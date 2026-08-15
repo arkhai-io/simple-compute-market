@@ -138,6 +138,20 @@ class SettlementServicingWorker:
                 record.last_error,
             )
             return
+        if record.collection_state == "succeeded":
+            if record.mechanism_status in {"failed", "manual_required"}:
+                await self._terminal(
+                    record,
+                    record.mechanism_status,
+                    record.last_error,
+                )
+                return
+            await self._schedule(record.obligation_ref, "status", now)
+            await self._emit(
+                "settlement_terminal_risk_monitored",
+                {"obligation_ref": record.obligation_ref},
+            )
+            return
         if record.mechanism_status != "ready":
             await self._schedule(record.obligation_ref, "status", now)
             await self._emit(
@@ -235,6 +249,8 @@ class SettlementServicingWorker:
 
     @staticmethod
     def _operation_for(record: SettlementObligationRecord) -> str:
+        if record.collection_state == "succeeded":
+            return "status"
         if record.condition_state == "ready":
             return "collect"
         if record.mechanism_status == "ready":

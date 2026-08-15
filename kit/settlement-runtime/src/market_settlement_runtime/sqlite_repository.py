@@ -1354,8 +1354,10 @@ class SettlementSQLiteRepository:
                           mechanism_state=COALESCE(?, mechanism_state),
                           buyer_action=?,
                           condition_anchor=COALESCE(?, condition_anchor),
-                          materialization_state=
-                            COALESCE(?, materialization_state),
+                          materialization_state=CASE
+                            WHEN collection_state='succeeded'
+                              THEN materialization_state
+                            ELSE COALESCE(?, materialization_state) END,
                           collection_state=CASE WHEN ?='collected'
                             THEN 'succeeded' ELSE collection_state END,
                           reclaim_state=CASE WHEN ?='reclaimed'
@@ -1491,19 +1493,38 @@ class SettlementSQLiteRepository:
                     LEFT JOIN settlement_operations op
                       ON op.obligation_ref=o.obligation_ref
                      AND op.operation=CASE
+                       WHEN o.collection_state='succeeded' THEN 'status'
                        WHEN o.condition_state='ready' THEN 'collect'
                        WHEN o.mechanism_status='ready' THEN 'check'
                        ELSE 'status' END
                     WHERE o.fulfillment_ref IS NOT NULL
-                      AND o.collection_state
-                        NOT IN ('succeeded','manual_required')
+                      AND (
+                        o.collection_state NOT IN ('succeeded','manual_required')
+                        OR (
+                          o.collection_state='succeeded'
+                          AND json_extract(
+                            o.mechanism_state,
+                            '$.terminal_risk_monitoring'
+                          )=1
+                        )
+                      )
                       AND o.reclaim_state
                         NOT IN ('succeeded','manual_required')
                       AND o.condition_state
                         NOT IN ('failed','manual_required')
-                      AND COALESCE(o.mechanism_status, '')
-                        NOT IN ('collected','reclaimed','expired','failed',
-                                'manual_required')
+                      AND (
+                        COALESCE(o.mechanism_status, '') NOT IN (
+                          'collected','reclaimed','expired','failed',
+                          'manual_required'
+                        )
+                        OR (
+                          o.mechanism_status='collected'
+                          AND json_extract(
+                            o.mechanism_state,
+                            '$.terminal_risk_monitoring'
+                          )=1
+                        )
+                      )
                       AND (
                         op.state IS NULL OR op.state='pending'
                         OR (op.state='in_progress'

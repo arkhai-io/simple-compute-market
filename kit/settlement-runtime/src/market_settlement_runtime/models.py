@@ -203,6 +203,7 @@ class SettlementOperationOutcome(BaseModel):
     obligation_ref: str
     operation: OperationKind
     status: Literal["succeeded", "pending", "manual_required", "busy", "terminal"]
+    action: dict[str, Any] | None = None
     receipt: dict[str, Any] | None = None
 
 

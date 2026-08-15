@@ -220,6 +220,120 @@ async def test_status_operation_is_shared_by_both_authorized_participants(
     assert claimant_status.status == "pending"
 
 
+async def test_transient_buyer_action_is_returned_but_only_metadata_is_stored(
+    repository,
+) -> None:
+    class ActionClient(Client):
+        async def materialize(self, obligation, *, operation_ref):
+            del obligation, operation_ref
+            return MaterializationOutcome(
+                mechanism_ref="mechanism-action",
+                status="requires_action",
+                receipt={"state": "awaiting_payment"},
+                buyer_action={
+                    "kind": "bank_instructions",
+                    "expires_at_unix": 999,
+                    "url": "https://checkout.example/private",
+                    "bank_instructions": {"reference": "provider-secret"},
+                },
+            )
+
+    runtime = SettlementRuntime(
+        repository,
+        {"test.v1": ActionClient()},
+        clock=lambda: 50,
+    )
+    record = await register(runtime, obligation())
+
+    outcome = await runtime.materialize(
+        obligation_ref=record.obligation_ref,
+        local_principal=BUYER,
+        worker_id="action",
+    )
+    stored = await repository.load_settlement_obligation(record.obligation_ref)
+
+    assert outcome.action == {
+        "kind": "bank_instructions",
+        "expires_at_unix": 999,
+        "url": "https://checkout.example/private",
+        "bank_instructions": {"reference": "provider-secret"},
+    }
+    assert stored is not None
+    assert stored["buyer_action"] == {
+        "kind": "bank_instructions",
+        "expires_at_unix": 999,
+    }
+
+
+async def test_post_collection_monitoring_preserves_collection_on_late_loss(
+    repository,
+) -> None:
+    class MonitoringClient(Client):
+        status_value = "collected"
+
+        async def get_status(
+            self, obligation, *, mechanism_ref, operation_ref, mechanism_state
+        ):
+            del obligation, operation_ref, mechanism_state
+            return StatusOutcome(
+                status=self.status_value,
+                mechanism_ref=mechanism_ref,
+                mechanism_state={"terminal_risk_monitoring": True},
+                receipt={"funding_reason": "late_return"}
+                if self.status_value == "failed"
+                else {"funding_reason": "settled"},
+            )
+
+    client = MonitoringClient()
+    runtime = SettlementRuntime(
+        repository,
+        {"test.v1": client},
+        clock=lambda: 50,
+    )
+    record = await register(runtime, obligation())
+    await runtime.materialize(
+        obligation_ref=record.obligation_ref,
+        local_principal=BUYER,
+        worker_id="materialize",
+    )
+    await runtime.bind_fulfillment(
+        record.obligation_ref,
+        "fulfillment-1",
+        local_principal=SELLER,
+    )
+    await runtime.check(
+        obligation_ref=record.obligation_ref,
+        local_principal=SELLER,
+        worker_id="check",
+    )
+    await runtime.collect(
+        obligation_ref=record.obligation_ref,
+        local_principal=SELLER,
+        worker_id="collect",
+    )
+    await runtime.reconcile_status(
+        obligation_ref=record.obligation_ref,
+        local_principal=SELLER,
+        worker_id="monitor-collected",
+    )
+
+    due = await repository.list_due_settlement_obligations(now_unix=50)
+    assert [row["obligation_ref"] for row in due] == [record.obligation_ref]
+
+    client.status_value = "failed"
+    await runtime.reconcile_status(
+        obligation_ref=record.obligation_ref,
+        local_principal=SELLER,
+        worker_id="monitor-loss",
+    )
+    stored = await repository.load_settlement_obligation(record.obligation_ref)
+
+    assert stored is not None
+    assert stored["collection_state"] == "succeeded"
+    assert stored["mechanism_status"] == "failed"
+    assert stored["status_receipt"]["funding_reason"] == "late_return"
+
+
 async def test_eip191_principal_remains_opaque_to_the_mechanism(repository) -> None:
     client = Client()
     runtime = SettlementRuntime(repository, {"test.v1": client}, clock=lambda: 50)

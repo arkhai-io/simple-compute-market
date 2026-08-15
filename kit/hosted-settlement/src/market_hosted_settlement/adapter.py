@@ -18,6 +18,7 @@ from hosted_settlement_client import (
     FulfillmentPublicationRequest,
     FulfillmentRef,
     FundingProfile,
+    FundingMode,
     HostedSettlementAsyncClient,
     NormalizedFundingState,
     OperationRequest,
@@ -52,6 +53,7 @@ REQUIRED_HOSTED_CAPABILITIES = frozenset(
 )
 _CURRENCY = re.compile(r"^[a-z]{3}$")
 _FULFILLMENT: TypeAdapter[FulfillmentRef] = TypeAdapter(FulfillmentRef)
+_CONTRACT_FINGERPRINT = re.compile(r"^sha256:[0-9a-f]{64}$")
 
 
 class HostedObligationParams(BaseModel):
@@ -63,6 +65,12 @@ class HostedObligationParams(BaseModel):
     funds_flow: Literal["separate_charges_transfers"]
     funding_profile: FundingProfile
     funding_authorization_ref: str = Field(min_length=1, max_length=256)
+    interaction: FundingMode
+    contract_fingerprint: str = Field(
+        min_length=71,
+        max_length=71,
+        pattern=_CONTRACT_FINGERPRINT,
+    )
     condition: ConditionDescriptor
 
 
@@ -634,9 +642,13 @@ def _operation_identity(
     legacy: bool,
 ) -> dict[str, Any]:
     if legacy:
-        return {"legacy_recovery": "hosted-card.v1"}
+        return {
+            "legacy_recovery": "hosted-card.v1",
+            "terminal_risk_monitoring": True,
+        }
     assert isinstance(params, HostedObligationParams)
     return {
         "funding_profile": params.funding_profile.value,
         "funding_authorization_ref": params.funding_authorization_ref,
+        "terminal_risk_monitoring": True,
     }

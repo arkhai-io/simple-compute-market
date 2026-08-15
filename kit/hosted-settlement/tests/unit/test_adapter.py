@@ -194,7 +194,13 @@ def _obligation(
             }
         )
     else:
-        params["funding_profile"] = funding_profile.value
+        params.update(
+            {
+                "funding_profile": funding_profile.value,
+                "interaction": "interactive",
+                "contract_fingerprint": "sha256:" + "11" * 32,
+            }
+        )
         if include_authorization:
             params["funding_authorization_ref"] = "funding-authorization-1"
     value = {

@@ -278,6 +278,7 @@ class SettlementRuntime:
             if state == "succeeded"
             else "pending",
             result.receipt,
+            action=result.buyer_action,
         )
 
     async def reconcile_status(
@@ -289,7 +290,9 @@ class SettlementRuntime:
     ) -> SettlementOperationOutcome:
         record = await self._load(obligation_ref)
         self._require_participant(record, local_principal, operation="reconcile")
-        if record.collection_state == "succeeded":
+        if record.collection_state == "succeeded" and not record.mechanism_state.get(
+            "terminal_risk_monitoring"
+        ):
             return self._outcome(
                 record,
                 "status",
@@ -323,11 +326,16 @@ class SettlementRuntime:
         except Exception as exc:
             await self._finish_retry(record, "status", worker_id, exc, uncertain=False)
             raise
+        terminal_status = result.status in {"reclaimed", "expired", "failed"}
+        if result.status == "collected" and not result.mechanism_state.get(
+            "terminal_risk_monitoring"
+        ):
+            terminal_status = True
         state = (
             "manual_required"
             if result.status == "manual_required"
             else "succeeded"
-            if result.status in {"collected", "reclaimed", "expired", "failed"}
+            if terminal_status
             else "pending"
         )
         await self._finish_status(record, worker_id, result, state)
@@ -336,10 +344,11 @@ class SettlementRuntime:
             "status",
             "manual_required"
             if state == "manual_required"
-            else "terminal"
+            else "succeeded"
             if state == "succeeded"
             else "pending",
             result.receipt,
+            action=result.buyer_action,
         )
 
     async def check(
@@ -637,7 +646,7 @@ class SettlementRuntime:
             mechanism_ref=result.mechanism_ref,
             mechanism_status=result.status,
             mechanism_state=result.mechanism_state,
-            buyer_action=result.buyer_action,
+            buyer_action=_safe_buyer_action(result.buyer_action),
             condition_anchor=result.condition_anchor,
         )
 
@@ -658,7 +667,7 @@ class SettlementRuntime:
             mechanism_ref=result.mechanism_ref,
             mechanism_status=result.status,
             mechanism_state=result.mechanism_state,
-            buyer_action=result.buyer_action,
+            buyer_action=_safe_buyer_action(result.buyer_action),
             condition_anchor=result.condition_anchor,
         )
 
@@ -708,6 +717,8 @@ class SettlementRuntime:
         operation: str,
         status: str,
         receipt: dict[str, Any] | None = None,
+        *,
+        action: dict[str, Any] | None = None,
     ) -> SettlementOperationOutcome:
         return SettlementOperationOutcome.model_validate(
             {
@@ -715,9 +726,23 @@ class SettlementRuntime:
                 "operation": operation,
                 "status": status,
                 "receipt": receipt,
+                "action": action,
             }
         )
 
+
+
+def _safe_buyer_action(action: Mapping[str, Any] | None) -> dict[str, Any] | None:
+    """Persist action lifecycle metadata without URLs or payment instructions."""
+
+    if not action:
+        return None
+    safe = {
+        key: action[key]
+        for key in ("kind", "expires_at_unix")
+        if key in action and action[key] is not None
+    }
+    return safe or None
 
 def settlement_operation_ref(obligation_ref: str, operation: str) -> str:
     return f"arkhai:settlement:{obligation_ref}:{operation}"
