@@ -116,6 +116,28 @@ provider customer, instrument, mandate, or payment data. A saved instrument is
 selected only for the current direct authorization call and is never stored in
 TOML or the run log.
 
+Create and manage that opaque binding through the direct, signer-authenticated
+payer namespace:
+
+```bash
+market settlement stripe payer create --country US
+market settlement stripe payer show
+market settlement stripe payer setup start \
+  --funding-profile card.v1 --label primary-card --action open
+market settlement stripe payer setup status SETUP_REF --action open
+market settlement stripe payer instrument list
+market settlement stripe payer instrument default INSTRUMENT_REF
+```
+
+Saved setup accepts `card.v1` and `us_ach_debit.v1`; push
+`us_bank_transfer.v1` remains purchase-interactive. Use `instrument revoke` or
+`instrument delete` for the same opaque `INSTRUMENT_REF`. After a proven local
+profile rotation, `payer owner rotate` proves both retained signers; retire an
+old hosted owner with `payer owner retire --principal scheme:identifier`.
+`payer delete` deletes the hosted profile and retires the local binding. Add
+`--json` for the safe projection and `--action open|print|fail` for transient
+setup actions; neither output stores action values or payment data.
+
 An Alkahest buyer instead enables and prioritizes `alkahest.v1`, supplies
 `[Settlement.alkahest].address_config_path`, and fills the generated `[Wallet]`
 and `[Chains.<name>]` tables. Enabling a mechanism does not make an incompatible
