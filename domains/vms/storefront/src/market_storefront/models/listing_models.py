@@ -22,7 +22,7 @@ class VmCreateListingRequest(CreateListingRequest):
     @model_validator(mode="before")
     @classmethod
     def reject_removed_settlement_config(cls, value: Any) -> Any:
-        if isinstance(value, dict) and "settlement_config" in value:
+        if isinstance(value, dict) and value.get("settlement_config") is not None:
             raise ValueError(
                 "settlement_config is removed; use complete settlements clauses"
             )
