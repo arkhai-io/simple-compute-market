@@ -562,6 +562,8 @@ def select_profile(store: ProfileStore, profile_id: uuid.UUID | str) -> ProfileS
     profile = store.profile(profile_id)
     if profile.state is not ProfileState.ACTIVE:
         raise ProfileStoreError("retired buyer profile cannot be selected")
+    if store.selected_profile_id == profile.profile_id:
+        return store
     return _next_store(store, profiles=store.profiles, selected=profile.profile_id)
 
 
