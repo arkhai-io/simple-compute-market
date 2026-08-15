@@ -258,12 +258,14 @@ async def test_contract_lease_view_serializes_every_reachable_reservation_state(
     for raw_state, want in expected.items():
         view = _lease_view({
             "capacity_reservation_id": "reservation-1",
+            "executor_kind": "vm",
             "state": raw_state,
             "lease_end_utc": "2099-01-01T00:00:00Z",
         })
         assert view.status == want, f"{raw_state!r} should map to {want!r}"
         vm_view = _vm_lease_view({
             "capacity_reservation_id": "reservation-1",
+            "executor_kind": "vm",
             "resource_id": "resource-1",
             "state": raw_state,
             "lease_end_utc": "2099-01-01T00:00:00Z",
