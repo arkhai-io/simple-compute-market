@@ -465,6 +465,7 @@ async def _load_active_physical_result(
     fulfillment_id: str,
     reservation_id: str,
     site_id: str,
+    domain: Any,
 ) -> tuple[dict[str, Any], dict[str, Any] | None] | None:
     status = await fulfillment_client.get_fulfillment_status(
         fulfillment_id,
@@ -487,6 +488,8 @@ async def _load_active_physical_result(
         capacity_reservation_id=reservation_id,
         site_id=site_id,
     )
+    domain_result = (result_envelope.payload or {}).get("domain_result")
+    domain.codecs.result(domain_result)
     legacy = _fulfillment_result_to_legacy_shape(result_envelope)
     authentication = legacy.pop("authentication", None)
     await persist_escrow_fields_with_retry(
@@ -563,6 +566,7 @@ async def converge_escrow_once(
         fulfillment_id=escrow.get("fulfillment_id"),
         site_id=site_id,
     )
+    domain = sqlite_client.domain_registry.resolve(thread_binding.binding)
     physical = await _load_active_physical_result(
         escrow_uid=escrow_uid,
         sqlite_client=sqlite_client,
@@ -570,6 +574,7 @@ async def converge_escrow_once(
         fulfillment_id=fulfillment_id,
         reservation_id=reservation_id,
         site_id=site_id,
+        domain=domain,
     )
     if physical is None:
         return False
