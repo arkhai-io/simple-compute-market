@@ -170,6 +170,31 @@ class RegisteredSettlementClauseField:
     field: SettlementClauseField
 
 
+def reject_scalar_rates_for_non_scalar(mechanism_id: str, built: Any) -> None:
+    """A non-scalar mechanism's published options must not advertise an
+    ``amount`` rate — counterparties read scalar participation off the
+    option shape, so an amount rate would contradict the declaration."""
+    if not isinstance(built, Mapping):
+        return
+    for option in built.get("settlement_options") or []:
+        rates = (
+            option.get("rates")
+            if isinstance(option, Mapping)
+            else getattr(option, "rates", None)
+        )
+        for rate in rates or []:
+            field = (
+                rate.get("field")
+                if isinstance(rate, Mapping)
+                else getattr(rate, "field", None)
+            )
+            if field == "amount":
+                raise SettlementConfigurationError(
+                    f"settlement mechanism {mechanism_id!r} declines scalar "
+                    "negotiation but published an option with an 'amount' rate"
+                )
+
+
 @dataclass(frozen=True, slots=True)
 class MechanismRegistration:
     """All common hooks supplied by an explicitly installed mechanism."""
@@ -185,6 +210,12 @@ class MechanismRegistration:
     clause_fields: tuple[SettlementClauseField, ...]
     publication_input_model: type[BaseModel]
     publication_input_validator: PublicationInputValidator
+    # Whether this mechanism bargains through the scalar ``fields.amount``
+    # path. A declining mechanism negotiates take-it-or-leave-it over its
+    # published options, and those options must not advertise an ``amount``
+    # rate: the option shape is how the declaration reaches counterparties
+    # that do not share this composition.
+    negotiates_scalar_amount: bool = True
     command_group: Any | None = None
     public_detail_keys: frozenset[str] = frozenset()
 
@@ -663,7 +694,10 @@ class SettlementConfigurationRegistry:
             raise SettlementConfigurationError(
                 f"settlement mechanism {readiness.mechanism!r} has no configured section"
             )
-        return registration.option_builder(section, readiness, resources or {}, role)
+        built = registration.option_builder(section, readiness, resources or {}, role)
+        if not registration.negotiates_scalar_amount:
+            reject_scalar_rates_for_non_scalar(registration.mechanism_id, built)
+        return built
 
     def buyer_compatible(
         self,

@@ -71,13 +71,22 @@ mechanism conditionals.
 
 ### Scalar participation is declared, not assumed
 
-`amount_from_proposal` / `proposal_from_amount` move from domain-supplied to
-registration-supplied (with the domain able to compose on top), joined by an ordering
-hint. The `missing_amount` guard consults the resolved mechanism's declaration: a
-scalar-declaring mechanism keeps today's strict behavior; a declining mechanism
-negotiates take-it-or-leave-it over its published option, and buyer ordering treats
-its listings as priceless. Both fallback paths already exist in `kit/policy`; the
-change is scoping the guard, not building new negotiation machinery.
+The registration declares scalar participation
+(`MechanismRegistration.negotiates_scalar_amount`), but the declaration reaches
+counterparties through the *option shape*: a buyer cannot see the seller's
+composition, so the published option's rates are the cross-party carrier — an
+`amount` rate means bargained-through-`fields.amount`, its absence means
+take-it-or-leave-it. This is deliberately symmetric with how `accepted_escrows`
+entries already declare scalarness through their rates and literal fields.
+`build_option` enforces coherence: a declining mechanism must not publish an
+`amount` rate. The shared guards (`proposal_uses_scalar_amount`, the
+`missing_amount` rejections, `accept_exact_listing`) read the matched option, so a
+scalar-declaring mechanism keeps today's strict behavior, a declining mechanism
+negotiates take-it-or-leave-it over its published option, and buyer ordering
+treats its listings as priceless — all three fallback paths already existed in
+`kit/policy`; the change scoped the guards rather than building new negotiation
+machinery. An unmatched selection stays scalar so the invalid-selection rejection
+fires instead of an exact-accept shortcut.
 
 ### Identity convergence is additive
 

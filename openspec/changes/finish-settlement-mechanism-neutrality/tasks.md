@@ -31,20 +31,33 @@ portions after the corresponding `consume-expanded-stripe-funding` tasks.
 
 ## 2. Declinable scalar negotiation
 
-- [ ] 2.1 Add the scalar-participation declaration to `MechanismRegistration`
-      (`kit/settlement-runtime/src/market_settlement_runtime/configuration.py`),
-      with `alkahest.v1` and `fiat.stripe.v1` declaring the scalar so existing
-      behavior is unchanged by construction.
-- [ ] 2.2 Scope the guard: `missing_amount` rejection and scalar policy routing
-      consult the resolved mechanism's declaration
-      (`kit/policy/src/market_policy/scalar_policies.py`, the domain guards such as
-      `domains/vms/negotiation/policies.py:203-210`); a declining mechanism routes to
-      the exact-accept path and buyer ordering treats its listings as priceless.
-- [ ] 2.3 Tests: characterization for both existing mechanisms unchanged
-      (missing-amount rejection preserved); a fake non-scalar registration reaches
-      acceptance through the kit negotiation runtime with no `fields.amount`.
-- [ ] 2.4 Closeout: as 1.4, promoting the declinable-scalar contract to
-      `openspec/specs/negotiation-protocol/spec.md`.
+- [x] 2.1 `MechanismRegistration.negotiates_scalar_amount` added (default scalar),
+      declared explicitly by both existing factories; `build_option` enforces
+      coherence — a declining mechanism must not publish an `amount` rate, since
+      the option shape is how the declaration reaches counterparties.
+- [x] 2.2 Guards scoped data-driven off the matched option, symmetric with the
+      existing escrow-entry scalar test: `proposal_uses_scalar_amount` reads the
+      selection's matched `settlement_options` entry, `accept_exact_listing`
+      gained a selection arm (unlisted selection rejected; scalar selection held
+      to the reference amount; non-scalar accepted as proposed), and the
+      `missing_amount` rejections (kit `buyer_counter_guard`, VM guard via the
+      shared helper) no longer fire for non-scalar selections. No domain-file
+      edits were needed — both domain guards already call the kit helper.
+- [x] 2.3 Evidence: kit/policy suite 17 passed (9 new selection-scalar tests,
+      including preserved missing-amount rejection for scalar selections);
+      kit/settlement-runtime 68 passed (5 new declaration/coherence tests);
+      kit/negotiation-runtime 7 passed (new: a non-scalar selection reaches
+      acceptance through the runtime with no `fields.amount`, `agreed_price` 0);
+      kit/alkahest 178 passed; core/buyer priceless-ordering pin (2 new tests).
+      Disclosed: kit/hosted-settlement's suite was not run — it requires the
+      verified released client wheel, not staged locally; its one-line factory
+      edit is exercised by the settlement-runtime registration suite. VM domain
+      suites likewise not run here (hosted wheel dependency); their guard path is
+      the shared kit helper covered above.
+- [x] 2.4 Closeout: `make check-comment-hygiene` clean; imports module-level; no
+      roadmap edit owed (gap row remains until the change completes); promotion
+      recorded below; design decision updated to record the option-shape carrier
+      refinement.
 
 ## 3. Registration-owned pre-terms dispatch
 
@@ -95,3 +108,4 @@ portions after the corresponding `consume-expanded-stripe-funding` tasks.
 | Accepted decision | Permanent location |
 |---|---|
 | Buyer acceptance validates the funded obligation strictly against the advertised option but does not compare seller `service_terms`, which carry negotiation-established service context the option cannot predict | `openspec/specs/buyer-orchestration/spec.md` (promote at synchronization) |
+| Scalar participation is a registration declaration carried to counterparties through the option shape (an `amount` rate ⇔ bargained through `fields.amount`), with `build_option` enforcing coherence; non-scalar selections negotiate take-it-or-leave-it and order as priceless | `openspec/specs/negotiation-protocol/spec.md` and `openspec/specs/settlement-configuration/spec.md` (promote at synchronization) |

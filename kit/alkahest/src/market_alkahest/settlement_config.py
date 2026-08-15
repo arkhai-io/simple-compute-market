@@ -571,6 +571,7 @@ def create_alkahest_registration() -> MechanismRegistration:
         config_key=ALKAHEST_CONFIG_KEY,
         config_model=AlkahestSettlementConfig,
         roles=frozenset({"buyer", "seller"}),
+        negotiates_scalar_amount=True,
         preflight=alkahest_preflight,
         client_factory=alkahest_client_factory,
         option_builder=alkahest_option_builder,

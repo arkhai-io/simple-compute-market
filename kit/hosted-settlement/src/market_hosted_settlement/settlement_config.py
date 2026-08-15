@@ -994,6 +994,7 @@ def create_stripe_registration(*, command_group: Any | None = None) -> Mechanism
         config_key=STRIPE_CONFIG_KEY,
         config_model=StripeSettlementConfig,
         roles=frozenset({"buyer", "seller"}),
+        negotiates_scalar_amount=True,
         preflight=stripe_preflight,
         client_factory=stripe_client_factory,
         option_builder=stripe_option_builder,
