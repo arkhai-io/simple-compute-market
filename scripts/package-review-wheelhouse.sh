@@ -113,7 +113,7 @@ for member in client_members:
             "webhook",
             "webhooks",
         }
-        for part in Path(normalized).parts
+        for part in (Path(component).stem for component in Path(normalized).parts)
     ):
         raise SystemExit("hosted client wheel contains service/provider implementation")
 

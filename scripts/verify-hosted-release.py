@@ -9,7 +9,7 @@ import hashlib
 import json
 import re
 import zipfile
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any
 
 _RELEASE_CONTRACT = "arkhai.hosted-settlement-release.v2"
@@ -71,6 +71,18 @@ _REQUIRED_CLIENT_EXPORTS = frozenset(
         "PayerSetupRequest",
         "PayerSetupResult",
         "Signer",
+    }
+)
+_FORBIDDEN_CLIENT_IMPLEMENTATION_PARTS = frozenset(
+    {
+        "authority",
+        "database",
+        "migrations",
+        "providers",
+        "recovery",
+        "storage",
+        "webhook",
+        "webhooks",
     }
 )
 _SHA256 = re.compile(r"^[0-9a-f]{64}$")
@@ -242,6 +254,22 @@ def _verify_client_boundary(path: Path) -> None:
                 or name.startswith("stripe/")
                 or "/stripe/" in name
                 for name in lowered
+            ):
+                raise ReleaseVerificationError(
+                    "staged client wheel contains service/provider implementation"
+                )
+            client_paths = (
+                PurePosixPath(name)
+                for name in lowered
+                if name.startswith("hosted_settlement_client/")
+            )
+            if any(
+                any(
+                    PurePosixPath(part).stem
+                    in _FORBIDDEN_CLIENT_IMPLEMENTATION_PARTS
+                    for part in client_path.parts[1:]
+                )
+                for client_path in client_paths
             ):
                 raise ReleaseVerificationError(
                     "staged client wheel contains service/provider implementation"
