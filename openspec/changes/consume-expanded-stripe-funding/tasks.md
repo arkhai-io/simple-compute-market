@@ -1,0 +1,75 @@
+## 1. Producer contract and exact dependency
+
+- [ ] 1.1 Verify the signed `hosted-settlement-service:expand-stripe-payer-funding` release exposes the exact payer-profile, instrument, funding-profile, funding-authorization, transient-action, identity, and conditional-escrow sync/async client contracts assumed by this change; record its manifest, client wheel, service image, API/schema/migration, capability, repository/workflow, provenance, and source identities without substituting sibling source.
+- [ ] 1.2 Update `kit/hosted-settlement/pyproject.toml`, its `uv.lock`, repository package/release inputs, and `.dist` initialization/reinitialization paths to verify, upgrade, and reinstall the exact released client wheel; add no editable sibling dependency.
+- [ ] 1.3 Add package-boundary and release-verification fixtures proving marketplace wheels/images contain the client and public models but no hosted service module, Stripe SDK/provider model, credential, database/migration, webhook, or copied canonicalization.
+
+## 2. Exact profile configuration and registration
+
+- [ ] 2.1 Replace the card-only publication input in `kit/hosted-settlement/src/market_hosted_settlement/settlement_config.py` with strict `card.v1`, `us_bank_transfer.v1`, and `us_ach_debit.v1` profile, currency/country, interaction, ordered clause, and exact signed capability models; reject `payment_method_types`, `method="card"`, provider strings, and role-inapplicable/sensitive fields.
+- [ ] 2.2 Extend hosted preflight to verify exact manifest/API/schema/profile/payer/authorization capabilities and return allowlisted per-profile readiness/blockers while preserving mechanism-wide authority/account failures and independently ready hosted/Alkahest options.
+- [ ] 2.3 Update option construction and clause projections to emit one deterministic option per ready clause with exact profile in its identity, fixed separate-charges/transfers flow, lowercase currency, positive minor-unit rate, condition, account, parties, and interaction capability.
+- [ ] 2.4 Update buyer compatibility to require the selected persistent profile's matching authority/environment opaque binding, exact profile/currency/country and interaction ability, and safe local readiness; revalidate before negotiation/authorization without discovery-time mutation.
+- [ ] 2.5 Add focused hosted-kit configuration, readiness, profile-order/identity, clause/query projection, compatibility, sanitized blocker, unsupported-profile, and independent-failure tests in `kit/hosted-settlement/tests/unit/` and shared settlement registration tests.
+
+## 3. Direct payer-profile composition
+
+- [ ] 3.1 Add provider-neutral payer profile, owner rotation/retirement, setup/status, instrument lifecycle, and safe projection façades to `kit/hosted-settlement` using only the released client and injected marketplace signer; export them without redefining hosted wire/signature/provider behavior.
+- [ ] 3.2 Extend the settlement registration/VM buyer composition contribution seam so `market settlement stripe payer` registers create/show/delete, owner rotate/retire, setup start/status, and instrument list/default/revoke/delete commands without importing the hosted client into core or another domain.
+- [ ] 3.3 Integrate payer commands with the `add-persistent-buyer-profiles` selected/historical signer and atomic owner-only profile-store updates; persist only authority/environment, opaque payer binding, canonical owner/history, and safe lifecycle metadata.
+- [ ] 3.4 Route setup and instrument actions through common `--action open|print|fail`, keep action values transient, and reject provider/customer/payment-method/mandate/bank/card data in config, profile projections, logs, errors, and command JSON.
+- [ ] 3.5 Add hosted-kit and CLI tests for exact signer ownership, dual-proof rotation, historical signer recovery, setup/action resume, instrument lifecycle, atomic local binding updates, deterministic failures, redaction, and core/domain import boundaries.
+
+## 4. Buyer authorization and automation policy
+
+- [ ] 4.1 Add strict buyer config/profile models for disabled-by-default off-session policy bound to exact authority/environment, profile, currency, per-purchase amount, aggregate amount/window, optional seller principals, and eligible saved mode; reject blanket, provider, action, credential, and free-form method fields.
+- [ ] 4.2 Implement a pure policy evaluator and owner-only aggregate reservation journal keyed by deterministic marketplace operation ID so concurrent attempts respect bounds, exact retries converge, and changed obligation/profile/amount/destination/seller input conflicts.
+- [ ] 4.3 Extend VM accepted-run orchestration to derive the exact marketplace operation ID and producer authorization input from durable accepted terms plus selected local payer/instrument or interactive mode, sign via the hosted kit, and persist only profile and `funding_authorization_ref`.
+- [ ] 4.4 Handle off-session success and `requires_action` on the same authorization/operation through the ordinary action dispatcher; policy refusal requires interaction and never changes profile, instrument, amount, currency, destination, seller, obligation, expiry, or mechanism.
+- [ ] 4.5 Add focused policy/authorization tests for every bound, aggregate concurrency, exact retry, changed reuse, revoked binding/instrument, missing mandate/consent, stale readiness, seller exclusion, user decline, action fallback, and absence of a provider or escrow call before accepted terms.
+
+## 5. VM storefront start and publication
+
+- [ ] 5.1 Update VM listing settlement config/compiler/publication/reconciliation to consume ordered exact hosted clauses, publish all independently ready profile options, expose sanitized profile blockers, and preserve Alkahest behavior and ordering.
+- [ ] 5.2 Change `domains/vms/buyer/hosted_settlement.py` and storefront `/api/v1/settlements` start models/routes to carry only accepted negotiation ID, obligation ID, and safe `funding_authorization_ref`; remove buyer/claimant and all caller-controlled commercial/provider overrides.
+- [ ] 5.3 Update `load_hosted_agreement`, accepted-artifact validation, and deterministic plan derivation to reload parties, amount, currency, account, profile, expiry, condition, and VM provision input from seller-accepted state and verify authorization through ordinary hosted materialization.
+- [ ] 5.4 Update storefront public status/reclaim projections and buyer polling/resume to retain only settlement/authorization refs, profile, public status/reason/deadline, action kind/expiry, receipt, and accepted identities; retrieve every current action instead of storing its URL/details.
+- [ ] 5.5 Add VM buyer/storefront route, signature, publication, reconciliation, restart, redaction, exact-start, changed-retry, multi-profile, delayed-action, and Alkahest non-regression tests at the lowest owning levels.
+
+## 6. Runtime servicing, fulfillment, and legacy recovery
+
+- [ ] 6.1 Extend `HostedObligationParams`, adapter materialization, immutable fingerprints, mechanism state, and operation receipts to carry exact profile and safe authorization reference while excluding stable payer/instrument and provider data.
+- [ ] 6.2 Map producer awaiting/action/availability/return/loss results monotonically into the common runtime so only authoritative funded state starts `ensure_hosted_fulfillment`; keep pending bank/ACH/confirmation states non-fulfilling and project post-collection loss as manual/incident without rewriting completion.
+- [ ] 6.3 Preserve the shared status/fulfill/check/collect/reclaim journal, leases, and compare-and-set exclusion at funding/expiry boundaries; recovery must use accepted profile/authorization/obligation/operation identities despite current config, readiness, priority, or automation changes.
+- [ ] 6.4 Add storefront/buyer profile-store and settlement database migrations plus fixtures for new safe fields and recovery-only legacy card classification, preserving historical option/obligation/settlement/operation/request/receipt identities and rolling back ambiguous rows atomically.
+- [ ] 6.5 Implement the legacy card decoder only for migrated accepted records; reject legacy fields/value at config, publication, query, negotiation, new plan, and materialization boundaries and never require a new payer profile/authorization for historical recovery.
+- [ ] 6.6 Add deterministic adapter/runtime/storefront tests for all three profiles, acknowledgement loss, duplicate and changed retry, delayed visibility, restart, funding/expiry race, return before collection, loss after collection, operator review, exact-once VM provisioning/transfer, and every terminal/nonterminal legacy card fixture.
+
+## 7. Configuration, deployment, and release artifacts
+
+- [ ] 7.1 Update committed defaults, examples, role templates, buyer/storefront config generation and migration commands to exact ordered profiles, release pins, persistent local-profile reference, bounded automation, and marketplace signer Secret references; prove migration idempotence and fail ambiguous input.
+- [ ] 7.2 Update `compose*.yml`, `scripts/prepare-hosted-compose.py`, Helm values/schema/templates/fixtures/render checks, and service startup/readiness wiring for consumer-only public profile inputs while rejecting Stripe credentials/IDs, payer/instrument data in storefront state, hosted persistence, and action material.
+- [ ] 7.3 Update marketplace manifest/image/wheel/schema/provenance verification and `scripts/verify-hosted-release.py` to record exact producer and consumer artifact identities independently and fail partial or compatible-major substitutions before publication or mutation.
+- [ ] 7.4 Exercise config migration, package contents, wheelhouse/reinit, Compose generation, Helm schema/render, image/startup/readiness, secret-placement, and rollback fixtures using matching old/new artifact sets.
+
+## 8. Credential-free and protected evidence
+
+- [ ] 8.1 Expand deterministic hosted-port, adapter, common-runtime, VM buyer/storefront, browser action, profile-store, config, release, package, typing, redaction, and evidence-schema suites so default checks cover the expanded consumer contract without credentials or silent skips.
+- [ ] 8.2 Extend `e2e-tests/src/hosted_real_stripe/` driver/runtime/gates/bridge/browser/evidence and report schema to select one exact profile, create payer fixtures through direct released-client operations, execute ordinary marketplace routes, and record independent signed producer/consumer release identities.
+- [ ] 8.3 Add protected scenarios for `card.v1`, `us_bank_transfer.v1`, `us_ach_debit.v1`, card-on-file off-session success, same-operation `requires_action` fallback, delayed funding, restart, authoritative VM fulfillment evidence, collection or eligible reclaim, and available return/loss boundaries.
+- [ ] 8.4 Enforce protected preflight and recursive canary/schema/signature checks so missing rail/account/test-mode/browser/release prerequisites are reported unavailable and credentials, provider/customer/payment-method/mandate/bank/card data, raw actions, payloads/events, URLs, and source paths never enter artifacts.
+
+## 9. Permanent documentation and promotion
+
+- [ ] 9.1 Promote exact profile vocabulary/readiness/compatibility/automation/recovery behavior and rationale to `openspec/specs/settlement-configuration/{spec,architecture}.md` and update the canonical capability index if its descriptions change.
+- [ ] 9.2 Promote separate publication, safe exact start, delayed fulfillment gate, legacy recovery, immutable runtime, reclaim/loss semantics, and tests to `openspec/specs/{storefront-publication,settlement-servicing,test-compatibility}/{spec,architecture}.md`.
+- [ ] 9.3 Promote direct payer versus storefront-mediated escrow composition, released-client ownership, signer/profile boundaries, package layers, and principal flows to `openspec/specs/{buyer-orchestration,market-composition}/{spec,architecture}.md`, `docs/development/ARCHITECTURE.md`, and VM buyer/seller current-state docs.
+- [ ] 9.4 Promote exact artifact/config/Secret/migration/activation/rollback/evidence behavior to `openspec/specs/deployment-state/{spec,architecture}.md`, `docs/development/{DEPLOYMENT_AND_CONFIG,TESTING}.md`, and applicable operator/quickstart docs; describe current system state rather than completion history.
+- [ ] 9.5 Update `docs/development/ROADMAP.md` with the completed common VM hosted-profile consumer and remaining API-credit/bare-metal adoption gaps, or record an explicit no-impact finding in the design-promotion record if roadmap structure no longer requires an edit.
+
+## 10. Validation and closeout
+
+- [ ] 10.1 Run focused hosted-kit, identity/profile, buyer, VM storefront, settlement-runtime, config migration, package, typing, Compose, Helm, release-verification, redaction, and evidence-schema suites plus the repository integration targets that own the changed contracts; disclose every external check not run.
+- [ ] 10.2 Run the protected hosted Stripe profile matrix through exact signed producer and consumer production artifacts where prerequisites are available, preserve the schema-validated signed sanitized report, and record each unavailable external assertion with its missing prerequisite rather than substituting local evidence.
+- [ ] 10.3 Run strict OpenSpec validation, documentation-link/index checks, generated-artifact drift checks, and the applicable marketplace aggregate checks after delta promotion; confirm all callsites use exact profiles and no public legacy alias, copied hosted wire behavior, provider field, or stale artifact pin remains.
+- [ ] 10.4 Close out the change: run `make check-comment-hygiene` and directly review changed Python comments/docstrings for current-state wording; move every newly touched local import to module scope unless a reproduced circular import or documented deliberate lazy-load reason requires it and verify the real suite; re-check every accepted decision against OpenSpec documentation placement; compress completed tasks to final behavior/evidence/deferred work/permanent destinations after moving durable rationale to `design.md`; ensure roadmap currency is updated or explicitly recorded as no-impact; and complete a `## Design promotion record` in this change with exact permanent headings for every material decision.
