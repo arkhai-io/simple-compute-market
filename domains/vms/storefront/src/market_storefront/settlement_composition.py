@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 import logging
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
@@ -13,9 +14,9 @@ from typing import Any
 from arkhai_vms import VmProvisionTerms
 from core_storefront.stage_log import stage_event
 from domains.vms.listings import reconciler as listings_reconciler
-from hosted_settlement_client import ConditionDescriptor
+from hosted_settlement_client import ConditionDescriptor, FundingMode
 from market_alkahest import create_alkahest_registration
-from market_core.schemas import EscrowProposal, SettlementPlan
+from market_core.schemas import EscrowProposal, SettlementPlan, SettlementSelection
 from market_hosted_settlement import FundingProfile, create_stripe_registration
 from market_identity import Identity, Signer
 from market_settlement_runtime import (
@@ -579,6 +580,15 @@ def serialize_settlement_job(row: Mapping[str, Any]) -> dict[str, Any]:
     return out
 
 
+def _terminal_requires_lease_truncation(record: Any, outcome: str) -> bool:
+    """Only uncollected terminal obligations abandon VM capacity service."""
+
+    return (
+        outcome != "collected"
+        and getattr(record, "collection_state", None) != "succeeded"
+    )
+
+
 async def truncate_lease_for_terminal_settlement(
     *, escrow_uid: str | None, reason: str | None = None, sqlite_client: Any
 ) -> dict[str, Any] | None:
@@ -619,12 +629,12 @@ async def truncate_lease_for_terminal_settlement(
             reason=reason,
             site=(truncated or {}).get("site"),
         )
-        return truncated
-    except Exception as exc:
-        logger.warning(
-            "[SETTLEMENT] Could not truncate lease for %s: %s", escrow_uid, exc
+    except Exception:
+        logger.exception(
+            "[SETTLEMENT] Could not truncate lease for %s",
+            escrow_uid,
         )
-        return None
+        raise
 
 
 @dataclass(frozen=True)
@@ -649,6 +659,25 @@ def _plain_mapping(value: Any) -> dict[str, Any]:
     return dict(value) if isinstance(value, Mapping) else {}
 
 
+
+_CURRENCY_CODE = re.compile(r"^[a-z]{3}$")
+_COUNTRY_CODE = re.compile(r"^[A-Z]{2}$")
+_CONTRACT_FINGERPRINT = re.compile(r"^sha256:[0-9a-f]{64}$")
+_FORBIDDEN_HOSTED_PARAMS = frozenset(
+    {
+        "payer_profile_ref",
+        "instrument_ref",
+        "customer_id",
+        "payment_method_id",
+        "mandate",
+        "client_secret",
+        "action",
+        "url",
+        "bank_instructions",
+    }
+)
+
+
 def _accepted_hosted_profile(
     obligation: Mapping[str, Any],
     *,
@@ -671,6 +700,21 @@ def _accepted_hosted_profile(
         raise ValueError("hosted settlement funds flow does not match the contract")
     condition = ConditionDescriptor.model_validate(params.get("condition"))
     conditions = obligation.get("conditions")
+    forbidden = sorted(_FORBIDDEN_HOSTED_PARAMS.intersection(params))
+    if forbidden:
+        raise ValueError(
+            "accepted hosted obligation contains forbidden payer/provider fields: "
+            + ", ".join(forbidden)
+        )
+    account_ref = params.get("account_ref")
+    if (
+        not isinstance(account_ref, str)
+        or not account_ref
+        or account_ref != account_ref.strip()
+    ):
+        raise ValueError("accepted hosted obligation has no exact account reference")
+    if "funding_authorization_ref" in params:
+        raise ValueError("accepted hosted plan must not contain a funding authorization")
     if not isinstance(conditions, list) or len(conditions) != 1:
         raise ValueError("hosted settlement requires one accepted condition")
     if ConditionDescriptor.model_validate(conditions[0]) != condition:
@@ -687,6 +731,21 @@ def _accepted_hosted_profile(
         return FundingProfile.CARD, True
     if not has_profile:
         raise ValueError("accepted hosted obligation has no funding profile")
+    for name in ("authority_id", "environment"):
+        value = params.get(name)
+        if not isinstance(value, str) or not value or value != value.strip():
+            raise ValueError(f"accepted hosted obligation has no exact {name}")
+    country = params.get("country")
+    if not isinstance(country, str) or not _COUNTRY_CODE.fullmatch(country):
+        raise ValueError("accepted hosted obligation has no exact country")
+    interaction = params.get("interaction")
+    fingerprint = params.get("contract_fingerprint")
+    if interaction not in {mode.value for mode in FundingMode}:
+        raise ValueError("accepted hosted obligation has no exact interaction mode")
+    if not isinstance(fingerprint, str) or not _CONTRACT_FINGERPRINT.fullmatch(
+        fingerprint
+    ):
+        raise ValueError("accepted hosted obligation has no contract fingerprint")
     try:
         return FundingProfile(params["funding_profile"]), False
     except (TypeError, ValueError) as exc:
@@ -712,16 +771,13 @@ async def load_hosted_agreement(
         raise ValueError("hosted settlement negotiation is not accepted")
     buyer_principal = Identity.model_validate(thread.get("buyer_principal"))
     listing_id = str(thread.get("our_listing_id") or "")
-    order = await sqlite_client.load_listing(listing_id=listing_id)
-    if not order:
-        raise ValueError("accepted hosted listing is unavailable")
     raw_plan = thread.get("settlement_plan")
     if not isinstance(raw_plan, dict):
         raise ValueError("accepted negotiation has no pinned settlement plan")
     plan = SettlementPlan.model_validate(raw_plan)
     if len(plan.obligations) != 1:
         raise ValueError("hosted settlement plan must contain exactly one obligation")
-    obligation = plan.obligations[0].model_dump(mode="json")
+    obligation = plan.obligations[0].model_dump()
     if obligation.get("mechanism") != "fiat.stripe.v1":
         raise ValueError("accepted negotiation did not select hosted settlement")
     derived_ref = derive_obligation_ref(negotiation_id, 0, obligation)
@@ -733,6 +789,16 @@ async def load_hosted_agreement(
         Identity.model_validate(plan.seller_principal) != expected_claimant
     ):
         raise ValueError("accepted plan seller does not match the storefront")
+    raw_selection = _plain_mapping(
+        _plain_mapping(thread.get("buyer_escrow_proposal")).get(
+            "settlement_selection"
+        )
+    )
+    selection = SettlementSelection.model_validate(raw_selection)
+    if selection.mechanism != "fiat.stripe.v1":
+        raise ValueError("accepted settlement selection is not hosted")
+    if obligation.get("expiration_unix") != selection.expiration_unix:
+        raise ValueError("hosted expiry does not match the accepted selection")
     if obligation_ref is not None and obligation_ref != derived_ref:
         raise ValueError("hosted obligation identifier does not match accepted plan")
     profile, legacy_recovery = _accepted_hosted_profile(
@@ -742,13 +808,36 @@ async def load_hosted_agreement(
         allow_legacy_recovery=allow_legacy_recovery,
     )
     agreed_amount = thread.get("agreed_price")
+    raw_amount = obligation.get("amount")
+    accepted_amount = (
+        int(raw_amount)
+        if isinstance(raw_amount, str) and raw_amount.isdigit()
+        else raw_amount
+    )
     if (
         isinstance(agreed_amount, bool)
         or not isinstance(agreed_amount, int)
-        or obligation.get("amount") != agreed_amount
+        or isinstance(accepted_amount, bool)
+        or accepted_amount != agreed_amount
     ):
         raise ValueError("hosted amount does not match accepted seller state")
-    provision = VmProvisionTerms.model_validate(thread.get("provision_terms"))
+    thread_provision = VmProvisionTerms.model_validate(thread.get("provision_terms"))
+    vm_state = _plain_mapping(plan.service_terms.get("vm.v1"))
+    if vm_state:
+        accepted_listing_id = vm_state.get("listing_id")
+        order = _plain_mapping(vm_state.get("order"))
+        provision = VmProvisionTerms.model_validate(vm_state.get("provision"))
+        if accepted_listing_id != listing_id or order.get("listing_id") != listing_id:
+            raise ValueError("accepted VM listing identity is inconsistent")
+        if provision != thread_provision:
+            raise ValueError("accepted VM input does not match the marketplace thread")
+    elif legacy_recovery:
+        order = await sqlite_client.load_listing(listing_id=listing_id)
+        if not order:
+            raise ValueError("legacy accepted hosted listing is unavailable")
+        provision = thread_provision
+    else:
+        raise ValueError("accepted hosted plan has no immutable VM input")
     return HostedAgreement(
         negotiation_id=negotiation_id,
         listing_id=listing_id,
@@ -886,8 +975,6 @@ async def ensure_hosted_fulfillment(
 def hosted_public_status(record: Any) -> str:
     if record.reclaim_state == "succeeded":
         return "reclaimed"
-    if record.collection_state == "succeeded":
-        return "collected"
     if (
         record.materialization_state == "manual_required"
         or record.condition_state == "manual_required"
@@ -896,6 +983,8 @@ def hosted_public_status(record: Any) -> str:
         or record.mechanism_status == "manual_required"
     ):
         return "manual_required"
+    if record.collection_state == "succeeded":
+        return "collected"
     if record.condition_state == "failed" or record.mechanism_status == "failed":
         return "failed"
     if record.mechanism_status == "ready":
@@ -1057,7 +1146,7 @@ def build_vm_settlement_composition(
         _outcome: str,
         reason: str | None,
     ) -> None:
-        if _outcome == "collected":
+        if not _terminal_requires_lease_truncation(record, _outcome):
             return
         await truncate_lease_for_terminal_settlement(
             escrow_uid=getattr(record, "mechanism_ref", None),

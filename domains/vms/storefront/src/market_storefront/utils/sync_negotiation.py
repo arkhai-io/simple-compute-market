@@ -78,6 +78,7 @@ from market_core.schemas import (
     SettlementPlan,
     SettlementSelection,
 )
+from market_hosted_settlement import HostedObligationParams
 from market_identity import Identity
 from market_policy.negotiation_middleware import (
     NegotiationDecision,
@@ -288,6 +289,44 @@ def _decision_wire(decision: Any) -> dict[str, Any]:
     return payload
 
 
+def _accepted_vm_service_terms(
+    *,
+    listing: dict[str, Any],
+    provision_terms: Any,
+) -> dict[str, Any]:
+    """Freeze the seller listing and buyer VM input used at acceptance."""
+
+    provision = (
+        provision_terms.model_dump(mode="json")
+        if hasattr(provision_terms, "model_dump")
+        else provision_terms
+    )
+    if not isinstance(provision, dict):
+        raise OfferUnfulfillableError("hosted_vm_provision_terms_unavailable")
+    listing_id = listing.get("listing_id")
+    if not isinstance(listing_id, str) or not listing_id:
+        raise OfferUnfulfillableError("hosted_listing_identity_unavailable")
+    order = dict(listing)
+    offer_resource = order.get("offer_resource")
+    if isinstance(offer_resource, str):
+        try:
+            offer_resource = json.loads(offer_resource)
+        except json.JSONDecodeError as exc:
+            raise OfferUnfulfillableError(
+                "hosted_offer_resource_unavailable"
+            ) from exc
+        order["offer_resource"] = offer_resource
+    if not isinstance(offer_resource, dict):
+        raise OfferUnfulfillableError("hosted_offer_resource_unavailable")
+    return {
+        "vm.v1": {
+            "listing_id": listing_id,
+            "order": order,
+            "provision": dict(provision),
+        }
+    }
+
+
 def _accepted_hosted_artifacts(
     *,
     selection: dict[str, Any],
@@ -295,6 +334,8 @@ def _accepted_hosted_artifacts(
     agreed_amount: int,
     buyer_principal: Identity,
     seller_principal: Identity,
+    listing: dict[str, Any],
+    provision_terms: Any,
 ) -> dict[str, Any]:
     if agreed_amount < 1:
         raise OfferUnfulfillableError("hosted_amount_below_one_minor_unit")
@@ -303,8 +344,18 @@ def _accepted_hosted_artifacts(
         "option_id"
     ) or accepted.mechanism != option.get("mechanism"):
         raise OfferUnfulfillableError("settlement_selection_not_exact")
+    if accepted.mechanism != "fiat.stripe.v1":
+        raise OfferUnfulfillableError("hosted_mechanism_not_exact")
     params = dict(option.get("params") or {})
     condition = params.get("condition")
+    currency = option.get("asset")
+    if (
+        not isinstance(currency, str)
+        or len(currency) != 3
+        or not currency.isalpha()
+        or currency != currency.lower()
+    ):
+        raise OfferUnfulfillableError("hosted_currency_not_exact")
     if not isinstance(condition, dict):
         raise OfferUnfulfillableError("hosted_condition_unavailable")
     advertised_claimant = Identity.model_validate(params.get("claimant_principal"))
@@ -312,9 +363,29 @@ def _accepted_hosted_artifacts(
         raise OfferUnfulfillableError("hosted_claimant_principal_mismatch")
     params["payer_principal"] = buyer_principal.model_dump(mode="json")
     params["claimant_principal"] = seller_principal.model_dump(mode="json")
+    if "funding_authorization_ref" in params:
+        raise OfferUnfulfillableError(
+            "hosted_authorization_not_allowed_before_acceptance"
+        )
+    try:
+        params = HostedObligationParams.model_validate(
+            {
+                **params,
+                "funding_authorization_ref": "accepted-plan-validation",
+            }
+        ).model_dump(
+            mode="json",
+            exclude={"funding_authorization_ref"},
+        )
+    except (TypeError, ValueError) as exc:
+        raise OfferUnfulfillableError("hosted_settlement_option_not_exact") from exc
     plan = SettlementPlan(
         buyer_principal=buyer_principal.model_dump(mode="json"),
         seller_principal=seller_principal.model_dump(mode="json"),
+        service_terms=_accepted_vm_service_terms(
+            listing=listing,
+            provision_terms=provision_terms,
+        ),
         obligations=[
             SettlementObligation(
                 payer="buyer",
@@ -345,6 +416,7 @@ def _accepted_settlement_artifacts(
     uses_scalar_amount: bool,
     buyer_principal: Identity,
     seller_principal: Identity,
+    provision_terms: Any,
 ) -> dict[str, Any]:
     proposal_dict = (
         proposal.model_dump() if isinstance(proposal, EscrowProposal) else proposal
@@ -374,6 +446,8 @@ def _accepted_settlement_artifacts(
             selection=selection.model_dump(),
             option=option,
             agreed_amount=agreed_amount,
+            listing=listing,
+            provision_terms=provision_terms,
             buyer_principal=buyer_principal,
             seller_principal=seller_principal,
         )
@@ -850,6 +924,8 @@ async def start_sync_negotiation(
             ),
             buyer_principal=buyer_principal,
             seller_principal=seller_principal,
+            listing=our_order_dict,
+            provision_terms=provision_terms,
         )
         response["settlement_selection"] = artifacts["settlement_selection"]
         if decision.action == "accept":
@@ -1003,6 +1079,7 @@ async def continue_sync_negotiation(
             uses_scalar_amount=uses_scalar_amount,
             buyer_principal=buyer_principal,
             seller_principal=seller_principal,
+            provision_terms=thread.get("provision_terms"),
         )
         response.update(artifacts)
         settlement_plan = artifacts.get("settlement_plan")
@@ -1152,6 +1229,7 @@ async def continue_sync_negotiation(
             uses_scalar_amount=uses_scalar_amount,
             buyer_principal=buyer_principal,
             seller_principal=seller_principal,
+            provision_terms=thread.get("provision_terms"),
         )
         response.update(artifacts)
         settlement_plan = artifacts.get("settlement_plan")

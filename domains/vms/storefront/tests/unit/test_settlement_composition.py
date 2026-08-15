@@ -15,6 +15,7 @@ from market_storefront.settlement_composition import (
     VmFulfillmentInput,
     VmProjectionContext,
     _hosted_evidence_input,
+    _terminal_requires_lease_truncation,
     build_storefront_settlement_registry,
     fulfill_vm_settlement,
     hosted_settlement_projection,
@@ -120,6 +121,25 @@ def test_hosted_evidence_resolver_accepts_typed_configuration():
     ) == ("vm-portable", "portable-remote.v1", evidence_client)
 
 
+@pytest.mark.parametrize(
+    ("outcome", "collection_state", "expected"),
+    [
+        ("failed", "pending", True),
+        ("manual_required", "succeeded", False),
+        ("failed", "succeeded", False),
+        ("collected", "pending", False),
+    ],
+)
+def test_terminal_cleanup_never_truncates_a_collected_vm_lease(
+    outcome,
+    collection_state,
+    expected,
+):
+    record = SimpleNamespace(collection_state=collection_state)
+
+    assert _terminal_requires_lease_truncation(record, outcome) is expected
+
+
 @pytest.mark.asyncio
 async def test_hosted_projection_exposes_portable_fulfillment_binding():
     record = SimpleNamespace(
@@ -158,6 +178,17 @@ async def test_hosted_projection_exposes_portable_fulfillment_binding():
     assert response.funding_profile.value == "card.v1"
     assert response.funding_authorization_ref == "authorization-1"
     assert response.receipt == {"funding_reason": "available"}
+    record.mechanism_status = "manual_required"
+    record.collection_state = "succeeded"
+    record.status_receipt = {"funding_reason": "post_collection_loss"}
+    late_loss = SettlementPublicResponse.model_validate(
+        await hosted_settlement_projection(
+            composition=SimpleNamespace(),
+            record=record,
+        )
+    )
+    assert late_loss.status == "manual_required"
+    assert late_loss.funding_reason == "post_collection_loss"
 
 
 @pytest.mark.asyncio

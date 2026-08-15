@@ -4,6 +4,7 @@ from datetime import datetime
 
 import pytest
 from market_core.schemas import EscrowProposal, ProvisionTerms
+from core_storefront.negotiation_sync import OfferUnfulfillableError
 from market_identity import Ed25519Signer
 from market_policy.identity import Identity
 from market_policy.negotiation_middleware import NegotiationDecision
@@ -11,6 +12,7 @@ from market_policy.negotiation_thread import get_thread_store
 
 from market_storefront.utils.sync_negotiation import (
     SellerRoundResult,
+    _accepted_hosted_artifacts,
     _normalize_vm_message_terms,
     continue_sync_negotiation,
     start_sync_negotiation,
@@ -177,8 +179,24 @@ async def test_hosted_selection_is_persisted_and_materialized_as_plan(db):
     rates = [RateValue(field="amount", value=42)]
     params = {
         "account_ref": "acct-seller",
+        "authority_id": "hosted-authority-1",
+        "environment": "test",
+        "country": "US",
         "claimant_principal": _SELLER.model_dump(mode="json"),
-        "condition": {"kind": "builtin", "arbiter": "trusted_oracle"},
+        "funds_flow": "separate_charges_transfers",
+        "funding_profile": "card.v1",
+        "interaction": "interactive",
+        "contract_fingerprint": "sha256:" + "11" * 32,
+        "condition": {
+            "protocol": "arkhai.condition.v1",
+            "condition_id": "condition-1",
+            "evaluator": {
+                "kind": "builtin",
+                "version": "trivial.v1",
+                "params": {"kind": "trivial"},
+            },
+            "demand": {"encoding": "application/jcs+json", "value": True},
+        },
     }
     option = SettlementOption(
         option_id=derive_settlement_option_id(
@@ -260,6 +278,10 @@ async def test_hosted_selection_is_persisted_and_materialized_as_plan(db):
     obligation = response["settlement_plan"]["obligations"][0]
     assert obligation["payer_principal"] == _BUYER.model_dump(mode="json")
     assert obligation["claimant_principal"] == _SELLER.model_dump(mode="json")
+    vm_state = response["settlement_plan"]["service_terms"]["vm.v1"]
+    assert vm_state["listing_id"] == "L-hosted"
+    assert vm_state["order"]["offer_resource"]["resource_id"] == "resource-hosted"
+    assert vm_state["provision"]["payload"]["ssh_public_key"] == "ssh-rsa AAAA"
     thread = await db.load_negotiation_thread_row(
         negotiation_id=response["negotiation_id"]
     )
@@ -275,6 +297,23 @@ async def test_hosted_selection_is_persisted_and_materialized_as_plan(db):
             "ssh_public_key": "ssh-rsa AAAA",
         },
     }
+    legacy_params = dict(params)
+    legacy_params.pop("funding_profile")
+    legacy_params["payment_method_types"] = ["card"]
+    legacy_option = option.model_copy(update={"params": legacy_params})
+    with pytest.raises(
+        OfferUnfulfillableError,
+        match="hosted_settlement_option_not_exact",
+    ):
+        _accepted_hosted_artifacts(
+            selection=selection.model_dump(mode="json"),
+            option=legacy_option.model_dump(mode="json"),
+            agreed_amount=42,
+            buyer_principal=_BUYER,
+            seller_principal=_SELLER,
+            listing=vm_state["order"],
+            provision_terms=vm_state["provision"],
+        )
 
 
 @pytest.mark.asyncio

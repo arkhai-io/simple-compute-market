@@ -123,6 +123,7 @@ def wait_for_hosted_settlement(
             "ready",
             "collected",
             "reclaimed",
+            "expired",
             "failed",
             "manual_required",
         }:

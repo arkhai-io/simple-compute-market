@@ -120,6 +120,18 @@ def _hosted_obligation(deal) -> dict | None:
     return hosted[0].model_dump(mode="json")
 
 
+def _is_legacy_hosted_recovery(obligation: dict) -> bool:
+    params = obligation.get("params")
+    if not isinstance(params, dict):
+        return False
+    methods = params.get("payment_method_types")
+    if methods is None:
+        return False
+    if methods != ["card"] or "funding_profile" in params:
+        raise ValueError("accepted hosted settlement has ambiguous legacy funding")
+    return True
+
+
 def _accepted_provision_inputs(deal) -> tuple[str | None, int]:
     """Recover immutable provision inputs, reserving config for legacy absence."""
 
@@ -211,6 +223,15 @@ def run_settle_from_log(
                 "accepted settlement operation identity conflicts with the run-log"
             )
         settlement_ref = deal.settlement_ref
+        try:
+            legacy_hosted_recovery = _is_legacy_hosted_recovery(hosted_obligation)
+        except ValueError as exc:
+            raise typer.BadParameter(str(exc)) from exc
+        if legacy_hosted_recovery and settlement_ref is None:
+            raise typer.BadParameter(
+                "historical hosted card settlement has no recoverable settlement "
+                "reference; operator recovery is required"
+            )
         funding_authorization_ref = deal.funding_authorization_ref(obligation_ref)
         if settlement_ref is None and funding_authorization_ref is None:
             try:

@@ -75,6 +75,33 @@ def test_hosted_start_carries_only_accepted_and_authorization_refs(monkeypatch):
     }
 
 
+def test_hosted_wait_returns_expired_for_explicit_reclaim(monkeypatch):
+    buyer = Ed25519Signer(b"\x31" * 32)
+    monkeypatch.setattr(
+        hosted_settlement,
+        "_signed_json",
+        lambda *_args, **_kwargs: {
+            "settlement_ref": "settlement-1",
+            "status": "expired",
+            "funding_profile": "us_bank_transfer.v1",
+            "funding_reason": "funding_deadline_elapsed",
+        },
+    )
+
+    result = hosted_settlement.wait_for_hosted_settlement(
+        seller_url="http://seller/",
+        settlement_ref="settlement-1",
+        principal=buyer.identity,
+        signer=buyer,
+        total_timeout=1,
+        sleep=lambda _seconds: None,
+        resolve_seller_principals=lambda: None,
+    )
+
+    assert result["status"] == "expired"
+    assert result["settlement_ref"] == "settlement-1"
+
+
 def test_select_escrow_entry_filters_by_chain_and_token():
     listing = {
         "accepted_escrows": [
@@ -505,6 +532,85 @@ def test_inflight_legacy_hosted_recovery_skips_new_authorization(monkeypatch):
     )
     assert result == {"status": "ready"}
     assert waited[0]["settlement_ref"] == "legacy-settlement-ref"
+
+
+def test_legacy_without_settlement_ref_requires_operator_before_payer_call(
+    monkeypatch,
+):
+    buyer = Ed25519Signer(b"\x38" * 32)
+    seller = Ed25519Signer(b"\x39" * 32).identity
+    obligation = {
+        "payer": "buyer",
+        "claimant": "seller",
+        "payer_principal": buyer.identity.model_dump(mode="json"),
+        "claimant_principal": seller.model_dump(mode="json"),
+        "amount": "25",
+        "asset": "usd",
+        "expiration_unix": 2_000_000_000,
+        "mechanism": "fiat.stripe.v1",
+        "params": {
+            "account_ref": "seller-main",
+            "condition_profile": "vm",
+            "payment_method_types": ["card"],
+        },
+    }
+    deal = SimpleNamespace(
+        settlement_selection={
+            "mechanism": "fiat.stripe.v1",
+            "option_id": "d" * 64,
+            "expiration_unix": 2_000_000_000,
+        },
+        settlement_plan={"obligations": [obligation]},
+        settlement_operation_identities=(),
+        negotiation_id="neg-legacy-unstarted",
+        settlement_ref=None,
+        seller_url="http://seller",
+        buyer_principal=buyer.identity,
+        funding_authorization_ref=lambda _ref: None,
+    )
+
+    class Log:
+        def event(self, *_args, **_kwargs):
+            return None
+
+    monkeypatch.setattr(
+        common,
+        "resolve_recovery_buyer_identity",
+        lambda _run_id: _resolved(buyer),
+    )
+    monkeypatch.setattr(
+        settle_cli,
+        "load_deal_context",
+        lambda *_args, **_kwargs: deal,
+    )
+    monkeypatch.setattr(
+        settle_cli,
+        "make_deal_publisher_trust_resolver",
+        lambda *_args, **_kwargs: lambda: None,
+    )
+    monkeypatch.setattr(settle_cli, "open_run_log", lambda *_args, **_kwargs: Log())
+    monkeypatch.setattr(
+        settle_cli,
+        "prepare_hosted_funding_authorization",
+        lambda **_kwargs: (_ for _ in ()).throw(
+            AssertionError("legacy recovery called the payer authority")
+        ),
+    )
+    monkeypatch.setattr(
+        settle_cli,
+        "start_hosted_settlement",
+        lambda **_kwargs: (_ for _ in ()).throw(
+            AssertionError("legacy recovery started a new settlement")
+        ),
+    )
+
+    with pytest.raises(typer.BadParameter, match="operator recovery is required"):
+        settle_cli.run_settle_from_log(
+            run_id="run-legacy-unstarted",
+            poll_interval=0,
+            settlement_timeout=1,
+            action_policy=BuyerActionPolicy.PRINT,
+        )
 
 
 def test_fiat_discovery_is_local_only_and_respects_action_capability(monkeypatch):

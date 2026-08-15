@@ -9,6 +9,7 @@ import uuid
 from typing import Any
 
 from arkhai_vms import VmProvisionTerms
+from core_storefront.auth import AuthenticatedPrincipal
 from core_storefront.models.settle_models import (
     EvaluateSettleRequest,
     EvaluateSettleResponse,
@@ -274,7 +275,7 @@ class SettlementsController:
         operation: str,
         resource_id: str,
         record: SettlementObligationRecord,
-    ) -> None:
+    ) -> AuthenticatedPrincipal:
         agreement = await load_hosted_agreement(
             sqlite_client=self._db,
             negotiation_id=record.agreement_ref,
@@ -427,11 +428,7 @@ class SettlementsController:
                 and record.fulfillment_ref
                 and record.collection_state != "succeeded"
             ):
-                await truncate_lease_for_terminal_settlement(
-                    escrow_uid=record.mechanism_ref,
-                    reason="hosted funding returned before collection",
-                    sqlite_client=self._db,
-                )
+                await composition.worker.wake(record.obligation_ref)
             projected = await hosted_settlement_projection(
                 composition=composition,
                 record=record,
