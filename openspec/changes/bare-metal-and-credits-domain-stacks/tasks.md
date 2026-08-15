@@ -11,6 +11,12 @@
 
 ## 2. Recompose API credits
 
+Implementation dependency: tasks 2.1-2.2 wait for the final committed interfaces
+from `kit-storefront-composition-seam`, `kit-owned-negotiation-runtime`, and
+`kit-owned-capacity-and-publication`. This change will consume those modules and
+remove the API-credit copies; it will not recreate an absent extraction locally.
+
+
 - [ ] 2.1 Remove every remaining local implementation of a concern the kit extractions
       own, so the domain is configuration and codecs over kit.
 - [ ] 2.2 Confirm no extracted concern retains an API-credits copy. The domain already
@@ -30,6 +36,12 @@
 
 ## 4. Bare-metal deal path
 
+Implementation dependency: task 4.1 waits for the accepted
+`market bare-metal` buyer contribution and the sibling storefront's authenticated
+result/access/teardown endpoint contract. The static scenario may consume only
+those public contracts, never a storefront database or provisioning authority.
+
+
 - [ ] 4.1 Add the end-to-end scenario: discovery, negotiation, settlement, delivery,
       teardown.
 - [ ] 4.2 Treat defects this surfaces in bare metal's own behavior as bare-metal
@@ -38,6 +50,12 @@
       whole-machine release is not VM destruction.
 
 ## 5. Validation
+
+External gate: tasks 5.1-5.2 require running API-credit and bare-metal seller
+stacks, role-scoped credentials, the selected site/provisioning authority, and a
+real whole-host access target. Static scenario/configuration work is not live-deal
+evidence. Task 5.3 is intentionally unrun in this delegated lane.
+
 
 - [ ] 5.1 Run both new end-to-end paths against a live service stack. This repository has
       previously recorded e2e work validated only statically because no stack was
