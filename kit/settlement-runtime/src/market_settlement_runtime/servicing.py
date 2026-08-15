@@ -16,9 +16,7 @@ from .runtime import SettlementRuntime
 logger = logging.getLogger(__name__)
 EventCallback = Callable[[str, dict[str, Any]], Any]
 TerminalCallback = Callable[[SettlementObligationRecord, str, str | None], Any]
-ReadyCallback = Callable[
-    [SettlementObligationRecord, str], Awaitable[None] | None
-]
+ReadyCallback = Callable[[SettlementObligationRecord, str], Awaitable[None] | None]
 
 
 class _ServicingStepError(RuntimeError):
@@ -138,7 +136,19 @@ class SettlementServicingWorker:
         ):
             await self._cleanup(record, record.last_error)
             return
-        if status.status in {"manual_required", "terminal"}:
+        if record.mechanism_status in {
+            "reclaimed",
+            "expired",
+            "failed",
+            "manual_required",
+        }:
+            await self._terminal(
+                record,
+                record.mechanism_status,
+                record.last_error,
+            )
+            return
+        if status.status == "terminal":
             await self._terminal(
                 record,
                 record.mechanism_status or status.status,
@@ -146,12 +156,8 @@ class SettlementServicingWorker:
             )
             return
         if record.collection_state == "succeeded":
-            if record.mechanism_status in {"failed", "manual_required"}:
-                await self._terminal(
-                    record,
-                    record.mechanism_status,
-                    record.last_error,
-                )
+            if not record.mechanism_state.get("terminal_risk_monitoring"):
+                await self._terminal(record, "collected", None)
                 return
             await self._schedule(record.obligation_ref, "status", now)
             await self._emit(

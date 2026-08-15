@@ -536,11 +536,15 @@ class SettlementRuntime:
             record.mechanism_status == "failed"
             and record.fulfillment_ref is not None
             and record.collection_state != "succeeded"
-            and record.cleanup_state != "succeeded"
         ):
-            raise ValueError(
-                "domain cleanup must complete before reclaiming returned funding"
+            cleanup = await self._repository.load_settlement_operation(
+                record.obligation_ref,
+                "cleanup",
             )
+            if cleanup is None or cleanup.get("state") != "succeeded":
+                raise ValueError(
+                    "domain cleanup must complete before reclaiming returned funding"
+                )
         client = self._client(record)
         reserved = await self._reserve(record, "reclaim", worker_id, local_principal)
         if reserved is None:
@@ -797,7 +801,6 @@ class SettlementRuntime:
         )
 
 
-
 def _safe_buyer_action(action: Mapping[str, Any] | None) -> dict[str, Any] | None:
     """Persist action lifecycle metadata without URLs or payment instructions."""
 
@@ -809,6 +812,7 @@ def _safe_buyer_action(action: Mapping[str, Any] | None) -> dict[str, Any] | Non
         if key in action and action[key] is not None
     }
     return safe or None
+
 
 def settlement_operation_ref(obligation_ref: str, operation: str) -> str:
     return f"arkhai:settlement:{obligation_ref}:{operation}"

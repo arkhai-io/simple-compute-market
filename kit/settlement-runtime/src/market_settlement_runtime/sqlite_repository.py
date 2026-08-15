@@ -17,13 +17,10 @@ from market_identity import Identity, IdentityScheme
 from .models import canonical_json, derive_obligation_ref, obligation_payload_hash
 
 SETTLEMENT_MIGRATION_ID = "20260810_001_settlement_obligation_lifecycle"
-SETTLEMENT_PRINCIPAL_MIGRATION_ID = (
-    "20260811_003_settlement_principal_authorization"
-)
+SETTLEMENT_PRINCIPAL_MIGRATION_ID = "20260811_003_settlement_principal_authorization"
 SETTLEMENT_MECHANISM_PARAMS_MIGRATION_ID = (
     "20260815_004_settlement_mechanism_materialization_params"
 )
-_LEGACY_HOSTED_CARD_RECOVERY = {"legacy_recovery": "hosted-card.v1"}
 
 
 @dataclass(frozen=True)
@@ -192,14 +189,10 @@ def _principal_from_legacy(
                 f"settlement obligation has malformed legacy {field}"
             ) from exc
     if not candidates:
-        raise ValueError(
-            f"settlement obligation cannot resolve {field}_principal"
-        )
+        raise ValueError(f"settlement obligation cannot resolve {field}_principal")
     principal = candidates[0]
     if any(candidate != principal for candidate in candidates[1:]):
-        raise ValueError(
-            f"settlement obligation has ambiguous {field} identities"
-        )
+        raise ValueError(f"settlement obligation has ambiguous {field} identities")
     return principal
 
 
@@ -265,6 +258,7 @@ def _extend_principal_schema(conn: sqlite3.Connection) -> None:
         "BEGIN SELECT RAISE(ABORT, 'settlement principals required'); END"
     )
 
+
 def _extend_mechanism_params_schema(conn: sqlite3.Connection) -> None:
     known = _columns(conn, "settlement_obligations")
     if "mechanism_params" not in known:
@@ -272,83 +266,6 @@ def _extend_mechanism_params_schema(conn: sqlite3.Connection) -> None:
             "ALTER TABLE settlement_obligations ADD COLUMN mechanism_params "
             "TEXT NOT NULL DEFAULT '{}'"
         )
-    rows = conn.execute(
-        "SELECT obligation_ref, obligation, mechanism_params, mechanism_ref "
-        "FROM settlement_obligations ORDER BY obligation_ref"
-    ).fetchall()
-    classified: list[tuple[str, str]] = []
-    for (
-        obligation_ref,
-        raw_obligation,
-        raw_mechanism_params,
-        mechanism_ref,
-    ) in rows:
-        try:
-            obligation = json.loads(raw_obligation)
-            mechanism_params = json.loads(raw_mechanism_params or "{}")
-        except (TypeError, json.JSONDecodeError) as exc:
-            raise ValueError(
-                f"settlement obligation {obligation_ref!r} has invalid JSON"
-            ) from exc
-        if not isinstance(obligation, dict) or not isinstance(mechanism_params, dict):
-            raise ValueError(
-                f"settlement obligation {obligation_ref!r} has invalid materialization state"
-            )
-        if obligation.get("mechanism") != "fiat.stripe.v1":
-            continue
-        params = obligation.get("params")
-        if not isinstance(params, dict):
-            raise ValueError(
-                f"hosted settlement obligation {obligation_ref!r} has no exact params"
-            )
-        legacy_methods = params.get("payment_method_types")
-        funding_profile = params.get("funding_profile")
-        if legacy_methods is not None and funding_profile is not None:
-            raise ValueError(
-                f"hosted settlement obligation {obligation_ref!r} mixes legacy and current funding fields"
-            )
-        if legacy_methods is not None:
-            if not isinstance(mechanism_ref, str) or not mechanism_ref:
-                raise ValueError(
-                    f"legacy hosted settlement {obligation_ref!r} has no immutable mechanism reference"
-                )
-            if (
-                legacy_methods != ["card"]
-                or "funding_authorization_ref" in params
-                or (
-                    mechanism_params
-                    and mechanism_params != _LEGACY_HOSTED_CARD_RECOVERY
-                )
-            ):
-                raise ValueError(
-                    f"hosted settlement obligation {obligation_ref!r} is ambiguous legacy funding"
-                )
-            classified.append(
-                (canonical_json(_LEGACY_HOSTED_CARD_RECOVERY), str(obligation_ref))
-            )
-            continue
-        if funding_profile is None:
-            raise ValueError(
-                f"hosted settlement obligation {obligation_ref!r} has no funding classification"
-            )
-        if mechanism_params:
-            accepted_profile = mechanism_params.get("funding_profile")
-            authorization_ref = mechanism_params.get("funding_authorization_ref")
-            if (
-                accepted_profile != funding_profile
-                or not isinstance(authorization_ref, str)
-                or not authorization_ref
-                or set(mechanism_params)
-                != {"funding_profile", "funding_authorization_ref"}
-            ):
-                raise ValueError(
-                    f"hosted settlement obligation {obligation_ref!r} has ambiguous materialization params"
-                )
-    conn.executemany(
-        "UPDATE settlement_obligations SET mechanism_params=? "
-        "WHERE obligation_ref=?",
-        classified,
-    )
 
 
 def _migrate_legacy_claims(conn: sqlite3.Connection) -> None:
@@ -435,12 +352,8 @@ def _migrate_legacy_claims(conn: sqlite3.Connection) -> None:
                 "obligation_ref": obligation_ref,
                 "obligation_hash": obligation_hash,
                 "obligation": obligation,
-                "payer_principal": canonical_json(
-                    payer.model_dump(mode="json")
-                ),
-                "claimant_principal": canonical_json(
-                    claimant.model_dump(mode="json")
-                ),
+                "payer_principal": canonical_json(payer.model_dump(mode="json")),
+                "claimant_principal": canonical_json(claimant.model_dump(mode="json")),
                 "fulfillment_ref": fulfillment_ref,
                 "attempts": int(attempts or 0),
                 "next_attempt": next_attempt,
@@ -628,8 +541,15 @@ class SettlementSQLiteRepository:
         "next_attempt_unix",
     )
 
-    def __init__(self, db_path: str, *, apply_migrations: bool = True) -> None:
+    def __init__(
+        self,
+        db_path: str,
+        *,
+        apply_migrations: bool = True,
+        extra_migrations: tuple[SettlementMigration, ...] = (),
+    ) -> None:
         self.db_path = db_path
+        self._extra_migrations = extra_migrations
         os.makedirs(os.path.dirname(os.path.abspath(db_path)) or ".", exist_ok=True)
         if apply_migrations:
             self._apply_migrations()
@@ -651,7 +571,7 @@ class SettlementSQLiteRepository:
             applied = {
                 str(row[0]) for row in conn.execute("SELECT id FROM schema_migrations")
             }
-            for migration in settlement_migrations():
+            for migration in (*settlement_migrations(), *self._extra_migrations):
                 if migration.id not in applied:
                     migration.apply(conn)
                     conn.execute(
@@ -674,9 +594,7 @@ class SettlementSQLiteRepository:
             raw = value.get(field)
             if field in {"payer_principal", "claimant_principal"}:
                 if not raw:
-                    raise ValueError(
-                        f"settlement obligation has no canonical {field}"
-                    )
+                    raise ValueError(f"settlement obligation has no canonical {field}")
                 try:
                     principal = Identity.model_validate(json.loads(raw))
                 except (TypeError, ValueError, json.JSONDecodeError) as exc:
@@ -685,9 +603,7 @@ class SettlementSQLiteRepository:
                     ) from exc
                 canonical = canonical_json(principal.model_dump(mode="json"))
                 if raw != canonical:
-                    raise ValueError(
-                        f"settlement obligation has non-canonical {field}"
-                    )
+                    raise ValueError(f"settlement obligation has non-canonical {field}")
                 value[field] = principal.model_dump(mode="json")
                 continue
             value[field] = (
@@ -973,7 +889,9 @@ class SettlementSQLiteRepository:
                         (encoded, self._now(), obligation_ref),
                     ).rowcount
                     if changed != 1:
-                        raise ValueError("mechanism_params binding lost its compare-and-set")
+                        raise ValueError(
+                            "mechanism_params binding lost its compare-and-set"
+                        )
                 result = conn.execute(
                     f"SELECT {', '.join(self._OBLIGATION_COLUMNS)} "
                     "FROM settlement_obligations WHERE obligation_ref=?",
@@ -1122,6 +1040,7 @@ class SettlementSQLiteRepository:
             "materialize",
             "status",
             "fulfill",
+            "cleanup",
             "check",
             "collect",
             "reclaim",
@@ -1137,7 +1056,7 @@ class SettlementSQLiteRepository:
                 conn.execute("BEGIN IMMEDIATE")
                 lifecycle = conn.execute(
                     "SELECT collection_state, reclaim_state, fulfillment_ref, "
-                    "condition_state FROM settlement_obligations "
+                    "condition_state, mechanism_status FROM settlement_obligations "
                     "WHERE obligation_ref=?",
                     (obligation_ref,),
                 ).fetchone()
@@ -1148,6 +1067,7 @@ class SettlementSQLiteRepository:
                     reclaim_state,
                     fulfillment_ref,
                     condition_state,
+                    mechanism_status,
                 ) = lifecycle
                 if operation in {"fulfill", "check", "collect"} and reclaim_state in {
                     "in_progress",
@@ -1163,10 +1083,23 @@ class SettlementSQLiteRepository:
                         "LIMIT 1",
                         (obligation_ref, now_unix),
                     ).fetchone()
+                    cleanup_complete = conn.execute(
+                        "SELECT 1 FROM settlement_operations "
+                        "WHERE obligation_ref=? AND operation='cleanup' "
+                        "AND state='succeeded'",
+                        (obligation_ref,),
+                    ).fetchone()
+                    returned_cleanup_complete = (
+                        mechanism_status == "failed" and cleanup_complete is not None
+                    )
                     if (
                         collection_state in {"in_progress", "succeeded"}
-                        or fulfillment_ref is not None
+                        or (
+                            fulfillment_ref is not None
+                            and not returned_cleanup_complete
+                        )
                         or condition_state == "ready"
+                        and not returned_cleanup_complete
                         or active_conflict is not None
                     ):
                         conn.rollback()
@@ -1234,7 +1167,12 @@ class SettlementSQLiteRepository:
                         "reclaim_state='in_progress', version=version+1, "
                         "updated_at=? WHERE obligation_ref=? "
                         "AND collection_state NOT IN ('in_progress','succeeded') "
-                        "AND fulfillment_ref IS NULL AND condition_state!='ready'",
+                        "AND ((fulfillment_ref IS NULL AND condition_state!='ready') "
+                        "OR (mechanism_status='failed' AND EXISTS ("
+                        "SELECT 1 FROM settlement_operations cleanup_op "
+                        "WHERE cleanup_op.obligation_ref=settlement_obligations.obligation_ref "
+                        "AND cleanup_op.operation='cleanup' "
+                        "AND cleanup_op.state='succeeded')))",
                         (now, obligation_ref),
                     ).rowcount
                     if changed != 1:

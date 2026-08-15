@@ -29,6 +29,7 @@ from domains.vms.listings.resource_csv_importer import (
     upsert_resources_from_csv,
     upsert_resources_from_csv_content,
 )
+from market_hosted_settlement import HOSTED_SETTLEMENT_MIGRATIONS
 from market_settlement_runtime import settlement_migrations
 
 from .config import BASE_URL_OVERRIDE, resolve_marketplace_signer, settings
@@ -50,7 +51,11 @@ class SQLiteClient(CoreSQLiteClient):
     )
 
     def _domain_migrations(self) -> tuple[MigrationLike, ...]:
-        return (*settlement_migrations(), *VM_MIGRATIONS)
+        return (
+            *settlement_migrations(),
+            *HOSTED_SETTLEMENT_MIGRATIONS,
+            *VM_MIGRATIONS,
+        )
 
     def _ensure_domain_tables(self, cur: sqlite3.Cursor) -> None:
         # Resources table (local source of truth across all resource types).

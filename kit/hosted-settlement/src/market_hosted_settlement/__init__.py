@@ -52,6 +52,10 @@ from .payer import (
     payer_command_context_from_config,
 )
 from .payer_cli import PayerCommandError, create_stripe_command_group
+from .migrations import (
+    HOSTED_SETTLEMENT_FUNDING_MIGRATION_ID,
+    HOSTED_SETTLEMENT_MIGRATIONS,
+)
 from .seller import HostedSellerError, onboard_hosted_seller
 from .settlement_config import (
     REQUIRED_STRIPE_CAPABILITIES,
@@ -80,6 +84,8 @@ __all__ = [
     "MECHANISM",
     "REQUIRED_HOSTED_CAPABILITIES",
     "REQUIRED_STRIPE_CAPABILITIES",
+    "HOSTED_SETTLEMENT_FUNDING_MIGRATION_ID",
+    "HOSTED_SETTLEMENT_MIGRATIONS",
     "FundingMode",
     "FundingProfile",
     "STRIPE_CONFIG_KEY",

@@ -271,6 +271,26 @@ async def test_post_collection_monitoring_preserves_collection_on_late_loss(
     class MonitoringClient(Client):
         status_value = "collected"
 
+        async def collect(
+            self,
+            obligation,
+            *,
+            mechanism_ref,
+            fulfillment_ref,
+            operation_ref,
+            mechanism_state,
+        ):
+            result = await super().collect(
+                obligation,
+                mechanism_ref=mechanism_ref,
+                fulfillment_ref=fulfillment_ref,
+                operation_ref=operation_ref,
+                mechanism_state=mechanism_state,
+            )
+            return result.model_copy(
+                update={"mechanism_state": {"terminal_risk_monitoring": True}}
+            )
+
         async def get_status(
             self, obligation, *, mechanism_ref, operation_ref, mechanism_state
         ):
@@ -486,8 +506,10 @@ async def test_returned_funding_reclaim_waits_for_vm_cleanup(repository) -> None
         local_principal=SELLER,
     )
     returned = fulfilled.model_copy(update={"mechanism_status": "failed"})
-    await repository.upsert_settlement_obligation(returned.model_dump())
-
+    assert await repository.save_settlement_obligation(
+        returned.model_dump(),
+        expected_version=returned.version,
+    )
     with pytest.raises(ValueError, match="cleanup must complete"):
         await runtime.reclaim(
             obligation_ref=record.obligation_ref,
@@ -622,9 +644,7 @@ async def test_fulfillment_restart_repairs_commit_before_acknowledgement(
     assert recovered.status == "succeeded"
     assert operation is not None
     assert operation["state"] == "succeeded"
-    assert operation["receipt"] == {
-        "fulfillment_ref": "portable-fulfillment-ref"
-    }
+    assert operation["receipt"] == {"fulfillment_ref": "portable-fulfillment-ref"}
 
 
 async def test_mechanism_params_bind_after_acceptance_without_changing_identity(
