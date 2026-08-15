@@ -52,20 +52,23 @@ Section 6.
 
 ## 2. Non-financial obligation servicing
 
-- [ ] 2.1 Characterize the settlement runtime against the contact-exchange
-      obligation — payer/claimant are the two parties, `amount`/`asset` absent
-      (`None`, already documented as the non-scalar view in
-      `market_core.schemas.SettlementObligation`), mechanism
-      `contact-exchange.v1`: `register_plan`, `derive_obligation_ref`, servicing
-      state transitions to collected on the immediate-ready client, and status
-      projection. Fix only what the characterization proves broken; the spec
-      delta in `specs/settlement-servicing/spec.md` is the contract.
-- [ ] 2.2 Pin the terminal shape: the deal is agreed → revealed with nothing to
-      converge, heartbeat, or reclaim; the claim completes on availability, not
-      on read.
-- [ ] 2.3 Evidence: settlement-runtime suite green including the new
-      non-financial characterization tests.
-- [ ] 2.4 Closeout.
+- [x] 2.1 Characterized in
+      `kit/settlement-runtime/tests/unit/test_non_financial_obligation.py`:
+      an amountless, assetless `contact-exchange.v1` obligation registers with
+      a stable `derive_obligation_ref` identity and services materialize →
+      fulfillment → check → collect to aggregate `complete` on an
+      immediate-ready client. Nothing was broken — the runtime never reads
+      `amount`/`asset` in its control flow, exactly as the spec delta requires;
+      no production change was needed.
+- [x] 2.2 Terminal shape pinned: completion with `reclaim_calls == 0`;
+      availability is modeled as the fulfillment signal, and the status
+      projection stays amountless. One lifecycle fact recorded: status
+      reconciliation requires materialization first (no `mechanism_ref` before
+      it), which the introduction flow satisfies since materialize is the first
+      act after acceptance.
+- [x] 2.3 Evidence: kit/settlement-runtime 71 passed (3 new).
+- [x] 2.4 Closeout: hygiene clean; no production edits, so no promotion beyond
+      the existing servicing spec delta.
 
 ## 3. Selection dispatch and the accepted plan (bare metal)
 
