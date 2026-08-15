@@ -24,12 +24,12 @@ from core_storefront.domain_registry import (
     build_storefront_derivation_key,
     canonical_source_envelope,
 )
-from market_core import ContractVersion, DomainIdentity
-
-
 from core_storefront.sqlite_migrations import (
     migrate_storefront_domain_bindings_schema,
 )
+from market_core import ContractVersion, DomainIdentity
+
+
 class StorefrontDomainMigrationError(RuntimeError):
     """The selected legacy source cannot be converted without guessing."""
 
@@ -162,9 +162,11 @@ def _prepare_vm_bindings(
             )
         resource = raw_row[4]
         pool = raw_row[3]
-        if not isinstance(resource, str) or not resource.strip():
+        resource_valid = isinstance(resource, str) and bool(resource.strip())
+        pool_valid = isinstance(pool, str) and bool(pool.strip())
+        if not resource_valid and not pool_valid:
             raise StorefrontDomainMigrationError(
-                f"listing {listing_id!r} has no Physical Resource provenance"
+                f"listing {listing_id!r} has neither pool nor Physical Resource provenance"
             )
         if pool is not None and (not isinstance(pool, str) or not pool.strip()):
             raise StorefrontDomainMigrationError(
@@ -178,6 +180,12 @@ def _prepare_vm_bindings(
             raise StorefrontDomainMigrationError(
                 f"listing {listing_id!r} declares public mode {public_mode!r}, "
                 f"not selected mode {selection.offering_mode!r}"
+            )
+        if public_mode is None:
+            offer["virtualization_type"] = selection.offering_mode
+            conn.execute(
+                "UPDATE listings SET offer_resource=? WHERE listing_id=?",
+                (_canonical_json(offer), listing_id),
             )
         source = {
             "kind": "compute.listing_source",
