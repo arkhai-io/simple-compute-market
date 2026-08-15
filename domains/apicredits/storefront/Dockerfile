@@ -43,49 +43,29 @@ RUN --mount=type=cache,target=/root/.cache/uv \
         --refresh-package arkhai-apicredits-domain \
         --refresh-package arkhai-kit-site-client
 
+# Install the storefront distribution itself from the staged wheel. The
+# runtime image never receives repository source, a project checkout, or an
+# editable path that could bypass the package boundary exercised by release.
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv pip install --python /app/.venv/bin/python --no-deps --find-links /.dist \
+        --reinstall arkhai-apicredits-storefront==0.2.0
+
 # Stage 2: runtime
 FROM --platform=linux/amd64 ghcr.io/astral-sh/uv:python3.12-bookworm-slim AS runtime
 
 ENV UV_HTTP_RETRIES=10
 RUN apt-get update && apt-get install -y --no-install-recommends git && rm -rf /var/lib/apt/lists/* && \
-    useradd -m -s /bin/sh appuser && mkdir -p /app && chown appuser /app
+    useradd -m -s /bin/sh appuser && mkdir -p /app/data && chown -R appuser:appuser /app
 USER appuser
 WORKDIR /app
 
 COPY --chown=appuser:appuser --from=builder /app/.venv ./.venv
 ENV PATH="/app/.venv/bin:$PATH"
-# Console scripts don't inherit CWD on sys.path; domains.apicredits.* and
-# apicredits_storefront.* both resolve from the installed venv
-# (arkhai-apicredits-domain, arkhai-apicredits-storefront), not this path
-# -- kept for any other module expecting /app importable directly.
-ENV PYTHONPATH="/app"
 # Dynaconf config layering looks under $XDG_CONFIG_HOME/arkhai/; the
 # operator's TOML is bind-mounted at /etc/arkhai/storefront.toml.
 ENV XDG_CONFIG_HOME="/etc"
 
-COPY --chown=appuser:appuser domains/apicredits/storefront/src ./src
 
-# Install the project itself (console script) — deps already present
-# from the builder stage's venv.
-COPY --chown=appuser:appuser domains/apicredits/storefront/pyproject.toml domains/apicredits/storefront/uv.lock ./
-RUN sed -E -i 's|registry = "[^"]*\.dist"|registry = "/.dist"|' uv.lock || true
-COPY .dist/ /.dist/
-RUN --mount=type=cache,target=/root/.cache/uv \
-    uv sync --no-sources --no-dev --find-links /.dist \
-        --refresh-package arkhai-core \
-        --refresh-package arkhai-core-storefront \
-        --refresh-package arkhai-kit-capacity-publication \
-        --refresh-package arkhai-core-registry-client \
-        --refresh-package arkhai-kit-policy \
-        --refresh-package arkhai-kit-settlement-runtime \
-        --refresh-package arkhai-kit-storefront \
-        --refresh-package arkhai-kit-negotiation-runtime \
-        --refresh-package arkhai-kit-alkahest \
-        --refresh-package arkhai-kit-identity \
-        --refresh-package arkhai-kit-config \
-        --refresh-package arkhai-apicredits-domain \
-        --refresh-package arkhai-kit-site-client \
-        --refresh-package arkhai-apicredits-storefront
 
 ARG PORT=8000
 ENV PORT=${PORT}

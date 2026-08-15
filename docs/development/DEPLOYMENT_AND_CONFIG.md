@@ -110,6 +110,36 @@ separate mechanism resources and never determine profile selection. ConfigMaps,
 arguments, image layers, run logs, evidence, output, and examples contain no
 resolved signing value.
 
+## Per-domain stack composition
+
+Each domain stack owns its public topology while consuming shared core/kit
+authorities:
+
+- `compose.vms.yml` composes the VM storefront and compute authorities.
+- `compose.apicredits.yml` composes the API-credit registry, credits authority,
+  gated sample service, and API-credit storefront.
+- `compose.bare-metal.yml` composes the dedicated bare-metal storefront with a
+  compute-family registry and the selected-site provisioning authority.
+
+Storefront images install their distributions from the staged `.dist`
+wheelhouse; runtime images do not resolve editable sibling source. API-credit
+and bare-metal SQLite/queue/registry stores occupy separate named volumes.
+
+Stack files carry public URLs, canonical principals, explicit Resource Pool
+offering modes, and exact selected-site bindings. Signer, API-admin,
+provisioning SSH, hosted-authority, and buyer credentials are independent
+role-scoped file references with no committed fallback. Missing identity,
+inventory, pool declaration, site authority, or credential blocks startup or
+scenario preflight; it never selects a test signer, default site, payload-
+guessed domain, direct executor, or provider simulator.
+
+The bare-metal image currently exposes the signed publication command seam but
+does not autonomously publish to the registry, and a public settlement address
+alone does not compose a settlement authority. Its stack may be brought up for
+operator integration, but it is not release-qualified or discoverable-deal
+evidence until accepted publication and settlement lifecycles are ready and
+the installed buyer completes real access and revocation.
+
 ## Stateful service persistence
 
 Each service owns its own database; there is no shared database between

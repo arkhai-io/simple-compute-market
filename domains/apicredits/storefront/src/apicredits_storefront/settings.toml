@@ -72,6 +72,7 @@ root_path = ""
 # independently below. Its admin_key is a mechanism credential only.
 service_url       = "http://localhost:8082"
 admin_key         = ""
+admin_key_file    = ""
 preflight_timeout = 30
 fail_on_unreachable = true
 

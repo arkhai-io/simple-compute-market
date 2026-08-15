@@ -217,6 +217,30 @@ Deterministic focused tests MUST cover frozen registry validation, immutable lis
 - **WHEN** the production bare-metal contribution or selected-site POOLS-7 lifecycle is unavailable
 - **THEN** the real multi-domain E2E remains explicitly blocked rather than recording fake publication, fulfillment, teardown, or capacity-restoration success
 
+### Requirement: Per-domain end-to-end deal path
+
+Every market domain intended for deployment MUST have an end-to-end scenario
+proving discovery, negotiation, settlement, delivery, and domain-defined
+teardown against running services. Scenarios MUST use the shared
+domain-neutral state, profile/config, event-order, and client helpers rather
+than copying a VM scenario or interpreting another domain's listing,
+fulfillment result, private authority state, or teardown carrier.
+
+#### Scenario: A domain is deployed
+
+- **WHEN** a market domain is intended for deployment
+- **THEN** its release-qualified scenario observes one complete deal through the ordinary public buyer and seller boundaries
+
+#### Scenario: Another domain needs a deal path
+
+- **WHEN** its listing, result, or teardown semantics differ from VM
+- **THEN** the scenario supplies domain codecs and assertions to shared helpers without adding a domain guess, default route, or copied orchestration
+
+#### Scenario: An external authority is unavailable
+
+- **WHEN** a live seller, site/provisioning authority, chain, hosted authority, credential, or real access target required by the selected scenario is absent
+- **THEN** that exact live assertion remains blocked or unavailable and static composition is not reported as end-to-end success
+
 ## Evidence
 
 - Layer ownership: package unit/integration suites, role-level E2E scenarios, and the independently released hosted producer's financial-provider and webhook-inbox integration suites.

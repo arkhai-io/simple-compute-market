@@ -1,0 +1,97 @@
+# Bare-metal seller domain stack.
+#
+# This stack runs the dedicated wheel-only storefront, one compute-family
+# registry, and the ordinary selected-site provisioning authority. It never
+# enables the provisioning test controller or substitutes mock fulfillment.
+# Deployment-specific principals and signer credentials are supplied by the
+# root compose.bare-metal.yml wrapper.
+
+services:
+  bare-metal-registry:
+    image: arkhai:registry
+    ports:
+      - "${BARE_METAL_REGISTRY_PORT:-8080}:8080"
+    env_file:
+      - ../../core/registry/.env.docker-compose
+    volumes:
+      - ../../shared-env:/app/shared-env:ro
+      - bare-metal-registry-data:/app/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8080/health')\" || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+  bare-metal-redis:
+    image: redis:7-alpine
+    volumes:
+      - bare-metal-redis-data:/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+
+  bare-metal-provisioning:
+    image: arkhai:compute-provisioning
+    platform: linux/amd64
+    command: ["sh", "-c", "compute-provisioning-migrate && exec compute-provisioning-api"]
+    depends_on:
+      bare-metal-redis:
+        condition: service_healthy
+      bare-metal-registry:
+        condition: service_healthy
+    ports:
+      - "${BARE_METAL_PROVISIONING_PORT:-8081}:8081"
+    environment:
+      - ACTIVE_PROFILES=docker
+      - PROVISIONING_DATABASE_URL=sqlite:////app/data/provisioning.db
+      - REDIS_URL=redis://bare-metal-redis:6379
+      - PROVISIONING_STOREFRONT_URL=http://bare-metal-storefront:8000
+      - PROVISIONING_INVENTORY_PATH=/run/config/bare-metal-hosts.ini
+      - PROVISIONING_POOL_DEFINITIONS_PATH=/run/config/resource-pools.yaml
+    volumes:
+      - ../vms/provisioning/iac:/opt/domains/vms/provisioning/iac:ro
+      - ${BARE_METAL_PROVISIONING_INVENTORY_FILE:?set selected-site host inventory file}:/run/config/bare-metal-hosts.ini:ro
+      - ${BARE_METAL_POOL_DEFINITIONS_FILE:?set explicit resource-pool definitions file}:/run/config/resource-pools.yaml:ro
+      - ${BARE_METAL_PROVISIONING_SSH_PRIVATE_KEY_FILE:?set provisioning SSH private key file}:/home/appuser/.ssh/id_ed25519:ro
+      - bare-metal-provisioning-data:/app/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8081/health')\" || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 15s
+
+  bare-metal-storefront:
+    image: ${BARE_METAL_STOREFRONT_IMAGE:-arkhai:bare-metal-storefront}
+    depends_on:
+      bare-metal-registry:
+        condition: service_healthy
+      bare-metal-provisioning:
+        condition: service_healthy
+    ports:
+      - "${BARE_METAL_STOREFRONT_PORT:-8000}:8000"
+    environment:
+      - BARE_METAL_STOREFRONT_DB_PATH=/var/lib/arkhai/storefront.db
+      - BARE_METAL_STOREFRONT_SITES=${BARE_METAL_STOREFRONT_SITES_JSON:?set exact selected-site authority bindings JSON}
+      - BARE_METAL_STOREFRONT_SITE_PLACEMENT=${BARE_METAL_STOREFRONT_SITE_PLACEMENT:?set fill_first or most_available}
+    volumes:
+      - bare-metal-storefront-data:/var/lib/arkhai
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8000/health')\" || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 15s
+
+volumes:
+  bare-metal-registry-data:
+  bare-metal-redis-data:
+  bare-metal-provisioning-data:
+  bare-metal-storefront-data:

@@ -1,0 +1,37 @@
+# Bare-metal marketplace wrapper. All values below are public identity/trust
+# pins or references to role-scoped credential files. No secret has a fallback.
+include:
+  - domains/bare_metal/compose.yml
+
+services:
+  bare-metal-registry:
+    environment:
+      - DATABASE_URL=sqlite:////app/data/indexer.db
+      - REGISTRY_AUTHORITY_ID=${BARE_METAL_REGISTRY_AUTHORITY_ID:?set registry authority id}
+      - REGISTRY_AUTHORITY_SCHEME=${BARE_METAL_REGISTRY_AUTHORITY_SCHEME:?set registry authority scheme}
+      - REGISTRY_AUTHORITY_IDENTIFIER=${BARE_METAL_REGISTRY_AUTHORITY_IDENTIFIER:?set canonical registry principal}
+      - REGISTRY_AUTHORITY_CREDENTIAL_FILE=/run/secrets/arkhai/registry-identity/credential
+    volumes:
+      - ${BARE_METAL_REGISTRY_IDENTITY_CREDENTIAL_FILE:?set registry signer credential file}:/run/secrets/arkhai/registry-identity/credential:ro
+
+  bare-metal-provisioning:
+    env_file:
+      - ${BARE_METAL_PROVISIONING_IDENTITY_ENV_FILE:?set provisioning signer credential environment file}
+    environment:
+      - PROVISIONING_IDENTITY__SCHEME=${BARE_METAL_PROVISIONING_IDENTITY_SCHEME:?set provisioning identity scheme}
+      - PROVISIONING_IDENTITY__IDENTIFIER=${BARE_METAL_PROVISIONING_IDENTITY_IDENTIFIER:?set canonical provisioning principal}
+      - PROVISIONING_STOREFRONT_IDENTITY__SCHEME=${BARE_METAL_STOREFRONT_IDENTITY_SCHEME:?set storefront identity scheme}
+      - PROVISIONING_STOREFRONT_IDENTITY__IDENTIFIER=${BARE_METAL_STOREFRONT_IDENTITY_IDENTIFIER:?set canonical storefront principal}
+      - PROVISIONING_STOREFRONT_SITE_ID=${BARE_METAL_SITE_ID:?set exact selected site id}
+      - PROVISIONING_ADMIN_IDENTITY__SCHEME=${BARE_METAL_PROVISIONING_ADMIN_IDENTITY_SCHEME:?set provisioning admin scheme}
+      - PROVISIONING_ADMIN_IDENTITY__IDENTIFIER=${BARE_METAL_PROVISIONING_ADMIN_IDENTITY_IDENTIFIER:?set canonical provisioning admin principal}
+
+  bare-metal-storefront:
+    env_file:
+      - ${BARE_METAL_STOREFRONT_IDENTITY_ENV_FILE:?set storefront signer credential environment file}
+    environment:
+      - BARE_METAL_STOREFRONT_IDENTITY_SCHEME=${BARE_METAL_STOREFRONT_IDENTITY_SCHEME:?set storefront identity scheme}
+      - BARE_METAL_STOREFRONT_IDENTITY_IDENTIFIER=${BARE_METAL_STOREFRONT_IDENTITY_IDENTIFIER:?set canonical storefront principal}
+      - BARE_METAL_STOREFRONT_ADMIN_IDENTITIES=${BARE_METAL_STOREFRONT_ADMIN_IDENTITIES_JSON:?set canonical storefront admin identities JSON}
+      - BARE_METAL_STOREFRONT_PUBLIC_URL=${BARE_METAL_STOREFRONT_PUBLIC_URL:?set externally reachable storefront URL}
+      - BARE_METAL_STOREFRONT_EVM_ADDRESS=${BARE_METAL_STOREFRONT_EVM_ADDRESS:?set public settlement address}
