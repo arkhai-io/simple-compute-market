@@ -154,18 +154,19 @@ class BareMetalStorefrontSettlementComposition:
                     for item in built_options
                 )
 
-        hosted = build_ready_bare_metal_hosted_options(
-            candidate=candidate,
-            base_hosted_options=hosted_bases,
-            policy=self.publication_policy,
-            offer_expires_at=offer_expires_at,
-            funding_deadlines=funding_deadlines,
-            fulfillment_deadline=fulfillment_deadline,
-            now=now,
-        )
-        settlement_options.extend(
-            option.model_dump(mode="json") for option in hosted.settlement_options
-        )
+        if hosted_bases:
+            hosted = build_ready_bare_metal_hosted_options(
+                candidate=candidate,
+                base_hosted_options=hosted_bases,
+                policy=self.publication_policy,
+                offer_expires_at=offer_expires_at,
+                funding_deadlines=funding_deadlines,
+                fulfillment_deadline=fulfillment_deadline,
+                now=now,
+            )
+            settlement_options.extend(
+                option.model_dump(mode="json") for option in hosted.settlement_options
+            )
         option_ids = [item["option_id"] for item in settlement_options]
         if len(option_ids) != len(set(option_ids)):
             raise ValueError(

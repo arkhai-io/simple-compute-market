@@ -207,6 +207,50 @@ def _accept_and_start(client: TestClient, option: dict) -> tuple[str, str, dict]
     return negotiation_id, obligation_ref, started.json()
 
 
+async def test_contact_options_publish_through_the_composition() -> None:
+    from datetime import datetime, timedelta, timezone
+
+    from market_settlement_runtime import SettlementPublicationClause
+
+    composition = BareMetalStorefrontSettlementComposition.from_raw_config(
+        {
+            "priority": [CONTACT_MECHANISM],
+            "contact": {
+                "enabled": True,
+                "contact_payload": dict(_SELLER_CONTACT),
+                "profiles": {
+                    "default": {
+                        "channel": "telegram",
+                        "terms": "Net-30, prose contract on request.",
+                    }
+                },
+            },
+        },
+        resources={
+            "claimant_principal": SELLER_SIGNER.identity,
+        },
+    )
+    now = datetime.now(timezone.utc)
+    payload = await composition.publication_payload(
+        candidate={"machine_id": "machine-1"},
+        clauses=[
+            SettlementPublicationClause(
+                mechanism=CONTACT_MECHANISM,
+                asset="introduction",
+                mechanism_input={"profile": "default"},
+            )
+        ],
+        offer_expires_at=now + timedelta(hours=2),
+        funding_deadlines={},
+        fulfillment_deadline=now + timedelta(hours=3),
+    )
+    assert payload.accepted_escrows == ()
+    (option,) = payload.settlement_options
+    assert option["mechanism"] == CONTACT_MECHANISM
+    assert option["rates"] == []
+    assert "@capacity_broker" not in str(payload.settlement_options)
+
+
 async def test_introduction_start_reveals_and_completes(tmp_path) -> None:
     runtime = _runtime(str(tmp_path / "storefront.db"))
     option = await _insert_contact_listing(runtime)

@@ -148,27 +148,39 @@ Section 6.
 
 ## 6. Composition, discovery, end-to-end
 
-- [ ] 6.1 Register `create_contact_exchange_registration()` in the bare-metal
-      composition roots (storefront `settlement_composition.py`; buyer side per
-      §5) behind `[Settlement.contact]` + a `priority` entry; other domains'
-      roots follow only after bare metal is proven (each is one line once §3's
-      seam covers that domain — do not add them ahead of their dispatch work).
-- [ ] 6.2 Loose-listing registry filter-spec profile for introduction markets:
-      option-only requirements, minimal filter set, missing-field-tolerant
-      matching; decide the mechanism-filter shape recorded as the open question
-      shared with `finish-settlement-mechanism-neutrality` §6.1.
-- [ ] 6.3 End-to-end introduction deal on bare metal: publish a contact-option
-      listing, negotiate take-it-or-leave-it, accept, start, both parties read
-      their introduction, deal reports terminal.
-- [ ] 6.4 Record the contact-payload retention posture (resolving the retention
-      question): bounded persistence, deletion as part of the deal lifecycle,
-      documented in the capability's `architecture.md`.
-- [ ] 6.5 Permanent docs: `docs/development/ARCHITECTURE.md` system-overview
-      note (a market may settle by introduction); promotion record rows below
-      filled as decisions are accepted.
-- [ ] 6.6 Closeout: comment hygiene, import placement, docs compliance,
-      narrative compression, roadmap currency (Goal 6 row), promotion record
-      complete.
+- [x] 6.1 `create_contact_exchange_registration()` registered in
+      `build_bare_metal_settlement_registry` (landed with §4.3, since
+      `[Settlement.contact]` cannot resolve without it) behind a `priority`
+      entry; the buyer side needs no `[Settlement]` section (no funding) and
+      composes through the CLI transport. Other domains' roots deliberately
+      not added ahead of their dispatch de-branching (neutrality §3.3–3.4).
+- [x] 6.2 `core/registry/filter-spec.introductions.yaml`: option-only
+      `listing_shape`, open `offer_resource`, three missing-tolerant filters
+      (`region`, and option-aware `mechanism` / `channel` projections over
+      `$.settlement_options[*]`), deployable via `REGISTRY_FILTER_SPEC_PATH`;
+      registry units pin sparse-listing discoverability and exact rejection of
+      stated mismatches (91 passed, 4 new). The mechanism-filter open question
+      resolves as option-aware projections for this profile; whether the main
+      compute spec gains one stays with the neutrality change's discovery
+      section.
+- [x] 6.3 End-to-end on bare metal via the storefront HTTP suite: contact
+      options publish through the composition's generic arm (a hosted-shaped
+      candidate is no longer demanded when no hosted options are ready),
+      selection negotiates take-it-or-leave-it to acceptance, start reveals
+      and the deal's settlement status aggregates `complete`, both parties
+      read their introduction, and the reveal survives a restart. Disclosed:
+      the compose-level (multi-container) e2e harness has no contact scenario
+      yet; the flow is proven at the HTTP app boundary.
+- [x] 6.4 Retention posture recorded as a spec requirement (bounded ingress,
+      persistence only for started introductions, lifecycle deletion via
+      `delete_introduction` leaving the settled obligation record intact);
+      promoted into the capability spec delta rather than a separate
+      architecture note.
+- [x] 6.5 Permanent docs: `docs/development/ARCHITECTURE.md` settlement
+      section now records that a market may settle by introduction; promotion
+      rows below.
+- [x] 6.6 Closeout: hygiene clean; ROADMAP Goal 6 narrative and gap rows
+      updated to the post-implementation state; promotion record complete.
 
 ## Design promotion record
 
@@ -177,3 +189,5 @@ Section 6.
 | The canonical mechanism ID is `contact-exchange.v1` (registry ID grammar forbids underscores) | `openspec/specs/contact-exchange-settlement/spec.md` (promote at synchronization) |
 | The introduction obligation keeps the option's nominal `asset` and binds party principals into params so buyer-side strict option comparison holds; only `amount` is absent | `openspec/specs/contact-exchange-settlement/spec.md` (promote at synchronization) |
 | Non-provisioning deals ride the provision envelope with `access_method: "none"`; provisioning arms re-require credentials themselves | bare-metal domain documentation (promote at synchronization) |
+| The seller contact payload binds at the first introduction operation, so unstarted deals persist no contact data; acceptance is consent to reveal | `openspec/specs/contact-exchange-settlement/spec.md` (promote at synchronization) |
+| Introduction markets ship their own loose filter-spec profile with option-aware, missing-tolerant projections | `openspec/specs/registry-discovery/spec.md` (promote at synchronization) |

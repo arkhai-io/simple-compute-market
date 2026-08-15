@@ -1,0 +1,38 @@
+# Introduction-market registry filter spec — the loose-listing profile.
+#
+# An introduction market's value is discovery and a trustworthy
+# introduction, not machine-settleable inventory: listings are sparse,
+# commercial terms are freeform prose inside settlement options, and no
+# field beyond identity can be assumed present. This profile therefore
+# requires option-only listings (no escrow contracts), leaves the offer
+# resource open, and matches missing-field-tolerantly (`on_missing: pass`)
+# so sparse entries stay discoverable despite the strict default profile's
+# fail-closed posture. Deploy by pointing REGISTRY_FILTER_SPEC_PATH here.
+
+version: 1
+
+schema:
+  id: introductions.market
+  version: 1
+
+listing_shape:
+  $schema: "https://json-schema.org/draft/2020-12/schema"
+  type: object
+  additionalProperties: true
+  required: [listing_id, offer_resource, storefront_url, settlement_options]
+  properties:
+    listing_id: {type: string, minLength: 1}
+    storefront_url: {type: string, minLength: 1}
+    settlement_options: {type: array, minItems: 1}
+    offer_resource:
+      # Deliberately open: sellers describe what they broker in whatever
+      # vocabulary fits; contact data never belongs in a listing.
+      type: object
+      additionalProperties: true
+
+filters:
+  # Every filter is underreport-friendly: a listing that does not state a
+  # field is not excluded by a query about it.
+  - {name: region,    path: $.offer_resource.region,                    op: in, value_type: string, on_missing: pass}
+  - {name: mechanism, path: "$.settlement_options[*].mechanism",        op: in, value_type: string, on_missing: pass}
+  - {name: channel,   path: "$.settlement_options[*].params.channel",   op: in, value_type: string, on_missing: pass}

@@ -227,7 +227,9 @@ no-op.
 
 ### Settlement configuration
 
-Marketplace roles configure peer settlement mechanisms through one typed `[Settlement]` root. Its duplicate-free `priority` list contains canonical mechanism IDs; registered `stripe` and `alkahest` subsections own their mechanism policy and public client inputs. Identity, wallet, and chains remain independent shared resources. Composition roots register installed mechanisms explicitly, inject only the signer or EVM resources each declares, and pass every resulting client into the single `market_settlement_runtime` lifecycle.
+Marketplace roles configure peer settlement mechanisms through one typed `[Settlement]` root. Its duplicate-free `priority` list contains canonical mechanism IDs; registered `stripe`, `alkahest`, and `contact` subsections own their mechanism policy and public client inputs. Identity, wallet, and chains remain independent shared resources. Composition roots register installed mechanisms explicitly, inject only the signer or EVM resources each declares, and pass every resulting client into the single `market_settlement_runtime` lifecycle.
+
+A market may settle by introduction: the `contact-exchange.v1` mechanism completes a deal with no payment and no provisioning — buyer and seller are put durably into contact with the context established during negotiation, revealed only after acceptance through the authenticated introductions surface. Its options are rateless (the mechanism declines scalar negotiation), its one obligation is non-financial, and contact payloads are bounded, deliberately persisted PII that never appears in listings or discovery.
 
 The shared CLI comparison grammar has two typed uses. Resource queries derive their fields, aliases, operators, types, and missing-value semantics from the active registry filter specification and carry its ETag. Settlement clauses use common option identity fields plus mechanism-owned public projections. Buyer clauses are correlated ordered alternatives after resource filtering; storefront clauses are complete option-construction inputs. Provider, secret, raw RPC, and administrator fields are outside both languages.
 

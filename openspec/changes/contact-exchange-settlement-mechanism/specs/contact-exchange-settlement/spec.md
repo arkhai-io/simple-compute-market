@@ -44,3 +44,24 @@ reveal MUST serve the persisted artifacts.
 - **WHEN** the storefront restarts between acceptance and a party's first
   introduction read
 - **THEN** the read serves the identical persisted introduction package
+
+### Requirement: Contact payloads are bounded, deliberate PII persistence
+
+Contact payloads MUST be size-bounded at every ingress (configuration and the
+introduction start), MUST be persisted only for deals whose introduction has been
+started, and MUST be deletable as part of the deal lifecycle without disturbing the
+settled obligation record. A deal that never starts its introduction MUST persist no
+contact data.
+
+#### Scenario: Unstarted deals hold no contact data
+
+- **WHEN** a contact-exchange deal is accepted but neither party starts the
+  introduction
+- **THEN** no contact payload is persisted for that deal
+
+#### Scenario: Introduction teardown removes the payloads
+
+- **WHEN** an operator removes a revealed introduction at the end of its retention
+  window
+- **THEN** both contact payloads are deleted while the settled obligation record
+  remains
