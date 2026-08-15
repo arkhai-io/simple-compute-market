@@ -30,7 +30,7 @@ The credits authority's committed grant, not Checkout, provider funding object, 
 
 ### Requirement: API-credit failure and reclaim are mutually exclusive with issuance
 
-Before issuance success, terminal ownership/quota/key failure or accepted expiry MAY allow reclaim only after current hosted status retrieval and only when no issuance lease/success, satisfied evidence, or collection reservation exists. Funding that remains delayed MUST create no issuance. A successful issuance MUST permanently remove marketplace reclaim authority and continue evidence/collection recovery after expiry. A pre-issuance/pre-collection hosted return MUST block issuance and collection; post-collection financial loss MUST project manual incident state without reversing credits.
+Before issuance success, terminal ownership/quota/key failure or accepted expiry MAY allow reclaim only after current hosted status retrieval and authoritative credits-service reconciliation proves that the exact issuance identity did not commit; an unknown acknowledgement or unavailable reconciliation MUST keep reclaim blocked. Reclaim is also forbidden while any issuance lease/success, satisfied evidence, or collection reservation exists. Funding that remains delayed MUST create no issuance. A successful issuance MUST permanently remove marketplace reclaim authority and continue evidence/collection recovery after expiry. A pre-issuance/pre-collection hosted return MUST block issuance and collection; post-collection financial loss MUST project manual incident state without reversing credits.
 
 #### Scenario: Funded issuance fails terminally
 
@@ -44,12 +44,17 @@ Before issuance success, terminal ownership/quota/key failure or accepted expiry
 
 ### Requirement: API-credit portable condition is authoritative and replay-safe
 
-Condition evaluation MUST retrieve the signed portable issuance evidence by immutable reference, verify configured issuer/schema/capability, signature, freshness, obligation, service, quantity, key ownership, canonical parties, and grant/fulfillment identity, then return pending, satisfied, failed, or manual-required without exposing the secret. Repeated evaluation MUST be side-effect free. Another obligation's otherwise valid evidence MUST fail.
+Condition evaluation MUST retrieve the signed portable issuance evidence by immutable reference; verify configured issuer/schema/capability, signature, timestamp not future/skewed, authoritative grant commit no later than accepted funding expiry, obligation, service, quantity, key ownership, canonical parties, and grant/fulfillment identity; then return pending, satisfied, failed, or manual-required without exposing the secret. Evidence bound to a timely committed grant remains durably valid for servicing after accepted funding expiry and restart; freshness MUST NOT be interpreted as a wall-clock-age limit on immutable fulfillment. Repeated evaluation MUST be side-effect free. Another obligation's otherwise valid evidence MUST fail.
 
 #### Scenario: Evidence retrieval is temporarily unavailable
 
 - **WHEN** the resolver cannot authoritatively retrieve the exact evidence before expiry
 - **THEN** condition remains pending and no collection occurs
+
+#### Scenario: Timely grant is recovered after expiry
+
+- **WHEN** the credits grant committed before accepted expiry but acknowledgement or evidence publication completes after expiry or restart
+- **THEN** authoritative reconciliation rejects reclaim, the immutable issuance evidence remains valid, and servicing resumes evidence evaluation and collection under the original identities
 
 #### Scenario: Evidence digest changes
 

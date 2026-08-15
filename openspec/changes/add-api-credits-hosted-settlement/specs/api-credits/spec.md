@@ -34,7 +34,7 @@ Once funded, issuance MUST use the immutable settlement obligation/fulfillment i
 
 Successful hosted issuance MUST publish one signed portable evidence object retrievable by the configured condition resolver. Its canonical body MUST bind domain/version, service and quota resource, quantity, key mode and resulting public key ID, canonical buyer and claimant principals, settlement obligation/fulfillment identity, issuance success, timestamp, issuer identity, schema/capability version, and digest. It MUST NOT contain the API bearer secret, hosted payer/instrument/provider data, action material, or private credits-service state.
 
-The hosted condition MUST accept only an unexpired, correctly signed object whose exact obligation, parties, service, quantity, key ownership, and issuance identity match. Evidence publication and retrieval MUST be idempotent; a changed body under the same identity MUST conflict. Only satisfied authoritative evidence MAY enable collection.
+The hosted condition MUST accept only a correctly signed object whose authoritative issuance committed no later than the accepted funding expiry, whose timestamp is not future/skewed, and whose exact obligation, parties, service, quantity, key ownership, and issuance identity match. A timely committed issuance and its bound evidence remain valid for servicing recovery after the funding expiry; wall-clock age MUST NOT invalidate that immutable fulfillment. Evidence publication and retrieval MUST be idempotent; a changed body under the same identity MUST conflict. Only satisfied authoritative evidence MAY enable collection.
 
 #### Scenario: New-key issuance succeeds
 

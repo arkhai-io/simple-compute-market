@@ -14,6 +14,8 @@ API credits already has most domain and authority boundaries required by this ad
 
 The hosted authority's portable-remote condition can evaluate a configured, signed remote evidence source. The API-credit domain therefore needs a durable secret-free issuance statement and resolver, not an EAS transaction or a generic fulfillment blob.
 
+Implementation is also gated on the API-credit domain/runtime/publication seams promised by `bare-metal-and-credits-domain-stacks` being shipped and promoted. If its accepted replacement does not provide those contracts, this adopter stops; it does not recreate them locally.
+
 ## Goals / Non-Goals
 
 **Goals:**
@@ -37,7 +39,7 @@ The hosted authority's portable-remote condition can evaluate a configured, sign
 
 ### 1. Extend `api_credits.v1` with peer settlement carriers
 
-Add `settlement_options: list[SettlementOption]` to `ApiCreditsListing` while keeping `accepted_escrows` as the Alkahest carrier. Use the common strict `SettlementOption`, `SettlementSelection`, `SettlementPlan`, and obligation codecs; do not reproduce their dict shapes in API-credit models.
+Add `settlement_options: list[SettlementOption]` to `ApiCreditsListing` while keeping `accepted_escrows` as the optional Alkahest carrier. Update and version the deployed API-credit registry filter/projection/query schema in the same cutover: it must admit a hosted-only listing with nonempty `settlement_options` and absent/empty `accepted_escrows`, and expose the hosted fields required for discovery without provider data. Use the common strict `SettlementOption`, `SettlementSelection`, `SettlementPlan`, and obligation codecs; do not reproduce their dict shapes in API-credit models.
 
 `ApiCreditsMessage`/`ApiCreditsTerms` carry one exact `SettlementSelection` after the buyer chooses an option. Existing Alkahest messages retain their accepted-escrow selection representation through an explicit domain decoder/migration. New hosted terms never include an `escrow_uid`, chain, wallet, payer profile, instrument, provider field, or funding authorization; authorization occurs after acceptance.
 
@@ -130,11 +132,11 @@ Add a strict `ApiCreditsIssuanceEvidenceV1` domain model with a canonical body a
 - committed issuance status/time;
 - issuer principal and request/body digest.
 
-It excludes the bearer secret, credentials ref, balances unrelated to the grant, provider/payer/instrument data, URLs, and raw service response. Sign with the configured API-credit storefront evidence signer after a committed grant. Derive `evidence_digest = sha256(canonical signed evidence)` and persist the immutable signed object keyed by that digest in the API-credit storefront database. Exact replay returns it; changed reuse conflicts.
+It excludes the bearer secret, credentials ref, balances unrelated to the grant, provider/payer/instrument data, URLs, and raw service response. Sign with the configured API-credit storefront evidence signer after a committed grant. The signed `committed_at` must be no later than accepted funding expiry and not future/skewed at verification; once that timely grant and evidence identity are bound, wall-clock age does not invalidate the immutable fulfillment during restart/recovery. Derive `evidence_digest = sha256(canonical signed evidence)` and persist the immutable signed object keyed by that digest in the API-credit storefront database. Exact replay returns it; changed reuse conflicts.
 
 Expose a bounded authenticated/signed evidence-resolution endpoint keyed by digest. The hosted authority's operator-configured remote resolver knows this endpoint and expected issuer/schema; the accepted condition carries only the resolver ID and exact demand. No listing/start caller supplies a URL or issuer.
 
-Use the hosted conditional-escrow adapter's existing `publish_fulfillment(condition_anchor, evidence=canonical_signed_evidence)` path. It sends only the digest to the hosted authority and returns a portable remote attestation UID. Encode that UID/resolver as the runtime fulfillment ref. During condition evaluation, the configured resolver matches the attested digest, retrieves the signed API-credit evidence, validates exact accepted fields/issuer, and reports provider-neutral satisfied/pending/invalid.
+Use the hosted conditional-escrow adapter's existing `publish_fulfillment(condition_anchor, evidence=canonical_signed_evidence)` path. It sends only the digest to the hosted authority and returns a portable remote attestation UID. Encode that UID/resolver as the runtime fulfillment ref. During condition evaluation, the configured resolver matches the attested digest, retrieves the signed API-credit evidence, validates exact accepted fields/issuer and timely commit semantics, and reports provider-neutral satisfied/pending/invalid. Evidence publication after expiry may therefore roll forward a grant that authoritatively committed before expiry; it cannot legitimize a late grant.
 
 ```text
 credits grant commit
@@ -159,11 +161,12 @@ Ordering invariants:
 2. no evidence publication before committed grant;
 3. no condition success before exact signed evidence retrieval;
 4. no collection before satisfied evidence reservation;
-5. no reclaim after fulfillment lease/success, satisfied evaluation, or collection reservation;
-6. no issuance after reclaim reservation;
-7. post-collection loss never rewrites issuance or consumption.
+5. no reclaim after authoritative issuance success, satisfied evaluation, or collection reservation;
+6. an expired fulfillment lease or unknown acknowledgement does not permit reclaim until credits-authority reconciliation proves the exact grant identity did not commit;
+7. no issuance after reclaim reservation;
+8. post-collection loss never rewrites issuance or consumption.
 
-A retryable credits-service failure calls runtime fulfillment retry under the same identity. Terminal domain failure records safe reason but remains non-fulfilled; after expiry, current hosted status plus compare-and-set can permit reclaim. A pre-collection return keeps the domain unfulfilled/uncollected. If grant commit wins the expiry race, reclaim loses and restart resumes evidence/collection.
+A retryable credits-service failure calls runtime fulfillment retry under the same identity. Before reclaim, the storefront queries that exact fulfillment/grant identity at the credits authority. Unknown or unavailable reconciliation keeps reclaim blocked even if the local lease expired; an authoritative grant makes fulfillment successful and recovery rolls forward, while authoritative terminal no-grant plus the other compare-and-set guards may permit reclaim after expiry. A pre-collection return keeps the domain unfulfilled/uncollected only when reconciliation proves no grant. If grant commit wins the expiry race, reclaim loses and restart resumes durable evidence/collection even after the accepted funding deadline.
 
 Do not reuse current Alkahest compensation for hosted failure. That compensation exists for issuance followed by a later on-chain fulfillment failure. In hosted flow the grant is the domain fulfillment effect; once it commits, recovery rolls forward to evidence/collection.
 

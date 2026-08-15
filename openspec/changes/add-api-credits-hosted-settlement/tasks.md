@@ -1,6 +1,6 @@
 ## 1. Shared hosted transport extraction
 
-- [ ] 1.1 Verify `consume-expanded-stripe-funding` and its exact signed producer release are complete, then inventory VM buyer/storefront hosted start/status/reclaim/action callsites and freeze the provider-neutral request/response/callback contract API credits will consume.
+- [ ] 1.1 Verify `consume-expanded-stripe-funding`, its exact signed producer release, and the completed API-credit domain/runtime/publication seams from `bare-metal-and-credits-domain-stacks` through their shipped artifacts and promoted permanent contracts; block implementation if any prerequisite is absent rather than reproducing it locally. Then inventory VM buyer/storefront hosted start/status/reclaim/action callsites and freeze the provider-neutral request/response/callback contract API credits will consume.
 - [ ] 1.2 Extract signed hosted start/status/reclaim/poll/resume transport from `domains/vms/buyer/hosted_settlement.py` into a schema-opaque core buyer module accepting only accepted IDs, safe authorization reference, marketplace signer/trust, and timeout/action policy; migrate every VM caller and remove the domain copy.
 - [ ] 1.3 Extract common `/api/v1/settlements` route/service mechanics from the VM storefront behind injected prepare/reserve/fulfill/project/cleanup callbacks; migrate VM routes to it while leaving `/api/v1/settle/{escrow_uid}` Alkahest behavior unchanged.
 - [ ] 1.4 Add core contract/signature/redaction/retry tests and rerun focused VM hosted/Alkahest buyer, route, runtime, action, restart, and import-boundary suites before adding API-credit callers.
@@ -21,11 +21,11 @@
 
 ## 4. Publication and server-authoritative preparation
 
-- [ ] 4.1 Update `ApiCreditsListing`, `ListingService.publish_from_quota`, publication/reconciliation, config and controllers to compile independently ready shared mechanism clauses into ordered hosted options plus accepted Alkahest escrows without accepting account/condition/provider overrides.
+- [ ] 4.1 Update `ApiCreditsListing`, `ListingService.publish_from_quota`, publication/reconciliation, config, controllers, and the versioned `domains/apicredits/registry/filter-spec.yaml` listing/projection/query contract to compile independently ready shared mechanism clauses into ordered hosted options plus optional accepted Alkahest escrows; hosted-only listings with `settlement_options` and no `accepted_escrows` must publish and remain discoverable without accepting account/condition/provider overrides.
 - [ ] 4.2 Reconcile quota and settlement readiness independently: zero authoritative quota closes, quota unavailability preserves the last complete listing, and one hosted profile blocker removes only its affected option while valid peers remain.
 - [ ] 4.3 Refactor API-credit settlement preparation into common accepted-state loading plus exact hosted or Alkahest verification; derive service, quantity, key target, canonical parties, amount/currency/profile, account, expiry, condition, obligation, and deterministic operation IDs only from trusted listing/accepted terms.
 - [ ] 4.4 Register API-credit hosted start/status/reclaim on the shared `/api/v1/settlements` route with negotiation ID, obligation ID, and safe authorization reference only; keep the legacy Alkahest route/projection and reject mechanism/commercial/provider overrides.
-- [ ] 4.5 Add storefront tests for multi-profile publication, per-profile blockers, quota/reconciliation interactions, signed route auth, exact authorization retry/conflict, option/condition/party/quantity/key mismatch, hosted-only readiness, and Alkahest non-regression.
+- [ ] 4.5 Add storefront and registry publication/discovery tests for hosted-only listing-shape admission, multi-profile publication/query projection, optional accepted escrows, per-profile blockers, quota/reconciliation interactions, signed route auth, exact authorization retry/conflict, option/condition/party/quantity/key mismatch, hosted-only readiness, and Alkahest non-regression.
 
 ## 5. Credits authority identity and exact-once grant
 
@@ -47,10 +47,10 @@
 ## 7. Servicing, failure, and recovery
 
 - [ ] 7.1 Wire API-credit hosted obligations through the common materialize/status/fulfill/check/collect/reclaim worker so only authoritative profile-funded state reserves issuance, committed evidence enables condition satisfaction, and satisfied evaluation enables collection.
-- [ ] 7.2 Enforce compare-and-set exclusion among issuance lease/success, evidence, collection, and reclaim; retry credits/evidence under identical identities, permit reclaim after terminal no-grant failure/expiry, and reject reclaim when issuance wins the boundary.
+- [ ] 7.2 Enforce compare-and-set exclusion among issuance lease/success, evidence, collection, and reclaim; before reclaim, authoritatively reconcile every uncertain issuance identity with the credits authority, keep reclaim blocked while the result is unknown, retry credits/evidence under identical identities, permit reclaim only after authoritative terminal no-grant failure/expiry, and reject reclaim when issuance wins the boundary.
 - [ ] 7.3 Map delayed card/bank/ACH, transient action, unfunded expiry, pre-collection return, post-collection loss, and operator review through shared safe states without issuing early, choosing financial reversal operations, revoking consumed credits, or changing completed history.
 - [ ] 7.4 Project hosted public status/result and authenticated credentials through API-credit serializers while preserving existing Alkahest settlement, compensation, credential, and status response behavior.
-- [ ] 7.5 Add deterministic runtime/restart/race tests for no issuance before funded, exact-once grant after delayed funding, restart at every stage, failed issuance then reclaim, funding/expiry race, return/loss, evidence pending/invalid, collect acknowledgement loss, and no cross-mechanism/profile fallback.
+- [ ] 7.5 Add deterministic runtime/restart/race tests for no issuance before funded, exact-once grant after delayed funding, restart at every stage, failed issuance then reclaim, commit-before-acknowledgement plus lease expiry with unknown reconciliation blocking reclaim, authoritative grant recovery after expiry, funding/expiry race, return/loss, evidence pending/invalid, collect acknowledgement loss, and no cross-mechanism/profile fallback.
 
 ## 8. Deployment, packages, and E2E
 
