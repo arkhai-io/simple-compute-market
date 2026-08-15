@@ -159,6 +159,8 @@ Alternative considered: publish `connection_details` directly as evidence. Rejec
 
 Before valid fulfillment/collection, terminal selected-site refusal, capacity loss, executor failure, access-grant failure, invalid evidence, or fulfillment expiry prevents collection. Reclaim is allowed only after authoritative hosted retrieval proves no collection effect/reservation and the physical side proves no successful lease/access evidence that would make the outcome ambiguous. An unknown collection acknowledgement freezes release/reclaim and reconciles the same financial operation.
 
+An authoritative funding return before physical work blocks allocation and follows hosted recovery. If funding returns after allocation, provisioning, or access begins but before collection, servicing stops new physical effects, preserves all committed physical/evidence identities, blocks collection, and drives access revocation, teardown or quarantine, allocation release, and hosted financial reclaim/recovery as independent convergent operations. Once collection has committed, a later funding loss is an incident only and never authorizes financial reclaim or rewriting the delivered lease.
+
 After collection/transfer, financial state is complete. Lease expiry or explicit authorized termination separately drives access revocation, provider teardown, allocation release, and capacity republication. Unknown/retryable teardown is retried by the provisioning-owned convergence worker. Terminal or ambiguous teardown keeps the resource quarantined/unavailable and exposes bounded operator recovery; it never triggers financial reclaim or marks capacity free.
 
 Alternative considered: reclaim on lease termination. Rejected because reclaim reverses an uncompleted financial obligation, while lease teardown ends already delivered physical service.
@@ -176,7 +178,7 @@ The final bare-metal hosted stack adds only configuration supported by completed
 - exact signed hosted release manifest/client wheel/service image and authority identity;
 - bare-metal buyer/storefront distributions/images and one-domain role entry points;
 - distinct buyer/storefront Ed25519 identities and trust registries;
-- buyer payer-profile binding and seller connected-account binding scoped by hosted authority/environment;
+- owner-restricted buyer profile-store path plus hosted authority/environment scope, from which the buyer resolves its opaque payer binding at runtime; storefront configuration retains only the seller's public connected-account binding;
 - exact settlement option/profile policy, USD quote/rate, condition/evidence resolver, offer/hold/funding/fulfillment windows;
 - trusted site authority and compute provisioner bindings, bare-metal adapter/executor configuration, and authenticated access-delivery trust;
 - shared runtime, domain, storefront, site, and provisioning migrations.
