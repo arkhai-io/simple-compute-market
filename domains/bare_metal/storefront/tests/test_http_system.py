@@ -171,5 +171,6 @@ async def test_health_is_truthful_about_uncomposed_authorities(tmp_path) -> None
         },
         "paused": False,
         "principal": SELLER_SIGNER.identity.model_dump(mode="json"),
+        "sites": [],
         "resource_count": 0,
     }

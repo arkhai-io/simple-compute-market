@@ -15,6 +15,7 @@ class BareMetalHealthResponse(BaseModel):
     checks: dict[str, str] = Field(default_factory=dict)
     paused: bool | None = None
     principal: Identity
+    sites: list[dict[str, object]] = Field(default_factory=list)
     resource_count: int | None = None
 
 
