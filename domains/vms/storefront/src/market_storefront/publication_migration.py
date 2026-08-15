@@ -223,7 +223,8 @@ def _clause_for_legacy_price(
             rate=_decimal_text(amount / (Decimal(10) ** exponent)),
             per="hour",
             mechanism_input={
-                "method": "card",
+                "funding_profile": "card.v1",
+                "interaction": "interactive",
                 "funds_flow": "separate_charges_transfers",
             },
         )

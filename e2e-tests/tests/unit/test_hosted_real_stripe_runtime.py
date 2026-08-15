@@ -154,7 +154,7 @@ def test_ephemeral_container_inputs_use_shared_directory(tmp_path: Path) -> None
         release_authority_id="release-authority",
         release_authority_address="0x1fe2aa7fbaf5720f79a22a4ada4b8b37d4e0c008",
         release_repository="arkhai/hosted-settlement-service",
-        release_workflow_ref=".github/workflows/release.yml@refs/tags/v0.1.0",
+        release_workflow_ref=".github/workflows/release.yml@refs/tags/v0.2.0",
         release_source_commit="3" * 40,
         shared_directory=tmp_path,
     ) as authority_env:
@@ -183,7 +183,7 @@ def test_ephemeral_container_inputs_use_shared_directory(tmp_path: Path) -> None
         assert values["HOSTED_SETTLEMENT_RELEASE_REPOSITORY"] == "arkhai/hosted-settlement-service"
         assert (
             values["HOSTED_SETTLEMENT_RELEASE_WORKFLOW_REF"]
-            == ".github/workflows/release.yml@refs/tags/v0.1.0"
+            == ".github/workflows/release.yml@refs/tags/v0.2.0"
         )
         assert values["HOSTED_SETTLEMENT_RELEASE_SOURCE_COMMIT"] == "3" * 40
         assert values["HOSTED_SETTLEMENT_RESOLVER_CALLERS"] == (

@@ -408,8 +408,9 @@ _INIT_USER_TEMPLATE = """\
 
 [pricing]
 # settlements = [                             # complete structured publication
-#   { mechanism = "fiat.stripe.v1", asset = "usd", rate = "2", per = "hour",
-#     mechanism_input = { method = "card", funds_flow = "separate_charges_transfers" } },
+#   { mechanism = "fiat.stripe.v1", asset = "usd", rate = "2", per = "hour", mechanism_input = { funding_profile = "card.v1", interaction = "interactive", funds_flow = "separate_charges_transfers" } },
+#   { mechanism = "fiat.stripe.v1", asset = "usd", rate = "2", per = "hour", mechanism_input = { funding_profile = "us_bank_transfer.v1", interaction = "interactive", funds_flow = "separate_charges_transfers" } },
+#   { mechanism = "fiat.stripe.v1", asset = "usd", rate = "2", per = "hour", mechanism_input = { funding_profile = "us_ach_debit.v1", interaction = "interactive", funds_flow = "separate_charges_transfers" } },
 # ]
 # Per-resource or command clauses replace this list; fields are never merged.
 # default_min_price = "1"                      # negotiation floor when a resource row has no min_price;

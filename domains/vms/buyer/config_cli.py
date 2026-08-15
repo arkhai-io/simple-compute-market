@@ -275,9 +275,27 @@ enabled = false
 # authority_id = "hosted-authority"
 # environment = "production"
 # expected_manifest_digest = "sha256:<released-manifest-digest>"
-# expected_api_version = "0.1.0"
-# expected_schema_version = 4
-# required_capabilities = []
+# expected_api_version = "0.2.0"
+# expected_schema_version = 5
+# required_capabilities = [
+#   "scheme-tagged-identities.v1",
+#   "account-owner-admission.v1",
+#   "account-owner-rotation.v1",
+#   "account-owner-retirement.v1",
+#   "signer-injected-client.v1",
+#   "provider-neutral-seller-onboarding.v1",
+#   "conditional-escrow.v2",
+#   "stripe-connect-separate-charges-transfers.v2",
+#   "portable-attestation.v1",
+#   "eas-arbiter.v1",
+#   "payer-profile.v1",
+#   "funding-authorization.v1",
+#   "funding-profile.card.v1",
+#   "funding-profile.us_bank_transfer.v1",
+#   "funding-profile.us_ach_debit.v1",
+#   "normalized-funding-reversal.v1",
+#   "operator-recovery-redaction.v1",
+# ]
 # request_timeout_seconds = 10.0
 # preflight_timeout_seconds = 5.0
 # allow_insecure_loopback = false

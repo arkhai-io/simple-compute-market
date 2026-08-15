@@ -253,7 +253,7 @@ wheels = [
 
 [[package]]
 name = "arkhai-hosted-settlement-client"
-version = "0.1.0"
+version = "0.2.0"
 source = { registry = "../../../.dist" }
 dependencies = [
     { name = "cryptography", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
@@ -263,7 +263,7 @@ dependencies = [
     { name = "rfc8785", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
 ]
 wheels = [
-    { path = "arkhai_hosted_settlement_client-0.1.0-py3-none-any.whl" },
+    { path = "arkhai_hosted_settlement_client-0.2.0-py3-none-any.whl" },
 ]
 
 [[package]]
@@ -488,7 +488,7 @@ requires-dist = [
     { name = "arkhai-core-registry-client", specifier = ">=0.11.0" },
     { name = "arkhai-core-storefront", specifier = ">=0.3.0" },
     { name = "arkhai-core-storefront-client", specifier = ">=0.17.0" },
-    { name = "arkhai-hosted-settlement-client", specifier = "==0.1.0" },
+    { name = "arkhai-hosted-settlement-client", specifier = "==0.2.0" },
     { name = "arkhai-kit-alkahest" },
     { name = "arkhai-kit-config" },
     { name = "arkhai-kit-fulfillment", specifier = ">=0.1.0" },

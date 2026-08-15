@@ -338,13 +338,14 @@ environment = {{ $stripe.environment | quote }}
 {{- if $stripe.expected_manifest_digest }}
 expected_manifest_digest = {{ $stripe.expected_manifest_digest | quote }}
 {{- end }}
-expected_api_version = {{ $stripe.expected_api_version | default "0.1.0" | quote }}
-expected_schema_version = {{ $stripe.expected_schema_version | default 4 }}
+expected_api_version = {{ $stripe.expected_api_version | default "0.2.0" | quote }}
+expected_schema_version = {{ $stripe.expected_schema_version | default 5 }}
 required_capabilities = [{{ range $i, $cap := ($stripe.required_capabilities | default list) }}{{ if $i }}, {{ end }}{{ $cap | quote }}{{ end }}]
 {{- if $stripe.account_ref }}
 account_ref = {{ $stripe.account_ref | quote }}
 {{- end }}
 currency = {{ $stripe.currency | default "usd" | quote }}
+country = {{ $stripe.country | default "US" | quote }}
 {{- if $stripe.condition_profile }}
 condition_profile = {{ $stripe.condition_profile | quote }}
 {{- end }}

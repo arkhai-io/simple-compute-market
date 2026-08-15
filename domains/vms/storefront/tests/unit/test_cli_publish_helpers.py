@@ -365,7 +365,8 @@ class TestPoolHintResolutionSettings:
             "rate": "2",
             "per": "hour",
             "mechanism_input": {
-                "method": "card",
+                "funding_profile": "card.v1",
+                "interaction": "interactive",
                 "funds_flow": "separate_charges_transfers",
             },
         }

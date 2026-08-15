@@ -41,7 +41,8 @@ async def test_readiness_reconciliation_preserves_listing_identity_and_accepted_
                 "rate": "1.25",
                 "per": "hour",
                 "mechanism_input": {
-                    "method": "card",
+                    "funding_profile": "card.v1",
+                    "interaction": "interactive",
                     "funds_flow": "separate_charges_transfers",
                 },
             }

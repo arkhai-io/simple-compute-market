@@ -233,7 +233,7 @@ jobs:
           mkdir -p "$EVIDENCE_DIR"
           make hosted-stripe-test \
             HOSTED_RELEASE_MANIFEST="$HOSTED_RELEASE_DIR/release-manifest.json" \
-            HOSTED_CLIENT_WHEEL="$HOSTED_RELEASE_DIR/arkhai_hosted_settlement_client-0.1.0-py3-none-any.whl" \
+            HOSTED_CLIENT_WHEEL="$HOSTED_RELEASE_DIR/arkhai_hosted_settlement_client-0.2.0-py3-none-any.whl" \
             HOSTED_PRODUCTION_MANIFEST_SHA256="$HOSTED_MANIFEST_SHA256" \
             HOSTED_PRODUCTION_CLIENT_WHEEL_SHA256="$HOSTED_CLIENT_WHEEL_SHA256" \
             HOSTED_PRODUCTION_IMAGE_DIGEST="$HOSTED_IMAGE_DIGEST" \

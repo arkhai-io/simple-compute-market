@@ -182,10 +182,35 @@ def test_wallet_free_fixtures_have_only_public_portable_configuration() -> None:
     for filename, expected_url in expected_urls.items():
         path = REPO_ROOT / "e2e-tests" / "config" / filename
         document = tomllib.loads(path.read_text(encoding="utf-8"))
-        assert "Identity" in document
+        if filename == "hosted-storefront.toml":
+            assert "Identity" in document
+        else:
+            assert "BuyerProfile" in document
         assert document["Settlement"]["stripe"]["enabled"] is True
         assert document["Settlement"]["stripe"]["base_url"] == expected_url
         assert field_paths(document).isdisjoint(forbidden)
+        stripe = document["Settlement"]["stripe"]
+        assert stripe["expected_api_version"] == "0.2.0"
+        assert stripe["expected_schema_version"] == 5
+        assert set(stripe["required_capabilities"]) == {
+            "scheme-tagged-identities.v1",
+            "account-owner-admission.v1",
+            "account-owner-rotation.v1",
+            "account-owner-retirement.v1",
+            "signer-injected-client.v1",
+            "provider-neutral-seller-onboarding.v1",
+            "conditional-escrow.v2",
+            "stripe-connect-separate-charges-transfers.v2",
+            "portable-attestation.v1",
+            "eas-arbiter.v1",
+            "payer-profile.v1",
+            "funding-authorization.v1",
+            "funding-profile.card.v1",
+            "funding-profile.us_bank_transfer.v1",
+            "funding-profile.us_ach_debit.v1",
+            "normalized-funding-reversal.v1",
+            "operator-recovery-redaction.v1",
+        }
 
 
 def test_marketplace_hosted_configs_contain_no_provider_fixture_identity() -> None:
@@ -224,9 +249,9 @@ def test_ready_gate_rejects_digest_schema_and_capability_mismatch(
     spec.loader.exec_module(module)
     production = {
         "manifest_digest": "sha256:" + "1" * 64,
-        "api_version": "0.1.0",
-        "schema_version": 4,
-        "capabilities": ["required.v1"],
+        "api_version": "0.2.0",
+        "schema_version": 5,
+        "capabilities": ["required.v2"],
     }
     response = {
         "ready": True,

@@ -27,19 +27,26 @@ base_url = "http://hosted-settlement-api:8080"
 authority_id = "local-e2e-hosted-authority"
 environment = "local-e2e"
 expected_manifest_digest = "sha256:4bdc5798ccb05cfd6b2ae6d9f64a71d62040c2be2dd8c758704bc0216d5ed276"
-expected_api_version = "0.1.0"
-expected_schema_version = 4
+expected_api_version = "0.2.0"
+expected_schema_version = 5
 required_capabilities = [
-  "conditional-escrow.v1",
-  "stripe-connect-separate-charges-transfers.v1",
-  "portable-attestation.v1",
-  "eas-arbiter.v1",
   "scheme-tagged-identities.v1",
   "account-owner-admission.v1",
   "account-owner-rotation.v1",
   "account-owner-retirement.v1",
   "signer-injected-client.v1",
   "provider-neutral-seller-onboarding.v1",
+  "conditional-escrow.v2",
+  "stripe-connect-separate-charges-transfers.v2",
+  "portable-attestation.v1",
+  "eas-arbiter.v1",
+  "payer-profile.v1",
+  "funding-authorization.v1",
+  "funding-profile.card.v1",
+  "funding-profile.us_bank_transfer.v1",
+  "funding-profile.us_ach_debit.v1",
+  "normalized-funding-reversal.v1",
+  "operator-recovery-redaction.v1",
 ]
 request_timeout_seconds = 10.0
 preflight_timeout_seconds = 5.0

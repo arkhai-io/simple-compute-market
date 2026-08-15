@@ -141,7 +141,8 @@ def test_resource_settlements_replace_command_settlements(tmp_path, monkeypatch)
             "fiat.stripe.v1",
             asset="usd",
             rate="125",
-            method="card",
+            funding_profile="card.v1",
+            interaction="interactive",
             funds_flow="separate_charges_transfers",
         )
     ]
@@ -193,7 +194,8 @@ def test_command_dual_mechanism_order_reaches_listing(tmp_path, monkeypatch):
             rate="125",
             per="hour",
             mechanism_input={
-                "method": "card",
+                "funding_profile": "card.v1",
+                "interaction": "interactive",
                 "funds_flow": "separate_charges_transfers",
             },
         ),

@@ -50,6 +50,11 @@ policies = ["has_matching_inventory_guard", "escrow_shape_guard", "bisection"]
 default_min_price = "100"
 default_token_address = ""
 default_max_duration_seconds = 0
+settlements = [
+  { mechanism = "fiat.stripe.v1", asset = "usd", rate = "100", per = "hour", mechanism_input = { funding_profile = "card.v1", interaction = "interactive", funds_flow = "separate_charges_transfers" } },
+  { mechanism = "fiat.stripe.v1", asset = "usd", rate = "100", per = "hour", mechanism_input = { funding_profile = "us_bank_transfer.v1", interaction = "interactive", funds_flow = "separate_charges_transfers" } },
+  { mechanism = "fiat.stripe.v1", asset = "usd", rate = "100", per = "hour", mechanism_input = { funding_profile = "us_ach_debit.v1", interaction = "interactive", funds_flow = "separate_charges_transfers" } },
+]
 
 [Settlement]
 schema_version = 1
@@ -61,21 +66,29 @@ base_url = "http://127.0.0.1:8080"
 authority_id = "local-hosted-authority"
 environment = "e2e"
 expected_manifest_digest = "sha256:4859b12cb8703a3c1db85c9636be903f493ae9a9ad1795ffb18a8f801a843a7e"
-expected_api_version = "0.1.0"
-expected_schema_version = 4
+expected_api_version = "0.2.0"
+expected_schema_version = 5
 required_capabilities = [
-  "conditional-escrow.v1",
-  "stripe-connect-separate-charges-transfers.v1",
-  "portable-attestation.v1",
-  "eas-arbiter.v1",
   "scheme-tagged-identities.v1",
   "account-owner-admission.v1",
   "account-owner-rotation.v1",
   "account-owner-retirement.v1",
   "signer-injected-client.v1",
   "provider-neutral-seller-onboarding.v1",
+  "conditional-escrow.v2",
+  "stripe-connect-separate-charges-transfers.v2",
+  "portable-attestation.v1",
+  "eas-arbiter.v1",
+  "payer-profile.v1",
+  "funding-authorization.v1",
+  "funding-profile.card.v1",
+  "funding-profile.us_bank_transfer.v1",
+  "funding-profile.us_ach_debit.v1",
+  "normalized-funding-reversal.v1",
+  "operator-recovery-redaction.v1",
 ]
 currency = "usd"
+country = "US"
 request_timeout_seconds = 10.0
 preflight_timeout_seconds = 5.0
 allow_insecure_loopback = true

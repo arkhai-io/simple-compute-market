@@ -30,10 +30,10 @@ helm template "$RELEASE-dual" "$CHART_DIR" \
     --set 'storefront.agents[0].config.settlement.stripe.enabled=true' \
     --set-string 'storefront.agents[0].config.settlement.stripe.base_url=https://hosted-settlement.example.test' \
     --set-string 'storefront.agents[0].config.settlement.stripe.expected_manifest_digest=sha256:4859b12cb8703a3c1db85c9636be903f493ae9a9ad1795ffb18a8f801a843a7e' \
-    --set-string 'storefront.agents[0].config.settlement.stripe.expected_api_version=0.1.0' \
-    --set 'storefront.agents[0].config.settlement.stripe.expected_schema_version=4' \
+    --set-string 'storefront.agents[0].config.settlement.stripe.expected_api_version=0.2.0' \
+    --set 'storefront.agents[0].config.settlement.stripe.expected_schema_version=5' \
     --set-json 'storefront.agents[0].config.settlement.stripe.authority.principals=[{"scheme":"eip191","identifier":"0x1c5a77d9fa7ef466951b2f01f724bca3a5820b63"}]' \
-    --set-json 'storefront.agents[0].config.settlement.stripe.required_capabilities=["conditional-escrow.v1","stripe-connect-separate-charges-transfers.v1","portable-attestation.v1","eas-arbiter.v1","scheme-tagged-identities.v1","account-owner-admission.v1","account-owner-rotation.v1","account-owner-retirement.v1","signer-injected-client.v1","provider-neutral-seller-onboarding.v1"]' >"$DUAL_RENDERED" 2>/dev/null
+    --set-json 'storefront.agents[0].config.settlement.stripe.required_capabilities=["scheme-tagged-identities.v1","account-owner-admission.v1","account-owner-rotation.v1","account-owner-retirement.v1","signer-injected-client.v1","provider-neutral-seller-onboarding.v1","conditional-escrow.v2","stripe-connect-separate-charges-transfers.v2","portable-attestation.v1","eas-arbiter.v1","payer-profile.v1","funding-authorization.v1","funding-profile.card.v1","funding-profile.us_bank_transfer.v1","funding-profile.us_ach_debit.v1","normalized-funding-reversal.v1","operator-recovery-redaction.v1"]' >"$DUAL_RENDERED" 2>/dev/null
 helm template "$RELEASE-overlap" "$CHART_DIR" \
     --values "$CHART_DIR/values.yaml" \
     --values "$CHART_DIR/fixtures/fiat-ed25519-values.yaml" \
@@ -147,10 +147,14 @@ expect_present "$FIAT_CONFIGMAP" 'identifier = \"0EqyMnQrtKs6E2i9RhXk5tAiSrcaAWu
 expect_present "$FIAT_CONFIGMAP" '\[Settlement\]' "fiat profile renders canonical Settlement root"
 expect_present "$FIAT_CONFIGMAP" 'priority = \["fiat\.stripe\.v1"\]' "fiat profile selects only Stripe"
 expect_present "$FIAT_CONFIGMAP" '\[Settlement\.stripe\]' "fiat profile renders Stripe subsection"
-expect_present "$FIAT_CONFIGMAP" 'expected_schema_version = 4' "fiat profile pins hosted schema 4"
+expect_present "$FIAT_CONFIGMAP" 'expected_schema_version = 5' "fiat profile pins hosted schema 5"
 expect_present "$FIAT_CONFIGMAP" 'scheme-tagged-identities\.v1' "fiat profile pins scheme-tagged hosted identity"
 expect_present "$FIAT_CONFIGMAP" 'signer-injected-client\.v1' "fiat profile pins signer-injected hosted client"
 expect_present "$FIAT_CONFIGMAP" 'account-owner-retirement\.v1' "fiat profile pins owner retirement"
+expect_present "$FIAT_CONFIGMAP" 'funding-profile\.card\.v1' "fiat profile pins card funding capability"
+expect_present "$FIAT_CONFIGMAP" 'funding-profile\.us_bank_transfer\.v1' "fiat profile pins push-transfer funding capability"
+expect_present "$FIAT_CONFIGMAP" 'funding-profile\.us_ach_debit\.v1' "fiat profile pins ACH funding capability"
+expect_present "$FIAT_CONFIGMAP" 'country = "US"' "fiat profile pins US country policy"
 expect_present "$FIAT_DEPLOYMENT" 'name: +\"?fiat-bob-marketplace-identity\"?' "fiat signer comes from a Secret reference"
 expect_absent "$FIAT_CONFIGMAP" '\[Wallet\]|\[Chains\.|rpc_url|(^|[[:space:]])(provider|webhook|database|migration)[[:space:]]*=' "fiat storefront config omits EVM and authority-provider configuration"
 expect_absent "$FIAT_CONFIGMAP" 'hostedSettlement|hosted_settlement|settlement\.hosted' "fiat storefront config rejects legacy hierarchy"
@@ -161,6 +165,7 @@ expect_present "$FIAT_REGISTRY" 'name: +REGISTRY_AUTHORITY_SCHEME' "fiat registr
 expect_present "$FIAT_REGISTRY" 'value: +\"?NLTZBDFWy23PC-sKKUm3VZyUDSvLbb6MU6mzAnjjp0Y\"?' "fiat registry renders its public authority"
 expect_present "$FIAT_REGISTRY" 'secretName: +\"?fiat-registry-identity\"?' "fiat registry signer credential is Secret-referenced"
 expect_absent "$FIAT_RENDERED" 'private_key|privateKey|request_credential|STRIPE_[A-Z_]*KEY' "fiat manifests contain no private or provider credentials"
+expect_absent "$FIAT_RENDERED" 'checkout\.stripe\.com|client_secret|payer_profile_ref|instrument_ref|payment_method|mandate|bank_instructions' "fiat manifests contain no payer, instrument, action, or bank material"
 expect_present "$PROVISIONING_CONFIGMAP" 'scheme: +ed25519' "fiat provisioning renders Ed25519 public principals"
 expect_present "$PROVISIONING_CONFIGMAP" 'identifier: +xoImN8fTEOxXYnvgC6JZ0lN0n0qvZERwz_vlOjX3MkI' "fiat provisioning renders its public service identity"
 expect_absent "$FIAT_RENDERED" 'admin_api_key|adminApiKey|X-Admin-Key' "fiat manifests contain no legacy administrator shared secret"

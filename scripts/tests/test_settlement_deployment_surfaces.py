@@ -28,11 +28,37 @@ def test_fiat_compose_uses_canonical_public_config_without_evm_resources() -> No
     assert settlement["schema_version"] == 1
     assert settlement["priority"] == ["fiat.stripe.v1"]
     assert set(settlement) == {"schema_version", "priority", "stripe"}
+    stripe = settlement["stripe"]
+    assert stripe["expected_api_version"] == "0.2.0"
+    assert stripe["expected_schema_version"] == 5
+    assert stripe["currency"] == "usd"
+    assert stripe["country"] == "US"
+    clauses = config["pricing"]["settlements"]
+    assert [clause["mechanism_input"]["funding_profile"] for clause in clauses] == [
+        "card.v1",
+        "us_bank_transfer.v1",
+        "us_ach_debit.v1",
+    ]
+    assert all(
+        clause["mechanism_input"]["interaction"] == "interactive"
+        and clause["mechanism_input"]["funds_flow"] == "separate_charges_transfers"
+        for clause in clauses
+    )
     assert "Wallet" not in config
     assert "Chains" not in config
 
     fields = _field_paths(settlement)
-    forbidden_fragments = ("provider_", "webhook", "database", "migration", "rpc_url")
+    forbidden_fragments = (
+        "provider_",
+        "webhook",
+        "database",
+        "migration",
+        "rpc_url",
+        "payer_profile",
+        "instrument",
+        "mandate",
+        "action_url",
+    )
     assert not {
         path
         for path in fields
@@ -45,6 +71,13 @@ def test_fiat_compose_uses_canonical_public_config_without_evm_resources() -> No
     assert "VMS_BOB_STRIPE_STOREFRONT_CONFIG" in compose
     assert "config.stripe-fiat-ed25519.toml" in compose
     assert "VMS_BOB_HOSTED_STOREFRONT_CONFIG" not in compose
+    for forbidden in (
+        "checkout.stripe.com",
+        "client_secret",
+        "payment_method",
+        "bank_instructions",
+    ):
+        assert forbidden not in compose
 
 
 def test_alkahest_profiles_keep_policy_outside_chains() -> None:

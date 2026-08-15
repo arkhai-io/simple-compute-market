@@ -19,7 +19,8 @@ async def test_listing_round_trips_canonical_publication_clauses(tmp_path) -> No
             "rate": "2",
             "per": "hour",
             "mechanism_input": {
-                "method": "card",
+                "funding_profile": "card.v1",
+                "interaction": "interactive",
                 "funds_flow": "separate_charges_transfers",
             },
         }

@@ -106,7 +106,8 @@ def test_config_write_backups_and_reruns_as_byte_identical_noop(
         "rate": "1.25",
         "per": "hour",
         "mechanism_input": {
-            "method": "card",
+            "funding_profile": "card.v1",
+            "interaction": "interactive",
             "funds_flow": "separate_charges_transfers",
         },
     }
@@ -187,8 +188,9 @@ def test_csv_check_write_backup_and_idempotence(tmp_path: Path) -> None:
             "asset": "usd",
             "mechanism": "fiat.stripe.v1",
             "mechanism_input": {
+                "funding_profile": "card.v1",
                 "funds_flow": "separate_charges_transfers",
-                "method": "card",
+                "interaction": "interactive",
             },
             "per": "hour",
             "rate": "2.5",
