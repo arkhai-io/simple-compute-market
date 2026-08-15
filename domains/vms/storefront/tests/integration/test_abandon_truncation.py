@@ -25,23 +25,37 @@ def db(tmp_path):
 
 @pytest.mark.asyncio
 async def test_truncates_the_ledger_lease_to_now(db):
-    fake = FakeSite()
+    fake = FakeSite(deliverable_modes={"vm"})
     fake.add_resource("res-trunc", 2, attributes={"vm_host": "kvm1"})
+    agreement_ref = "negotiation-abandoned"
+    escrow_uid = "0xabandoned"
+    await db.insert_escrow(
+        escrow_uid=escrow_uid,
+        negotiation_id=agreement_ref,
+        chain_name=None,
+        escrow_address=None,
+    )
 
     with site_capacity(fake) as capacity:
         reserved = await capacity.reserve(
-            claim={},
-            deal_ref={"escrow_uid": "0xabandoned"},
+            claim={"executor_kind": "vm"},
+            deal_ref={
+                "listing_id": "listing-abandoned",
+                "negotiation_id": agreement_ref,
+            },
         )
         await capacity.commit(
-            resource_id=reserved["resource_id"],
             capacity_reservation_id=reserved["capacity_reservation_id"],
             lease_start_utc="2099-01-01T00:00:00Z",
             lease_end_utc="2099-01-01 01:00",
         )
+        await db.update_escrow(
+            escrow_uid=escrow_uid,
+            capacity_reservation_id=reserved["capacity_reservation_id"],
+        )
         truncated = await truncate_lease_for_terminal_settlement(
             sqlite_client=db,
-            escrow_uid="0xabandoned",
+            agreement_ref=agreement_ref,
             reason="expiration window passed",
         )
 
@@ -54,11 +68,23 @@ async def test_truncates_the_ledger_lease_to_now(db):
 
 @pytest.mark.asyncio
 async def test_no_live_reservation_is_a_quiet_noop(db):
-    with site_capacity(FakeSite()):
+    agreement_ref = "negotiation-with-missing-reservation"
+    escrow_uid = "0xmissing"
+    await db.insert_escrow(
+        escrow_uid=escrow_uid,
+        negotiation_id=agreement_ref,
+        chain_name=None,
+        escrow_address=None,
+    )
+    await db.update_escrow(
+        escrow_uid=escrow_uid,
+        capacity_reservation_id="alloc-missing",
+    )
+    with site_capacity(FakeSite(deliverable_modes={"vm"})):
         assert (
             await truncate_lease_for_terminal_settlement(
                 sqlite_client=db,
-                escrow_uid="0xunknown",
+                agreement_ref=agreement_ref,
             )
             is None
         )

@@ -45,10 +45,7 @@ from market_settlement_runtime import (
 
 from market_storefront import domain_runtime
 from market_storefront.hosted_evidence import encode_hosted_fulfillment_ref
-from market_storefront.services.capacity_client import (
-    build_capacity_client,
-    remote_site_clients,
-)
+from market_storefront.services.capacity_client import build_capacity_client
 from market_storefront.utils import config as storefront_config
 from market_storefront.utils import escrow_verification
 
@@ -600,49 +597,53 @@ def _terminal_requires_lease_truncation(record: Any, outcome: str) -> bool:
 
 
 async def truncate_lease_for_terminal_settlement(
-    *, escrow_uid: str | None, reason: str | None = None, sqlite_client: Any
+    *, agreement_ref: str | None, reason: str | None = None, sqlite_client: Any
 ) -> dict[str, Any] | None:
-    """End capacity service when the shared runtime abandons settlement."""
-    if not escrow_uid:
+    """End capacity service through the agreement's durable reservation binding."""
+    if not agreement_ref:
         return None
 
     try:
-        capacity = build_capacity_client(lambda: sqlite_client)
-        reservation_id: str | None = None
-        for client in remote_site_clients(capacity).values():
-            rows = await client.list_reservations(escrow_uid=escrow_uid)
-            held = [
-                row
-                for row in rows
-                if row.get("state")
-                in {"reserved", "provisioning", "leased", "releasing"}
-            ]
-            if held:
-                reservation_id = str(held[0]["capacity_reservation_id"])
-                break
+        escrow = await sqlite_client.load_primary_escrow_for_negotiation(
+            negotiation_id=agreement_ref
+        )
+        reservation_id = (
+            str(escrow.get("capacity_reservation_id") or "") if escrow else ""
+        )
         if not reservation_id:
             logger.info(
-                "[SETTLEMENT] No live reservation to truncate for %s", escrow_uid
+                "[SETTLEMENT] Agreement %s has no bound capacity reservation",
+                agreement_ref,
             )
             return None
+        capacity = build_capacity_client(lambda: sqlite_client)
         lease_end = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M")
         truncated = await capacity.truncate_lease(
             capacity_reservation_id=reservation_id,
             lease_end_utc=lease_end,
         )
+        if truncated is None:
+            logger.info(
+                "[SETTLEMENT] Bound reservation %s for agreement %s "
+                "has no live lease to truncate",
+                reservation_id,
+                agreement_ref,
+            )
+            return None
         stage_event(
             "claims",
             "lease_truncated_after_abandonment",
-            escrow_uid=escrow_uid,
+            agreement_ref=agreement_ref,
             capacity_reservation_id=reservation_id,
             lease_end_utc=lease_end,
             reason=reason,
-            site=(truncated or {}).get("site"),
+            site=truncated.get("site"),
         )
+        return truncated
     except Exception:
         logger.exception(
-            "[SETTLEMENT] Could not truncate lease for %s",
-            escrow_uid,
+            "[SETTLEMENT] Could not truncate lease for agreement %s",
+            agreement_ref,
         )
         raise
 
@@ -1239,7 +1240,7 @@ def build_vm_settlement_composition(
         if not _terminal_requires_lease_truncation(record, _outcome):
             return
         await truncate_lease_for_terminal_settlement(
-            escrow_uid=getattr(record, "mechanism_ref", None),
+            agreement_ref=getattr(record, "agreement_ref", None),
             reason=reason,
             sqlite_client=sqlite_client,
         )

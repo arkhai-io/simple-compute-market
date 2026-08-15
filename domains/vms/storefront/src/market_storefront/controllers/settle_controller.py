@@ -482,7 +482,7 @@ class SettlementsController:
                 )
             if outcome.status == "succeeded":
                 await truncate_lease_for_terminal_settlement(
-                    escrow_uid=settlement_ref,
+                    agreement_ref=record.agreement_ref,
                     reason="hosted settlement reclaimed",
                     sqlite_client=self._db,
                 )
