@@ -31,9 +31,5 @@ dev = [
     "pytest-asyncio>=0.23",
 ]
 
-[tool.uv.sources]
-arkhai-kit-site = { path = "../../kit/site", editable = true }
-arkhai-kit-resource-pools = { path = "../../kit/resource-pools", editable = true }
-
-arkhai-kit-fulfillment = { path = "../../kit/fulfillment", editable = true }
-arkhai-kit-identity = { path = "../../kit/identity", editable = true }
+[tool.uv]
+find-links = ["../../.dist"]

@@ -53,8 +53,8 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "arkhai-kit-resource-pools", editable = "../resource-pools" },
-    { name = "arkhai-kit-site", editable = "../site" },
+    { name = "arkhai-kit-resource-pools", specifier = ">=0.2.0" },
+    { name = "arkhai-kit-site", specifier = ">=0.3.0" },
     { name = "pydantic", specifier = ">=2.7" },
     { name = "sqlalchemy", specifier = ">=2.0" },
     { name = "uuid6", specifier = ">=2024.7.10" },
@@ -69,46 +69,28 @@ dev = [
 [[package]]
 name = "arkhai-kit-resource-pools"
 version = "0.2.0"
-source = { editable = "../resource-pools" }
+source = { registry = "../../.dist" }
 dependencies = [
     { name = "pydantic" },
     { name = "pyyaml" },
     { name = "sqlalchemy" },
 ]
-
-[package.metadata]
-requires-dist = [
-    { name = "pydantic", specifier = ">=2.7" },
-    { name = "pyyaml", specifier = ">=6.0" },
-    { name = "sqlalchemy", specifier = ">=2.0" },
+wheels = [
+    { path = "arkhai_kit_resource_pools-0.2.0-py3-none-any.whl" },
 ]
-
-[package.metadata.requires-dev]
-dev = [{ name = "pytest", specifier = ">=8.3.4,<9.0.0" }]
 
 [[package]]
 name = "arkhai-kit-site"
 version = "0.3.0"
-source = { editable = "../site" }
+source = { registry = "../../.dist" }
 dependencies = [
     { name = "arkhai-kit-resource-pools" },
     { name = "fastapi" },
     { name = "pydantic" },
     { name = "sqlalchemy" },
 ]
-
-[package.metadata]
-requires-dist = [
-    { name = "arkhai-kit-resource-pools", editable = "../resource-pools" },
-    { name = "fastapi", specifier = ">=0.115.0" },
-    { name = "pydantic", specifier = ">=2.7" },
-    { name = "sqlalchemy", specifier = ">=2.0" },
-]
-
-[package.metadata.requires-dev]
-dev = [
-    { name = "httpx2" },
-    { name = "pytest", specifier = ">=8.3.4,<9.0.0" },
+wheels = [
+    { path = "arkhai_kit_site-0.3.0-py3-none-any.whl" },
 ]
 
 [[package]]

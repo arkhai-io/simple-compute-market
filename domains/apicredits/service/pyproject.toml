@@ -38,7 +38,5 @@ python_classes = ["Test*"]
 python_functions = ["test_*"]
 
 
-[tool.uv.sources]
-arkhai-kit-site = { path = "../../../kit/site", editable = true }
-arkhai-kit-resource-pools = { path = "../../../kit/resource-pools", editable = true }
-arkhai-kit-identity = { path = "../../../kit/identity", editable = true }
+[tool.uv]
+find-links = ["../../../.dist"]

@@ -36,13 +36,5 @@ dev = [
     "pytest-asyncio>=0.23",
 ]
 
-[tool.uv.sources]
-arkhai-compute-provisioning = { path = "../../../../provisioning/compute", editable = true }
-arkhai-compute-provisioning-service = { path = "../../../../provisioning/compute/service", editable = true }
-arkhai-kit-resource-pools = { path = "../../../../kit/resource-pools", editable = true }
-arkhai-kit-fulfillment = { path = "../../../../kit/fulfillment", editable = true }
-arkhai-core-storefront-client = { path = "../../../../core/storefront-client", editable = true }
-arkhai-kit-identity = { path = "../../../../kit/identity", editable = true }
-arkhai-vms-provisioning-operator-client = { path = "../client", editable = true }
-arkhai-vms = { path = "../../domain", editable = true }
-arkhai-bare-metal = { path = "../../../bare_metal", editable = true }
+[tool.uv]
+find-links = ["../../../../.dist"]
