@@ -56,7 +56,7 @@ None.
 
 - Implementing or simulating any missing prerequisite inside this change.
 - Negotiating directly over provider/executor internals or exposing Physical Resource in the ordinary fungible case; exact resource binding applies only where the trusted listing/accepted terms intentionally select it.
-- Reserving capacity during delayed funding, extending offer/hold expiry for payment, or treating Checkout/action/webhook/provider state as funded.
+- Committing/scheduling capacity, allocating/provisioning a host, renewing/replacing the original billable hold, extending offer/hold expiry for payment, or treating Checkout/action/webhook/provider state as funded.
 - Stripe/provider credentials, IDs, webhooks, payer/instrument state, or recovery in bare-metal packages.
 - SSH private keys, bearer credentials, provider topology, or raw access details in hosted evidence, generic settlement state, logs, or reports.
 - Financial reclaim as lease teardown or lease teardown as financial reversal.
