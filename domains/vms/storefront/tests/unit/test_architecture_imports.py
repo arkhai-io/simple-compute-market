@@ -127,11 +127,11 @@ def test_domain_concept_modules_import_no_core_packages():
     )
 
 
-def test_vm_storefront_has_one_default_contract_construction_root() -> None:
+def test_vm_storefront_constructs_contract_only_in_domain_contribution() -> None:
     storefront_root = (
         REPO / "domains" / "vms" / "storefront" / "src" / "market_storefront"
     )
-    default_calls: list[str] = []
+    construction_calls: list[str] = []
     stale_accessors: list[str] = []
     for path in _py_files(storefront_root):
         source = path.read_text(encoding="utf-8")
@@ -144,11 +144,11 @@ def test_vm_storefront_has_one_default_contract_construction_root() -> None:
             and node.func.id == "build_vm_storefront_domain"
             for node in ast.walk(tree)
         ):
-            default_calls.append(str(path.relative_to(REPO)))
+            construction_calls.append(str(path.relative_to(REPO)))
 
     assert stale_accessors == []
-    assert default_calls == [
-        "domains/vms/storefront/src/market_storefront/server.py"
+    assert construction_calls == [
+        "domains/vms/storefront/src/market_storefront/domain_runtime.py"
     ]
 
 
@@ -161,6 +161,17 @@ def test_vm_storefront_imports_no_bare_metal_composition() -> None:
         ("domains.bare_metal", "arkhai_bare_metal_storefront"),
     )
     assert not violations, "VM storefront must not import bare-metal roots:\n" + "\n".join(
+        violations
+    )
+
+
+def test_core_storefront_imports_no_domain_composition() -> None:
+    core_root = REPO / "core" / "storefront" / "src" / "core_storefront"
+    violations = _violations(
+        [core_root],
+        ("domains.vms", "domains.bare_metal", "market_storefront", "arkhai_bare_metal_storefront"),
+    )
+    assert not violations, "core storefront must stay domain-free:\n" + "\n".join(
         violations
     )
 

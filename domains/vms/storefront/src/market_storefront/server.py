@@ -35,7 +35,6 @@ from core_storefront.domain_registry import StorefrontDomainRegistry
 
 import market_storefront.container as _container
 from market_storefront.domain_runtime import (
-    build_vm_storefront_domain,
     validate_vm_storefront_domain,
 )
 from market_storefront.middleware.admin_identity import (
