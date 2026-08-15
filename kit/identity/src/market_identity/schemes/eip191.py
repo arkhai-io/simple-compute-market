@@ -84,12 +84,21 @@ class Eip191SignerFactory:
 
 def _private_key_bytes(private_key: SecretMaterial) -> bytes:
     if isinstance(private_key, bytes):
-        if len(private_key) != 32:
-            raise ValueError("eip191 private key must contain exactly 32 bytes")
-        return private_key
-    if not isinstance(private_key, str) or not _PRIVATE_KEY.fullmatch(private_key):
+        if len(private_key) == 32:
+            return private_key
+        try:
+            encoded = private_key.decode("ascii")
+        except UnicodeDecodeError as exc:
+            raise ValueError(
+                "eip191 private key must be raw bytes or hexadecimal bytes"
+            ) from exc
+    elif isinstance(private_key, str):
+        encoded = private_key
+    else:
         raise ValueError("eip191 private key must be 32-byte hexadecimal text")
-    value = private_key[2:] if private_key.startswith("0x") else private_key
+    if not _PRIVATE_KEY.fullmatch(encoded):
+        raise ValueError("eip191 private key must be 32-byte hexadecimal text")
+    value = encoded[2:] if encoded.startswith("0x") else encoded
     return bytes.fromhex(value)
 
 

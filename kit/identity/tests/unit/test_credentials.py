@@ -42,9 +42,9 @@ def test_registry_dispatches_only_exact_selected_provider() -> None:
     class Provider:
         kind = CredentialProviderKind.ENVIRONMENT
 
-        def load(self, reference: CredentialReference) -> str:
+        def load(self, reference: CredentialReference) -> bytes:
             calls.append(reference.locator)
-            return _encoded_seed()
+            return _encoded_seed().encode("ascii")
 
         def generate(self, reference: CredentialReference, *, scheme: IdentityScheme) -> None:
             raise AssertionError("not selected")
@@ -57,7 +57,7 @@ def test_registry_dispatches_only_exact_selected_provider() -> None:
         locator="EXACT_BUYER_SEED",
     )
     registry = CredentialProviderRegistry((Provider(),))
-    assert registry.load(reference) == _encoded_seed()
+    assert registry.load(reference) == _encoded_seed().encode("ascii")
     assert calls == ["EXACT_BUYER_SEED"]
     missing = CredentialReference(
         provider=CredentialProviderKind.KEYRING,
@@ -86,7 +86,7 @@ def test_default_registry_does_not_import_keyring_for_environment(
         locator="BUYER_SEED",
     )
     registry = default_credential_registry(environ={"BUYER_SEED": _encoded_seed()})
-    assert registry.load(reference) == _encoded_seed()
+    assert registry.load(reference) == _encoded_seed().encode("ascii")
     assert "keyring" not in imported
 
 

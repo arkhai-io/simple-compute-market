@@ -92,19 +92,23 @@ class Ed25519SignerFactory:
 
 def _private_key_bytes(private_key: SecretMaterial) -> bytes:
     if isinstance(private_key, bytes):
-        raw = private_key
+        if len(private_key) == 32:
+            return private_key
+        try:
+            encoded = private_key.decode("ascii")
+        except UnicodeDecodeError as exc:
+            raise ValueError(
+                "ed25519 private key must be raw bytes or canonical base64url bytes"
+            ) from exc
     elif isinstance(private_key, str):
-        if not _BASE64URL.fullmatch(private_key):
-            raise ValueError(
-                "ed25519 private key must be canonical unpadded base64url"
-            )
-        raw = _decode_base64url(private_key)
-        if private_key != _encode_base64url(raw):
-            raise ValueError(
-                "ed25519 private key must be canonical unpadded base64url"
-            )
+        encoded = private_key
     else:
         raise TypeError("ed25519 private key must be bytes or base64url text")
+    if not _BASE64URL.fullmatch(encoded):
+        raise ValueError("ed25519 private key must be canonical unpadded base64url")
+    raw = _decode_base64url(encoded)
+    if encoded != _encode_base64url(raw):
+        raise ValueError("ed25519 private key must be canonical unpadded base64url")
     if len(raw) != 32:
         raise ValueError("ed25519 private key must contain exactly 32 bytes")
     return raw

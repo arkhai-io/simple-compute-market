@@ -475,10 +475,8 @@ class ProfileRepository:
         finally:
             os.close(fd)
         try:
-            payload = json.loads(b"".join(chunks).decode("utf-8"))
-            if not isinstance(payload, dict):
-                raise TypeError("profile store root is not an object")
-            return ProfileStore.model_validate(payload)
+            payload = b"".join(chunks)
+            return ProfileStore.model_validate_json(payload)
         except (UnicodeDecodeError, json.JSONDecodeError, TypeError, ValueError) as exc:
             raise ProfileStoreError("profile store is malformed or unsupported") from exc
 

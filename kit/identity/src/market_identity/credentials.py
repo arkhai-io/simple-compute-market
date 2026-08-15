@@ -43,8 +43,8 @@ class CredentialProvider(Protocol):
 
     kind: CredentialProviderKind
 
-    def load(self, reference: CredentialReference) -> SecretMaterial:
-        """Load only the exact referenced secret."""
+    def load(self, reference: CredentialReference) -> bytes:
+        """Load the exact referenced secret bytes without fallback or normalization."""
 
     def generate(
         self,
@@ -83,7 +83,7 @@ class CredentialProviderRegistry:
                 "selected provider is unavailable",
             ) from exc
 
-    def load(self, reference: CredentialReference) -> SecretMaterial:
+    def load(self, reference: CredentialReference) -> bytes:
         return self.provider(reference).load(reference)
 
     def generate(
@@ -107,7 +107,7 @@ class KeyringCredentialProvider:
 
     kind = CredentialProviderKind.KEYRING
 
-    def load(self, reference: CredentialReference) -> SecretMaterial:
+    def load(self, reference: CredentialReference) -> bytes:
         service, entry = _keyring_parts(reference)
         keyring = self._backend(reference, "load")
         try:
@@ -116,7 +116,7 @@ class KeyringCredentialProvider:
             raise CredentialProviderError(reference, "load", "backend error") from exc
         if not value:
             raise CredentialProviderError(reference, "load", "entry is missing")
-        return value
+        return value.encode("utf-8")
 
     def generate(
         self,
@@ -182,7 +182,7 @@ class SecretFileCredentialProvider:
 
     kind = CredentialProviderKind.SECRET_FILE
 
-    def load(self, reference: CredentialReference) -> SecretMaterial:
+    def load(self, reference: CredentialReference) -> bytes:
         fd = _open_secret_file(reference, operation="load")
         try:
             chunks: list[bytes] = []
@@ -202,10 +202,7 @@ class SecretFileCredentialProvider:
             payload = b"".join(chunks)
             if not payload:
                 raise CredentialProviderError(reference, "load", "secret is empty")
-            try:
-                return payload.decode("utf-8")
-            except UnicodeDecodeError:
-                return payload
+            return payload
         finally:
             os.close(fd)
 
@@ -308,7 +305,7 @@ class EnvironmentCredentialProvider:
     def __init__(self, environ: Mapping[str, str] | None = None) -> None:
         self._environ = environ if environ is not None else os.environ
 
-    def load(self, reference: CredentialReference) -> SecretMaterial:
+    def load(self, reference: CredentialReference) -> bytes:
         value = self._environ.get(reference.locator)
         if not value:
             raise CredentialProviderError(
@@ -316,7 +313,7 @@ class EnvironmentCredentialProvider:
                 "load",
                 "exact environment variable is missing",
             )
-        return value
+        return value.encode("utf-8")
 
     def generate(
         self,
