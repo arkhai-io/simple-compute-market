@@ -52,7 +52,7 @@ FROM --platform=linux/amd64 ghcr.io/astral-sh/uv:python3.12-bookworm-slim AS run
 
 ENV UV_HTTP_RETRIES=10
 RUN apt-get update && apt-get install -y --no-install-recommends git && rm -rf /var/lib/apt/lists/* && \
-    useradd -m -s /bin/sh appuser && mkdir -p /app && chown appuser /app
+    useradd -m -s /bin/sh appuser && mkdir -p /app/data && chown -R appuser:appuser /app
 USER appuser
 WORKDIR /app
 

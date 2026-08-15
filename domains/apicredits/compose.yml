@@ -58,6 +58,7 @@ services:
       - APICREDITS_STOREFRONT_ADMIN_KEY_FILE=/run/secrets/arkhai/api-credits-admin-key
     volumes:
       - ${APICREDITS_ADMIN_KEY_FILE:?set API-credits admin credential file}:/run/secrets/arkhai/api-credits-admin-key:ro
+      - api-credits-service-data:/app/data
     restart: unless-stopped
     deploy:
       resources:
@@ -132,6 +133,7 @@ services:
       # non-Anvil deployment supplies its own address book here.
       - ../vms/storefront/src/market_storefront/data/alkahest_anvil_addresses.json:/app/alkahest_anvil_addresses.json:ro
       - ${APICREDITS_ADMIN_KEY_FILE:?set API-credits admin credential file}:/run/secrets/arkhai/api-credits-admin-key:ro
+      - api-credits-storefront-data:/app/data
     restart: unless-stopped
     deploy:
       resources:
@@ -143,3 +145,7 @@ services:
       timeout: 5s
       retries: 6
       start_period: 15s
+
+volumes:
+  api-credits-service-data:
+  api-credits-storefront-data:

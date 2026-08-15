@@ -8,7 +8,7 @@
 agent_id      = "tokenseller"
 port          = 8000
 base_url      = "http://credits-storefront:8000/"
-db_path       = "./src/apicredits_storefront/data/storefront/agent.db"
+db_path       = "/app/data/storefront.db"
 
 [identity]
 scheme     = "eip191"
