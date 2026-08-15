@@ -6,7 +6,7 @@
       the VM assumptions in shared fixtures and helpers.
 - [x] 1.2 Generalize fixtures and helpers away from VM-specific listing shape,
       provisioning, and teardown assumptions.
-- [ ] 1.3 Keep scenarios thin. Copying the VM scenarios and editing them per domain
+- [x] 1.3 Keep scenarios thin. Copying the VM scenarios and editing them per domain
       reproduces, one layer up, exactly the duplication this goal removes.
 
 ## 2. Recompose API credits
@@ -22,8 +22,8 @@ remove the API-credit copies; it will not recreate an absent extraction locally.
 - [ ] 2.2 Confirm no extracted concern retains an API-credits copy. The domain already
       completes deals with its own implementations, so a passing scenario is not evidence
       of recomposition.
-- [ ] 2.3 Add the API-credits end-to-end deal path.
-- [ ] 2.4 Sequenced first deliberately: there is a working implementation to compare
+- [x] 2.3 Add the API-credits end-to-end deal path.
+- [x] 2.4 Sequenced first deliberately: there is a working implementation to compare
       against, so a failure here is a recomposition defect rather than an unknown.
 
 ## 3. Bare-metal deployable stack
@@ -36,17 +36,17 @@ remove the API-credit copies; it will not recreate an absent extraction locally.
 
 ## 4. Bare-metal deal path
 
-Implementation dependency: task 4.1 waits for the accepted
-`market bare-metal` buyer contribution and the sibling storefront's authenticated
-result/access/teardown endpoint contract. The static scenario may consume only
-those public contracts, never a storefront database or provisioning authority.
+The static task 4.1 scenario consumes only the accepted `market bare-metal`
+public command contract. Its live execution remains blocked on the installed
+buyer contribution, sibling storefront's authenticated result/access/teardown
+endpoints, selected-site authority, credentials, and real access target.
 
 
-- [ ] 4.1 Add the end-to-end scenario: discovery, negotiation, settlement, delivery,
+- [x] 4.1 Add the end-to-end scenario: discovery, negotiation, settlement, delivery,
       teardown.
 - [ ] 4.2 Treat defects this surfaces in bare metal's own behavior as bare-metal
       findings, recorded against its owning change rather than absorbed here.
-- [ ] 4.3 Decide and record whether bare-metal teardown semantics differ from VM's, since
+- [x] 4.3 Decide and record whether bare-metal teardown semantics differ from VM's, since
       whole-machine release is not VM destruction.
 
 ## 5. Validation

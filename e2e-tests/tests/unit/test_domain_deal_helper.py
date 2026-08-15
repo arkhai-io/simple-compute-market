@@ -7,6 +7,7 @@ import pytest
 from tests.e2e.roles.helpers.domain_deal import (
     DealStage,
     DomainDealState,
+    ordered_event_groups,
     ordered_events,
 )
 
@@ -66,4 +67,28 @@ def test_ordered_events_ignores_domain_specific_events_between_boundaries():
         "discover",
         "negotiation_completed",
         "settlement_submitted",
+    ]
+
+
+def test_ordered_event_groups_accept_public_mechanism_alternatives():
+    events = [
+        {"event": "discover"},
+        {"event": "negotiation_completed"},
+        {"event": "settlement_started"},
+        {"event": "run_ended"},
+    ]
+
+    matched = ordered_event_groups(
+        events,
+        ("discover",),
+        ("negotiation_completed",),
+        ("settlement_submitted", "settlement_started"),
+        ("run_ended",),
+    )
+
+    assert [event["event"] for event in matched] == [
+        "discover",
+        "negotiation_completed",
+        "settlement_started",
+        "run_ended",
     ]

@@ -61,6 +61,15 @@ proves is a working deal path, not a deployment topology.
 Deferring keeps this change independent of Goal 3's sequencing. The stack definition
 should be written so the answer can change without rewriting the scenarios.
 
+### Teardown is domain-defined, and bare metal proves access revocation
+
+The shared lifecycle names a teardown boundary without imposing a VM payload.
+API credits ends the purchased grant by consuming it to authoritative HTTP 402.
+Bare metal requests teardown through the authenticated storefront, waits for the
+selected-site lease-release result, and then proves the previously working SSH
+access no longer works. Whole-host release is therefore not modeled as VM
+destruction, and neither scenario reads a provisioning authority directly.
+
 ## Risks / Trade-offs
 
 - **[Scenarios are copied per domain rather than fixtures generalized]** → The main risk,
@@ -93,6 +102,3 @@ Rollback is per step; nothing here changes persisted state or wire contracts.
   three separate suites?** Attractive — it would make "can this domain trade" a fixture a
   new domain runs. Deferrable: it is better designed against two real domains than
   predicted from one.
-- **Does bare metal need teardown semantics distinct from VM's?** Whole-machine release
-  differs from destroying a VM. Deferrable to the scenario, where the difference becomes
-  concrete.

@@ -85,22 +85,36 @@ def require_state(state: object, *fields: str) -> None:
             )
 
 
-def ordered_events(events: Iterable[dict[str, Any]], *event_names: str) -> list[dict[str, Any]]:
-    """Return named run events in order, failing on an absent lifecycle boundary."""
+def ordered_event_groups(
+    events: Iterable[dict[str, Any]],
+    *event_groups: tuple[str, ...],
+) -> list[dict[str, Any]]:
+    """Return one event from each ordered public-mechanism boundary group."""
 
     remaining = iter(events)
     matched: list[dict[str, Any]] = []
-    for expected in event_names:
+    for expected in event_groups:
+        if not expected:
+            raise ValueError("event group cannot be empty")
         for event in remaining:
-            if event.get("event") == expected:
+            if event.get("event") in expected:
                 matched.append(event)
                 break
         else:
             seen = [event.get("event") for event in matched]
             raise AssertionError(
-                f"run did not emit {expected!r} after ordered events {seen!r}"
+                f"run did not emit one of {expected!r} after ordered events {seen!r}"
             )
     return matched
+
+
+def ordered_events(
+    events: Iterable[dict[str, Any]],
+    *event_names: str,
+) -> list[dict[str, Any]]:
+    """Return named run events in order, failing on an absent lifecycle boundary."""
+
+    return ordered_event_groups(events, *((name,) for name in event_names))
 
 
 def assert_market_run_succeeded(run: Any, *, command: str) -> None:
