@@ -41,7 +41,12 @@ from market_negotiation_runtime import (
     RoundRequest,
 )
 from market_policy.negotiation_middleware import NegotiationDecision, NegotiationRound
-from market_storefront.services.capacity_client import build_capacity_client
+from market_capacity_publication import CapacityBinding
+from market_storefront.services.capacity_client import (
+    build_capacity_client,
+    build_capacity_runtime,
+    capacity_binding_for_listing,
+)
 from market_storefront.utils.config import CHAINS, settings
 
 logger = logging.getLogger(__name__)
@@ -571,10 +576,15 @@ async def _place_capacity_hold(
     repository: Any,
     acceptance: Acceptance,
 ) -> None:
-    """Place the VM domain's best-effort capacity hold after acceptance."""
+    """Place the VM domain's best-effort capacity hold after acceptance.
+
+    The binding is resolved by the VM composition root before the negotiation
+    lifecycle starts.  Keeping that exact site/offering-mode/source tuple on
+    ``Acceptance`` prevents the hold from falling back to an aggregate default
+    or escaping the listing's pool-mode validation.
+    """
 
     from core_storefront.stage_log import stage_event
-    from domains.vms.listings.reconciler import site_id_for_listing
     from market_resource_pools.hints import capped_hold_seconds
     from market_storefront.services.vm_job_spec_service import (
         compute_capacity_claim_from_order,
@@ -586,14 +596,16 @@ async def _place_capacity_hold(
     if ttl <= 0:
         return
     try:
+        if not isinstance(acceptance.binding, CapacityBinding):
+            raise RuntimeError("capacity hold requires a durably bound listing")
         claim = compute_capacity_claim_from_order(dict(acceptance.listing_record))
-        capacity = build_capacity_client(lambda: repository)
-        site_id = site_id_for_listing(repository.db_path, acceptance.listing_id)
+        capacity = build_capacity_runtime(lambda: repository)
         ttl = capped_hold_seconds(
             ttl,
             lookup_pool_policy_tags(repository, acceptance.listing_id),
         )
         held = await capacity.reserve(
+            acceptance.binding,
             claim=claim,
             deal_ref={
                 "listing_id": acceptance.listing_id,
@@ -602,7 +614,6 @@ async def _place_capacity_hold(
             ttl_seconds=ttl,
             lease_start_utc=acceptance.agreement.start_utc,
             lease_duration_seconds=acceptance.agreement.duration_seconds,
-            site=site_id,
         )
     except Exception as exc:
         logger.warning(
@@ -662,11 +673,13 @@ def build_vm_negotiation_runtime(
             raise NegotiationStateError(
                 f"Order {listing_id} not found locally; seller has no matching listing"
             )
+        binding = await capacity_binding_for_listing(repository, listing_id)
         return ResolvedNegotiation(
             listing_id=listing_id,
             listing=Listing.model_validate(record),
             listing_record=record,
             hooks=hooks,
+            binding=binding,
         )
 
     async def resolve_continuation(
@@ -682,11 +695,13 @@ def build_vm_negotiation_runtime(
             raise NegotiationStateError(
                 f"Seller's order {listing_id} is gone from local DB"
             )
+        binding = await capacity_binding_for_listing(repository, listing_id)
         return ResolvedNegotiation(
             listing_id=listing_id,
             listing=Listing.model_validate(record),
             listing_record=record,
             hooks=hooks,
+            binding=binding,
         )
 
     async def evaluate(request: RoundRequest) -> RoundEvaluation:

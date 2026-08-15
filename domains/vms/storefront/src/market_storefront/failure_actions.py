@@ -271,26 +271,23 @@ async def _release_capacity(
     ctx: FulfillmentFailureContext,
     capacity: Any | None = None,
 ) -> FulfillmentFailurePolicyResult:
-    """Return the failed deal's capacity through the site authority.
-
-    The hold lives in the ledger; release it there (by capacity_reservation_id
-    when the fulfillment flow knows it, else by the deal ref) and
-    reopen derived listings against the refreshed availability.
-    """
+    """Release failed capacity at the listing's exact recorded site."""
+    from market_capacity_publication import capacity_availability, remote_site_clients
     from market_storefront.services.capacity_client import (
-        build_capacity_client,
-        member_availability_view,
-        remote_site_clients,
+        build_capacity_runtime,
+        capacity_binding_for_listing,
     )
 
     result = FulfillmentFailurePolicyResult(
         capacity_reservation_id=ctx.capacity_reservation_id
     )
-    if capacity is None:
-        capacity = build_capacity_client(lambda: db)
-
-    reservation = await capacity.release(
-        capacity_reservation_id=ctx.capacity_reservation_id,
+    if not ctx.listing_id:
+        raise RuntimeError("capacity release requires the persisted listing binding")
+    binding = await capacity_binding_for_listing(db, ctx.listing_id)
+    runtime = capacity or build_capacity_runtime(lambda: db)
+    reservation = await runtime.release(
+        binding,
+        capacity_reservation_id=str(ctx.capacity_reservation_id or ""),
         deal_ref={"escrow_uid": ctx.escrow_uid} if ctx.escrow_uid else None,
         failure_reason=ctx.reason,
         failure_message=ctx.message,
@@ -300,16 +297,13 @@ async def _release_capacity(
         result.state = "released"
         result.resource_id = reservation.get("resource_id")
         result.gpu_count = reservation.get("allocated_gpu_count")
-        home_site = next(iter(remote_site_clients(capacity)), None)
+        home_site = next(iter(remote_site_clients(runtime.client())), None)
         reopened: list[str] = []
         if home_site is not None:
             reopened = closed_available_listing_ids(
                 db.db_path,
                 home_site=home_site,
-                member_availability=await member_availability_view(
-                    capacity,
-                    db.db_path,
-                ),
+                member_availability=await capacity_availability(runtime.client()),
             )
         for listing_id in reopened:
             await db.update_listing(listing_id=listing_id, status="open")

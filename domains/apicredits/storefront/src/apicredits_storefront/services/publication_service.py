@@ -1,29 +1,23 @@
-"""Publication and quota-backed listing reconciliation.
-
-Registry fan-out is the shared core machinery
-(``core_storefront.registry_publication`` over the hoisted
-``MultiRegistryClient``); the domain part is the reconcile rule: a
-credit listing derives from a quota resource and closes on exhaustion /
-reopens on replenishment, driven by capacity deltas from the credits
-service's event feed.
-"""
-
+"""API-credit candidate hooks composed onto kit-owned publication."""
 from __future__ import annotations
 
-import logging
 from typing import Any
 
-from core_storefront.registry_publication import (
-    close_listing_in_registries,
-    publish_listing_to_registries,
-)
-from core_storefront.stage_log import stage_event
 from domains.apicredits.listings.reconciler import (
     reopenable_credit_listing_ids,
     stale_open_credit_listing_ids,
 )
+from market_capacity_publication import (
+    BoundListing,
+    CapacityBinding,
+    CapacityBindingError,
+    PublicationCandidate,
+    PublicationRuntime,
+    ReconciliationPlan,
+)
 from registry_client import ListingRequest, UpdateListingRequest
 
+from apicredits_storefront.services.capacity_client import capacity_binding_from_offer
 from apicredits_storefront.utils.config import (
     BASE_URL_OVERRIDE,
     resolve_registry_authorities,
@@ -31,7 +25,27 @@ from apicredits_storefront.utils.config import (
 )
 from apicredits_storefront.utils.sqlite_client import get_sqlite_client
 
-logger = logging.getLogger(__name__)
+
+class ApiCreditPublicationHooks:
+    def __init__(self, db: Any) -> None:
+        self._db = db
+
+    def validate_candidate(self, candidate: PublicationCandidate[dict[str, Any]]) -> None:
+        offer = candidate.payload.get("offer_resource") or {}
+        if isinstance(offer, str):
+            import json
+            offer = json.loads(offer)
+        if offer.get("offering_mode") != candidate.binding.offering_mode:
+            raise CapacityBindingError("API-credit offer mode differs from binding")
+
+    async def binding_for_listing(self, listing_id: str) -> CapacityBinding | None:
+        row = await self._db.load_listing(listing_id=listing_id)
+        if row is None:
+            return None
+        try:
+            return capacity_binding_from_offer(row.get("offer_resource") or {})
+        except (ValueError, TypeError):
+            return None
 
 
 def _make_registry_client():
@@ -40,173 +54,73 @@ def _make_registry_client():
     signer = container.resolved_marketplace_signer
     if signer is None:
         raise RuntimeError("storefront marketplace signer is not initialized")
-
-    urls = list(settings.registry.urls) if settings.registry.urls else []
-    if not urls:
-        raise RuntimeError("registry.urls must not be empty")
     return MultiRegistryClient(
-        urls,
-        caller_role="seller",
+        list(settings.registry.urls), caller_role="seller",
         expected_registries=resolve_registry_authorities(),
-        timeout=settings.registry.discovery_timeout,
-        auth=settings.registry.auth,
+        timeout=settings.registry.discovery_timeout, auth=settings.registry.auth,
         signer=signer,
     )
 
 
-async def publish_order_to_registry(order: dict[str, Any]) -> dict[str, Any]:
-    """Publish a listing to every configured registry."""
-    return await publish_listing_to_registries(
-        order,
+def build_publication_runtime(db: Any) -> PublicationRuntime[dict[str, Any]]:
+    return PublicationRuntime(
+        repository=db, hooks=ApiCreditPublicationHooks(db),
         enabled=settings.enable_registry_discovery,
+        registry_urls=tuple(settings.registry.urls),
         registry_client_factory=_make_registry_client,
         listing_request_factory=ListingRequest,
+        update_listing_request_factory=UpdateListingRequest,
         storefront_url=BASE_URL_OVERRIDE,
-        record_publications=_record_publications,
-        on_published=_record_listing_published_stage_event,
     )
+
+
+async def _candidate(db: Any, row: dict[str, Any]) -> PublicationCandidate[dict[str, Any]]:
+    binding = await ApiCreditPublicationHooks(db).binding_for_listing(str(row.get("listing_id") or ""))
+    if binding is None:
+        raise CapacityBindingError("API-credit listing has no durable capacity binding")
+    return PublicationCandidate(str(row["listing_id"]), binding, row)
+
+
+async def publish_order_to_registry(order: dict[str, Any]) -> dict[str, Any]:
+    db = get_sqlite_client()
+    return await build_publication_runtime(db).publish(await _candidate(db, order))
 
 
 async def close_order(parameters: dict[str, Any] | None = None) -> dict[str, Any]:
-    """Close a listing locally and in the registries."""
-    parameters = parameters or {}
-    listing_id = parameters.get("listing_id")
+    listing_id = (parameters or {}).get("listing_id")
     if not isinstance(listing_id, str) or not listing_id.strip():
         return {"status": "error", "message": "Missing listing_id for close_listing"}
-
-    try:
-        await get_sqlite_client().update_listing(
-            listing_id=listing_id,
-            status="closed",
-        )
-    except Exception as exc:
-        logger.warning(
-            "[LOCAL DB] Failed to update listing %s as closed: %s",
-            listing_id,
-            exc,
-        )
-
-    return await close_listing_in_registries(
-        listing_id,
-        enabled=settings.enable_registry_discovery,
-        registry_client_factory=_make_registry_client,
-        update_listing_request_factory=UpdateListingRequest,
-        select_target_registries=_registries_to_target,
-        record_publications=_record_publications,
-    )
+    db = get_sqlite_client()
+    binding = await ApiCreditPublicationHooks(db).binding_for_listing(listing_id)
+    if binding is None:
+        raise CapacityBindingError("API-credit listing has no durable capacity binding")
+    return await build_publication_runtime(db).close(BoundListing(listing_id, binding))
 
 
-async def close_token_listings_after_capacity_change(
-    db: Any,
-    capacity: Any,
-) -> list[str]:
-    """Close open credit listings whose quota resource is exhausted."""
-    from apicredits_storefront.services.capacity_client import availability_view
-
-    try:
-        availability = await availability_view(capacity)
-    except Exception as exc:
-        logger.warning(
-            "[CAPACITY] Quota snapshot unavailable; closing nothing: %s",
-            exc,
-        )
-        return []
+async def close_token_listings_after_capacity_change(db: Any, availability: dict) -> list[str]:
     rows = await db.list_listings(status="open", limit=200)
-    closed: list[str] = []
-    for listing_id in stale_open_credit_listing_ids(rows, availability=availability):
-        result = await close_order({"listing_id": listing_id})
-        if str(result.get("status", "?")) in ("closed", "skipped", "queued"):
-            closed.append(listing_id)
-            continue
-        row = await db.load_listing(listing_id=listing_id)
-        if row and row.get("status") == "closed":
-            closed.append(listing_id)
-    return closed
+    ids = stale_open_credit_listing_ids(rows, availability=availability)
+    hooks = ApiCreditPublicationHooks(db)
+    closed = []
+    for listing_id in ids:
+        binding = await hooks.binding_for_listing(listing_id)
+        if binding is None:
+            raise CapacityBindingError("API-credit listing has no durable capacity binding")
+        closed.append(BoundListing(listing_id, binding))
+    plan = ReconciliationPlan(close=tuple(closed))
+    result = await build_publication_runtime(db).reconcile(plan)
+    return list(result["closed"])
 
 
-async def reopen_token_listings_after_capacity_change(
-    db: Any,
-    capacity: Any,
-) -> list[str]:
-    """Reopen closed credit listings whose quota has units again."""
-    from apicredits_storefront.services.capacity_client import availability_view
-
-    try:
-        availability = await availability_view(capacity)
-    except Exception as exc:
-        logger.warning(
-            "[CAPACITY] Quota snapshot unavailable; reopening nothing: %s",
-            exc,
-        )
-        return []
+async def reopen_token_listings_after_capacity_change(db: Any, availability: dict) -> list[str]:
     rows = await db.list_listings(status="closed", limit=200)
-    reopened = reopenable_credit_listing_ids(rows, availability=availability)
-    for listing_id in reopened:
-        await db.update_listing(listing_id=listing_id, status="open")
-        await publish_order_to_registry(
-            await db.load_listing(listing_id=listing_id) or {},
-        )
-    return reopened
-
-
-def _record_listing_published_stage_event(
-    *,
-    listing_id: str,
-    offer_resource: dict[str, Any],
-    accepted_escrows: list[dict[str, Any]],
-    settlement_options: list[dict[str, Any]],
-    demands: list[dict[str, Any]],
-    max_duration_seconds: int | None,
-) -> None:
-    stage_event(
-        "discovery",
-        "order_published",
-        order_id=listing_id,
-        agent_url=BASE_URL_OVERRIDE,
-        offer=offer_resource,
-        accepted_escrows=accepted_escrows,
-        settlement_options=settlement_options,
-        demands=demands,
-        max_duration_seconds=max_duration_seconds,
+    ids = reopenable_credit_listing_ids(rows, availability=availability)
+    candidates = []
+    for listing_id in ids:
+        row = await db.load_listing(listing_id=listing_id)
+        if row is not None:
+            candidates.append(await _candidate(db, row))
+    result = await build_publication_runtime(db).reconcile(
+        ReconciliationPlan(reopen=tuple(candidates))
     )
-
-
-async def _registries_to_target(
-    listing_id: str,
-    fallback_urls: list[str],
-) -> list[str]:
-    try:
-        pubs = await get_sqlite_client().load_publications(listing_id=listing_id)
-    except Exception:
-        return list(fallback_urls)
-    active = [p["registry_url"] for p in pubs if p.get("status") != "unpublished"]
-    return active if active else list(fallback_urls)
-
-
-async def _record_publications(
-    listing_id: str,
-    results: list[dict[str, Any]],
-) -> None:
-    try:
-        sqlite_client = get_sqlite_client()
-    except Exception:
-        return
-    for result in results:
-        payload = result.get("payload") or {}
-        status = "published" if result.get("success") else "failed"
-        try:
-            await sqlite_client.upsert_publication(
-                listing_id=listing_id,
-                registry_url=result["registry_url"],
-                payload=payload,
-                status=status,
-                registry_assigned_id=result.get("registry_assigned_id"),
-                last_error=result.get("error"),
-            )
-        except Exception as exc:
-            logger.warning(
-                "[PUBLICATIONS] Failed to record publication for %s @ %s: %s",
-                listing_id,
-                result.get("registry_url"),
-                exc,
-            )
+    return list(result["reopened"])

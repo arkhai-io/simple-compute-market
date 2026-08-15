@@ -192,6 +192,7 @@ dependencies = [
     { name = "arkhai-core-registry-client", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "arkhai-core-storefront", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "arkhai-kit-alkahest", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
+    { name = "arkhai-kit-capacity-publication", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "arkhai-kit-config", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "arkhai-kit-identity", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "arkhai-kit-policy", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
@@ -222,6 +223,7 @@ requires-dist = [
     { name = "arkhai-core-registry-client", specifier = ">=0.11.0" },
     { name = "arkhai-core-storefront", specifier = ">=0.3.0" },
     { name = "arkhai-kit-alkahest" },
+    { name = "arkhai-kit-capacity-publication", specifier = "==0.1.0" },
     { name = "arkhai-kit-config" },
     { name = "arkhai-kit-identity", specifier = "==0.3.0" },
     { name = "arkhai-kit-policy" },
@@ -296,6 +298,20 @@ dependencies = [
 ]
 wheels = [
     { path = "arkhai_kit_alkahest-0.2.0-py3-none-any.whl" },
+]
+
+[[package]]
+name = "arkhai-kit-capacity-publication"
+version = "0.1.0"
+source = { registry = "../../../.dist" }
+dependencies = [
+    { name = "arkhai-core-storefront" },
+    { name = "arkhai-core-registry-client" },
+    { name = "arkhai-kit-site-client" },
+    { name = "pydantic" },
+]
+wheels = [
+    { path = "arkhai_kit_capacity_publication-0.1.0-py3-none-any.whl" },
 ]
 
 [[package]]

@@ -1,11 +1,14 @@
-.PHONY: test test-alkahest test-config test-identity test-policy test-site test-site-client test-resource-pools test-fulfillment test-settlement-runtime test-negotiation-runtime test-hosted-settlement test-storefront dist dist-site dist-site-client dist-resource-pools dist-fulfillment dist-settlement-runtime dist-negotiation-runtime dist-hosted-settlement dist-storefront
+.PHONY: test test-alkahest test-capacity-publication test-config test-identity test-policy test-site test-site-client test-resource-pools test-fulfillment test-settlement-runtime test-negotiation-runtime test-hosted-settlement test-storefront dist dist-capacity-publication dist-site dist-site-client dist-resource-pools dist-fulfillment dist-settlement-runtime dist-negotiation-runtime dist-hosted-settlement dist-storefront
 
 DIST_DIR ?= ../.dist
 
-test: dist test-alkahest test-config test-identity test-policy test-site test-site-client test-resource-pools test-fulfillment test-settlement-runtime test-negotiation-runtime test-hosted-settlement test-storefront
+test: dist test-alkahest test-capacity-publication test-config test-identity test-policy test-site test-site-client test-resource-pools test-fulfillment test-settlement-runtime test-negotiation-runtime test-hosted-settlement test-storefront
 
 test-alkahest:
 	cd alkahest && $(MAKE) test
+
+test-capacity-publication:
+	cd capacity-publication && $(MAKE) test
 
 test-config:
 	cd config && $(MAKE) test
@@ -40,7 +43,13 @@ test-hosted-settlement:
 test-storefront:
 	cd storefront && $(MAKE) test
 
-dist: dist-site dist-site-client dist-resource-pools dist-fulfillment dist-settlement-runtime dist-negotiation-runtime dist-hosted-settlement dist-storefront
+dist: dist-capacity-publication dist-site dist-site-client dist-resource-pools dist-fulfillment dist-settlement-runtime dist-negotiation-runtime dist-hosted-settlement dist-storefront
+
+dist-capacity-publication: dist-site-client
+	-mkdir -p $(DIST_DIR)
+	cd capacity-publication && $(MAKE) build
+	@ls $(DIST_DIR)/arkhai_kit_capacity_publication-*-none-any.whl > /dev/null 2>&1 || \
+		(echo "ERROR: arkhai-kit-capacity-publication produced a platform-specific wheel" && exit 1)
 
 dist-site:
 	-mkdir -p $(DIST_DIR)

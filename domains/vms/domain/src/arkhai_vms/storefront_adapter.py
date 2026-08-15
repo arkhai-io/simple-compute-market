@@ -71,6 +71,7 @@ def vm_offer_resource_for_listing(
         "gpu_count": candidate["gpu_count"],
         "sla": candidate["sla"],
         "region": candidate["region"],
+        "virtualization_type": candidate["offering_mode"],
     }
     if candidate.get("resource_id"):
         offer["resource_id"] = candidate["resource_id"]

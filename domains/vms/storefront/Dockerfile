@@ -46,6 +46,7 @@ RUN --mount=type=cache,target=/root/.cache/uv \
         uv sync --no-sources --no-dev --no-install-project --extra rl --find-links /.dist \
             --refresh-package arkhai-core \
             --refresh-package arkhai-core-storefront \
+            --refresh-package arkhai-kit-capacity-publication \
             --refresh-package arkhai-core-registry-client \
             --refresh-package arkhai-core-storefront-client \
             --refresh-package arkhai-kit-policy \
@@ -66,6 +67,7 @@ RUN --mount=type=cache,target=/root/.cache/uv \
         uv sync --no-sources --no-dev --no-install-project --find-links /.dist \
             --refresh-package arkhai-core \
             --refresh-package arkhai-core-storefront \
+            --refresh-package arkhai-kit-capacity-publication \
             --refresh-package arkhai-core-registry-client \
             --refresh-package arkhai-core-storefront-client \
             --refresh-package arkhai-kit-policy \
@@ -158,6 +160,7 @@ RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --no-sources --no-dev --no-editable --find-links /.dist \
         --refresh-package arkhai-core \
         --refresh-package arkhai-core-storefront \
+        --refresh-package arkhai-kit-capacity-publication \
         --refresh-package arkhai-core-registry-client \
         --refresh-package arkhai-core-storefront-client \
         --refresh-package arkhai-kit-policy \

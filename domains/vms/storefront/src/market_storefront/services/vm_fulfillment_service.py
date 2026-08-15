@@ -108,6 +108,7 @@ def _lease_window_strings(
 async def _commit_capacity_hold(
     *,
     capacity: Any,
+    binding: Any,
     held_reservation: dict[str, Any] | None,
     escrow_uid: str,
     duration_seconds: int,
@@ -134,7 +135,10 @@ async def _commit_capacity_hold(
         duration_seconds=duration_seconds,
     )
     try:
+        if held_reservation.get("site") != binding.site_id:
+            raise RuntimeError("accepted capacity hold site does not match listing")
         await capacity.commit(
+            binding,
             resource_id=held_reservation.get("resource_id"),
             capacity_reservation_id=str(held_reservation["capacity_reservation_id"]),
             lease_start_utc=lease_start_utc,
@@ -163,6 +167,7 @@ async def _commit_capacity_hold(
 async def _commit_fresh_reservation(
     *,
     capacity: Any,
+    binding: Any,
     reserved: dict[str, Any],
     escrow_uid: str,
     duration_seconds: int,
@@ -179,6 +184,7 @@ async def _commit_fresh_reservation(
         duration_seconds=duration_seconds,
     )
     await capacity.commit(
+        binding,
         resource_id=resource_id,
         capacity_reservation_id=str(capacity_reservation_id),
         lease_start_utc=lease_start_utc,
@@ -265,6 +271,7 @@ async def _build_vm_fulfillment_context(
 async def _reserve_capacity_for_obligation(
     *,
     capacity: Any,
+    binding: Any,
     held_reservation: dict[str, Any] | None,
     escrow_uid: str,
     listing_id: str | None,
@@ -286,6 +293,7 @@ async def _reserve_capacity_for_obligation(
     """
     reserved = await _commit_capacity_hold(
         capacity=capacity,
+        binding=binding,
         held_reservation=held_reservation,
         escrow_uid=escrow_uid,
         duration_seconds=duration_seconds,
@@ -296,15 +304,16 @@ async def _reserve_capacity_for_obligation(
         claim = dict(required_attributes or {})
         claim["executor_kind"] = "vm"
         reserved = await capacity.reserve(
+            binding,
             claim=claim,
             deal_ref={"listing_id": listing_id or order_id, "escrow_uid": escrow_uid},
             lease_start_utc=start_utc,
             lease_duration_seconds=duration_seconds,
-            site=site_id,
         )
         if reserved:
             await _commit_fresh_reservation(
                 capacity=capacity,
+                binding=binding,
                 reserved=reserved,
                 escrow_uid=escrow_uid,
                 duration_seconds=duration_seconds,
@@ -383,9 +392,19 @@ async def fulfill_vm_obligation(
             fulfillment_context=json.dumps(recovery_context, sort_keys=True),
             fulfillment_phase="context_persisted",
         )
+        if not listing_id:
+            raise RuntimeError("VM fulfillment requires a durably bound listing")
+        from market_storefront.services.capacity_client import (
+            capacity_binding_for_listing,
+        )
+
+        binding = await capacity_binding_for_listing(get_sqlite_client(), listing_id)
+        if site_id is not None and site_id != binding.site_id:
+            raise RuntimeError("requested fulfillment site differs from listing binding")
 
         reserved = await _reserve_capacity_for_obligation(
             capacity=capacity,
+            binding=binding,
             held_reservation=held_reservation,
             escrow_uid=escrow_uid,
             listing_id=listing_id,
@@ -555,6 +574,7 @@ async def fulfill_vm_obligation(
         # reservation, which is the common case, not an edge case.
         try:
             await capacity.commit(
+                binding,
                 resource_id=reserved_resource_id,
                 capacity_reservation_id=reserved_capacity_reservation_id,
                 lease_start_utc=lease_start_utc,

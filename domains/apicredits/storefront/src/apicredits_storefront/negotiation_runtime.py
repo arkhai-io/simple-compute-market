@@ -7,7 +7,11 @@ from collections.abc import Mapping
 from decimal import Decimal
 from typing import Any
 
-from apicredits_storefront.services.capacity_client import build_capacity_client
+from apicredits_storefront.services.capacity_client import (
+    build_capacity_client,
+    build_capacity_runtime,
+    capacity_binding_from_offer,
+)
 from apicredits_storefront.services.keys_lookup import lookup_key_record
 from apicredits_storefront.utils.config import CHAINS, settings
 from domains.apicredits.listings.models import coerce_resource_dict
@@ -277,8 +281,10 @@ async def _place_quota_hold(
         }
         if offer.get("resource_id"):
             claim["resource_id"] = str(offer["resource_id"])
-        capacity = build_capacity_client(lambda: repository)
+        capacity = build_capacity_runtime(lambda: repository)
+        binding = capacity_binding_from_offer(offer)
         held = await capacity.reserve(
+            binding,
             claim=claim,
             deal_ref={
                 "listing_id": acceptance.listing_id,

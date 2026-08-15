@@ -45,7 +45,10 @@ from market_settlement_runtime import (
 )
 
 from market_storefront.hosted_evidence import encode_hosted_fulfillment_ref
-from market_storefront.services.capacity_client import build_capacity_client
+from market_storefront.services.capacity_client import (
+    build_capacity_runtime,
+    capacity_binding_for_listing,
+)
 from market_storefront.utils import config as storefront_config
 from market_storefront.utils import escrow_verification
 
@@ -641,9 +644,17 @@ async def truncate_lease_for_terminal_settlement(
                 agreement_ref,
             )
             return None
-        capacity = build_capacity_client(lambda: sqlite_client)
+        thread = await sqlite_client.load_negotiation_thread_row(
+            negotiation_id=agreement_ref
+        )
+        listing_id = str((thread or {}).get("our_listing_id") or "")
+        if not listing_id:
+            raise RuntimeError("terminal settlement has no durable listing binding")
+        binding = await capacity_binding_for_listing(sqlite_client, listing_id)
+        capacity = build_capacity_runtime(lambda: sqlite_client)
         lease_end = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M")
         truncated = await capacity.truncate_lease(
+            binding,
             capacity_reservation_id=reservation_id,
             lease_end_utc=lease_end,
         )

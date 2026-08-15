@@ -367,11 +367,14 @@ def aggregate_over(
     subscriber is attached — drive it with ``pump_events``.
     """
     from core_storefront.aggregation import AggregateCapacityClient
+    from market_capacity_publication import (
+        CapacityProjection,
+        CapacityReconcileContext,
+        capacity_availability,
+    )
     from market_site_client import SiteCapacityClient
 
-    from market_storefront.services.capacity_client import (
-        _make_listing_reconcile_subscriber,
-    )
+    from market_storefront.services.capacity_client import _capacity_reconciler
 
     remote = SiteCapacityClient(
         "http://fake-site:8081",
@@ -381,9 +384,19 @@ def aggregate_over(
     )
     aggregate = AggregateCapacityClient({site_name: remote})
     if sqlite_client_factory is not None:
-        aggregate.subscribe(
-            _make_listing_reconcile_subscriber(sqlite_client_factory, aggregate),
-        )
+        reconcile = _capacity_reconciler(sqlite_client_factory)
+
+        async def _on_delta(delta):
+            rows = tuple(await aggregate.snapshot())
+            await reconcile(
+                CapacityReconcileContext(
+                    projections=(CapacityProjection(site_name, rows),),
+                    availability=await capacity_availability(aggregate),
+                    delta=delta,
+                )
+            )
+
+        aggregate.subscribe(_on_delta)
     return aggregate
 
 

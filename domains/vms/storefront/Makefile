@@ -33,6 +33,7 @@ reinit: verify-hosted-release ## Force-reinstall verified internal wheels.
 	uv sync --find-links $(DIST_DIR) \
 	--upgrade-package arkhai-core                    --reinstall-package arkhai-core \
 	--upgrade-package arkhai-core-storefront         --reinstall-package arkhai-core-storefront \
+	--upgrade-package arkhai-kit-capacity-publication --reinstall-package arkhai-kit-capacity-publication \
 	--upgrade-package arkhai-vms-storefront       --reinstall-package arkhai-vms-storefront \
 	--upgrade-package arkhai-bare-metal             --reinstall-package arkhai-bare-metal \
 	--upgrade-package arkhai-kit-identity            --reinstall-package arkhai-kit-identity \

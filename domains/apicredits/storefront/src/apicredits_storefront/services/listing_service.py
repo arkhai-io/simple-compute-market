@@ -43,8 +43,7 @@ class ListingService:
         deltas close it on exhaustion and reopen it on replenishment).
         """
         from apicredits_storefront.services.capacity_client import (
-            availability_view,
-            build_capacity_client,
+            build_capacity_runtime,
         )
         from apicredits_storefront.domain_runtime import get_market_domain_contract
         from apicredits_storefront.utils.config import BASE_URL_OVERRIDE
@@ -55,23 +54,19 @@ class ListingService:
                 "{chain_name, escrow_address, literal_fields, rates} entries."
             )
 
-        capacity = build_capacity_client(lambda: self._db)
-        availability = await availability_view(capacity)
-        available = availability.get((None, resource_id))
-        if available is None:
-            available = next(
-                (
-                    units
-                    for (_site, rid), units in availability.items()
-                    if rid == resource_id
-                ),
-                None,
-            )
-        if available is None:
+        capacity = build_capacity_runtime(lambda: self._db)
+        availability = await capacity.availability()
+        matches = [
+            (site_id, units)
+            for (site_id, rid), units in availability.items()
+            if rid == resource_id
+        ]
+        if len(matches) != 1:
             raise ValueError(
-                f"Quota resource {resource_id!r} is not registered in the "
-                "credits service's ledger; register it before publishing."
+                f"Quota resource {resource_id!r} must resolve to exactly one "
+                f"trusted capacity site; found {len(matches)}."
             )
+        capacity_site_id, available = matches[0]
         if available < 1:
             raise ValueError(
                 f"Quota resource {resource_id!r} has no sellable units "
@@ -86,6 +81,8 @@ class ListingService:
                     "openapi_url": openapi_url,
                     "base_url": base_url,
                     "resource_id": resource_id,
+                    "capacity_site_id": capacity_site_id,
+                    "offering_mode": "api_credits",
                 },
                 "accepted_escrows": accepted_escrows,
                 "demands": [],

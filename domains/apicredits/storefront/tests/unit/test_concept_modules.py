@@ -48,6 +48,8 @@ def _offer(resource_id="svc-quota"):
         "openapi_url": "https://api.acme.example/openapi.json",
         "base_url": "https://api.acme.example",
         "resource_id": resource_id,
+        "capacity_site_id": "tokens",
+        "offering_mode": "api_credits",
     }
 
 

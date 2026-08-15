@@ -61,7 +61,7 @@ from market_storefront.models.capacity_admin_models import (
     UsageStartedEventRequest,
 )
 from market_storefront.server import _set_globally_paused
-from market_storefront.services.capacity_client import remote_site_clients
+from market_capacity_publication import capacity_availability, remote_site_clients
 from market_storefront.settlement_composition import (
     build_storefront_publication_clause_compiler,
 )
@@ -246,8 +246,15 @@ class AdminController:
 
         truncated: dict[str, Any] | None = None
         if not body.dry_run:
-            capacity = self._capacity()
+            from market_storefront.services.capacity_client import (
+                build_capacity_runtime,
+                capacity_binding_for_listing,
+            )
+
+            binding = await capacity_binding_for_listing(self._db, listing_id)
+            capacity = build_capacity_runtime(lambda: self._db)
             truncated = await capacity.truncate_lease(
+                binding,
                 capacity_reservation_id=capacity_reservation_id,
                 lease_end_utc=interrupted_at,
             )
@@ -743,15 +750,8 @@ class AdminController:
         transient authority outage must not close (or worse, reopen)
         everything on ignorance.
         """
-        from market_storefront.services.capacity_client import (
-            member_availability_view,
-        )
-
         try:
-            return await member_availability_view(
-                self._capacity(),
-                self._db.db_path,
-            )
+            return await capacity_availability(self._capacity())
         except Exception as exc:
             logger.warning(
                 "[ADMIN] Could not snapshot site-authority capacity: %s",
@@ -1165,9 +1165,6 @@ class AdminController:
         )
 
     async def _release_site_ledger_holds(self) -> list[str]:
-        from market_storefront.services.capacity_client import (
-            remote_site_clients,
-        )
 
         released: list[str] = []
         try:

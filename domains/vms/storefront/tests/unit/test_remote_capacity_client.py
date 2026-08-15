@@ -12,12 +12,18 @@ by that service's own integration tests).
 
 from __future__ import annotations
 
-import asyncio
 from types import SimpleNamespace
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from core_storefront.capacity import CapacityDelta
+from core_storefront.aggregation import fill_first
+from market_capacity_publication import (
+    CapacityProjection,
+    CapacityReconcileContext,
+    capacity_availability,
+    remote_site_clients,
+)
 from dynaconf import Dynaconf
 
 from market_storefront.services import capacity_client as cc
@@ -93,7 +99,7 @@ def _settings(
     )
     source.set("capacity.authority_url", url)
     source.set("capacity.poll_interval", 0.01)
-    source.set("capacity.sites", sites)
+    source.set("capacity.sites", sites if sites is not None else {"default": url})
     source.set("capacity.placement", placement)
     source.set(
         "capacity.use_site_projection_for_listings",
@@ -105,25 +111,25 @@ def _settings(
 
 @pytest.fixture(autouse=True)
 def _reset_aggregate_cache():
-    cc._aggregate_state.update(key=None, client=None)
+    cc._capacity_runtime_state.update(key=None, runtime=None)
     with patch(
         "market_storefront.container.resolved_marketplace_signer",
         TEST_MARKETPLACE_SIGNER,
     ):
         yield
-    cc._aggregate_state.update(key=None, client=None)
+    cc._capacity_runtime_state.update(key=None, runtime=None)
 
 
 @pytest.mark.asyncio
-async def test_member_availability_view_reflects_consumption(
+async def test_exact_site_availability_reflects_consumption(
     client: cc.SiteCapacityClient,
 ):
     await client.reserve(
         claim={"executor_kind": "vm", "gpu_count": 3},
         deal_ref={},
     )
-    view = await cc.member_availability_view(client)
-    assert view[(None, "compute-kvm1-001")] == 5
+    aggregate = cc.AggregateCapacityClient({"default": client})
+    view = await capacity_availability(aggregate)
     assert view[("default", "compute-kvm1-001")] == 5
 
 
@@ -133,7 +139,7 @@ def test_build_always_aggregates_site_authorities():
     assert isinstance(built, cc.AggregateCapacityClient)
     assert built.site_names == ["default"]
     assert built.site("default").base_url == "http://site-authority:8081"
-    assert cc.remote_site_clients(built).keys() == {"default"}
+    assert remote_site_clients(built).keys() == {"default"}
 
 
 def test_build_is_a_config_keyed_singleton():
@@ -149,16 +155,15 @@ def test_build_is_a_config_keyed_singleton():
         rebuilt = cc.build_capacity_client(lambda: None)
     assert rebuilt is not first
     assert rebuilt.site_names == ["dc-a", "dc-b"]
-    assert cc.remote_site_clients(rebuilt).keys() == {"dc-a", "dc-b"}
+    assert remote_site_clients(rebuilt).keys() == {"dc-a", "dc-b"}
 
 
-def test_site_mode_defaults_authority_url_to_provisioning():
-    with patch(
-        "market_storefront.utils.config.settings",
-        _settings(url=""),
-    ):
-        built = cc.build_capacity_client(lambda: None)
-    assert built.site("default").base_url == "http://prov:8081"
+def test_missing_explicit_sites_is_rejected():
+    configured = _settings()
+    configured.set("capacity.sites", {})
+    with patch("market_storefront.utils.config.settings", configured):
+        with pytest.raises(RuntimeError, match="capacity.sites"):
+            cc.build_capacity_client(lambda: None)
 
 
 def test_most_available_placement_gets_the_kit_site_exact_claim_matcher():
@@ -204,7 +209,7 @@ def test_fill_first_placement_is_not_wrapped_with_a_claim_matcher():
         _settings(placement="fill_first"),
     ):
         built = cc.build_capacity_client(lambda: None)
-    assert built._placement is cc.fill_first
+    assert built._placement is fill_first
 
 
 @pytest.mark.asyncio
@@ -295,47 +300,20 @@ async def test_most_available_excludes_a_resource_type_mismatch_through_the_real
 
 
 @pytest.mark.asyncio
-async def test_subscriber_closes_and_reopens_with_site_availability(
-    client: cc.SiteCapacityClient,
-):
-    calls: list[tuple[str, dict | None]] = []
+async def test_domain_hook_closes_and_reopens_with_exact_site_availability():
+    calls: list[tuple[str, dict]] = []
     repository = SimpleNamespace(db_path="/tmp/x.db")
 
-    async def fake_close(
-        db_path,
-        *,
-        sqlite_client,
-        home_site=None,
-        configured_site_count=0,
-        member_availability=None,
-        site_pool_projection=None,
-        site_capacity_buckets=None,
-    ):
-        assert sqlite_client is repository
-        calls.append(("close", None, member_availability))
-        return ["lst-1"]
-
-    async def fake_reopen(
-        db_path,
-        *,
-        sqlite_client,
-        home_site=None,
-        member_availability=None,
-        site_pool_projection=None,
-        site_capacity_buckets=None,
-    ):
-        assert sqlite_client is repository
-        calls.append(("reopen", None, member_availability))
+    async def fake_close(_db_path, *, member_availability, **_kwargs):
+        calls.append(("close", member_availability))
         return []
 
-    subscriber = cc._make_listing_reconcile_subscriber(
-        lambda: repository,
-        client,
-    )
-    await client.reserve(
-        claim={"executor_kind": "vm", "gpu_count": 2},
-        deal_ref={},
-    )
+    async def fake_reopen(_db_path, *, member_availability, **_kwargs):
+        calls.append(("reopen", member_availability))
+        return []
+
+    reconcile = cc._capacity_reconciler(lambda: repository)
+    projection = (CapacityProjection("default", ()),)
     with (
         patch(
             "market_storefront.services.publication_service."
@@ -347,56 +325,41 @@ async def test_subscriber_closes_and_reopens_with_site_availability(
             "reopen_available_compute_listings_after_capacity_change",
             fake_reopen,
         ),
+        patch("market_storefront.services.capacity_client.settings", _settings()),
     ):
-        await subscriber(CapacityDelta(kind="reserved", version=1))
-        await subscriber(CapacityDelta(kind="released", version=2))
+        await reconcile(
+            CapacityReconcileContext(
+                projections=projection,
+                availability={("default", "compute-kvm1-001"): 6},
+                delta=CapacityDelta(kind="reserved", version=1),
+            )
+        )
+        await reconcile(
+            CapacityReconcileContext(
+                projections=projection,
+                availability={("default", "compute-kvm1-001"): 8},
+                delta=CapacityDelta(kind="released", version=2),
+            )
+        )
 
-    assert [c[0] for c in calls] == ["close", "reopen"]
-    # Availability came from the site snapshot, keyed for the home site.
-    assert calls[0][2][(None, "compute-kvm1-001")] == 6
+    assert [name for name, _ in calls] == ["close", "reopen"]
+    assert calls[0][1] == {("default", "compute-kvm1-001"): 6}
 
 
 @pytest.mark.asyncio
-async def test_subscriber_runs_both_passes_for_mixed_direction_capacity_change(
-    client: cc.SiteCapacityClient,
-):
-    """A mixed-direction registration e.g. GPU count grew while RAM shrank.
-    "capacity_changed" must run both reconciliation passes and not be silently
-    ignored like an unrecognized kind would be."""
+async def test_domain_hook_runs_both_passes_for_mixed_capacity_change():
     calls: list[str] = []
     repository = SimpleNamespace(db_path="/tmp/x.db")
 
-    async def fake_close(
-        db_path,
-        *,
-        sqlite_client,
-        home_site=None,
-        configured_site_count=0,
-        member_availability=None,
-        site_pool_projection=None,
-        site_capacity_buckets=None,
-    ):
-        assert sqlite_client is repository
+    async def fake_close(*_args, **_kwargs):
         calls.append("close")
         return []
 
-    async def fake_reopen(
-        db_path,
-        *,
-        sqlite_client,
-        home_site=None,
-        member_availability=None,
-        site_pool_projection=None,
-        site_capacity_buckets=None,
-    ):
-        assert sqlite_client is repository
+    async def fake_reopen(*_args, **_kwargs):
         calls.append("reopen")
         return []
 
-    subscriber = cc._make_listing_reconcile_subscriber(
-        lambda: repository,
-        client,
-    )
+    reconcile = cc._capacity_reconciler(lambda: repository)
     with (
         patch(
             "market_storefront.services.publication_service."
@@ -408,85 +371,30 @@ async def test_subscriber_runs_both_passes_for_mixed_direction_capacity_change(
             "reopen_available_compute_listings_after_capacity_change",
             fake_reopen,
         ),
+        patch("market_storefront.services.capacity_client.settings", _settings()),
     ):
-        await subscriber(CapacityDelta(kind="capacity_changed", version=1))
+        await reconcile(
+            CapacityReconcileContext(
+                projections=(CapacityProjection("default", ()),),
+                availability={},
+                delta=CapacityDelta(kind="capacity_changed", version=1),
+            )
+        )
 
     assert calls == ["close", "reopen"]
 
 
 @pytest.mark.asyncio
-async def test_poller_positions_at_head_then_emits_new_deltas(site: FakeSite):
-    """Each site's poller skips history, reconciles once, then streams
-    site-tagged deltas onto the aggregate bus."""
-    client = cc.SiteCapacityClient(
-        "http://site-authority:8081",
-        signer=TEST_MARKETPLACE_SIGNER,
-        expected_authorities=TEST_SITE_AUTHORITIES,
-        transport=site.transport(),
-    )
-    aggregate = cc.AggregateCapacityClient({"dc-a": client})
-    seen: list[CapacityDelta] = []
-
-    async def record(delta: CapacityDelta) -> None:
-        seen.append(delta)
-
-    aggregate.subscribe(record)
-    site._emit("reserved", "compute-kvm1-001")  # history — must NOT replay
-
-    reconciles: list[dict] = []
+async def test_poller_loop_delegates_to_composed_kit_runtime():
     repository = SimpleNamespace(db_path="/tmp/x.db")
-
-    async def fake_reconcile(db_path, *, sqlite_client, **kwargs):
-        assert sqlite_client is repository
-        reconciles.append(
-            {"db_path": db_path, "sqlite_client": sqlite_client, **kwargs}
-        )
-        return []
-
+    runtime = SimpleNamespace(poll_events=AsyncMock())
     with (
-        patch.object(cc, "build_capacity_client", return_value=aggregate),
-        patch(
-            "market_storefront.utils.config.settings",
-            _settings(),
-        ),
-        patch(
-            "market_storefront.services.publication_service."
-            "close_stale_compute_listings_after_capacity_change",
-            fake_reconcile,
-        ),
-        patch(
-            "market_storefront.services.publication_service."
-            "reopen_available_compute_listings_after_capacity_change",
-            fake_reconcile,
-        ),
+        patch.object(cc, "build_capacity_runtime", return_value=runtime),
+        patch("market_storefront.utils.config.settings", _settings()),
     ):
-        task = asyncio.create_task(
-            cc.capacity_events_poller_loop(repository)
-        )
-        try:
-            for _ in range(200):
-                if len(reconciles) >= 2:  # startup close+reopen ran
-                    break
-                await asyncio.sleep(0.01)
-            site._emit("committed", "compute-kvm1-001")
-            for _ in range(200):
-                if seen:
-                    break
-                await asyncio.sleep(0.01)
-        finally:
-            task.cancel()
-            try:
-                await task
-            except asyncio.CancelledError:
-                pass
+        await cc.capacity_events_poller_loop(repository)
 
-    assert len(reconciles) >= 2
-    assert all(call["home_site"] == "dc-a" for call in reconciles[:2])
-    assert all(call["sqlite_client"] is repository for call in reconciles[:2])
-    assert reconciles[0]["configured_site_count"] == 1
-    assert [d.kind for d in seen] == ["committed"]
-    assert seen[0].resource_id == "compute-kvm1-001"
-    assert seen[0].site == "dc-a"
+    runtime.poll_events.assert_awaited_once_with(interval_seconds=0.01)
 
 
 # ---------------------------------------------------------------------------
@@ -710,10 +618,7 @@ class TestReconcileListingsUsesCachedProjectionWhenEnabled:
             assert sqlite_client is repository
             return []
 
-        subscriber = cc._make_listing_reconcile_subscriber(
-            lambda: repository,
-            client,
-        )
+        reconcile = cc._capacity_reconciler(lambda: repository)
         with (
             patch.dict(spc._caches, {"default": caches}, clear=True),
             settings_overrides(**{"capacity.use_site_projection_for_listings": True}),
@@ -728,7 +633,13 @@ class TestReconcileListingsUsesCachedProjectionWhenEnabled:
                 fake_reopen,
             ),
         ):
-            await subscriber(CapacityDelta(kind="reserved", version=1))
+            await reconcile(
+                CapacityReconcileContext(
+                    projections=(CapacityProjection("default", ()),),
+                    availability={},
+                    delta=CapacityDelta(kind="reserved", version=1),
+                )
+            )
 
         assert received["site_pool_projection"] == {"default": pool_rows}
         assert received["site_capacity_buckets"] == {"default": bucket_rows}
@@ -791,10 +702,7 @@ class TestReconcileListingsUsesCachedProjectionWhenEnabled:
             assert sqlite_client is repository
             return []
 
-        subscriber = cc._make_listing_reconcile_subscriber(
-            lambda: repository,
-            client,
-        )
+        reconcile = cc._capacity_reconciler(lambda: repository)
         with (
             patch.dict(spc._caches, {"default": caches}, clear=True),
             settings_overrides(**{"capacity.use_site_projection_for_listings": False}),
@@ -809,7 +717,13 @@ class TestReconcileListingsUsesCachedProjectionWhenEnabled:
                 fake_reopen,
             ),
         ):
-            await subscriber(CapacityDelta(kind="reserved", version=1))
+            await reconcile(
+                CapacityReconcileContext(
+                    projections=(CapacityProjection("default", ()),),
+                    availability={},
+                    delta=CapacityDelta(kind="reserved", version=1),
+                )
+            )
 
         assert received["site_pool_projection"] is None
         assert received["site_capacity_buckets"] is None
