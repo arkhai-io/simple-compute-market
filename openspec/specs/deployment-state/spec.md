@@ -67,6 +67,29 @@ Published wheels MUST resolve internal runtime dependencies by distribution vers
 - **WHEN** its dependencies are available from PyPI or `--find-links`
 - **THEN** installation succeeds without the repository's relative directory layout
 
+### Requirement: Independently deployable bare-metal seller role
+The bare-metal storefront MUST be buildable as a wheel from the repository `.dist` artifact set and as a dedicated image containing its declared domain and shared-role dependencies. It MUST own a writable database distinct from every other storefront, with separate immutable agreement-artifact, fulfillment-lifecycle, and reservation-to-site routing tables. Operator configuration MUST bind every stable site identifier to one exact authority URL and canonical principal, while signer credentials and complete routing records remain Secret-injected and diagnostics remain URL/credential-free.
+
+#### Scenario: Bare-metal storefront package is installed
+- **WHEN** the distribution is installed from staged wheels outside the source checkout
+- **THEN** the `bare-metal-storefront` entry point and `market.storefront_contributions` hook load without editable sibling packages
+
+#### Scenario: Operator enables only bare-metal
+- **WHEN** the bare-metal seller role is enabled and VM storefront is disabled
+- **THEN** the role starts with its own persistence and trusted-site configuration without waiting for or referencing a VM storefront
+
+#### Scenario: Operator enables both compute storefronts
+- **WHEN** VM and bare-metal seller roles use one provisioning service
+- **THEN** they remain separate processes with separate writable storefront databases and explicit public service URLs or gateway paths
+
+#### Scenario: Site configuration is diagnosed
+- **WHEN** health or operator status reports configured bare-metal site bindings
+- **THEN** it reports stable site IDs and canonical authority principals but no authority URL, signer credential, provider configuration, or private inventory
+
+#### Scenario: Helm deploys the one-domain role
+- **WHEN** an operator supplies public seller identity, existing signer and site-binding Secret references, one persistent volume, and a pinned dedicated image to `helm/charts/bare-metal-storefront`
+- **THEN** the chart renders one unprivileged storefront process with startup, liveness, and readiness probes and no wait or import dependency on the VM storefront
+
 ### Requirement: Installable compute provisioner
 
 The extracted compute-provisioning distribution MUST install outside the repository layout with all declared runtime dependencies and MUST expose supported commands for its API and worker roles.
@@ -403,6 +426,7 @@ An operator MUST quiesce effects and run the explicitly selected contribution's 
 - Extracted compute API/worker packaging and image lifecycle: `provisioning/compute/service/pyproject.toml`, `provisioning/compute/service/Dockerfile`, and its composition, worker, and image smoke tests.
 - Explicit contribution configuration and secret-free render surfaces: `domains/vms/storefront/tests/unit/test_config_loader.py`, `test_cli.py`, `helm/charts/storefront/templates/tests/storefront-environment-test.yaml`, and Helm schema fixtures.
 - Transactional legacy storefront migration, byte-stable refusal, restrictive backup, atomic replacement, and idempotency: `domains/vms/storefront/tests/unit/test_domain_migration.py`.
+- Bare-metal staged-wheel/image boundary and installed contribution: `domains/bare_metal/storefront/pyproject.toml`, `domains/bare_metal/storefront/Dockerfile`, `domains/bare_metal/storefront/tests/test_package.py`, `test_import_boundaries.py`, and `test_app_composition.py`.
 
 Repository-wide migration entrypoints and compatibility-preserving non-additive registry rollout remain proposed in `add-database-migration-commands` and `migrate-registry-to-postgres`.
 

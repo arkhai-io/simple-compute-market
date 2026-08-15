@@ -8,9 +8,15 @@ import sqlite3
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from typing import Any
-from urllib.parse import urlsplit
+from compute_provisioning import (
+    ComputeProvisioningClient,
+    FulfillmentAcceptanceResponse,
+    FulfillmentRequestBody,
+    FulfillmentScheduleRequest,
+    FulfillmentScheduleResponse,
+    FulfillmentStatusResponse,
+)
 
-from compute_provisioning import ComputeProvisioningClient
 from core_storefront.aggregation import (
     PLACEMENT_POLICIES,
     AggregateCapacityClient,
@@ -155,15 +161,10 @@ class DurableReservationSiteMap(dict[str, str]):
             with conn:
                 conn.execute(
                     """
-                    INSERT INTO bare_metal_selected_site_bindings(
+                    INSERT OR IGNORE INTO bare_metal_selected_site_bindings(
                       capacity_reservation_id, site_id,
                       authority_scheme, authority_identifier
                     ) VALUES (?, ?, ?, ?)
-                    ON CONFLICT(capacity_reservation_id) DO UPDATE SET
-                      site_id = excluded.site_id,
-                      authority_scheme = excluded.authority_scheme,
-                      authority_identifier = excluded.authority_identifier,
-                      updated_at = STRFTIME('%Y-%m-%dT%H:%M:%fZ', 'now')
                     """,
                     (
                         reservation_id,
@@ -172,6 +173,22 @@ class DurableReservationSiteMap(dict[str, str]):
                         binding.authority_principal.identifier,
                     ),
                 )
+                recorded = conn.execute(
+                    "SELECT site_id, authority_scheme, authority_identifier "
+                    "FROM bare_metal_selected_site_bindings "
+                    "WHERE capacity_reservation_id = ?",
+                    (reservation_id,),
+                ).fetchone()
+                expected = (
+                    site_id,
+                    binding.authority_principal.scheme.value,
+                    binding.authority_principal.identifier,
+                )
+                if recorded != expected:
+                    raise RuntimeError(
+                        "capacity reservation conflicts with its persisted "
+                        "trusted site authority binding"
+                    )
         finally:
             conn.close()
         super().__setitem__(reservation_id, site_id)
@@ -191,6 +208,77 @@ class DurableReservationSiteMap(dict[str, str]):
         return super().pop(reservation_id, default)
 
 
+class SelectedSiteFulfillmentClient:
+    """Route every lifecycle verb only to the reservation's durable site."""
+
+    def __init__(
+        self,
+        clients: Mapping[str, ComputeProvisioningClient],
+        reservation_sites: Mapping[str, str],
+    ) -> None:
+        self._clients = dict(clients)
+        self._reservation_sites = reservation_sites
+
+    def _client(self, capacity_reservation_id: str) -> ComputeProvisioningClient:
+        site_id = self._reservation_sites.get(str(capacity_reservation_id))
+        if site_id is None:
+            raise RuntimeError(
+                "capacity reservation has no persisted trusted site binding"
+            )
+        try:
+            return self._clients[site_id]
+        except KeyError as exc:
+            raise RuntimeError(
+                f"capacity reservation references unconfigured site_id {site_id!r}"
+            ) from exc
+
+    async def schedule_resource(
+        self,
+        request: FulfillmentScheduleRequest,
+    ) -> FulfillmentScheduleResponse:
+        return await self._client(
+            request.capacity_reservation_id
+        ).schedule_resource(request)
+
+    async def begin_fulfillment(
+        self,
+        body: FulfillmentRequestBody,
+    ) -> FulfillmentAcceptanceResponse:
+        return await self._client(
+            body.capacity_reservation_id
+        ).begin_fulfillment(body)
+
+    async def get_fulfillment_status(
+        self,
+        fulfillment_id: str,
+        *,
+        capacity_reservation_id: str,
+    ) -> FulfillmentStatusResponse:
+        return await self._client(
+            capacity_reservation_id
+        ).get_fulfillment_status(fulfillment_id)
+
+    async def get_fulfillment_result(
+        self,
+        fulfillment_id: str,
+        *,
+        capacity_reservation_id: str,
+    ):
+        return await self._client(
+            capacity_reservation_id
+        ).get_fulfillment_result(fulfillment_id)
+
+    async def begin_fulfillment_teardown(
+        self,
+        fulfillment_id: str,
+        *,
+        capacity_reservation_id: str,
+    ) -> FulfillmentAcceptanceResponse:
+        return await self._client(
+            capacity_reservation_id
+        ).begin_fulfillment_teardown(fulfillment_id)
+
+
 def build_trusted_site_clients(
     *,
     bindings: tuple[BareMetalSiteBinding, ...],
@@ -199,7 +287,7 @@ def build_trusted_site_clients(
     placement: str,
 ) -> tuple[
     AggregateCapacityClient,
-    dict[str, ComputeProvisioningClient],
+    SelectedSiteFulfillmentClient,
 ]:
     """Construct exact per-site clients and a shared durable route map."""
     try:
@@ -232,11 +320,15 @@ def build_trusted_site_clients(
         )
         for site_id, binding in by_site.items()
     }
+    capacity_client = AggregateCapacityClient(
+        capacity_sites,
+        placement=placement_policy,
+        reservation_sites=reservation_sites,
+    )
     return (
-        AggregateCapacityClient(
-            capacity_sites,
-            placement=placement_policy,
-            reservation_sites=reservation_sites,
+        capacity_client,
+        SelectedSiteFulfillmentClient(
+            fulfillment_sites,
+            reservation_sites,
         ),
-        fulfillment_sites,
     )

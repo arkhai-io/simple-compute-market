@@ -68,7 +68,7 @@ def build_bare_metal_storefront_registry(
     return StorefrontDomainRegistry(
         (
             StorefrontDomainRegistration(
-                offering_mode="bare_metal.ansible",
+                offering_mode="bare_metal",
                 contract=domain,
                 contribution_id="bare_metal",
             ),
@@ -87,7 +87,7 @@ def build_bare_metal_storefront_app(
 ) -> Any:
     """Build the shared storefront shell around one bare-metal registration."""
 
-    registration = registry.resolve_mode("bare_metal.ansible")
+    registration = registry.resolve_mode("bare_metal")
     selected_domain = registration.contract
 
     def build_services(domain: MarketDomainContract) -> BareMetalStorefrontRuntime:

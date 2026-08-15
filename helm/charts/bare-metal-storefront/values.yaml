@@ -1,0 +1,53 @@
+global:
+  imageRepository: ""
+
+image:
+  repository: ""
+  name: arkhai
+  tag: bare-metal-storefront
+  digest: ""
+  pullPolicy: IfNotPresent
+
+replicaCount: 1
+
+service:
+  type: ClusterIP
+  port: 8000
+
+identity:
+  principal:
+    scheme: eip191
+    identifier: "0x0000000000000000000000000000000000000000"
+  credentialSecret:
+    name: ""
+    key: credential
+
+adminPrincipals:
+  - scheme: eip191
+    identifier: "0x0000000000000000000000000000000000000000"
+
+# Existing Secret containing one JSON array under `key`. Each entry is exactly:
+# {"site_id":"...","authority_url":"https://...","authority_principal":
+#  {"scheme":"eip191|ed25519","identifier":"..."}}.
+# URLs and routing topology therefore never enter chart-generated ConfigMaps.
+siteBindingsSecret:
+  name: ""
+  key: sites.json
+sitePlacement: fill_first
+
+publicUrl: ""
+sellerEvmAddress: ""
+databasePath: /var/lib/arkhai/bare-metal-storefront.db
+
+persistence:
+  enabled: true
+  existingClaim: ""
+  storageClass: ""
+  size: 1Gi
+  accessMode: ReadWriteOnce
+  mountPath: /var/lib/arkhai
+
+resources: {}
+nodeSelector: {}
+tolerations: []
+affinity: {}

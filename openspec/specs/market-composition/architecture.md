@@ -68,18 +68,22 @@ Registration controls construction, not lifecycle ownership. A composition injec
 ## Frozen storefront registry and executable ownership
 
 The compute-family storefront executable is core-owned, schema-opaque role
-machinery extended from below. Installed domain packages publish one
-`StorefrontDomainContribution` entry point. Public configuration selects an
+machinery extended from below. Installed domain packages publish one validated
+`StorefrontDomainContribution` through the canonical
+`market.storefront_contributions` entry group. Public configuration selects an
 exact contribution/mode/domain/version set; startup validates it and freezes
 one registry before state or network effects. Each registry value retains the
 exact contract object plus its publication and legacy-migration hooks.
 
 Application, persistence, publication, negotiation, settlement, fulfillment,
-recovery, result, and teardown layers receive that same registry. Durable
-bindings resolve only to their pre-registered exact objects. Domain payloads
-cross common lifecycle boundaries as immutable schema-opaque carriers and are
-validated only by the selected contract. The one-domain topology is the same
-composition with one explicit row, never a separate executable or default.
+recovery, result, and teardown layers receive that same registry. Every listing
+binding freezes its selected contribution identity, contract version, Resource
+Pool offering mode, trusted site, and Physical Resource; negotiation copies the
+immutable binding before storing a domain artifact. Durable bindings resolve
+only to their pre-registered exact objects, and schema-opaque payloads are
+validated only by the selected contract. A one-domain storefront uses these
+same carriers with one explicit registration, never a separate executable or
+default, so adding a shared shell changes neither persistence nor routing.
 
 ## Storefront composition kit
 
@@ -125,12 +129,17 @@ own lifecycle and dispatch, while the domain owns interpretation and the
 concrete effect.
 
 The buyer CLI and registry executable remain core-owned for the same
-schema-opaque reason. Domain packages retain market meaning, codecs,
-publication semantics, seller policy, route and service contributions, and
-concrete fulfillment behavior. The compute-family shell gives VM and bare
-metal the shared frozen-registry lifecycle, while API credits composes the same
-kit mechanisms at its own non-physical storefront boundary. No topology gains
-a default domain, global selector, or no-op fulfillment implementation.
+schema-opaque reason. Each domain package exports one validated contribution
+while retaining its market meaning, codecs, publication semantics, seller
+policy,
+route and service contributions, and concrete fulfillment behavior. A
+one-domain executable or shared shell owns process configuration. The
+bare-metal contribution uses shared lifecycle contexts with its own
+site/capacity/fulfillment adapters and never imports VM services. The
+compute-family shell gives VM and bare metal the shared frozen-registry
+lifecycle, while API credits composes the same kit mechanisms at its own
+non-physical storefront boundary. No topology gains a default domain, global
+selector, or no-op fulfillment implementation.
 
 ## Identity composition
 
@@ -153,10 +162,12 @@ This split does not add a second settlement lifecycle. The direct lane manages p
 The composition contract covers the shipped role protocols and versioned domain contracts; it is not a claim that every possible market shape fits the current phases. Auctions, sealed-bid protocols, arbitrary settlement plans, and a universal storefront executable require explicit changes rather than inference from the extension points.
 
 The frozen-registry, binding, and dispatch seams have deterministic repository
-evidence, but the complete live VM/bare-metal restart, teardown, and
-capacity-restoration proof remains gated on the external production bare-metal
-fulfillment contribution and its selected-site POOLS-7 lifecycle. A no-op hook,
-synthetic result, or common-shell success cannot stand in for that live proof.
+evidence, but complete live VM/bare-metal restart, teardown, and
+capacity-restoration proof requires deployment against an external production
+site authority, provider, and the selected-site POOLS-7 lifecycle. The shipped
+bare-metal contribution and its exact hooks do not by themselves prove live
+hardware access or revocation. A no-op hook, synthetic result, or common-shell
+success cannot stand in for that proof.
 
 ## Related contracts
 

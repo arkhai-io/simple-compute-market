@@ -84,6 +84,9 @@ async def _insert_listing(runtime: BareMetalStorefrontRuntime) -> None:
         updated_at="2026-01-01T00:00:00Z",
         seller_principal=runtime.seller_principal,
         storefront_url=runtime.storefront_url,
+        site_id="site-a",
+        pool_id="pool-a",
+        physical_resource_id="resource-1",
         listing={
             "kind": "bare_metal.v1",
             "machine_id": "machine-1",
@@ -108,6 +111,7 @@ async def test_listing_routes_return_exact_validated_domain_payload(tmp_path) ->
     assert response.status_code == 200
     assert response.json()["offer_resource"] == {
         "kind": "bare_metal.v1",
+        "virtualization_type": "bare_metal",
         "machine_id": "machine-1",
         "physical_host_id": "physical-host-1",
         "access_methods": ["ssh"],

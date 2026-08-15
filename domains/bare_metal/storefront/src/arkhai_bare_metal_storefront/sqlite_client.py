@@ -20,6 +20,14 @@ from arkhai_bare_metal import (
 from core_storefront.sqlite_client import SQLiteClient as CoreSQLiteClient
 from core_storefront.sqlite_migrations import MigrationLike
 from market_core import MarketDomainContract, validate_domain_contract
+from core_storefront import (
+    StorefrontDomainBinding,
+    StorefrontDomainRegistration,
+    StorefrontDomainRegistry,
+    StorefrontListingBinding,
+    StorefrontThreadBinding,
+    build_storefront_derivation_key,
+)
 from market_settlement_runtime import settlement_migrations
 from market_identity import Identity
 from pydantic import BaseModel
@@ -33,14 +41,6 @@ T = TypeVar("T", bound=BaseModel)
 class SQLiteClient(CoreSQLiteClient):
     """Core market state plus validated opaque bare-metal artifacts."""
 
-    _ARTIFACT_COLUMNS = {
-        "message": "message_json",
-        "terms": "terms_json",
-        "materialization": "materialization_json",
-        "receipt": "receipt_json",
-        "result": "result_json",
-    }
-
     def __init__(
         self,
         db_path: str,
@@ -51,6 +51,15 @@ class SQLiteClient(CoreSQLiteClient):
     ) -> None:
         self._market_domain = validate_domain_contract(
             domain or get_market_domain_contract(),
+        )
+        self._domain_registry = StorefrontDomainRegistry(
+            (
+                StorefrontDomainRegistration(
+                    offering_mode="bare_metal",
+                    contract=self._market_domain,
+                    contribution_id="bare_metal",
+                ),
+            )
         )
         super().__init__(
             db_path,
@@ -136,31 +145,74 @@ class SQLiteClient(CoreSQLiteClient):
         terms: BareMetalTerms | None,
         agreed_amount: int | None,
     ) -> None:
-        """Atomically persist one validated opening and seller decision."""
-        message_payload = json.dumps(
-            self._market_domain.codecs.message(message).model_dump(
-                mode="json",
-                exclude_none=True,
-            ),
-            sort_keys=True,
-            separators=(",", ":"),
+        """Persist one opening under the listing's immutable domain/site binding."""
+        listing_binding = await self.load_listing_binding(listing_id=listing_id)
+        if listing_binding is None:
+            raise RuntimeError(
+                f"listing {listing_id!r} has no immutable storefront binding"
+            )
+        self._domain_registry.resolve(listing_binding.binding)
+        thread_binding = StorefrontThreadBinding(
+            negotiation_id=negotiation_id,
+            listing_id=listing_id,
+            site_id=listing_binding.site_id,
+            binding=listing_binding.binding,
         )
-        terms_payload = None
-        if terms is not None:
-            terms_payload = json.dumps(
-                self._market_domain.codecs.terms(terms).model_dump(
+        normalized_message = self._market_domain.codecs.message(message)
+        prepared_message, _ = self.prepare_domain_artifact(
+            artifact_slot="message",
+            value=normalized_message,
+            binding=thread_binding.binding,
+            registry=self._domain_registry,
+        )
+        now = datetime.now(timezone.utc).isoformat()
+        owner_id = (
+            f"{seller_principal.scheme.value}:{seller_principal.identifier}"
+        )
+        await self.create_negotiation_opening(
+            thread={
+                "negotiation_id": negotiation_id,
+                "listing_id": listing_id,
+                "counterparty_listing_id": "",
+                "seller_agent_url": "",
+                "buyer_agent_url": buyer_agent_id,
+                "requested_duration_seconds": message.duration_seconds,
+                "requested_start_utc": None,
+                "pinned_proposal": dict(proposal),
+                "terms_wire": normalized_message.model_dump(
                     mode="json",
                     exclude_none=True,
                 ),
-                sort_keys=True,
-                separators=(",", ":"),
-            )
-        proposal_payload = json.dumps(
-            dict(proposal),
-            sort_keys=True,
-            separators=(",", ":"),
+                "buyer_principal": buyer_principal,
+                "seller_principal": seller_principal,
+                "owner_id": owner_id,
+                "seller_initial_amount": seller_reference_amount,
+                "strategy_label": strategy,
+            },
+            initial_message={
+                "round_number": 0,
+                "sender_role": "buyer",
+                "sender_principal": buyer_principal,
+                "seller_amount": seller_reference_amount,
+                "buyer_amount": buyer_amount,
+                "proposed_amount": buyer_amount,
+                "action_taken": "initial_proposal",
+                "message_type": "initial_proposal",
+                "timestamp": now,
+            },
+            binding=thread_binding,
+            domain_artifact=prepared_message,
         )
-        now = datetime.now(timezone.utc).isoformat()
+        normalized_terms = (
+            self._market_domain.codecs.terms(terms)
+            if terms is not None
+            else None
+        )
+        terms_payload = (
+            self._canonical_artifact_json(normalized_terms)
+            if normalized_terms is not None
+            else None
+        )
         terminal_state = "success" if seller_action == "accept" else None
         status = "terminated" if terminal_state else "active"
         seller_action_taken = {
@@ -172,76 +224,30 @@ class SQLiteClient(CoreSQLiteClient):
             "counter": "counter_proposal",
         }.get(seller_action, seller_action)
 
-        def _save() -> None:
+        def _finish() -> None:
             conn = sqlite3.connect(self.db_path)
             try:
                 conn.execute("BEGIN IMMEDIATE")
                 conn.execute(
                     """
-                    INSERT INTO negotiation_threads(
-                      negotiation_id, our_listing_id, their_listing_id,
-                      our_agent_id, their_agent_id, status, created_at,
-                      updated_at, terminal_state, requested_duration_seconds,
-                      buyer_escrow_proposal, agreed_price,
-                      agreed_duration_seconds, agreed_at,
-                      buyer_scheme, buyer_identifier,
-                      seller_scheme, seller_identifier
-                    ) VALUES (?, ?, '', '', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    UPDATE negotiation_threads
+                    SET status=?, terminal_state=?, agreed_price=?,
+                        agreed_duration_seconds=?, agreed_at=?, updated_at=?
+                    WHERE negotiation_id=?
                     """,
                     (
-                        negotiation_id,
-                        listing_id,
-                        buyer_agent_id,
                         status,
-                        now,
-                        now,
                         terminal_state,
-                        message.duration_seconds,
-                        proposal_payload,
                         None if agreed_amount is None else str(agreed_amount),
                         message.duration_seconds if agreed_amount is not None else None,
                         now if agreed_amount is not None else None,
-                        buyer_principal.scheme.value,
-                        buyer_principal.identifier,
-                        seller_principal.scheme.value,
-                        seller_principal.identifier,
-                    ),
-                )
-                conn.execute(
-                    """
-                    INSERT INTO negotiation_local_state(
-                      negotiation_id, owner_id, our_initial_price, our_strategy
-                    ) VALUES (?, ?, ?, ?)
-                    """,
-                    (
-                        negotiation_id,
-                        f"{seller_principal.scheme.value}:{seller_principal.identifier}",
-                        str(seller_reference_amount),
-                        strategy,
-                    ),
-                )
-                conn.execute(
-                    """
-                    INSERT INTO negotiation_messages(
-                      negotiation_id, round, sender_role, sender_scheme,
-                      sender_identifier, our_price, their_price, proposed_price,
-                      action_taken, message_type, timestamp
-                    ) VALUES (?, 0, 'buyer', ?, ?, ?, ?, ?, 'initial_proposal',
-                              'initial_proposal', ?)
-                    """,
-                    (
-                        negotiation_id,
-                        buyer_principal.scheme.value,
-                        buyer_principal.identifier,
-                        str(seller_reference_amount),
-                        None if buyer_amount is None else str(buyer_amount),
-                        None if buyer_amount is None else str(buyer_amount),
                         now,
+                        negotiation_id,
                     ),
                 )
                 conn.execute(
                     """
-                    INSERT INTO negotiation_messages(
+                    INSERT OR IGNORE INTO negotiation_messages(
                       negotiation_id, round, sender_role, sender_scheme,
                       sender_identifier, our_price, their_price, proposed_price,
                       action_taken, message_type, timestamp
@@ -259,14 +265,25 @@ class SQLiteClient(CoreSQLiteClient):
                         now,
                     ),
                 )
-                conn.execute(
-                    """
-                    INSERT INTO bare_metal_agreement_payloads(
-                      negotiation_id, message_json, terms_json
-                    ) VALUES (?, ?, ?)
-                    """,
-                    (negotiation_id, message_payload, terms_payload),
-                )
+                if terms_payload is not None:
+                    binding = thread_binding.binding
+                    conn.execute(
+                        """
+                        INSERT OR IGNORE INTO storefront_domain_artifacts(
+                          negotiation_id, artifact_slot, offering_mode,
+                          domain_identity, contract_major, contract_minor,
+                          artifact_json
+                        ) VALUES (?, 'terms', ?, ?, ?, ?, ?)
+                        """,
+                        (
+                            negotiation_id,
+                            binding.offering_mode,
+                            str(binding.domain_identity),
+                            binding.contract_major,
+                            binding.contract_minor,
+                            terms_payload,
+                        ),
+                    )
                 conn.commit()
             except Exception:
                 conn.rollback()
@@ -274,7 +291,7 @@ class SQLiteClient(CoreSQLiteClient):
             finally:
                 conn.close()
 
-        await asyncio.to_thread(_save)
+        await asyncio.to_thread(_finish)
 
     async def upsert_bare_metal_listing(
         self,
@@ -290,10 +307,46 @@ class SQLiteClient(CoreSQLiteClient):
         demands: list[dict[str, Any]] | None = None,
         paused: bool = False,
         oracle_address: str | None = None,
+        site_id: str,
+        pool_id: str,
+        physical_resource_id: str,
     ) -> None:
         normalized = self._market_domain.codecs.listing(listing)
-        await self.upsert_listing(
+        domain_binding = StorefrontDomainBinding(
+            offering_mode="bare_metal",
+            domain_identity=self._market_domain.identity,
+            contract_major=self._market_domain.contract_version.major,
+            contract_minor=self._market_domain.contract_version.minor,
+        )
+        source_envelope = {
+            "kind": "bare_metal.resource-projection.v1",
+            "schema_version": 1,
+            "site_id": site_id,
+            "pool_id": pool_id,
+            "physical_resource_id": physical_resource_id,
+            "machine_id": normalized.machine_id,
+            "physical_host_id": normalized.physical_host_id,
+        }
+        binding = StorefrontListingBinding.from_source_envelope(
             listing_id=listing_id,
+            site_id=site_id,
+            pool_id=pool_id,
+            physical_resource_id=physical_resource_id,
+            binding=domain_binding,
+            derivation_key=build_storefront_derivation_key(
+                site_id=site_id,
+                offering_mode="bare_metal",
+                binding=domain_binding,
+                source_identity={
+                    "pool_id": pool_id,
+                    "physical_resource_id": physical_resource_id,
+                },
+            ),
+            source_envelope=source_envelope,
+            last_reconciled_at=updated_at,
+        )
+        await self.upsert_listing_with_binding(
+            binding=binding,
             status=status,
             created_at=created_at,
             updated_at=updated_at,
@@ -328,33 +381,13 @@ class SQLiteClient(CoreSQLiteClient):
         value: Any,
         normalize: Callable[[Any], T],
     ) -> None:
-        column = self._ARTIFACT_COLUMNS[artifact]
         normalized = normalize(value)
-        payload = json.dumps(
-            normalized.model_dump(mode="json", exclude_none=True),
-            sort_keys=True,
-            separators=(",", ":"),
+        await self.save_domain_artifact(
+            negotiation_id=negotiation_id,
+            artifact_slot=artifact,
+            value=normalized,
+            registry=self._domain_registry,
         )
-
-        def _save() -> None:
-            conn = sqlite3.connect(self.db_path)
-            try:
-                conn.execute(
-                    f"""
-                    INSERT INTO bare_metal_agreement_payloads(
-                      negotiation_id, {column}
-                    ) VALUES (?, ?)
-                    ON CONFLICT(negotiation_id) DO UPDATE SET
-                      {column}=excluded.{column},
-                      updated_at=STRFTIME('%Y-%m-%dT%H:%M:%fZ', 'now')
-                    """,
-                    (negotiation_id, payload),
-                )
-                conn.commit()
-            finally:
-                conn.close()
-
-        await asyncio.to_thread(_save)
 
     async def _load_artifact(
         self,
@@ -363,24 +396,12 @@ class SQLiteClient(CoreSQLiteClient):
         artifact: str,
         normalize: Callable[[Any], T],
     ) -> T | None:
-        column = self._ARTIFACT_COLUMNS[artifact]
-
-        def _load() -> str | None:
-            conn = sqlite3.connect(self.db_path)
-            try:
-                row = conn.execute(
-                    f"SELECT {column} FROM bare_metal_agreement_payloads "
-                    "WHERE negotiation_id = ?",
-                    (negotiation_id,),
-                ).fetchone()
-            finally:
-                conn.close()
-            return None if row is None else row[0]
-
-        raw = await asyncio.to_thread(_load)
-        if raw is None:
-            return None
-        return normalize(json.loads(raw))
+        value = await self.load_domain_artifact(
+            negotiation_id=negotiation_id,
+            artifact_slot=artifact,
+            registry=self._domain_registry,
+        )
+        return None if value is None else normalize(value)
 
     async def save_bare_metal_message(
         self,
@@ -501,3 +522,200 @@ class SQLiteClient(CoreSQLiteClient):
             artifact="result",
             normalize=self._market_domain.codecs.result,
         )
+
+    async def load_bare_metal_fulfillment_context(
+        self,
+        *,
+        negotiation_id: str,
+    ) -> dict[str, Any] | None:
+        try:
+            thread_binding = await self.load_thread_binding(
+                negotiation_id=negotiation_id,
+            )
+        except KeyError:
+            return None
+        self._domain_registry.resolve(thread_binding.binding)
+        listing_binding = await self.load_listing_binding(
+            listing_id=thread_binding.listing_id,
+        )
+        if listing_binding is None:
+            raise RuntimeError(
+                "bare-metal negotiation references an unbound listing"
+            )
+        if (
+            listing_binding.site_id != thread_binding.site_id
+            or listing_binding.binding != thread_binding.binding
+        ):
+            raise RuntimeError(
+                "bare-metal negotiation binding conflicts with its listing"
+            )
+        if not listing_binding.physical_resource_id:
+            raise RuntimeError(
+                "bare-metal listing binding has no physical resource identity"
+            )
+
+        def _load() -> dict[str, Any] | None:
+            conn = sqlite3.connect(self.db_path)
+            conn.row_factory = sqlite3.Row
+            try:
+                row = conn.execute(
+                    """
+                    SELECT nt.our_listing_id AS listing_id,
+                           nt.buyer_scheme, nt.buyer_identifier,
+                           nt.seller_scheme, nt.seller_identifier,
+                           nt.terminal_state
+                    FROM negotiation_threads nt
+                    WHERE nt.negotiation_id = ?
+                    """,
+                    (negotiation_id,),
+                ).fetchone()
+                return dict(row) if row is not None else None
+            finally:
+                conn.close()
+
+        context = await asyncio.to_thread(_load)
+        if context is None:
+            return None
+        listing = await self.load_bare_metal_listing_payload(
+            listing_id=thread_binding.listing_id,
+        )
+        if listing is None:
+            raise RuntimeError(
+                "bare-metal negotiation references a missing listing payload"
+            )
+        context.update(
+            {
+                "site_id": thread_binding.site_id,
+                "physical_resource_id": listing_binding.physical_resource_id,
+                "pool_id": listing_binding.pool_id,
+                "machine_id": listing.machine_id,
+                "physical_host_id": listing.physical_host_id,
+            }
+        )
+        return self.bind_fulfillment_context(
+            context,
+            thread_binding=thread_binding,
+        )
+
+    async def ensure_bare_metal_fulfillment_lifecycle(
+        self,
+        *,
+        negotiation_id: str,
+        escrow_uid: str,
+        site_id: str,
+        physical_resource_id: str,
+    ) -> dict[str, Any]:
+        def _save() -> dict[str, Any]:
+            conn = sqlite3.connect(self.db_path)
+            conn.row_factory = sqlite3.Row
+            try:
+                with conn:
+                    conn.execute(
+                        """
+                        INSERT OR IGNORE INTO bare_metal_fulfillment_lifecycle(
+                          negotiation_id, escrow_uid, site_id,
+                          physical_resource_id, state
+                        ) VALUES (?, ?, ?, ?, 'planning')
+                        """,
+                        (
+                            negotiation_id,
+                            escrow_uid,
+                            site_id,
+                            physical_resource_id,
+                        ),
+                    )
+                row = conn.execute(
+                    "SELECT * FROM bare_metal_fulfillment_lifecycle "
+                    "WHERE negotiation_id = ?",
+                    (negotiation_id,),
+                ).fetchone()
+                if row is None:
+                    raise RuntimeError("bare-metal fulfillment lifecycle is missing")
+                result = dict(row)
+                expected = {
+                    "escrow_uid": escrow_uid,
+                    "site_id": site_id,
+                    "physical_resource_id": physical_resource_id,
+                }
+                if any(result[key] != value for key, value in expected.items()):
+                    raise RuntimeError(
+                        "bare-metal fulfillment lifecycle identity conflict"
+                    )
+                return result
+            finally:
+                conn.close()
+
+        return await asyncio.to_thread(_save)
+
+    async def load_bare_metal_fulfillment_lifecycle(
+        self,
+        *,
+        negotiation_id: str,
+    ) -> dict[str, Any] | None:
+        def _load() -> dict[str, Any] | None:
+            conn = sqlite3.connect(self.db_path)
+            conn.row_factory = sqlite3.Row
+            try:
+                row = conn.execute(
+                    "SELECT * FROM bare_metal_fulfillment_lifecycle "
+                    "WHERE negotiation_id = ?",
+                    (negotiation_id,),
+                ).fetchone()
+                return dict(row) if row is not None else None
+            finally:
+                conn.close()
+
+        return await asyncio.to_thread(_load)
+
+    async def update_bare_metal_fulfillment_lifecycle(
+        self,
+        *,
+        negotiation_id: str,
+        state: str,
+        capacity_reservation_id: str | None = None,
+        settlement_resource_id: str | None = None,
+        fulfillment_id: str | None = None,
+        failure_reason: str | None = None,
+    ) -> dict[str, Any]:
+        def _save() -> dict[str, Any]:
+            conn = sqlite3.connect(self.db_path)
+            conn.row_factory = sqlite3.Row
+            try:
+                with conn:
+                    cursor = conn.execute(
+                        """
+                        UPDATE bare_metal_fulfillment_lifecycle SET
+                          state = ?,
+                          capacity_reservation_id =
+                            COALESCE(?, capacity_reservation_id),
+                          settlement_resource_id =
+                            COALESCE(?, settlement_resource_id),
+                          fulfillment_id = COALESCE(?, fulfillment_id),
+                          failure_reason = ?,
+                          updated_at = STRFTIME('%Y-%m-%dT%H:%M:%fZ', 'now')
+                        WHERE negotiation_id = ?
+                        """,
+                        (
+                            state,
+                            capacity_reservation_id,
+                            settlement_resource_id,
+                            fulfillment_id,
+                            failure_reason,
+                            negotiation_id,
+                        ),
+                    )
+                    if cursor.rowcount != 1:
+                        raise RuntimeError(
+                            "bare-metal fulfillment lifecycle is missing"
+                        )
+                row = conn.execute(
+                    "SELECT * FROM bare_metal_fulfillment_lifecycle "
+                    "WHERE negotiation_id = ?",
+                    (negotiation_id,),
+                ).fetchone()
+                assert row is not None
+                return dict(row)
+            finally:
+                conn.close()
+
+        return await asyncio.to_thread(_save)

@@ -8,16 +8,26 @@ A storefront is the seller's market-facing authority. It composes domain codecs,
 
 The storefront may publish to multiple registries, but each publication remains derived from seller state and signed under the complete canonical publisher principal expected by that registry. The listing ID and storefront URL remain stable commercial subjects; changing an authorized credential does not manufacture a new listing or transfer ownership implicitly.
 
-## Immutable domain-bound publication
+## Immutable domain ownership and publication
 
-The common storefront validates all explicitly configured contributions at its
-application root and freezes their exact contracts. Every derived listing is
-persisted with one common binding containing trusted site, mode, exact domain
-identity/version, source envelope, and collision-safe pool or Physical
-Resource provenance. Public `virtualization_type` is projected from this
-binding, not guessed from a listing payload. One pool may therefore produce
-distinct VM and bare-metal listings without creating competing domain-specific
-mapping authorities.
+The common storefront validates every explicitly configured contribution at
+its application root and freezes each exact contract. Bare metal exports one
+validated contract builder through `market.storefront_contributions`; its
+standalone executable composes that same contribution with bare-metal seller
+policy and provisioning adapters. A shared shell can therefore select it
+without importing VM services or replacing domain-owned codecs and lifecycle
+semantics.
+
+Every derived listing persists one common binding containing trusted site,
+offering mode, exact domain identity/version, public source envelope, and
+collision-safe pool or Physical Resource provenance. Public
+`virtualization_type` is projected from this binding, not guessed from a
+listing payload. One pool may therefore produce distinct VM and bare-metal
+listings without creating competing domain-specific mapping authorities.
+Negotiation and artifact bindings copy the frozen selection, and repository
+rehydration resolves it only through the installed contribution registry;
+neither a singleton, optional default, payload-shape guess, nor domain-name
+branch may replace it.
 
 Publication runners are built from the configured registry once. Disabling a
 contribution removes its source and wait path; withdrawing a pool mode closes
@@ -58,7 +68,11 @@ This separation prevents address-shaped data from silently becoming authorizatio
 
 ## Trusted site routing
 
-`site_id` is storefront-owned configuration bound to a provisioning connection. It is not accepted as an untrusted routing assertion from a counterparty or remote projection. This keeps market-visible location choice separate from authority selection and prevents opaque identifiers from encoding credentials or endpoints.
+`site_id` is storefront-owned configuration bound to one exact provisioning authority URL and canonical principal. Authority URLs are excluded from reprs, health, status, logs, and public results; credentials enter only through signer injection. Listing reconciliation freezes the trusted site and Physical Resource in an immutable common binding, and accepted negotiations copy it before agreement artifacts are stored.
+
+Bare-metal fulfillment reloads this binding for every step. Site-targeted capacity reservation, scheduling, fulfillment begin/status/result, teardown, and capacity release use the configured client selected by the recorded site or the durable reservation-to-site map. A buyer assertion, provider response, or opaque artifact cannot replace the site, URL, principal, Physical Resource, machine, or physical-host identity. Restart therefore changes neither authority nor executor, and capacity is released exactly once only after authoritative teardown succeeds.
+
+The result channel is pull-based: the storefront polls the recorded fulfillment and converts its versioned bare-metal envelope to a buyer-safe receipt and access result. Provider payloads, private SSH material, authority URLs, and credentials are not copied into market state or responses.
 
 ## Role and service-peer identity
 

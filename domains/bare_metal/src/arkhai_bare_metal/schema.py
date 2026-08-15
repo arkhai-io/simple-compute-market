@@ -42,6 +42,7 @@ class BareMetalListing(BaseModel):
     """Bare-metal domain payload carried by a registry listing."""
 
     kind: Literal["bare_metal.v1"] = BARE_METAL_SCHEMA_KIND
+    virtualization_type: Literal["bare_metal"] = "bare_metal"
     machine_id: str = Field(
         description="Bare-metal executor-local machine identity.",
     )
