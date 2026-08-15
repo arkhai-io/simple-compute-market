@@ -152,17 +152,26 @@ not any one service's internal logic.
 
 **Current location:** `e2e-tests/tests/e2e/`.
 
-<!-- Confirmed current and real (openspec/specs/test-compatibility/spec.md's
-"Dependency-aware e2e stages" and "Exact e2e state dependencies"
-requirements): downstream e2e stages declare which prior stage's state
-they consume via `require_state`, using one exact producer/consumer
-field name per staged value, and skip with the missing field name
-rather than failing on an unrelated symptom -- see
-`e2e-tests/tests/e2e/roles/scenarios/vms/conftest.py` and
-`e2e-tests/tests/e2e/roles/README.md`. The specific scenario structure
-beyond that skeleton (which stages exist today, the dry-run/advance
-pattern's current shape, specific test file layout) still needs
-confirming before being restated here in detail. -->
+Every deployable domain owns one release-qualified complete-deal scenario:
+discovery, negotiation, settlement, delivery, and domain-defined teardown.
+The teardown observation follows the resource sold: VM capacity is released,
+an API-credit grant is consumed until the authority returns HTTP 402, and a
+bare-metal lease is released only when authenticated access is revoked and the
+selected-site authority reports teardown. A health check or static Compose
+render is not deal evidence.
+
+The scenarios share `DomainDealState`, exact event ordering, profiled buyer
+configuration, and public client helpers from
+`e2e-tests/tests/e2e/roles/helpers/domain_deal.py` and
+`e2e-tests/tests/e2e/roles/buyer_cli.py`. The helpers keep domain results
+opaque: they do not assume a VM listing, provisioning job, host field, API key,
+Physical Resource, site, or teardown payload. A scenario supplies its codecs
+and domain assertions instead of copying another domain's control flow.
+
+Staged scenarios use `require_state` with one exact producer/consumer field.
+When an earlier stage or external authority is unavailable, the dependent
+stage names that prerequisite and remains blocked; it is never counted as a
+successful live deal.
 
 The e2e test pod cannot import service internals — it uses typed
 clients, explicit test controllers, and stage/event APIs over HTTP, the

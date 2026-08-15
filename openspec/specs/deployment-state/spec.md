@@ -362,6 +362,26 @@ An operator MUST preview and explicitly import legacy buyer identity into one ex
 - **WHEN** replacement fails after one candidate was written
 - **THEN** startup refuses mixed state and recovery restores every recorded original before retry
 
+### Requirement: Deployable stack per market domain
+
+Every market domain intended for deployment MUST have a stack definition that
+stands its services up through the repository's ordinary images and public
+process contracts. Domain stack definitions MUST follow the same topology
+conventions, select an exact domain contribution and version, persist each
+authority's state independently, and carry credentials only through explicit
+role-scoped Secret references. A domain without such a stack MUST NOT be
+described as deployable.
+
+#### Scenario: A domain is stood up
+
+- **WHEN** an operator stands up a market domain's services
+- **THEN** its stack definition composes the exact registry, storefront, domain authorities, and optional buyer role without source sharing, provider shortcuts, or committed secret values
+
+#### Scenario: A domain's deployment topology changes
+
+- **WHEN** a domain contribution moves between a standalone storefront and a shared multi-domain storefront process
+- **THEN** only the stack's contribution/config binding changes while public domain identity, selected-site routing, and scenario endpoints remain exact
+
 ## Evidence
 
 - Configurable registry endpoints and independently composed role stacks: core buyer registry configuration plus domain Compose and Helm manifests.
