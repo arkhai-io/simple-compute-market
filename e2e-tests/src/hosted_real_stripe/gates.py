@@ -196,8 +196,8 @@ def require_release_identity(
         values.get("HOSTED_SETTLEMENT_VERIFIED_SERVICE_WHEEL_SHA256", ""),
     )
     if (
-        values.get("HOSTED_SETTLEMENT_VERIFIED_RELEASE_VERSION") != "0.2.0"
-        or values.get("HOSTED_SETTLEMENT_VERIFIED_API_VERSION") != "0.2.0"
+        values.get("HOSTED_SETTLEMENT_VERIFIED_RELEASE_VERSION") != "0.2.1"
+        or values.get("HOSTED_SETTLEMENT_VERIFIED_API_VERSION") != "0.2.1"
         or values.get("HOSTED_SETTLEMENT_VERIFIED_SCHEMA_VERSION") != "5"
         or tuple(values.get("HOSTED_SETTLEMENT_VERIFIED_FUNDING_PROFILES", "").split(","))
         != _FUNDING_PROFILES
