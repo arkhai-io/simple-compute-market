@@ -16,7 +16,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     env:
-      HOSTED_RELEASE_TAG: v0.2.0
+      HOSTED_RELEASE_TAG: v0.2.1
       HOSTED_RELEASE_REPOSITORY: arkhai-io/stripe-settlement-service
       IMAGE_REPOSITORY: ghcr.io/arkhai-io/simple-compute-market
       RELEASE_DIR: marketplace-release
