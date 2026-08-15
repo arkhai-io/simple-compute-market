@@ -27,11 +27,23 @@ logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
+class LegacyMigrationInputs:
+    """Explicit domain-owned inputs for one legacy database migration."""
+
+    accepted_escrows_synthesizer: (
+        Callable[[Any], list[dict[str, Any]] | None] | None
+    ) = None
+
+
+@dataclass(frozen=True)
 class Migration:
     id: str
     apply: Callable[[sqlite3.Connection], None]
     apply_with_identity_context: Callable[
         [sqlite3.Connection, Identity | None, Collection[str]], None
+    ] | None = None
+    apply_with_legacy_context: Callable[
+        [sqlite3.Connection, LegacyMigrationInputs | None], None
     ] | None = None
 
 
@@ -49,6 +61,7 @@ def apply_schema_migrations(
     *,
     local_listing_principal: Identity | None = None,
     expected_legacy_sellers: Collection[str] = (),
+    legacy_inputs: LegacyMigrationInputs | None = None,
 ) -> None:
     """Apply all known migrations once, tracking completion in the database.
 
@@ -65,15 +78,26 @@ def apply_schema_migrations(
         savepoint = "schema_migration"
         conn.execute(f"SAVEPOINT {savepoint}")
         try:
-            contextual = getattr(migration, "apply_with_identity_context", None)
-            if contextual is None:
-                migration.apply(conn)
-            else:
-                contextual(
+            identity_contextual = getattr(
+                migration, "apply_with_identity_context", None
+            )
+            legacy_contextual = getattr(
+                migration, "apply_with_legacy_context", None
+            )
+            if identity_contextual is not None and legacy_contextual is not None:
+                raise RuntimeError(
+                    f"migration {migration.id!r} declares two context owners"
+                )
+            if identity_contextual is not None:
+                identity_contextual(
                     conn,
                     local_listing_principal,
                     expected_legacy_sellers,
                 )
+            elif legacy_contextual is not None:
+                legacy_contextual(conn, legacy_inputs)
+            else:
+                migration.apply(conn)
             _record_migration(conn, migration.id)
             conn.execute(f"RELEASE SAVEPOINT {savepoint}")
         except Exception:
@@ -138,34 +162,24 @@ def _add_column_if_missing(
 # Legacy accepted_escrows backfill — synthesis is domain vocabulary.
 # ---------------------------------------------------------------------------
 
-_accepted_escrows_synthesizer: Callable[[Any], list[dict[str, Any]] | None] | None = (
-    None
-)
 
-
-def set_accepted_escrows_synthesizer(
-    fn: Callable[[Any], list[dict[str, Any]] | None],
+def _backfill_accepted_escrows(
+    conn: sqlite3.Connection,
+    legacy_inputs: LegacyMigrationInputs | None,
 ) -> None:
-    """Install the domain's legacy ``demand_resource`` → ``accepted_escrows``
-    converter.
-
-    The escrows/listings migration backfills pre-cutover listing rows
-    through this hook; with none installed (a composition root that never
-    had legacy rows) the backfill is skipped.
-    """
-    global _accepted_escrows_synthesizer
-    _accepted_escrows_synthesizer = fn
-
-
-def _backfill_accepted_escrows(conn: sqlite3.Connection) -> None:
-    if _accepted_escrows_synthesizer is None:
+    synthesizer = (
+        legacy_inputs.accepted_escrows_synthesizer
+        if legacy_inputs is not None
+        else None
+    )
+    if synthesizer is None:
         return
     rows = conn.execute(
         "SELECT listing_id, demand_resource FROM listings "
         "WHERE accepted_escrows IS NULL AND demand_resource IS NOT NULL"
     ).fetchall()
     for listing_id, demand_resource in rows:
-        synthesized = _accepted_escrows_synthesizer(demand_resource)
+        synthesized = synthesizer(demand_resource)
         if not synthesized:
             continue
         conn.execute(
@@ -347,8 +361,11 @@ def _drop_column_if_exists(
         pass
 
 
-def _migrate_escrows_and_listings(conn: sqlite3.Connection) -> None:
-    """Migrate legacy settlement/listing columns to escrows/thread tables."""
+def _migrate_escrows_and_listings(
+    conn: sqlite3.Connection,
+    legacy_inputs: LegacyMigrationInputs | None = None,
+) -> None:
+    """Migrate legacy settlement/listing columns with explicit domain input."""
     if _table_exists(conn, "settlement_jobs") and not _table_exists(conn, "escrows"):
         conn.execute("ALTER TABLE settlement_jobs RENAME TO escrows")
         for old_idx in (
@@ -380,7 +397,7 @@ def _migrate_escrows_and_listings(conn: sqlite3.Connection) -> None:
         ):
             _add_column_if_missing(conn, "listings", column_name, column_sql)
         if _column_exists(conn, "listings", "demand_resource"):
-            _backfill_accepted_escrows(conn)
+            _backfill_accepted_escrows(conn, legacy_inputs)
 
     listing_cols = _cols(conn, "listings")
     escrow_cols = _cols(conn, "escrows")
@@ -1508,6 +1525,242 @@ def _migrate_marketplace_principals(
                 f"{table_name}.{old_column} could not be removed during identity cutover"
             )
 
+def _migrate_storefront_domain_bindings(conn: sqlite3.Connection) -> None:
+    """Create immutable listing, negotiation, and domain-artifact bindings."""
+
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS storefront_listing_bindings (
+          listing_id TEXT PRIMARY KEY,
+          site_id TEXT NOT NULL,
+          pool_id TEXT,
+          physical_resource_id TEXT,
+          offering_mode TEXT NOT NULL,
+          domain_identity TEXT NOT NULL,
+          contract_major INTEGER NOT NULL CHECK (contract_major >= 1),
+          contract_minor INTEGER NOT NULL CHECK (contract_minor >= 0),
+          derivation_key TEXT NOT NULL UNIQUE,
+          source_envelope_json TEXT NOT NULL,
+          last_reconciled_at TEXT NOT NULL,
+          FOREIGN KEY (listing_id) REFERENCES listings(listing_id)
+        )
+        """
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_storefront_listing_bindings_site "
+        "ON storefront_listing_bindings(site_id, offering_mode)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_storefront_listing_bindings_domain "
+        "ON storefront_listing_bindings("
+        "domain_identity, contract_major, contract_minor)"
+    )
+    for column_name, column_sql in (
+        ("domain_listing_id", "TEXT"),
+        ("site_id", "TEXT"),
+        ("offering_mode", "TEXT"),
+        ("domain_identity", "TEXT"),
+        ("contract_major", "INTEGER"),
+        ("contract_minor", "INTEGER"),
+    ):
+        _add_column_if_missing(
+            conn,
+            "negotiation_threads",
+            column_name,
+            column_sql,
+        )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_negotiation_threads_domain_binding "
+        "ON negotiation_threads("
+        "domain_identity, contract_major, contract_minor, offering_mode)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_negotiation_threads_domain_listing "
+        "ON negotiation_threads(domain_listing_id)"
+    )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS storefront_domain_artifacts (
+          negotiation_id TEXT NOT NULL,
+          artifact_slot TEXT NOT NULL,
+          offering_mode TEXT NOT NULL,
+          domain_identity TEXT NOT NULL,
+          contract_major INTEGER NOT NULL CHECK (contract_major >= 1),
+          contract_minor INTEGER NOT NULL CHECK (contract_minor >= 0),
+          artifact_json TEXT NOT NULL,
+          created_at TEXT NOT NULL DEFAULT (
+            STRFTIME('%Y-%m-%dT%H:%M:%fZ', 'now')
+          ),
+          PRIMARY KEY (negotiation_id, artifact_slot),
+          FOREIGN KEY (negotiation_id)
+            REFERENCES negotiation_threads(negotiation_id)
+        )
+        """
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_storefront_domain_artifacts_binding "
+        "ON storefront_domain_artifacts("
+        "domain_identity, contract_major, contract_minor, offering_mode)"
+    )
+    conn.execute(
+        """
+        CREATE TRIGGER IF NOT EXISTS storefront_listing_binding_insert_owner
+        BEFORE INSERT ON storefront_listing_bindings
+        WHEN NOT EXISTS (
+          SELECT 1 FROM listings WHERE listing_id = NEW.listing_id
+        )
+        BEGIN
+          SELECT RAISE(ABORT, 'listing binding requires an existing listing');
+        END
+        """
+    )
+    conn.execute(
+        """
+        CREATE TRIGGER IF NOT EXISTS storefront_listing_binding_immutable
+        BEFORE UPDATE OF
+          listing_id, site_id, pool_id, physical_resource_id, offering_mode,
+          domain_identity, contract_major, contract_minor, derivation_key,
+          source_envelope_json
+        ON storefront_listing_bindings
+        WHEN NOT (OLD.listing_id IS NEW.listing_id)
+          OR NOT (OLD.site_id IS NEW.site_id)
+          OR NOT (OLD.pool_id IS NEW.pool_id)
+          OR NOT (OLD.physical_resource_id IS NEW.physical_resource_id)
+          OR NOT (OLD.offering_mode IS NEW.offering_mode)
+          OR NOT (OLD.domain_identity IS NEW.domain_identity)
+          OR NOT (OLD.contract_major IS NEW.contract_major)
+          OR NOT (OLD.contract_minor IS NEW.contract_minor)
+          OR NOT (OLD.derivation_key IS NEW.derivation_key)
+          OR NOT (OLD.source_envelope_json IS NEW.source_envelope_json)
+        BEGIN
+          SELECT RAISE(ABORT, 'storefront listing binding is immutable');
+        END
+        """
+    )
+    conn.execute(
+        """
+        CREATE TRIGGER IF NOT EXISTS negotiation_domain_binding_complete_insert
+        BEFORE INSERT ON negotiation_threads
+        WHEN (
+          NEW.domain_listing_id IS NULL
+          OR NEW.site_id IS NULL
+          OR NEW.offering_mode IS NULL
+          OR NEW.domain_identity IS NULL
+          OR NEW.contract_major IS NULL
+          OR NEW.contract_minor IS NULL
+        ) AND NOT (
+          NEW.domain_listing_id IS NULL
+          AND NEW.site_id IS NULL
+          AND NEW.offering_mode IS NULL
+          AND NEW.domain_identity IS NULL
+          AND NEW.contract_major IS NULL
+          AND NEW.contract_minor IS NULL
+        )
+        BEGIN
+          SELECT RAISE(ABORT, 'negotiation domain binding is incomplete');
+        END
+        """
+    )
+    conn.execute(
+        """
+        CREATE TRIGGER IF NOT EXISTS negotiation_domain_binding_owner_insert
+        BEFORE INSERT ON negotiation_threads
+        WHEN NEW.domain_identity IS NOT NULL
+          AND NOT EXISTS (
+            SELECT 1
+            FROM storefront_listing_bindings binding
+            WHERE binding.listing_id = NEW.domain_listing_id
+              AND binding.site_id = NEW.site_id
+              AND binding.offering_mode = NEW.offering_mode
+              AND binding.domain_identity = NEW.domain_identity
+              AND binding.contract_major = NEW.contract_major
+              AND binding.contract_minor = NEW.contract_minor
+          )
+        BEGIN
+          SELECT RAISE(ABORT, 'negotiation domain binding disagrees with listing');
+        END
+        """
+    )
+    conn.execute(
+        """
+        CREATE TRIGGER IF NOT EXISTS negotiation_domain_binding_immutable
+        BEFORE UPDATE OF
+          domain_listing_id, site_id, offering_mode, domain_identity,
+          contract_major, contract_minor
+        ON negotiation_threads
+        WHEN OLD.domain_identity IS NOT NULL
+          AND (
+            NOT (OLD.domain_listing_id IS NEW.domain_listing_id)
+            OR NOT (OLD.site_id IS NEW.site_id)
+            OR NOT (OLD.offering_mode IS NEW.offering_mode)
+            OR NOT (OLD.domain_identity IS NEW.domain_identity)
+            OR NOT (OLD.contract_major IS NEW.contract_major)
+            OR NOT (OLD.contract_minor IS NEW.contract_minor)
+          )
+        BEGIN
+          SELECT RAISE(ABORT, 'negotiation domain binding is immutable');
+        END
+        """
+    )
+    conn.execute(
+        """
+        CREATE TRIGGER IF NOT EXISTS negotiation_domain_binding_owner_update
+        BEFORE UPDATE OF
+          domain_listing_id, site_id, offering_mode, domain_identity,
+          contract_major, contract_minor
+        ON negotiation_threads
+        WHEN NEW.domain_identity IS NOT NULL
+          AND NOT EXISTS (
+            SELECT 1
+            FROM storefront_listing_bindings binding
+            WHERE binding.listing_id = NEW.domain_listing_id
+              AND binding.site_id = NEW.site_id
+              AND binding.offering_mode = NEW.offering_mode
+              AND binding.domain_identity = NEW.domain_identity
+              AND binding.contract_major = NEW.contract_major
+              AND binding.contract_minor = NEW.contract_minor
+          )
+        BEGIN
+          SELECT RAISE(ABORT, 'negotiation domain binding disagrees with listing');
+        END
+        """
+    )
+    conn.execute(
+        """
+        CREATE TRIGGER IF NOT EXISTS storefront_domain_artifact_owner_insert
+        BEFORE INSERT ON storefront_domain_artifacts
+        WHEN NOT EXISTS (
+          SELECT 1
+          FROM negotiation_threads thread
+          WHERE thread.negotiation_id = NEW.negotiation_id
+            AND thread.offering_mode = NEW.offering_mode
+            AND thread.domain_identity = NEW.domain_identity
+            AND thread.contract_major = NEW.contract_major
+            AND thread.contract_minor = NEW.contract_minor
+        )
+        BEGIN
+          SELECT RAISE(ABORT, 'domain artifact disagrees with negotiation binding');
+        END
+        """
+    )
+    conn.execute(
+        """
+        CREATE TRIGGER IF NOT EXISTS storefront_domain_artifact_immutable
+        BEFORE UPDATE ON storefront_domain_artifacts
+        WHEN NOT (OLD.negotiation_id IS NEW.negotiation_id)
+          OR NOT (OLD.artifact_slot IS NEW.artifact_slot)
+          OR NOT (OLD.offering_mode IS NEW.offering_mode)
+          OR NOT (OLD.domain_identity IS NEW.domain_identity)
+          OR NOT (OLD.contract_major IS NEW.contract_major)
+          OR NOT (OLD.contract_minor IS NEW.contract_minor)
+          OR NOT (OLD.artifact_json IS NEW.artifact_json)
+        BEGIN
+          SELECT RAISE(ABORT, 'storefront domain artifact is immutable');
+        END
+        """
+    )
+
+
 def _migrate_replay_attempt_leases(conn: sqlite3.Connection) -> None:
     """Make pending replay reservations reclaimable after a crashed attempt."""
 
@@ -1547,6 +1800,7 @@ _MIGRATIONS: tuple[Migration, ...] = (
     Migration(
         "20260604_005_escrows_and_listings",
         _migrate_escrows_and_listings,
+        apply_with_legacy_context=_migrate_escrows_and_listings,
     ),
     Migration(
         "20260722_001_capacity_holds_reservation_id",
@@ -1564,5 +1818,9 @@ _MIGRATIONS: tuple[Migration, ...] = (
     Migration(
         "20260811_002_replay_attempt_leases",
         _migrate_replay_attempt_leases,
+    ),
+    Migration(
+        "20260815_001_storefront_domain_bindings",
+        _migrate_storefront_domain_bindings,
     ),
 )

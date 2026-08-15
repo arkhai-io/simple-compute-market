@@ -37,6 +37,7 @@ from market_identity import Identity
 
 from .config import BASE_URL_OVERRIDE, resolve_marketplace_signer, settings
 from .migrations import (  # noqa: F401 — re-exported (tests import via here)
+    VM_LEGACY_MIGRATION_INPUTS,
     VM_MIGRATIONS,
     synthesize_accepted_escrows_from_demand,
 )
@@ -61,6 +62,7 @@ class SQLiteClient(CoreSQLiteClient):
             local_listing_principal=local_listing_principal,
             expected_legacy_sellers=expected_legacy_sellers,
             extra_migrations=extra_migrations,
+            legacy_migration_inputs=VM_LEGACY_MIGRATION_INPUTS,
         )
 
     @property
