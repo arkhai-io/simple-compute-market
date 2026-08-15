@@ -313,78 +313,33 @@ Hosted settlement has one provider-authentic system lane:
 make hosted-stripe-test
 ```
 
-This protected target verifies one exact ordinary signed hosted production
-release and then runs the marketplace-owned wallet-free VM lifecycle against
-Stripe test mode. Publication, discovery, negotiation, exact
-`fiat.stripe.v1` selection, materialization, buyer action, funding,
-fulfillment evidence, collection or reclaim, status, restart, and recovery use
-released marketplace and hosted clients and ordinary network contracts.
-Chromium completes Checkout, Stripe CLI forwards the real signed event to the
-loopback authority mapping, and Stripe retrieval APIs verify the exact related
-payment, charge, transfer, or refund. Provider behavior is not inferred from a
-local substitute.
+This protected target verifies one exact ordinary signed hosted production release and one exact marketplace consumer release, then runs the wallet-free VM lifecycle against Stripe test mode. It attributes `card.v1`, `us_bank_transfer.v1`, `us_ach_debit.v1`, and off-session `requires_action` separately through ordinary publication, discovery, negotiation, exact post-acceptance funding authorization, storefront-mediated materialization/status/reclaim, transient buyer action, authoritative funding, VM fulfillment evidence, condition evaluation, collection or eligible reclaim, restart, and recovery.
 
-Preflight completes before publication or financial mutation and requires:
+Credential-free marketplace checks own the behavior that does not require Stripe: exact profile config and deterministic option identity, independent readiness/publication, local persistent payer binding, direct released-client payer and authorization helpers, bounded automation policy, storefront mediation, action redaction, delayed funding gates, immutable runtime journals, legacy card recovery, fulfillment/reclaim exclusion, package contents, release verification, and evidence-schema canaries. Deterministic hosted ports describe provider-neutral outcomes and never establish Stripe behavior.
 
-- the exact marketplace commit and signed hosted production manifest, client
-  wheel hash/version, service image digest, signed release repository/workflow
-  reference, and hosted source commit;
-- the independently trusted protected producer workflow run identity, recorded
-  as orchestration evidence rather than a signed-manifest field;
-- a test-mode secret (`sk_test` or least-privilege `rk_test`), Stripe
-  connectivity, and non-live returned objects;
-- the expected allowlisted connected account with the required ownership,
-  charge/transfer capabilities, and readiness;
+Protected preflight completes before publication or financial mutation and requires:
+
+- the exact marketplace commit and signed hosted production manifest, client wheel hash/version, service image digest, API/schema/migrations, conformance and provenance identities, signed release repository/workflow reference, hosted source commit, and independently recorded protected workflow run;
+- a test-mode secret (`sk_test` or least-privilege `rk_test`), Stripe connectivity, and non-live returned objects;
+- the expected allowlisted connected account with the exact ownership, funding-profile, currency/country, charge/transfer, and readiness capabilities for the selected scenario;
+- a supported interactive or saved-instrument/mandate/funding path for the selected profile;
 - Stripe CLI forwarding to the exact loopback webhook endpoint; and
-- Chromium and the official Stripe test payment inputs for the selected case.
+- Chromium plus the official Stripe test input required by that profile and action.
 
-A missing prerequisite is a failed explicit run, not a skip. Terminal results
-are classified as `product` (a tested contract is wrong), `account`
-(ownership/capability/readiness is unsuitable), `environment`
-(credential/artifact/Stripe/CLI/browser/network access is unavailable), or
-`timeout` (a named state did not converge within its bound after valid
-preflight). Classification never weakens an assertion.
+Unavailable external prerequisites are recorded per assertion. They do not become a silent skip and do not permit substituting another funding profile, a credential-free result, or a scripted provider result. Terminal executed outcomes are classified as `product` (the observed contract is wrong), `account` (ownership/capability/readiness is unsuitable), `environment` (artifact/credential/Stripe/CLI/browser/network access is unavailable), or `timeout` (a named state did not converge after valid preflight).
 
-System recovery uses real omissions: webhook forwarding, the authority API, or
-the ordinary worker may be stopped and restarted while preserving the
-authority store and original marketplace operation identity. Setup and
-read-only polling may retry within declared bounds. Financial mutations remain
-inside production code and retain the original durable idempotency identity;
-the harness never issues a replacement mutation under a new identity.
+System recovery uses real omissions: webhook forwarding, the authority API, the ordinary worker, or the marketplace consumer may be stopped and restarted while preserving authority and marketplace state and the original obligation, authorization, settlement, and operation identities. Financial mutations remain inside production paths and exact retry cannot issue a replacement mutation under a new identity.
 
-Deterministic timeout placement, unknown acknowledgement, delayed visibility,
-provider unavailability, exact-attempt failure, and event-order cases belong
-to credential-free hosted-producer integration tests. Those tests inject a
-small provider-neutral scripted collaborator directly at the internal
-financial-provider or webhook-inbox boundary and exercise the production
-journal, leases, retry policy, reconciliation, inbox, and lifecycle. They
-assert Arkhai behavior under declared outcomes, do not reproduce provider
-objects or public protocols, and are not Stripe evidence. Marketplace public
-checks separately cover released-client conformance, adapter mapping,
-orchestration, configuration, packaging, and production-release verification
-without provider mutation or protected credentials.
+Protected evidence is schema-validated and signed by the marketplace evidence signer. It keeps the marketplace repository/commit distinct from hosted manifest/client/image/API/schema/migrations/provenance/repository/workflow/source and protected-run identities. Reports permit only selected profile/currency, public lifecycle stages, normalized outcomes, attempts, timestamps, and bounded hashed opaque correlations. Credentials, provider/customer/payment-method/mandate/bank/card identifiers or data, raw setup/payment/confirmation/bank-instruction actions and URLs, payloads, events, requests, source-bearing local paths, and unrestricted logs are rejected before signing.
 
-Protected evidence contains only the marketplace repository and exact commit,
-the separately identified hosted manifest/client/image and signed
-repository/workflow-reference/source coordinates, the protected producer
-workflow run identity as orchestration evidence, scenario and stage, unique
-run identity, opaque durable operation
-identity, normalized state/amount/currency/cardinality, failure class, and
-bounded diagnostics. Logs and reports exclude credentials, Checkout or Account
-Link URLs, account/customer/card data, raw webhooks, unrestricted provider
-payloads, and unrelated provider objects.
-
-Alkahest remains an independent mechanism E2E and can be selected with:
+Alkahest remains an independent mechanism E2E:
 
 ```console
 make -C e2e-tests test-buyer-machine \
   BUYER_MODULE=e2e_alkahest_escrow_codecs
 ```
 
-Local EAS/allowlisted-arbiter behavior is condition-boundary conformance only,
-not hosted financial evidence. There is currently no standalone hosted
-local-EAS operator target; do not infer Stripe or hosted finance behavior from
-focused condition tests.
+Local EAS/allowlisted-arbiter behavior is condition-boundary conformance only, not hosted financial evidence. There is no standalone hosted local-EAS operator target; focused condition tests do not establish hosted financial behavior.
 
 ## Boundary-Change Validation
 

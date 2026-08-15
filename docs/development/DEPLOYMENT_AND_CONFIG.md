@@ -174,6 +174,12 @@ Role CLIs reject legacy settlement keys and expose the same explicit migration c
 
 Publication config and inventory CSV migrate separately from the `[Settlement]` hierarchy. The migration converts an unambiguous single-mechanism legacy price into one complete typed clause. It refuses a dual-mechanism source whose one scalar price has no authoritative asset scale, and refuses CSV rows whose legacy `accepted_escrows` lack a resolvable rate. Resource `settlements` replace command/config defaults as a whole after cutover.
 
+Expanded hosted configuration uses exact funding-profile clauses rather than `payment_method_types` or provider method strings. One seller clause names one of `card.v1`, `us_bank_transfer.v1`, or `us_ach_debit.v1`, its lowercase currency, positive rate, interaction capability, and typed condition input. Config may declare all three; preflight reports readiness per profile and suppresses only the clauses whose profile/currency/country/authority contract is unavailable. Buyer config carries the same exact client/API `0.2.0`/schema `5`/capability pins and references the owner-restricted local buyer profile store. The opaque authority/environment payer binding is stored only in that profile; saved instrument refs remain authority-side or transient.
+
+The expanded cutover coordinates buyer and storefront config, the exact hosted client wheel, signed manifest and service-image coordinate, generated templates, Compose/Helm values, and role-scoped marketplace signer Secrets. A legacy unambiguous card publication clause migrates to `card.v1`; accepted historical card obligations are not rewritten. Before the first new publication or purchase authorization, rollback restores the matching prior artifacts and config together. After an effect begins, recovery rolls forward under the accepted funding profile, authorization, and marketplace operation identities.
+
+Marketplace schemas reject provider credentials and IDs, Customer/PaymentMethod/mandate/bank/card data, stable instruments in storefront state, action URLs, webhooks, hosted databases/migrations, provider reconciliation, and recovery controls. The hosted authority remains the only process that receives those inputs.
+
 For each buyer and storefront configuration overlay, use this production
 sequence:
 
@@ -320,15 +326,9 @@ configuration, processes, webhook material, and browser state. Accepted
 external financial objects are recovered, transferred, or refunded through
 their original durable identities rather than being deleted or recreated.
 
-The sanitized report identifies the marketplace repository and exact commit
-separately from the hosted manifest digest, client wheel hash, service image
-digest, and signed release repository/workflow reference/source commit. It
-records the protected producer workflow run identity separately as
-orchestration evidence and includes only allowlisted scenario/stage, opaque
-operation identity, normalized
-state/amount/currency/cardinality, failure class, and bounded diagnostics. It
-contains no credentials, action URLs, account/customer/card data, raw
-webhooks, unrestricted provider payloads, or marketplace configuration secrets.
+The protected matrix runs and attributes `card.v1`, `us_bank_transfer.v1`, `us_ach_debit.v1`, and off-session `requires_action` separately. Each selected rail must have its exact signed-release, account, currency/country, instrument or funding path, mandate where applicable, transient browser/action, and supported Stripe test-mode prerequisite. A missing prerequisite makes only that assertion unavailable and cannot be replaced by another profile, a provider-port script, or a credential-free marketplace result.
+
+The sanitized report keeps the marketplace repository/commit independent from hosted manifest/client/image/API/schema/migrations/provenance/repository/workflow/source identities and the protected workflow run. It contains only selected profile/currency, public lifecycle stages, normalized outcomes, attempts/timestamps, failure class, and bounded hashed opaque correlations. Recursive canary validation rejects credentials, provider/customer/payment-method/mandate/bank/card data, raw actions or URLs, provider payloads/events/requests, source-bearing local paths, and marketplace configuration secrets before evidence is signed.
 
 Default and fork workflows do not receive protected release access, Stripe
 credentials, connected-account identifiers, webhook secrets, or browser

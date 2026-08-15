@@ -465,47 +465,17 @@ A schema cutover that transfers ownership of active workloads between persistenc
 
 ## Hosted fiat settlement boundary
 
-`fiat.stripe.v1` is a second mechanism behind the kit-owned settlement
-runtime. The marketplace owns deterministic options and accepted plans, VM
-fulfillment, work leases, and opaque public settlement state. The separately
-released hosted settlement service is the sole financial authority: it owns
-Stripe custody, connected accounts, Checkout, transfers, refunds, provider
-recovery, EAS/RPC access, and condition authorization. Platform-custodied
-Stripe funds are never on-chain escrow. EAS and Alkahest-arbiter compatibility
-supplies only a release predicate.
+`fiat.stripe.v1` remains one mechanism behind the kit-owned settlement runtime, now with three exact consumer profiles: `card.v1`, `us_bank_transfer.v1`, and `us_ach_debit.v1`. The marketplace owns deterministic per-profile options and accepted plans, VM fulfillment, work leases, and provider-neutral public settlement state. The separately released hosted service is the sole payer-profile and financial authority: it owns provider customers and instruments, mandates, Checkout and confirmation, push-transfer instructions, debits, transfers, returns/refunds/reversals, webhooks, recovery, EAS/RPC access, and condition authorization. Platform-custodied funds are not on-chain escrow; EAS and Alkahest-arbiter compatibility supplies only a release predicate.
 
-The VM storefront consumes the released `hosted_settlement_client` through
-the thin `market_hosted_settlement` adapter. Buyer requests go to the
-storefront's `/api/v1/settlements` routes, never directly to the authority.
-Marketplace persistence contains opaque settlement references, lifecycle
-states, action kind/expiry, condition anchors, safe fulfillment references,
-and opaque receipts. Checkout URLs are retrieved for an immediate response
-and are not written to marketplace databases or run logs.
+The VM storefront consumes the released `hosted_settlement_client` through the thin `market_hosted_settlement` adapter. The buyer has one narrow direct-authority lane for payer profile/setup/instrument management and exact post-acceptance purchase authorization. Those operations use the selected or run-recorded persistent marketplace signer and the authority/environment-scoped opaque payer binding. Escrow materialization, status, condition, collection, reclaim, and recovery remain storefront-mediated. Neither core nor VM packages copy hosted wire models or signing behavior.
 
-Hosted system evidence preserves the same production ownership boundary. The
-hosted repository owns the financial-provider interface, Stripe adapter,
-operation journal, webhook inbox, reconciliation lifecycle, focused
-provider-port tests, and one ordinary signed production release containing only
-the released client and service. Its provider-neutral scripted test
-collaborator is injected directly at the internal test seam and is not an HTTP
-service, provider implementation, credential consumer, or production artifact.
+Every ready funding profile publishes as its own option. The accepted plan pins the profile, amount, currency, destination account, parties, condition, expiry policy, and deterministic marketplace operation identity. After accepted terms are durable, the buyer authorizes exactly that obligation and passes only the operation-scoped `funding_authorization_ref` to storefront start. Storefront persistence contains the exact profile, safe authorization and settlement refs, lifecycle reason/deadline/action kind and expiry, condition anchor, safe fulfillment reference, and opaque receipts. It never contains stable payer/instrument refs, provider identifiers, raw action URLs, bank/card/payment data, client secrets, or buyer automation policy.
 
-This repository owns the protected marketplace system scenario and consumes
-that exact production release through the released client, digest-pinned
-image, ordinary migration/API/worker roles, and public network contracts.
-Stripe-specific Checkout, webhook, connected-account, retrieval, transfer, and
-refund assertions come only from Stripe test mode. Restart and missed-webhook
-evidence pauses ordinary processes or real forwarding while preserving the
-authority store and original operation identity; arbitrary provider outcomes
-remain provider-port tests and assert only Arkhai behavior.
+Only authoritative hosted `funded` state after the selected profile's success and availability gate permits VM fulfillment. Setup/payment/confirmation actions, bank instructions, Checkout completion, or pending ACH do not. An unknown acknowledgement or restart reuses the immutable accepted obligation, authorization, settlement, and operation identities. Reclaim asks the hosted authority for a provider-neutral outcome and never selects a provider refund/return/reversal operation. Historical card-only rows retain recovery-only decoding under their original identities; new publication and negotiation accept only `card.v1`.
 
-Each protected report identifies the marketplace repository and exact consumer
-commit separately from the hosted manifest, client wheel, service image, and
-signed release repository/workflow reference/source commit, plus the protected
-producer workflow run identity recorded separately as orchestration evidence.
-Role-scoped preflight and
-sanitized evidence boundaries are defined by the deployment and testing
-capabilities. Alkahest E2E remains an independent mechanism lane, while local
-EAS/allowlisted-arbiter checks concern only the condition boundary and do not
-establish hosted financial behavior.
+Buyer-local off-session automation is an opt-in policy bounded by exact authority/environment, profile, currency, per-purchase amount, aggregate window, and optional seller principals. It can sign only the current accepted authorization. A policy refusal or hosted `requires_action` continues the same obligation through the ordinary transient `--action open|print|fail` path; it does not switch profile, instrument, amount, destination, or operation.
+
+Hosted system evidence preserves the production ownership boundary. Credential-free marketplace tests cover profile configuration/identity, independent readiness, direct payer and authorization helpers, action redaction, delayed funding gates, runtime journals, legacy recovery, reclaim races, and packaging using released provider-neutral contracts. The protected marketplace scenario alone attributes supported Stripe test-mode behavior for each profile and off-session action fallback. Its report identifies marketplace source separately from the hosted signed manifest, client, service image, API/schema/migrations, provenance, repository/workflow/source, and protected run, and marks unavailable external prerequisites rather than substituting local evidence.
+
+Alkahest remains an independent mechanism lane. API-credit and bare-metal hosted adoption are separate composition changes; the VM consumer does not install hosted dependencies or lifecycle code into those domains.
 
