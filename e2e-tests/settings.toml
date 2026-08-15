@@ -74,6 +74,8 @@ storefront_url  = ""   # credits seller storefront
 # ---------------------------------------------------------------------------
 [default.bare_metal]
 registry_url = ""
+registry_authority = ""
+registry_principals = []
 buyer_credential_environment = "ARKHAI_E2E_BARE_METAL_MARKETPLACE_CREDENTIAL"
 # Exact public `market bare-metal buy` arguments. Supply duration, one SSH
 # public key, settlement selection, and JSON/non-interactive flags. Seller-owned

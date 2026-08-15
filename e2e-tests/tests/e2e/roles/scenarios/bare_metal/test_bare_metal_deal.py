@@ -17,7 +17,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from market_identity import IdentityScheme
+from market_identity import Identity, IdentityScheme
 
 from src.settings import settings
 from tests.e2e.roles.buyer_cli import BuyerCli, create_profiled_buyer_cli
@@ -48,13 +48,10 @@ def _setting(name: str, default: Any = "") -> Any:
 
 
 def _require_bare_metal_plugin() -> None:
-    installed = {
-        item.name for item in entry_points().select(group="market.buyer_domains")
-    }
+    installed = {item.name for item in entry_points().select(group="market.buyer_domains")}
     if "bare-metal" not in installed:
         pytest.skip(
-            "arkhai-bare-metal-buyer entry point market.buyer_domains/bare-metal "
-            "is not installed"
+            "arkhai-bare-metal-buyer entry point market.buyer_domains/bare-metal is not installed"
         )
 
 
@@ -112,6 +109,16 @@ def bare_metal_buyer_cli(buyer_cli_binary, tmp_path_factory) -> BuyerCli:
     registry_url = str(_setting("REGISTRY_URL") or "")
     if not registry_url:
         pytest.skip("BARE_METAL.REGISTRY_URL is not configured")
+    registry_authority = str(_setting("REGISTRY_AUTHORITY") or "")
+    raw_registry_principals = _setting("REGISTRY_PRINCIPALS", [])
+    try:
+        registry_principals = tuple(
+            Identity.model_validate(dict(value)) for value in raw_registry_principals
+        )
+    except (TypeError, ValueError) as exc:
+        pytest.skip(f"BARE_METAL.REGISTRY_PRINCIPALS is invalid: {exc}")
+    if not registry_authority or not registry_principals:
+        pytest.skip("BARE_METAL.REGISTRY_AUTHORITY and REGISTRY_PRINCIPALS are not configured")
     credential_variable = str(
         _setting(
             "BUYER_CREDENTIAL_ENVIRONMENT",
@@ -130,6 +137,21 @@ def bare_metal_buyer_cli(buyer_cli_binary, tmp_path_factory) -> BuyerCli:
         marketplace_credential=credential,
         registries=(registry_url,),
         credential_variable=credential_variable,
+        toml_sections=(
+            "[bare_metal]",
+            f"registry_url = {json.dumps(registry_url)}",
+            f"registry_authority = {json.dumps(registry_authority)}",
+            "registry_principals = ["
+            + ", ".join(
+                "{ scheme = "
+                + json.dumps(principal.scheme.value)
+                + ", identifier = "
+                + json.dumps(principal.identifier)
+                + " }"
+                for principal in registry_principals
+            )
+            + "]",
+        ),
     )
 
 
@@ -143,8 +165,7 @@ def bare_metal_ssh_private_key() -> Path:
     path = Path(file_name)
     if not file_name or not path.is_file():
         pytest.skip(
-            "ARKHAI_E2E_BARE_METAL_SSH_PRIVATE_KEY_FILE is not an available "
-            "role-scoped credential"
+            "ARKHAI_E2E_BARE_METAL_SSH_PRIVATE_KEY_FILE is not an available role-scoped credential"
         )
     return path
 
@@ -191,17 +212,13 @@ def test_bare_metal_complete_deal(
     state.complete(DealStage.SETTLEMENT)
 
     result = _json_result(
-        bare_metal_buyer_cli.run(
-            ["bare-metal", "result", "--from", buy.run_id, "--json"]
-        ),
+        bare_metal_buyer_cli.run(["bare-metal", "result", "--from", buy.run_id, "--json"]),
         command="market bare-metal result",
     )
     state.complete(DealStage.DELIVERY, delivery=result)
 
     access = _json_result(
-        bare_metal_buyer_cli.run(
-            ["bare-metal", "access", "--from", buy.run_id, "--json"]
-        ),
+        bare_metal_buyer_cli.run(["bare-metal", "access", "--from", buy.run_id, "--json"]),
         command="market bare-metal access",
     )
     known_hosts_file = tmp_path / "known_hosts"
