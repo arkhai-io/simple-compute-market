@@ -61,12 +61,32 @@ portions after the corresponding `consume-expanded-stripe-funding` tasks.
 
 ## 3. Registration-owned pre-terms dispatch
 
-- [ ] 3.1 Extend `MechanismRegistration` with the pre-terms hooks the branch sites
-      need (proposal interpretation, accepted-artifact construction, verification,
-      route/status projection), designed against the concrete branch inventory in
-      `design.md`.
-- [ ] 3.2 Replace the bare-metal branches first (smallest domain, contact-exchange's
-      first composition target), as the template.
+- [x] 3.1 `MechanismRegistration.accepted_obligation_builder` +
+      `AcceptedObligationArtifacts` (obligation, scalar-coherent `amount`,
+      mechanism-namespaced `service_terms`) with registry dispatch
+      `build_accepted_obligation` enforcing role, section, mechanism identity,
+      scalar coherence, and the service-terms namespace. The hosted mechanism
+      rebuilds its canonical duration-scaled obligation in
+      `kit/hosted-settlement` (147 passed — suite now runnable locally);
+      contact-exchange builds its amountless introduction obligation
+      (kit suites 78 + 20 passed). Verification and route/status projection
+      hooks deliberately deferred to Sections 5.1 and later — the accepted
+      branch inventory showed obligation construction is the load-bearing
+      pre-terms hook.
+- [x] 3.2 Bare metal replaced as the template: `_open_exact_selection`
+      resolves the mechanism once from the selection and dispatches through
+      `BareMetalStorefrontSettlementComposition.accepted_obligation_dispatch()`
+      (hosted-only default for runtimes composed without settlement config);
+      the domain keeps trusted-physical-facts validation keyed on the option's
+      `bare_metal` params — the option shape, not the mechanism — and its
+      `bare_metal.v1` service terms, with mechanism service terms merged from
+      the artifacts. `hosted_binding`'s rebuild-verify delegates to the same
+      kit builder, so accept and verify share one definition (hosted lifecycle
+      test green through the new path). The provision envelope gained the
+      non-provisioning shape (`access_method: "none"`, no SSH key; every
+      provisioning arm still requires credentials). Evidence: bare-metal
+      domain 73, storefront 99 (6 new dispatch tests incl. non-scalar accept,
+      uncomposed-mechanism/tampered-option/proposed-amount rejections), buyer 4.
 - [ ] 3.3 Replace the api-credits branches.
 - [ ] 3.4 Replace the VM branches, sequenced after the touching
       `consume-expanded-stripe-funding` tasks land.
@@ -109,3 +129,4 @@ portions after the corresponding `consume-expanded-stripe-funding` tasks.
 |---|---|
 | Buyer acceptance validates the funded obligation strictly against the advertised option but does not compare seller `service_terms`, which carry negotiation-established service context the option cannot predict | `openspec/specs/buyer-orchestration/spec.md` (promote at synchronization) |
 | Scalar participation is a registration declaration carried to counterparties through the option shape (an `amount` rate ⇔ bargained through `fields.amount`), with `build_option` enforcing coherence; non-scalar selections negotiate take-it-or-leave-it and order as priceless | `openspec/specs/negotiation-protocol/spec.md` and `openspec/specs/settlement-configuration/spec.md` (promote at synchronization) |
+| Accepted obligations are constructed by the registration (`accepted_obligation_builder` → `AcceptedObligationArtifacts` with scalar-coherent amount and mechanism-namespaced service terms); domains resolve the mechanism once from the selection and keep only domain semantics, keyed on option shape rather than mechanism ID | `openspec/specs/market-composition/spec.md` (promote at synchronization) |

@@ -303,6 +303,10 @@ def contact_accepted_obligation_builder(
     params = dict(selected.params)
     for key in context.get("domain_param_keys", ()):
         params.pop(key, None)
+    # Principals bind into the obligation params exactly as buyers rebuild
+    # them from the advertised option, so buyer-side strict comparison holds.
+    params["payer_principal"] = buyer
+    params["claimant_principal"] = seller
     introduction_package: dict[str, Any] = {
         "option_id": selected.option_id,
         "profile": params.get("profile"),
@@ -331,6 +335,10 @@ def contact_accepted_obligation_builder(
             "claimant": "seller",
             "payer_principal": buyer,
             "claimant_principal": seller,
+            # ``asset`` is the nominal deliverable tag from the advertised
+            # option; the amount stays absent — the deal's value does not
+            # reduce to a number.
+            "asset": selected.asset,
             "expiration_unix": expiration_unix,
             "conditions": [],
             "mechanism": MECHANISM,

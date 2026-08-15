@@ -72,33 +72,34 @@ Section 6.
 
 ## 3. Selection dispatch and the accepted plan (bare metal)
 
-- [ ] 3.1 Land `finish-settlement-mechanism-neutrality` §3.1–3.2 first: the
-      registration-owned pre-terms hooks (selection admission, accepted-plan
-      construction) with bare metal as the template, replacing the
-      `mechanism != HOSTED_MECHANISM` rejection and the Stripe-shaped
-      `_open_hosted` arm with dispatch through the registry. Check those boxes
-      in that change's tasks with their own evidence; this section consumes the
-      seam, it does not duplicate the work.
-- [ ] 3.2 Contact-exchange accepted plan through the seam: selection of a
-      contact option produces a plan with the one non-financial obligation and
-      the introduction package (agreed context, channel descriptor, prose terms,
-      negotiated free text — never contact payloads) in
-      `service_terms["contact-exchange.v1"]`; acceptance persists it via the
-      existing `commit_settlement_plan` path. Amount is absent, not zero, on
-      the wire shape the buyer sees; `agreed_price` records 0 per the runtime's
-      existing tolerance.
-- [ ] 3.3 Bare-metal round admission for introduction deals: the seller round
-      path must not demand provisioning inputs (SSH key, access method) that an
-      introduction does not need — decide whether the contact option's listing
-      admits a reduced message shape or the domain message keeps its fields
-      optional for non-provisioning mechanisms, and record the decision in
-      `design.md`.
-- [ ] 3.4 Evidence: bare-metal storefront unit tests covering open-with-selection
-      for a contact option (accept, plan persisted, tampered selection rejected);
-      buyer-side acceptance covered by the existing `service_terms` and
-      non-scalar tests plus one contact-shaped case in
-      `core/buyer/tests/unit/`.
-- [ ] 3.5 Closeout.
+- [x] 3.1 Landed as `finish-settlement-mechanism-neutrality` §3.1–3.2 (checked
+      there with its own evidence): registration-owned
+      `accepted_obligation_builder` dispatch, bare metal as the template.
+- [x] 3.2 The contact builder produces the one non-financial obligation and
+      the introduction package (option identity, profile, channel, prose
+      terms, listing ref, negotiated free text — never contact payloads) as
+      mechanism-namespaced `service_terms`, which the domain merges into the
+      accepted plan and persists via the existing `commit_settlement_plan`
+      path. Amount is absent on the wire; the proposal echo carries no
+      `fields.amount`. One refinement over the design draft, recorded in
+      `design.md`: the obligation keeps the option's nominal `asset`
+      (`"introduction"`) and binds both party principals into params, so the
+      buyer's strict obligation-vs-advertised-option comparison holds without
+      weakening.
+- [x] 3.3 Decision recorded in `design.md`: the provision envelope gains the
+      non-provisioning shape — `access_method: "none"` with no SSH key —
+      rather than a second message kind; every provisioning path still
+      requires credentials at its own admission arm, and the introduction deal
+      still states the brokered duration.
+- [x] 3.4 Evidence: bare-metal storefront `test_selection_dispatch.py`
+      (non-scalar accept persists the plan with the mechanism package;
+      uncomposed-mechanism, tampered-option, and proposed-amount rejections;
+      composition dispatch surfaces only priority builders including hosted);
+      `core/buyer` `test_accepts_amountless_introduction_plan` validates the
+      buyer side with `agreed_amount=None`. Suites: storefront 99, buyer 102,
+      contact kit 20.
+- [x] 3.5 Closeout: hygiene clean; imports module-level; design updated with
+      the two decisions above.
 
 ## 4. Introductions reveal surface
 
@@ -163,4 +164,6 @@ Section 6.
 
 | Accepted decision | Permanent location |
 |---|---|
-| _(filled as sections complete)_ | |
+| The canonical mechanism ID is `contact-exchange.v1` (registry ID grammar forbids underscores) | `openspec/specs/contact-exchange-settlement/spec.md` (promote at synchronization) |
+| The introduction obligation keeps the option's nominal `asset` and binds party principals into params so buyer-side strict option comparison holds; only `amount` is absent | `openspec/specs/contact-exchange-settlement/spec.md` (promote at synchronization) |
+| Non-provisioning deals ride the provision envelope with `access_method: "none"`; provisioning arms re-require credentials themselves | bare-metal domain documentation (promote at synchronization) |

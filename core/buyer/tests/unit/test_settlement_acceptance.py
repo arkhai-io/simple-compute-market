@@ -112,6 +112,81 @@ def test_accepts_seller_plan_with_empty_service_terms() -> None:
     _validate(_seller_plan(service_terms={}))
 
 
+_CONTACT_PARAMS = {
+    "profile": "default",
+    "channel": "telegram",
+    "terms": "Net-30, prose contract on request.",
+    "claimant_principal": _SELLER.model_dump(mode="json"),
+}
+_CONTACT_OPTION_ID = derive_settlement_option_id(
+    mechanism="contact-exchange.v1",
+    asset="introduction",
+    rates=[],
+    params=_CONTACT_PARAMS,
+)
+
+
+def test_accepts_amountless_introduction_plan() -> None:
+    """An introduction accept mirrors the contact-exchange seller shape:
+    amountless obligation, nominal asset, mechanism-namespaced package."""
+
+    option = SettlementOption(
+        option_id=_CONTACT_OPTION_ID,
+        mechanism="contact-exchange.v1",
+        asset="introduction",
+        rates=[],
+        params=dict(_CONTACT_PARAMS),
+    )
+    params = dict(option.params)
+    params["payer_principal"] = _BUYER.model_dump(mode="json")
+    params["claimant_principal"] = _SELLER.model_dump(mode="json")
+    plan = SettlementPlan(
+        buyer_principal=_BUYER.model_dump(mode="json"),
+        seller_principal=_SELLER.model_dump(mode="json"),
+        service_terms={
+            "contact-exchange.v1": {
+                "option_id": _CONTACT_OPTION_ID,
+                "profile": "default",
+                "channel": "telegram",
+                "terms": "Net-30, prose contract on request.",
+            }
+        },
+        obligations=[
+            SettlementObligation(
+                payer="buyer",
+                claimant="seller",
+                payer_principal=_BUYER.model_dump(mode="json"),
+                claimant_principal=_SELLER.model_dump(mode="json"),
+                amount=None,
+                asset="introduction",
+                expiration_unix=_EXPIRATION,
+                conditions=[],
+                mechanism="contact-exchange.v1",
+                params=params,
+            )
+        ],
+    )
+    selection = SettlementSelection(
+        mechanism="contact-exchange.v1",
+        option_id=_CONTACT_OPTION_ID,
+        expiration_unix=_EXPIRATION,
+    )
+    _validate_settlement_acceptance(
+        reply={
+            "buyer_principal": _BUYER.model_dump(mode="json"),
+            "seller_principal": _SELLER.model_dump(mode="json"),
+        },
+        selection=selection,
+        plan=plan,
+        expected_selection=selection,
+        advertised_option=option,
+        agreed_amount=None,
+        expected_plan=None,
+        buyer_principal=_BUYER,
+        trusted_seller_principals=TrustedIdentitySet(identities=(_SELLER,)),
+    )
+
+
 def test_rejects_tampered_conditions() -> None:
     plan = _seller_plan(service_terms={})
     tampered = plan.obligations[0].model_copy(

@@ -89,11 +89,13 @@ def test_builder_produces_the_amountless_introduction_obligation() -> None:
     assert built.amount is None
     obligation = built.obligation
     assert "amount" not in obligation
-    assert "asset" not in obligation
+    assert obligation["asset"] == INTRODUCTION_ASSET
     assert obligation["payer_principal"] == _BUYER
     assert obligation["claimant_principal"] == _SELLER
     assert obligation["conditions"] == []
     assert obligation["params"]["channel"] == "telegram"
+    assert obligation["params"]["payer_principal"] == _BUYER
+    assert obligation["params"]["claimant_principal"] == _SELLER
     package = built.service_terms[MECHANISM]
     assert package["channel"] == "telegram"
     assert package["listing_id"] == "listing-1"

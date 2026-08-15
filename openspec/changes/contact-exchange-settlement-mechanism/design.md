@@ -33,10 +33,27 @@ automated bargaining.
 The earlier draft modeled the introduction as a plan with zero obligations. The
 settlement runtime registers and services plans per obligation, so the introduction
 is instead one obligation under `contact-exchange.v1` — payer and claimant are the two
-parties, amount and asset absent — whose mechanism client materializes ready
+parties, amount absent — whose mechanism client materializes ready
 immediately. This fits `register_plan`, operation identity, and status reporting with
 no runtime changes; only the servicing spec's assumption that an obligation is
 financial needs the small delta this change carries.
+
+One refinement discovered at the buyer boundary: the obligation keeps the
+advertised option's nominal ``asset`` (``"introduction"``) and binds both party
+principals into its params, exactly as the hosted mechanism does. The buyer
+validates an accepted obligation strictly against the advertised option (asset
+and params comparison); a fully assetless obligation would force that
+comparison to weaken, whereas a nominal deliverable tag keeps it strict. The
+*amount* stays absent — the deal's value does not reduce to a number — and the
+servicing runtime tolerates full absence regardless (characterized).
+
+### Non-provisioning deals ride the same message envelope
+
+The bare-metal provision envelope gains ``access_method: "none"`` with no SSH
+key, instead of a second message kind: an introduction deal still states the
+brokered duration, but requests no machine access. Every provisioning path
+re-requires SSH credentials at its own admission arm, so physical deals are
+exactly as strict as before.
 
 ### The reveal is the receipt
 
