@@ -30,6 +30,9 @@ from core_buyer.action_policy import (
     BuyerActionRequired,
     resolve_buyer_action_policy,
 )
+from core_buyer.orchestration import (
+    make_publisher_trust_resolver as make_core_publisher_trust_resolver,
+)
 
 import typer
 from arkhai_vms import make_vm_provision_terms
@@ -38,6 +41,11 @@ from market_alkahest.token import TokenResolutionError, resolve_token
 from market_identity import Identity
 from market_core.schemas import SettlementSelection
 from market_settlement_runtime import derive_obligation_ref
+from market_hosted_settlement import (
+    FundingMode,
+    FundingSelection,
+    StripeSettlementConfig,
+)
 from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
@@ -54,7 +62,10 @@ from .buy_orchestrator import (
     run_buy,
 )
 from .buyer_client import ResumeState, negotiate_with_seller
-from .settlement_composition import resolve_buyer_settlement_policy
+from .settlement_composition import (
+    resolve_buyer_settlement_policy,
+    revalidate_hosted_buyer_option,
+)
 from .common import resolve_config_value
 from .cli_helpers import (
     emit_buyer_explanation,
@@ -71,6 +82,7 @@ from .hosted_settlement import (
     start_hosted_settlement,
     wait_for_hosted_settlement,
 )
+from .hosted_authorization import prepare_hosted_funding_authorization
 from .run_log import RunLog
 from .settle_cli import run_settle_from_log
 
@@ -94,6 +106,9 @@ def _make_hosted_settle_hook(
     action_policy: BuyerActionPolicy,
     open_url: Callable[[str], Any],
     print_url: Callable[[str], Any],
+    stripe_config: StripeSettlementConfig,
+    funding_selection: FundingSelection,
+    automatic_funding: bool,
     confirm: Callable[[int, dict[str, Any]], bool] | None = None,
 ):
     del provision
@@ -106,9 +121,8 @@ def _make_hosted_settle_hook(
         obligations = outcome.settlement_plan.obligations
         if len(obligations) != 1 or obligations[0].mechanism != "fiat.stripe.v1":
             raise ValueError("hosted settlement requires one fiat.stripe.v1 obligation")
-        from core_buyer.orchestration import make_publisher_trust_resolver
 
-        resolve_seller_principals = make_publisher_trust_resolver(
+        resolve_seller_principals = make_core_publisher_trust_resolver(
             config=config,
             listing=match,
             on_update=lambda stage, payload: on_event(stage, payload),
@@ -126,6 +140,25 @@ def _make_hosted_settle_hook(
             )
         negotiation_id = outcome.negotiation_id or ""
         obligation_ref = derive_obligation_ref(negotiation_id, 0, obligation)
+        authorization = prepare_hosted_funding_authorization(
+            buyer_profile_id=str(config.buyer_profile_id),
+            principal=config.principal,
+            signer=config.signer,
+            stripe_config=stripe_config,
+            obligation_ref=obligation_ref,
+            obligation=obligation,
+            selection=funding_selection,
+            automatic=automatic_funding,
+        )
+        on_event(
+            "funding_authorized",
+            {
+                "obligation_ref": obligation_ref,
+                "funding_profile": authorization.funding_profile.value,
+                "funding_authorization_ref": authorization.funding_authorization_ref,
+                "expires_at_unix": authorization.expires_at_unix,
+            },
+        )
         seller_url = str(match.get("storefront_url") or "")
         if not seller_url:
             raise ValueError("listing is missing required storefront_url")
@@ -133,11 +166,8 @@ def _make_hosted_settle_hook(
             seller_url=seller_url,
             negotiation_id=negotiation_id,
             obligation_ref=obligation_ref,
+            funding_authorization_ref=authorization.funding_authorization_ref,
             principal=config.principal,
-            payer_principal=Identity.model_validate(obligations[0].payer_principal),
-            claimant_principal=Identity.model_validate(
-                obligations[0].claimant_principal
-            ),
             signer=config.signer,
             resolve_seller_principals=resolve_seller_principals,
         )
@@ -263,6 +293,9 @@ def _run_resume_from(
     settlement_timeout: float,
     console: Console,
     action_policy: BuyerActionPolicy,
+    funding_mode: FundingMode,
+    instrument_ref: str | None,
+    automatic_funding: bool,
 ) -> None:
     """Composite resume: finish negotiation if mid-stream, then settle.
 
@@ -432,6 +465,9 @@ def _run_resume_from(
         console=console,
         action_policy=action_policy,
         identity=identity,
+        funding_mode=funding_mode,
+        instrument_ref=instrument_ref,
+        automatic_funding=automatic_funding,
     )
 
 
@@ -531,6 +567,21 @@ def register(app: typer.Typer) -> None:
             help="Handle transient settlement actions: open, print, or fail. "
             "Defaults to open in an interactive terminal and print otherwise.",
         ),
+        funding_mode: FundingMode = typer.Option(
+            FundingMode.INTERACTIVE,
+            "--funding-mode",
+            help="Hosted payer mode: interactive or saved_instrument.",
+        ),
+        instrument_ref: str | None = typer.Option(
+            None,
+            "--instrument-ref",
+            help="Opaque saved-instrument ref; transient and never written to the run log.",
+        ),
+        automatic_funding: bool = typer.Option(
+            False,
+            "--automatic-funding",
+            help="Apply the disabled-by-default bounded off-session policy.",
+        ),
         expiration_seconds: int = typer.Option(
             3600,
             "--expiration",
@@ -588,6 +639,17 @@ def register(app: typer.Typer) -> None:
             action,
             interactive=os.isatty(0) and os.isatty(1),
         )
+        try:
+            funding_selection = FundingSelection(
+                mode=funding_mode,
+                instrument_ref=instrument_ref,
+            )
+        except ValueError as exc:
+            raise typer.BadParameter(str(exc), param_hint="--funding-mode") from exc
+        if automatic_funding and funding_mode is not FundingMode.SAVED_INSTRUMENT:
+            raise typer.BadParameter(
+                "--automatic-funding requires --funding-mode saved_instrument"
+            )
 
         # The configured policy's parameters arrive through the injected
         # flags. They live in one policy-owned namespace: declared flag
@@ -618,6 +680,9 @@ def register(app: typer.Typer) -> None:
                 settlement_timeout=settlement_timeout,
                 console=console,
                 action_policy=action_policy,
+                funding_mode=funding_mode,
+                instrument_ref=instrument_ref,
+                automatic_funding=automatic_funding,
             )
             return
 
@@ -647,7 +712,6 @@ def register(app: typer.Typer) -> None:
         from .common import (
             VMS_SCHEMA_ID,
             resolve_buyer_wallet,
-            resolve_discovery_timeout,
             resolve_fresh_buyer_identity,
             resolve_indexer_urls,
             resolve_indexer_urls_for_schema,
@@ -660,7 +724,11 @@ def register(app: typer.Typer) -> None:
         signer = identity.signer
         ssh = None if explain else resolve_ssh_public_key(override=ssh_public_key)
         try:
-            settlement_policy = resolve_buyer_settlement_policy()
+            settlement_policy = resolve_buyer_settlement_policy(
+                identity=identity,
+                funding_selection=funding_selection,
+                action_capable=action_policy is not BuyerActionPolicy.FAIL,
+            )
         except ValueError as exc:
             typer.secho(str(exc), err=True, fg=typer.colors.RED)
             raise typer.Exit(2) from exc
@@ -1061,6 +1129,16 @@ def register(app: typer.Typer) -> None:
                 policies=policies, policy_mode=policy_mode
             )
 
+        async def revalidate_settlement(_match, option) -> None:
+            await revalidate_hosted_buyer_option(
+                policy=settlement_policy,
+                option=option,
+                identity=identity,
+                funding_selection=funding_selection,
+                action_capable=action_policy is not BuyerActionPolicy.FAIL,
+            )
+
+
         negotiate_hook = make_legacy_negotiate_hook(
             config=config,
             constraints=constraints,
@@ -1069,6 +1147,7 @@ def register(app: typer.Typer) -> None:
             max_negotiation_rounds=max_rounds,
             derive_prices=None,
             chain=negotiation_chain,
+            revalidate_settlement=revalidate_settlement,
         )
         if hosted_mode:
 
@@ -1092,6 +1171,11 @@ def register(app: typer.Typer) -> None:
                 open_url=webbrowser.open,
                 print_url=print_hosted_action,
                 confirm=(confirm_hosted if not assume_yes and os.isatty(0) else None),
+                stripe_config=StripeSettlementConfig.model_validate(
+                    settlement_policy.config.mechanism_config("stripe")
+                ),
+                funding_selection=funding_selection,
+                automatic_funding=automatic_funding,
             )
         else:
             assert build_escrow_terms is not None

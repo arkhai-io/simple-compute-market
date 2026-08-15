@@ -16,7 +16,18 @@ from domains.vms.settlement import escrow_proposal_from_accepted_entry
 from market_core.schemas import SettlementOption, derive_settlement_option_id
 from core_buyer.buyer_config import ResolvedBuyerIdentity
 from core_buyer.action_policy import BuyerActionPolicy
-from market_identity import Ed25519Signer
+from market_hosted_settlement import (
+    FundingMode,
+    FundingProfile,
+    FundingSelection,
+    StripeSettlementConfig,
+    stripe_contract_fingerprint,
+)
+from market_identity import (
+    AuthorityBindingState,
+    AuthorityPayerBinding,
+    Ed25519Signer,
+)
 
 _ESCROW = "0x" + "11" * 20
 _TOKEN = "0x" + "22" * 20
@@ -33,9 +44,8 @@ def _resolved(signer: Ed25519Signer) -> ResolvedBuyerIdentity:
 
 
 
-def test_hosted_start_binds_canonical_obligation_parties(monkeypatch):
+def test_hosted_start_carries_only_accepted_and_authorization_refs(monkeypatch):
     buyer = Ed25519Signer(b"\x31" * 32)
-    seller = Ed25519Signer(b"\x32" * 32)
     captured = {}
     monkeypatch.setattr(
         hosted_settlement,
@@ -50,19 +60,19 @@ def test_hosted_start_binds_canonical_obligation_parties(monkeypatch):
         seller_url="http://seller/",
         negotiation_id="neg-1",
         obligation_ref="a" * 64,
+        funding_authorization_ref="funding-auth-safe-1",
         principal=buyer.identity,
         signer=buyer,
-        payer_principal=buyer.identity,
-        claimant_principal=seller.identity,
         resolve_seller_principals=lambda: None,
     )
 
     assert result["settlement_ref"] == "settlement-1"
     assert captured["url"] == "http://seller/api/v1/settlements"
-    assert captured["body"]["payer_principal"] == buyer.identity.model_dump(mode="json")
-    assert captured["body"]["claimant_principal"] == seller.identity.model_dump(
-        mode="json"
-    )
+    assert captured["body"] == {
+        "negotiation_id": "neg-1",
+        "obligation_ref": "a" * 64,
+        "funding_authorization_ref": "funding-auth-safe-1",
+    }
 
 
 def test_select_escrow_entry_filters_by_chain_and_token():
@@ -340,6 +350,7 @@ def test_hosted_recovery_is_pinned_and_never_touches_chain_config(monkeypatch, c
         settlement_ref=None,
         seller_url="http://seller",
         buyer_principal=buyer.identity,
+        funding_authorization_ref=lambda _ref: "funding-auth-safe-1",
     )
 
     events: list[tuple[tuple, dict]] = []
@@ -409,7 +420,94 @@ def test_hosted_recovery_is_pinned_and_never_touches_chain_config(monkeypatch, c
     assert "checkout.invalid" not in repr(events)
 
 
-def test_fiat_only_policy_selection_does_not_resolve_chain_resources(monkeypatch):
+def test_inflight_legacy_hosted_recovery_skips_new_authorization(monkeypatch):
+    buyer = Ed25519Signer(b"\x36" * 32)
+    seller = Ed25519Signer(b"\x37" * 32).identity
+    obligation = {
+        "payer": "buyer",
+        "claimant": "seller",
+        "payer_principal": buyer.identity.model_dump(mode="json"),
+        "claimant_principal": seller.model_dump(mode="json"),
+        "amount": "25",
+        "asset": "usd",
+        "expiration_unix": 2_000_000_000,
+        "mechanism": "fiat.stripe.v1",
+        "params": {
+            "account_ref": "seller-main",
+            "condition_profile": "vm",
+            "payment_method_types": ["card"],
+        },
+    }
+    deal = SimpleNamespace(
+        settlement_selection={
+            "mechanism": "fiat.stripe.v1",
+            "option_id": "c" * 64,
+            "expiration_unix": 2_000_000_000,
+        },
+        settlement_plan={"obligations": [obligation]},
+        settlement_operation_identities=(),
+        negotiation_id="neg-legacy",
+        settlement_ref="legacy-settlement-ref",
+        seller_url="http://seller",
+        buyer_principal=buyer.identity,
+        funding_authorization_ref=lambda _ref: None,
+    )
+
+    class Log:
+        def event(self, *_args, **_kwargs):
+            return None
+
+        def end(self, *_args, **_kwargs):
+            return None
+
+    monkeypatch.setattr(
+        common,
+        "resolve_recovery_buyer_identity",
+        lambda _run_id: _resolved(buyer),
+    )
+    monkeypatch.setattr(
+        settle_cli,
+        "load_deal_context",
+        lambda *_args, **_kwargs: deal,
+    )
+    monkeypatch.setattr(
+        settle_cli,
+        "make_deal_publisher_trust_resolver",
+        lambda *_args, **_kwargs: lambda: None,
+    )
+    monkeypatch.setattr(settle_cli, "open_run_log", lambda *_args, **_kwargs: Log())
+    monkeypatch.setattr(
+        settle_cli,
+        "prepare_hosted_funding_authorization",
+        lambda **_kwargs: (_ for _ in ()).throw(
+            AssertionError("in-flight legacy recovery reauthorized funding")
+        ),
+    )
+    monkeypatch.setattr(
+        settle_cli,
+        "start_hosted_settlement",
+        lambda **_kwargs: (_ for _ in ()).throw(
+            AssertionError("in-flight legacy recovery started a new settlement")
+        ),
+    )
+    waited = []
+    monkeypatch.setattr(
+        settle_cli,
+        "wait_for_hosted_settlement",
+        lambda **kwargs: waited.append(kwargs) or {"status": "ready"},
+    )
+
+    result = settle_cli.run_settle_from_log(
+        run_id="run-legacy",
+        poll_interval=0,
+        settlement_timeout=1,
+        action_policy=BuyerActionPolicy.PRINT,
+    )
+    assert result == {"status": "ready"}
+    assert waited[0]["settlement_ref"] == "legacy-settlement-ref"
+
+
+def test_fiat_discovery_is_local_only_and_respects_action_capability(monkeypatch):
     monkeypatch.setattr(
         common,
         "buyer_chains",
@@ -417,7 +515,48 @@ def test_fiat_only_policy_selection_does_not_resolve_chain_resources(monkeypatch
             AssertionError("fiat selection resolved chain resources")
         ),
     )
-    params = {"condition_profile": "vm"}
+    buyer = Ed25519Signer(b"\x35" * 32)
+
+    class Profiles:
+        def authority_payer_binding(self, profile_id, **coordinates):
+            return AuthorityPayerBinding(
+                authority_id=coordinates["authority_id"],
+                environment=coordinates["environment"],
+                binding_ref="payer_binding_opaque",
+                bound_principal=coordinates["principal"],
+                state=AuthorityBindingState.ACTIVE,
+            )
+
+    monkeypatch.setattr(settlement_composition, "BuyerProfileService", Profiles)
+    monkeypatch.setattr(
+        settlement_composition,
+        "payer_command_context_from_config",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("discovery performed a hosted network read")
+        ),
+    )
+    stripe = StripeSettlementConfig(
+        enabled=True,
+        base_url="https://settlement.example",
+        authority_id="authority-main",
+        environment="production",
+        authority={"principals": [buyer.identity.model_dump(mode="json")]},
+        expected_manifest_digest="sha256:" + "ab" * 32,
+    )
+    config = {
+        "Settlement": {
+            "schema_version": 1,
+            "priority": ["fiat.stripe.v1"],
+            "stripe": stripe.model_dump(mode="json"),
+        }
+    }
+    params = {
+        "account_ref": "seller-main",
+        "funding_profile": FundingProfile.CARD.value,
+        "interaction": FundingMode.INTERACTIVE.value,
+        "funds_flow": "separate_charges_transfers",
+        "contract_fingerprint": stripe_contract_fingerprint(stripe),
+    }
     option = SettlementOption(
         option_id=derive_settlement_option_id(
             mechanism="fiat.stripe.v1",
@@ -429,20 +568,24 @@ def test_fiat_only_policy_selection_does_not_resolve_chain_resources(monkeypatch
         asset="usd",
         params=params,
     )
+    listing = {"settlement_options": [option.model_dump(mode="json")]}
     policy = resolve_buyer_settlement_policy(
-        {
-            "Settlement": {
-                "schema_version": 1,
-                "priority": ["fiat.stripe.v1"],
-                "stripe": {"enabled": True},
-            }
-        }
+        config,
+        identity=_resolved(buyer),
+        funding_selection=FundingSelection(mode=FundingMode.INTERACTIVE),
+        action_capable=True,
     )
-
-    selected = policy.select(
-        {"settlement_options": [option.model_dump(mode="json")]},
-        expiration_unix=2_000_000_000,
-    )
-
+    selected = policy.select(listing, expiration_unix=2_000_000_000)
     assert selected is not None
     assert selected.selection.mechanism == "fiat.stripe.v1"
+
+    no_action_policy = resolve_buyer_settlement_policy(
+        config,
+        identity=_resolved(buyer),
+        funding_selection=FundingSelection(mode=FundingMode.INTERACTIVE),
+        action_capable=False,
+    )
+    assert (
+        no_action_policy.select(listing, expiration_unix=2_000_000_000)
+        is None
+    )

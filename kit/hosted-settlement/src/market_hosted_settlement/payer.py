@@ -10,12 +10,16 @@ from typing import Any, Literal, Protocol
 
 from hosted_settlement_client import (
     ClientConfig,
+    FundingMode,
     FundingProfile,
     HostedSettlementAsyncClient,
+    InstrumentKind,
     InstrumentMutationRequest,
+    InstrumentReadiness,
     PayerOwnerRetirement,
     PayerOwnerRotation,
     PayerProfileRequest,
+    PayerProfileState,
     PayerSetupRequest,
     PayerSetupStatusRequest,
     Principal,
@@ -24,13 +28,23 @@ from hosted_settlement_client import (
     sign_payer_profile_creation,
 )
 from hosted_settlement_client import IdentityScheme as HostedIdentityScheme
-from market_identity import AuthorityPayerBinding, BuyerProfile, Identity, Signer
+from market_identity import (
+    AuthorityBindingState,
+    AuthorityPayerBinding,
+    BuyerProfile,
+    Identity,
+    Signer,
+)
 
 from .adapter import (
     MarketplaceSignerAdapter,
     adapt_expected_authorities,
 )
-from .settlement_config import StripeSettlementConfig
+from .settlement_config import (
+    StripeSettlementConfig,
+    stripe_contract_fingerprint,
+    stripe_preflight,
+)
 
 
 class HostedPayerError(RuntimeError):
@@ -54,6 +68,12 @@ class PayerProfileAccess(Protocol):
         profile_id: str,
         binding: AuthorityPayerBinding,
     ) -> BuyerProfile: ...
+    def ensure_principal_retirable(
+        self,
+        profile: str,
+        principal: Identity,
+    ) -> None: ...
+
 
     def retire_principal(self, profile: str, principal: Identity) -> dict[str, Any]: ...
 
@@ -166,6 +186,13 @@ class HostedPayerFacade:
             return await _await_if_needed(call())
         except Exception:
             raise HostedPayerError(f"hosted payer {operation} failed") from None
+    async def aclose(self) -> None:
+        """Close an owned released client when it exposes async cleanup."""
+
+        close = getattr(self._client, "aclose", None)
+        if callable(close):
+            await _await_if_needed(close())
+
 
     async def create(self, *, country: Literal["US"] = "US") -> Any:
         if country != "US":
@@ -383,6 +410,102 @@ def instrument_projection(result: Any) -> dict[str, Any]:
         "is_default": result.is_default,
         "revoked": result.revoked,
     }
+async def payer_compatibility_context(
+    *,
+    config: StripeSettlementConfig,
+    binding: AuthorityPayerBinding,
+    signer: Signer,
+    client: Any,
+    funding_mode: FundingMode = FundingMode.INTERACTIVE,
+    instrument_ref: str | None = None,
+    action_capable: bool = True,
+) -> dict[str, Any]:
+    """Build exact remote readiness for the selected pre-negotiation mode."""
+
+    resolved = StripeSettlementConfig.model_validate(config)
+    if (
+        binding.authority_id != resolved.authority_id
+        or binding.environment != resolved.environment
+        or binding.state is not AuthorityBindingState.ACTIVE
+        or binding.bound_principal != signer.identity
+    ):
+        raise HostedPayerError("hosted payer binding is not active")
+    if funding_mode is FundingMode.SAVED_INSTRUMENT and not instrument_ref:
+        raise HostedPayerError("saved funding requires one opaque instrument reference")
+    readiness = await stripe_preflight(
+        resolved,
+        {"marketplace_signer": signer, "preflight_client": client},
+        "buyer",
+    )
+    facade = HostedPayerFacade(
+        client=client,
+        signer=signer,
+        authority_id=binding.authority_id,
+        environment=binding.environment,
+    )
+    profile = await facade.show(binding.binding_ref)
+    if profile.state is not PayerProfileState.ACTIVE:
+        raise HostedPayerError("hosted payer ownership is not active")
+    selected_instrument = None
+    if funding_mode is FundingMode.SAVED_INSTRUMENT:
+        try:
+            instruments = (
+                await facade.list_instruments(binding.binding_ref)
+            ).instruments
+        except HostedPayerError:
+            instruments = ()
+        selected_instrument = next(
+            (
+                item
+                for item in instruments
+                if item.instrument_ref == instrument_ref
+                and item.readiness is InstrumentReadiness.READY
+                and not item.revoked
+            ),
+            None,
+        )
+    profile_readiness: dict[str, dict[str, bool]] = {}
+    ready_profiles: list[str] = []
+    details = readiness.public_details.get("profiles", {})
+    for funding_profile in FundingProfile:
+        ready = bool(details.get(funding_profile.value, {}).get("ready"))
+        if ready:
+            ready_profiles.append(funding_profile.value)
+        saved_ready = bool(
+            ready
+            and action_capable
+            and funding_mode is FundingMode.SAVED_INSTRUMENT
+            and selected_instrument is not None
+            and (
+                selected_instrument.kind is InstrumentKind.CARD
+                if funding_profile is FundingProfile.CARD
+                else selected_instrument.kind is InstrumentKind.US_BANK_ACCOUNT
+                if funding_profile is FundingProfile.US_ACH_DEBIT
+                else False
+            )
+        )
+        profile_readiness[funding_profile.value] = {
+            FundingMode.INTERACTIVE.value: bool(
+                ready
+                and action_capable
+                and funding_mode is FundingMode.INTERACTIVE
+            ),
+            FundingMode.SAVED_INSTRUMENT.value: saved_ready,
+        }
+    return {
+        "contract_fingerprint": stripe_contract_fingerprint(resolved),
+        "funding_profiles": tuple(ready_profiles),
+        "currencies": (resolved.currency,),
+        "countries": (resolved.country,),
+        "interactions": (
+            (funding_mode.value,)
+            if action_capable
+            else ()
+        ),
+        "selected_payer_binding": binding.model_dump(mode="json"),
+        "selected_principal": signer.identity.model_dump(mode="json"),
+        "profile_readiness": profile_readiness,
+    }
 
 
 def instrument_list_projection(result: Any) -> dict[str, Any]:
@@ -400,6 +523,7 @@ __all__ = [
     "PayerCommandContext",
     "PayerProfileAccess",
     "payer_command_context_from_config",
+    "payer_compatibility_context",
     "instrument_list_projection",
     "instrument_projection",
     "payer_profile_projection",

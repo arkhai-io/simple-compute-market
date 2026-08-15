@@ -9,7 +9,7 @@
 - [x] 2.1 Replace the card-only publication input in `kit/hosted-settlement/src/market_hosted_settlement/settlement_config.py` with strict `card.v1`, `us_bank_transfer.v1`, and `us_ach_debit.v1` profile, currency/country, interaction, ordered clause, and exact signed capability models; reject `payment_method_types`, `method="card"`, provider strings, and role-inapplicable/sensitive fields.
 - [x] 2.2 Extend hosted preflight to verify exact manifest/API/schema/profile/payer/authorization capabilities and return allowlisted per-profile readiness/blockers while preserving mechanism-wide authority/account failures and independently ready hosted/Alkahest options.
 - [x] 2.3 Update option construction and clause projections to emit one deterministic option per ready clause with exact profile in its identity, fixed separate-charges/transfers flow, lowercase currency, positive minor-unit rate, condition, account, parties, and interaction capability.
-- [ ] 2.4 Update buyer compatibility to require the selected persistent profile's matching authority/environment opaque binding, exact profile/currency/country and interaction ability, and safe local readiness; revalidate before negotiation/authorization without discovery-time mutation.
+- [x] 2.4 Update buyer compatibility to require the selected persistent profile's matching authority/environment opaque binding, exact profile/currency/country and interaction ability, and safe local readiness; revalidate before negotiation/authorization without discovery-time mutation.
 - [x] 2.5 Add focused hosted-kit configuration, readiness, profile-order/identity, clause/query projection, compatibility, sanitized blocker, unsupported-profile, and independent-failure tests in `kit/hosted-settlement/tests/unit/` and shared settlement registration tests.
 
 ## 3. Direct payer-profile composition
@@ -22,11 +22,11 @@
 
 ## 4. Buyer authorization and automation policy
 
-- [ ] 4.1 Add strict buyer config/profile models for disabled-by-default off-session policy bound to exact authority/environment, profile, currency, per-purchase amount, aggregate amount/window, optional seller principals, and eligible saved mode; reject blanket, provider, action, credential, and free-form method fields.
-- [ ] 4.2 Implement a pure policy evaluator and owner-only aggregate reservation journal keyed by deterministic marketplace operation ID so concurrent attempts respect bounds, exact retries converge, and changed obligation/profile/amount/destination/seller input conflicts.
-- [ ] 4.3 Extend VM accepted-run orchestration to derive the exact marketplace operation ID and producer authorization input from durable accepted terms plus selected local payer/instrument or interactive mode, sign via the hosted kit, and persist only profile and `funding_authorization_ref`.
-- [ ] 4.4 Handle off-session success and `requires_action` on the same authorization/operation through the ordinary action dispatcher; policy refusal requires interaction and never changes profile, instrument, amount, currency, destination, seller, obligation, expiry, or mechanism.
-- [ ] 4.5 Add focused policy/authorization tests for every bound, aggregate concurrency, exact retry, changed reuse, revoked binding/instrument, missing mandate/consent, stale readiness, seller exclusion, user decline, action fallback, and absence of a provider or escrow call before accepted terms.
+- [x] 4.1 Add strict buyer config/profile models for disabled-by-default off-session policy bound to exact authority/environment, profile, currency, per-purchase amount, aggregate amount/window, optional seller principals, and eligible saved mode; reject blanket, provider, action, credential, and free-form method fields.
+- [x] 4.2 Implement a pure policy evaluator and owner-only aggregate reservation journal keyed by deterministic marketplace operation ID so concurrent attempts respect bounds, exact retries converge, and changed obligation/profile/amount/destination/seller input conflicts.
+- [x] 4.3 Extend VM accepted-run orchestration to derive the exact marketplace operation ID and producer authorization input from durable accepted terms plus selected local payer/instrument or interactive mode, sign via the hosted kit, and persist only profile and `funding_authorization_ref`.
+- [x] 4.4 Handle off-session success and `requires_action` on the same authorization/operation through the ordinary action dispatcher; policy refusal requires interaction and never changes profile, instrument, amount, currency, destination, seller, obligation, expiry, or mechanism.
+- [x] 4.5 Add focused policy/authorization tests for every bound, aggregate concurrency, exact retry, changed reuse, revoked binding/instrument, missing mandate/consent, stale readiness, seller exclusion, user decline, action fallback, and absence of a provider or escrow call before accepted terms.
 
 ## 5. VM storefront start and publication
 

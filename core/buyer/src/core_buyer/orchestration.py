@@ -21,7 +21,7 @@ from __future__ import annotations
 import asyncio
 import time
 import uuid
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import Any
 
@@ -59,6 +59,10 @@ BuildEscrowTermsFn = Callable[[Any, str | None, int, int], list[Any]]
 CreateEscrowFn = Callable[[list[Any]], list[str]]
 SettlementRecipientFn = Callable[[Any], str | None]
 BuildSettlementPayloadFn = Callable[[str, Any], dict[str, Any]]
+RevalidateSettlementFn = Callable[
+    [dict[str, Any], SettlementOption],
+    Awaitable[None],
+]
 
 
 def _opaque_payload_dict(value: Any) -> dict[str, Any]:
@@ -347,6 +351,7 @@ def make_negotiate_hook(
     max_negotiation_rounds: int,
     derive_prices: Callable[[dict[str, Any]], tuple[int, int]] | None,
     chain: list[Any] | None,
+    revalidate_settlement: RevalidateSettlementFn | None = None,
 ) -> NegotiateFn:
     """Build the schema-instantiated negotiate hook.
 
@@ -375,6 +380,7 @@ def make_negotiate_hook(
             max_negotiation_rounds=max_negotiation_rounds,
             derive_prices=derive_prices,
             chain=chain,
+            revalidate_settlement=revalidate_settlement,
             on_event=on_event,
         )
 
@@ -396,6 +402,7 @@ def _negotiate_matches(
     max_negotiation_rounds: int,
     derive_prices: Callable[[dict[str, Any]], tuple[int, int]] | None,
     chain: list[Any] | None,
+    revalidate_settlement: RevalidateSettlementFn | None,
     on_event: Callable[[str, dict], None],
 ) -> NegotiationResult:
     attempts: list[dict[str, Any]] = []
@@ -446,6 +453,23 @@ def _negotiate_matches(
             selected_option = getattr(selected, "option", None)
             if selected_option is not None:
                 advertised_option = SettlementOption.model_validate(selected_option)
+        if advertised_option is not None and revalidate_settlement is not None:
+            try:
+                await revalidate_settlement(match, advertised_option)
+            except Exception:
+                error = "settlement_revalidation_failed"
+                attempts.append(
+                    {
+                        "seller_url": seller_url,
+                        "listing_id": listing_id,
+                        "error": error,
+                    }
+                )
+                return NegotiationOutcome(
+                    status="exited",
+                    negotiation_id=None,
+                    reason=error,
+                )
         negotiation_policy_params = dict(constraints.policy_params)
         if advertised_option is not None:
             negotiation_policy_params["_selected_settlement_option"] = (

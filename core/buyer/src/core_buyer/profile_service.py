@@ -14,6 +14,7 @@ from market_config.config_loader import get_dotted, load_user_config
 
 from market_identity import (
     PROFILE_ROTATION_AUTHORITY,
+    AuthorityBindingState,
     AuthorityPayerBinding,
     BuyerProfile,
     CredentialProviderError,
@@ -364,6 +365,27 @@ class BuyerProfileService:
             created=False,
         )
 
+    def ensure_principal_retirable(
+        self,
+        profile: str | uuid.UUID,
+        principal: Identity,
+    ) -> None:
+        """Validate recovery retention without changing profile metadata."""
+
+        current = self.repository.load()
+        value = self._profile(current, profile)
+        retire_principal(
+            current,
+            value.profile_id,
+            principal,
+            recoverable_run_ids=recoverable_run_ids(
+                value.profile_id,
+                principal=principal,
+                directory=self.run_logs_directory,
+            ),
+        )
+
+
     def retire_principal(
         self,
         profile: str | uuid.UUID,
@@ -489,6 +511,43 @@ class BuyerProfileService:
                 "credential-derived principal does not match recorded run principal"
             )
         return profile, signer
+
+    def authority_payer_binding(
+        self,
+        profile_id: str | uuid.UUID,
+        *,
+        authority_id: str,
+        environment: str,
+        principal: Identity,
+    ) -> AuthorityPayerBinding:
+        """Resolve an active opaque binding for a retained recorded signer."""
+
+        profile = self.repository.load().profile(profile_id)
+        binding = next(
+            (
+                item
+                for item in profile.authority_payer_bindings
+                if item.authority_id == authority_id
+                and item.environment == environment
+            ),
+            None,
+        )
+        try:
+            history = profile.history_entry(principal)
+        except ProfileStoreError:
+            history = None
+        if (
+            binding is None
+            or binding.state is not AuthorityBindingState.ACTIVE
+            or history is None
+            or history.state is PrincipalState.RETIRED
+        ):
+            raise ProfileServiceError(
+                "buyer profile has no active payer binding for this authority"
+            )
+        if binding.bound_principal == principal:
+            return binding
+        return binding.model_copy(update={"bound_principal": principal})
 
     def set_authority_payer_binding(
         self,

@@ -320,3 +320,64 @@ def test_authority_payer_binding_update_is_owner_only_and_atomic(
     assert service.repository.load().profile(
         created.profile.profile_id
     ).authority_payer_bindings == (binding,)
+
+
+def test_historical_signer_uses_active_binding_transiently_until_retired(
+    tmp_path: Path,
+) -> None:
+    old = Ed25519Signer(b"a" * 32)
+    new = Ed25519Signer(b"b" * 32)
+    service = _service(
+        tmp_path,
+        {
+            "BUYER_SEED": _seed(b"a" * 32),
+            "NEW_SEED": _seed(b"b" * 32),
+        },
+    )
+    created = service.create(
+        name="buyer",
+        credential_reference=_reference("BUYER_SEED"),
+        generate=False,
+    )
+    binding = AuthorityPayerBinding(
+        authority_id="authority-main",
+        environment="production",
+        binding_ref="payer_binding_opaque",
+        bound_principal=old.identity,
+        state=AuthorityBindingState.ACTIVE,
+    )
+    service.set_authority_payer_binding(created.profile.profile_id, binding)
+    rotated = service.rotate(
+        created.profile.profile_id,
+        replacement_reference=_reference("NEW_SEED"),
+        generate=False,
+        overlap_seconds=0,
+    )
+    service.set_authority_payer_binding(
+        rotated.profile.profile_id,
+        binding.model_copy(update={"bound_principal": new.identity}),
+    )
+
+    historical = service.authority_payer_binding(
+        rotated.profile.profile_id,
+        authority_id="authority-main",
+        environment="production",
+        principal=old.identity,
+    )
+    assert historical.bound_principal == old.identity
+    assert (
+        service.repository.load()
+        .profile(rotated.profile.profile_id)
+        .authority_payer_bindings[0]
+        .bound_principal
+        == new.identity
+    )
+
+    service.retire_principal(rotated.profile.profile_id, old.identity)
+    with pytest.raises(ProfileServiceError, match="no active payer binding"):
+        service.authority_payer_binding(
+            rotated.profile.profile_id,
+            authority_id="authority-main",
+            environment="production",
+            principal=old.identity,
+        )

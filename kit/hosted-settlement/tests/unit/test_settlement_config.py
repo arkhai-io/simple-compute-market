@@ -242,6 +242,37 @@ def test_config_is_exact_and_closed(updates: dict, match: str) -> None:
 
 
 @pytest.mark.parametrize(
+    ("policy_updates", "match"),
+    [
+        ({"authority_id": "other-authority"}, "authority must match"),
+        ({"environment": "staging"}, "environment must match"),
+        ({"currency": "eur"}, "currency must match"),
+        (
+            {"funding_profile": "us_bank_transfer.v1"},
+            "does not support push bank transfer",
+        ),
+    ],
+)
+def test_enabled_off_session_policy_must_match_exact_consumer_config(
+    policy_updates: dict,
+    match: str,
+) -> None:
+    policy = {
+        "enabled": True,
+        "authority_id": "authority-main",
+        "environment": "production",
+        "funding_profile": "card.v1",
+        "currency": "usd",
+        "max_purchase_minor_units": 100,
+        "max_aggregate_minor_units": 1000,
+        "window_seconds": 3600,
+    }
+    policy.update(policy_updates)
+    with pytest.raises(ValidationError, match=match):
+        _config(off_session_policy=policy)
+
+
+@pytest.mark.parametrize(
     ("value", "valid"),
     [
         (

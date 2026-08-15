@@ -95,7 +95,7 @@ def _registry_context(
         for url, key in resolve_registry_api_keys().items()
         if url in authorities
     }
-    return signer, urls, authorities, api_keys, deadline
+    return identity, signer, urls, authorities, api_keys, deadline
 
 
 # ---------------------------------------------------------------------------
@@ -143,8 +143,12 @@ def listing_list(
     offset: int = typer.Option(0, "--offset", "-o", help="Pagination offset."),
 ) -> None:
     """List open listings matching an optional typed resource query."""
+    identity, signer, urls, authorities, api_keys, deadline = _registry_context(
+        registry_urls=registry_urls,
+        discovery_timeout=discovery_timeout,
+    )
     try:
-        settlement_policy = resolve_buyer_settlement_policy()
+        settlement_policy = resolve_buyer_settlement_policy(identity=identity)
     except ValueError as exc:
         raise typer.BadParameter(str(exc)) from exc
     try:
@@ -153,10 +157,6 @@ def listing_list(
         raise typer.BadParameter(
             settlement_clause_error_message(exc, settlement_policy)
         ) from exc
-    signer, urls, authorities, api_keys, deadline = _registry_context(
-        registry_urls=registry_urls,
-        discovery_timeout=discovery_timeout,
-    )
     if limit < 1 or limit > 200:
         raise typer.BadParameter("limit must be between 1 and 200")
     if offset < 0:
@@ -271,7 +271,7 @@ def listing_show(
 ) -> None:
     """Show a single listing by ID, fetched from the configured
     listing registries — the first one that knows the listing wins."""
-    signer, urls, authorities, api_keys, deadline = _registry_context(
+    _identity, signer, urls, authorities, api_keys, deadline = _registry_context(
         registry_urls=registry_urls,
         discovery_timeout=discovery_timeout,
     )

@@ -10,6 +10,7 @@ exists to exercise /negotiate/new + /negotiate/{id} directly.
 
 from __future__ import annotations
 
+import asyncio
 import time
 from typing import Any
 
@@ -17,6 +18,7 @@ import typer
 from market_alkahest.schemas import accepted_token_address
 from market_alkahest.token import TokenResolutionError, resolve_token
 from market_core.schemas import SettlementSelection
+from market_hosted_settlement import FundingMode, FundingSelection
 from market_identity import TrustedIdentitySet
 from rich.console import Console
 from rich.panel import Panel
@@ -35,6 +37,7 @@ from .run_log import RunLog
 from .settlement_composition import (
     alkahest_entry_from_selection,
     resolve_buyer_settlement_policy,
+    revalidate_hosted_buyer_option,
 )
 
 
@@ -232,11 +235,16 @@ def register(app: typer.Typer) -> None:
             )
 
         settlement_policy = None
+        funding_selection = FundingSelection(mode=FundingMode.INTERACTIVE)
         settlement_clauses = ()
         resolved_ssh_public_key: str | None = None
         if resume_state is None:
             try:
-                settlement_policy = resolve_buyer_settlement_policy()
+                settlement_policy = resolve_buyer_settlement_policy(
+                    identity=identity,
+                    funding_selection=funding_selection,
+                    action_capable=True,
+                )
             except ValueError as exc:
                 raise typer.BadParameter(str(exc)) from exc
             try:
@@ -572,6 +580,26 @@ def register(app: typer.Typer) -> None:
             current=expected_seller_principals,
             signer=signer,
         )
+
+        if resume_state is None:
+            assert settlement_policy is not None
+            assert selected_settlement is not None
+            try:
+                asyncio.run(
+                    revalidate_hosted_buyer_option(
+                        policy=settlement_policy,
+                        option=selected_settlement.option,
+                        identity=identity,
+                        funding_selection=funding_selection,
+                        action_capable=True,
+                    )
+                )
+            except ValueError:
+                run_log.end("error", error="settlement_revalidation_failed")
+                raise typer.BadParameter(
+                    "selected hosted funding is not ready"
+                ) from None
+
 
         negotiation_policy_params = dict(policy_params_all)
         if selected_settlement is not None:

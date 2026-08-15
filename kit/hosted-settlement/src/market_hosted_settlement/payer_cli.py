@@ -6,6 +6,7 @@ import asyncio
 import inspect
 import json
 from collections.abc import Callable
+from contextlib import asynccontextmanager
 from datetime import datetime
 from typing import Any
 
@@ -123,6 +124,15 @@ def _invoke(operation: Callable[[], Any]) -> Any:
         raise typer.Exit(2) from None
 
 
+@asynccontextmanager
+async def _facade(context: PayerCommandContext, signer: Signer):
+    facade = context.facade(signer)
+    try:
+        yield facade
+    finally:
+        await facade.aclose()
+
+
 def create_stripe_command_group(
     context_factory: Callable[[], PayerCommandContext],
 ) -> typer.Typer:
@@ -161,7 +171,8 @@ def create_stripe_command_group(
                 raise PayerCommandError(
                     "selected profile already has an active hosted payer binding"
                 )
-            result = await context.facade(signer).create(country=country)
+            async with _facade(context, signer) as facade:
+                result = await facade.create(country=country)
             if result.primary_principal.model_dump(mode="json") != signer.identity.model_dump(
                 mode="json"
             ):
@@ -187,7 +198,8 @@ def create_stripe_command_group(
         async def operation() -> dict[str, Any]:
             context = context_factory()
             _profile, signer, binding = _selected_owner(context)
-            result = await context.facade(signer).show(binding.binding_ref)
+            async with _facade(context, signer) as facade:
+                result = await facade.show(binding.binding_ref)
             return payer_profile_projection(result)
 
         _emit(_invoke(operation), json_output=json_output)
@@ -199,7 +211,8 @@ def create_stripe_command_group(
         async def operation() -> dict[str, Any]:
             context = context_factory()
             profile, signer, binding = _selected_owner(context)
-            result = await context.facade(signer).delete(binding.binding_ref)
+            async with _facade(context, signer) as facade:
+                result = await facade.delete(binding.binding_ref)
             context.profiles.set_authority_payer_binding(
                 str(profile.profile_id),
                 binding.model_copy(update={"state": AuthorityBindingState.RETIRED}),
@@ -226,13 +239,14 @@ def create_stripe_command_group(
                 principal=binding.bound_principal,
             )
             overlap_until = _epoch(predecessor.overlap_until)
-            result = await context.facade(old_signer).rotate_owner(
-                payer_profile_ref=binding.binding_ref,
-                new_signer=new_signer,
-                nonce=predecessor.rotation_nonce,
-                overlap_until_unix=overlap_until,
-                valid_until_unix=overlap_until + 300,
-            )
+            async with _facade(context, old_signer) as facade:
+                result = await facade.rotate_owner(
+                    payer_profile_ref=binding.binding_ref,
+                    new_signer=new_signer,
+                    nonce=predecessor.rotation_nonce,
+                    overlap_until_unix=overlap_until,
+                    valid_until_unix=overlap_until + 300,
+                )
             context.profiles.set_authority_payer_binding(
                 str(profile.profile_id),
                 binding.model_copy(
@@ -258,10 +272,15 @@ def create_stripe_command_group(
         async def operation() -> dict[str, Any]:
             context = context_factory()
             profile, signer, binding = _selected_owner(context)
-            result = await context.facade(signer).retire_owner(
-                payer_profile_ref=binding.binding_ref,
-                principal=target,
+            context.profiles.ensure_principal_retirable(
+                str(profile.profile_id),
+                target,
             )
+            async with _facade(context, signer) as facade:
+                result = await facade.retire_owner(
+                    payer_profile_ref=binding.binding_ref,
+                    principal=target,
+                )
             context.profiles.retire_principal(str(profile.profile_id), target)
             return payer_profile_projection(result)
 
@@ -283,11 +302,19 @@ def create_stripe_command_group(
                 profile_value = FundingProfile(funding_profile)
             except ValueError:
                 raise PayerCommandError("unsupported exact funding profile") from None
-            result = await context.facade(signer).start_setup(
-                payer_profile_ref=binding.binding_ref,
-                funding_profile=profile_value,
-                label=label,
-            )
+            if profile_value not in {
+                FundingProfile.CARD,
+                FundingProfile.US_ACH_DEBIT,
+            }:
+                raise PayerCommandError(
+                    "saved setup supports only card.v1 or us_ach_debit.v1"
+                )
+            async with _facade(context, signer) as facade:
+                result = await facade.start_setup(
+                    payer_profile_ref=binding.binding_ref,
+                    funding_profile=profile_value,
+                    label=label,
+                )
             await _dispatch_action(context, result, action)
             return payer_setup_projection(result)
 
@@ -304,10 +331,11 @@ def create_stripe_command_group(
         async def operation() -> dict[str, Any]:
             context = context_factory()
             _profile, signer, binding = _selected_owner(context)
-            result = await context.facade(signer).setup_status(
-                payer_profile_ref=binding.binding_ref,
-                setup_ref=setup_ref,
-            )
+            async with _facade(context, signer) as facade:
+                result = await facade.setup_status(
+                    payer_profile_ref=binding.binding_ref,
+                    setup_ref=setup_ref,
+                )
             await _dispatch_action(context, result, action)
             return payer_setup_projection(result)
 
@@ -320,7 +348,8 @@ def create_stripe_command_group(
         async def operation() -> dict[str, Any]:
             context = context_factory()
             _profile, signer, binding = _selected_owner(context)
-            result = await context.facade(signer).list_instruments(binding.binding_ref)
+            async with _facade(context, signer) as facade:
+                result = await facade.list_instruments(binding.binding_ref)
             return instrument_list_projection(result)
 
         _emit(_invoke(operation), json_output=json_output)
@@ -333,11 +362,12 @@ def create_stripe_command_group(
             async def operation() -> dict[str, Any]:
                 context = context_factory()
                 _profile, signer, binding = _selected_owner(context)
-                result = await context.facade(signer).mutate_instrument(
-                    name,
-                    payer_profile_ref=binding.binding_ref,
-                    instrument_ref=instrument_ref,
-                )
+                async with _facade(context, signer) as facade:
+                    result = await facade.mutate_instrument(
+                        name,
+                        payer_profile_ref=binding.binding_ref,
+                        instrument_ref=instrument_ref,
+                    )
                 return instrument_projection(result)
 
             _emit(_invoke(operation), json_output=json_output)

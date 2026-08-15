@@ -299,6 +299,22 @@ enabled = false
 # request_timeout_seconds = 10.0
 # preflight_timeout_seconds = 5.0
 # allow_insecure_loopback = false
+# authorization_journal_path = "/var/lib/arkhai/buyer/funding-authorizations.jsonl"
+# [Settlement.stripe.off_session_policy]
+# enabled = false
+# mode = "saved_instrument"
+# authority_id = "hosted-authority"
+# environment = "production"
+# funding_profile = "card.v1" # card.v1 or us_ach_debit.v1
+# currency = "usd"
+# max_purchase_minor_units = 10000
+# max_aggregate_minor_units = 50000
+# window_kind = "rolling" # rolling or fixed
+# window_seconds = 86400
+# fixed_window_anchor_unix = 0 # required only for fixed windows
+# seller_principals = [
+#   { scheme = "ed25519", identifier = "<seller-public-key>" },
+# ]
 # [Settlement.stripe.authority]
 # principals = [
 #   { scheme = "ed25519", identifier = "<authority-public-key>" },

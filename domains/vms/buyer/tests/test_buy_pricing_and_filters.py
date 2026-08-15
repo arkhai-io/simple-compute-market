@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import uuid
 import json
+from dataclasses import replace
 from types import SimpleNamespace
 from typing import Any
 from unittest import mock
@@ -28,6 +29,13 @@ from domains.vms.buyer.buy_orchestrator import (
 )
 from domains.vms.buyer.settlement_composition import resolve_buyer_settlement_policy
 from registry_client import FilterSpecResponse
+from market_hosted_settlement import (
+    FundingMode,
+    FundingProfile,
+    FundingSelection,
+    StripeSettlementConfig,
+    stripe_contract_fingerprint,
+)
 from identity_helpers import BUYER_SIGNER, seller_principals
 from market_core.schemas import (
     EscrowProposal,
@@ -91,7 +99,14 @@ def _escrow_proposal() -> EscrowProposal:
 
 def _hosted_option() -> SettlementOption:
     rates = [RateValue(field="amount", value=125)]
-    params = {"account_ref": "acct-seller"}
+    config = StripeSettlementConfig(enabled=True)
+    params = {
+        "account_ref": "acct-seller",
+        "funding_profile": "card.v1",
+        "interaction": "interactive",
+        "funds_flow": "separate_charges_transfers",
+        "contract_fingerprint": stripe_contract_fingerprint(config),
+    }
     return SettlementOption(
         option_id=derive_settlement_option_id(
             mechanism="fiat.stripe.v1",
@@ -106,16 +121,41 @@ def _hosted_option() -> SettlementOption:
     )
 
 
+def _with_hosted_readiness(policy):
+    section = policy.config.mechanism_config("stripe")
+    return replace(
+        policy,
+        public_context={
+            "contract_fingerprint": stripe_contract_fingerprint(section),
+            "funding_profiles": ("card.v1",),
+            "currencies": ("usd",),
+            "countries": ("US",),
+            "interactions": ("interactive",),
+            "selected_payer_binding": {
+                "authority_id": None,
+                "environment": None,
+                "binding_ref": "payer-safe",
+                "bound_principal": BUYER_SIGNER.identity.model_dump(mode="json"),
+                "state": "active",
+            },
+            "selected_principal": BUYER_SIGNER.identity.model_dump(mode="json"),
+            "profile_readiness": {"card.v1": {"interactive": True}},
+        },
+    )
+
+
 def test_select_hosted_option_pins_exact_listed_choice():
     option = _hosted_option()
     listing = {"settlement_options": [option.model_dump(mode="json")]}
-    policy = resolve_buyer_settlement_policy(
-        {
-            "Settlement": {
-                "priority": ["fiat.stripe.v1"],
-                "stripe": {"enabled": True},
+    policy = _with_hosted_readiness(
+        resolve_buyer_settlement_policy(
+            {
+                "Settlement": {
+                    "priority": ["fiat.stripe.v1"],
+                    "stripe": {"enabled": True},
+                }
             }
-        }
+        )
     )
 
     selected = policy.select(
@@ -123,7 +163,6 @@ def test_select_hosted_option_pins_exact_listed_choice():
         clauses=(f"option_id={option.option_id}",),
         expiration_unix=1_800_000_000,
     )
-
     assert selected is not None
     assert selected.selection.option_id == option.option_id
     assert selected.selection.expiration_unix == 1_800_000_000
@@ -131,13 +170,15 @@ def test_select_hosted_option_pins_exact_listed_choice():
 
 def test_select_hosted_option_rejects_unlisted_choice():
     option = _hosted_option()
-    policy = resolve_buyer_settlement_policy(
-        {
-            "Settlement": {
-                "priority": ["fiat.stripe.v1"],
-                "stripe": {"enabled": True},
+    policy = _with_hosted_readiness(
+        resolve_buyer_settlement_policy(
+            {
+                "Settlement": {
+                    "priority": ["fiat.stripe.v1"],
+                    "stripe": {"enabled": True},
+                }
             }
-        }
+        )
     )
 
     assert (
@@ -162,14 +203,16 @@ def test_standalone_pricing_uses_selected_option_rate_and_units():
         "accepted_escrows": [legacy_alkahest_entry],
         "settlement_options": [option.model_dump(mode="json")],
     }
-    policy = resolve_buyer_settlement_policy(
-        {
-            "Settlement": {
-                "schema_version": 1,
-                "priority": ["fiat.stripe.v1"],
-                "stripe": {"enabled": True},
+    policy = _with_hosted_readiness(
+        resolve_buyer_settlement_policy(
+            {
+                "Settlement": {
+                    "schema_version": 1,
+                    "priority": ["fiat.stripe.v1"],
+                    "stripe": {"enabled": True},
+                }
             }
-        }
+        )
     )
     selected = policy.select(listing, expiration_unix=1_800_000_000)
     assert selected is not None
@@ -191,7 +234,7 @@ def test_hosted_settle_uses_storefront_and_never_calls_authority_directly(
     from market_core.schemas import SettlementObligation, SettlementPlan
 
     monkeypatch.setattr(
-        "domains.vms.buyer.buy_cli.make_publisher_trust_resolver",
+        "domains.vms.buyer.buy_cli.make_core_publisher_trust_resolver",
         lambda **_kwargs: seller_principals,
     )
 
@@ -217,6 +260,14 @@ def test_hosted_settle_uses_storefront_and_never_calls_authority_directly(
         "domains.vms.buyer.buy_cli.wait_for_hosted_settlement",
         lambda **_kwargs: {"status": "ready"},
     )
+    monkeypatch.setattr(
+        "domains.vms.buyer.buy_cli.prepare_hosted_funding_authorization",
+        lambda **_kwargs: SimpleNamespace(
+            funding_profile=FundingProfile.CARD,
+            funding_authorization_ref="funding-auth-safe-1",
+            expires_at_unix=1_800_000_000,
+        ),
+    )
     opened: list[str] = []
     events: list[tuple[str, dict[str, Any]]] = []
     hook = _make_hosted_settle_hook(
@@ -231,6 +282,9 @@ def test_hosted_settle_uses_storefront_and_never_calls_authority_directly(
         action_policy=BuyerActionPolicy.OPEN,
         open_url=lambda url: opened.append(url),
         print_url=lambda _url: None,
+        stripe_config=SimpleNamespace(),
+        funding_selection=FundingSelection(FundingMode.INTERACTIVE),
+        automatic_funding=False,
     )
     outcome = NegotiationOutcome(
         status="agreed",
@@ -268,11 +322,58 @@ def test_hosted_settle_uses_storefront_and_never_calls_authority_directly(
     assert opened == ["https://checkout.example/session"]
     assert starts[0]["negotiation_id"] == "neg-1"
     assert len(starts[0]["obligation_ref"]) == 64
-    assert starts[0]["payer_principal"] == BUYER_SIGNER.identity
-    assert starts[0]["claimant_principal"] == seller_principals().identities[0]
+    assert starts[0]["funding_authorization_ref"] == "funding-auth-safe-1"
+    assert "payer_principal" not in starts[0]
+    assert "claimant_principal" not in starts[0]
     assert result.status == "ready"
     assert result.escrow_uid == "settlement-1"
     assert all("url" not in body for _, body in events)
+
+def test_hosted_settle_never_authorizes_or_starts_before_accepted_terms(
+    monkeypatch,
+) -> None:
+    from domains.vms.buyer.buyer_client import NegotiationOutcome
+
+    monkeypatch.setattr(
+        "domains.vms.buyer.buy_cli.prepare_hosted_funding_authorization",
+        lambda **_kwargs: pytest.fail("funding authorization preceded accepted terms"),
+    )
+    monkeypatch.setattr(
+        "domains.vms.buyer.buy_cli.start_hosted_settlement",
+        lambda **_kwargs: pytest.fail("settlement start preceded accepted terms"),
+    )
+    hook = _make_hosted_settle_hook(
+        config=_config("http://registry"),
+        provision=make_vm_provision_terms(
+            duration_seconds=3600,
+            ssh_public_key="ssh-ed25519 AAAA",
+        ),
+        poll_interval=0,
+        total_timeout=5,
+        sleep=lambda _seconds: None,
+        action_policy=BuyerActionPolicy.PRINT,
+        open_url=lambda _url: None,
+        print_url=lambda _url: None,
+        stripe_config=SimpleNamespace(),
+        funding_selection=FundingSelection(FundingMode.INTERACTIVE),
+        automatic_funding=False,
+    )
+    with pytest.raises(ValueError, match="accepted settlement plan"):
+        hook(
+            NegotiationResult(
+                match=_listing_with_identity(
+                    {"listing_id": "L1", "seller": "http://seller"},
+                    "http://registry",
+                ),
+                outcome=NegotiationOutcome(
+                    status="agreed",
+                    negotiation_id="neg-1",
+                    agreed_amount=125,
+                ),
+            ),
+            lambda _stage, _body: None,
+        )
+
 
 
 def _build_escrow_proposal():

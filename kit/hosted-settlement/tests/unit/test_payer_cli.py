@@ -7,6 +7,7 @@ from dataclasses import dataclass
 import pytest
 import typer
 from hosted_settlement_client import (
+    InstrumentListResult,
     InstrumentKind,
     InstrumentProjection,
     InstrumentReadiness,
@@ -121,9 +122,11 @@ class Access:
     profile: BuyerProfile
     signer: Ed25519Signer
     historical_signer: Ed25519Signer = _OLD
+    block_retirement: bool = False
 
     def __post_init__(self) -> None:
         self.updates: list[AuthorityPayerBinding] = []
+        self.retirement_checks = []
         self.retirements = []
 
     def resolve_fresh_signer(self):
@@ -142,6 +145,11 @@ class Access:
         )
         return self.profile
 
+    def ensure_principal_retirable(self, profile, principal):
+        self.retirement_checks.append((profile, principal))
+        if self.block_retirement:
+            raise RuntimeError("recoverable run retains principal")
+
     def retire_principal(self, profile, principal):
         self.retirements.append((profile, principal))
         return self.profile.redacted()
@@ -150,6 +158,11 @@ class Access:
 class Client:
     def __init__(self) -> None:
         self.calls = []
+        self.closed = 0
+        self.failure = False
+
+    async def aclose(self):
+        self.closed += 1
 
     async def create_payer_profile(self, request):
         self.calls.append(("create", request))
@@ -169,6 +182,15 @@ class Client:
             version=1,
         )
 
+    async def delete_payer_profile(self, request):
+        self.calls.append(("payer-delete", request))
+        return PayerProfileResult(
+            payer_profile_ref=request.payer_profile_ref,
+            primary_principal=MarketplaceSignerAdapter(_OLD).principal,
+            state=PayerProfileState.DELETED,
+            version=2,
+        )
+
     async def rotate_payer_owner(self, request):
         self.calls.append(("rotate", request))
         return PayerProfileResult(
@@ -177,6 +199,15 @@ class Client:
             state=PayerProfileState.ACTIVE,
             version=2,
         )
+    async def retire_payer_owner(self, request):
+        self.calls.append(("retire", request))
+        return PayerProfileResult(
+            payer_profile_ref=request.payer_profile_ref,
+            primary_principal=MarketplaceSignerAdapter(_NEW).principal,
+            state=PayerProfileState.ACTIVE,
+            version=3,
+        )
+
 
     async def start_payer_setup(self, request):
         self.calls.append(("setup", request))
@@ -190,6 +221,20 @@ class Client:
                 url="https://transient.example/secret-action",
             ),
         )
+    async def get_payer_setup(self, request):
+        self.calls.append(("setup-status", request))
+        return PayerSetupResult(
+            setup_ref=request.setup_ref,
+            readiness=InstrumentReadiness.READY,
+        )
+
+    async def list_payer_instruments(self, payer_profile_ref, *, request_id):
+        self.calls.append(("instrument-list", payer_profile_ref, request_id))
+        return InstrumentListResult(
+            payer_profile_ref=payer_profile_ref,
+            instruments=(_instrument("instrument_opaque_1234", default=True),),
+        )
+
 
     async def set_default_instrument(self, request):
         self.calls.append(("default", request))
@@ -251,6 +296,26 @@ def test_create_atomically_records_only_opaque_selected_owner_binding() -> None:
     ]
     assert "cus_" not in result.stdout
     assert "pm_" not in result.stdout
+    assert client.closed == 1
+
+
+def test_show_and_delete_use_selected_owner_and_retire_local_binding() -> None:
+    access = Access(_profile(), _OLD)
+    client = Client()
+    context = PayerCommandContext(
+        authority_id="authority-main",
+        environment="production",
+        profiles=access,
+        client_factory=lambda signer: client,
+        dispatch_action=lambda _action, _policy: None,
+    )
+    shown = CliRunner().invoke(_app(context), ["payer", "show", "--json"])
+    deleted = CliRunner().invoke(_app(context), ["payer", "delete", "--json"])
+    assert shown.exit_code == 0
+    assert deleted.exit_code == 0
+    assert [call[0] for call in client.calls] == ["show", "payer-delete"]
+    assert access.updates[-1].state is AuthorityBindingState.RETIRED
+    assert client.closed == 2
 
 
 def test_setup_dispatches_action_but_never_outputs_or_stores_its_value() -> None:
@@ -288,6 +353,44 @@ def test_setup_dispatches_action_but_never_outputs_or_stores_its_value() -> None
         "expires_at_unix": 2_000_000_000,
         "kind": "setup",
     }
+    assert client.closed == 1
+
+
+def test_setup_status_and_instrument_list_return_only_safe_projections() -> None:
+    access = Access(_profile(), _OLD)
+    client = Client()
+    context = PayerCommandContext(
+        authority_id="authority-main",
+        environment="production",
+        profiles=access,
+        client_factory=lambda signer: client,
+        dispatch_action=lambda _action, _policy: None,
+    )
+    status = CliRunner().invoke(
+        _app(context),
+        ["payer", "setup", "status", "setup_opaque_1234", "--json"],
+    )
+    listed = CliRunner().invoke(
+        _app(context),
+        ["payer", "instrument", "list", "--json"],
+    )
+    assert status.exit_code == 0
+    assert listed.exit_code == 0
+    assert json.loads(status.stdout) == {
+        "setup_ref": "setup_opaque_1234",
+        "readiness": "ready",
+    }
+    assert json.loads(listed.stdout)["instruments"] == [
+        {
+            "instrument_ref": "instrument_opaque_1234",
+            "is_default": True,
+            "kind": "card",
+            "label": "main card",
+            "readiness": "ready",
+            "revoked": False,
+        }
+    ]
+    assert client.closed == 2
 
 
 def test_owner_rotation_uses_historical_signer_and_updates_canonical_owner() -> None:
@@ -309,6 +412,7 @@ def test_owner_rotation_uses_historical_signer_and_updates_canonical_owner() -> 
     assert client.calls[0][0] == "rotate"
     assert access.updates[0].bound_principal == _NEW.identity
     assert access.updates[0].binding_ref == "payer_binding_opaque"
+    assert client.closed == 1
 
 
 @pytest.mark.parametrize("operation", ["default", "revoke", "delete"])
@@ -329,6 +433,83 @@ def test_instrument_mutations_use_direct_released_client_only(operation: str) ->
     assert result.exit_code == 0
     assert client.calls[0][0] == operation
     assert json.loads(result.stdout)["instrument_ref"] == "instrument_opaque_1234"
+    assert client.closed == 1
+
+
+def test_payer_client_closes_after_sanitized_remote_failure() -> None:
+    class FailingClient(Client):
+        async def create_payer_profile(self, request):
+            raise RuntimeError("cus_secret https://action.invalid")
+
+    access = Access(_profile(binding_principal=False), _OLD)
+    client = FailingClient()
+    context = PayerCommandContext(
+        authority_id="authority-main",
+        environment="production",
+        profiles=access,
+        client_factory=lambda signer: client,
+        dispatch_action=lambda _action, _policy: None,
+    )
+    result = CliRunner().invoke(_app(context), ["payer", "create", "--json"])
+    assert result.exit_code == 2
+    assert client.closed == 1
+    assert "cus_secret" not in result.stdout
+    assert "action.invalid" not in result.stdout
+
+
+def test_push_bank_transfer_setup_rejects_before_client_construction() -> None:
+    access = Access(_profile(), _OLD)
+    clients = []
+    context = PayerCommandContext(
+        authority_id="authority-main",
+        environment="production",
+        profiles=access,
+        client_factory=lambda signer: clients.append(Client()) or clients[-1],
+        dispatch_action=lambda _action, _policy: None,
+    )
+    result = CliRunner().invoke(
+        _app(context),
+        [
+            "payer",
+            "setup",
+            "start",
+            "--funding-profile",
+            "us_bank_transfer.v1",
+            "--label",
+            "not applicable",
+        ],
+    )
+    assert result.exit_code == 2
+    assert clients == []
+
+
+def test_owner_retirement_blocker_prevents_hosted_mutation() -> None:
+    profile = _rotated_profile()
+    binding = profile.authority_payer_bindings[0].model_copy(
+        update={"bound_principal": _NEW.identity}
+    )
+    access = Access(
+        profile.model_copy(update={"authority_payer_bindings": (binding,)}),
+        _NEW,
+        block_retirement=True,
+    )
+    client = Client()
+    context = PayerCommandContext(
+        authority_id="authority-main",
+        environment="production",
+        profiles=access,
+        client_factory=lambda signer: client,
+        dispatch_action=lambda _action, _policy: None,
+    )
+    target = f"{_OLD.identity.scheme.value}:{_OLD.identity.identifier}"
+    result = CliRunner().invoke(
+        _app(context),
+        ["payer", "owner", "retire", "--principal", target],
+    )
+    assert result.exit_code == 2
+    assert len(access.retirement_checks) == 1
+    assert client.calls == []
+    assert client.closed == 0
 
 
 def test_cli_tree_registers_every_exact_namespaced_operation() -> None:

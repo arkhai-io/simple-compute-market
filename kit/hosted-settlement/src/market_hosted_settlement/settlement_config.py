@@ -9,6 +9,7 @@ import re
 import uuid
 from collections.abc import Mapping, Sequence
 from decimal import Decimal, InvalidOperation
+from pathlib import Path
 from typing import Annotated, Any, Literal
 from urllib.parse import urlsplit
 
@@ -33,6 +34,7 @@ from market_settlement_runtime import (
 )
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from .automation import OffSessionPolicy
 from .adapter import (
     MECHANISM,
     REQUIRED_HOSTED_CAPABILITIES,
@@ -212,6 +214,16 @@ class StripeSettlementConfig(BaseModel):
     request_timeout_seconds: float = Field(default=10.0, gt=0)
     preflight_timeout_seconds: float = Field(default=5.0, gt=0)
     allow_insecure_loopback: bool = False
+    off_session_policy: OffSessionPolicy = Field(
+        default_factory=OffSessionPolicy,
+        repr=False,
+        json_schema_extra={"roles": ["buyer"]},
+    )
+    authorization_journal_path: str | None = Field(
+        default=None,
+        repr=False,
+        json_schema_extra={"roles": ["buyer"]},
+    )
 
     @field_validator("base_url")
     @classmethod
@@ -236,6 +248,13 @@ class StripeSettlementConfig(BaseModel):
             raise ValueError(
                 "base_url must not contain credentials, query, or fragment"
             )
+        return value
+
+    @field_validator("authorization_journal_path")
+    @classmethod
+    def validate_authorization_journal_path(cls, value: str | None) -> str | None:
+        if value is not None and not Path(value).is_absolute():
+            raise ValueError("authorization_journal_path must be absolute")
         return value
 
     @field_validator("authority_id", "environment", "account_ref", "condition_profile")
@@ -286,6 +305,26 @@ class StripeSettlementConfig(BaseModel):
             and not self.allow_insecure_loopback
         ):
             raise ValueError("HTTP loopback requires allow_insecure_loopback")
+        if self.off_session_policy.enabled:
+            if self.off_session_policy.authority_id != self.authority_id:
+                raise ValueError(
+                    "off-session policy authority must match hosted authority"
+                )
+            if self.off_session_policy.environment != self.environment:
+                raise ValueError(
+                    "off-session policy environment must match hosted environment"
+                )
+            if self.off_session_policy.currency != self.currency:
+                raise ValueError(
+                    "off-session policy currency must match hosted currency"
+                )
+            if (
+                self.off_session_policy.funding_profile
+                is FundingProfile.US_BANK_TRANSFER
+            ):
+                raise ValueError(
+                    "off-session policy does not support push bank transfer"
+                )
         return self
 
 
