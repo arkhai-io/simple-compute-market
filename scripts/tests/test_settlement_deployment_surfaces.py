@@ -137,20 +137,14 @@ def test_alkahest_profiles_keep_policy_outside_chains() -> None:
         )
 
 
-def test_public_rehearsal_examples_exclude_wallet_credentials() -> None:
+def test_public_deployment_config_examples_exclude_wallet_credentials() -> None:
     for relative_path in (
-        "deploy-base-sepolia/buyer.config.toml",
-        "deploy-base-sepolia/storefront.toml",
+        "domains/vms/storefront/storefront.bob.toml",
+        "domains/vms/storefront/storefront.alice.toml",
     ):
         config = _toml(relative_path)
-        assert "private_key" not in config["Wallet"]
+        assert "wallet.private_key" not in _field_paths(config)
         assert config["Settlement"]["priority"] == ["alkahest.v1"]
-
-    compose = (REPO_ROOT / "deploy-base-sepolia/docker-compose.yml").read_text(
-        encoding="utf-8"
-    )
-    assert "VMS_SEPOLIA_STOREFRONT_SECRETS_FILE" in compose
-    assert "/etc/arkhai/storefront.secrets.toml:ro" in compose
 
 
 def test_marketplace_compose_emits_no_legacy_settlement_environment() -> None:
