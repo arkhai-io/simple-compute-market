@@ -15,32 +15,40 @@ Section 6.
 
 ## 1. Mechanism kit
 
-- [ ] 1.1 Scaffold `kit/contact-exchange` (package `market_contact_exchange`)
-      mirroring `kit/hosted-settlement`: pyproject, Makefile with `dist` target,
-      and an import-fence boundary test identical in spirit to the other mechanism
-      kits (stdlib + market_core + market_identity + market_settlement_runtime +
-      pydantic; no provider SDKs, no web frameworks).
-- [ ] 1.2 `create_contact_exchange_registration()`: `mechanism_id =
-      "contact_exchange.v1"`, `config_key = "contact"`, buyer and seller roles,
-      `negotiates_scalar_amount=False`, preflight that validates configuration
-      only (no external dependency to probe). Config model under
-      `[Settlement.contact]`: the seller's contact payload (an opaque bounded
-      dict, size-capped), offered contact profiles (channel descriptor + prose
-      commercial terms), and nothing that could leak contact into publication.
-- [ ] 1.3 Mechanism client implementing the `ConditionalEscrowClient` port:
-      `materialize` returns ready immediately, `get_status`/`check` report
-      satisfied, `collect` produces the introduction receipt, `reclaim_expired`
-      is a no-op. No funding, no condition anchors.
-- [ ] 1.4 Option builder: one `SettlementOption` per offered profile with
-      `rates: []`, prose terms and channel descriptor in `params`, `option_id`
-      via `derive_settlement_option_id`. Pin that the builder passes
-      `build_option`'s `reject_scalar_rates_for_non_scalar` coherence check and
-      that no configured contact payload reaches the built option.
-- [ ] 1.5 Evidence: kit unit suite (registration, readiness, client port, option
-      builder, fence) green via `uv run --find-links ../../.dist pytest
-      tests/unit -q`; wheel builds into `.dist`.
-- [ ] 1.6 Closeout: comment hygiene, module-level imports, no change-ID
-      references in code.
+- [x] 1.1 Scaffolded `kit/contact-exchange` (package `market_contact_exchange`)
+      mirroring `kit/hosted-settlement`: pyproject (deps: arkhai-core,
+      arkhai-kit-settlement-runtime, pydantic), Makefile, `kit/Makefile`
+      `test-contact-exchange`/`dist-contact-exchange` wiring, and an import-fence
+      boundary test (stdlib + market_core + market_settlement_runtime + pydantic;
+      no provider SDKs, no web frameworks; market_identity unneeded so far, add
+      to the fence only when imported).
+- [x] 1.2 `create_contact_exchange_registration()` done. One correction forced
+      by the registry: the canonical mechanism-ID grammar
+      (`[a-z][a-z0-9.-]*\.vN`) forbids underscores, so the ID is
+      `contact-exchange.v1`, not the drafted `contact_exchange.v1`; all change
+      documents and prior test fixtures were renamed. Config under
+      `[Settlement.contact]`: `contact_payload` (bounded opaque dict, marked
+      secret, seller-role) and `profiles` (channel + prose terms); a config-time
+      validator rejects payload values that appear in published profiles.
+- [x] 1.3 `ContactExchangeClient` implements the port trivially; mechanism_ref
+      derives from the runtime's deterministic materialize operation_ref, so
+      re-materialization is idempotent. Port conformance pinned via the
+      runtime-checkable protocol.
+- [x] 1.4 Option builder emits one rateless option per ready clause with
+      `option_id` via `derive_settlement_option_id` (market_core import — no
+      inline hash duplicate); rejects scalar-rate clauses, unoffered profiles,
+      and any option payload containing a configured contact value. Built
+      option validates against `SettlementOption` (canonical-ID check) and
+      passes registry `build_option` with the non-scalar coherence check live.
+- [x] 1.5 Evidence: kit suite 16 passed (fence, client port ×5, config/registry
+      ×10 covering readiness channels-only projection, blockers, option build,
+      scalar-clause rejection, leak refusal at config and builder, publication
+      input, buyer compatibility, buyer-role client map); wheel
+      `arkhai_kit_contact_exchange-0.1.0` built into `.dist`. Renamed-fixture
+      suites re-run green: kit/policy 17, kit/negotiation-runtime 7,
+      core/buyer 101.
+- [x] 1.6 Closeout: `make check-comment-hygiene` clean; imports module-level;
+      no change-ID references in code.
 
 ## 2. Non-financial obligation servicing
 
@@ -48,7 +56,7 @@ Section 6.
       obligation — payer/claimant are the two parties, `amount`/`asset` absent
       (`None`, already documented as the non-scalar view in
       `market_core.schemas.SettlementObligation`), mechanism
-      `contact_exchange.v1`: `register_plan`, `derive_obligation_ref`, servicing
+      `contact-exchange.v1`: `register_plan`, `derive_obligation_ref`, servicing
       state transitions to collected on the immediate-ready client, and status
       projection. Fix only what the characterization proves broken; the spec
       delta in `specs/settlement-servicing/spec.md` is the contract.
@@ -72,7 +80,7 @@ Section 6.
       contact option produces a plan with the one non-financial obligation and
       the introduction package (agreed context, channel descriptor, prose terms,
       negotiated free text — never contact payloads) in
-      `service_terms["contact_exchange.v1"]`; acceptance persists it via the
+      `service_terms["contact-exchange.v1"]`; acceptance persists it via the
       existing `commit_settlement_plan` path. Amount is absent, not zero, on
       the wire shape the buyer sees; `agreed_price` records 0 per the runtime's
       existing tolerance.

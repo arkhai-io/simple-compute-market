@@ -2,7 +2,7 @@
 
 ### Requirement: An introduction completes a deal
 
-Under the `contact_exchange.v1` mechanism, a deal MUST complete with no payment and no
+Under the `contact-exchange.v1` mechanism, a deal MUST complete with no payment and no
 provisioning: the accepted plan carries one non-financial obligation whose
 materialization is immediately ready, and the deal MUST reach a terminal settled state
 once the reveal is available to both parties, independent of whether either party has

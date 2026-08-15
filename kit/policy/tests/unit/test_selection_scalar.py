@@ -29,7 +29,7 @@ _SCALAR_OPTION = {
 }
 _NON_SCALAR_OPTION = {
     "option_id": "bb" * 32,
-    "mechanism": "contact_exchange.v1",
+    "mechanism": "contact-exchange.v1",
     "asset": "introduction",
     "rates": [],
     "params": {"terms": "weekly rate negotiable on call"},
@@ -78,7 +78,7 @@ def test_selection_proposal_scalarness_follows_matched_option() -> None:
 
 def test_unmatched_selection_stays_scalar() -> None:
     unmatched = _selection_proposal(
-        {"option_id": "cc" * 32, "mechanism": "contact_exchange.v1"}
+        {"option_id": "cc" * 32, "mechanism": "contact-exchange.v1"}
     )
     assert proposal_uses_scalar_amount(_LISTING, unmatched) is True
 
@@ -103,7 +103,7 @@ def test_exact_accept_takes_non_scalar_selection_as_proposed() -> None:
 
 def test_exact_accept_rejects_unlisted_selection() -> None:
     proposal = _selection_proposal(
-        {"option_id": "cc" * 32, "mechanism": "contact_exchange.v1"}
+        {"option_id": "cc" * 32, "mechanism": "contact-exchange.v1"}
     )
     history = [
         NegotiationRound(

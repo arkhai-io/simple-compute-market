@@ -21,7 +21,7 @@ analog is deliberately transient, while an introduction must be re-readable.
 ## What Changes
 
 - A new `kit/contact-exchange` exporting `create_contact_exchange_registration()`:
-  `mechanism_id="contact_exchange.v1"`, `config_key="contact"`, buyer and seller
+  `mechanism_id="contact-exchange.v1"`, `config_key="contact"`, buyer and seller
   roles, a preflight that checks configuration only, and a mechanism client whose
   `materialize` returns ready immediately, `check` reports satisfied, `collect`
   produces the receipt, and reclaim is trivial. Import fence identical to the other
@@ -35,7 +35,7 @@ analog is deliberately transient, while an introduction must be re-readable.
   `finish-settlement-mechanism-neutrality`'s declinable-scalar capability), with
   freeform counter-context in the domain message payload.
 - Accepted context: the introduction package is written into
-  `SettlementPlan.service_terms["contact_exchange.v1"]`, which acceptance already
+  `SettlementPlan.service_terms["contact-exchange.v1"]`, which acceptance already
   persists durably.
 - Reveal: a third signed route family (`/api/v1/introductions`) mirroring the hosted
   settlement routes — start supplies the buyer's contact payload, and an idempotent

@@ -32,7 +32,7 @@ automated bargaining.
 
 The earlier draft modeled the introduction as a plan with zero obligations. The
 settlement runtime registers and services plans per obligation, so the introduction
-is instead one obligation under `contact_exchange.v1` — payer and claimant are the two
+is instead one obligation under `contact-exchange.v1` — payer and claimant are the two
 parties, amount and asset absent — whose mechanism client materializes ready
 immediately. This fits `register_plan`, operation identity, and status reporting with
 no runtime changes; only the servicing spec's assumption that an obligation is
@@ -53,6 +53,13 @@ domain through callbacks — but where the hosted action is transient by design,
 contact payload is persisted and the read is idempotent: an introduction that could
 be lost to a missed poll would not be an introduction. Mounted as its own family
 (`/api/v1/introductions`), not overloaded onto either existing settle surface.
+
+### The canonical ID is `contact-exchange.v1`
+
+The registry's mechanism-ID grammar (`[a-z][a-z0-9.-]*\.vN`, enforced at
+registration) forbids underscores, so the earlier `contact_exchange.v1` spelling
+could never register. Hyphenated `contact-exchange.v1` is used everywhere: the
+mechanism ID, the `service_terms` namespace key, and discovery projections.
 
 ### Contact is held then revealed, never published
 

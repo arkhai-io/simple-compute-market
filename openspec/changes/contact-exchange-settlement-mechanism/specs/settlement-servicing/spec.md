@@ -10,7 +10,7 @@ funding state, a chain client, or an expiration-driven reclaim path.
 
 #### Scenario: Servicing an introduction obligation
 
-- **WHEN** a `contact_exchange.v1` obligation is registered and its mechanism reports
+- **WHEN** a `contact-exchange.v1` obligation is registered and its mechanism reports
   the introduction available
 - **THEN** the runtime records it ready, completes collection with a receipt, and no
   funding or reclaim machinery is invoked
