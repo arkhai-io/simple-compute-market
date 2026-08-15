@@ -1,7 +1,7 @@
 {
   "contract_version": "arkhai.hosted-settlement-release.v2",
-  "release_version": "0.2.0",
-  "api_version": "0.2.0",
+  "release_version": "0.2.1",
+  "api_version": "0.2.1",
   "schema_version": 5,
   "required_capabilities": [
     "scheme-tagged-identities.v1",
@@ -61,20 +61,20 @@
     ]
   },
   "manifest_filename": "release-manifest.json",
-  "manifest_sha256": "07ab88d7cbe16f4197e0117194c02d1310797807b06d17124eebe13ddf3d9efe",
+  "manifest_sha256": "fc24d69e56a8f1a4aaed4711d06d67e0414e47cb996ce4865a7d4439c7de0644",
   "authority_id": "hosted-settlement-release-v0.2",
   "authority_address": "0x0810bdefeef3b8b85aa6c689f5e907e03328c9ac",
   "repository": "arkhai-io/stripe-settlement-service",
-  "workflow_ref": ".github/workflows/release.yml@refs/tags/v0.2.0",
-  "source_commit": "88bcc7b918614bde78872f5a3e71bd5cb64d20ae",
+  "workflow_ref": ".github/workflows/release.yml@refs/tags/v0.2.1",
+  "source_commit": "bb68a08bf717d13326641be4405831bc23229c95",
   "client_wheel": {
-    "filename": "arkhai_hosted_settlement_client-0.2.0-py3-none-any.whl",
+    "filename": "arkhai_hosted_settlement_client-0.2.1-py3-none-any.whl",
     "distribution": "arkhai-hosted-settlement-client",
-    "version": "0.2.0",
-    "sha256": "f60af0a614f5da322da925fcb39af5f71d52078bafc669d22a3301f688531f8b"
+    "version": "0.2.1",
+    "sha256": "0d57c91249855798d6485b8850e4a7470033a896b721460123d9b9dc6cd57a07"
   },
   "service_image": {
     "reference": "ghcr.io/arkhai-io/stripe-settlement-service",
-    "digest": "sha256:9ea6cd005d010571f8a2370e02a58cfedb5187e88057f25a98b5804b15930a04"
+    "digest": "sha256:c7f70fb4755db1010c6a6e6731e7da7fc7a5d7f464d9577a1bed4a0826908f6c"
   }
 }

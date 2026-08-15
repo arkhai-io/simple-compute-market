@@ -184,22 +184,27 @@ wheels = [
 
 [[package]]
 name = "arkhai-bare-metal-storefront"
-version = "0.2.0"
+version = "0.2.1"
 source = { registry = "../../../.dist" }
 dependencies = [
     { name = "arkhai-bare-metal", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
+    { name = "arkhai-compute-provisioning", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "arkhai-core", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "arkhai-core-storefront", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
+    { name = "arkhai-hosted-settlement-client", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "arkhai-kit-alkahest", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
+    { name = "arkhai-kit-hosted-settlement", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "arkhai-kit-identity", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "arkhai-kit-policy", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "arkhai-kit-settlement-runtime", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
+    { name = "arkhai-kit-site-client", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
+    { name = "arkhai-kit-storefront", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "fastapi", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "typer", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "uvicorn", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
 ]
 wheels = [
-    { path = "arkhai_bare_metal_storefront-0.2.0-py3-none-any.whl" },
+    { path = "arkhai_bare_metal_storefront-0.2.1-py3-none-any.whl" },
 ]
 
 [[package]]
@@ -273,7 +278,7 @@ wheels = [
 
 [[package]]
 name = "arkhai-hosted-settlement-client"
-version = "0.2.0"
+version = "0.2.1"
 source = { registry = "../../../.dist" }
 dependencies = [
     { name = "cryptography", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
@@ -283,7 +288,7 @@ dependencies = [
     { name = "rfc8785", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
 ]
 wheels = [
-    { path = "arkhai_hosted_settlement_client-0.2.0-py3-none-any.whl" },
+    { path = "arkhai_hosted_settlement_client-0.2.1-py3-none-any.whl" },
 ]
 
 [[package]]
@@ -344,7 +349,7 @@ wheels = [
 
 [[package]]
 name = "arkhai-kit-hosted-settlement"
-version = "0.1.0"
+version = "0.1.1"
 source = { registry = "../../../.dist" }
 dependencies = [
     { name = "arkhai-hosted-settlement-client", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
@@ -354,7 +359,7 @@ dependencies = [
     { name = "typer", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
 ]
 wheels = [
-    { path = "arkhai_kit_hosted_settlement-0.1.0-py3-none-any.whl" },
+    { path = "arkhai_kit_hosted_settlement-0.1.1-py3-none-any.whl" },
 ]
 
 [[package]]
@@ -373,6 +378,18 @@ wheels = [
 ]
 
 [[package]]
+name = "arkhai-kit-negotiation-runtime"
+version = "0.1.0"
+source = { registry = "../../../.dist" }
+dependencies = [
+    { name = "arkhai-kit-identity", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
+    { name = "arkhai-kit-policy", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
+]
+wheels = [
+    { path = "arkhai_kit_negotiation_runtime-0.1.0-py3-none-any.whl" },
+]
+
+[[package]]
 name = "arkhai-kit-policy"
 version = "0.1.1"
 source = { registry = "../../../.dist" }
@@ -383,18 +400,6 @@ dependencies = [
 ]
 wheels = [
     { path = "arkhai_kit_policy-0.1.1-py3-none-any.whl" },
-]
-
-[[package]]
-name = "arkhai-kit-negotiation-runtime"
-version = "0.1.0"
-source = { registry = "../../../.dist" }
-dependencies = [
-    { name = "arkhai-kit-identity", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
-    { name = "arkhai-kit-policy", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
-]
-wheels = [
-    { path = "arkhai_kit_negotiation_runtime-0.1.0-py3-none-any.whl" },
 ]
 
 [[package]]
@@ -421,19 +426,6 @@ dependencies = [
 ]
 wheels = [
     { path = "arkhai_kit_settlement_runtime-0.1.0-py3-none-any.whl" },
-]
-
-[[package]]
-name = "arkhai-kit-storefront"
-version = "0.1.0"
-source = { registry = "../../../.dist" }
-dependencies = [
-    { name = "alkahest-py", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
-    { name = "arkhai-core-storefront", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
-    { name = "arkhai-kit-alkahest", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
-]
-wheels = [
-    { path = "arkhai_kit_storefront-0.1.0-py3-none-any.whl" },
 ]
 
 [[package]]
@@ -464,6 +456,19 @@ wheels = [
 ]
 
 [[package]]
+name = "arkhai-kit-storefront"
+version = "0.1.0"
+source = { registry = "../../../.dist" }
+dependencies = [
+    { name = "alkahest-py", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
+    { name = "arkhai-core-storefront", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
+    { name = "arkhai-kit-alkahest", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
+]
+wheels = [
+    { path = "arkhai_kit_storefront-0.1.0-py3-none-any.whl" },
+]
+
+[[package]]
 name = "arkhai-vms"
 version = "0.2.0"
 source = { registry = "../../../.dist" }
@@ -477,7 +482,7 @@ wheels = [
 
 [[package]]
 name = "arkhai-vms-storefront"
-version = "0.3.0"
+version = "0.3.1"
 source = { editable = "." }
 dependencies = [
     { name = "alkahest-py", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
@@ -489,18 +494,18 @@ dependencies = [
     { name = "arkhai-core-storefront", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "arkhai-core-storefront-client", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "arkhai-kit-alkahest", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
-    { name = "arkhai-kit-config", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "arkhai-kit-capacity-publication", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
+    { name = "arkhai-kit-config", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "arkhai-kit-fulfillment", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "arkhai-kit-hosted-settlement", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "arkhai-kit-identity", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
-    { name = "arkhai-kit-policy", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "arkhai-kit-negotiation-runtime", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
+    { name = "arkhai-kit-policy", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "arkhai-kit-resource-pools", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "arkhai-kit-settlement-runtime", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
-    { name = "arkhai-kit-storefront", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "arkhai-kit-site", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "arkhai-kit-site-client", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
+    { name = "arkhai-kit-storefront", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "arkhai-vms", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "dynaconf", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "eth-account", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
@@ -546,25 +551,25 @@ dev = [
 requires-dist = [
     { name = "alkahest-py", specifier = "==1.1.2" },
     { name = "arkhai-bare-metal", specifier = ">=0.2.0" },
-    { name = "arkhai-bare-metal-storefront", specifier = "==0.2.0" },
+    { name = "arkhai-bare-metal-storefront", specifier = "==0.2.1" },
     { name = "arkhai-compute-provisioning", specifier = ">=0.6.0" },
     { name = "arkhai-core", specifier = ">=0.2.0" },
     { name = "arkhai-core-registry-client", specifier = ">=0.11.0" },
     { name = "arkhai-core-storefront", specifier = ">=0.3.0" },
     { name = "arkhai-core-storefront-client", specifier = ">=0.17.0" },
     { name = "arkhai-kit-alkahest" },
-    { name = "arkhai-kit-config" },
     { name = "arkhai-kit-capacity-publication", specifier = "==0.1.0" },
+    { name = "arkhai-kit-config" },
     { name = "arkhai-kit-fulfillment", specifier = ">=0.2.0" },
-    { name = "arkhai-kit-hosted-settlement", specifier = "==0.1.0" },
+    { name = "arkhai-kit-hosted-settlement", specifier = "==0.1.1" },
     { name = "arkhai-kit-identity", specifier = "==0.3.0" },
-    { name = "arkhai-kit-policy" },
     { name = "arkhai-kit-negotiation-runtime", specifier = "==0.1.0" },
+    { name = "arkhai-kit-policy" },
     { name = "arkhai-kit-resource-pools", specifier = ">=0.2.0" },
     { name = "arkhai-kit-settlement-runtime", specifier = ">=0.1.0" },
-    { name = "arkhai-kit-storefront", specifier = "==0.1.0" },
     { name = "arkhai-kit-site", specifier = ">=0.3.0" },
     { name = "arkhai-kit-site-client", specifier = ">=0.2.0" },
+    { name = "arkhai-kit-storefront", specifier = "==0.1.0" },
     { name = "arkhai-vms", specifier = ">=0.2.0" },
     { name = "codespell", marker = "extra == 'lint'", specifier = ">=2.2.0,<3.0.0" },
     { name = "dynaconf", specifier = ">=3.0.0" },

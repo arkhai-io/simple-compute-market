@@ -74,7 +74,7 @@ jobs:
             kit-policy: ['kit/policy/**', '.github/workflows/publish-pypi.yml']
             kit-settlement-runtime: ['kit/settlement-runtime/**', '.github/workflows/publish-pypi.yml']
             kit-negotiation-runtime: ['kit/negotiation-runtime/**', '.github/workflows/publish-pypi.yml']
-            kit-hosted-settlement: ['kit/hosted-settlement/**', 'manifests/hosted-settlement-v0.2.0-trust.json', '.github/workflows/publish-pypi.yml']
+            kit-hosted-settlement: ['kit/hosted-settlement/**', 'manifests/hosted-settlement-v0.2.1-trust.json', '.github/workflows/publish-pypi.yml']
             core: ['core/src/**', 'core/pyproject.toml', 'core/README.md', '.github/workflows/publish-pypi.yml']
             core-buyer: ['core/buyer/**', '.github/workflows/publish-pypi.yml']
             core-storefront: ['core/storefront/**', '.github/workflows/publish-pypi.yml']
@@ -190,16 +190,16 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           mkdir -p .dist
-          repository="$(python -c 'import json; print(json.load(open("manifests/hosted-settlement-v0.2.0-trust.json"))["repository"])')"
-          version="$(python -c 'import json; print(json.load(open("manifests/hosted-settlement-v0.2.0-trust.json"))["release_version"])')"
-          manifest="$(python -c 'import json; print(json.load(open("manifests/hosted-settlement-v0.2.0-trust.json"))["manifest_filename"])')"
-          wheel="$(python -c 'import json; print(json.load(open("manifests/hosted-settlement-v0.2.0-trust.json"))["client_wheel"]["filename"])')"
+          repository="$(python -c 'import json; print(json.load(open("manifests/hosted-settlement-v0.2.1-trust.json"))["repository"])')"
+          version="$(python -c 'import json; print(json.load(open("manifests/hosted-settlement-v0.2.1-trust.json"))["release_version"])')"
+          manifest="$(python -c 'import json; print(json.load(open("manifests/hosted-settlement-v0.2.1-trust.json"))["manifest_filename"])')"
+          wheel="$(python -c 'import json; print(json.load(open("manifests/hosted-settlement-v0.2.1-trust.json"))["client_wheel"]["filename"])')"
           test -n "$repository"
           gh release download "v$version" --repo "$repository" --dir .dist \
             --pattern "$manifest" \
             --pattern "$wheel" \
-            --pattern "openapi-v0.2.0.json" \
-            --pattern "conformance-v0.2.0.json" \
+            --pattern "openapi-v0.2.1.json" \
+            --pattern "conformance-v0.2.1.json" \
             --pattern "migrations-v5.json" \
             --pattern "sbom.spdx.json" \
             --pattern "provenance.intoto.json"

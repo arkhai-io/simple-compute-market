@@ -103,7 +103,7 @@ priority = ["fiat.stripe.v1"]
 [Settlement.stripe]
 enabled = true
 # Set the hosted base URL, authority/environment, exact signed manifest,
-# client/API 0.2.0/schema 5 and capability pins, USD/US policy, and
+# client/API 0.2.1/schema 5 and capability pins, USD/US policy, and
 # [Settlement.stripe.authority].principals.
 
 [Settlement.alkahest]

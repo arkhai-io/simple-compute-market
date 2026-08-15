@@ -250,7 +250,10 @@ jobs:
           test ! -e .dist
           tar -xzf "$MARKETPLACE_RELEASE_DIR/marketplace-wheelhouse.tar.gz" \
             -C "$GITHUB_WORKSPACE"
-          test -f .dist/arkhai_hosted_settlement_client-0.2.0-py3-none-any.whl
+          hosted_client_wheel="$(python -c 'import json, os; print(json.load(open(os.environ["HOSTED_RELEASE_DIR"] + "/release-manifest.json"))["payload"]["client_wheel"]["filename"])')"
+          test -f "$HOSTED_RELEASE_DIR/$hosted_client_wheel"
+          test -f ".dist/$hosted_client_wheel"
+          echo "HOSTED_CLIENT_WHEEL_FILE=$hosted_client_wheel" >> "$GITHUB_ENV"
 
 
       - name: Install protected Chromium runtime
@@ -365,7 +368,7 @@ jobs:
           mkdir -p "$EVIDENCE_DIR"
           make hosted-stripe-test \
             HOSTED_RELEASE_MANIFEST="$HOSTED_RELEASE_DIR/release-manifest.json" \
-            HOSTED_CLIENT_WHEEL="$HOSTED_RELEASE_DIR/arkhai_hosted_settlement_client-0.2.0-py3-none-any.whl" \
+            HOSTED_CLIENT_WHEEL="$HOSTED_RELEASE_DIR/$HOSTED_CLIENT_WHEEL_FILE" \
             HOSTED_MARKETPLACE_RELEASE_MANIFEST="$MARKETPLACE_RELEASE_DIR/marketplace-release-manifest.json" \
             HOSTED_PRODUCTION_MANIFEST_SHA256="$HOSTED_MANIFEST_SHA256" \
             HOSTED_PRODUCTION_CLIENT_WHEEL_SHA256="$HOSTED_CLIENT_WHEEL_SHA256" \

@@ -163,7 +163,7 @@ wheels = [
 
 [[package]]
 name = "arkhai-bare-metal-storefront"
-version = "0.2.0"
+version = "0.2.1"
 source = { registry = "../.dist" }
 dependencies = [
     { name = "arkhai-bare-metal" },
@@ -183,7 +183,7 @@ dependencies = [
     { name = "uvicorn" },
 ]
 wheels = [
-    { path = "arkhai_bare_metal_storefront-0.2.0-py3-none-any.whl" },
+    { path = "arkhai_bare_metal_storefront-0.2.1-py3-none-any.whl" },
 ]
 
 [[package]]
@@ -347,7 +347,7 @@ provides-extras = ["dev", "stripe-test"]
 
 [[package]]
 name = "arkhai-hosted-settlement-client"
-version = "0.2.0"
+version = "0.2.1"
 source = { registry = "../.dist" }
 dependencies = [
     { name = "cryptography" },
@@ -357,7 +357,7 @@ dependencies = [
     { name = "rfc8785" },
 ]
 wheels = [
-    { path = "arkhai_hosted_settlement_client-0.2.0-py3-none-any.whl" },
+    { path = "arkhai_hosted_settlement_client-0.2.1-py3-none-any.whl" },
 ]
 
 [[package]]
@@ -418,7 +418,7 @@ wheels = [
 
 [[package]]
 name = "arkhai-kit-hosted-settlement"
-version = "0.1.0"
+version = "0.1.1"
 source = { registry = "../.dist" }
 dependencies = [
     { name = "arkhai-hosted-settlement-client" },
@@ -428,7 +428,7 @@ dependencies = [
     { name = "typer" },
 ]
 wheels = [
-    { path = "arkhai_kit_hosted_settlement-0.1.0-py3-none-any.whl" },
+    { path = "arkhai_kit_hosted_settlement-0.1.1-py3-none-any.whl" },
 ]
 
 [[package]]
@@ -551,7 +551,7 @@ wheels = [
 
 [[package]]
 name = "arkhai-vms-buyer"
-version = "0.3.0"
+version = "0.3.1"
 source = { registry = "../.dist" }
 dependencies = [
     { name = "alkahest-py" },
@@ -571,7 +571,7 @@ dependencies = [
     { name = "typer" },
 ]
 wheels = [
-    { path = "arkhai_vms_buyer-0.3.0-py3-none-any.whl" },
+    { path = "arkhai_vms_buyer-0.3.1-py3-none-any.whl" },
 ]
 
 [[package]]
@@ -590,7 +590,7 @@ wheels = [
 
 [[package]]
 name = "arkhai-vms-storefront"
-version = "0.3.0"
+version = "0.3.1"
 source = { registry = "../.dist" }
 dependencies = [
     { name = "alkahest-py" },
@@ -631,7 +631,7 @@ dependencies = [
     { name = "websockets" },
 ]
 wheels = [
-    { path = "arkhai_vms_storefront-0.3.0-py3-none-any.whl" },
+    { path = "arkhai_vms_storefront-0.3.1-py3-none-any.whl" },
 ]
 
 [[package]]

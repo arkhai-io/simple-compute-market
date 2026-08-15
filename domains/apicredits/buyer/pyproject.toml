@@ -18,7 +18,7 @@ dependencies = [
   "arkhai-kit-alkahest",
   "arkhai-kit-config",
   "arkhai-kit-policy",
-  "arkhai-kit-hosted-settlement",
+  "arkhai-kit-hosted-settlement>=0.1.1",
   "arkhai-kit-settlement-runtime",
 ]
 

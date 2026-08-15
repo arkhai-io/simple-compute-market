@@ -13,8 +13,8 @@ from pathlib import Path, PurePosixPath
 from typing import Any
 
 _RELEASE_CONTRACT = "arkhai.hosted-settlement-release.v2"
-_RELEASE_VERSION = "0.2.0"
-_API_VERSION = "0.2.0"
+_RELEASE_VERSION = "0.2.1"
+_API_VERSION = "0.2.1"
 _SCHEMA_VERSION = 5
 _FUNDING_PROFILES = ("card.v1", "us_bank_transfer.v1", "us_ach_debit.v1")
 _CAPABILITIES = (
@@ -50,8 +50,8 @@ _IDENTITY_CONTRACT = {
     "funding_profiles": list(_FUNDING_PROFILES),
 }
 _ARTIFACT_FILENAMES = {
-    "openapi": "openapi-v0.2.0.json",
-    "conformance": "conformance-v0.2.0.json",
+    "openapi": "openapi-v0.2.1.json",
+    "conformance": "conformance-v0.2.1.json",
     "migrations": "migrations-v5.json",
     "sbom": "sbom.spdx.json",
     "provenance": "provenance.intoto.json",
@@ -265,8 +265,7 @@ def _verify_client_boundary(path: Path) -> None:
             )
             if any(
                 any(
-                    PurePosixPath(part).stem
-                    in _FORBIDDEN_CLIENT_IMPLEMENTATION_PARTS
+                    PurePosixPath(part).stem in _FORBIDDEN_CLIENT_IMPLEMENTATION_PARTS
                     for part in client_path.parts[1:]
                 )
                 for client_path in client_paths
@@ -285,17 +284,16 @@ def _verify_client_boundary(path: Path) -> None:
                 tree = ast.parse(archive.read(name).decode("utf-8"), filename=name)
                 for node in ast.walk(tree):
                     if isinstance(node, ast.Import):
-                        imports.update(alias.name.split(".", 1)[0] for alias in node.names)
+                        imports.update(
+                            alias.name.split(".", 1)[0] for alias in node.names
+                        )
                     elif isinstance(node, ast.ImportFrom) and node.module:
                         imports.add(node.module.split(".", 1)[0])
                 if name == "hosted_settlement_client/__init__.py":
                     for node in tree.body:
-                        if (
-                            isinstance(node, ast.Assign)
-                            and any(
-                                isinstance(target, ast.Name) and target.id == "__all__"
-                                for target in node.targets
-                            )
+                        if isinstance(node, ast.Assign) and any(
+                            isinstance(target, ast.Name) and target.id == "__all__"
+                            for target in node.targets
                         ):
                             exports.update(ast.literal_eval(node.value))
             if imports.intersection({"hosted_settlement_service", "stripe"}):
@@ -308,10 +306,17 @@ def _verify_client_boundary(path: Path) -> None:
                     "staged client wheel is missing expanded public exports: "
                     + ", ".join(missing)
                 )
-    except (OSError, UnicodeDecodeError, SyntaxError, ValueError, zipfile.BadZipFile) as exc:
+    except (
+        OSError,
+        UnicodeDecodeError,
+        SyntaxError,
+        ValueError,
+        zipfile.BadZipFile,
+    ) as exc:
         raise ReleaseVerificationError(
             f"staged client wheel boundary is unreadable: {exc}"
         ) from exc
+
 
 def _verify_wheel(
     path: Path,
@@ -363,6 +368,7 @@ def _verify_file(root: Path, descriptor: dict[str, Any], field: str) -> Path:
         raise ReleaseVerificationError(f"staged {field} artifact hash does not match")
     return path
 
+
 def _verify_contract_artifacts(paths: dict[str, Path]) -> None:
     _, openapi = _read_json(paths["openapi"], "staged OpenAPI")
     info = _object(openapi.get("info"), "openapi.info")
@@ -395,9 +401,7 @@ def _verify_contract_artifacts(paths: dict[str, Path]) -> None:
     migration_rows = migrations.get("migrations")
     if not isinstance(migration_rows, list):
         raise ReleaseVerificationError("migration artifact migrations must be a list")
-    positions = [
-        row.get("position") for row in migration_rows if isinstance(row, dict)
-    ]
+    positions = [row.get("position") for row in migration_rows if isinstance(row, dict)]
     if positions != list(range(1, _SCHEMA_VERSION + 1)):
         raise ReleaseVerificationError(
             "migration artifact must contain the exact ordered schema history"

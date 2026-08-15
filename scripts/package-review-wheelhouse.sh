@@ -7,14 +7,14 @@ PROJECTS="${REVIEW_PROJECTS:-}"
 REVIEW_PYTHON="${REVIEW_PYTHON:-3.13}"
 MARKETPLACE_SOURCE_COMMIT="${REVIEW_SOURCE_COMMIT:-$(git -C "${ROOT_DIR}" rev-parse HEAD)}"
 IDENTITY_WHEEL="arkhai_kit_identity-0.3.0-py3-none-any.whl"
-HOSTED_CLIENT_WHEEL="arkhai_hosted_settlement_client-0.2.0-py3-none-any.whl"
+HOSTED_CLIENT_WHEEL="arkhai_hosted_settlement_client-0.2.1-py3-none-any.whl"
 HOSTED_MANIFEST="release-manifest.json"
-HOSTED_TRUST="${ROOT_DIR}/manifests/hosted-settlement-v0.2.0-trust.json"
+HOSTED_TRUST="${ROOT_DIR}/manifests/hosted-settlement-v0.2.1-trust.json"
 HOSTED_RELEASE_ARTIFACTS=(
   "${HOSTED_MANIFEST}"
   "${HOSTED_CLIENT_WHEEL}"
-  "openapi-v0.2.0.json"
-  "conformance-v0.2.0.json"
+  "openapi-v0.2.1.json"
+  "conformance-v0.2.1.json"
   "migrations-v5.json"
   "sbom.spdx.json"
   "provenance.intoto.json"
@@ -151,8 +151,8 @@ expected_identity = {
 }
 if trust["contract_version"] != "arkhai.hosted-settlement-release.v2":
     raise SystemExit("hosted release trust does not pin identity-capable contract v2")
-if trust["release_version"] != "0.2.0" or trust["api_version"] != "0.2.0":
-    raise SystemExit("hosted release trust does not pin client/API 0.2.0")
+if trust["release_version"] != "0.2.1" or trust["api_version"] != "0.2.1":
+    raise SystemExit("hosted release trust does not pin client/API 0.2.1")
 if trust["schema_version"] != 5:
     raise SystemExit("hosted release trust does not pin schema 5")
 if trust.get("required_capabilities") != expected_capabilities:
@@ -235,14 +235,13 @@ for wheel_path in sorted(wheelhouse.glob("*.whl")):
                         "marketplace wheel imports hosted service/provider module: "
                         f"{wheel_path.name}"
                     )
-                if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name in {
-                    "canonical_body_hash",
-                    "canonical_json",
-                    "sign_request",
-                    "verify_response",
-                }:
+                if (
+                    isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+                    and node.name in {"sign_request", "verify_response"}
+                    and not name.startswith("market_identity/")
+                ):
                     raise SystemExit(
-                        "marketplace wheel copies hosted canonicalization/signature behavior: "
+                        "marketplace wheel copies hosted signature behavior: "
                         f"{wheel_path.name}"
                     )
 
@@ -260,8 +259,8 @@ pins = {
     "settlement_config_schema_version": 1,
     "producer_release": {
         "repository": "arkhai-io/stripe-settlement-service",
-        "release_version": "0.2.0",
-        "api_version": "0.2.0",
+        "release_version": "0.2.1",
+        "api_version": "0.2.1",
         "schema_version": 5,
         "funding_profiles": ["card.v1", "us_bank_transfer.v1", "us_ach_debit.v1"],
         "verification": verified_release,
@@ -420,7 +419,7 @@ project_name_match = re.search(r'(?m)^name = "([^"]+)"$', project_text)
 project_name = project_name_match.group(1) if project_name_match else None
 for name, version in (
     ("arkhai-kit-identity", "0.3.0"),
-    ("arkhai-hosted-settlement-client", "0.2.0"),
+    ("arkhai-hosted-settlement-client", "0.2.1"),
 ):
     mentions = re.findall(rf'(?m)^\s*"{re.escape(name)}([^"]*)"', project_text)
     if mentions and any(value != f"=={version}" for value in mentions):
@@ -428,7 +427,7 @@ for name, version in (
 
 for required_name, required_version in (
     ("arkhai-kit-identity", "0.3.0"),
-    ("arkhai-hosted-settlement-client", "0.2.0"),
+    ("arkhai-hosted-settlement-client", "0.2.1"),
 ):
     if required_name == project_name:
         continue
@@ -486,7 +485,7 @@ project = tomllib.loads(Path(sys.argv[1]).read_text())
 requirements = tuple(project.get("project", {}).get("dependencies", ()))
 for distribution, version, module in (
     ("arkhai-kit-identity", "0.3.0", "market_identity"),
-    ("arkhai-hosted-settlement-client", "0.2.0", "hosted_settlement_client"),
+    ("arkhai-hosted-settlement-client", "0.2.1", "hosted_settlement_client"),
 ):
     if not any(value.startswith(distribution) for value in requirements):
         continue

@@ -180,7 +180,7 @@ wheels = [
 
 [[package]]
 name = "arkhai-bare-metal-storefront"
-version = "0.2.0"
+version = "0.2.1"
 source = { editable = "." }
 dependencies = [
     { name = "arkhai-bare-metal", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
@@ -212,9 +212,9 @@ requires-dist = [
     { name = "arkhai-compute-provisioning", specifier = ">=0.6.0" },
     { name = "arkhai-core", specifier = ">=0.2.0" },
     { name = "arkhai-core-storefront", specifier = ">=0.3.0" },
-    { name = "arkhai-hosted-settlement-client", specifier = "==0.2.0" },
+    { name = "arkhai-hosted-settlement-client", specifier = "==0.2.1" },
     { name = "arkhai-kit-alkahest" },
-    { name = "arkhai-kit-hosted-settlement", specifier = "==0.1.0" },
+    { name = "arkhai-kit-hosted-settlement", specifier = "==0.1.1" },
     { name = "arkhai-kit-identity", specifier = "==0.3.0" },
     { name = "arkhai-kit-policy" },
     { name = "arkhai-kit-settlement-runtime", specifier = ">=0.1.0" },
@@ -290,7 +290,7 @@ wheels = [
 
 [[package]]
 name = "arkhai-hosted-settlement-client"
-version = "0.2.0"
+version = "0.2.1"
 source = { registry = "../../../.dist" }
 dependencies = [
     { name = "cryptography", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
@@ -300,7 +300,7 @@ dependencies = [
     { name = "rfc8785", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
 ]
 wheels = [
-    { path = "arkhai_hosted_settlement_client-0.2.0-py3-none-any.whl" },
+    { path = "arkhai_hosted_settlement_client-0.2.1-py3-none-any.whl" },
 ]
 
 [[package]]
@@ -348,7 +348,7 @@ wheels = [
 
 [[package]]
 name = "arkhai-kit-hosted-settlement"
-version = "0.1.0"
+version = "0.1.1"
 source = { registry = "../../../.dist" }
 dependencies = [
     { name = "arkhai-hosted-settlement-client", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
@@ -358,7 +358,7 @@ dependencies = [
     { name = "typer", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
 ]
 wheels = [
-    { path = "arkhai_kit_hosted_settlement-0.1.0-py3-none-any.whl" },
+    { path = "arkhai_kit_hosted_settlement-0.1.1-py3-none-any.whl" },
 ]
 
 [[package]]

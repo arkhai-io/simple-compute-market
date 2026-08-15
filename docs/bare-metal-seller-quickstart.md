@@ -33,7 +33,7 @@ make dist build-registry build-provisioning build-bare-metal-storefront
 ```
 
 `domains/bare_metal/storefront/Dockerfile` installs
-`arkhai_bare_metal_storefront-0.2.0` from `.dist`. The runtime image does not
+`arkhai_bare_metal_storefront-0.2.1` from `.dist`. The runtime image does not
 copy repository source or resolve an editable sibling package.
 
 ## Define the selected site

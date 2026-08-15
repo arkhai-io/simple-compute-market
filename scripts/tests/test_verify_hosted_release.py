@@ -83,16 +83,16 @@ def _client_wheel_bytes(*, entry_points: str | None = None) -> bytes:
             "'PayerSetupResult','Signer']\n",
         )
         archive.writestr(
-            "arkhai_hosted_settlement_client-0.2.0.dist-info/METADATA",
-            "Name: arkhai-hosted-settlement-client\nVersion: 0.2.0\n",
+            "arkhai_hosted_settlement_client-0.2.1.dist-info/METADATA",
+            "Name: arkhai-hosted-settlement-client\nVersion: 0.2.1\n",
         )
         archive.writestr(
-            "arkhai_hosted_settlement_client-0.2.0.dist-info/WHEEL",
+            "arkhai_hosted_settlement_client-0.2.1.dist-info/WHEEL",
             "Wheel-Version: 1.0\nTag: py3-none-any\n",
         )
         if entry_points is not None:
             archive.writestr(
-                "arkhai_hosted_settlement_client-0.2.0.dist-info/entry_points.txt",
+                "arkhai_hosted_settlement_client-0.2.1.dist-info/entry_points.txt",
                 entry_points,
             )
     return buffer.getvalue()
@@ -107,12 +107,12 @@ def _stage_release(
     client_entry_points: str | None = None,
 ) -> tuple[Path, Path, Path]:
     artifact_contents = {
-        "openapi-v0.2.0.json": json.dumps(
-            {"openapi": "3.1.0", "info": {"version": "0.2.0"}}
+        "openapi-v0.2.1.json": json.dumps(
+            {"openapi": "3.1.0", "info": {"version": "0.2.1"}}
         ).encode(),
-        "conformance-v0.2.0.json": json.dumps(
+        "conformance-v0.2.1.json": json.dumps(
             {
-                "api_version": "0.2.0",
+                "api_version": "0.2.1",
                 "schema_version": 5,
                 "funding_profiles": [
                     "card.v1",
@@ -140,7 +140,7 @@ def _stage_release(
     for filename, contents in artifact_contents.items():
         (root / filename).write_bytes(contents)
 
-    client_filename = "arkhai_hosted_settlement_client-0.2.0-py3-none-any.whl"
+    client_filename = "arkhai_hosted_settlement_client-0.2.1-py3-none-any.whl"
     client_bytes = _client_wheel_bytes(entry_points=client_entry_points)
     client_path = root / client_filename
     client_path.write_bytes(client_bytes)
@@ -156,8 +156,8 @@ def _stage_release(
 
     payload: dict[str, Any] = {
         "contract_version": "arkhai.hosted-settlement-release.v2",
-        "release_version": "0.2.0",
-        "api_version": "0.2.0",
+        "release_version": "0.2.1",
+        "api_version": "0.2.1",
         "schema_version": 5,
         "funding_profiles": ["card.v1", "us_bank_transfer.v1", "us_ach_debit.v1"],
         "capabilities": list(_REQUIRED_CAPABILITIES),
@@ -165,21 +165,21 @@ def _stage_release(
         "client_wheel": {
             "filename": client_filename,
             "distribution": "arkhai-hosted-settlement-client",
-            "version": "0.2.0",
+            "version": "0.2.1",
             "sha256": "sha256:" + client_sha,
         },
         "service_wheel": {
-            "filename": "arkhai_hosted_settlement_service-0.2.0-py3-none-any.whl",
+            "filename": "arkhai_hosted_settlement_service-0.2.1-py3-none-any.whl",
             "distribution": "arkhai-hosted-settlement-service",
-            "version": "0.2.0",
+            "version": "0.2.1",
             "sha256": "sha256:" + "cd" * 32,
         },
         "service_image": {
             "reference": "ghcr.io/arkhai-io/stripe-settlement-service",
             "digest": image_digest,
         },
-        "openapi": artifact("openapi-v0.2.0.json"),
-        "conformance": artifact("conformance-v0.2.0.json"),
+        "openapi": artifact("openapi-v0.2.1.json"),
+        "conformance": artifact("conformance-v0.2.1.json"),
         "migrations": {
             **artifact("migrations-v5.json"),
             "schema_version": 5,
@@ -188,7 +188,7 @@ def _stage_release(
         "provenance": artifact("provenance.intoto.json"),
         "build": {
             "repository": "arkhai-io/stripe-settlement-service",
-            "workflow_ref": ".github/workflows/release.yml@refs/tags/v0.2.0",
+            "workflow_ref": ".github/workflows/release.yml@refs/tags/v0.2.1",
             "source_commit": "12" * 20,
         },
     }
@@ -216,8 +216,8 @@ def _stage_release(
 
     trust: dict[str, Any] = {
         "contract_version": "arkhai.hosted-settlement-release.v2",
-        "release_version": "0.2.0",
-        "api_version": "0.2.0",
+        "release_version": "0.2.1",
+        "api_version": "0.2.1",
         "schema_version": 5,
         "required_capabilities": list(_REQUIRED_CAPABILITIES),
         "identity_contract": copy.deepcopy(_IDENTITY_CONTRACT),
@@ -226,12 +226,12 @@ def _stage_release(
         "authority_id": "release-authority",
         "authority_address": account.address.lower(),
         "repository": "arkhai-io/stripe-settlement-service",
-        "workflow_ref": ".github/workflows/release.yml@refs/tags/v0.2.0",
+        "workflow_ref": ".github/workflows/release.yml@refs/tags/v0.2.1",
         "source_commit": "12" * 20,
         "client_wheel": {
             "filename": client_filename,
             "distribution": "arkhai-hosted-settlement-client",
-            "version": "0.2.0",
+            "version": "0.2.1",
             "sha256": client_sha,
         },
         "service_image": {
@@ -244,6 +244,8 @@ def _stage_release(
     trust_path = root / "marketplace-trust.json"
     trust_path.write_text(json.dumps(trust), encoding="utf-8")
     return trust_path, manifest_path, client_path
+
+
 def _marketplace_args(root: Path) -> dict[str, Any]:
     release_dir = root / "marketplace-release"
     release_dir.mkdir(exist_ok=True)
@@ -291,8 +293,6 @@ def _marketplace_args(root: Path) -> dict[str, Any]:
         "marketplace_workflow_run_id": "123456",
         "marketplace_image_digest": "sha256:" + "cd" * 32,
     }
-
-
 
 
 def _verify(root: Path, **kwargs: Any) -> dict[str, Any]:

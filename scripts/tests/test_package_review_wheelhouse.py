@@ -50,6 +50,7 @@ _IDENTITY_CONTRACT = {
     "funding_profiles": ["card.v1", "us_bank_transfer.v1", "us_ach_debit.v1"],
 }
 
+
 def _write_wheel_member(
     archive: zipfile.ZipFile,
     filename: str,
@@ -93,13 +94,13 @@ def _hosted_client_wheel(
         )
         _write_wheel_member(
             archive,
-            "arkhai_hosted_settlement_client-0.2.0.dist-info/METADATA",
-            "Name: arkhai-hosted-settlement-client\nVersion: 0.2.0\n",
+            "arkhai_hosted_settlement_client-0.2.1.dist-info/METADATA",
+            "Name: arkhai-hosted-settlement-client\nVersion: 0.2.1\n",
         )
         if entry_points is not None:
             _write_wheel_member(
                 archive,
-                "arkhai_hosted_settlement_client-0.2.0.dist-info/entry_points.txt",
+                "arkhai_hosted_settlement_client-0.2.1.dist-info/entry_points.txt",
                 entry_points,
             )
         if extra_member is not None:
@@ -158,16 +159,16 @@ def _stage_root(
         entry_points=hosted_entry_points,
         extra_member=hosted_extra_member,
     )
-    client_filename = "arkhai_hosted_settlement_client-0.2.0-py3-none-any.whl"
+    client_filename = "arkhai_hosted_settlement_client-0.2.1-py3-none-any.whl"
     client_path = root / ".dist" / client_filename
     client_path.write_bytes(hosted_client_wheel)
     artifacts = {
-        "openapi-v0.2.0.json": json.dumps(
-            {"openapi": "3.1.0", "info": {"version": "0.2.0"}}
+        "openapi-v0.2.1.json": json.dumps(
+            {"openapi": "3.1.0", "info": {"version": "0.2.1"}}
         ).encode(),
-        "conformance-v0.2.0.json": json.dumps(
+        "conformance-v0.2.1.json": json.dumps(
             {
-                "api_version": "0.2.0",
+                "api_version": "0.2.1",
                 "schema_version": 5,
                 "funding_profiles": [
                     "card.v1",
@@ -204,11 +205,11 @@ def _stage_root(
 
     client_sha = hashlib.sha256(hosted_client_wheel).hexdigest()
     source_commit = "12" * 20
-    workflow_ref = ".github/workflows/release.yml@refs/tags/v0.2.0"
+    workflow_ref = ".github/workflows/release.yml@refs/tags/v0.2.1"
     payload = {
         "contract_version": "arkhai.hosted-settlement-release.v2",
-        "release_version": "0.2.0",
-        "api_version": "0.2.0",
+        "release_version": "0.2.1",
+        "api_version": "0.2.1",
         "schema_version": 5,
         "funding_profiles": ["card.v1", "us_bank_transfer.v1", "us_ach_debit.v1"],
         "capabilities": _CAPABILITIES,
@@ -216,21 +217,21 @@ def _stage_root(
         "client_wheel": {
             "filename": client_filename,
             "distribution": "arkhai-hosted-settlement-client",
-            "version": "0.2.0",
+            "version": "0.2.1",
             "sha256": "sha256:" + client_sha,
         },
         "service_wheel": {
-            "filename": "arkhai_hosted_settlement_service-0.2.0-py3-none-any.whl",
+            "filename": "arkhai_hosted_settlement_service-0.2.1-py3-none-any.whl",
             "distribution": "arkhai-hosted-settlement-service",
-            "version": "0.2.0",
+            "version": "0.2.1",
             "sha256": "sha256:" + "cd" * 32,
         },
         "service_image": {
             "reference": "ghcr.io/arkhai-io/stripe-settlement-service",
             "digest": "sha256:" + "ab" * 32,
         },
-        "openapi": artifact("openapi-v0.2.0.json"),
-        "conformance": artifact("conformance-v0.2.0.json"),
+        "openapi": artifact("openapi-v0.2.1.json"),
+        "conformance": artifact("conformance-v0.2.1.json"),
         "migrations": {**artifact("migrations-v5.json"), "schema_version": 5},
         "sbom": artifact("sbom.spdx.json"),
         "provenance": artifact("provenance.intoto.json"),
@@ -262,8 +263,8 @@ def _stage_root(
     )
     trust = {
         "contract_version": "arkhai.hosted-settlement-release.v2",
-        "release_version": "0.2.0",
-        "api_version": "0.2.0",
+        "release_version": "0.2.1",
+        "api_version": "0.2.1",
         "schema_version": 5,
         "required_capabilities": _CAPABILITIES,
         "identity_contract": _IDENTITY_CONTRACT,
@@ -277,7 +278,7 @@ def _stage_root(
         "client_wheel": {
             "filename": client_filename,
             "distribution": "arkhai-hosted-settlement-client",
-            "version": "0.2.0",
+            "version": "0.2.1",
             "sha256": client_sha,
         },
         "service_image": {
@@ -285,7 +286,7 @@ def _stage_root(
             "digest": "sha256:" + "ab" * 32,
         },
     }
-    (root / "manifests" / "hosted-settlement-v0.2.0-trust.json").write_text(
+    (root / "manifests" / "hosted-settlement-v0.2.1-trust.json").write_text(
         json.dumps(trust), encoding="utf-8"
     )
     (root / "project" / "pyproject.toml").write_text(
@@ -360,7 +361,7 @@ def test_wheelhouse_rejects_incomplete_hosted_identity_contract(
     tmp_path: Path,
 ) -> None:
     root, env = _stage_root(tmp_path)
-    trust_path = root / "manifests" / "hosted-settlement-v0.2.0-trust.json"
+    trust_path = root / "manifests" / "hosted-settlement-v0.2.1-trust.json"
     trust = json.loads(trust_path.read_text(encoding="utf-8"))
     trust["identity_contract"]["capabilities"].remove("account-owner-retirement.v1")
     trust_path.write_text(json.dumps(trust), encoding="utf-8")
@@ -384,6 +385,7 @@ def test_wheelhouse_rejects_hosted_seller_entry_point(tmp_path: Path) -> None:
 
     assert result.returncode != 0
     assert "console-script entry-point metadata" in result.stderr
+
 
 @pytest.mark.parametrize(
     "member",
@@ -506,8 +508,8 @@ def test_wheelhouse_packages_external_release_inputs_and_portable_lock(
         "sha256": hashlib.sha256(identity_path.read_bytes()).hexdigest(),
     }
     producer = pins["producer_release"]
-    assert producer["release_version"] == "0.2.0"
-    assert producer["api_version"] == "0.2.0"
+    assert producer["release_version"] == "0.2.1"
+    assert producer["api_version"] == "0.2.1"
     assert producer["schema_version"] == 5
     assert producer["funding_profiles"] == [
         "card.v1",
@@ -515,12 +517,12 @@ def test_wheelhouse_packages_external_release_inputs_and_portable_lock(
         "us_ach_debit.v1",
     ]
     assert producer["client_wheel"] == {
-        "filename": "arkhai_hosted_settlement_client-0.2.0-py3-none-any.whl",
+        "filename": "arkhai_hosted_settlement_client-0.2.1-py3-none-any.whl",
         "sha256": hashlib.sha256(
             (
                 root
                 / ".dist"
-                / "arkhai_hosted_settlement_client-0.2.0-py3-none-any.whl"
+                / "arkhai_hosted_settlement_client-0.2.1-py3-none-any.whl"
             ).read_bytes()
         ).hexdigest(),
         "entry_point_metadata": False,

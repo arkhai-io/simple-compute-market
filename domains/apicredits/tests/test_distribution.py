@@ -115,7 +115,7 @@ def wheels(tmp_path_factory: pytest.TempPathFactory) -> dict[str, Path]:
         assert len(matches) == 1
         built[name] = matches[0]
     hosted_clients = sorted(
-        (REPO / ".dist").glob("arkhai_hosted_settlement_client-0.2.0-py3-none-any.whl")
+        (REPO / ".dist").glob("arkhai_hosted_settlement_client-0.2.1-py3-none-any.whl")
     )
     assert len(hosted_clients) == 1
     shutil.copy2(hosted_clients[0], output / hosted_clients[0].name)
