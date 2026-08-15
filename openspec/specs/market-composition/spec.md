@@ -270,6 +270,57 @@ A domain-owned storefront composition root MUST receive one immutable versioned 
 - **WHEN** the parameterized executable opens existing VM storefront state with the supported `compute.v1` contract
 - **THEN** no schema migration or carrier conversion is required and listing, negotiation, obligation, settlement, fulfillment, and operation identifiers retain their interpretation
 
+### Requirement: Cross-cutting storefront runtime is kit-owned
+
+Storefront functionality that differs between market domains only in which
+immutable domain hooks it invokes and which configuration values it reads MUST
+live in the storefront kit and be composed by a domain, not reimplemented in
+the domain layer. A domain MUST supply its validated contract, service
+lifecycle hooks, route contribution, and configuration explicitly. The shared
+runtime MUST NOT discover a contract through module-global state, import a
+concrete domain, or depend on a deployed service.
+
+#### Scenario: Two domains need the same storefront mechanism
+
+- **WHEN** two domains require a storefront mechanism that differs only in
+  codecs, policy hooks, and configuration
+- **THEN** the mechanism lives in kit and both composition roots inject their
+  immutable domain contributions
+
+#### Scenario: A new domain composes a storefront
+
+- **WHEN** a domain supplies an app description, service/container lifecycle,
+  ordered routes, and middleware around its validated contract
+- **THEN** the shared shell carries that exact contract through application
+  state and the lifespan-owned container without a global resolver
+
+#### Scenario: Kit runtime would reach for a domain
+
+- **WHEN** a reusable storefront mechanism needs domain semantics
+- **THEN** the dependency is inverted through the validated contract or an
+  explicit composition hook rather than a domain import
+
+### Requirement: An extracted concern leaves no domain-local implementation
+
+When a storefront concern moves into kit, every domain that implemented it
+MUST compose the kit implementation in the same change, every obsolete
+domain-local implementation MUST be removed, and a domain that lacked the
+concern MUST gain it by composition. The extracted mechanism MUST retain the
+domain's configured timing, terminal vocabulary, readiness, and client
+construction behavior.
+
+#### Scenario: A concern is extracted
+
+- **WHEN** a reusable storefront concern moves into kit
+- **THEN** VM, API-credit, and applicable bare-metal roots compose it and no
+  domain retains a second implementation
+
+#### Scenario: Existing copies have drifted
+
+- **WHEN** the copies differ in observable control flow
+- **THEN** the chosen behavior is recorded and configured explicitly rather
+  than silently selecting one copy
+
 ## Evidence
 
 - Import boundaries: `core/tests/unit/test_carrier_purity.py` and `domains/vms/storefront/tests/unit/test_architecture_imports.py`.

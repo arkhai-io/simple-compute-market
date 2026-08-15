@@ -16,6 +16,7 @@ from core_storefront.models.negotiation_models import (
     NegotiateNewRequest,
     NegotiateNewResponse,
 )
+from market_core import MarketDomainContract
 
 logger = logging.getLogger(__name__)
 
@@ -33,8 +34,14 @@ class NegotiateController:
     def __init__(
         self,
         db=Depends(lambda: _container.resolved_sqlite_client),
+        domain: MarketDomainContract = Depends(
+            lambda: _container.resolved_market_domain
+        ),
     ) -> None:
+        if domain is None:
+            raise RuntimeError("API-credit market-domain contract is unavailable")
         self._db = db
+        self._domain = domain
 
     @router.post(
         "/new",
@@ -68,6 +75,7 @@ class NegotiateController:
         try:
             result = await start_sync_negotiation(
                 sqlite_client=self._db,
+                domain=self._domain,
                 our_listing_id=body.listing_id,
                 buyer_principal=body.buyer_principal,
                 seller_principal=seller_principal,
@@ -152,6 +160,7 @@ class NegotiateController:
         try:
             result = await continue_sync_negotiation(
                 sqlite_client=self._db,
+                domain=self._domain,
                 neg_id=neg_id,
                 buyer_action=body.action,
                 buyer_proposal=body.proposal,

@@ -16,7 +16,12 @@ from core_storefront.app_startup import (
     run_storefront_startup_steps,
     start_storefront_background_task,
 )
+from core_storefront.stage_log import stage_event
 from market_core import MarketDomainContract
+from market_storefront_kit import (
+    NegotiationWatchdogPolicy,
+    run_negotiation_watchdog,
+)
 
 from market_storefront.utils.config import (
     BASE_URL_OVERRIDE,
@@ -147,21 +152,31 @@ async def _seed_resources_if_empty() -> None:
         )
 
 
-def _start_negotiation_watchdog(sqlite_client: Any) -> None:
-    from market_storefront.negotiation_watchdog import (
-        watchdog_loop as _neg_watchdog_loop,
+def _negotiation_watchdog_policy() -> NegotiationWatchdogPolicy:
+    return NegotiationWatchdogPolicy(
+        timeout_seconds=float(settings.negotiation_timeout_seconds),
+        interval_seconds=float(settings.negotiation_watchdog_interval),
     )
 
+
+def _start_negotiation_watchdog(sqlite_client: Any) -> None:
+    policy = _negotiation_watchdog_policy()
     start_storefront_background_task(
         StorefrontBackgroundTask(
             name="negotiation_watchdog",
-            task_factory=partial(_neg_watchdog_loop, sqlite_client),
+            task_factory=partial(
+                run_negotiation_watchdog,
+                sqlite_client,
+                policy,
+                emit_stage_event=stage_event,
+                logger=logger,
+            ),
             log_message=(
                 "[STARTUP] Negotiation watchdog started (interval=%ds, timeout=%ds)"
             ),
             log_args=(
-                settings.negotiation_watchdog_interval,
-                settings.negotiation_timeout_seconds,
+                policy.interval_seconds,
+                policy.timeout_seconds,
             ),
         ),
         logger=logger,

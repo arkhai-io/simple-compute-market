@@ -11,6 +11,7 @@ from __future__ import annotations
 from datetime import datetime
 
 import pytest
+from apicredits_storefront.domain_runtime import get_market_domain_contract
 from apicredits_storefront.utils.sync_negotiation import (
     OfferUnfulfillableError,
     _normalize_api_credits_message_terms,
@@ -27,6 +28,7 @@ _SELLER_PRINCIPAL = Ed25519Signer(bytes.fromhex("22" * 32)).identity
 _STRANGER_PRINCIPAL = Ed25519Signer(bytes.fromhex("33" * 32)).identity
 _TOKEN = "0x" + "01" * 20
 _ESCROW = "0x" + "11" * 20
+_DOMAIN = get_market_domain_contract()
 
 
 class FakeCapacity:
@@ -191,6 +193,7 @@ def test_normalize_api_credits_terms_rejects_unsupported_version() -> None:
 async def _start(db, *, amount=300, quantity=3, key_mode="new", key_id=None):
     return await start_sync_negotiation(
         sqlite_client=db,
+        domain=_DOMAIN,
         our_listing_id="L-tok",
         buyer_principal=_BUYER_PRINCIPAL,
         seller_principal=_SELLER_PRINCIPAL,
@@ -308,6 +311,7 @@ async def test_bisection_counter_round_scales_by_quantity(
 
         response = await continue_sync_negotiation(
             sqlite_client=db,
+            domain=_DOMAIN,
             neg_id=neg_id,
             buyer_action="accept",
             buyer_proposal=None,

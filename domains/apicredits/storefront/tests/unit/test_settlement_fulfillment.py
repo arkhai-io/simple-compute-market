@@ -304,6 +304,7 @@ async def settled_db(tmp_path, monkeypatch):
 
     from apicredits_storefront.services import capacity_client as cc_module
     from apicredits_storefront.utils.sqlite_client import SQLiteClient
+    from apicredits_storefront.domain_runtime import get_market_domain_contract
     from apicredits_storefront.utils.sync_negotiation import start_sync_negotiation
     from apicredits_storefront.utils import config as config_module
     from market_core.schemas import EscrowProposal, ProvisionTerms
@@ -375,6 +376,7 @@ async def settled_db(tmp_path, monkeypatch):
     )
     response = await start_sync_negotiation(
         sqlite_client=client,
+        domain=get_market_domain_contract(),
         our_listing_id="L-tok",
         buyer_principal=_BUYER_PRINCIPAL,
         seller_principal=_SELLER_PRINCIPAL,

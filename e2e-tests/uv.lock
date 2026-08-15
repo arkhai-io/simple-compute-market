@@ -470,6 +470,19 @@ wheels = [
 ]
 
 [[package]]
+name = "arkhai-kit-storefront"
+version = "0.1.0"
+source = { registry = "../.dist" }
+dependencies = [
+    { name = "alkahest-py" },
+    { name = "arkhai-core-storefront" },
+    { name = "arkhai-kit-alkahest" },
+]
+wheels = [
+    { path = "arkhai_kit_storefront-0.1.0-py3-none-any.whl" },
+]
+
+[[package]]
 name = "arkhai-vms"
 version = "0.2.0"
 source = { registry = "../.dist" }
@@ -543,6 +556,7 @@ dependencies = [
     { name = "arkhai-kit-settlement-runtime" },
     { name = "arkhai-kit-site" },
     { name = "arkhai-kit-site-client" },
+    { name = "arkhai-kit-storefront" },
     { name = "arkhai-vms" },
     { name = "dynaconf" },
     { name = "eth-account" },

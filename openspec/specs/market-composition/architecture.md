@@ -71,6 +71,36 @@ A domain-owned storefront validates its contract once at the executable boundary
 
 Single-domain persistence intentionally does not duplicate the process-selected domain identity on every row. The VM executable therefore reopens existing rows under its validated `compute.v1` contract without migration. A future multi-domain root must add explicit record ownership and dispatch rather than infer a domain from payload shape or restore a module-global resolver.
 
+## Storefront composition kit
+
+`arkhai-kit-storefront`, imported as `market_storefront_kit`, is the reusable
+role-composition layer between domain-owned executables and the lower core
+storefront shell. A root supplies one exact `MarketDomainContract`, immutable
+service/container lifecycle callbacks, and an ordered route and middleware
+contribution. The kit validates and places that same contract in application
+state, builds the lifespan-owned container against it, and rejects an equal but
+reconstructed contract object. Domain codecs, negotiation policy, settlement,
+fulfillment, and publication semantics remain in the injected contract; the
+kit neither looks them up globally nor interprets their payloads.
+
+The kit also owns reusable storefront mechanisms whose control flow is common
+across domains. Alkahest client construction receives an immutable tuple of
+chain name, RPC URL, address-config path, private-key readiness, and missing
+requirements. The negotiation watchdog receives an existing repository plus
+timeout, interval, terminal-state, and event hooks. These inputs preserve
+domain configuration without copying the factory or sweep loop. Per-chain
+construction failures remain isolated, and stale-thread write or event
+failures do not stop later threads or later sweeps.
+
+The VM and API-credit executables contribute their existing routers and
+service graphs through this shell. Bare metal contributes its smaller runtime
+container and receives the same watchdog and chain-construction mechanisms.
+This composition does not turn the kit into a universal executable or move
+domain settlement and fulfillment behavior upward. Future multi-domain
+dispatch must resolve a persisted binding to an exact registered contract
+before invoking these hooks; it cannot add a default contract or infer one
+from a payload.
+
 ## Executable ownership
 
 The buyer CLI and registry executable are core-owned because their control flow is schema-opaque and extended through domain entry points or configuration. Storefront executables remain domain-owned composition roots where domain adapters and seller policy are wired into shared storefront machinery. A package move does not alter these authority boundaries.

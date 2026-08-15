@@ -15,9 +15,10 @@ from datetime import datetime, timedelta, timezone
 import pytest
 from market_identity import create_signer
 
-from market_storefront.negotiation_watchdog import _watchdog_tick
+from market_storefront_kit import sweep_stale_negotiations
 from market_storefront.domain_runtime import build_vm_storefront_domain
 from market_storefront.utils.sqlite_client import SQLiteClient
+from market_storefront.startup import _negotiation_watchdog_policy
 from tests._settings_overrides import settings_overrides
 
 _BUYER_PRINCIPAL = create_signer("ed25519", b"\x31" * 32).identity
@@ -87,7 +88,10 @@ async def test_stale_active_thread_is_abandoned(tmp_path):
 
     client = SQLiteClient(db_path=db_path, domain=build_vm_storefront_domain())
     with settings_overrides(negotiation_timeout_seconds=1800):
-        n = await _watchdog_tick(client)
+        n = await sweep_stale_negotiations(
+            client,
+            _negotiation_watchdog_policy(),
+        )
 
     assert n == 1, f"Expected 1 abandoned, got {n}"
     assert _read_terminal_state(db_path, "neg-stale-001") == "abandoned"
@@ -103,8 +107,10 @@ async def test_fresh_active_thread_is_left_alone(tmp_path):
 
     client = SQLiteClient(db_path=db_path, domain=build_vm_storefront_domain())
     with settings_overrides(negotiation_timeout_seconds=1800):
-
-        n = await _watchdog_tick(client)
+        n = await sweep_stale_negotiations(
+            client,
+            _negotiation_watchdog_policy(),
+        )
 
     assert n == 0
     assert _read_terminal_state(db_path, "neg-fresh-001") is None
@@ -123,8 +129,10 @@ async def test_already_terminal_thread_is_not_re_marked(tmp_path):
 
     client = SQLiteClient(db_path=db_path, domain=build_vm_storefront_domain())
     with settings_overrides(negotiation_timeout_seconds=1800):
-
-        n = await _watchdog_tick(client)
+        n = await sweep_stale_negotiations(
+            client,
+            _negotiation_watchdog_policy(),
+        )
 
     assert n == 0
     assert _read_terminal_state(db_path, "neg-done-001") == "success"
@@ -147,11 +155,27 @@ async def test_mixed_threads_only_stale_active_abandoned(tmp_path):
 
     client = SQLiteClient(db_path=db_path, domain=build_vm_storefront_domain())
     with settings_overrides(negotiation_timeout_seconds=1800):
-
-        n = await _watchdog_tick(client)
+        n = await sweep_stale_negotiations(
+            client,
+            _negotiation_watchdog_policy(),
+        )
 
     assert n == 2
     assert _read_terminal_state(db_path, "stale-a") == "abandoned"
     assert _read_terminal_state(db_path, "stale-b") == "abandoned"
     assert _read_terminal_state(db_path, "fresh-c") is None
     assert _read_terminal_state(db_path, "done-d") == "failure"
+
+
+def test_vm_watchdog_preserves_configured_schedule():
+    with settings_overrides(
+        negotiation_timeout_seconds=1800,
+        negotiation_watchdog_interval=60,
+    ):
+        policy = _negotiation_watchdog_policy()
+
+    assert policy.timeout_seconds == 1800
+    assert policy.interval_seconds == 60
+    assert policy.terminal_state == "abandoned"
+    assert policy.log_loop_start is True
+    assert policy.log_cutoff is True

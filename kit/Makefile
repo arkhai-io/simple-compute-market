@@ -1,8 +1,8 @@
-.PHONY: test test-alkahest test-config test-identity test-policy test-site test-site-client test-resource-pools test-fulfillment test-settlement-runtime test-hosted-settlement dist dist-site dist-site-client dist-resource-pools dist-fulfillment dist-settlement-runtime dist-hosted-settlement
+.PHONY: test test-alkahest test-config test-identity test-policy test-site test-site-client test-resource-pools test-fulfillment test-settlement-runtime test-hosted-settlement test-storefront dist dist-site dist-site-client dist-resource-pools dist-fulfillment dist-settlement-runtime dist-hosted-settlement dist-storefront
 
 DIST_DIR ?= ../.dist
 
-test: dist test-alkahest test-config test-identity test-policy test-site test-site-client test-resource-pools test-fulfillment test-settlement-runtime test-hosted-settlement
+test: dist test-alkahest test-config test-identity test-policy test-site test-site-client test-resource-pools test-fulfillment test-settlement-runtime test-hosted-settlement test-storefront
 
 test-alkahest:
 	cd alkahest && $(MAKE) test
@@ -34,7 +34,10 @@ test-settlement-runtime:
 test-hosted-settlement:
 	cd hosted-settlement && $(MAKE) test
 
-dist: dist-site dist-site-client dist-resource-pools dist-fulfillment dist-settlement-runtime dist-hosted-settlement
+test-storefront:
+	cd storefront && $(MAKE) test
+
+dist: dist-site dist-site-client dist-resource-pools dist-fulfillment dist-settlement-runtime dist-hosted-settlement dist-storefront
 
 dist-site:
 	-mkdir -p $(DIST_DIR)
@@ -71,3 +74,9 @@ dist-hosted-settlement:
 	cd hosted-settlement && $(MAKE) build
 	@ls $(DIST_DIR)/arkhai_kit_hosted_settlement-*-none-any.whl > /dev/null 2>&1 || \
 		(echo "ERROR: arkhai-kit-hosted-settlement produced a platform-specific wheel" && exit 1)
+
+dist-storefront:
+	-mkdir -p $(DIST_DIR)
+	cd storefront && $(MAKE) build
+	@ls $(DIST_DIR)/arkhai_kit_storefront-*-none-any.whl > /dev/null 2>&1 || \
+		(echo "ERROR: arkhai-kit-storefront produced a platform-specific wheel — must build inside Docker" && exit 1)

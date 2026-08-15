@@ -137,10 +137,19 @@ The domain layer's own structure is better than the duplication suggests. All th
 
 | Open gap | Owned by |
 |---|---|
-| No seam exists for kit-owned storefront runtime, and no rule prevents an extraction leaving copies behind | [`kit-storefront-composition-seam`](../../openspec/changes/kit-storefront-composition-seam/) |
 | The synchronous negotiation runtime is implemented twice and absent once | [`kit-owned-negotiation-runtime`](../../openspec/changes/kit-owned-negotiation-runtime/) |
 | The capacity client and publication runtime are implemented twice and absent once | [`kit-owned-capacity-and-publication`](../../openspec/changes/kit-owned-capacity-and-publication/) |
 | Bare metal has no deployable stack, no domain has an end-to-end deal path but VM, and API credits still reimplements rather than composes | [`bare-metal-and-credits-domain-stacks`](../../openspec/changes/bare-metal-and-credits-domain-stacks/) |
+
+**Design promotion (2026-08-15).** The storefront application/lifespan,
+container, route/middleware contribution, Alkahest client factory, and stale
+negotiation watchdog seams from `kit-storefront-composition-seam` are now
+implemented by `kit/storefront` and recorded permanently in the market
+composition specification and architecture. VM and API credits preserve their
+one-domain route and timing behavior through explicit contributions; bare
+metal now composes the previously missing watchdog and chain factory. The
+remaining negotiation and capacity/publication rows below build on this seam
+rather than reopening it.
 
 A compute-dimension name leaking into every domain's capacity declaration is a real defect but too small to own a gap row here; it rides with [`capacity-resource-administration`](../../openspec/changes/capacity-resource-administration/), which already rewrites the code that causes it.
 

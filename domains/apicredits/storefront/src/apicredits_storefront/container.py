@@ -8,9 +8,10 @@ storefront and the services.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, Optional
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
+    from market_core import MarketDomainContract
     from core_storefront.services.negotiation_service import NegotiationService
     from market_settlement_runtime import (
         FailurePolicy,
@@ -25,6 +26,7 @@ if TYPE_CHECKING:
     from apicredits_storefront.services.system_service import SystemService
     from apicredits_storefront.utils.sqlite_client import SQLiteClient
 
+resolved_market_domain: "MarketDomainContract | None" = None
 resolved_sqlite_client: "SQLiteClient | None" = None
 resolved_settlement_repository: "SettlementSQLiteRepository | None" = None
 resolved_settlement_runtime: "SettlementRuntime | None" = None
@@ -38,7 +40,42 @@ resolved_system_service: "SystemService | None" = None
 resolved_marketplace_signer: "Signer | None" = None
 
 
-def get_alkahest_client(chain_name: str) -> Optional[Any]:
+def clear_lifespan_state(*, domain: "MarketDomainContract") -> None:
+    """Clear API-credit service state owned by one shared lifespan."""
+
+    global resolved_market_domain
+    global resolved_sqlite_client
+    global resolved_settlement_repository
+    global resolved_settlement_runtime
+    global resolved_settlement_worker
+    global resolved_settlement_coordinator
+    global resolved_failure_policy
+    global resolved_alkahest_clients
+    global resolved_listing_service
+    global resolved_negotiation_service
+    global resolved_system_service
+    global resolved_marketplace_signer
+
+    if resolved_market_domain is not None and resolved_market_domain is not domain:
+        raise RuntimeError(
+            "cannot clear a dependency container owned by a different "
+            "market-domain contract"
+        )
+    resolved_market_domain = None
+    resolved_sqlite_client = None
+    resolved_settlement_repository = None
+    resolved_settlement_runtime = None
+    resolved_settlement_worker = None
+    resolved_settlement_coordinator = None
+    resolved_failure_policy = None
+    resolved_alkahest_clients = {}
+    resolved_listing_service = None
+    resolved_negotiation_service = None
+    resolved_system_service = None
+    resolved_marketplace_signer = None
+
+
+def get_alkahest_client(chain_name: str) -> Any | None:
     """Return the AlkahestClient for ``chain_name``, or ``None`` if absent."""
     return resolved_alkahest_clients.get(chain_name)
 
