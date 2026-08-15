@@ -1,8 +1,8 @@
 ## 1. Producer contract and exact dependency
 
 - [ ] 1.1 Verify the signed `hosted-settlement-service:expand-stripe-payer-funding` release exposes the exact payer-profile, instrument, funding-profile, funding-authorization, transient-action, identity, and conditional-escrow sync/async client contracts assumed by this change; record its manifest, client wheel, service image, API/schema/migration, capability, repository/workflow, provenance, and source identities without substituting sibling source.
-- [ ] 1.2 Update `kit/hosted-settlement/pyproject.toml`, its `uv.lock`, repository package/release inputs, and `.dist` initialization/reinitialization paths to verify, upgrade, and reinstall the exact released client wheel; add no editable sibling dependency.
-- [ ] 1.3 Add package-boundary and release-verification fixtures proving marketplace wheels/images contain the client and public models but no hosted service module, Stripe SDK/provider model, credential, database/migration, webhook, or copied canonicalization.
+- [x] 1.2 Update `kit/hosted-settlement/pyproject.toml`, its `uv.lock`, repository package/release inputs, and `.dist` initialization/reinitialization paths to verify, upgrade, and reinstall the exact released client wheel; add no editable sibling dependency.
+- [x] 1.3 Add package-boundary and release-verification fixtures proving marketplace wheels/images contain the client and public models but no hosted service module, Stripe SDK/provider model, credential, database/migration, webhook, or copied canonicalization.
 
 ## 2. Exact profile configuration and registration
 
