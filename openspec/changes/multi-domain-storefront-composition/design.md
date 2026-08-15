@@ -60,14 +60,26 @@ The check records exact promoted headings, package APIs, and focused evidence in
   identity requirements.  The shared `pool_delivers_offering_mode` predicate
   is used by reservation, scheduling, and provisioning; the accepted migration
   rejects ambiguous historical executor identity rather than selecting VM.
-- Full bare-metal lifecycle acceptance remains an external producer gate:
-  the installed `BARE_METAL_STOREFRONT_DOMAIN` deliberately removes
-  `DomainCapability.FULFILLMENT` and exposes no fulfillment hook.  Registry,
-  binding, migration, and exact-site shell work may proceed, but one-process
-  bare-metal servicing and its live proof remain blocked until
-  `market-platform-bare-metal-10-storefront-composition` supplies and accepts
-  that production hook.  No fake, no-op, payload inference, or default is
-  substituted here.
+- Bare-metal contribution production is owned externally. The parallel producer
+  reports commit `18083392` with entry-point group
+  `market.storefront_contributions`, contribution id `bare_metal`, and a
+  validated exact contract; its dedicated chart is `3b46f6f8`. Those commits
+  are not part of this isolated checkout and their full selected-site
+  scheduling/result/recovery/teardown acceptance has not been run here.
+  Registry, binding, migration, and exact-site shell work proceeds, while the
+  one-process live bare-metal proof remains a parent-run prerequisite. No fake,
+  no-op, payload inference, or default substitutes for that producer.
+- The canonical public discriminator was already
+  `offer_resource.virtualization_type`; this change persists its exact value in
+  `StorefrontDomainBinding` and rejects any normalized-public disagreement.
+  Existing registry filters/builders remain the only public schema owner; no
+  alternate discriminator was added.
+- Inventory found legacy VM `derived_compute_listings`, thread provision/terms
+  columns, escrow fulfillment context, VM settlement hooks, and aggregate
+  capacity/fulfillment fan-out. The cutover adds common binding/artifact tables,
+  freezes contribution discovery, records site/mode/domain on threads and
+  fulfillment contexts, uses exact-site methods for accepted work, and keeps
+  concrete market meaning behind the selected contract.
 
 ### 2. Use a frozen registration registry; keep mode and domain key distinct
 
@@ -262,14 +274,15 @@ No test uses sleeps for recovery, raw HTTP where a canonical client exists, rout
 
 ## Design Promotion Record
 
-Populate this table during implementation; the destinations are fixed now.
-
-| Accepted decision | Permanent location |
-|---|---|
-| Frozen explicit registrations and record-only selection | `openspec/specs/market-composition/spec.md#storefront-domain-registrations-are-explicit-and-immutable`, companion `architecture.md`, and `docs/development/ARCHITECTURE.md#composition-from-above-and-below` |
-| Common listing binding, public mode projection, and exact trusted site | `openspec/specs/storefront-publication/spec.md` requirements added/modified by this change and companion `architecture.md` |
-| Thread binding inheritance and immutable acceptance | `openspec/specs/negotiation-protocol/spec.md` and companion `architecture.md` |
-| Accepted binding through servicing/result/recovery/teardown | `openspec/specs/settlement-servicing/spec.md` and companion `architecture.md` |
-| Transactional legacy migration and combined artifact/config rollout | `openspec/specs/deployment-state/spec.md`, companion `architecture.md`, and `docs/development/DEPLOYMENT_AND_CONFIG.md` |
-| Focused matrix and complete one-process VM/bare-metal proof | `openspec/specs/test-compatibility/spec.md`, companion `architecture.md`, and `docs/development/TESTING.md` |
-| Goal 3 completion state and remaining Compute-40/buyer gaps | `docs/development/ROADMAP.md#goal-3--one-storefront-serving-several-compute-family-domains` |
+| Decision | Disposition | Permanent location |
+|---|---|---|
+| Frozen configured contributions; mode and domain identity remain distinct; durable resolution returns only the exact startup object | permanent | `openspec/specs/market-composition/spec.md#requirement-storefront-roots-inject-a-frozen-domain-registry`, companion `architecture.md#frozen-storefront-registry-and-executable-ownership`, and `docs/development/ARCHITECTURE.md#multi-domain-storefront-composition` |
+| Common listing binding, exact public mode, collision-safe provenance, and site-pinned routing | permanent | `openspec/specs/storefront-publication/spec.md#requirement-durable-bindings-govern-multi-domain-publication`, `#requirement-trusted-listing-mappings-route-to-one-site`, and companion `architecture.md#immutable-domain-bound-publication` |
+| Listing binding is copied transactionally into the thread and controls continuation/acceptance | permanent | `openspec/specs/negotiation-protocol/spec.md#requirement-negotiation-inherits-an-immutable-listing-domain-binding` and companion `architecture.md#record-bound-domain-dispatch` |
+| Accepted binding controls settlement, fulfillment, result recovery, and teardown through domain-neutral carriers | permanent | `openspec/specs/settlement-servicing/spec.md#requirement-accepted-domain-binding-governs-the-servicing-lifecycle` and companion `architecture.md#accepted-domain-continuity` |
+| Combined artifact/config topology and preview-first transactional legacy migration | permanent | `openspec/specs/deployment-state/spec.md#requirement-multi-domain-storefront-configuration-is-explicit`, `#requirement-legacy-storefront-domain-migration-is-transactional`, companion `architecture.md#multi-domain-storefront-activation`, and `docs/development/DEPLOYMENT_AND_CONFIG.md#combined-compute-family-storefront` |
+| Focused cross-domain boundary matrix and real one-process proof jurisdiction | permanent | `openspec/specs/test-compatibility/spec.md#requirement-multi-domain-storefront-selection-has-focused-compatibility-coverage`, companion `architecture.md#multi-domain-storefront-evidence-ownership`, and `docs/development/TESTING.md#multi-domain-storefront-composition` |
+| Goal 3 shared shell accepted; bare-metal buyer/producer and Compute-40 live proof remain separate gaps | permanent | `docs/development/ROADMAP.md#goal-3--one-storefront-serving-several-compute-family-domains` |
+| Process-global contract getters, one-element/default selection, payload-kind routing, cross-site accepted-record fan-out, and parallel VM/bare-metal shared control flow | superseded | Replaced by the permanent registry/binding requirements above |
+| A no-op bare-metal fulfillment hook or VM-shaped compatibility adapter | rejected | Explicit blocker in `test-compatibility` and the Goal 3 gap table |
+| Change-local implementation/debugging commentary | temporary | Retained only in this checked design/tasks history until validation and archive |
