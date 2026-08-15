@@ -3,6 +3,7 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 import pytest
+import market_hosted_settlement.authorization as authorization_module
 from hosted_settlement_client import (
     FundingAuthorizationResult,
     FundingMode,
@@ -430,9 +431,15 @@ def _policy() -> OffSessionPolicy:
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("retryable", [False, True])
-async def test_unknown_authorization_ack_keeps_bounded_exact_reservation(
-    tmp_path, retryable: bool
+@pytest.mark.parametrize(
+    ("retryable", "expected_state"),
+    [
+        (False, ReservationState.RELEASED),
+        (True, ReservationState.RESERVED),
+    ],
+)
+async def test_authenticated_authority_rejection_releases_only_when_no_effect(
+    tmp_path, retryable: bool, expected_state: ReservationState
 ) -> None:
     error = HostedSettlementError(
         code="rejected",
@@ -456,9 +463,94 @@ async def test_unknown_authorization_ack_keeps_bounded_exact_reservation(
             journal=journal,
             now_unix=1000,
         )
+    assert caught.value.uncertain is retryable
     assert "provider detail" not in str(caught.value)
-    assert journal.snapshot()[0].state is ReservationState.RESERVED
+    assert journal.snapshot()[0].state is expected_state
     assert client.calls == ["health", "show", "instruments", "authorize"]
-    assert authorization_input_fingerprint(
-        _accepted(), binding=_binding(), selection=selection
-    ) == journal.snapshot()[0].input_fingerprint
+
+
+@pytest.mark.asyncio
+async def test_untrusted_invalid_response_keeps_reservation_for_exact_retry(
+    tmp_path,
+) -> None:
+    client = Client(
+        authorization_error=HostedSettlementError(
+            code="invalid_response",
+            message="untrusted response detail",
+            retryable=False,
+            status_code=200,
+        )
+    )
+    journal = AuthorizationReservationJournal((tmp_path / "journal.json").absolute())
+    selection = FundingSelection(
+        FundingMode.SAVED_INSTRUMENT,
+        "instrument-opaque-1",
+    )
+    authorizer = HostedFundingAuthorizer(config=_config(), client=client, signer=SIGNER)
+    for _attempt in range(2):
+        with pytest.raises(HostedAuthorizationError) as caught:
+            await authorizer.authorize_automatically(
+                _accepted(),
+                binding=_binding(),
+                selection=selection,
+                policy=_policy(),
+                journal=journal,
+                now_unix=1000,
+            )
+        assert caught.value.uncertain is True
+    records = journal.snapshot()
+    assert len(records) == 1
+    assert records[0].state is ReservationState.RESERVED
+    assert client.calls.count("authorize") == 2
+
+
+@pytest.mark.asyncio
+async def test_deterministic_pre_send_failure_releases_reservation(
+    tmp_path, monkeypatch
+) -> None:
+    client = Client()
+    journal = AuthorizationReservationJournal((tmp_path / "journal.json").absolute())
+    selection = FundingSelection(
+        FundingMode.SAVED_INSTRUMENT,
+        "instrument-opaque-1",
+    )
+    monkeypatch.setattr(
+        authorization_module,
+        "sign_funding_authorization",
+        lambda **_kwargs: (_ for _ in ()).throw(ValueError("invalid exact input")),
+    )
+    with pytest.raises(HostedAuthorizationError) as caught:
+        await HostedFundingAuthorizer(
+            config=_config(), client=client, signer=SIGNER
+        ).authorize_automatically(
+            _accepted(),
+            binding=_binding(),
+            selection=selection,
+            policy=_policy(),
+            journal=journal,
+            now_unix=1000,
+        )
+    assert caught.value.uncertain is False
+    assert journal.snapshot()[0].state is ReservationState.RELEASED
+    assert "authorize" not in client.calls
+
+
+@pytest.mark.asyncio
+async def test_successful_authorization_commits_aggregate_reservation(tmp_path) -> None:
+    client = Client()
+    journal = AuthorizationReservationJournal((tmp_path / "journal.json").absolute())
+    receipt = await HostedFundingAuthorizer(
+        config=_config(), client=client, signer=SIGNER
+    ).authorize_automatically(
+        _accepted(),
+        binding=_binding(),
+        selection=FundingSelection(
+            FundingMode.SAVED_INSTRUMENT,
+            "instrument-opaque-1",
+        ),
+        policy=_policy(),
+        journal=journal,
+        now_unix=1000,
+    )
+    assert receipt.funding_authorization_ref == "funding-auth-safe-1"
+    assert journal.snapshot()[0].state is ReservationState.AUTHORIZED

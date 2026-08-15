@@ -41,6 +41,17 @@ from .settlement_config import (
     stripe_contract_fingerprint,
     stripe_preflight,
 )
+_UNTRUSTED_MUTATION_RESPONSE_CODES = frozenset(
+    {
+        "invalid_error_response",
+        "invalid_response",
+        "redirect_refused",
+        "response_request_mismatch",
+        "response_too_large",
+    }
+)
+
+
 
 
 class AuthorizationModel(BaseModel):
@@ -349,7 +360,10 @@ class HostedFundingAuthorizer:
         except HostedSettlementError as exc:
             raise HostedAuthorizationError(
                 "hosted funding authorization failed",
-                uncertain=exc.retryable,
+                uncertain=(
+                    exc.retryable
+                    or exc.code in _UNTRUSTED_MUTATION_RESPONSE_CODES
+                ),
             ) from None
         except Exception:
             raise HostedAuthorizationError(
@@ -434,12 +448,20 @@ class HostedFundingAuthorizer:
             expires_at_unix=accepted.expires_at_unix,
             now_unix=now_unix,
         )
-        receipt = await self._send(
-            accepted,
-            binding=binding,
-            selection=selection,
-            fingerprint=fingerprint,
-        )
+        try:
+            receipt = await self._send(
+                accepted,
+                binding=binding,
+                selection=selection,
+                fingerprint=fingerprint,
+            )
+        except HostedAuthorizationError as exc:
+            if not exc.uncertain:
+                journal.release(
+                    marketplace_operation_id=accepted.marketplace_operation_id,
+                    input_fingerprint=fingerprint,
+                )
+            raise
         journal.record_authorized(
             marketplace_operation_id=accepted.marketplace_operation_id,
             input_fingerprint=fingerprint,
