@@ -360,7 +360,7 @@ async def test_adapter_produces_exact_released_client_requests(
     assert result.mechanism_ref == "escrow-public"
     assert result.buyer_action == {
         "kind": "payment",
-        "operation_ref": "action-1",
+        "operation_ref": "funding-action-1",
         "expires_at_unix": 2_000_000_100,
         "url": "https://checkout.example/secret-session",
         "bank_instructions": None,

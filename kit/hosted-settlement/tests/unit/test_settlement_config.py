@@ -227,7 +227,7 @@ def test_config_rejects_provider_legacy_and_sensitive_fields(field: str) -> None
 
 def test_registry_validation_does_not_echo_rejected_config_values() -> None:
     secret = "credential-canary"
-    section = _config().model_dump(mode="python")
+    section = _config().model_dump(mode="python", exclude_defaults=True)
     section["base_url"] = f"https://user:{secret}@settlement.example"
     registry = SettlementConfigurationRegistry([create_stripe_registration()])
 
@@ -262,7 +262,7 @@ def test_config_is_exact_and_closed(updates: dict, match: str) -> None:
     [
         ({"authority_id": "other-authority"}, "authority must match"),
         ({"environment": "staging"}, "environment must match"),
-        ({"currency": "eur"}, "currency must match"),
+        ({"currency": "eur"}, "Input should be 'usd'"),
         (
             {"funding_profile": "us_bank_transfer.v1"},
             "does not support push bank transfer",
@@ -701,7 +701,7 @@ def test_registration_factory_and_publication_validation_are_exact() -> None:
     config = registry.resolve(
         {
             "priority": [MECHANISM],
-            "stripe": _config().model_dump(mode="python"),
+            "stripe": _config().model_dump(mode="python", exclude_defaults=True),
         },
         role="seller",
     )

@@ -692,6 +692,7 @@ class SettlementSQLiteRepository:
                 continue
             value[field] = (
                 json.loads(raw)
+                if raw
                 else (
                     {}
                     if field in {"obligation", "mechanism_params", "mechanism_state"}
