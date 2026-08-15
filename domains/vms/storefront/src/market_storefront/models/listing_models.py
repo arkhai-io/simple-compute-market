@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 from core_storefront.models.listing_models import CreateListingRequest
 from market_settlement_runtime import SettlementPublicationClause
 from pydantic import Field, model_validator
@@ -16,6 +18,15 @@ class VmCreateListingRequest(CreateListingRequest):
         default_factory=list,
         description="Typed settlement clauses compiled into public options.",
     )
+
+    @model_validator(mode="before")
+    @classmethod
+    def reject_removed_settlement_config(cls, value: Any) -> Any:
+        if isinstance(value, dict) and "settlement_config" in value:
+            raise ValueError(
+                "settlement_config is removed; use complete settlements clauses"
+            )
+        return value
 
     @model_validator(mode="after")
     def require_settlement_choice(self) -> VmCreateListingRequest:

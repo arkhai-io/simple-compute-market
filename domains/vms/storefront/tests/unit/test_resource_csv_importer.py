@@ -286,8 +286,8 @@ async def test_csv_settlements_column_round_trips_as_complete_clauses(
     clause = (
         '[{""mechanism"":""fiat.stripe.v1"",""asset"":""usd"",'
         '""rate"":""125"",""per"":""hour"",""mechanism_input"":'
-        '{""method"":""card"",""funds_flow"":'
-        '""separate_charges_transfers""}}]'
+        '{""funding_profile"":""card.v1"",""interaction"":""interactive"",'
+        '""funds_flow"":""separate_charges_transfers""}}]'
     )
     _write_csv(
         csv_path,
