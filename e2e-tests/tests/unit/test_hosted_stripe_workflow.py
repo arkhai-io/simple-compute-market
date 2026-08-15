@@ -23,6 +23,11 @@ def test_protected_workflow_requires_exact_release_and_run_identities() -> None:
     inputs = dispatch["inputs"]
     required = {
         "marketplace_commit",
+        "marketplace_release_run_id",
+        "marketplace_release_artifact",
+        "marketplace_workflow_ref",
+        "marketplace_manifest_sha256",
+        "marketplace_image_digest",
         "hosted_release_run_id",
         "hosted_release_artifact",
         "hosted_manifest_sha256",
@@ -30,6 +35,8 @@ def test_protected_workflow_requires_exact_release_and_run_identities() -> None:
         "hosted_source_commit",
         "hosted_workflow_ref",
         "hosted_image_digest",
+        "funding_profile",
+        "interaction",
         "scenario",
     }
     assert set(inputs) == required
@@ -81,9 +88,12 @@ def test_protected_workflow_scopes_credentials_and_always_cleans_up() -> None:
 
     upload = next(step for step in steps if step["name"].startswith("Upload allowlisted"))
     assert upload["if"].startswith("always()")
-    assert upload["with"]["path"] == "stripe-test-evidence/${{ matrix.scenario }}.json"
+    assert upload["with"]["path"] == (
+        "stripe-test-evidence/${{ matrix.funding_profile }}-"
+        "${{ matrix.interaction }}-${{ matrix.scenario }}.json"
+    )
     stop = next(step for step in steps if step["name"].startswith("Stop protected"))
-    assert stop["if"] == "always()"
+    assert stop["if"] == "always() && env.SELECTED == 'true'"
     assert "hosted-stripe-test-stop" in stop["run"]
 
 
