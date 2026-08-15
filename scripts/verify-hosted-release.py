@@ -244,7 +244,7 @@ def _verify_client_boundary(path: Path) -> None:
                 for name in lowered
             ):
                 raise ReleaseVerificationError(
-                    "staged client wheel crosses the hosted service/provider boundary"
+                    "staged client wheel contains service/provider implementation"
                 )
             source_names = [
                 name

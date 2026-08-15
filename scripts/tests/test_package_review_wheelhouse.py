@@ -50,16 +50,27 @@ _IDENTITY_CONTRACT = {
     "funding_profiles": ["card.v1", "us_bank_transfer.v1", "us_ach_debit.v1"],
 }
 
+def _write_wheel_member(
+    archive: zipfile.ZipFile,
+    filename: str,
+    content: str,
+) -> None:
+    member = zipfile.ZipInfo(filename, date_time=(1980, 1, 1, 0, 0, 0))
+    member.create_system = 3
+    member.external_attr = 0o100644 << 16
+    archive.writestr(member, content.encode("utf-8"))
+
+
 def _identity_wheel() -> bytes:
     buffer = io.BytesIO()
     with zipfile.ZipFile(buffer, mode="w") as archive:
-        archive.writestr("market_identity/__init__.py", "")
-        archive.writestr(
+        _write_wheel_member(archive, "market_identity/__init__.py", "")
+        _write_wheel_member(
+            archive,
             "arkhai_kit_identity-0.3.0.dist-info/METADATA",
             "Name: arkhai-kit-identity\nVersion: 0.3.0\n",
         )
     return buffer.getvalue()
-
 
 
 def _hosted_client_wheel(
@@ -69,7 +80,8 @@ def _hosted_client_wheel(
 ) -> bytes:
     buffer = io.BytesIO()
     with zipfile.ZipFile(buffer, mode="w") as archive:
-        archive.writestr(
+        _write_wheel_member(
+            archive,
             "hosted_settlement_client/__init__.py",
             "__all__ = ["
             "'CreatePayerProfileRequest','FundingAuthorizationRequest',"
@@ -79,17 +91,19 @@ def _hosted_client_wheel(
             "'PayerAction','PayerProfileResult','PayerSetupRequest',"
             "'PayerSetupResult','Signer']\n",
         )
-        archive.writestr(
+        _write_wheel_member(
+            archive,
             "arkhai_hosted_settlement_client-0.2.0.dist-info/METADATA",
             "Name: arkhai-hosted-settlement-client\nVersion: 0.2.0\n",
         )
         if entry_points is not None:
-            archive.writestr(
+            _write_wheel_member(
+                archive,
                 "arkhai_hosted_settlement_client-0.2.0.dist-info/entry_points.txt",
                 entry_points,
             )
         if extra_member is not None:
-            archive.writestr(extra_member, "")
+            _write_wheel_member(archive, extra_member, "")
     return buffer.getvalue()
 
 
@@ -354,7 +368,7 @@ def test_wheelhouse_rejects_incomplete_hosted_identity_contract(
     result = _run(root, env)
 
     assert result.returncode != 0
-    assert "exact identity contract" in result.stderr
+    assert "trust identity_contract does not match the trusted pin" in result.stderr
 
 
 def test_wheelhouse_rejects_hosted_seller_entry_point(tmp_path: Path) -> None:

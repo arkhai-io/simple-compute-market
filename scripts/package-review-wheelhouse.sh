@@ -58,12 +58,14 @@ if [[ ! -f "${HOSTED_TRUST}" ]]; then
 fi
 mkdir -p "${BUNDLE_DIR}/release"
 cp "${HOSTED_TRUST}" "${BUNDLE_DIR}/release/hosted-settlement-trust.json"
-cp "${BUNDLE_DIR}/wheelhouse/${HOSTED_MANIFEST}" "${BUNDLE_DIR}/release/"
+for artifact in "${HOSTED_RELEASE_ARTIFACTS[@]}"; do
+  cp "${BUNDLE_DIR}/wheelhouse/${artifact}" "${BUNDLE_DIR}/release/"
+done
 uv run --no-project --with 'eth-account>=0.13,<0.14' \
   python "${ROOT_DIR}/scripts/verify-hosted-release.py" \
   --trust "${HOSTED_TRUST}" \
   --manifest "${BUNDLE_DIR}/release/${HOSTED_MANIFEST}" \
-  --wheel "${BUNDLE_DIR}/wheelhouse/${HOSTED_CLIENT_WHEEL}" \
+  --wheel "${BUNDLE_DIR}/release/${HOSTED_CLIENT_WHEEL}" \
   > "${BUNDLE_DIR}/release/verified-release.json"
 uv run --no-project --python "${REVIEW_PYTHON}" python - \
   "${BUNDLE_DIR}" "${IDENTITY_WHEEL}" "${HOSTED_CLIENT_WHEEL}" \
