@@ -56,3 +56,23 @@ def test_hosted_kit_imports_only_released_client_and_lower_level_kits() -> None:
         "requests",
         "stripe",
     }
+
+def test_core_and_domains_consume_hosted_contracts_through_the_kit() -> None:
+    repository = Path(__file__).parents[4]
+    violations: list[str] = []
+    for package_root in (repository / "core", repository / "domains"):
+        for path in package_root.rglob("*.py"):
+            if any(part in {".venv", "__pycache__"} for part in path.parts):
+                continue
+            tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+            for node in ast.walk(tree):
+                if isinstance(node, ast.Import):
+                    roots = {alias.name.partition(".")[0] for alias in node.names}
+                elif isinstance(node, ast.ImportFrom) and node.module and node.level == 0:
+                    roots = {node.module.partition(".")[0]}
+                else:
+                    continue
+                if "hosted_settlement_client" in roots:
+                    violations.append(str(path.relative_to(repository)))
+    assert sorted(set(violations)) == []
+

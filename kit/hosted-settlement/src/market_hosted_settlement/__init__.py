@@ -1,4 +1,11 @@
-from hosted_settlement_client import FundingMode, FundingProfile
+from hosted_settlement_client import (
+    ConditionDescriptor,
+    EasFulfillmentRef,
+    FundingMode,
+    FundingProfile,
+    PortableRemoteFulfillmentRef,
+    canonical_json,
+)
 
 from .adapter import (
     EXPECTED_HOSTED_REQUEST_PROTOCOL,
@@ -45,6 +52,7 @@ from .payer import (
     payer_command_context_from_config,
 )
 from .payer_cli import PayerCommandError, create_stripe_command_group
+from .seller import HostedSellerError, onboard_hosted_seller
 from .settlement_config import (
     REQUIRED_STRIPE_CAPABILITIES,
     STRIPE_CONFIG_KEY,
@@ -65,6 +73,8 @@ __all__ = [
     "AutomationCandidate",
     "AutomationDecision",
     "AutomationPolicyRefused",
+    "ConditionDescriptor",
+    "EasFulfillmentRef",
     "EXPECTED_HOSTED_REQUEST_PROTOCOL",
     "EXPECTED_HOSTED_RESPONSE_PROTOCOL",
     "MECHANISM",
@@ -82,11 +92,13 @@ __all__ = [
     "FundingSelection",
     "HostedAuthorizationError",
     "HostedFundingAuthorizer",
+    "HostedSellerError",
     "MarketplaceSignerAdapter",
     "PayerCommandContext",
     "PayerCommandError",
     "PayerProfileAccess",
     "OffSessionPolicy",
+    "PortableRemoteFulfillmentRef",
     "StripeAuthorityTrust",
     "StripePublicationInput",
     "StripeResolverConfig",
@@ -96,10 +108,12 @@ __all__ = [
     "adapt_expected_authorities",
     "authorization_input_fingerprint",
     "authorization_journal_path",
+    "canonical_json",
     "create_stripe_registration",
     "create_stripe_command_group",
     "instrument_list_projection",
     "instrument_projection",
+    "onboard_hosted_seller",
     "payer_compatibility_context",
     "payer_profile_projection",
     "payer_setup_projection",
