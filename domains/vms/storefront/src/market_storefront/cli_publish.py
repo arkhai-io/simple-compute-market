@@ -284,31 +284,25 @@ def _site_capacity_buckets_sync() -> dict[str, list[dict[str, Any]]] | None:
     return buckets or None
 
 
-def _member_availability_sync() -> dict[tuple[str | None, str], int] | None:
-    """Aggregated site availability, fetched synchronously for CLI flows.
-
-    Keyed ``(site, resource_id)`` like ``member_availability_view``;
-    ``None`` when no authority answers — publishing then assumes
-    members are fully available and the reserve path corrects it.
-    """
+def _member_availability_sync() -> dict[tuple[str, str], int]:
+    """Fetch exact site/resource availability for CLI publication."""
     snapshot = _capacity_snapshot_sync()
     if snapshot is None:
-        return None
-    view: dict[tuple[str | None, str], int] = {}
-    home_site = next(
-        (str(row.get("site")) for row in snapshot if row.get("home_site")),
-        None,
-    )
+        return {}
+    view: dict[tuple[str, str], int] = {}
     for row in snapshot:
         resource_id = row.get("resource_id")
+        site = row.get("site")
         available = row.get("available_units")
-        if not resource_id or available is None:
+        if (
+            not isinstance(site, str)
+            or not site.strip()
+            or not isinstance(resource_id, str)
+            or not resource_id.strip()
+            or available is None
+        ):
             continue
-        site = str(row.get("site")) if row.get("site") else None
-        available = max(int(available), 0)
-        if site is not None and site == home_site:
-            view[(None, str(resource_id))] = available
-        view[(site, str(resource_id))] = available
+        view[(site, resource_id)] = max(int(available), 0)
     return view
 
 
@@ -430,9 +424,6 @@ def _stale_open_listing_ids(db_path: str) -> list[str]:
     if home_site is None:
         return []
     availability = _member_availability_sync()
-    if availability is None:
-        # No authority answered — closing on ignorance over-closes.
-        return []
     projection = _site_pool_projection_if_enabled()
     return stale_open_listing_ids(
         db_path,

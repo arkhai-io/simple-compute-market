@@ -604,24 +604,25 @@ async def _place_capacity_hold(
     if ttl <= 0:
         return
     try:
-        from domains.vms.listings.reconciler import site_id_for_listing
         from market_resource_pools.hints import capped_hold_seconds
 
-        from market_storefront.services.capacity_client import build_capacity_client
+        from market_storefront.services.capacity_client import (
+            build_capacity_runtime,
+            capacity_binding_for_listing,
+        )
         from market_storefront.services.vm_job_spec_service import (
             compute_capacity_claim_from_order,
         )
 
         claim = compute_capacity_claim_from_order(order_dict)
-        capacity = build_capacity_client(lambda: sqlite_client)
-        site_id = (
-            site_id_for_listing(sqlite_client.db_path, listing_id)
-            if listing_id
-            else None
-        )
+        if not listing_id:
+            raise RuntimeError("capacity hold requires a durably bound listing")
+        capacity = build_capacity_runtime(lambda: sqlite_client)
+        binding = await capacity_binding_for_listing(sqlite_client, listing_id)
         policy_tags = lookup_pool_policy_tags(sqlite_client, listing_id)
         ttl = capped_hold_seconds(ttl, policy_tags)
         held = await capacity.reserve(
+            binding,
             claim=claim,
             deal_ref={
                 "listing_id": listing_id,
@@ -630,7 +631,6 @@ async def _place_capacity_hold(
             ttl_seconds=ttl,
             lease_start_utc=requested_start_utc,
             lease_duration_seconds=requested_duration_seconds,
-            site=site_id,
         )
     except Exception as exc:
         logger.warning(

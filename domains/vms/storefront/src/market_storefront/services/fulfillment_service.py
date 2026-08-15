@@ -24,6 +24,7 @@ from market_fulfillment import VersionedEnvelope
 
 from market_storefront.services.capacity_client import (
     build_capacity_client,
+    build_capacity_runtime,
     build_fulfillment_client,
 )
 from market_storefront.services.vm_fulfillment_service import (
@@ -303,7 +304,7 @@ async def _apply_fulfillment_failure_policy_adapter(
         ),
         # In remote-capacity mode the hold lives in the site ledger; the
         # policy's release_capacity action must go back through the client.
-        capacity=build_capacity_client(lambda: sqlite_client),
+        capacity=build_capacity_runtime(lambda: sqlite_client),
     )
 
 
@@ -440,7 +441,7 @@ async def fulfill_compute_obligation(
         chain_configs=CHAINS,
         base_url=BASE_URL_OVERRIDE,
         get_sqlite_client=lambda: sqlite_client,
-        capacity=build_capacity_client(lambda: sqlite_client),
+        capacity=build_capacity_runtime(lambda: sqlite_client),
         stage_event=stage_event,
         provision_vm=partial(_do_provision, sqlite_client=sqlite_client),
         schedule_shutdown=_do_shutdown,

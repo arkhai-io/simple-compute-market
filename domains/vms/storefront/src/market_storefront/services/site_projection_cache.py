@@ -12,10 +12,8 @@ from core_storefront.site_projections import (
     ProjectionCacheView,
     ProjectionIdentity,
 )
-from market_storefront.services.capacity_client import (
-    build_capacity_client,
-    remote_site_clients,
-)
+from market_capacity_publication import remote_site_clients
+from market_storefront.services.capacity_client import build_capacity_client
 
 logger = logging.getLogger(__name__)
 

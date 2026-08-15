@@ -61,7 +61,7 @@ from market_storefront.models.capacity_admin_models import (
     UsageStartedEventRequest,
 )
 from market_storefront.server import _set_globally_paused
-from market_storefront.services.capacity_client import remote_site_clients
+from market_capacity_publication import capacity_availability, remote_site_clients
 from market_storefront.settlement_composition import (
     build_storefront_publication_clause_compiler,
 )
@@ -743,15 +743,8 @@ class AdminController:
         transient authority outage must not close (or worse, reopen)
         everything on ignorance.
         """
-        from market_storefront.services.capacity_client import (
-            member_availability_view,
-        )
-
         try:
-            return await member_availability_view(
-                self._capacity(),
-                self._db.db_path,
-            )
+            return await capacity_availability(self._capacity())
         except Exception as exc:
             logger.warning(
                 "[ADMIN] Could not snapshot site-authority capacity: %s",
@@ -1165,9 +1158,6 @@ class AdminController:
         )
 
     async def _release_site_ledger_holds(self) -> list[str]:
-        from market_storefront.services.capacity_client import (
-            remote_site_clients,
-        )
 
         released: list[str] = []
         try:

@@ -101,6 +101,31 @@ def _default_site_client(site: CapacitySite, signer: Any) -> SiteCapacityClient:
         expected_authorities=site.expected_authorities,
     )
 
+def remote_site_clients(client: Any) -> dict[str, Any]:
+    """Return explicitly named aggregate members; never invent a default site."""
+    if not isinstance(client, AggregateCapacityClient):
+        return {}
+    return {site_id: client.site(site_id) for site_id in client.site_names}
+
+async def capacity_availability(client: Any) -> dict[tuple[str, str], int]:
+    """Project exact site/resource availability from a named aggregate."""
+    configured = set(remote_site_clients(client))
+    view: dict[tuple[str, str], int] = {}
+    for row in await client.snapshot():
+        site_id = row.get("site")
+        resource_id = row.get("resource_id")
+        available = row.get("available_units")
+        if (
+            not isinstance(site_id, str)
+            or site_id not in configured
+            or not isinstance(resource_id, str)
+            or not resource_id.strip()
+            or available is None
+        ):
+            continue
+        view[(site_id, resource_id)] = max(int(available), 0)
+    return view
+
 
 class CapacityRuntime:
     """One composed source for projection, reconciliation, and bound effects."""

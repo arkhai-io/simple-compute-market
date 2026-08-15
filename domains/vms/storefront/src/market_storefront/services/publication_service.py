@@ -1,29 +1,102 @@
-"""Storefront publication and registry-close orchestration."""
+"""VM codecs and configuration composed onto kit-owned publication."""
 
 from __future__ import annotations
 
-import logging
-from functools import partial
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
-from core_storefront.registry_publication import (
-    close_listing_in_registries,
-    publish_listing_to_registries,
-)
 from core_storefront.stage_log import stage_event
 from domains.vms.listings.models import Listing
 from domains.vms.listings.reconciler import (
+    closed_available_listing_ids,
     mark_derived_listings_closed,
+    mark_derived_listings_open,
     stale_open_listing_ids,
+)
+from market_capacity_publication import (
+    BoundListing,
+    CapacityBinding,
+    CapacityBindingError,
+    PublicationCandidate,
+    PublicationRuntime,
+    ReconciliationPlan,
 )
 from registry_client import ListingRequest, UpdateListingRequest
 
+from market_storefront.services.capacity_client import capacity_binding_for_listing
 from market_storefront.utils.config import BASE_URL_OVERRIDE, settings
 
-if TYPE_CHECKING:
-    from core_storefront.multi_registry_client import MultiRegistryClient
 
-logger = logging.getLogger(__name__)
+class VmPublicationHooks:
+    """VM candidate codec and durable derived-listing binding lookup."""
+
+    def __init__(self, sqlite_client: Any) -> None:
+        self._db = sqlite_client
+
+    def validate_candidate(
+        self, candidate: PublicationCandidate[Listing]
+    ) -> None:
+        mode = candidate.payload.offer_resource.virtualization_type
+        offering_mode = mode.value if hasattr(mode, "value") else str(mode or "")
+        if offering_mode != candidate.binding.offering_mode:
+            raise CapacityBindingError(
+                "VM offer virtualization_type does not match its capacity binding"
+            )
+
+    async def binding_for_listing(self, listing_id: str) -> CapacityBinding | None:
+        try:
+            return await capacity_binding_for_listing(self._db, listing_id)
+        except RuntimeError:
+            return None
+
+
+def _make_registry_client():
+    from core_storefront.multi_registry_client import MultiRegistryClient
+    import market_storefront.container as container
+    from market_storefront.utils.config import get_registry_authorities
+
+    signer = container.resolved_marketplace_signer
+    if signer is None:
+        raise RuntimeError("marketplace signer is not initialized")
+    return MultiRegistryClient(
+        list(settings.registry.urls),
+        timeout=settings.registry.discovery_timeout,
+        auth=settings.registry.auth,
+        signer=signer,
+        caller_role="seller",
+        expected_registries=get_registry_authorities(),
+    )
+
+
+def build_publication_runtime(sqlite_client: Any) -> PublicationRuntime[Listing]:
+    """Compose VM schema/persistence hooks onto one publication runtime."""
+    return PublicationRuntime(
+        repository=sqlite_client,
+        hooks=VmPublicationHooks(sqlite_client),
+        enabled=settings.enable_registry_discovery,
+        registry_urls=tuple(settings.registry.urls),
+        registry_client_factory=_make_registry_client,
+        listing_request_factory=ListingRequest,
+        update_listing_request_factory=UpdateListingRequest,
+        storefront_url=BASE_URL_OVERRIDE,
+        on_published=_record_listing_published_stage_event,
+    )
+
+
+async def _candidate(sqlite_client: Any, value: Listing | dict) -> PublicationCandidate[Listing]:
+    listing = value if isinstance(value, Listing) else Listing.model_validate(value)
+    binding = await capacity_binding_for_listing(sqlite_client, listing.listing_id)
+    return PublicationCandidate(listing.listing_id, binding, listing)
+
+
+async def publish_order_to_registry(
+    order: Listing | dict,
+    *,
+    sqlite_client: Any,
+) -> dict[str, Any]:
+    """Publish a domain-validated, durably bound VM candidate."""
+    return await build_publication_runtime(sqlite_client).publish(
+        await _candidate(sqlite_client, order)
+    )
 
 
 async def close_order(
@@ -31,35 +104,13 @@ async def close_order(
     *,
     sqlite_client: Any,
 ) -> dict[str, Any]:
-    """Close an order locally and in the registry when registry discovery is enabled."""
-    parameters = parameters or {}
-    order_id = parameters.get("listing_id")
-    if not isinstance(order_id, str) or not order_id.strip():
+    """Close a VM listing through the kit lifecycle using its exact binding."""
+    listing_id = (parameters or {}).get("listing_id")
+    if not isinstance(listing_id, str) or not listing_id.strip():
         return {"status": "error", "message": "Missing listing_id for close_listing"}
-
-    try:
-        await sqlite_client.update_listing(
-            listing_id=order_id,
-            status="closed",
-        )
-    except Exception as exc:
-        logger.warning(
-            "[LOCAL DB] Failed to update order %s as closed: %s", order_id, exc
-        )
-
-    return await close_listing_in_registries(
-        order_id,
-        enabled=settings.enable_registry_discovery,
-        registry_client_factory=_make_registry_client,
-        update_listing_request_factory=UpdateListingRequest,
-        select_target_registries=partial(
-            _registries_to_target,
-            sqlite_client=sqlite_client,
-        ),
-        record_publications=partial(
-            _record_publications,
-            sqlite_client=sqlite_client,
-        ),
+    binding = await capacity_binding_for_listing(sqlite_client, listing_id)
+    return await build_publication_runtime(sqlite_client).close(
+        BoundListing(listing_id, binding)
     )
 
 
@@ -69,45 +120,37 @@ async def close_stale_compute_listings_after_capacity_change(
     sqlite_client: Any,
     home_site: str,
     configured_site_count: int,
-    member_availability: dict[tuple[str | None, str], int] | None = None,
+    member_availability: dict[tuple[str, str], int] | None = None,
     site_pool_projection: dict[str, list[dict]] | None = None,
     site_capacity_buckets: dict[str, list[dict]] | None = None,
 ) -> list[str]:
-    """Close open derived compute listings whose GPU slice no longer fits.
-
-    ``member_availability`` carries the aggregated site snapshots keyed
-    ``(site, resource_id)``. ``None`` (availability unknown — the
-    authority was unreachable) closes nothing: members are assumed
-    fully available, and the next delta/reconcile converges.
-    ``configured_site_count`` gates whether an unmapped listing may be
-    defaulted to ``home_site`` -- see ``reconciler.stale_open_listing_ids``.
-    """
-    closed_listing_ids: list[str] = []
-    for listing_id in stale_open_listing_ids(
+    """Let VM semantics choose stale candidates; kit executes each close."""
+    ids = stale_open_listing_ids(
         db_path,
         home_site=home_site,
         configured_site_count=configured_site_count,
         member_availability=member_availability,
         site_pool_projection=site_pool_projection,
         site_capacity_buckets=site_capacity_buckets,
-    ):
-        result = await close_order(
-            {"listing_id": listing_id},
-            sqlite_client=sqlite_client,
+    )
+    bound = tuple(
+        BoundListing(
+            listing_id,
+            await capacity_binding_for_listing(sqlite_client, listing_id),
         )
-        if str(result.get("status", "?")) in ("closed", "skipped", "queued"):
-            closed_listing_ids.append(listing_id)
-            continue
-        row = await sqlite_client.load_listing(listing_id=listing_id)
-        if row and row.get("status") == "closed":
-            closed_listing_ids.append(listing_id)
+        for listing_id in ids
+    )
+    result = await build_publication_runtime(sqlite_client).reconcile(
+        ReconciliationPlan(close=bound)
+    )
+    closed = list(result["closed"])
     mark_derived_listings_closed(
         db_path,
-        closed_listing_ids,
+        closed,
         home_site=home_site,
         configured_site_count=configured_site_count,
     )
-    return closed_listing_ids
+    return closed
 
 
 async def reopen_available_compute_listings_after_capacity_change(
@@ -115,85 +158,32 @@ async def reopen_available_compute_listings_after_capacity_change(
     *,
     sqlite_client: Any,
     home_site: str,
-    member_availability: dict[tuple[str | None, str], int] | None = None,
+    member_availability: dict[tuple[str, str], int] | None = None,
     site_pool_projection: dict[str, list[dict]] | None = None,
     site_capacity_buckets: dict[str, list[dict]] | None = None,
 ) -> list[str]:
-    """Reopen closed derived listings whose slice fits capacity again.
-
-    The freeing counterpart of the close path above, run for "released"
-    capacity deltas — same mechanics as the admin fulfillment-event
-    handlers' reopen step. ``None`` availability (authority unreachable)
-    reopens nothing: with no consumption information everything would
-    look free, and reopening on ignorance over-sells.
-    """
-    from domains.vms.listings.reconciler import (
-        closed_available_listing_ids,
-        mark_derived_listings_open,
-    )
-
+    """Let VM semantics choose available candidates; kit executes reopen/publish."""
     if member_availability is None:
         return []
-    reopened_listing_ids = closed_available_listing_ids(
+    ids = closed_available_listing_ids(
         db_path,
         home_site=home_site,
         member_availability=member_availability,
         site_pool_projection=site_pool_projection,
         site_capacity_buckets=site_capacity_buckets,
     )
-    for listing_id in reopened_listing_ids:
-        await sqlite_client.update_listing(listing_id=listing_id, status="open")
-    mark_derived_listings_open(db_path, reopened_listing_ids)
-    return reopened_listing_ids
-
-
-def _make_registry_client() -> MultiRegistryClient:
-    """Construct a signer-authenticated client for every pinned registry."""
-    import market_storefront.container as container
-
-    from core_storefront.multi_registry_client import MultiRegistryClient
-    from market_storefront.utils.config import get_registry_authorities
-
-    urls = list(settings.registry.urls)
-    signer = container.resolved_marketplace_signer
-    if signer is None:
-        raise RuntimeError("marketplace signer is not initialized")
-    return MultiRegistryClient(
-        urls,
-        timeout=settings.registry.discovery_timeout,
-        auth=settings.registry.auth,
-        signer=signer,
-        caller_role="seller",
-        expected_registries=get_registry_authorities(),
+    candidates: list[PublicationCandidate[Listing]] = []
+    for listing_id in ids:
+        row = await sqlite_client.load_listing(listing_id=listing_id)
+        if row is None:
+            continue
+        candidates.append(await _candidate(sqlite_client, row))
+    result = await build_publication_runtime(sqlite_client).reconcile(
+        ReconciliationPlan(reopen=tuple(candidates))
     )
-
-
-async def publish_order_to_registry(
-    order: Listing | dict,
-    *,
-    sqlite_client: Any,
-) -> dict[str, Any]:
-    """Publish a validated listing to every configured registry.
-
-    Raw dictionaries are accepted for compatibility with stored rows, but they
-    must satisfy the current listing contract before any registry is contacted.
-    Legacy-invalid rows can still be explicitly closed; they cannot be
-    republished.
-    """
-    payload = order.model_dump(mode="json") if isinstance(order, Listing) else order
-    listing = Listing.model_validate(payload)
-    return await publish_listing_to_registries(
-        listing,
-        enabled=settings.enable_registry_discovery,
-        registry_client_factory=_make_registry_client,
-        listing_request_factory=ListingRequest,
-        storefront_url=BASE_URL_OVERRIDE,
-        record_publications=partial(
-            _record_publications,
-            sqlite_client=sqlite_client,
-        ),
-        on_published=_record_listing_published_stage_event,
-    )
+    reopened = list(result["reopened"])
+    mark_derived_listings_open(db_path, reopened)
+    return reopened
 
 
 def _record_listing_published_stage_event(
@@ -219,48 +209,3 @@ def _record_listing_published_stage_event(
         demands=demands,
         max_duration_seconds=max_duration_seconds,
     )
-
-
-async def _registries_to_target(
-    listing_id: str,
-    fallback_urls: list[str],
-    *,
-    sqlite_client: Any,
-) -> list[str]:
-    """Return registry URLs that should receive update/delete for ``listing_id``."""
-    try:
-        pubs = await sqlite_client.load_publications(listing_id=listing_id)
-    except Exception:
-        return list(fallback_urls)
-    active = [p["registry_url"] for p in pubs if p.get("status") != "unpublished"]
-    return active if active else list(fallback_urls)
-
-
-async def _record_publications(
-    listing_id: str,
-    results: list[dict[str, Any]],
-    *,
-    sqlite_client: Any,
-) -> None:
-    """Persist one ``publications`` row per per-registry write result."""
-    if sqlite_client is None:
-        return
-    for result in results:
-        payload = result.get("payload") or {}
-        status = "published" if result.get("success") else "failed"
-        try:
-            await sqlite_client.upsert_publication(
-                listing_id=listing_id,
-                registry_url=result["registry_url"],
-                payload=payload,
-                status=status,
-                registry_assigned_id=result.get("registry_assigned_id"),
-                last_error=result.get("error"),
-            )
-        except Exception as exc:
-            logger.warning(
-                "[PUBLICATIONS] Failed to record publication for %s @ %s: %s",
-                listing_id,
-                result.get("registry_url"),
-                exc,
-            )

@@ -12,6 +12,7 @@ from domains.vms.listings.pricing_resolution import (
     resolve_gpu_pricing,
 )
 from market_identity import Identity
+from market_resource_pools import pool_delivers_offering_mode
 
 
 HELD_ALLOCATION_STATES = {
@@ -251,11 +252,13 @@ def _accumulate_capacity_pool_member(
     pool: dict[str, Any],
     row: sqlite3.Row,
     member_availability: dict[tuple[str | None, str], int] | None,
+    *,
+    home_site: str,
 ) -> None:
     """Fold one compute_pool_members row into its pool's running
     aggregate, in place."""
     member_total = int(row["gpu_count"] or 0)
-    member_site = str(row["site"]) if row["site"] else None
+    member_site = str(row["site"]) if row["site"] else home_site
     member_key = (member_site, str(row["resource_id"]))
     member_available = _member_available_units(
         member_total, member_key, member_availability
@@ -275,6 +278,8 @@ def _accumulate_capacity_pool_member(
 def _pool_rows_from_capacity_pools(
     conn: sqlite3.Connection,
     member_availability: dict[tuple[str | None, str], int] | None,
+    *,
+    home_site: str,
 ) -> list[dict[str, Any]]:
     """compute_capacity_pools JOIN compute_pool_members, grouped by pool
     -- the fungible-pool-capable local source, preferred over the legacy
@@ -301,7 +306,9 @@ def _pool_rows_from_capacity_pools(
                 "member_count": 0,
             },
         )
-        _accumulate_capacity_pool_member(pool, row, member_availability)
+        _accumulate_capacity_pool_member(
+            pool, row, member_availability, home_site=home_site
+        )
     return list(by_pool.values())
 
 
@@ -322,6 +329,7 @@ def _project_legacy_resource_row(
     has_max_duration: bool,
     has_settlements: bool = False,
     member_availability: dict[tuple[str | None, str], int] | None,
+    home_site: str,
 ) -> dict[str, Any]:
     """Shape one legacy `resources` row into a pool_rows entry -- each
     such resource is its own single-member "pool" (no fungible grouping
@@ -333,7 +341,7 @@ def _project_legacy_resource_row(
     total_gpu_count = int(row["value"]) if row["value"] is not None else 1
     available_gpu_count = _member_available_units(
         total_gpu_count,
-        (None, str(row["resource_id"])),
+        (home_site, str(row["resource_id"])),
         member_availability,
     )
     return {
@@ -358,6 +366,8 @@ def _project_legacy_resource_row(
 def _pool_rows_from_legacy_resources(
     conn: sqlite3.Connection,
     member_availability: dict[tuple[str | None, str], int] | None,
+    *,
+    home_site: str,
 ) -> list[dict[str, Any]]:
     """Legacy `resources` table fallback, used only when
     compute_capacity_pools/compute_pool_members don't both exist."""
@@ -383,6 +393,7 @@ def _pool_rows_from_legacy_resources(
             has_max_duration=has_max_duration,
             has_settlements=has_settlements,
             member_availability=member_availability,
+            home_site=home_site,
         )
         for row in rows
     ]
@@ -391,6 +402,8 @@ def _pool_rows_from_legacy_resources(
 def _pool_rows_from_local_tables(
     conn: sqlite3.Connection,
     member_availability: dict[tuple[str | None, str], int] | None,
+    *,
+    home_site: str,
 ) -> list[dict[str, Any]]:
     """Local-table sourcing: compute_capacity_pools joined with
     compute_pool_members when both exist, else the legacy resources
@@ -410,8 +423,12 @@ def _pool_rows_from_local_tables(
         is not None
     )
     if has_pools and has_members:
-        return _pool_rows_from_capacity_pools(conn, member_availability)
-    return _pool_rows_from_legacy_resources(conn, member_availability)
+        return _pool_rows_from_capacity_pools(
+            conn, member_availability, home_site=home_site
+        )
+    return _pool_rows_from_legacy_resources(
+        conn, member_availability, home_site=home_site
+    )
 
 
 def _local_pool_pricing(conn: sqlite3.Connection) -> dict[str, sqlite3.Row]:
@@ -699,6 +716,8 @@ def _projected_pool_rows(
 
     metadata = pool.get("pool_metadata") or {}
     policy_tags = metadata.get("policy_tags") or {}
+    if not pool_delivers_offering_mode(policy_tags, "vm"):
+        return []
 
     structural_default = "specific_resource" if len(usages) == 1 else "fungible"
     mode, explanation = resolve_vm_listing_mode(
@@ -746,6 +765,7 @@ def _projected_pool_rows(
         "region": region,
         "sla": sla,
         "listing_mode": mode,
+        "offering_mode": "vm",
         "listing_mode_explanation": explanation,
     }
 
@@ -949,12 +969,16 @@ def available_compute_slices(
                 hint_resolution=hint_resolution,
             )
         else:
-            pool_rows = _pool_rows_from_local_tables(conn, member_availability)
+            pool_rows = _pool_rows_from_local_tables(
+                conn, member_availability, home_site=home_site
+            )
     finally:
         conn.close()
 
     out: list[dict[str, Any]] = []
     for row in pool_rows:
+        if row.get("offering_mode") != "vm":
+            continue
         site_id = str(row.get("site_id") or home_site)
         accepted_escrows: list[dict[str, Any]] | None = None
         raw = row.get("accepted_escrows")
@@ -988,6 +1012,7 @@ def available_compute_slices(
             is_fungible_pool = not single_resource_id
             out.append(
                 {
+                    "offering_mode": "vm",
                     "site_id": site_id,
                     "pool_id": pool_id,
                     "resource_id": single_resource_id,
