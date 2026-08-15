@@ -4,8 +4,18 @@ from __future__ import annotations
 
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict
 from market_identity import Identity
+from pydantic import BaseModel, ConfigDict, Field
+
+
+class BareMetalHealthResponse(BaseModel):
+    """Public-safe readiness and identity projection for this storefront."""
+
+    status: str
+    checks: dict[str, str] = Field(default_factory=dict)
+    paused: bool | None = None
+    principal: Identity
+    resource_count: int | None = None
 
 
 class BareMetalSettleRequest(BaseModel):

@@ -170,9 +170,6 @@ async def test_health_is_truthful_about_uncomposed_authorities(tmp_path) -> None
             "fulfillment": "unavailable",
         },
         "paused": False,
-        "agent_id": "seller-1",
-        "chain_id": None,
+        "principal": SELLER_SIGNER.identity.model_dump(mode="json"),
         "resource_count": 0,
-        "site_projections": None,
-        "listing_mode_explanations": None,
     }

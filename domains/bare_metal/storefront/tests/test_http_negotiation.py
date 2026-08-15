@@ -110,6 +110,7 @@ async def _insert_listing(runtime: BareMetalStorefrontRuntime) -> None:
 
 def _opening(*, payload: dict | None = None) -> dict:
     return {
+        "listing_id": "listing-1",
         "buyer_principal": BUYER_SIGNER.identity.model_dump(mode="json"),
         "buyer_agent_url": "https://buyer.example",
         "provision_terms": {

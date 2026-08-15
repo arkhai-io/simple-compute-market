@@ -15,11 +15,13 @@ from core_storefront.models.negotiation_models import (
     NegotiationDetailResponse,
     NegotiationListResponse,
 )
-from core_storefront.models.system_models import AdminPauseResponse, HealthResponse
+from core_storefront.models.system_models import AdminPauseResponse
 from fastapi import APIRouter, HTTPException, Query, Request
 
 from market_identity import EMPTY_BODY, Identity
+
 from .models import (
+    BareMetalHealthResponse,
     BareMetalSettleRequest,
     BareMetalSettleResponse,
     BareMetalSettleStatusResponse,
@@ -203,7 +205,7 @@ async def negotiate_continue(
     )
     if thread is None:
         raise HTTPException(status_code=404, detail="negotiation not found")
-    if thread.get("buyer_principal") != identity:
+    if Identity.model_validate(thread.get("buyer_principal")) != identity:
         raise HTTPException(status_code=403, detail="negotiation buyer mismatch")
     if thread.get("terminal_state") is not None:
         raise HTTPException(status_code=409, detail="negotiation is terminal")
@@ -337,17 +339,17 @@ async def settle_status(
         raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
 
 
-@router.get("/health", response_model=HealthResponse)
-@router.get("/api/v1/system/health", response_model=HealthResponse)
-async def health(request: Request) -> HealthResponse:
-    return HealthResponse.model_validate(await _runtime(request).health())
+@router.get("/health", response_model=BareMetalHealthResponse)
+@router.get("/api/v1/system/health", response_model=BareMetalHealthResponse)
+async def health(request: Request) -> BareMetalHealthResponse:
+    return BareMetalHealthResponse.model_validate(await _runtime(request).health())
 
 
-@router.get("/api/v1/system/status", response_model=HealthResponse)
-async def system_status(request: Request) -> HealthResponse:
+@router.get("/api/v1/system/status", response_model=BareMetalHealthResponse)
+async def system_status(request: Request) -> BareMetalHealthResponse:
     runtime = _runtime(request)
     await _admin(request=request, runtime=runtime, operation="system_status")
-    return HealthResponse.model_validate(await runtime.health())
+    return BareMetalHealthResponse.model_validate(await runtime.health())
 
 
 @router.post("/api/v1/admin/pause", response_model=AdminPauseResponse)
