@@ -109,6 +109,14 @@ EAS/allowlisted-arbiter validation is a condition-boundary concern, not a
 hosted financial-provider profile; this repository currently exposes no
 standalone hosted local-EAS operator target.
 
+## Expanded consumer cutover and rollback
+
+The expanded consumer activates as one compatibility set: exact hosted client wheel, signed manifest, API `0.2.0`, schema `5`, payer-profile and purchase-authorization capabilities, three exact funding profiles, service image coordinate, marketplace config, and role-scoped signer Secrets. Config migration converts new-publication card method input to `card.v1` clauses and refuses ambiguity; historical accepted card rows remain a recovery concern rather than a runtime alias.
+
+Marketplace deployment carries only public authority trust, exact release pins, account/condition references, profile/currency/country policy, local buyer profile locations, and marketplace signer Secret references. Provider credentials, Customer/PaymentMethod/mandate data, stable instrument state, webhooks, hosted databases/migrations, reconciliation, and provider recovery remain outside marketplace packages and workloads.
+
+Before activation, rollback restores the matching prior client, config, image coordinates, and Secret mapping together. After new profile publication or purchase authorization occurs, rollback cannot reinterpret accepted state; operators roll forward using immutable obligation, authorization, and hosted operation identities. Protected profile evidence remains blocked unless every signed producer artifact and selected Stripe rail prerequisite is available.
+
 ## Current limits
 
 The repository does not yet have one universal configuration-delivery mechanism or migration phase for every service. Publication authority between private artifact registries and public package releases, removal of all local source overrides, and a repository-wide typed-client versioning policy remain separate decisions.

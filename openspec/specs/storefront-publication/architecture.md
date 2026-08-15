@@ -75,6 +75,14 @@ Command defaults, CSV resource rows, projected reconciliation records, and direc
 
 Readiness recovery may add a deterministic option without changing listing identity. Loss of readiness may remove that option from future offers, but accepted Terms remain pinned. Seller operations live under `market-storefront settlement`: the common status command is observational, while mechanism-owned subcommands expose genuine differences such as hosted onboarding or an Alkahest check without creating separate publication paths. Normal `publish` accepts only mechanism-neutral clauses.
 
+## Exact hosted alternatives and accepted authorization
+
+Hosted publication treats every complete ready profile clause as an independent option. The option and accepted plan bind the exact profile alongside money, destination account, condition, parties, and expiry policy. Readiness is evaluated per clause and per profile, so adding or losing one rail does not rewrite another option or an already accepted agreement.
+
+The buyer obtains its operation-scoped funding authorization only after accepted terms are durable. Storefront start accepts the accepted negotiation and obligation identities plus that safe reference, then reloads all commercial inputs from seller-owned state. Payer profiles, saved instruments, buyer automation policy, and provider data never enter listings, accepted terms, storefront persistence, or evidence.
+
+Historical card-only plans are classified from persisted state and decoded only for recovery. New config, publication, negotiation, and start accept the explicit `card.v1` profile; there is no public legacy alias that could generate a second identity for the same old plan.
+
 ## Related contracts
 
 - [Marketplace identity](../marketplace-identity/spec.md)

@@ -59,6 +59,14 @@ Transient buyer actions use one mechanism-neutral `open`, `print`, or `fail` pol
 
 Priority and explicit clauses never authorize recovery-time failover. Accepted Terms, the obligation reference, and stable operation identities remain authoritative even if current priority, readiness, enablement, or command inputs change. Generated buyer configuration therefore contains shared selection vocabulary but omits seller account, onboarding, publication, authority-administration, and provider fields.
 
+## Persistent payer binding and exact authorization
+
+The marketplace buyer profile and hosted payer profile are separate identities. Owner-restricted local profile metadata keeps only the authority/environment binding, opaque payer reference, bound canonical marketplace principal, and safe lifecycle state. Payer create/setup/instrument administration calls the hosted authority directly through the released client under `market settlement stripe payer`; escrow status, reclaim, fulfillment, and collection remain storefront-mediated.
+
+After accepted terms are durable, the buyer constructs one authorization from the immutable obligation hash, accepted amount/currency/destination/profile/expiry, deterministic marketplace operation identity, and the user-selected interactive or saved-instrument mode. Only the operation-scoped authorization reference is durable run state. Saved instrument references and transient setup, payment, confirmation, or bank-instruction details remain invocation-local.
+
+Off-session policy evaluation never grants blanket charging authority. A qualifying accepted obligation may be signed without another prompt, while a refusal or hosted `requires_action` continues the same exact obligation through the common transient action policy. Restart re-fetches provider-neutral status/reason/deadline/action metadata and reuses accepted identities rather than persisting a URL or selecting another profile.
+
 ## Current limits
 
 The plugin boundary and shipped export contracts do not prove that every arbitrary third-party command composes without collision. Persisted recovery covers documented stages; it is not a universal exactly-once transaction spanning registries, storefronts, and settlement mechanisms.

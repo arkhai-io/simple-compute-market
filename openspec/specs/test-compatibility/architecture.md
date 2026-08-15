@@ -98,6 +98,14 @@ lane. Local EAS/allowlisted-arbiter work is condition-boundary conformance
 only; it is not part of hosted financial evidence, and there is currently no
 standalone hosted local-EAS operator target.
 
+## Expanded consumer evidence matrix
+
+Credential-free marketplace tests own exact profile configuration and option identity, per-profile readiness/publication, persistent opaque payer binding, direct payer and authorization helpers, bounded automation, storefront mediation, transient action redaction, delayed funding gates, immutable journals, legacy recovery, reclaim races, and package boundaries. They use the released provider-neutral client with deterministic ports and never stand in for Stripe assertions.
+
+The protected VM lane attributes each selected `card.v1`, `us_bank_transfer.v1`, `us_ach_debit.v1`, and off-session `requires_action` assertion separately. Reports keep marketplace source/commit distinct from the hosted signed manifest, client, image, schema/migrations, provenance, repository/workflow/source, and protected workflow run. A missing rail, account, mandate, browser, or signed-release prerequisite is an unavailable assertion, not permission to substitute another profile or local simulation.
+
+Reports permit only public lifecycle stages, profile/currency, normalized outcomes, timestamps, attempts, and bounded hashed opaque correlations. Recursive canary scanning rejects credentials, provider/customer/payment-method/mandate/bank/card data, raw actions or URLs, payloads, events, requests, source-bearing local paths, and unrestricted logs before evidence is signed.
+
 ## Current limits
 
 The e2e harness predominantly uses HTTP clients and explicit test seams, but it is not yet completely external to service packages and a few scenarios retain timing or private-client dependencies. The architecture therefore states the desired boundary only where current tests establish it and treats full harness extraction as separate work.

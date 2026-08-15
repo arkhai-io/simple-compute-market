@@ -100,6 +100,14 @@ Typed mechanism registration controls which clients are constructed and which ne
 
 Configuration and readiness are admission inputs, not durable-plan interpreters. Once Terms are accepted, the stored canonical mechanism, exact parameters, payer/claimant direction, and operation identities govern recovery. Disabling or deprioritizing a mechanism may stop new publication, but funded obligations continue authoritative status, collection, and reclaim convergence through their original client.
 
+## Profile-bound hosted servicing
+
+New hosted settlement records bind the accepted funding profile and the operation-scoped authorization reference without changing the already derived agreement or obligation identity. The binding is immutable and participates in the materialization operation fingerprint, so an exact retry can converge after an unknown acknowledgement while changed reuse fails before another financial effect.
+
+Only the hosted authority's normalized `funded` result after the selected profile's success and availability gate releases the VM fulfillment lease. Redirect completion, confirmation, transfer instructions, pending ACH, webhook timing, and local policy are not funding evidence. Provider-neutral reason, deadline, and action metadata may be projected, but raw URLs and provider payloads are transient and authority-owned.
+
+Reclaim uses the same opaque settlement and operation identity and never asks marketplace code to choose refund, return, reversal, or dispute behavior. A pre-collection return blocks collection; a post-fulfillment/pre-collection return preserves fulfillment attribution while domain teardown and hosted financial recovery converge independently. A post-collection loss becomes operator-required state rather than rewriting completed marketplace identities.
+
 ## Current limits
 
 Heartbeat evidence remains persisted but is not an automated adjudication

@@ -79,6 +79,12 @@ Chain and provider dependencies enter only after a composition root selects a co
 
 Hosted authentication remains a separately released protocol even when it uses the same marketplace signer and cryptographic scheme. The thin hosted adapter presents that signer through the exact manifest-pinned `hosted-settlement-client`, verifies that the manifest advertises the required identity contract before publishing fiat, and lets the client own hosted principal models, canonical bytes, headers, proofs, and response verification. This preserves each protocol's domain separation and prevents marketplace packages from copying or translating hosted wire logic.
 
+## Direct payer lane and mediated escrow lane
+
+The hosted kit has two provider-neutral entry surfaces over the same exact released client. Buyer-only payer profile, setup, instrument, and accepted-obligation authorization operations call the authority directly with the selected or recorded marketplace signer. Escrow materialization, status, condition, collect, reclaim, and recovery are composed into the shared settlement runtime and remain reachable to the buyer only through the authenticated storefront.
+
+This split does not add a second settlement lifecycle. The direct lane manages payer ownership and yields only an opaque operation-scoped authorization reference; the mediated lane owns durable obligation state and financial convergence. Neither lane copies client models or signing bytes, imports hosted service source, or admits provider configuration. API-credit and bare-metal composition remain separate adopters and gain no hosted dependency from the VM cutover.
+
 ## Current limits
 
 The composition contract covers the shipped role protocols and versioned domain contracts; it is not a claim that every possible market shape fits the current phases. Auctions, sealed-bid protocols, arbitrary settlement plans, and a universal storefront executable require explicit changes rather than inference from the extension points.
