@@ -225,6 +225,22 @@ def test_config_rejects_provider_legacy_and_sensitive_fields(field: str) -> None
         StripeSettlementConfig.model_validate({field: "must-not-cross-boundary"})
 
 
+def test_registry_validation_does_not_echo_rejected_config_values() -> None:
+    secret = "credential-canary"
+    section = _config().model_dump(mode="python")
+    section["base_url"] = f"https://user:{secret}@settlement.example"
+    registry = SettlementConfigurationRegistry([create_stripe_registration()])
+
+    with pytest.raises(SettlementConfigurationError) as caught:
+        registry.resolve(
+            {"priority": [MECHANISM], "stripe": section},
+            role="seller",
+        )
+
+    assert str(caught.value) == "invalid Settlement.stripe"
+    assert secret not in str(caught.value)
+
+
 @pytest.mark.parametrize(
     ("updates", "match"),
     [
@@ -703,13 +719,15 @@ def test_registration_factory_and_publication_validation_are_exact() -> None:
         "interaction": "interactive",
         "funds_flow": "separate_charges_transfers",
     }
-    with pytest.raises(SettlementConfigurationError):
+    secret = "credential-canary"
+    with pytest.raises(SettlementConfigurationError) as caught:
         registry.validate_publication_input(
             MECHANISM,
-            {"method": "card"},
+            {"method": secret},
             config,
             role="seller",
         )
+    assert secret not in str(caught.value)
 
 
 def test_factory_wraps_only_the_released_client() -> None:
