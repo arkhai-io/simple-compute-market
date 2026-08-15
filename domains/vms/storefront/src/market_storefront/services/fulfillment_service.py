@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 from collections.abc import Awaitable, Callable
 from datetime import datetime, timezone
@@ -74,6 +75,40 @@ async def _do_provision(
     ``fulfillment_id`` but before polling starts, mirroring the legacy job-id
     hook this replaces.
     """
+    escrow = await sqlite_client.load_escrow(escrow_uid=escrow_uid)
+    if escrow is None or not escrow.get("negotiation_id"):
+        raise RuntimeError(
+            f"escrow {escrow_uid!r} has no accepted negotiation binding"
+        )
+    thread_binding = await sqlite_client.load_thread_binding(
+        negotiation_id=str(escrow["negotiation_id"])
+    )
+    sqlite_client.domain_registry.resolve(thread_binding.binding)
+    raw_context = escrow.get("fulfillment_context")
+    if isinstance(raw_context, str):
+        try:
+            context = json.loads(raw_context)
+        except json.JSONDecodeError as exc:
+            raise RuntimeError("stored fulfillment context is malformed") from exc
+    elif isinstance(raw_context, dict):
+        context = dict(raw_context)
+    elif raw_context is None:
+        context = {}
+    else:
+        raise RuntimeError("stored fulfillment context must be an object")
+    bound_context = sqlite_client.bind_fulfillment_context(
+        context,
+        thread_binding=thread_binding,
+    )
+    await sqlite_client.update_escrow(
+        escrow_uid=escrow_uid,
+        fulfillment_context=json.dumps(
+            bound_context,
+            sort_keys=True,
+            separators=(",", ":"),
+        ),
+    )
+    site_id = thread_binding.site_id
     fulfillment_client = build_fulfillment_client(
         build_capacity_client(lambda: sqlite_client)
     )
@@ -82,7 +117,8 @@ async def _do_provision(
         FulfillmentScheduleRequest(
             capacity_reservation_id=capacity_reservation_id,
             market=_VM_MARKET,
-        )
+        ),
+        site_id=site_id,
     )
     if escrow_uid:
         await persist_escrow_fields_with_retry(
@@ -109,7 +145,8 @@ async def _do_provision(
                 schema_version=1,
                 payload=request_payload,
             ),
-        )
+        ),
+        site_id=site_id,
     )
 
     if on_job_submitted is not None:
@@ -130,6 +167,7 @@ async def _do_provision(
         capacity_reservation_id=capacity_reservation_id,
         timeout=timeout,
         poll_interval=poll_interval,
+        site_id=site_id,
     )
     if status.state == "failed":
         raise ComputeProvisioningJobError(
@@ -139,6 +177,7 @@ async def _do_provision(
     envelope = await fulfillment_client.get_fulfillment_result(
         accepted.fulfillment_id,
         capacity_reservation_id=capacity_reservation_id,
+        site_id=site_id,
     )
     return _fulfillment_result_to_legacy_shape(envelope)
 
@@ -172,6 +211,7 @@ async def _poll_fulfillment_until_terminal(
     capacity_reservation_id: str,
     timeout: float,
     poll_interval: float,
+    site_id: str,
 ) -> Any:
     """Poll ``get_fulfillment_status`` until ``active``/``failed`` or timeout.
 
@@ -185,6 +225,7 @@ async def _poll_fulfillment_until_terminal(
         status = await fulfillment_client.get_fulfillment_status(
             fulfillment_id,
             capacity_reservation_id=capacity_reservation_id,
+            site_id=site_id,
         )
         if status.state in ("active", "failed"):
             return status

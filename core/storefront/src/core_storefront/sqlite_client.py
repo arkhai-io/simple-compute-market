@@ -1364,6 +1364,84 @@ class SQLiteClient:
 
         await asyncio.to_thread(_save)
 
+    async def record_listing_binding(
+        self,
+        *,
+        binding: StorefrontListingBinding,
+    ) -> None:
+        """Attach a validated immutable binding to an already persisted listing."""
+
+        self._domain_registry.resolve(binding.binding)
+
+        def _save() -> None:
+            conn = sqlite3.connect(self.db_path)
+            try:
+                conn.execute("BEGIN IMMEDIATE")
+                row = conn.execute(
+                    "SELECT offer_resource FROM listings WHERE listing_id=?",
+                    (binding.listing_id,),
+                ).fetchone()
+                if row is None:
+                    raise KeyError(
+                        f"unknown listing {binding.listing_id!r}"
+                    )
+                offer = self._deserialize_json(row[0])
+                if (
+                    not isinstance(offer, dict)
+                    or offer.get("virtualization_type")
+                    != binding.binding.offering_mode
+                ):
+                    raise StorefrontDomainBindingError(
+                        "persisted offer_resource mode disagrees with binding"
+                    )
+                values = binding.as_record()
+                conn.execute(
+                    """
+                    INSERT INTO storefront_listing_bindings(
+                      listing_id, site_id, pool_id, physical_resource_id,
+                      offering_mode, domain_identity, contract_major,
+                      contract_minor, derivation_key, source_envelope_json,
+                      last_reconciled_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(listing_id) DO UPDATE SET
+                      last_reconciled_at=excluded.last_reconciled_at
+                    """,
+                    tuple(values.values()),
+                )
+                stored = conn.execute(
+                    """
+                    SELECT site_id, pool_id, physical_resource_id, offering_mode,
+                           domain_identity, contract_major, contract_minor,
+                           derivation_key, source_envelope_json
+                    FROM storefront_listing_bindings WHERE listing_id=?
+                    """,
+                    (binding.listing_id,),
+                ).fetchone()
+                expected = (
+                    binding.site_id,
+                    binding.pool_id,
+                    binding.physical_resource_id,
+                    binding.binding.offering_mode,
+                    str(binding.binding.domain_identity),
+                    binding.binding.contract_major,
+                    binding.binding.contract_minor,
+                    binding.derivation_key,
+                    binding.source_envelope_json,
+                )
+                if stored != expected:
+                    raise StorefrontDomainBindingError(
+                        f"listing {binding.listing_id!r} already has a "
+                        "different immutable domain binding"
+                    )
+                conn.commit()
+            except Exception:
+                conn.rollback()
+                raise
+            finally:
+                conn.close()
+
+        await asyncio.to_thread(_save)
+
     async def update_listing(
         self,
         *,

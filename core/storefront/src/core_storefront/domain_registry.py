@@ -258,6 +258,20 @@ class StorefrontListingBinding:
             physical_resource_id=physical_resource_id,
         )
 
+    def as_record(self) -> dict[str, object]:
+        """Return columns in the canonical SQLite insertion order."""
+
+        return {
+            "listing_id": self.listing_id,
+            "site_id": self.site_id,
+            "pool_id": self.pool_id,
+            "physical_resource_id": self.physical_resource_id,
+            **self.binding.as_record(),
+            "derivation_key": self.derivation_key,
+            "source_envelope_json": self.source_envelope_json,
+            "last_reconciled_at": self.last_reconciled_at,
+        }
+
 
 @dataclass(frozen=True)
 class StorefrontThreadBinding:
@@ -483,3 +497,20 @@ class StorefrontDomainRegistry:
             raise StorefrontDomainBindingError(
                 f"unknown storefront contribution {contribution_id!r}"
             ) from exc
+
+    def registration_for_contract(
+        self,
+        contract: MarketDomainContract,
+    ) -> StorefrontDomainRegistration:
+        """Return the exact pre-registered object; reconstructed peers fail."""
+
+        key = DomainContractKey(
+            contract.identity,
+            contract.contract_version,
+        )
+        registration = self._by_contract_key.get(key)
+        if registration is None or registration.contract is not contract:
+            raise StorefrontDomainBindingError(
+                "market-domain contract is not the exact startup-owned object"
+            )
+        return registration

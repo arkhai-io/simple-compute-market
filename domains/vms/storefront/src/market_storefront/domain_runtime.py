@@ -6,6 +6,11 @@ from dataclasses import replace
 
 from arkhai_vms.domain_runtime import market_domain
 from core_storefront.domain_plugins import StorefrontDomainContribution
+from core_storefront.domain_lifecycle import StorefrontSettlementBuildContext
+from core_storefront.domain_registry import (
+    StorefrontDomainRegistration,
+    StorefrontDomainRegistry,
+)
 from core_storefront.escrow_verification import verify_escrow_for_settlement
 from domains.vms.negotiation.storefront_round import default_seller_round_hook
 from market_core import (
@@ -35,6 +40,21 @@ _REQUIRED_VM_STOREFRONT_CAPABILITIES = frozenset(
 )
 
 
+def _build_vm_settlement_plan(
+    *,
+    context: StorefrontSettlementBuildContext,
+):
+    """Adapt the VM plan builder to the common selected-domain context."""
+
+    return _accepted_escrow_artifacts(
+        proposal=context.proposal,
+        agreed_amount=context.agreed_amount,
+        duration_seconds=context.duration_seconds,
+        buyer_principal=context.buyer_principal,
+        seller_principal=context.seller_principal,
+    )
+
+
 def build_vm_storefront_domain() -> MarketDomainContract:
     """Construct the ordinary VM contract used by the storefront executable."""
     base = market_domain()
@@ -50,7 +70,7 @@ def build_vm_storefront_domain() -> MarketDomainContract:
             ),
             settlement=ImmutableSettlementCapability(
                 verify=verify_escrow_for_settlement,
-                build_plan=_accepted_escrow_artifacts,
+                build_plan=_build_vm_settlement_plan,
             ),
             fulfillment=ImmutableFulfillmentCapability(
                 fulfill=fulfill_compute_obligation,
@@ -65,6 +85,22 @@ VM_STOREFRONT_CONTRIBUTION = StorefrontDomainContribution(
     contribution_id="vms",
     build_contract=build_vm_storefront_domain,
 )
+
+def build_vm_storefront_registry(
+    domain: MarketDomainContract | None = None,
+) -> StorefrontDomainRegistry:
+    """Build an explicit one-registration VM registry for focused composition."""
+
+    contract = build_vm_storefront_domain() if domain is None else domain
+    return StorefrontDomainRegistry(
+        (
+            StorefrontDomainRegistration(
+                offering_mode="vm",
+                contract=contract,
+                contribution_id="vms",
+            ),
+        )
+    )
 
 
 def validate_vm_storefront_domain(domain: object) -> MarketDomainContract:

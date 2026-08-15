@@ -22,6 +22,7 @@ from typing import Any
 from core_storefront.sqlite_client import (
     SQLiteClient as CoreSQLiteClient,
 )
+from core_storefront.domain_registry import StorefrontDomainRegistry
 from core_storefront.sqlite_migrations import MigrationLike
 from domains.vms.listings.host_csv_importer import upsert_hosts_from_csv
 from domains.vms.listings.reconciler import ensure_derived_compute_listings_table
@@ -32,7 +33,6 @@ from domains.vms.listings.resource_csv_importer import (
 )
 from market_hosted_settlement import HOSTED_SETTLEMENT_MIGRATIONS
 from market_settlement_runtime import settlement_migrations
-from market_core import MarketDomainContract, validate_domain_contract
 from market_identity import Identity
 
 from .config import BASE_URL_OVERRIDE, resolve_marketplace_signer, settings
@@ -51,12 +51,14 @@ class SQLiteClient(CoreSQLiteClient):
         self,
         db_path: str,
         *,
-        domain: MarketDomainContract,
+        registry: StorefrontDomainRegistry,
         local_listing_principal: Identity | None = None,
         expected_legacy_sellers: Collection[str] = (),
         extra_migrations: Sequence[MigrationLike] = (),
     ) -> None:
-        self._market_domain = validate_domain_contract(domain)
+        if not isinstance(registry, StorefrontDomainRegistry):
+            raise TypeError("registry must be a StorefrontDomainRegistry")
+        self._domain_registry = registry
         super().__init__(
             db_path,
             local_listing_principal=local_listing_principal,
@@ -66,9 +68,10 @@ class SQLiteClient(CoreSQLiteClient):
         )
 
     @property
-    def market_domain(self) -> MarketDomainContract:
-        """Return the immutable contract governing persisted VM artifacts."""
-        return self._market_domain
+    def domain_registry(self) -> StorefrontDomainRegistry:
+        """Return the immutable startup registry governing durable bindings."""
+
+        return self._domain_registry
 
 
     _ESCROW_COLS = (
@@ -1305,21 +1308,21 @@ class SQLiteClient(CoreSQLiteClient):
 _sqlite_client: SQLiteClient | None = None
 
 
-def get_sqlite_client(*, domain: MarketDomainContract) -> SQLiteClient:
+def get_sqlite_client(*, registry: StorefrontDomainRegistry) -> SQLiteClient:
     global _sqlite_client
-    domain = validate_domain_contract(domain)
+    if not isinstance(registry, StorefrontDomainRegistry):
+        raise TypeError("registry must be a StorefrontDomainRegistry")
     if _sqlite_client is None:
         signer = resolve_marketplace_signer()
         _sqlite_client = SQLiteClient(
             db_path=settings.db_path,
-            domain=domain,
+            registry=registry,
             local_listing_principal=signer.identity,
             expected_legacy_sellers=(BASE_URL_OVERRIDE,),
         )
-    elif _sqlite_client.market_domain is not domain:
+    elif _sqlite_client.domain_registry is not registry:
         raise RuntimeError(
-            "SQLite client is already bound to a different market-domain "
-            f"contract object (existing={_sqlite_client.market_domain.identity!s}, "
-            f"requested={domain.identity!s})"
+            "SQLite client is already bound to a different storefront "
+            "domain registry object"
         )
     return _sqlite_client
