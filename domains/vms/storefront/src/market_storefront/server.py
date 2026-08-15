@@ -8,10 +8,8 @@ Mirrors provisioning/compute/service/src/compute_provisioning_service/main.py:
 * X-Admin-Key OpenAPI security scheme registered so Swagger renders the
   Authorize button.
 
-Global pause state
-------------------
-``_GLOBALLY_PAUSED`` is the module-level flag read by
-``sync_negotiation.start_sync_negotiation``.
+Global pause state is read through the VM hook set injected into the shared
+negotiation runtime.
 """
 
 from __future__ import annotations
@@ -53,7 +51,7 @@ from market_storefront.utils.config import (
     settings,
 )
 from market_storefront.utils.sqlite_client import get_sqlite_client
-from market_storefront.utils.sync_negotiation import continue_sync_negotiation
+from market_storefront.negotiation_runtime import build_vm_negotiation_runtime
 
 logger = logging.getLogger(__name__)
 
@@ -118,11 +116,15 @@ def _build_listing_service(*, domain: MarketDomainContract, **kwargs):
 
 
 def _build_negotiation_service(*, domain: MarketDomainContract, **kwargs):
-    return NegotiationService(
+    runtime = build_vm_negotiation_runtime(domain)
+    service = NegotiationService(
         **kwargs,
-        continue_negotiation=partial(continue_sync_negotiation, domain=domain),
+        continue_negotiation=runtime.continue_negotiation,
         stage_event=stage_event,
     )
+    service._market_domain_contract = domain
+    service._negotiation_runtime = runtime
+    return service
 
 
 def _build_system_service(**kwargs):
@@ -170,12 +172,8 @@ def _populate_container(
         ("SQLite repository", getattr(sqlite_client, "market_domain", None)),
         ("listing service", getattr(listing_service, "market_domain", None)),
         (
-            "negotiation callback",
-            getattr(
-                getattr(negotiation_service, "_continue_negotiation", None),
-                "keywords",
-                {},
-            ).get("domain"),
+            "negotiation runtime",
+            getattr(negotiation_service, "_market_domain_contract", None),
         ),
     )
     for label, collaborator_domain in collaborators:
@@ -193,6 +191,9 @@ def _populate_container(
     _container.resolved_market_domain = domain
     _container.resolved_sqlite_client = sqlite_client
     _container.resolved_marketplace_signer = marketplace_signer
+    _container.resolved_negotiation_runtime = (
+        negotiation_service._negotiation_runtime
+    )
     if settings.enable_registry_discovery:
         get_registry_authorities()
     initialize_administrator_identities(sqlite_client.db_path)

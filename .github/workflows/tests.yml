@@ -44,6 +44,7 @@ jobs:
           - { name: kit-identity,           dir: kit/identity }
           - { name: kit-policy,             dir: kit/policy, predist: true }
           - { name: kit-settlement-runtime, dir: kit/settlement-runtime, predist: true }
+          - { name: kit-negotiation-runtime, dir: kit/negotiation-runtime, predist: true }
           - { name: kit-hosted-settlement, dir: kit/hosted-settlement, predist: true, requires_hosted: true }
           - { name: core,                   dir: core }
           - { name: core-buyer,             dir: core/buyer, predist: true }
@@ -120,6 +121,7 @@ jobs:
           uv build --no-sources --out-dir .dist kit/config
           uv build --no-sources --out-dir .dist kit/policy
           uv build --no-sources --out-dir .dist kit/settlement-runtime
+          uv build --no-sources --out-dir .dist kit/negotiation-runtime
           uv build --no-sources --out-dir .dist core/storefront-client
           uv build --no-sources --out-dir .dist core/registry-client
       - name: Build hosted adapter from verified client contract

@@ -81,6 +81,10 @@ def wheels(tmp_path_factory: pytest.TempPathFactory) -> dict[str, Path]:
             REPO / "kit" / "settlement-runtime",
             "arkhai_kit_settlement_runtime-*.whl",
         ),
+        "negotiation_runtime": (
+            REPO / "kit" / "negotiation-runtime",
+            "arkhai_kit_negotiation_runtime-*.whl",
+        ),
     }
     built: dict[str, Path] = {}
     for name, (project, pattern) in projects.items():
@@ -161,6 +165,16 @@ def test_storefront_wheels_require_settlement_runtime(
     for name in ("storefront", "vms_storefront", "bare_metal_storefront"):
         metadata = _metadata(wheels[name])
         assert "Requires-Dist: arkhai-kit-settlement-runtime>=0.1.0" in metadata, name
+
+
+def test_migrated_storefront_wheels_require_negotiation_runtime(
+    wheels: dict[str, Path],
+) -> None:
+    for name in ("storefront", "vms_storefront"):
+        metadata = _metadata(wheels[name])
+        assert (
+            "Requires-Dist: arkhai-kit-negotiation-runtime==0.1.0" in metadata
+        ), name
 
 
 def test_storefront_wheel_exports_contract_constant(

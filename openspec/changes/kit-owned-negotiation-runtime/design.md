@@ -2,9 +2,10 @@
 
 ## Context
 
-Per-domain line counts and the absence of these concerns in bare metal are recorded in
-`kit-storefront-composition-seam`'s `design.md`, measured 2026-08-06. Re-verify before
-implementing.
+At implementation time the domain-local files were 1,324 lines for VM and 652
+lines for API credits. Bare metal still had no synchronous negotiation runtime.
+The larger VM count included later hosted-settlement, resource-shape, and
+capacity-hold work that had landed after the proposal's original measurement.
 
 ## Goals / Non-Goals
 
@@ -25,24 +26,39 @@ injected rather than interleaved.
 What is not yet separated is configuration: timeouts, watchdog intervals, and escrow
 proposal handling read from a domain's own settings module. Those become supplied values.
 
-### The two copies have diverged, and the VM one is ahead
+### Drift disposition
 
-The VM implementation carries guards the API-credits one does not. Extraction must not
-quietly impose VM guards on API credits, nor quietly drop them.
+The two copies shared round creation, transcript append/load, seller-policy
+evaluation, terminal success/failure, and acceptance persistence, but differed
+at every domain-shaped edge:
 
-Each guard needs a deliberate disposition: universal and therefore kit-owned, or
-compute-specific and therefore a domain-supplied hook. `_reject_unsupported_resource_shape_request`
-is the clearest example — it compares a requested resource shape against a listing's,
-which is meaningless for a domain whose offer has no shape.
+- VM alone rejected a round-zero compute resource shape that disagreed with the
+  listing and derived duration/start terms for accepted VM service.
+- API credits alone validated quota and existing-key ownership, multiplied its
+  price bound by quantity, persisted quantity/key intent, and treated service
+  terms as durationless.
+- Each domain built different accepted artifacts and used a different
+  best-effort post-acceptance hold.
+- VM had accumulated the stricter principal, listing-state, and acceptance
+  guards; API credits had the same protocol states but fewer pre-effect checks.
 
-Getting this wrong in either direction is the main risk in the change, and it is why the
-comparison in task 1.2 is a task rather than an assumption.
+The resolution makes canonical buyer/seller and authenticated-actor checks,
+recorded-listing resolution, terminal-state rejection, transcript ordering, and
+the single acceptance chokepoint universal. It keeps resource-shape validation,
+quota/key validation, price reference, configuration, agreement terms,
+artifact construction, accepted-input persistence, and hold placement in
+injected domain hooks. Continuation additionally asks the selected domain to
+compare its persisted accepted inputs with the transcript before policy or
+acceptance effects. This adopts the VM protocol guards for every domain without
+adopting VM payload semantics.
 
-### Bare metal gains a working negotiation for the first time
+### Bare-metal consumption
 
-It has no implementation, so composing it is not a swap but an addition. Its suites will
-exercise a protocol path it has never run, and gaps found there are bare-metal findings
-rather than extraction defects.
+Bare metal still has no caller in this change's starting checkout. The kit API
+therefore exposes opening and continuation resolvers plus one complete opaque
+domain hook set; the bare-metal storefront composition track can supply its own
+codecs and policy without importing VM or API-credit code. VM and API credits
+are the concrete migrations in this changeset.
 
 ## Risks / Trade-offs
 
@@ -59,12 +75,14 @@ rather than extraction defects.
 
 ## Migration Plan
 
-Extract, compose all three domains, remove every copy, then packaging follow-through.
-Rollback is a code revert; no persisted state or wire surface changes.
+Extract the mechanism, compose every existing VM and API-credit caller, remove
+both copies, expose the complete seam for the bare-metal composition track, then
+complete packaging. Rollback is a code revert; no persisted state or wire
+surface changes.
 
-## Open Questions
+## Resolved sequencing
 
-- **Should this extraction wait for the in-flight changes that modify the same code?**
-  Extracting during active modification means repeated rebasing; extracting after means
-  those changes land in one domain and need porting. Deferrable to sequencing, and the
-  answer may differ per concern.
+The extraction landed behind injected adapters after the in-flight VM and
+API-credit behavior was present. Domain-local lifecycle modules were deleted,
+so subsequent negotiation changes must modify the kit protocol or the owning
+domain hook rather than patching one of two copies.

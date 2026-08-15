@@ -235,7 +235,7 @@ class TestAdvance:
             )
         assert exc_info.value.status_code == 409
 
-    async def test_delegates_to_continue_sync_negotiation(self):
+    async def test_delegates_to_shared_negotiation_runtime(self):
         db = AsyncMock()
         db.load_negotiation_thread_row.return_value = _thread()
 
@@ -253,6 +253,9 @@ class TestAdvance:
 
         mock_continue.assert_awaited_once()
         assert mock_continue.await_args.kwargs["actor_principal"] == ADMIN
+        assert mock_continue.await_args.kwargs["repository"] is db
+        assert mock_continue.await_args.kwargs["negotiation_id"] == "neg-1"
+        assert mock_continue.await_args.kwargs["actor_role"] == "admin"
         assert mock_continue.await_args.kwargs["buyer_principal"] == BUYER.model_dump(
             mode="json"
         )

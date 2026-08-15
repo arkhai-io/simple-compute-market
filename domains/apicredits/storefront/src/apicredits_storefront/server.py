@@ -24,7 +24,9 @@ from apicredits_storefront.domain_runtime import (
 )
 from apicredits_storefront.utils.config import AGENT_ID, BASE_URL_OVERRIDE, settings
 from apicredits_storefront.utils.sqlite_client import get_sqlite_client
-from apicredits_storefront.utils.sync_negotiation import continue_sync_negotiation
+from apicredits_storefront.negotiation_runtime import (
+    build_api_credit_negotiation_runtime,
+)
 from core_storefront.openapi import install_marketplace_identity_openapi
 from core_storefront.services.negotiation_service import NegotiationService
 from core_storefront.stage_log import set_stage_event_db_path, stage_event
@@ -92,6 +94,9 @@ async def lifespan(_: FastAPI):
     )
     set_stage_event_db_path(sqlite_client.db_path)
     alkahest_clients = alkahest_service.build_clients()
+    negotiation_runtime = build_api_credit_negotiation_runtime(
+        get_market_domain_contract()
+    )
     settlement_repository = SettlementSQLiteRepository(
         sqlite_client.db_path,
         apply_migrations=False,
@@ -146,6 +151,7 @@ async def lifespan(_: FastAPI):
     _container.resolved_settlement_worker = settlement_worker
     _container.resolved_settlement_coordinator = settlement_coordinator
     _container.resolved_marketplace_signer = marketplace_signer
+    _container.resolved_negotiation_runtime = negotiation_runtime
     _container.resolved_failure_policy = build_api_credit_failure_policy()
     _container.resolved_listing_service = ListingService(
         sqlite_client=sqlite_client,
@@ -153,7 +159,7 @@ async def lifespan(_: FastAPI):
     )
     _container.resolved_negotiation_service = NegotiationService(
         sqlite_client=sqlite_client,
-        continue_negotiation=continue_sync_negotiation,
+        continue_negotiation=negotiation_runtime.continue_negotiation,
         stage_event=stage_event,
     )
     _container.resolved_system_service = SystemService(

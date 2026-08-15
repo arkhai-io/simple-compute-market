@@ -50,6 +50,7 @@ RUN --mount=type=cache,target=/root/.cache/uv \
             --refresh-package arkhai-core-storefront-client \
             --refresh-package arkhai-kit-policy \
             --refresh-package arkhai-kit-settlement-runtime \
+            --refresh-package arkhai-kit-negotiation-runtime \
             --refresh-package arkhai-kit-alkahest \
             --refresh-package arkhai-kit-identity \
             --refresh-package arkhai-hosted-settlement-client \
@@ -68,6 +69,7 @@ RUN --mount=type=cache,target=/root/.cache/uv \
             --refresh-package arkhai-core-storefront-client \
             --refresh-package arkhai-kit-policy \
             --refresh-package arkhai-kit-settlement-runtime \
+            --refresh-package arkhai-kit-negotiation-runtime \
             --refresh-package arkhai-kit-alkahest \
             --refresh-package arkhai-kit-identity \
             --refresh-package arkhai-hosted-settlement-client \
@@ -158,6 +160,7 @@ RUN --mount=type=cache,target=/root/.cache/uv \
         --refresh-package arkhai-core-storefront-client \
         --refresh-package arkhai-kit-policy \
         --refresh-package arkhai-kit-settlement-runtime \
+        --refresh-package arkhai-kit-negotiation-runtime \
         --refresh-package arkhai-kit-alkahest \
         --refresh-package arkhai-kit-identity \
         --refresh-package arkhai-hosted-settlement-client \

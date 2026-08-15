@@ -14,7 +14,6 @@ from __future__ import annotations
 import asyncio
 import sqlite3
 from datetime import datetime
-from functools import partial
 from collections.abc import AsyncIterator
 
 import httpx
@@ -31,7 +30,7 @@ from core_storefront.stage_log import stage_event
 
 from market_storefront.domain_runtime import build_vm_storefront_domain
 from market_storefront.utils.sqlite_client import SQLiteClient
-from market_storefront.utils.sync_negotiation import continue_sync_negotiation
+from market_storefront.negotiation_runtime import build_vm_negotiation_runtime
 from storefront_client.client import StorefrontClient, StorefrontClientError
 
 
@@ -145,10 +144,9 @@ async def _seed_thread(
 def _make_negotiation_service(db: SQLiteClient) -> NegotiationService:
     return NegotiationService(
         sqlite_client=db,
-        continue_negotiation=partial(
-            continue_sync_negotiation,
-            domain=db.market_domain,
-        ),
+        continue_negotiation=build_vm_negotiation_runtime(
+            db.market_domain
+        ).continue_negotiation,
         stage_event=stage_event,
     )
 

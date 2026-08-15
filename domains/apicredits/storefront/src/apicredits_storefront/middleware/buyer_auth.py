@@ -16,6 +16,7 @@ async def _verify(
     *,
     expected_principal: Identity,
     body: object = EMPTY_BODY,
+    allow_exact_retry: bool = False,
 ) -> AuthenticatedPrincipal:
     """Verify and replay-reserve a complete principal before route dispatch."""
     import apicredits_storefront.container as container
@@ -47,6 +48,8 @@ async def _verify(
         operation=operation,
         resource=resource_id,
     )
-    if not authenticated.dispatch_allowed:
+    if not authenticated.dispatch_allowed and not (
+        allow_exact_retry and authenticated.exact_retry
+    ):
         raise HTTPException(status_code=409, detail="request was already dispatched")
     return authenticated

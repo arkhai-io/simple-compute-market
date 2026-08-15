@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING, Any, Optional
 
 if TYPE_CHECKING:
     from core_storefront.services.negotiation_service import NegotiationService
+    from market_negotiation_runtime import NegotiationRuntime
     from market_settlement_runtime import (
         FailurePolicy,
         SettlementJobCoordinator,
@@ -34,6 +35,7 @@ resolved_failure_policy: "FailurePolicy | None" = None
 resolved_alkahest_clients: dict[str, Any] = {}
 resolved_listing_service: "ListingService | None" = None
 resolved_negotiation_service: "NegotiationService | None" = None
+resolved_negotiation_runtime: "NegotiationRuntime | None" = None
 resolved_system_service: "SystemService | None" = None
 resolved_marketplace_signer: "Signer | None" = None
 

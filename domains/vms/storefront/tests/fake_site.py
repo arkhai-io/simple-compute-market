@@ -406,7 +406,7 @@ def site_capacity(
             return_value=aggregate,
         ),
         patch(
-            "market_storefront.utils.sync_negotiation.build_capacity_client",
+            "market_storefront.negotiation_runtime.build_capacity_client",
             return_value=aggregate,
         ),
     ]

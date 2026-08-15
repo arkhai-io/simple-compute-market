@@ -84,7 +84,7 @@ Core carrier packages must not import domain vocabulary. Domain packages may imp
 
 Kit is not a flat peer group. It has an explicit one-way hierarchy:
 
-1. **Foundation capabilities** — identity, configuration, generic policy, settlement-mechanism primitives, and `kit/settlement-runtime`'s domain-neutral obligation/operation lifecycle.
+1. **Foundation capabilities** — identity, configuration, generic policy, `kit/negotiation-runtime`'s schema-opaque round lifecycle, settlement-mechanism primitives, and `kit/settlement-runtime`'s domain-neutral obligation/operation lifecycle.
 2. **Authority capabilities** — `kit/site` and `kit/resource-pools`, which own capacity and pool administration and depend only on foundation capabilities.
 3. **Fulfillment lifecycle** — `kit/fulfillment`, which owns provider-neutral scheduling and provider execution contracts and may depend on authority capabilities.
 
@@ -108,6 +108,17 @@ dispatch. Storefront composition roots inject database repositories,
 mechanism clients, domain fulfillment and projection callables, and real
 failure actions. The kit does not import a storefront, domain, mechanism, or
 provider SDK.
+
+The negotiation-runtime distribution is
+`arkhai-kit-negotiation-runtime`, imported as
+`market_negotiation_runtime`. It owns signed round ordering, complete canonical
+principal checks, durable transcript and terminal-state transitions, exact
+continuation recovery, and the acceptance chokepoint. A storefront domain
+injects authoritative opening and continuation resolvers plus codecs, seller
+policy, agreement and artifact construction, and domain persistence/effect
+hooks. The runtime treats the selected domain binding and every payload as
+opaque; it never imports a domain or guesses one from a listing, terms, or
+proposal shape.
 
 The fulfillment distribution is `arkhai-kit-fulfillment`, imported as `market_fulfillment`. It owns both scheduling and provider-neutral fulfillment contracts. Keeping those contracts together avoids a reverse dependency from resource-pool administration into provisioning execution while preserving module-level separation between pure carriers and operational scheduling.
 
@@ -321,6 +332,14 @@ Commercial agreement identity does not cross the generic provisioning boundary m
 ### Discovery and negotiation
 
 The buyer discovers listings from a registry and drives signed synchronous request/response rounds against a storefront. Negotiation is a deterministic reduction of the shared message history to agreed terms. Seller policy evaluates listing data, captured side inputs, and the message history; protocol infrastructure does not reinterpret domain policy.
+
+VM and API-credit storefronts use that one kit lifecycle. Opening resolution
+selects the storefront's configured domain contract and listing before the
+runtime persists anything. Continuation resolution starts from the recorded
+thread, re-establishes the exact listing and canonical buyer/seller binding,
+then lets the selected domain validate its persisted terms before a policy or
+acceptance effect can run. Domain policy remains the only component that
+interprets the provision-term and proposal schemas.
 
 Normal buyer commands apply two separate constraint layers in fixed order: one filter-spec-typed resource query is pushed to the registry, then zero or more settlement clauses are evaluated locally against installed, enabled, compatible advertised options. Every comparison in one settlement clause must match the same option; repeated clauses are alternatives in command order. Explanation stops before negotiation and reports registry-owned predicates, local settlement rejections, and survivor counts without making a physical indexing claim.
 
