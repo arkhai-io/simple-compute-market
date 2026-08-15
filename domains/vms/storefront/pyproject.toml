@@ -52,6 +52,9 @@ dependencies = [
 [project.scripts]
 market-storefront = "market_storefront.cli:app"
 
+[project.entry-points."market.storefront_contributions"]
+vms = "market_storefront.domain_runtime:VM_STOREFRONT_CONTRIBUTION"
+
 [dependency-groups]
 dev = [
     "pytest>=8.3.4,<9.0.0",

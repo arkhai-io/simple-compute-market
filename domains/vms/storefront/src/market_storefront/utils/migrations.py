@@ -1,11 +1,8 @@
-"""VM-domain schema migrations and legacy demand synthesis.
+"""VM-domain schema migrations and explicit legacy demand synthesis.
 
-The migration engine plus the domain-neutral market-state migrations
-live in ``core_storefront.sqlite_migrations``; this module keeps the
-compute-flavored ones (pools, allocations, derived listings) and the
-config-coupled ``accepted_escrows`` synthesizer, which it registers
-with core so the shared escrows/listings migration can backfill
-legacy ``demand_resource`` rows.
+The migration engine plus domain-neutral market-state migrations live in
+``core_storefront.sqlite_migrations``.  This module supplies VM-owned
+migrations and the legacy converter as an explicit per-database input.
 """
 
 from __future__ import annotations
@@ -16,12 +13,12 @@ import sqlite3
 from typing import Any
 
 from core_storefront.sqlite_migrations import (  # noqa: F401 — re-exported
+    LegacyMigrationInputs,
     Migration,
     _add_column_if_missing,
     _column_exists,
     _table_exists,
     apply_schema_migrations,
-    set_accepted_escrows_synthesizer,
 )
 
 logger = logging.getLogger(__name__)
@@ -101,10 +98,9 @@ def synthesize_accepted_escrows_from_demand(
     return entries or None
 
 
-# The shared escrows/listings migration backfills legacy rows through
-# this hook; registration happens at import (the SQLite client module
-# imports this one before any client is constructed).
-set_accepted_escrows_synthesizer(synthesize_accepted_escrows_from_demand)
+VM_LEGACY_MIGRATION_INPUTS = LegacyMigrationInputs(
+    accepted_escrows_synthesizer=synthesize_accepted_escrows_from_demand
+)
 
 
 def _migrate_compute_allocation_callback_metadata(conn: sqlite3.Connection) -> None:

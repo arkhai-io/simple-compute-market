@@ -65,7 +65,7 @@ class BareMetalSettlementService:
         )
         if thread is None:
             raise SettlementRequestError("negotiation not found", status_code=404)
-        if thread.get("buyer_principal") != buyer_principal:
+        if Identity.model_validate(thread.get("buyer_principal")) != buyer_principal:
             raise SettlementRequestError("negotiation buyer mismatch", status_code=403)
         return thread
 

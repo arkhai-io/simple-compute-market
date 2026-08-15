@@ -14,6 +14,10 @@ from dataclasses import dataclass
 from typing import Any, Generic, Protocol, TypeVar, cast
 
 from core_storefront.app_composition import StorefrontAppConfig, build_storefront_app
+from core_storefront.domain_registry import (
+    StorefrontDomainBinding,
+    StorefrontDomainRegistry,
+)
 from market_core import MarketDomainContract
 
 
@@ -47,12 +51,26 @@ class StorefrontRouteHooks:
 
 @dataclass(frozen=True, slots=True)
 class StorefrontComposition(Generic[ContainerT]):
-    """Complete immutable input to one single-domain storefront application."""
+    """Complete immutable input to one explicitly registered storefront app."""
 
+    registry: StorefrontDomainRegistry
+    binding: StorefrontDomainBinding
     domain: MarketDomainContract
     app: StorefrontAppConfig
     services: StorefrontServiceHooks[ContainerT]
     routes: StorefrontRouteHooks
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.registry, StorefrontDomainRegistry):
+            raise TypeError("registry must be a StorefrontDomainRegistry")
+        if not isinstance(self.binding, StorefrontDomainBinding):
+            raise TypeError("binding must be a StorefrontDomainBinding")
+        registration = self.registry.resolve_registration(self.binding)
+        if registration.contract is not self.domain:
+            raise RuntimeError(
+                "storefront composition domain must be the exact contract "
+                "resolved by its frozen registry and binding"
+            )
 
 
 async def _resolve(value: ContainerResult) -> ContainerT:
@@ -74,19 +92,34 @@ async def _call_lifecycle(
 
 def build_storefront_lifespan(
     *,
+    registry: StorefrontDomainRegistry,
+    binding: StorefrontDomainBinding,
     domain: MarketDomainContract,
     services: StorefrontServiceHooks[ContainerT],
 ) -> Callable[[Any], Any]:
-    """Build a lifespan that binds one contract to one service container."""
+    """Build a lifespan bound to one exact frozen registry registration."""
+
+    registration = registry.resolve_registration(binding)
+    if registration.contract is not domain:
+        raise RuntimeError(
+            "storefront lifespan domain must be the exact registered contract"
+        )
 
     from contextlib import asynccontextmanager
 
     @asynccontextmanager
     async def lifespan(application: Any):
-        if getattr(application.state, "market_domain", None) is not domain:
+        expected = registration.binding
+        configured = tuple(application.state.market_domains)
+        if not any(
+            item.offering_mode == expected.offering_mode
+            and item.domain_identity == str(expected.domain_identity)
+            and item.contract_version == str(expected.contract_version)
+            for item in configured
+        ):
             raise RuntimeError(
-                "FastAPI app and lifespan must share the exact market-domain "
-                "contract object"
+                "FastAPI app registration projection does not contain its "
+                "lifespan market-domain binding"
             )
         container = await _resolve(services.build(domain))
         if getattr(container, "domain", None) is not domain:
@@ -108,17 +141,21 @@ def build_storefront_lifespan(
 def build_composed_storefront_app(
     composition: StorefrontComposition[ContainerT],
 ) -> Any:
-    """Build one storefront app from explicit domain, service, and route hooks."""
+    """Build one storefront app from explicit registry and domain hooks."""
 
     application = build_storefront_app(
         config=composition.app,
-        domain=composition.domain,
+        registry=composition.registry,
+        runtime_resolver=composition.registry.resolve_registration,
         lifespan=build_storefront_lifespan(
+            registry=composition.registry,
+            binding=composition.binding,
             domain=composition.domain,
             services=composition.services,
         ),
         routers=composition.routes.routers,
     )
+    application.state.storefront_binding = composition.binding
     for middleware in composition.routes.middleware:
         application.middleware("http")(middleware)
     return application

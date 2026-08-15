@@ -8,6 +8,10 @@ from collections.abc import Mapping
 from typing import Any
 
 from arkhai_vms import DIMENSION_KEYS as _DIMENSION_COMPUTE_KEYS
+from core_storefront.domain_registry import (
+    StorefrontDomainBinding,
+    StorefrontDomainRegistry,
+)
 from domains.vms.listings import (
     determine_strategy_from_order,
     extract_compute_from_order,
@@ -41,12 +45,8 @@ from market_negotiation_runtime import (
     RoundRequest,
 )
 from market_policy.negotiation_middleware import NegotiationDecision, NegotiationRound
-from market_capacity_publication import CapacityBinding
-from market_storefront.services.capacity_client import (
-    build_capacity_client,
-    build_capacity_runtime,
-    capacity_binding_for_listing,
-)
+from market_capacity_publication import CapacityBinding, CapacityRuntime
+from market_storefront.services.capacity_client import capacity_binding_for_listing
 from market_storefront.utils.config import CHAINS, settings
 
 logger = logging.getLogger(__name__)
@@ -96,7 +96,7 @@ def seller_reference_amount(
 
 def _default_seller_round_hook(
     domain: MarketDomainContract,
-    repository: Any,
+    capacity_runtime: CapacityRuntime,
 ) -> SellerRoundHook:
     policy = domain.storefront
     if policy is None:
@@ -104,7 +104,7 @@ def _default_seller_round_hook(
             f"domain {domain.identity!s} has no storefront negotiation capability"
         )
     return policy.run_negotiation_policy(
-        build_capacity_client(lambda: repository),
+        capacity_runtime.client(),
         negotiation_config=_negotiation_settings(),
         chains=_chain_settings(),
         extra_policy_paths=_extra_policy_paths(),
@@ -575,6 +575,8 @@ def lookup_pool_policy_tags(
 async def _place_capacity_hold(
     repository: Any,
     acceptance: Acceptance,
+    *,
+    capacity_runtime: CapacityRuntime,
 ) -> None:
     """Place the VM domain's best-effort capacity hold after acceptance.
 
@@ -599,7 +601,7 @@ async def _place_capacity_hold(
         if not isinstance(acceptance.binding, CapacityBinding):
             raise RuntimeError("capacity hold requires a durably bound listing")
         claim = compute_capacity_claim_from_order(dict(acceptance.listing_record))
-        capacity = build_capacity_runtime(lambda: repository)
+        capacity = capacity_runtime
         ttl = capped_hold_seconds(
             ttl,
             lookup_pool_policy_tags(repository, acceptance.listing_id),
@@ -652,62 +654,147 @@ async def _place_capacity_hold(
 def build_vm_negotiation_runtime(
     domain: MarketDomainContract,
     *,
+    registry: StorefrontDomainRegistry,
+    binding: StorefrontDomainBinding,
+    capacity_runtime: CapacityRuntime,
     seller_round_hook: SellerRoundHook | None = None,
 ) -> NegotiationRuntime:
-    """Compose the shared lifecycle with VM codecs, policy, and effects."""
+    """Compose the shared lifecycle with the exact registered VM contract."""
 
-    def require_repository_contract(repository: Any) -> None:
-        if getattr(repository, "market_domain", None) is not domain:
+    if not isinstance(registry, StorefrontDomainRegistry):
+        raise TypeError("registry must be a StorefrontDomainRegistry")
+    if not isinstance(binding, StorefrontDomainBinding):
+        raise TypeError("binding must be a StorefrontDomainBinding")
+    if binding.offering_mode != "vm":
+        raise RuntimeError(
+            "VM negotiation runtime requires offering mode 'vm', "
+            f"got {binding.offering_mode!r}"
+        )
+    if registry.resolve(binding) is not domain:
+        raise RuntimeError(
+            "VM negotiation runtime requires the exact contract resolved by "
+            "its startup registry and binding"
+        )
+    if registry.registration_for_contract(domain).binding != binding:
+        raise RuntimeError(
+            "VM negotiation binding does not match its exact startup registration"
+        )
+    if not isinstance(capacity_runtime, CapacityRuntime):
+        raise TypeError("capacity_runtime must be a CapacityRuntime")
+
+    def require_repository_registry(repository: Any) -> None:
+        if getattr(repository, "domain_registry", None) is not registry:
             raise RuntimeError(
-                "negotiation and repository must share the exact "
-                "market-domain contract object"
+                "negotiation and repository must share the exact storefront "
+                "domain registry object"
+            )
+
+    def require_domain_binding(durable_binding: StorefrontDomainBinding) -> None:
+        if (
+            durable_binding != binding
+            or registry.resolve(durable_binding) is not domain
+        ):
+            raise NegotiationStateError(
+                "durable negotiation binding does not select the configured "
+                "VM contract"
+            )
+
+    def require_capacity_binding(
+        capacity_binding: CapacityBinding,
+        *,
+        site_id: str,
+    ) -> None:
+        if (
+            capacity_binding.site_id != site_id
+            or capacity_binding.offering_mode != binding.offering_mode
+        ):
+            raise NegotiationStateError(
+                "capacity binding does not match the durable VM site and mode"
             )
 
     async def resolve_opening(
         repository: Any,
         listing_id: str,
     ) -> ResolvedNegotiation:
-        require_repository_contract(repository)
+        require_repository_registry(repository)
+        listing_binding = await repository.load_listing_binding(
+            listing_id=listing_id
+        )
+        if listing_binding is None:
+            raise NegotiationStateError(
+                f"listing {listing_id!r} has no durable storefront binding"
+            )
+        require_domain_binding(listing_binding.binding)
         record = await repository.load_listing(listing_id=listing_id)
         if not record:
             raise NegotiationStateError(
                 f"Order {listing_id} not found locally; seller has no matching listing"
             )
-        binding = await capacity_binding_for_listing(repository, listing_id)
+        capacity_binding = await capacity_binding_for_listing(repository, listing_id)
+        require_capacity_binding(
+            capacity_binding,
+            site_id=listing_binding.site_id,
+        )
         return ResolvedNegotiation(
             listing_id=listing_id,
             listing=Listing.model_validate(record),
             listing_record=record,
             hooks=hooks,
-            binding=binding,
+            binding=capacity_binding,
         )
 
     async def resolve_continuation(
         repository: Any,
         thread: Mapping[str, Any],
     ) -> ResolvedNegotiation:
-        require_repository_contract(repository)
+        require_repository_registry(repository)
+        negotiation_id = thread.get("negotiation_id")
+        if not isinstance(negotiation_id, str) or not negotiation_id:
+            raise NegotiationStateError("negotiation thread has no durable identity")
         listing_id = thread.get("our_listing_id")
         if not isinstance(listing_id, str) or not listing_id:
             raise NegotiationStateError("negotiation has no recorded VM listing")
+        thread_binding = await repository.load_thread_binding(
+            negotiation_id=negotiation_id
+        )
+        if thread_binding.listing_id != listing_id:
+            raise NegotiationStateError(
+                "negotiation binding does not match its recorded VM listing"
+            )
+        require_domain_binding(thread_binding.binding)
+        listing_binding = await repository.load_listing_binding(
+            listing_id=listing_id
+        )
+        if (
+            listing_binding is None
+            or listing_binding.binding != thread_binding.binding
+            or listing_binding.site_id != thread_binding.site_id
+        ):
+            raise NegotiationStateError(
+                "VM listing binding changed after negotiation creation"
+            )
         record = await repository.load_listing(listing_id=listing_id)
         if not record:
             raise NegotiationStateError(
                 f"Seller's order {listing_id} is gone from local DB"
             )
-        binding = await capacity_binding_for_listing(repository, listing_id)
+        capacity_binding = await capacity_binding_for_listing(repository, listing_id)
+        require_capacity_binding(
+            capacity_binding,
+            site_id=thread_binding.site_id,
+        )
         return ResolvedNegotiation(
             listing_id=listing_id,
             listing=Listing.model_validate(record),
             listing_record=record,
             hooks=hooks,
-            binding=binding,
+            binding=capacity_binding,
         )
 
     async def evaluate(request: RoundRequest) -> RoundEvaluation:
         policy = seller_round_hook or _default_seller_round_hook(
             domain,
-            request.repository,
+            capacity_runtime,
         )
         result = await policy(
             listing=request.listing,
@@ -747,10 +834,38 @@ def build_vm_negotiation_runtime(
     ) -> None:
         _validate_vm_opening(listing, listing_record, terms)
 
+    async def persist_opening(
+        repository: Any,
+        opening: OpeningRecord,
+    ) -> None:
+        copied = await repository.copy_listing_binding_to_thread(
+            negotiation_id=opening.negotiation_id,
+            listing_id=opening.listing_id,
+        )
+        require_domain_binding(copied.binding)
+        if not isinstance(opening.binding, CapacityBinding):
+            raise NegotiationStateError(
+                "VM negotiation opening has no capacity binding"
+            )
+        require_capacity_binding(
+            opening.binding,
+            site_id=copied.site_id,
+        )
+
     def storefront_is_paused() -> bool:
         from market_storefront.server import is_globally_paused
 
         return bool(is_globally_paused())
+
+    async def place_hold(
+        repository: Any,
+        acceptance: Acceptance,
+    ) -> None:
+        await _place_capacity_hold(
+            repository,
+            acceptance,
+            capacity_runtime=capacity_runtime,
+        )
 
     from core_storefront.stage_log import stage_event
 
@@ -781,8 +896,9 @@ def build_vm_negotiation_runtime(
         listing_is_paused=listing_is_paused,
         storefront_is_paused=storefront_is_paused,
         stage_event=stage_event,
-        place_hold=_place_capacity_hold,
+        place_hold=place_hold,
         persist_artifacts=_persist_artifacts,
+        persist_opening=persist_opening,
     )
     return NegotiationRuntime(
         resolve_opening=resolve_opening,
@@ -793,14 +909,44 @@ def build_vm_negotiation_runtime(
 async def compute_round_zero_decision(
     *,
     repository: Any,
+    registry: StorefrontDomainRegistry,
+    binding: StorefrontDomainBinding,
     domain: MarketDomainContract,
+    capacity_runtime: CapacityRuntime,
     listing: Any,
     proposal: Mapping[str, Any] | None,
     requested_duration_seconds: int | None = None,
 ) -> tuple[int, str, str, str, NegotiationDecision]:
-    """Run the VM policy adapter without persisting a negotiation."""
+    """Run the VM policy adapter against the exact durable capacity binding."""
 
-    result: SellerRoundResult = await _default_seller_round_hook(domain, repository)(
+    if getattr(repository, "domain_registry", None) is not registry:
+        raise RuntimeError(
+            "round-zero evaluation and repository must share the exact registry"
+        )
+    if registry.resolve(binding) is not domain:
+        raise RuntimeError(
+            "round-zero evaluation requires the exact registry-owned VM contract"
+        )
+    if not isinstance(capacity_runtime, CapacityRuntime):
+        raise TypeError("capacity_runtime must be a CapacityRuntime")
+    listing_id = str(getattr(listing, "listing_id", "") or "")
+    listing_binding = await repository.load_listing_binding(listing_id=listing_id)
+    if listing_binding is None or listing_binding.binding != binding:
+        raise NegotiationStateError(
+            "round-zero evaluation requires the selected durable VM binding"
+        )
+    capacity_binding = await capacity_binding_for_listing(repository, listing_id)
+    if (
+        capacity_binding.site_id != listing_binding.site_id
+        or capacity_binding.offering_mode != binding.offering_mode
+    ):
+        raise NegotiationStateError(
+            "round-zero capacity binding does not match the durable VM site and mode"
+        )
+    result: SellerRoundResult = await _default_seller_round_hook(
+        domain,
+        capacity_runtime,
+    )(
         listing=listing,
         history=[
             NegotiationRound(

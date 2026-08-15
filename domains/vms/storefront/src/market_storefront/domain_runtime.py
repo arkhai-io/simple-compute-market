@@ -5,6 +5,11 @@ from __future__ import annotations
 from dataclasses import replace
 
 from arkhai_vms.domain_runtime import market_domain
+from core_storefront.domain_plugins import StorefrontDomainContribution
+from core_storefront.domain_registry import (
+    StorefrontDomainRegistration,
+    StorefrontDomainRegistry,
+)
 from core_storefront.escrow_verification import verify_escrow_for_settlement
 from domains.vms.negotiation.storefront_round import default_seller_round_hook
 from market_core import (
@@ -20,6 +25,7 @@ from market_core import (
 )
 
 from market_storefront.negotiation_runtime import build_vm_accepted_artifacts
+from market_storefront.services.fulfillment_service import fulfill_compute_obligation
 
 VM_STOREFRONT_DOMAIN_IDENTITY = DomainIdentity("compute.v1")
 _REQUIRED_VM_STOREFRONT_CAPABILITIES = frozenset(
@@ -55,6 +61,33 @@ def build_vm_storefront_domain() -> MarketDomainContract:
             ),
             compute_provisioning=ImmutableComputeProvisioningCapability(
                 provision=fulfill_compute_obligation,
+            ),
+        )
+    )
+
+
+VM_STOREFRONT_CONTRIBUTION = StorefrontDomainContribution(
+    contribution_id="vms",
+    build_contract=build_vm_storefront_domain,
+)
+
+
+def build_vm_storefront_registry(
+    domain: MarketDomainContract | None = None,
+) -> StorefrontDomainRegistry:
+    """Build an explicit one-registration VM registry for focused composition."""
+
+    contract = (
+        build_vm_storefront_domain()
+        if domain is None
+        else validate_vm_storefront_domain(domain)
+    )
+    return StorefrontDomainRegistry(
+        (
+            StorefrontDomainRegistration(
+                offering_mode="vm",
+                contract=contract,
+                contribution_id="vms",
             ),
         )
     )

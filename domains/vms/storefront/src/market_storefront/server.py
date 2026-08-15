@@ -22,6 +22,11 @@ from core_storefront.app_composition import default_storefront_app_config
 from core_storefront.services.negotiation_service import NegotiationService
 from core_storefront.stage_log import set_stage_event_db_path, stage_event
 from market_core import MarketDomainContract
+from core_storefront.domain_registry import (
+    StorefrontDomainBinding,
+    StorefrontDomainRegistry,
+)
+from market_capacity_publication import CapacityRuntime
 from market_negotiation_runtime import NegotiationRuntime
 from market_storefront_kit import (
     AlkahestChain,
@@ -34,10 +39,7 @@ from market_storefront_kit import (
 )
 
 import market_storefront.container as _container
-from market_storefront.domain_runtime import (
-    build_vm_storefront_domain,
-    validate_vm_storefront_domain,
-)
+from market_storefront.domain_runtime import validate_vm_storefront_domain
 from market_storefront.middleware.admin_identity import (
     administrator_identity_middleware,
     initialize_administrator_identities,
@@ -54,6 +56,7 @@ from market_storefront.utils.config import (
     get_registry_authorities,
     resolve_marketplace_signer,
     settings,
+    storefront_domain_registry,
 )
 from market_storefront.utils.sqlite_client import get_sqlite_client
 from market_storefront.negotiation_runtime import build_vm_negotiation_runtime
@@ -132,14 +135,20 @@ def _build_alkahest_clients() -> dict[str, Any]:
 
 def _build_listing_service(
     *,
+    registry: StorefrontDomainRegistry,
+    binding: StorefrontDomainBinding,
     domain: MarketDomainContract,
+    capacity_runtime: CapacityRuntime,
     settlement_composition: Any,
     **kwargs: Any,
 ) -> Any:
     from market_storefront.services.listing_service import ListingService
 
     return ListingService(
+        registry=registry,
+        binding=binding,
         domain=domain,
+        capacity_runtime=capacity_runtime,
         **kwargs,
         settlement_composition_provider=lambda: settlement_composition,
     )
@@ -180,12 +189,15 @@ def _build_settlement_composition(
 
 @dataclass(frozen=True, slots=True)
 class VmStorefrontServices:
-    """Lifespan-owned VM services bound to one exact market contract."""
+    """Lifespan-owned VM services bound to one exact registry registration."""
 
+    registry: StorefrontDomainRegistry
+    binding: StorefrontDomainBinding
     domain: MarketDomainContract
     sqlite_client: Any
     marketplace_signer: Any
     alkahest_clients: dict[str, Any]
+    capacity_runtime: CapacityRuntime
     listing_service: Any
     negotiation_runtime: NegotiationRuntime
     negotiation_service: Any
@@ -193,20 +205,44 @@ class VmStorefrontServices:
     settlement_composition: Any
 
 
-def _build_vm_services(domain: MarketDomainContract) -> VmStorefrontServices:
-    sqlite_client = get_sqlite_client(domain=domain)
+def _build_vm_services(
+    *,
+    registry: StorefrontDomainRegistry,
+    binding: StorefrontDomainBinding,
+    domain: MarketDomainContract,
+) -> VmStorefrontServices:
+    registration = registry.resolve_registration(binding)
+    if registration.contract is not domain:
+        raise RuntimeError(
+            "VM service composition must use the exact registry-owned domain contract"
+        )
+    sqlite_client = get_sqlite_client(registry=registry)
     marketplace_signer = resolve_marketplace_signer()
     set_stage_event_db_path(sqlite_client.db_path)
     alkahest_clients = _build_alkahest_clients()
+    from market_storefront.services.capacity_client import build_capacity_runtime_for
+
+    capacity_runtime = build_capacity_runtime_for(
+        lambda: sqlite_client,
+        signer=marketplace_signer,
+    )
     settlement_composition = _build_settlement_composition(
         domain=domain,
         sqlite_client=sqlite_client,
         alkahest_clients=alkahest_clients,
         marketplace_signer=marketplace_signer,
     )
-    negotiation_runtime = build_vm_negotiation_runtime(domain)
+    negotiation_runtime = build_vm_negotiation_runtime(
+        domain,
+        registry=registry,
+        binding=binding,
+        capacity_runtime=capacity_runtime,
+    )
     listing_service = _build_listing_service(
+        registry=registry,
+        binding=binding,
         domain=domain,
+        capacity_runtime=capacity_runtime,
         sqlite_client=sqlite_client,
         alkahest_clients=alkahest_clients,
         marketplace_signer=marketplace_signer,
@@ -221,10 +257,13 @@ def _build_vm_services(domain: MarketDomainContract) -> VmStorefrontServices:
         marketplace_signer=marketplace_signer,
     )
     return VmStorefrontServices(
+        registry=registry,
+        binding=binding,
         domain=domain,
         sqlite_client=sqlite_client,
         marketplace_signer=marketplace_signer,
         alkahest_clients=alkahest_clients,
+        capacity_runtime=capacity_runtime,
         listing_service=listing_service,
         negotiation_runtime=negotiation_runtime,
         negotiation_service=negotiation_service,
@@ -234,13 +273,21 @@ def _build_vm_services(domain: MarketDomainContract) -> VmStorefrontServices:
 
 
 async def _start_vm_services(services: VmStorefrontServices) -> None:
+    if (
+        _container.resolved_domain_registry is not None
+        and _container.resolved_domain_registry is not services.registry
+    ):
+        raise RuntimeError(
+            "dependency container is already owned by a different "
+            "storefront domain registry"
+        )
+    _container.resolved_domain_registry = services.registry
+    _container.resolved_sqlite_client = services.sqlite_client
+    _container.resolved_marketplace_signer = services.marketplace_signer
     if settings.enable_registry_discovery:
         get_registry_authorities()
     initialize_administrator_identities(services.sqlite_client.db_path)
     initialize_service_peer_identities(services.sqlite_client.db_path)
-    _container.resolved_market_domain = services.domain
-    _container.resolved_sqlite_client = services.sqlite_client
-    _container.resolved_marketplace_signer = services.marketplace_signer
     _container.resolved_alkahest_clients = services.alkahest_clients
     _container.resolved_listing_service = services.listing_service
     _container.resolved_negotiation_runtime = services.negotiation_runtime
@@ -248,19 +295,27 @@ async def _start_vm_services(services: VmStorefrontServices) -> None:
     _container.resolved_system_service = services.system_service
     _container.resolved_settlement_composition = services.settlement_composition
     logger.info("[STARTUP] Singletons initialized")
-    await _run_startup_tasks(domain=services.domain)
+    await _run_startup_tasks(
+        registry=services.registry,
+        domain=services.domain,
+    )
     logger.info("[STARTUP] Background tasks started")
 
 
 async def _stop_vm_services(services: VmStorefrontServices) -> None:
-    _container.clear_lifespan_state(domain=services.domain)
+    _container.clear_lifespan_state(registry=services.registry)
     logger.info("[SHUTDOWN] Storefront shutting down")
 
 
-async def _run_startup_tasks(*, domain: MarketDomainContract) -> None:
+async def _run_startup_tasks(
+    *,
+    registry: StorefrontDomainRegistry,
+    domain: MarketDomainContract,
+) -> None:
     from market_storefront.startup import _startup_tasks
 
-    await _startup_tasks(domain=domain)
+    await _startup_tasks(registry=registry, domain=domain)
+
 
 
 
@@ -299,17 +354,34 @@ from market_storefront.controllers.system_controller import (  # noqa: E402
     router as system_router,
 )
 
-def build_vm_storefront_app(*, domain: MarketDomainContract):
-    """Build the VM HTTP application around one validated contract."""
-    selected_domain = validate_vm_storefront_domain(domain)
+def build_vm_storefront_app(*, registry: StorefrontDomainRegistry):
+    """Build the VM HTTP application from one explicit frozen registry."""
+
+    registration = registry.resolve_mode("vm")
+    selected_domain = validate_vm_storefront_domain(registration.contract)
+    selected_binding = registration.binding
+
+    def build_services(domain: MarketDomainContract) -> VmStorefrontServices:
+        if domain is not selected_domain:
+            raise RuntimeError(
+                "storefront kit supplied a domain outside the selected VM registration"
+            )
+        return _build_vm_services(
+            registry=registry,
+            binding=selected_binding,
+            domain=domain,
+        )
+
     return build_composed_storefront_app(
         StorefrontComposition(
+            registry=registry,
+            binding=selected_binding,
             domain=selected_domain,
             app=default_storefront_app_config(
                 root_path=settings.gateway.root_path,
             ),
             services=StorefrontServiceHooks(
-                build=_build_vm_services,
+                build=build_services,
                 start=_start_vm_services,
                 stop=_stop_vm_services,
             ),
@@ -336,4 +408,4 @@ def build_vm_storefront_app(*, domain: MarketDomainContract):
     )
 
 
-app = build_vm_storefront_app(domain=build_vm_storefront_domain())
+app = build_vm_storefront_app(registry=storefront_domain_registry())

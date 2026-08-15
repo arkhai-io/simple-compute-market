@@ -19,8 +19,18 @@ from market_identity import (
 from arkhai_bare_metal import BareMetalMessage, BareMetalTerms
 from arkhai_bare_metal_storefront.domain_runtime import get_market_domain_contract
 from arkhai_bare_metal_storefront.runtime import BareMetalStorefrontRuntime
-from arkhai_bare_metal_storefront.server import build_bare_metal_storefront_app
+from arkhai_bare_metal_storefront.server import (
+    build_bare_metal_storefront_app,
+    build_bare_metal_storefront_registry,
+)
 from arkhai_bare_metal_storefront.sqlite_client import SQLiteClient
+
+
+def _app(runtime: BareMetalStorefrontRuntime):
+    return build_bare_metal_storefront_app(
+        registry=build_bare_metal_storefront_registry(domain=runtime.domain),
+        runtime=runtime,
+    )
 
 PRIVATE_KEY = bytes.fromhex(
     "5de4111afa1a4b94908f83103eb1f1706367c2e68ca870fc3fb9a804cdab365a"
@@ -190,7 +200,7 @@ async def test_settlement_is_verified_idempotently_without_fulfillment_claims(
 
     path = str(tmp_path / "storefront.db")
     runtime, negotiation_id = await _accepted_runtime(path, verifier)
-    app = build_bare_metal_storefront_app(runtime=runtime)
+    app = _app(runtime)
     body = _settle_body(negotiation_id)
 
     with TestClient(app) as client:
@@ -224,7 +234,7 @@ async def test_settlement_is_verified_idempotently_without_fulfillment_claims(
         chain_config_paths={"anvil": None},
         escrow_verifier=verifier,
     )
-    with TestClient(build_bare_metal_storefront_app(runtime=restarted)) as client:
+    with TestClient(_app(restarted)) as client:
         restart_retry = client.post(
             f"/api/v1/settle/{ESCROW_UID}",
             json=body,
@@ -318,7 +328,7 @@ async def test_settlement_rejects_replacement_access_input_and_failed_verificati
         str(tmp_path / "storefront.db"),
         verifier,
     )
-    app = build_bare_metal_storefront_app(runtime=runtime)
+    app = _app(runtime)
 
     with TestClient(app) as client:
         replacement_body = {
@@ -352,7 +362,7 @@ async def test_settlement_rejects_unmatched_obligation_without_registering_claim
         str(tmp_path / "storefront.db"),
         verifier,
     )
-    with TestClient(build_bare_metal_storefront_app(runtime=runtime)) as client:
+    with TestClient(_app(runtime)) as client:
         body = _settle_body(negotiation_id)
         response = client.post(
             f"/api/v1/settle/{ESCROW_UID}",
@@ -389,7 +399,7 @@ async def test_status_fails_closed_without_canonical_verified_adoption(
     )
     assert inserted
 
-    with TestClient(build_bare_metal_storefront_app(runtime=runtime)) as client:
+    with TestClient(_app(runtime)) as client:
         response = client.get(
             f"/api/v1/settle/{ESCROW_UID}/status",
             headers=_headers("settle_status", ESCROW_UID, method="GET"),

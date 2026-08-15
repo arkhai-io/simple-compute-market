@@ -93,6 +93,31 @@ def _add_operator_state(conn: sqlite3.Connection) -> None:
     )
 
 
+
+def _add_selected_site_bindings(conn: sqlite3.Connection) -> None:
+    conn.execute(
+        """
+        CREATE TABLE bare_metal_selected_site_bindings (
+          capacity_reservation_id TEXT PRIMARY KEY,
+          site_id TEXT NOT NULL,
+          authority_scheme TEXT NOT NULL,
+          authority_identifier TEXT NOT NULL,
+          created_at TEXT NOT NULL
+            DEFAULT (STRFTIME('%Y-%m-%dT%H:%M:%fZ', 'now')),
+          updated_at TEXT NOT NULL
+            DEFAULT (STRFTIME('%Y-%m-%dT%H:%M:%fZ', 'now')),
+          CHECK (LENGTH(TRIM(capacity_reservation_id)) > 0),
+          CHECK (LENGTH(TRIM(site_id)) > 0),
+          CHECK (LENGTH(TRIM(authority_scheme)) > 0),
+          CHECK (LENGTH(TRIM(authority_identifier)) > 0)
+        )
+        """,
+    )
+    conn.execute(
+        "CREATE INDEX idx_bare_metal_selected_site "
+        "ON bare_metal_selected_site_bindings(site_id)",
+    )
+
 BARE_METAL_STOREFRONT_MIGRATIONS = (
     Migration(
         id="bare-metal-storefront-0001-agreement-payloads",
@@ -105,5 +130,9 @@ BARE_METAL_STOREFRONT_MIGRATIONS = (
     Migration(
         id="bare-metal-storefront-0003-operator-state",
         apply=_add_operator_state,
+    ),
+    Migration(
+        id="bare-metal-storefront-0004-selected-site-bindings",
+        apply=_add_selected_site_bindings,
     ),
 )

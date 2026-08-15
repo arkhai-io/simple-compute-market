@@ -9,6 +9,10 @@ from importlib import import_module
 from typing import Any
 
 from core_storefront.app_composition import StorefrontAppConfig
+from core_storefront.domain_registry import (
+    StorefrontDomainRegistry,
+    StorefrontDomainRegistration,
+)
 from core_storefront.stage_log import set_stage_event_db_path, stage_event
 from market_core import MarketDomainContract
 from market_storefront_kit import (
@@ -55,31 +59,61 @@ async def _start_runtime(runtime: BareMetalStorefrontRuntime) -> None:
         )
     )
 
+def build_bare_metal_storefront_registry(
+    *,
+    domain: MarketDomainContract,
+) -> StorefrontDomainRegistry:
+    """Build the explicit one-registration bare-metal storefront registry."""
+
+    return StorefrontDomainRegistry(
+        (
+            StorefrontDomainRegistration(
+                offering_mode="bare_metal.ansible",
+                contract=domain,
+                contribution_id="bare_metal",
+            ),
+        )
+    )
+
+
 
 def build_bare_metal_storefront_app(
     *,
-    domain: MarketDomainContract | None = None,
+    registry: StorefrontDomainRegistry,
     runtime: BareMetalStorefrontRuntime | None = None,
     runtime_factory: Callable[[], BareMetalStorefrontRuntime] | None = None,
     routers: Iterable[Any] = (),
     root_path: str = "",
 ) -> Any:
-    """Build the shared storefront shell around one bare-metal contract."""
-    selected_domain = domain or get_market_domain_contract()
-    if runtime_factory is not None:
-        build_services = lambda selected: runtime_factory()
-    elif runtime is not None:
-        build_services = lambda selected: runtime
-    else:
-        build_services = lambda selected: build_runtime_from_environment(
-            domain=selected
-        )
+    """Build the shared storefront shell around one bare-metal registration."""
+
+    registration = registry.resolve_mode("bare_metal.ansible")
+    selected_domain = registration.contract
+
+    def build_services(domain: MarketDomainContract) -> BareMetalStorefrontRuntime:
+        if domain is not selected_domain:
+            raise RuntimeError(
+                "storefront kit supplied a domain outside the bare-metal registration"
+            )
+        if runtime_factory is not None:
+            selected_runtime = runtime_factory()
+        elif runtime is not None:
+            selected_runtime = runtime
+        else:
+            selected_runtime = build_runtime_from_environment(domain=domain)
+        if selected_runtime.domain is not domain:
+            raise RuntimeError(
+                "bare-metal runtime must carry the exact registered domain contract"
+            )
+        return selected_runtime
     service_hooks = StorefrontServiceHooks(
         build=build_services,
         start=_start_runtime,
     )
     return build_composed_storefront_app(
         StorefrontComposition(
+            registry=registry,
+            binding=registration.binding,
             domain=selected_domain,
             app=StorefrontAppConfig(
                 title="Arkhai Bare-Metal Storefront",
@@ -96,7 +130,11 @@ def build_bare_metal_storefront_app(
     )
 
 
-app = build_bare_metal_storefront_app()
+app = build_bare_metal_storefront_app(
+    registry=build_bare_metal_storefront_registry(
+        domain=get_market_domain_contract(),
+    )
+)
 
 
 def run_serve(

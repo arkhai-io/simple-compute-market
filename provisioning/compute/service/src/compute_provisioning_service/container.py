@@ -85,12 +85,9 @@ def _runtime_value(runtime, name):
     return getattr(runtime, name)
 
 
-def _vm_fulfillment_provider(runtime, resource_pool_service):
-    return runtime.fulfillment_provider(resource_pool_service)
 
-
-def _vm_bundle(runtime, site_authority, resource_pool_service):
-    return runtime.adapter_bundle(site_authority, resource_pool_service)
+def _vm_bundle(runtime, site_authority):
+    return runtime.adapter_bundle(site_authority)
 
 
 def _bare_metal_bundle(runtime, site_authority):
@@ -107,6 +104,10 @@ def _compose_adapters(vm_bundle, bare_metal_bundle):
 
 def _provider_registry(composed_adapters):
     return composed_adapters.provider_registry
+
+
+def _pool_config_handlers(composed_adapters):
+    return dict(composed_adapters.pool_config_handlers)
 
 
 def _release_dispatcher(composed_adapters):
@@ -254,12 +255,6 @@ class Container(containers.DeclarativeContainer):
         name=providers.Object("host_operations_service"),
     )
 
-    resource_pool_service = providers.Singleton(
-        ResourcePoolService,
-        session_factory=session_factory,
-        handlers=providers.Dict(ansible=ansible_pool_config_handler),
-    )
-
     capacity_ledger_service = providers.Singleton(
         CapacityLedgerService,
         session_factory=session_factory,
@@ -271,6 +266,58 @@ class Container(containers.DeclarativeContainer):
             lambda repository: repository.abandon_if_assigned,
             repository=settlement_repository,
         ),
+    )
+
+    site_authority = providers.Singleton(
+        LedgerSiteAuthority,
+        ledger=capacity_ledger_service,
+    )
+
+    bare_metal_runtime = providers.Singleton(
+        build_bare_metal_runtime,
+        site_authority=site_authority,
+        job_service=job_service,
+        job_queue_provider=providers.Object(_resolved_job_queue),
+        config=config,
+        host_service=host_service,
+    )
+    bare_metal_lease_service = providers.Callable(
+        _runtime_value,
+        runtime=bare_metal_runtime,
+        name=providers.Object("lease_service"),
+    )
+    bare_metal_operations_service = providers.Callable(
+        _runtime_value,
+        runtime=bare_metal_runtime,
+        name=providers.Object("operations_service"),
+    )
+
+    vm_adapter_bundle = providers.Singleton(
+        _vm_bundle,
+        runtime=vm_runtime,
+        site_authority=site_authority,
+    )
+
+    bare_metal_adapter_bundle = providers.Singleton(
+        _bare_metal_bundle,
+        runtime=bare_metal_runtime,
+        site_authority=site_authority,
+    )
+
+    composed_adapters = providers.Singleton(
+        _compose_adapters,
+        vm_bundle=vm_adapter_bundle,
+        bare_metal_bundle=bare_metal_adapter_bundle,
+    )
+
+    composed_pool_config_handlers = providers.Singleton(
+        _pool_config_handlers,
+        composed_adapters=composed_adapters,
+    )
+    resource_pool_service = providers.Singleton(
+        ResourcePoolService,
+        session_factory=session_factory,
+        handlers=composed_pool_config_handlers,
     )
 
     scheduling_unit_of_work = providers.Singleton(
@@ -299,64 +346,15 @@ class Container(containers.DeclarativeContainer):
     # Fulfillment orchestration takes an already-selected SettlementResource as
     # input and never calls the scheduler itself.
     # ------------------------------------------------------------------
-    ansible_fulfillment_provider = providers.Singleton(
-        _vm_fulfillment_provider,
-        runtime=vm_runtime,
-        resource_pool_service=resource_pool_service,
-    )
-
     capacity_reservation_watchdog = providers.Singleton(
         CapacityReservationWatchdog,
         capacity_ledger_service=capacity_ledger_service,
         settings=config,
     )
 
-    site_authority = providers.Singleton(
-        LedgerSiteAuthority,
-        ledger=capacity_ledger_service,
-    )
-
-    bare_metal_runtime = providers.Singleton(
-        build_bare_metal_runtime,
-        site_authority=site_authority,
-        job_service=job_service,
-        job_queue_provider=providers.Object(_resolved_job_queue),
-        config=config,
-        host_service=host_service,
-    )
-    bare_metal_lease_service = providers.Callable(
-        _runtime_value,
-        runtime=bare_metal_runtime,
-        name=providers.Object("lease_service"),
-    )
-    bare_metal_operations_service = providers.Callable(
-        _runtime_value,
-        runtime=bare_metal_runtime,
-        name=providers.Object("operations_service"),
-    )
-
     executor_lease_service = providers.Singleton(
         ExecutorLeaseService,
         site_authority=site_authority,
-    )
-
-    vm_adapter_bundle = providers.Singleton(
-        _vm_bundle,
-        runtime=vm_runtime,
-        site_authority=site_authority,
-        resource_pool_service=resource_pool_service,
-    )
-
-    bare_metal_adapter_bundle = providers.Singleton(
-        _bare_metal_bundle,
-        runtime=bare_metal_runtime,
-        site_authority=site_authority,
-    )
-
-    composed_adapters = providers.Singleton(
-        _compose_adapters,
-        vm_bundle=vm_adapter_bundle,
-        bare_metal_bundle=bare_metal_adapter_bundle,
     )
 
     provider_registry = providers.Singleton(

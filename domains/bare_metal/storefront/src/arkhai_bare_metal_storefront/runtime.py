@@ -28,6 +28,11 @@ from .negotiation_service import BareMetalNegotiationService
 from .settlement import build_bare_metal_settlement_plan
 from .settlement_service import BareMetalSettlementService
 from .sqlite_client import SQLiteClient
+from .site_clients import (
+    BareMetalSiteBinding,
+    build_trusted_site_clients,
+    parse_site_bindings,
+)
 
 
 logger = logging.getLogger(__name__)
@@ -44,6 +49,12 @@ class BareMetalStorefrontRuntime:
     marketplace_signer: Signer = field(repr=False)
     seller_evm_address: str
     plan_builder: Callable[..., dict[str, Any]] = build_bare_metal_settlement_plan
+    site_bindings: tuple[BareMetalSiteBinding, ...] = ()
+    capacity_client: Any | None = field(default=None, repr=False)
+    fulfillment_site_clients: Mapping[str, Any] = field(
+        default_factory=dict,
+        repr=False,
+    )
     chain_clients: Mapping[str, Any] = field(default_factory=dict)
     chain_config_paths: Mapping[str, str | None] = field(default_factory=dict)
     escrow_verifier: Callable[..., Awaitable[int]] = verify_escrow_for_settlement
@@ -109,11 +120,27 @@ class BareMetalStorefrontRuntime:
             checks["database"] = "error"
             paused = None
             resource_count = None
+        if self.capacity_client is not None:
+            try:
+                await self.capacity_client.snapshot()
+            except Exception:
+                checks["site_projection"] = "error"
+                checks["fulfillment"] = "error"
+            else:
+                checks["site_projection"] = "ok"
+                checks["fulfillment"] = (
+                    "ok" if self.fulfillment_site_clients else "unavailable"
+                )
         return {
-            "status": "degraded" if "unavailable" in checks.values() else "ok",
+            "status": (
+                "ok"
+                if all(value == "ok" for value in checks.values())
+                else "degraded"
+            ),
             "checks": checks,
             "paused": paused,
             "principal": self.seller_principal.model_dump(mode="json"),
+            "sites": [binding.diagnostic() for binding in self.site_bindings],
             "resource_count": resource_count,
         }
 
@@ -217,16 +244,40 @@ def build_runtime_from_environment(
             "BARE_METAL_STOREFRONT_EVM_ADDRESS is required for Alkahest settlement",
         )
     chain_clients, chain_config_paths = _build_chain_clients_from_environment()
-    return BareMetalStorefrontRuntime(
-        db=SQLiteClient(
-            os.environ.get(
-                "BARE_METAL_STOREFRONT_DB_PATH",
-                "bare-metal-storefront.db",
-            ),
-            domain=selected_domain,
-            local_listing_principal=identity_config.principal,
-            expected_legacy_sellers=(storefront_url,),
+    try:
+        site_bindings = parse_site_bindings(
+            os.environ["BARE_METAL_STOREFRONT_SITES"],
+        )
+        site_placement = os.environ.get(
+            "BARE_METAL_STOREFRONT_SITE_PLACEMENT",
+            "fill_first",
+        ).strip()
+    except (KeyError, TypeError, ValueError) as exc:
+        raise RuntimeError(
+            "bare-metal storefront requires valid trusted site bindings",
+        ) from exc
+    db = SQLiteClient(
+        os.environ.get(
+            "BARE_METAL_STOREFRONT_DB_PATH",
+            "bare-metal-storefront.db",
         ),
+        domain=selected_domain,
+        local_listing_principal=identity_config.principal,
+        expected_legacy_sellers=(storefront_url,),
+    )
+    try:
+        capacity_client, fulfillment_site_clients = build_trusted_site_clients(
+            bindings=site_bindings,
+            signer=signer,
+            db_path=db.db_path,
+            placement=site_placement,
+        )
+    except (RuntimeError, TypeError, ValueError) as exc:
+        raise RuntimeError(
+            "bare-metal storefront trusted site composition is invalid",
+        ) from exc
+    return BareMetalStorefrontRuntime(
+        db=db,
         domain=selected_domain,
         seller_principal=identity_config.principal,
         storefront_url=storefront_url,
@@ -235,4 +286,7 @@ def build_runtime_from_environment(
         seller_evm_address=seller_evm_address,
         chain_clients=chain_clients,
         chain_config_paths=chain_config_paths,
+        site_bindings=site_bindings,
+        capacity_client=capacity_client,
+        fulfillment_site_clients=fulfillment_site_clients,
     )

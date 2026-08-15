@@ -15,8 +15,18 @@ from market_identity import (
 
 from arkhai_bare_metal_storefront.domain_runtime import get_market_domain_contract
 from arkhai_bare_metal_storefront.runtime import BareMetalStorefrontRuntime
-from arkhai_bare_metal_storefront.server import build_bare_metal_storefront_app
+from arkhai_bare_metal_storefront.server import (
+    build_bare_metal_storefront_app,
+    build_bare_metal_storefront_registry,
+)
 from arkhai_bare_metal_storefront.sqlite_client import SQLiteClient
+
+
+def _app(runtime: BareMetalStorefrontRuntime):
+    return build_bare_metal_storefront_app(
+        registry=build_bare_metal_storefront_registry(domain=runtime.domain),
+        runtime=runtime,
+    )
 
 PRIVATE_KEY = bytes.fromhex(
     "5de4111afa1a4b94908f83103eb1f1706367c2e68ca870fc3fb9a804cdab365a"
@@ -110,6 +120,7 @@ async def _insert_listing(runtime: BareMetalStorefrontRuntime) -> None:
 
 def _opening(*, payload: dict | None = None) -> dict:
     return {
+        "listing_id": "listing-1",
         "buyer_principal": BUYER_SIGNER.identity.model_dump(mode="json"),
         "buyer_agent_url": "https://buyer.example",
         "provision_terms": {
@@ -135,7 +146,7 @@ def _opening(*, payload: dict | None = None) -> dict:
 async def test_signed_opening_accepts_and_persists_domain_artifacts(tmp_path) -> None:
     runtime = _runtime(str(tmp_path / "storefront.db"))
     await _insert_listing(runtime)
-    app = build_bare_metal_storefront_app(runtime=runtime)
+    app = _app(runtime)
 
     with TestClient(app) as client:
         opening = _opening()
@@ -177,7 +188,7 @@ async def test_signed_opening_accepts_and_persists_domain_artifacts(tmp_path) ->
 async def test_auth_and_domain_failures_write_no_thread(tmp_path) -> None:
     runtime = _runtime(str(tmp_path / "storefront.db"))
     await _insert_listing(runtime)
-    app = build_bare_metal_storefront_app(runtime=runtime)
+    app = _app(runtime)
     invalid = _opening(
         payload={
             "duration_seconds": 3600,
@@ -205,7 +216,7 @@ async def test_durable_pause_blocks_new_negotiation(tmp_path) -> None:
     runtime = _runtime(str(tmp_path / "storefront.db"))
     await _insert_listing(runtime)
     await runtime.db.set_global_paused(paused=True)
-    app = build_bare_metal_storefront_app(runtime=runtime)
+    app = _app(runtime)
 
     with TestClient(app) as client:
         opening = _opening()

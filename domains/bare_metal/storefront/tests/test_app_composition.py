@@ -10,7 +10,16 @@ from market_core import DomainCapability, DomainContractValidationError
 import arkhai_bare_metal_storefront.runtime as runtime_module
 import arkhai_bare_metal_storefront.server as server_module
 from arkhai_bare_metal_storefront.domain_runtime import get_market_domain_contract
-from arkhai_bare_metal_storefront.server import build_bare_metal_storefront_app
+from arkhai_bare_metal_storefront.server import (
+    build_bare_metal_storefront_app,
+    build_bare_metal_storefront_registry,
+)
+
+
+def _registry(domain=None):
+    return build_bare_metal_storefront_registry(
+        domain=domain or get_market_domain_contract()
+    )
 
 
 def test_app_injects_validated_bare_metal_contract_and_router() -> None:
@@ -21,13 +30,14 @@ def test_app_injects_validated_bare_metal_contract_and_router() -> None:
         return {"status": "ok"}
 
     app = build_bare_metal_storefront_app(
+        registry=_registry(),
         routers=(router,),
         root_path="/bare-metal",
     )
 
     assert app.title == "Arkhai Bare-Metal Storefront"
     assert app.root_path == "/bare-metal"
-    assert app.state.market_domain is get_market_domain_contract()
+    assert app.state.storefront_binding.offering_mode == "bare_metal.ansible"
     assert "/healthz" in {route.path for route in app.routes}
 
 
@@ -44,11 +54,11 @@ def test_app_rejects_inconsistent_domain_before_startup() -> None:
         DomainContractValidationError,
         match="provides no implementation",
     ):
-        build_bare_metal_storefront_app(domain=invalid)
+        build_bare_metal_storefront_app(registry=_registry(invalid))
 
 
 def test_runnable_http_contract_excludes_fulfillment_claims() -> None:
-    app = build_bare_metal_storefront_app()
+    app = build_bare_metal_storefront_app(registry=_registry())
     paths = set(app.openapi()["paths"])
 
     assert {
@@ -79,9 +89,11 @@ def test_runnable_http_contract_excludes_fulfillment_claims() -> None:
 def test_importing_app_does_not_construct_publication_source() -> None:
     contract = get_market_domain_contract()
 
-    app = build_bare_metal_storefront_app(domain=contract)
+    app = build_bare_metal_storefront_app(registry=_registry(contract))
 
-    assert app.state.market_domain.publication is contract.publication
+    assert app.state.storefront_binding == _registry(contract).resolve_mode(
+        "bare_metal.ansible"
+    ).binding
     assert not hasattr(app.state, "publication_source")
 
 
@@ -97,7 +109,10 @@ async def test_lifespan_exposes_exact_bare_metal_runtime_without_global_lookup(
         started.append(selected)
 
     monkeypatch.setattr(server_module, "_start_runtime", start)
-    app = build_bare_metal_storefront_app(domain=domain, runtime=runtime)
+    app = build_bare_metal_storefront_app(
+        registry=_registry(domain),
+        runtime=runtime,
+    )
 
     async with app.router.lifespan_context(app):
         assert app.state.storefront_container is runtime

@@ -223,10 +223,10 @@ class SQLiteClient(CoreSQLiteClient):
                 conn.execute(
                     """
                     INSERT INTO negotiation_messages(
-                      negotiation_id, round, sender_scheme, sender_identifier,
-                      our_price, their_price, proposed_price, action_taken,
-                      message_type, timestamp
-                    ) VALUES (?, 0, ?, ?, ?, ?, ?, 'initial_proposal',
+                      negotiation_id, round, sender_role, sender_scheme,
+                      sender_identifier, our_price, their_price, proposed_price,
+                      action_taken, message_type, timestamp
+                    ) VALUES (?, 0, 'buyer', ?, ?, ?, ?, ?, 'initial_proposal',
                               'initial_proposal', ?)
                     """,
                     (
@@ -242,10 +242,10 @@ class SQLiteClient(CoreSQLiteClient):
                 conn.execute(
                     """
                     INSERT INTO negotiation_messages(
-                      negotiation_id, round, sender_scheme, sender_identifier,
-                      our_price, their_price, proposed_price, action_taken,
-                      message_type, timestamp
-                    ) VALUES (?, 1, ?, ?, ?, ?, ?, ?, ?, ?)
+                      negotiation_id, round, sender_role, sender_scheme,
+                      sender_identifier, our_price, their_price, proposed_price,
+                      action_taken, message_type, timestamp
+                    ) VALUES (?, 1, 'seller', ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         negotiation_id,

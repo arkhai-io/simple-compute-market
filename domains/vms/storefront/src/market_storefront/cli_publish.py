@@ -18,6 +18,7 @@ Assumes the seller agent is already running (mirror of `market buy`).
 """
 
 from __future__ import annotations
+import asyncio
 
 import json
 import logging
@@ -50,7 +51,6 @@ from domains.vms.listings.reconciler import (
     load_derived_listing_for_slice,
     mark_derived_listings_closed,
     open_listing_resource_keys,
-    record_derived_listing,
     reopen_local_derived_listing,
     stale_open_listing_ids,
 )
@@ -73,6 +73,7 @@ from storefront_client import (
     SyncStorefrontClient,
 )
 
+from .publication_binding import record_vm_listing_binding
 from .cli_common import _resolve_db_path, resolve_storefront_url
 from .publication_wiring import (
     BareMetalPublicationSourceCallbacks,
@@ -707,15 +708,12 @@ def _record_published_vm_listing(
     candidate: dict[str, Any],
     listing_id: str,
 ) -> None:
-    record_derived_listing(
-        db_path,
-        listing_id=listing_id,
-        site_id=str(candidate["site_id"]),
-        pool_id=str(candidate["pool_id"]) if candidate.get("pool_id") else None,
-        resource_id=str(candidate["resource_id"])
-        if candidate.get("resource_id")
-        else None,
-        gpu_count=int(candidate["gpu_count"]),
+    asyncio.run(
+        record_vm_listing_binding(
+            db_path=db_path,
+            listing_id=listing_id,
+            candidate=candidate,
+        )
     )
 
 
@@ -953,7 +951,9 @@ def _offer_resource_for_listing(res: dict[str, Any]) -> dict[str, Any]:
     interruptible = isinstance(alkahest, dict) and bool(
         alkahest.get("interruptible", False)
     )
-    return vm_offer_resource_for_listing(res, interruptible=interruptible)
+    offer = vm_offer_resource_for_listing(res, interruptible=interruptible)
+    offer["virtualization_type"] = "vm"
+    return offer
 
 
 def _compile_publication_clauses(

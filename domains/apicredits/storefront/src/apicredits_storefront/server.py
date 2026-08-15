@@ -14,6 +14,10 @@ from functools import partial
 from typing import Any
 
 from core_storefront.app_composition import StorefrontAppConfig
+from core_storefront.domain_registry import (
+    StorefrontDomainRegistry,
+    StorefrontDomainRegistration,
+)
 
 import apicredits_storefront.container as _container
 from apicredits_storefront.domain_runtime import (
@@ -269,14 +273,43 @@ from apicredits_storefront.controllers.system_controller import (  # noqa: E402
     router as system_router,
 )
 
-def build_api_credits_storefront_app(
+def build_api_credits_storefront_registry(
     *,
     domain: MarketDomainContract,
+) -> StorefrontDomainRegistry:
+    """Build the explicit one-registration API-credit storefront registry."""
+
+    return StorefrontDomainRegistry(
+        (
+            StorefrontDomainRegistration(
+                offering_mode="api_credits",
+                contract=domain,
+                contribution_id="apicredits",
+            ),
+        )
+    )
+
+
+def build_api_credits_storefront_app(
+    *,
+    registry: StorefrontDomainRegistry,
 ) -> Any:
-    """Build the API-credit app from immutable shared composition hooks."""
+    """Build the API-credit app from one frozen domain registration."""
+
+    registration = registry.resolve_mode("api_credits")
+    domain = registration.contract
+
+    def build_services(selected: MarketDomainContract) -> ApiCreditsStorefrontServices:
+        if selected is not domain:
+            raise RuntimeError(
+                "storefront kit supplied a domain outside the API-credit registration"
+            )
+        return _build_api_credit_services(selected)
 
     return build_composed_storefront_app(
         StorefrontComposition(
+            registry=registry,
+            binding=registration.binding,
             domain=domain,
             app=StorefrontAppConfig(
                 title="Arkhai API-Credits Storefront",
@@ -291,7 +324,7 @@ def build_api_credits_storefront_app(
                 swagger_ui_parameters={"persistAuthorization": True},
             ),
             services=StorefrontServiceHooks(
-                build=_build_api_credit_services,
+                build=build_services,
                 start=_start_api_credit_services,
                 stop=_stop_api_credit_services,
             ),
@@ -310,4 +343,8 @@ def build_api_credits_storefront_app(
     )
 
 
-app = build_api_credits_storefront_app(domain=get_market_domain_contract())
+app = build_api_credits_storefront_app(
+    registry=build_api_credits_storefront_registry(
+        domain=get_market_domain_contract(),
+    )
+)

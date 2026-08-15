@@ -261,7 +261,7 @@ def _start_site_projection_poller(sqlite_client: Any) -> None:
     )
 
 
-def _assert_startup_domain(domain: MarketDomainContract) -> Any:
+def _assert_startup_registry(registry: Any, domain: MarketDomainContract) -> Any:
     """Reject mixed composition before preflight or background work."""
     import market_storefront.container as _container
 
@@ -270,26 +270,31 @@ def _assert_startup_domain(domain: MarketDomainContract) -> Any:
     negotiation_service = _container.resolved_negotiation_service
     settlement_composition = _container.resolved_settlement_composition
     callback = getattr(negotiation_service, "_continue_negotiation", None)
-    callback_domain = getattr(callback, "keywords", {}).get("domain")
+    callback_registry = getattr(callback, "keywords", {}).get("registry")
     collaborators = (
-        ("container", _container.resolved_market_domain),
-        ("SQLite repository", getattr(sqlite_client, "market_domain", None)),
-        ("listing service", getattr(listing_service, "market_domain", None)),
-        ("negotiation callback", callback_domain),
-        ("settlement composition", getattr(settlement_composition, "domain", None)),
+        ("container", _container.resolved_domain_registry),
+        ("SQLite repository", getattr(sqlite_client, "domain_registry", None)),
+        ("listing service", getattr(listing_service, "domain_registry", None)),
+        ("negotiation callback", callback_registry),
     )
-    for label, collaborator_domain in collaborators:
-        if collaborator_domain is not domain:
+    for label, collaborator_registry in collaborators:
+        if collaborator_registry is not registry:
             raise RuntimeError(
-                f"{label} is not bound to the app-selected market-domain "
-                "contract object"
+                f"{label} is not bound to the app-selected storefront "
+                "domain registry object"
             )
+    if registry.registration_for_contract(domain).contract is not domain:
+        raise RuntimeError("settlement domain is not the startup-owned contract")
+    if getattr(settlement_composition, "domain", None) is not domain:
+        raise RuntimeError(
+            "settlement composition is not bound to its registered contract"
+        )
     return sqlite_client
 
 
-async def _startup_tasks(*, domain: MarketDomainContract) -> None:
-    """Initialize background tasks for one validated storefront contract."""
-    sqlite_client = _assert_startup_domain(domain)
+async def _startup_tasks(*, registry: Any, domain: MarketDomainContract) -> None:
+    """Initialize background tasks for one frozen storefront registry."""
+    sqlite_client = _assert_startup_registry(registry, domain)
     await run_storefront_startup_steps(
         (
             StorefrontStartupStep("join_zerotier", _maybe_join_zerotier_network),

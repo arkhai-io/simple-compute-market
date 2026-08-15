@@ -8,6 +8,8 @@ dependencies = [
     "arkhai-bare-metal>=0.2.0",
     "arkhai-compute-provisioning>=0.6.0",
     "arkhai-compute-provisioning-service>=0.1.0",
+    "arkhai-kit-fulfillment>=0.2.0",
+    "arkhai-kit-resource-pools>=0.2.0",
     "arkhai-vms-provisioning-operator-client>=0.3.0",
     "pydantic>=2.7",
 ]
@@ -25,5 +27,7 @@ dev = ["pytest>=9.0.2"]
 [tool.uv.sources]
 arkhai-bare-metal = { path = "../..", editable = true }
 arkhai-compute-provisioning = { path = "../../../../provisioning/compute", editable = true }
+arkhai-kit-fulfillment = { path = "../../../../kit/fulfillment", editable = true }
+arkhai-kit-resource-pools = { path = "../../../../kit/resource-pools", editable = true }
 arkhai-compute-provisioning-service = { path = "../../../../provisioning/compute/service", editable = true }
 arkhai-vms-provisioning-operator-client = { path = "../../../vms/provisioning/client", editable = true }

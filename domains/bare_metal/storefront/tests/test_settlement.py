@@ -68,8 +68,12 @@ def test_plan_builder_forwards_agreed_inputs_and_validates_plan(monkeypatch) -> 
 
     plan = SettlementPlan.model_validate(result["settlement_plan"])
     assert plan.obligations[0].mechanism == "alkahest.v1"
-    assert plan.obligations[0].payer_principal == BUYER_PRINCIPAL
-    assert plan.obligations[0].claimant_principal == SELLER_PRINCIPAL
+    assert plan.obligations[0].payer_principal == BUYER_PRINCIPAL.model_dump(
+        mode="json"
+    )
+    assert plan.obligations[0].claimant_principal == SELLER_PRINCIPAL.model_dump(
+        mode="json"
+    )
     assert plan.obligations[0].amount == 100
     assert plan.service_terms == {}
     assert calls == [

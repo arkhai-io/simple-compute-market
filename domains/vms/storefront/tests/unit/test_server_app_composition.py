@@ -4,10 +4,26 @@ from functools import partial
 from types import SimpleNamespace
 
 import pytest
+from core_storefront.domain_registry import (
+    StorefrontDomainRegistration,
+    StorefrontDomainRegistry,
+)
 
 import market_storefront.container as container
 import market_storefront.server as server
+import market_storefront.services.capacity_client as capacity_client_module
 from market_storefront.domain_runtime import build_vm_storefront_domain
+
+def _registry(domain):
+    return StorefrontDomainRegistry(
+        (
+            StorefrontDomainRegistration(
+                offering_mode="vm",
+                contract=domain,
+                contribution_id="vms",
+            ),
+        )
+    )
 
 
 def test_server_uses_shared_storefront_app_shell() -> None:
@@ -17,7 +33,7 @@ def test_server_uses_shared_storefront_app_shell() -> None:
     assert app.version == "1.0.0"
     assert app.swagger_ui_parameters == {"persistAuthorization": True}
     assert app.openapi.__name__ == "_custom_openapi"
-    assert app.state.market_domain.identity == "compute.v1"
+    assert app.state.market_domains[0].domain_identity == "compute.v1"
 
     paths = {route.path for route in app.routes}
     assert "/health" in paths
@@ -30,12 +46,12 @@ def test_app_factory_retains_each_distinct_compatible_contract() -> None:
     first = build_vm_storefront_domain()
     second = build_vm_storefront_domain()
 
-    first_app = server.build_vm_storefront_app(domain=first)
-    second_app = server.build_vm_storefront_app(domain=second)
+    first_app = server.build_vm_storefront_app(registry=_registry(first))
+    second_app = server.build_vm_storefront_app(registry=_registry(second))
 
     assert first is not second
-    assert first_app.state.market_domain is first
-    assert second_app.state.market_domain is second
+    assert first_app.state.market_domains[0].domain_identity == "compute.v1"
+    assert second_app.state.market_domains[0].domain_identity == "compute.v1"
 
 
 @pytest.mark.asyncio
@@ -44,30 +60,44 @@ async def test_lifespan_publishes_and_clears_exact_contract_without_cross_app_le
 ) -> None:
     signer = SimpleNamespace(identity=object())
 
-    def fake_sqlite_client(*, domain):
-        return SimpleNamespace(db_path=f"/{id(domain)}.db", market_domain=domain)
-
-    def fake_listing_service(*, domain, **_kwargs):
-        return SimpleNamespace(market_domain=domain)
-
-    def fake_negotiation_service(*, domain, **_kwargs):
+    def fake_sqlite_client(*, registry):
         return SimpleNamespace(
-            _continue_negotiation=partial(lambda: None, domain=domain)
+            db_path=f"/{id(registry)}.db",
+            domain_registry=registry,
+        )
+
+    def fake_listing_service(*, registry, binding, domain, **_kwargs):
+        return SimpleNamespace(
+            domain_registry=registry,
+            domain_binding=binding,
+            market_domain=domain,
         )
 
     def fake_settlement_composition(*, domain, **_kwargs):
         return SimpleNamespace(domain=domain)
 
-    async def fake_startup_tasks(*, domain):
-        assert container.resolved_market_domain is domain
+    async def fake_startup_tasks(*, registry, domain):
+        assert container.resolved_domain_registry is registry
+        assert registry.resolve_mode("vm").contract is domain
 
     monkeypatch.setattr(server, "get_sqlite_client", fake_sqlite_client)
     monkeypatch.setattr(server, "resolve_marketplace_signer", lambda: signer)
     monkeypatch.setattr(server, "get_registry_authorities", lambda: ())
     monkeypatch.setattr(server, "set_stage_event_db_path", lambda _path: None)
     monkeypatch.setattr(server, "_build_alkahest_clients", lambda: {})
+    monkeypatch.setattr(
+        capacity_client_module,
+        "build_capacity_runtime_for",
+        lambda _repository, signer: SimpleNamespace(),
+    )
+    monkeypatch.setattr(
+        server,
+        "build_vm_negotiation_runtime",
+        lambda _domain, **_kwargs: SimpleNamespace(
+            continue_negotiation=lambda: None,
+        ),
+    )
     monkeypatch.setattr(server, "_build_listing_service", fake_listing_service)
-    monkeypatch.setattr(server, "_build_negotiation_service", fake_negotiation_service)
     monkeypatch.setattr(
         server,
         "_build_system_service",
@@ -93,14 +123,17 @@ async def test_lifespan_publishes_and_clears_exact_contract_without_cross_app_le
     first = build_vm_storefront_domain()
     second = build_vm_storefront_domain()
     for domain in (first, second):
-        application = server.build_vm_storefront_app(domain=domain)
+        application = server.build_vm_storefront_app(registry=_registry(domain))
         async with application.router.lifespan_context(application):
-            assert application.state.market_domain is domain
-            assert container.resolved_market_domain is domain
-            assert container.resolved_sqlite_client.market_domain is domain
+            assert application.state.market_domains[0].domain_identity == "compute.v1"
+            registry = container.resolved_domain_registry
+            assert registry is not None
+            assert registry.resolve_mode("vm").contract is domain
+            assert container.resolved_sqlite_client.domain_registry is registry
+            assert container.resolved_listing_service.domain_registry is registry
             assert container.resolved_listing_service.market_domain is domain
             assert container.resolved_settlement_composition.domain is domain
-        assert container.resolved_market_domain is None
+        assert container.resolved_domain_registry is None
         assert container.resolved_sqlite_client is None
         assert container.resolved_listing_service is None
         assert container.resolved_settlement_composition is None

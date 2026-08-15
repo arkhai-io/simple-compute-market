@@ -4,10 +4,18 @@ from dataclasses import dataclass
 
 import pytest
 from core_storefront.app_composition import StorefrontAppConfig
+from core_storefront.domain_registry import (
+    StorefrontDomainRegistry,
+    StorefrontDomainRegistration,
+)
 from fastapi import APIRouter
 from market_core import (
     DomainCapability,
     DomainIdentity,
+    ImmutableFulfillmentCapability,
+    ImmutablePublicationCapability,
+    ImmutableSettlementCapability,
+    ImmutableStorefrontCapability,
     ImmutableBuyerCapability,
     MARKET_DOMAIN_CONTRACT_VERSION,
     MarketDomainContract,
@@ -46,7 +54,15 @@ def _domain(identity: str = "external.example") -> MarketDomainContract:
         identity=DomainIdentity(identity),
         contract_version=MARKET_DOMAIN_CONTRACT_VERSION,
         codecs=Codecs(),
-        declared_capabilities=frozenset({DomainCapability.BUYER}),
+        declared_capabilities=frozenset(
+            {
+                DomainCapability.BUYER,
+                DomainCapability.PUBLICATION,
+                DomainCapability.STOREFRONT,
+                DomainCapability.SETTLEMENT,
+                DomainCapability.FULFILLMENT,
+            }
+        ),
         buyer=ImmutableBuyerCapability(
             identity_injection_contract="core.resolved-buyer-identity.v1",
             register_commands=lambda app: None,
@@ -54,8 +70,32 @@ def _domain(identity: str = "external.example") -> MarketDomainContract:
             select_policy=lambda: "policy",
             decode_result=lambda payload: payload,
         ),
+        publication=ImmutablePublicationCapability(
+            source_factory=lambda: (),
+        ),
+        storefront=ImmutableStorefrontCapability(
+            run_negotiation_policy=lambda *args, **kwargs: None,
+        ),
+        settlement=ImmutableSettlementCapability(
+            verify=lambda *args, **kwargs: None,
+            build_plan=lambda *args, **kwargs: None,
+        ),
+        fulfillment=ImmutableFulfillmentCapability(
+            fulfill=lambda *args, **kwargs: None,
+        ),
     )
 
+
+def _registry(domain: MarketDomainContract) -> StorefrontDomainRegistry:
+    return StorefrontDomainRegistry(
+        (
+            StorefrontDomainRegistration(
+                offering_mode="external",
+                contract=domain,
+                contribution_id="external",
+            ),
+        )
+    )
 
 @dataclass(frozen=True)
 class Container:
@@ -66,6 +106,7 @@ class Container:
 @pytest.mark.asyncio
 async def test_composition_carries_exact_contract_through_lifecycle_and_routes():
     domain = _domain()
+    registry = _registry(domain)
     service = object()
     events: list[tuple[str, object]] = []
     router = APIRouter()
@@ -82,6 +123,8 @@ async def test_composition_carries_exact_contract_through_lifecycle_and_routes()
 
     app = build_composed_storefront_app(
         StorefrontComposition(
+            registry=registry,
+            binding=registry.resolve_mode("external").binding,
             domain=domain,
             app=StorefrontAppConfig(title="External", description="external"),
             services=StorefrontServiceHooks(
@@ -93,7 +136,8 @@ async def test_composition_carries_exact_contract_through_lifecycle_and_routes()
         )
     )
 
-    assert app.state.market_domain is domain
+    assert app.state.storefront_binding == registry.resolve_mode("external").binding
+    assert app.state.market_domains[0].domain_identity == "external.example"
     assert any(route.path == "/probe" for route in app.routes)
     async with app.router.lifespan_context(app):
         assert app.state.storefront_container.domain is domain
@@ -106,9 +150,12 @@ async def test_composition_carries_exact_contract_through_lifecycle_and_routes()
 @pytest.mark.asyncio
 async def test_lifespan_rejects_reconstructed_equal_contract_container():
     domain = _domain()
+    registry = _registry(domain)
     replacement = _domain()
     app = build_composed_storefront_app(
         StorefrontComposition(
+            registry=registry,
+            binding=registry.resolve_mode("external").binding,
             domain=domain,
             app=StorefrontAppConfig(title="External", description="external"),
             services=StorefrontServiceHooks(

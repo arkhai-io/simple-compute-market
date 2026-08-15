@@ -14,7 +14,10 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
-    from market_core import MarketDomainContract
+    from core_storefront.domain_registry import (
+        StorefrontDomainBinding,
+        StorefrontDomainRegistry,
+    )
     from core_storefront.services.negotiation_service import NegotiationService
     from market_identity import Signer
     from market_negotiation_runtime import NegotiationRuntime
@@ -28,7 +31,7 @@ if TYPE_CHECKING:
 # Resolved service instances — populated during FastAPI lifespan startup.
 # ---------------------------------------------------------------------------
 
-resolved_market_domain: MarketDomainContract | None = None
+resolved_domain_registry: StorefrontDomainRegistry | None = None
 resolved_sqlite_client: SQLiteClient | None = None
 resolved_marketplace_signer: Signer | None = None
 resolved_negotiation_runtime: NegotiationRuntime | None = None
@@ -45,9 +48,17 @@ resolved_settlement_composition: VmSettlementComposition | None = None
 
 resolved_storefront_service = None
 
-def clear_lifespan_state(*, domain: MarketDomainContract) -> None:
-    """Clear state owned by the lifespan bound to ``domain``."""
-    global resolved_market_domain
+def resolve_market_domain(binding: StorefrontDomainBinding):
+    """Resolve only from the frozen startup registry and exact durable binding."""
+
+    if resolved_domain_registry is None:
+        raise RuntimeError("storefront domain registry is unavailable")
+    return resolved_domain_registry.resolve(binding)
+
+
+def clear_lifespan_state(*, registry: StorefrontDomainRegistry) -> None:
+    """Clear state owned by the lifespan bound to ``registry``."""
+    global resolved_domain_registry
     global resolved_sqlite_client
     global resolved_marketplace_signer
     global resolved_negotiation_runtime
@@ -58,12 +69,15 @@ def clear_lifespan_state(*, domain: MarketDomainContract) -> None:
     global resolved_settlement_composition
     global resolved_storefront_service
 
-    if resolved_market_domain is not None and resolved_market_domain is not domain:
+    if (
+        resolved_domain_registry is not None
+        and resolved_domain_registry is not registry
+    ):
         raise RuntimeError(
             "cannot clear a dependency container owned by a different "
-            "market-domain contract"
+            "storefront domain registry"
         )
-    resolved_market_domain = None
+    resolved_domain_registry = None
     resolved_sqlite_client = None
     resolved_marketplace_signer = None
     resolved_alkahest_clients = {}

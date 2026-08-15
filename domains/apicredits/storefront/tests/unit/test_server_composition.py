@@ -14,7 +14,7 @@ def test_api_credit_routes_use_shared_storefront_shell():
     app = server.app
 
     assert app.title == "Arkhai API-Credits Storefront"
-    assert app.state.market_domain is get_market_domain_contract()
+    assert app.state.storefront_binding.offering_mode == "api_credits"
     paths = {route.path for route in app.routes}
     assert "/health" in paths
     assert "/api/v1/listings" in paths
@@ -40,7 +40,9 @@ async def test_api_credit_lifespan_carries_exact_domain_container(monkeypatch):
 
     monkeypatch.setattr(server, "_start_api_credit_services", start)
     monkeypatch.setattr(server, "_stop_api_credit_services", stop)
-    app = server.build_api_credits_storefront_app(domain=domain)
+    app = server.build_api_credits_storefront_app(
+        registry=server.build_api_credits_storefront_registry(domain=domain)
+    )
 
     async with app.router.lifespan_context(app):
         assert app.state.storefront_container is container
