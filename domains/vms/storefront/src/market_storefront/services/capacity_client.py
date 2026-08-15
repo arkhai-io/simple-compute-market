@@ -339,25 +339,12 @@ def build_capacity_client(
 
 
 class AggregateFulfillmentClient:
-    """Routes fulfillment scheduling/acceptance calls to the owning site.
+    """Routes fulfillment calls to an explicitly recorded trusted site.
 
-    Shares its ``capacity_reservation_id`` → site routing cache with the
-    paired ``AggregateCapacityClient`` (same dict instance, via
-    ``build_fulfillment_client``'s ``reservation_sites=``), so a
-    reservation's site is learned once, at ``reserve()`` time, and reused
-    for both the capacity and fulfillment surfaces — not re-learned or
-    tracked twice.
-
-    A cold cache (process restart) falls back to trying every configured
-    site in turn, same as ``AggregateCapacityClient.commit``/``release``.
-    This is safe, not just convenient: `schedule_resource`/`begin_fulfillment`
-    retries are idempotent by `capacity_reservation_id` (see
-    `openspec/specs/fulfillment/spec.md`, "Durable settlement persistence" --
-    an equivalent retry returns the existing row rather than erroring), so a
-    wrong-site attempt before the right one costs latency, not correctness. A
-    site that doesn't recognize the reservation answers 404
-    (`SettlementEntityNotFoundError`), which routes to the next site exactly
-    like a capacity `commit`/`release` refusal does today.
+    The shared reservation cache remains available to legacy callers, but
+    record-bound storefront flows pass ``site_id`` on every call.  A targeted
+    call addresses exactly that configured client and propagates its refusal
+    or error without consulting the cache or another site.
     """
 
     def __init__(
@@ -392,7 +379,13 @@ class AggregateFulfillmentClient:
     async def schedule_resource(
         self,
         request: FulfillmentScheduleRequest,
+        *,
+        site_id: str | None = None,
     ) -> FulfillmentScheduleResponse:
+        if site_id is not None:
+            result = await self._sites[site_id].schedule_resource(request)
+            self._reservation_sites[str(request.capacity_reservation_id)] = site_id
+            return result
         last_error: Exception | None = None
         for name in self._route_order(request.capacity_reservation_id):
             try:
@@ -414,7 +407,13 @@ class AggregateFulfillmentClient:
     async def begin_fulfillment(
         self,
         body: FulfillmentRequestBody,
+        *,
+        site_id: str | None = None,
     ) -> FulfillmentAcceptanceResponse:
+        if site_id is not None:
+            result = await self._sites[site_id].begin_fulfillment(body)
+            self._reservation_sites[str(body.capacity_reservation_id)] = site_id
+            return result
         last_error: Exception | None = None
         for name in self._route_order(body.capacity_reservation_id):
             try:
@@ -437,11 +436,14 @@ class AggregateFulfillmentClient:
         fulfillment_id: str,
         *,
         capacity_reservation_id: str | None = None,
+        site_id: str | None = None,
     ) -> FulfillmentStatusResponse:
         """Read fulfillment status, routed by ``capacity_reservation_id`` if
         the caller has it (it's keyed on that, not ``fulfillment_id``, in the
         shared routing cache — pass it whenever available, e.g. from the
         storefront's own persisted workflow state)."""
+        if site_id is not None:
+            return await self._sites[site_id].get_fulfillment_status(fulfillment_id)
         last_error: Exception | None = None
         for name in self._route_order(capacity_reservation_id):
             try:
@@ -463,8 +465,11 @@ class AggregateFulfillmentClient:
         fulfillment_id: str,
         *,
         capacity_reservation_id: str | None = None,
+        site_id: str | None = None,
     ) -> VersionedEnvelope[dict[str, Any]]:
         """Read fulfillment result; see ``get_fulfillment_status`` on routing."""
+        if site_id is not None:
+            return await self._sites[site_id].get_fulfillment_result(fulfillment_id)
         last_error: Exception | None = None
         for name in self._route_order(capacity_reservation_id):
             try:
@@ -480,6 +485,16 @@ class AggregateFulfillmentClient:
                 continue
         assert last_error is not None
         raise last_error
+
+    async def begin_fulfillment_teardown(
+        self,
+        fulfillment_id: str,
+        *,
+        site_id: str,
+    ) -> Any:
+        """Begin teardown only at the accepted fulfillment's recorded site."""
+
+        return await self._sites[site_id].begin_fulfillment_teardown(fulfillment_id)
 
 
 _fulfillment_aggregate_state: dict[str, Any] = {"key": None, "client": None}

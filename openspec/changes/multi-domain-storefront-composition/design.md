@@ -41,6 +41,34 @@ The first implementation task is an executable contract check, not a checkbox re
 
 The check records exact promoted headings, package APIs, and focused evidence in this design before production edits. Later interface drift updates proposal/specs/tasks first.
 
+#### Prerequisite verification record (2026-08-15)
+
+- `storefront-domain-parameterization` is present in the integrated base.  The
+  permanent requirements are **Storefront roots inject one validated domain
+  contract** in `market-composition` and **Domain runtime composition** in
+  `storefront-publication`.  `build_vm_storefront_app`, startup/container,
+  `SQLiteClient`, `ListingService`, negotiation, and
+  `VmSettlementComposition` all receive the composition-root-owned contract;
+  focused evidence is owned by
+  `domains/vms/storefront/tests/unit/test_domain_runtime_parameterization.py`
+  and the service/controller injection tests named by that accepted change.
+- `pool-declared-offering-modes` is present in the integrated base.  The
+  permanent requirements are **Pool-declared offering modes** in
+  `resource-pool-management`, **Requested offering mode is explicit and
+  bounded by the pool** and **Offering mode is enforced through fulfillment**
+  in `site-capacity`, plus the fulfillment/physical-provisioning executor
+  identity requirements.  The shared `pool_delivers_offering_mode` predicate
+  is used by reservation, scheduling, and provisioning; the accepted migration
+  rejects ambiguous historical executor identity rather than selecting VM.
+- Full bare-metal lifecycle acceptance remains an external producer gate:
+  the installed `BARE_METAL_STOREFRONT_DOMAIN` deliberately removes
+  `DomainCapability.FULFILLMENT` and exposes no fulfillment hook.  Registry,
+  binding, migration, and exact-site shell work may proceed, but one-process
+  bare-metal servicing and its live proof remain blocked until
+  `market-platform-bare-metal-10-storefront-composition` supplies and accepts
+  that production hook.  No fake, no-op, payload inference, or default is
+  substituted here.
+
 ### 2. Use a frozen registration registry; keep mode and domain key distinct
 
 Add a core-owned immutable composition carrier with these semantics:
