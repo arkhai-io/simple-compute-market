@@ -713,6 +713,7 @@ def register(app: typer.Typer) -> None:
             VMS_SCHEMA_ID,
             resolve_buyer_wallet,
             resolve_fresh_buyer_identity,
+            resolve_discovery_timeout,
             resolve_indexer_urls,
             resolve_indexer_urls_for_schema,
             resolve_registry_api_keys,

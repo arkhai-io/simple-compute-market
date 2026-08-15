@@ -52,13 +52,15 @@ def test_raw_settlement_utilities_are_mechanism_namespaced() -> None:
     nested = runner.invoke(app, ["settlement", "alkahest", "escrow", "--help"])
     legacy_escrow = runner.invoke(app, ["escrow", "--help"])
     legacy_chain = runner.invoke(app, ["chain", "--help"])
-    absent_stripe = runner.invoke(app, ["settlement", "stripe", "--help"])
+    stripe = runner.invoke(app, ["settlement", "stripe", "--help"])
+    payer = runner.invoke(app, ["settlement", "stripe", "payer", "--help"])
 
     assert status.exit_code == 0, status.output
     assert nested.exit_code == 0, nested.output
     assert legacy_escrow.exit_code == 2
     assert legacy_chain.exit_code == 2
-    assert absent_stripe.exit_code == 2
+    assert stripe.exit_code == 0, stripe.output
+    assert payer.exit_code == 0, payer.output
 
 
 def test_common_settlement_status_emits_sanitized_schema(monkeypatch) -> None:
