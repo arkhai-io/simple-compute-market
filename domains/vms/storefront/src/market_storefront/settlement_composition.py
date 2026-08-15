@@ -130,6 +130,16 @@ class VmSettlementComposition:
                         {"chain_name": chain_name} for chain_name in alkahest_chains
                     ],
                 }
+            hosted_clauses = [
+                clause.model_dump(mode="json")
+                for clause in compiled
+                if clause.mechanism == "fiat.stripe.v1"
+            ]
+            if hosted_clauses:
+                readiness_resources = {
+                    **readiness_resources,
+                    "publication_clauses": hosted_clauses,
+                }
 
         readiness = await self.configuration_registry.ordered_readiness(
             self.settlement_config,
@@ -177,6 +187,34 @@ class VmSettlementComposition:
             if not isinstance(envelope, Mapping):
                 raise RuntimeError(
                     f"settlement option builder {status.mechanism} returned no envelope"
+                )
+            if (
+                not envelope.get("accepted_escrows")
+                and not envelope.get("settlement_options")
+                and status.mechanism == "fiat.stripe.v1"
+            ):
+                clause = option_resources.get("publication_clause")
+                mechanism_input = getattr(clause, "mechanism_input", {})
+                profile = (
+                    mechanism_input.get("funding_profile")
+                    if isinstance(mechanism_input, Mapping)
+                    else None
+                )
+                profile_details = (
+                    status.public_details.get("profiles", {}).get(str(profile), {})
+                    if isinstance(status.public_details, Mapping)
+                    else {}
+                )
+                blocker_codes = ",".join(
+                    str(blocker.get("code"))
+                    for blocker in profile_details.get("blockers", ())
+                    if isinstance(blocker, Mapping) and blocker.get("code")
+                )
+                logger.warning(
+                    "[SETTLEMENT] option suppressed mechanism=%s profile=%s blockers=%s",
+                    status.mechanism,
+                    profile,
+                    blocker_codes,
                 )
             accepted_escrows.extend(
                 dict(item) for item in envelope.get("accepted_escrows", ())

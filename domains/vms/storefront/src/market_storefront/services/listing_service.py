@@ -265,25 +265,6 @@ class ListingService:
             "accepted_escrows": list(request.accepted_escrows),
             "claimant_principal": self._marketplace_signer.identity,
         }
-        if request.settlement_config is not None:
-            spec = (
-                request.settlement_config.model_dump(mode="python")
-                if hasattr(request.settlement_config, "model_dump")
-                else dict(request.settlement_config)
-            )
-            resources.update(spec)
-            resolver_id = spec.get("resolver_id")
-            if resolver_id is not None:
-                stripe = composition.settlement_config.mechanism_config("stripe")
-                profiles = getattr(stripe, "condition_profiles", {}) if stripe else {}
-                condition = profiles.get(spec.get("condition_profile"))
-                configured = (
-                    condition.evaluator.resolver_id if condition is not None else None
-                )
-                if resolver_id != configured:
-                    raise ValueError(
-                        "listing resolver does not match configured condition profile"
-                    )
         try:
             accepted, options, _readiness = await composition.publication_artifacts(
                 resources,
@@ -318,11 +299,7 @@ class ListingService:
                 "Listing offer must be a compute resource (the buyer-as-maker "
                 "token-offer shape was removed with the demand_resource cutover)."
             )
-        if (
-            not request.accepted_escrows
-            and not getattr(request, "settlements", ())
-            and request.settlement_config is None
-        ):
+        if not request.accepted_escrows and not getattr(request, "settlements", ()):
             raise ValueError("at least one settlement input is required")
         demands = [
             d.model_dump(mode="json") if hasattr(d, "model_dump") else dict(d)

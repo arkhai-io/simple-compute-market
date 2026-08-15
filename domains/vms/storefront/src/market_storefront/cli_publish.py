@@ -483,7 +483,6 @@ def _publish_offer(
     max_duration_seconds: int | None,
     *,
     settlements: list[dict[str, Any]] | None = None,
-    settlement_config: dict[str, Any] | None = None,
 ) -> dict:
     """POST /listings/create and return the callback response mapping."""
     from .utils.config import resolve_marketplace_signer
@@ -500,7 +499,6 @@ def _publish_offer(
                 offer=offer,
                 accepted_escrows=accepted_escrows,
                 settlements=settlements,
-                settlement_config=settlement_config,
                 demands=demands,
                 max_duration_seconds=max_duration_seconds,
             )

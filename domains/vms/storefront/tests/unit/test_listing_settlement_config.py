@@ -7,46 +7,22 @@ import pytest
 from market_settlement_runtime import SettlementPublicationClause
 from pydantic import ValidationError
 
-from market_storefront.models.listing_models import (
-    HostedFiatSettlementConfig,
-    VmCreateListingRequest,
-)
+from market_storefront.models.listing_models import VmCreateListingRequest
 from market_storefront.services.listing_service import ListingService
 from tests.fake_site import TEST_MARKETPLACE_SIGNER
 
-_VALID_CONFIG = {
-    "account_ref": "acct-seller",
-    "currency": "usd",
-    "rate_minor_units": 125,
-    "condition_profile": "vm-fulfillment",
-    "resolver_id": None,
-}
 
 
-@pytest.mark.parametrize(
-    "update",
-    [
-        {"account_ref": " acct-seller"},
-        {"currency": "USD"},
-        {"rate_minor_units": True},
-        {"rate_minor_units": 0},
-        {"condition_profile": "vm-fulfillment "},
-        {"resolver_id": ""},
-        {"provider_secret": "must-not-cross-the-boundary"},
-    ],
-)
-def test_hosted_fiat_settlement_config_rejects_malformed_payload(update) -> None:
-    payload = {**_VALID_CONFIG, **update}
-
-    with pytest.raises(ValidationError):
-        HostedFiatSettlementConfig.model_validate(payload)
-
-
-def test_vm_listing_request_validates_hosted_fiat_settlement_config() -> None:
-    with pytest.raises(ValidationError):
+def test_vm_listing_request_rejects_removed_scalar_hosted_config() -> None:
+    with pytest.raises(ValidationError, match="settlement_config"):
         VmCreateListingRequest(
             offer={},
-            settlement_config={**_VALID_CONFIG, "resolver_id": " resolver-main"},
+            settlement_config={
+                "account_ref": "acct-seller",
+                "currency": "usd",
+                "rate_minor_units": 125,
+                "condition_profile": "vm-fulfillment",
+            },
         )
 
 
@@ -67,7 +43,8 @@ def test_clause_only_listing_request_is_a_valid_publication_input() -> None:
                 rate="2",
                 per="hour",
                 mechanism_input={
-                    "method": "card",
+                    "funding_profile": "card.v1",
+                    "interaction": "interactive",
                     "funds_flow": "separate_charges_transfers",
                 },
             )
@@ -94,7 +71,8 @@ async def test_clause_only_create_persists_canonical_clause_before_publication(
         rate="2",
         per="hour",
         mechanism_input={
-            "method": "card",
+            "funding_profile": "card.v1",
+            "interaction": "interactive",
             "funds_flow": "separate_charges_transfers",
         },
     )
@@ -175,18 +153,18 @@ async def test_direct_settlement_options_are_rejected() -> None:
 
 
 @pytest.mark.asyncio
-async def test_registration_composition_receives_valid_hosted_listing_input() -> None:
+async def test_registration_composition_receives_ordered_hosted_clauses() -> None:
     option = {
         "option_id": "hosted",
         "mechanism": "fiat.stripe.v1",
         "asset": "usd",
         "rates": [{"field": "amount", "per": "hour", "value": "125"}],
-        "params": {"account_ref": "acct-seller"},
+        "params": {
+            "account_ref": "acct-seller",
+            "funding_profile": "us_ach_debit.v1",
+        },
     }
     composition = SimpleNamespace(
-        settlement_config=SimpleNamespace(
-            mechanism_config=lambda _key: SimpleNamespace(condition_profiles={})
-        ),
         publication_artifacts=AsyncMock(return_value=([], [option], ())),
     )
     service = ListingService(
@@ -194,13 +172,32 @@ async def test_registration_composition_receives_valid_hosted_listing_input() ->
         marketplace_signer=TEST_MARKETPLACE_SIGNER,
         settlement_composition_provider=lambda: composition,
     )
-    request = VmCreateListingRequest(offer={}, settlement_config=_VALID_CONFIG)
+    clauses = [
+        SettlementPublicationClause(
+            mechanism="fiat.stripe.v1",
+            asset="usd",
+            rate="125",
+            per="hour",
+            mechanism_input={
+                "funding_profile": "us_ach_debit.v1",
+                "interaction": "interactive",
+                "funds_flow": "separate_charges_transfers",
+            },
+        )
+    ]
+    request = VmCreateListingRequest(offer={}, settlements=clauses)
 
-    accepted, options = await service._derive_settlement_artifacts(request)
+    accepted, options = await service._derive_settlement_artifacts(
+        request,
+        clauses=tuple(clauses),
+    )
 
     assert accepted == []
     assert options == [option]
-    resources = composition.publication_artifacts.await_args.args[0]
-    assert resources["account_ref"] == "acct-seller"
-    assert resources["rate_minor_units"] == 125
-    assert resources["claimant_principal"] == TEST_MARKETPLACE_SIGNER.identity
+    composition.publication_artifacts.assert_awaited_once_with(
+        {
+            "accepted_escrows": [],
+            "claimant_principal": TEST_MARKETPLACE_SIGNER.identity,
+        },
+        clauses=clauses,
+    )
