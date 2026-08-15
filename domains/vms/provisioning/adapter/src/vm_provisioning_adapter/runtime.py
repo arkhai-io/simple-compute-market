@@ -38,7 +38,7 @@ class VmProvisioningRuntime:
     settlement_repository: Any
     teardown_port: Any
 
-    def fulfillment_provider(self, resource_pool_service):
+    def fulfillment_provider(self):
         return AnsibleFulfillmentProvider(
             job_service=self.job_service,
             job_queue_provider=self.job_queue_provider,
@@ -47,7 +47,7 @@ class VmProvisioningRuntime:
     def readiness(self) -> dict[str, bool]:
         return {"ansible_service": self.ansible_service is not None}
 
-    def adapter_bundle(self, site_authority, resource_pool_service):
+    def adapter_bundle(self, site_authority):
         return build_vm_adapter_bundle(
             compute_adapter=VmComputeAdapter(
                 site_authority,
@@ -58,7 +58,8 @@ class VmProvisioningRuntime:
                 session_factory=self.session_factory,
                 teardown_port=self.teardown_port,
             ),
-            fulfillment_provider=self.fulfillment_provider(resource_pool_service),
+            fulfillment_provider=self.fulfillment_provider(),
+            pool_config_handler=self.pool_config_handler,
             readiness_check=self.readiness,
         )
 
