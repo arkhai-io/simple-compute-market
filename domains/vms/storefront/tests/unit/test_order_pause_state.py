@@ -16,6 +16,7 @@ import pytest_asyncio
 from market_core.schemas import EscrowProposal
 from market_identity import TrustedIdentitySet, create_signer
 
+from market_storefront.domain_runtime import build_vm_storefront_domain
 from market_storefront.utils.sqlite_client import SQLiteClient
 from market_storefront.utils.sync_negotiation import (
     OfferUnfulfillableError,
@@ -40,7 +41,7 @@ _PROVISIONING_AUTHORITIES = TrustedIdentitySet(
 
 @pytest_asyncio.fixture
 async def db(tmp_path) -> SQLiteClient:
-    client = SQLiteClient(db_path=str(tmp_path / "test.db"))
+    client = SQLiteClient(db_path=str(tmp_path / "test.db"), domain=build_vm_storefront_domain())
     # Seed a minimal order row to test pause helpers against
     from datetime import datetime
     await client.upsert_listing(
@@ -221,7 +222,7 @@ class TestStartSyncNegotiationPauseGuard:
 
         from market_storefront.utils.sync_negotiation import start_sync_negotiation
         with pytest.raises(StorefrontPausedError) as exc_info:
-            await start_sync_negotiation(sqlite_client=db,
+            await start_sync_negotiation(domain=db.market_domain, sqlite_client=db,
             our_listing_id="order-001", buyer_principal=_BUYER_PRINCIPAL, seller_principal=_SELLER_PRINCIPAL, proposal=EscrowProposal(chain_name="anvil", escrow_address="0x"+"0"*40, fields={"amount": 5000, "token": "0x"+"a"*40}, expiration_unix=2000000000),
             our_base_url="http://seller:8001",
             their_agent_url="0xBuyer",)
@@ -235,7 +236,7 @@ class TestStartSyncNegotiationPauseGuard:
 
         from market_storefront.utils.sync_negotiation import start_sync_negotiation
         with pytest.raises(StorefrontPausedError) as exc_info:
-            await start_sync_negotiation(sqlite_client=db,
+            await start_sync_negotiation(domain=db.market_domain, sqlite_client=db,
             our_listing_id="order-001", buyer_principal=_BUYER_PRINCIPAL, seller_principal=_SELLER_PRINCIPAL, proposal=EscrowProposal(chain_name="anvil", escrow_address="0x"+"0"*40, fields={"amount": 5000, "token": "0x"+"a"*40}, expiration_unix=2000000000),
             our_base_url="http://seller:8001",
             their_agent_url="0xBuyer",)
@@ -250,7 +251,7 @@ class TestStartSyncNegotiationPauseGuard:
         from market_storefront.utils.sync_negotiation import start_sync_negotiation
         # order-001 has no strategy set, so we expect ValueError not paused
         with pytest.raises((ValueError, Exception)) as exc_info:
-            await start_sync_negotiation(sqlite_client=db,
+            await start_sync_negotiation(domain=db.market_domain, sqlite_client=db,
             our_listing_id="order-001", buyer_principal=_BUYER_PRINCIPAL, seller_principal=_SELLER_PRINCIPAL, proposal=EscrowProposal(chain_name="anvil", escrow_address="0x"+"0"*40, fields={"amount": 5000, "token": "0x"+"a"*40}, expiration_unix=2000000000),
             our_base_url="http://seller:8001",
             their_agent_url="0xBuyer",)
@@ -272,7 +273,7 @@ class TestStartSyncNegotiationPauseGuard:
         from market_storefront.utils.sync_negotiation import start_sync_negotiation
         from market_core.schemas import EscrowProposal, ProvisionTerms
         with pytest.raises(OfferUnfulfillableError) as exc_info:
-            await start_sync_negotiation(sqlite_client=db,
+            await start_sync_negotiation(domain=db.market_domain, sqlite_client=db,
             our_listing_id="order-001", buyer_principal=_BUYER_PRINCIPAL, seller_principal=_SELLER_PRINCIPAL, proposal=EscrowProposal(chain_name="anvil", escrow_address="0x"+"0"*40, fields={"amount": 5000, "token": "0x"+"a"*40}, expiration_unix=2000000000),
             provision_terms=ProvisionTerms(
                 kind="compute.v1",

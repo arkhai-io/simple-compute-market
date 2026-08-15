@@ -15,6 +15,7 @@ from arkhai_vms import VmProvisionTerms
 from core_storefront.stage_log import stage_event
 from domains.vms.listings import reconciler as listings_reconciler
 from market_alkahest import create_alkahest_registration
+from market_core import MarketDomainContract
 from market_core.schemas import (
     EscrowProposal,
     SettlementOption,
@@ -43,7 +44,6 @@ from market_settlement_runtime import (
     derive_obligation_ref,
 )
 
-from market_storefront import domain_runtime
 from market_storefront.hosted_evidence import encode_hosted_fulfillment_ref
 from market_storefront.services.capacity_client import build_capacity_client
 from market_storefront.utils import config as storefront_config
@@ -79,6 +79,7 @@ class VmProjectionContext:
 
 @dataclass(frozen=True)
 class VmSettlementComposition:
+    domain: MarketDomainContract
     repository: SettlementSQLiteRepository
     runtime: SettlementRuntime
     coordinator: SettlementJobCoordinator
@@ -259,15 +260,25 @@ def build_storefront_publication_clause_compiler() -> Callable[
 
 
 def _settlement_plan_obligations(
-    *, proposal: EscrowProposal, agreed_amount: int, duration_seconds: int
+    *,
+    domain: MarketDomainContract,
+    proposal: EscrowProposal,
+    agreed_amount: int,
+    duration_seconds: int,
+    buyer_principal: Identity,
+    seller_principal: Identity,
 ) -> tuple[dict[str, Any], ...]:
-    settlement = domain_runtime.get_market_domain_contract().settlement
+    settlement = domain.settlement
     if settlement is None:
-        raise RuntimeError("VM settlement capability is not installed")
+        raise RuntimeError(
+            f"domain {domain.identity!s} has no settlement-plan capability"
+        )
     artifacts = settlement.build_plan(
         proposal=proposal,
         agreed_amount=agreed_amount,
         duration_seconds=duration_seconds,
+        buyer_principal=buyer_principal,
+        seller_principal=seller_principal,
     )
     plan = artifacts.get("settlement_plan") if isinstance(artifacts, dict) else None
     obligations = plan.get("obligations") if isinstance(plan, dict) else None
@@ -280,6 +291,7 @@ def _settlement_plan_obligations(
 
 async def prepare_vm_settlement(
     *,
+    domain: MarketDomainContract,
     escrow_uid: str,
     negotiation_id: str,
     local_principal: Identity,
@@ -290,6 +302,11 @@ async def prepare_vm_settlement(
 ) -> PreparedSettlement:
     """Reload, verify, and pin accepted VM terms before provisioning."""
     del request
+    if getattr(sqlite_client, "market_domain", None) is not domain:
+        raise RuntimeError(
+            "settlement preparation and SQLite repository must share the exact "
+            "market-domain contract object"
+        )
 
     thread = await sqlite_client.load_negotiation_thread_row(
         negotiation_id=negotiation_id
@@ -353,9 +370,12 @@ async def prepare_vm_settlement(
         raise ValueError("escrow verification did not identify an exact obligation")
 
     obligations = _settlement_plan_obligations(
+        domain=domain,
         proposal=proposal,
         agreed_amount=int(thread["agreed_price"]),
         duration_seconds=provision.duration_seconds,
+        buyer_principal=Identity.model_validate(thread.get("buyer_principal")),
+        seller_principal=local_principal,
     )
     if obligation_index < 0 or obligation_index >= len(obligations):
         raise ValueError(
@@ -427,16 +447,20 @@ async def reserve_vm_settlement_start(
 
 
 async def fulfill_vm_settlement(
+    domain: MarketDomainContract,
     prepared: PreparedSettlement,
     *,
+    sqlite_client: Any,
     mechanism_client: Any,
 ) -> FulfillmentOutcome:
     fulfillment_input = prepared.fulfillment_input
     if not isinstance(fulfillment_input, VmFulfillmentInput):
         raise TypeError("VM settlement fulfillment input is missing")
-    fulfillment = domain_runtime.get_market_domain_contract().fulfillment
+    fulfillment = domain.fulfillment
     if fulfillment is None:
-        raise RuntimeError("VM fulfillment capability is not installed")
+        raise RuntimeError(
+            f"domain {domain.identity!s} has no fulfillment capability"
+        )
     selected_obligation = prepared.obligations[prepared.selected_obligation_index]
     hosted = selected_obligation.get("mechanism") == "fiat.stripe.v1"
     delivery_client = fulfillment_input.evidence_client if hosted else mechanism_client
@@ -446,6 +470,7 @@ async def fulfill_vm_settlement(
     if not delivery_anchor:
         raise ValueError("settlement fulfillment anchor is unavailable")
     result = await fulfillment.fulfill(
+        sqlite_client=sqlite_client,
         client=delivery_client,
         escrow_uid=delivery_anchor,
         ssh_public_key=fulfillment_input.provision.ssh_public_key,
@@ -1034,8 +1059,10 @@ async def ensure_hosted_fulfillment(
     )
     try:
         outcome = await fulfill_vm_settlement(
+            composition.domain,
             prepared,
             mechanism_client=composition.mechanism_clients["fiat.stripe.v1"],
+            sqlite_client=sqlite_client,
         )
         if outcome.status != "fulfilled" or not outcome.fulfillment_ref:
             raise RuntimeError("hosted VM fulfillment did not succeed")
@@ -1156,11 +1183,17 @@ async def preflight_settlement_mechanisms(
 
 def build_vm_settlement_composition(
     *,
+    domain: MarketDomainContract,
     sqlite_client: Any,
     alkahest_clients: Mapping[str, Any],
     marketplace_signer: Signer,
 ) -> VmSettlementComposition:
     """Construct the VM runtime from explicit settlement mechanisms."""
+    if getattr(sqlite_client, "market_domain", None) is not domain:
+        raise RuntimeError(
+            "settlement composition and SQLite repository must share the exact "
+            "market-domain contract object"
+        )
 
     repository = SettlementSQLiteRepository(
         sqlite_client.db_path,
@@ -1304,15 +1337,21 @@ def build_vm_settlement_composition(
         runtime,
         prepare=partial(
             prepare_vm_settlement,
+            domain=domain,
             sqlite_client=sqlite_client,
             local_principal=marketplace_signer.identity,
         ),
         reserve_start=reserve_start,
-        fulfill=fulfill_vm_settlement,
+        fulfill=partial(
+            fulfill_vm_settlement,
+            domain,
+            sqlite_client=sqlite_client,
+        ),
         persist_outcome=persist_vm_settlement_outcome,
         wake_servicing=wake_servicing,
     )
     composition = VmSettlementComposition(
+        domain=domain,
         repository=repository,
         runtime=runtime,
         coordinator=coordinator,

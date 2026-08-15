@@ -26,6 +26,7 @@ from core_storefront.models.listing_models import (
 )
 from core_storefront.stage_log import stage_event
 from domains.vms.listings.resources import parse_resource_from_dict
+from market_core import MarketDomainContract
 from market_identity import Signer
 from market_settlement_runtime import (
     SettlementPublicationClause,
@@ -39,6 +40,7 @@ class ListingService:
     def __init__(
         self,
         *,
+        domain: MarketDomainContract,
         sqlite_client: Any,
         marketplace_signer: Signer,
         alkahest_clients: dict[str, Any] | None = None,
@@ -49,6 +51,12 @@ class ListingService:
             get_evm_wallet_private_key,
         )
 
+        if getattr(sqlite_client, "market_domain", None) is not domain:
+            raise RuntimeError(
+                "listing service and SQLite repository must share the exact "
+                "market-domain contract object"
+            )
+        self._domain = domain
         self._db = sqlite_client
         self._marketplace_signer = marketplace_signer
         self._alkahest_clients: dict[str, Any] = alkahest_clients or {}
@@ -60,6 +68,11 @@ class ListingService:
             self._alkahest_clients and CHAINS and get_evm_wallet_private_key()
         )
         self._alkahest_available = bool(self._alkahest_clients)
+    @property
+    def market_domain(self) -> MarketDomainContract:
+        """Return the contract governing listing persistence and publication."""
+        return self._domain
+
 
     async def _resolve_chain_for_escrow(
         self, escrow_uid: str
@@ -286,11 +299,7 @@ class ListingService:
 
         try:
             normalized_offer = self._normalize_token_resource(request.offer)
-            from market_storefront.domain_runtime import (
-                get_market_domain_contract,
-            )
-
-            get_market_domain_contract().codecs.listing(normalized_offer)
+            self._domain.codecs.listing(normalized_offer)
             offer_resource = parse_resource_from_dict(normalized_offer)
         except Exception as exc:
             raise ValueError(f"Invalid offer resource: {exc}") from exc
@@ -391,7 +400,10 @@ class ListingService:
             )
             return CreateListingResponse(status="created", listing_id=listing_id)
 
-        publish_result = await publish_order_to_registry(listing_dict)
+        publish_result = await publish_order_to_registry(
+            listing_dict,
+            sqlite_client=self._db,
+        )
         return CreateListingResponse(
             status="created",
             listing_id=listing_id,
@@ -445,7 +457,7 @@ class ListingService:
             "settlement_options": settlement_options,
         }
         listing = Listing.model_validate(updated)
-        await publish_order_to_registry(listing)
+        await publish_order_to_registry(listing, sqlite_client=self._db)
         return listing.model_dump(mode="json")
 
     async def close_listing(self, listing_id: str) -> CloseListingResponse:
@@ -458,7 +470,10 @@ class ListingService:
         """
         from market_storefront.services.publication_service import close_order
 
-        result = await close_order({"listing_id": listing_id})
+        result = await close_order(
+            {"listing_id": listing_id},
+            sqlite_client=self._db,
+        )
         return CloseListingResponse(
             status=result.get("status", "closed"),
             listing_id=listing_id,
@@ -505,6 +520,7 @@ class ListingService:
             decision,
         ) = await _compute_round_zero_decision(
             sqlite_client=self._db,
+            domain=self._domain,
             listing=listing,
             their_proposal=proposal,
             requested_duration_seconds=requested_duration_seconds,

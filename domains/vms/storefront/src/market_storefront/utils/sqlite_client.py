@@ -16,6 +16,7 @@ import logging
 import sqlite3
 import uuid
 from datetime import datetime
+from collections.abc import Collection, Sequence
 from typing import Any
 
 from core_storefront.sqlite_client import (
@@ -31,6 +32,8 @@ from domains.vms.listings.resource_csv_importer import (
 )
 from market_hosted_settlement import HOSTED_SETTLEMENT_MIGRATIONS
 from market_settlement_runtime import settlement_migrations
+from market_core import MarketDomainContract, validate_domain_contract
+from market_identity import Identity
 
 from .config import BASE_URL_OVERRIDE, resolve_marketplace_signer, settings
 from .migrations import (  # noqa: F401 — re-exported (tests import via here)
@@ -43,6 +46,28 @@ logger = logging.getLogger(__name__)
 
 class SQLiteClient(CoreSQLiteClient):
     """Core market-state client + the VM domain's inventory tables."""
+    def __init__(
+        self,
+        db_path: str,
+        *,
+        domain: MarketDomainContract,
+        local_listing_principal: Identity | None = None,
+        expected_legacy_sellers: Collection[str] = (),
+        extra_migrations: Sequence[MigrationLike] = (),
+    ) -> None:
+        self._market_domain = validate_domain_contract(domain)
+        super().__init__(
+            db_path,
+            local_listing_principal=local_listing_principal,
+            expected_legacy_sellers=expected_legacy_sellers,
+            extra_migrations=extra_migrations,
+        )
+
+    @property
+    def market_domain(self) -> MarketDomainContract:
+        """Return the immutable contract governing persisted VM artifacts."""
+        return self._market_domain
+
 
     _ESCROW_COLS = (
         *CoreSQLiteClient._ESCROW_COLS,
@@ -1278,13 +1303,21 @@ class SQLiteClient(CoreSQLiteClient):
 _sqlite_client: SQLiteClient | None = None
 
 
-def get_sqlite_client() -> SQLiteClient:
+def get_sqlite_client(*, domain: MarketDomainContract) -> SQLiteClient:
     global _sqlite_client
+    domain = validate_domain_contract(domain)
     if _sqlite_client is None:
         signer = resolve_marketplace_signer()
         _sqlite_client = SQLiteClient(
             db_path=settings.db_path,
+            domain=domain,
             local_listing_principal=signer.identity,
             expected_legacy_sellers=(BASE_URL_OVERRIDE,),
+        )
+    elif _sqlite_client.market_domain is not domain:
+        raise RuntimeError(
+            "SQLite client is already bound to a different market-domain "
+            f"contract object (existing={_sqlite_client.market_domain.identity!s}, "
+            f"requested={domain.identity!s})"
         )
     return _sqlite_client

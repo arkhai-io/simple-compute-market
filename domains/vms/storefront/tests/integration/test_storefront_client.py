@@ -56,8 +56,9 @@ async def mock_svc():
 
 @pytest_asyncio.fixture
 async def orders_client(mock_svc, tmp_path) -> AsyncIterator[httpx.AsyncClient]:
+    from market_storefront.domain_runtime import build_vm_storefront_domain
     from market_storefront.utils.sqlite_client import SQLiteClient
-    db = SQLiteClient(db_path=str(tmp_path / "orders_test.db"))
+    db = SQLiteClient(db_path=str(tmp_path / "orders_test.db"), domain=build_vm_storefront_domain())
     _container.resolved_sqlite_client = db
     _container.resolved_listing_service = mock_svc
 

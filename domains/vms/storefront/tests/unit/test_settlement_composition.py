@@ -1,8 +1,9 @@
 from __future__ import annotations
 
+from dataclasses import replace
 import json
 from types import SimpleNamespace
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, Mock
 
 import pytest
 from arkhai_vms import make_vm_provision_terms
@@ -17,6 +18,7 @@ from market_storefront.settlement_composition import (
     _hosted_evidence_input,
     _terminal_requires_lease_truncation,
     build_storefront_settlement_registry,
+    build_vm_settlement_composition,
     fulfill_vm_settlement,
     hosted_settlement_projection,
     persist_vm_settlement_outcome,
@@ -24,6 +26,7 @@ from market_storefront.settlement_composition import (
     reserve_vm_settlement_start,
     serialize_settlement_job,
 )
+from market_storefront.domain_runtime import build_vm_storefront_domain
 from market_storefront.utils.sqlite_client import SQLiteClient
 
 _BUYER_SIGNER = Ed25519Signer(b"\x31" * 32)
@@ -87,7 +90,10 @@ def _prepared(db: SQLiteClient, *, escrow_uid: str = "0xescrow") -> PreparedSett
 
 @pytest.fixture
 def db(tmp_path):
-    return SQLiteClient(db_path=str(tmp_path / "vm-settlement.db"))
+    return SQLiteClient(
+        db_path=str(tmp_path / "vm-settlement.db"),
+        domain=build_vm_storefront_domain(),
+    )
 
 
 def test_storefront_installs_both_mechanism_registrations():
@@ -192,20 +198,34 @@ async def test_hosted_projection_exposes_portable_fulfillment_binding():
 
 
 @pytest.mark.asyncio
-async def test_prepare_pins_the_exact_verified_obligation(db, monkeypatch):
+async def test_prepare_pins_the_exact_verified_obligation(tmp_path, monkeypatch):
     proposal = {
         "chain_name": "anvil",
         "escrow_address": "0x" + "11" * 20,
         "fields": {"token": "0x" + "22" * 20},
         "expiration_unix": 1_900_000_000,
     }
+    obligations = [_obligation(0), _obligation(1)]
+    domain = build_vm_storefront_domain()
+    domain = replace(
+        domain,
+        settlement=replace(
+            domain.settlement,
+            build_plan=lambda **_kwargs: {
+                "settlement_plan": {"obligations": obligations}
+            },
+        ),
+    )
+    db = SQLiteClient(
+        db_path=str(tmp_path / "injected-plan.db"),
+        domain=domain,
+    )
     db.load_negotiation_thread_row = AsyncMock(
         return_value={
             "negotiation_id": "neg-1",
+            "our_listing_id": "listing-1",
             "terminal_state": "success",
             "agreed_price": 42,
-            "agreed_duration_seconds": 3600,
-            "our_listing_id": "listing-1",
             "buyer_principal": _BUYER.model_dump(mode="json"),
             "buyer_escrow_proposal": proposal,
             "provision_terms": _ACCEPTED_PROVISION,
@@ -218,22 +238,12 @@ async def test_prepare_pins_the_exact_verified_obligation(db, monkeypatch):
             "max_duration_seconds": 3600,
         }
     )
-    obligations = [_obligation(0), _obligation(1)]
     verify = AsyncMock(return_value=1)
     monkeypatch.setattr(
         "market_storefront.utils.escrow_verification.verify_escrow_for_settlement",
         verify,
     )
-    monkeypatch.setattr(
-        "market_storefront.domain_runtime.get_market_domain_contract",
-        lambda: SimpleNamespace(
-            settlement=SimpleNamespace(
-                build_plan=lambda **_kwargs: {
-                    "settlement_plan": {"obligations": obligations}
-                }
-            )
-        ),
-    )
+    assert domain.settlement is not None
     monkeypatch.setattr(
         "domains.vms.listings.reconciler.site_id_for_listing",
         lambda *_args: "site-1",
@@ -244,6 +254,7 @@ async def test_prepare_pins_the_exact_verified_obligation(db, monkeypatch):
     )
 
     prepared = await prepare_vm_settlement(
+        domain=domain,
         escrow_uid="0xverified",
         negotiation_id="neg-1",
         local_principal=_SELLER,
@@ -291,6 +302,7 @@ async def test_prepare_hosted_rejects_the_removed_legacy_start_route(db, monkeyp
         match="accepted settlement endpoint",
     ):
         await prepare_vm_settlement(
+            domain=db.market_domain,
             escrow_uid="settlement-1",
             negotiation_id="neg-hosted",
             local_principal=_SELLER,
@@ -331,6 +343,7 @@ async def test_prepare_rejects_missing_accepted_proposal_without_fallback(
 
     with pytest.raises(ValueError, match="no persisted accepted escrow proposal"):
         await prepare_vm_settlement(
+            domain=db.market_domain,
             escrow_uid="0xverified",
             negotiation_id="neg-1",
             local_principal=_SELLER,
@@ -373,7 +386,7 @@ async def test_reserve_persists_immutable_obligation_mapping_before_fulfillment(
 
 @pytest.mark.asyncio
 async def test_fulfillment_keeps_private_delivery_out_of_public_runtime_result(
-    db, monkeypatch
+    tmp_path,
 ):
     result = {
         "status": "fulfilled",
@@ -383,15 +396,22 @@ async def test_fulfillment_keeps_private_delivery_out_of_public_runtime_result(
         "tenant_credentials": {"password": "secret", "key_type": "ed25519"},
     }
     fulfill = AsyncMock(return_value=result)
-    monkeypatch.setattr(
-        "market_storefront.domain_runtime.get_market_domain_contract",
-        lambda: SimpleNamespace(fulfillment=SimpleNamespace(fulfill=fulfill)),
+    domain = build_vm_storefront_domain()
+    domain = replace(
+        domain,
+        fulfillment=replace(domain.fulfillment, fulfill=fulfill),
+    )
+    db = SQLiteClient(
+        db_path=str(tmp_path / "injected-fulfillment.db"),
+        domain=domain,
     )
     prepared = _prepared(db)
 
     outcome = await fulfill_vm_settlement(
+        domain,
         prepared,
         mechanism_client=object(),
+        sqlite_client=db,
     )
 
     assert outcome.status == "fulfilled"
@@ -400,6 +420,28 @@ async def test_fulfillment_keeps_private_delivery_out_of_public_runtime_result(
     assert "tenant_credentials" not in outcome.public_result
     assert outcome.private_result == result
     assert fulfill.await_args.kwargs["site_id"] == "site-1"
+
+
+def test_composition_rejects_repository_domain_mismatch_before_registration(
+    db,
+    monkeypatch,
+) -> None:
+    registry_builder = Mock()
+    monkeypatch.setattr(
+        "market_storefront.settlement_composition.build_storefront_settlement_registry",
+        registry_builder,
+    )
+    other_domain = build_vm_storefront_domain()
+
+    with pytest.raises(RuntimeError, match="exact market-domain contract object"):
+        build_vm_settlement_composition(
+            domain=other_domain,
+            sqlite_client=db,
+            alkahest_clients={},
+            marketplace_signer=_SELLER_SIGNER,
+        )
+
+    registry_builder.assert_not_called()
 
 
 @pytest.mark.asyncio

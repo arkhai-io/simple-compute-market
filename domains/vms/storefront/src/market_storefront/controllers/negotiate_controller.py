@@ -19,6 +19,7 @@ from core_storefront.models.negotiation_models import (
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi_utils.cbv import cbv
 from pydantic import ValidationError
+from market_core import MarketDomainContract
 
 import market_storefront.container as _container
 from market_storefront.middleware import buyer_auth
@@ -47,8 +48,17 @@ class NegotiateController:
     def __init__(
         self,
         db=Depends(lambda: _container.resolved_sqlite_client),
+        domain: MarketDomainContract = Depends(
+            lambda: _container.resolved_market_domain
+        ),
     ) -> None:
+        if domain is None or getattr(db, "market_domain", None) is not domain:
+            raise RuntimeError(
+                "negotiation controller requires one app-selected "
+                "market-domain contract"
+            )
         self._db = db
+        self._domain = domain
 
     @router.post(
         "/new",
@@ -94,6 +104,7 @@ class NegotiateController:
             )
         try:
             result = await start_sync_negotiation(
+                domain=self._domain,
                 sqlite_client=self._db,
                 our_listing_id=body.listing_id,
                 buyer_principal=body.buyer_principal,
@@ -188,6 +199,7 @@ class NegotiateController:
 
         try:
             result = await continue_sync_negotiation(
+                domain=self._domain,
                 sqlite_client=self._db,
                 neg_id=neg_id,
                 buyer_action=body.action,

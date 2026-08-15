@@ -299,32 +299,37 @@ async def test_subscriber_closes_and_reopens_with_site_availability(
     client: cc.SiteCapacityClient,
 ):
     calls: list[tuple[str, dict | None]] = []
+    repository = SimpleNamespace(db_path="/tmp/x.db")
 
     async def fake_close(
         db_path,
         *,
+        sqlite_client,
         home_site=None,
         configured_site_count=0,
         member_availability=None,
         site_pool_projection=None,
         site_capacity_buckets=None,
     ):
+        assert sqlite_client is repository
         calls.append(("close", None, member_availability))
         return ["lst-1"]
 
     async def fake_reopen(
         db_path,
         *,
+        sqlite_client,
         home_site=None,
         member_availability=None,
         site_pool_projection=None,
         site_capacity_buckets=None,
     ):
+        assert sqlite_client is repository
         calls.append(("reopen", None, member_availability))
         return []
 
     subscriber = cc._make_listing_reconcile_subscriber(
-        lambda: SimpleNamespace(db_path="/tmp/x.db"),
+        lambda: repository,
         client,
     )
     await client.reserve(
@@ -359,32 +364,37 @@ async def test_subscriber_runs_both_passes_for_mixed_direction_capacity_change(
     "capacity_changed" must run both reconciliation passes and not be silently
     ignored like an unrecognized kind would be."""
     calls: list[str] = []
+    repository = SimpleNamespace(db_path="/tmp/x.db")
 
     async def fake_close(
         db_path,
         *,
+        sqlite_client,
         home_site=None,
         configured_site_count=0,
         member_availability=None,
         site_pool_projection=None,
         site_capacity_buckets=None,
     ):
+        assert sqlite_client is repository
         calls.append("close")
         return []
 
     async def fake_reopen(
         db_path,
         *,
+        sqlite_client,
         home_site=None,
         member_availability=None,
         site_pool_projection=None,
         site_capacity_buckets=None,
     ):
+        assert sqlite_client is repository
         calls.append("reopen")
         return []
 
     subscriber = cc._make_listing_reconcile_subscriber(
-        lambda: SimpleNamespace(db_path="/tmp/x.db"),
+        lambda: repository,
         client,
     )
     with (
@@ -424,9 +434,13 @@ async def test_poller_positions_at_head_then_emits_new_deltas(site: FakeSite):
     site._emit("reserved", "compute-kvm1-001")  # history — must NOT replay
 
     reconciles: list[dict] = []
+    repository = SimpleNamespace(db_path="/tmp/x.db")
 
-    async def fake_reconcile(db_path, **kwargs):
-        reconciles.append({"db_path": db_path, **kwargs})
+    async def fake_reconcile(db_path, *, sqlite_client, **kwargs):
+        assert sqlite_client is repository
+        reconciles.append(
+            {"db_path": db_path, "sqlite_client": sqlite_client, **kwargs}
+        )
         return []
 
     with (
@@ -434,10 +448,6 @@ async def test_poller_positions_at_head_then_emits_new_deltas(site: FakeSite):
         patch(
             "market_storefront.utils.config.settings",
             _settings(),
-        ),
-        patch(
-            "market_storefront.utils.sqlite_client.get_sqlite_client",
-            return_value=SimpleNamespace(db_path="/tmp/x.db"),
         ),
         patch(
             "market_storefront.services.publication_service."
@@ -450,7 +460,9 @@ async def test_poller_positions_at_head_then_emits_new_deltas(site: FakeSite):
             fake_reconcile,
         ),
     ):
-        task = asyncio.create_task(cc.capacity_events_poller_loop())
+        task = asyncio.create_task(
+            cc.capacity_events_poller_loop(repository)
+        )
         try:
             for _ in range(200):
                 if len(reconciles) >= 2:  # startup close+reopen ran
@@ -470,6 +482,7 @@ async def test_poller_positions_at_head_then_emits_new_deltas(site: FakeSite):
 
     assert len(reconciles) >= 2
     assert all(call["home_site"] == "dc-a" for call in reconciles[:2])
+    assert all(call["sqlite_client"] is repository for call in reconciles[:2])
     assert reconciles[0]["configured_site_count"] == 1
     assert [d.kind for d in seen] == ["committed"]
     assert seen[0].resource_id == "compute-kvm1-001"
@@ -668,16 +681,19 @@ class TestReconcileListingsUsesCachedProjectionWhenEnabled:
         )
 
         received: dict = {}
+        repository = SimpleNamespace(db_path="/tmp/x.db")
 
         async def fake_close(
             db_path,
             *,
+            sqlite_client,
             home_site=None,
             configured_site_count=0,
             member_availability=None,
             site_pool_projection=None,
             site_capacity_buckets=None,
         ):
+            assert sqlite_client is repository
             received["site_pool_projection"] = site_pool_projection
             received["site_capacity_buckets"] = site_capacity_buckets
             return []
@@ -685,15 +701,17 @@ class TestReconcileListingsUsesCachedProjectionWhenEnabled:
         async def fake_reopen(
             db_path,
             *,
+            sqlite_client,
             home_site=None,
             member_availability=None,
             site_pool_projection=None,
             site_capacity_buckets=None,
         ):
+            assert sqlite_client is repository
             return []
 
         subscriber = cc._make_listing_reconcile_subscriber(
-            lambda: SimpleNamespace(db_path="/tmp/x.db"),
+            lambda: repository,
             client,
         )
         with (
@@ -744,16 +762,19 @@ class TestReconcileListingsUsesCachedProjectionWhenEnabled:
         )
 
         received: dict = {}
+        repository = SimpleNamespace(db_path="/tmp/x.db")
 
         async def fake_close(
             db_path,
             *,
+            sqlite_client,
             home_site=None,
             configured_site_count=0,
             member_availability=None,
             site_pool_projection=None,
             site_capacity_buckets=None,
         ):
+            assert sqlite_client is repository
             received["site_pool_projection"] = site_pool_projection
             received["site_capacity_buckets"] = site_capacity_buckets
             return []
@@ -761,15 +782,17 @@ class TestReconcileListingsUsesCachedProjectionWhenEnabled:
         async def fake_reopen(
             db_path,
             *,
+            sqlite_client,
             home_site=None,
             member_availability=None,
             site_pool_projection=None,
             site_capacity_buckets=None,
         ):
+            assert sqlite_client is repository
             return []
 
         subscriber = cc._make_listing_reconcile_subscriber(
-            lambda: SimpleNamespace(db_path="/tmp/x.db"),
+            lambda: repository,
             client,
         )
         with (

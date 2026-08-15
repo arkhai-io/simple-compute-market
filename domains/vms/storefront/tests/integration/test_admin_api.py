@@ -38,6 +38,7 @@ from domains.vms.listings.reconciler import (
     mark_derived_listings_closed,
     record_derived_listing,
 )
+from market_storefront.domain_runtime import build_vm_storefront_domain
 from market_storefront.utils.sqlite_client import SQLiteClient
 
 from market_storefront.services.system_service import SystemService
@@ -66,7 +67,7 @@ _SERVICE_PRINCIPALS = TrustedIdentitySet(identities=(_SERVICE_SIGNER.identity,))
 
 @pytest_asyncio.fixture
 async def db(tmp_path) -> SQLiteClient:
-    return SQLiteClient(db_path=str(tmp_path / "admin_test.db"))
+    return SQLiteClient(db_path=str(tmp_path / "admin_test.db"), domain=build_vm_storefront_domain())
 
 
 @pytest_asyncio.fixture(autouse=True)
@@ -961,20 +962,15 @@ class TestRealOrchestrationCacheToReconciliation:
             capacity_buckets=ProjectionCache(client=None),
         )
 
-        with site_capacity(_fake_pool_site()) as capacity, \
-             patch.dict(spc._caches, {"default": caches}, clear=True), \
-             settings_overrides(**{"capacity.use_site_projection_for_listings": True}), \
-             patch(
-                 "market_storefront.services.publication_service.get_sqlite_client",
-                 return_value=db,
-             ):
-            # close_order (called for each stale listing) is registry-
-            # backed and has no real registry server here -- it falls
-            # back to get_sqlite_client() to confirm the DB-side close
-            # landed even when the registry push failed. That global
-            # singleton defaults to settings.db_path, not this test's
-            # own db fixture, so it must be patched here or the
-            # fallback check silently finds nothing.
+        with (
+            site_capacity(_fake_pool_site()) as capacity,
+            patch.dict(spc._caches, {"default": caches}, clear=True),
+            settings_overrides(
+                **{"capacity.use_site_projection_for_listings": True}
+            ),
+        ):
+            # The subscriber carries this test's repository into close and
+            # fallback checks, so the persisted state is authoritative.
             subscriber = _make_listing_reconcile_subscriber(lambda: db, capacity)
             await subscriber(CapacityDelta(kind="reserved", version=1))
 

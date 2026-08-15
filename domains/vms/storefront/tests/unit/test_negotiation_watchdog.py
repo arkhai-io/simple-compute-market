@@ -16,6 +16,7 @@ import pytest
 from market_identity import create_signer
 
 from market_storefront.negotiation_watchdog import _watchdog_tick
+from market_storefront.domain_runtime import build_vm_storefront_domain
 from market_storefront.utils.sqlite_client import SQLiteClient
 from tests._settings_overrides import settings_overrides
 
@@ -27,7 +28,7 @@ def _init_threads_table(db_path: str) -> None:
     """Create the minimal negotiation_threads schema + run migrations."""
     # Initialising SQLiteClient triggers the `_ensure_tables` migrations,
     # which create the full schema we need.
-    SQLiteClient(db_path=db_path)
+    SQLiteClient(db_path=db_path, domain=build_vm_storefront_domain())
 
 
 def _insert_thread(
@@ -84,7 +85,7 @@ async def test_stale_active_thread_is_abandoned(tmp_path):
     old_ts = (datetime.now(timezone.utc) - timedelta(hours=2)).isoformat()
     _insert_thread(db_path, negotiation_id="neg-stale-001", updated_at=old_ts)
 
-    client = SQLiteClient(db_path=db_path)
+    client = SQLiteClient(db_path=db_path, domain=build_vm_storefront_domain())
     with settings_overrides(negotiation_timeout_seconds=1800):
         n = await _watchdog_tick(client)
 
@@ -100,7 +101,7 @@ async def test_fresh_active_thread_is_left_alone(tmp_path):
     recent_ts = (datetime.now(timezone.utc) - timedelta(minutes=1)).isoformat()
     _insert_thread(db_path, negotiation_id="neg-fresh-001", updated_at=recent_ts)
 
-    client = SQLiteClient(db_path=db_path)
+    client = SQLiteClient(db_path=db_path, domain=build_vm_storefront_domain())
     with settings_overrides(negotiation_timeout_seconds=1800):
 
         n = await _watchdog_tick(client)
@@ -120,7 +121,7 @@ async def test_already_terminal_thread_is_not_re_marked(tmp_path):
         updated_at=old_ts, terminal_state="success",
     )
 
-    client = SQLiteClient(db_path=db_path)
+    client = SQLiteClient(db_path=db_path, domain=build_vm_storefront_domain())
     with settings_overrides(negotiation_timeout_seconds=1800):
 
         n = await _watchdog_tick(client)
@@ -144,7 +145,7 @@ async def test_mixed_threads_only_stale_active_abandoned(tmp_path):
         updated_at=old_ts, terminal_state="failure",
     )
 
-    client = SQLiteClient(db_path=db_path)
+    client = SQLiteClient(db_path=db_path, domain=build_vm_storefront_domain())
     with settings_overrides(negotiation_timeout_seconds=1800):
 
         n = await _watchdog_tick(client)

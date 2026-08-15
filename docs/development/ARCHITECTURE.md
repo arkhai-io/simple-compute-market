@@ -54,6 +54,10 @@ receipt = service(plan)
 
 Core owns schema-opaque carriers and role structure around these phases: signed transport, round sequencing, persistence mechanics, and deterministic handoffs. Domain packages own listing vocabulary, message content, validation, deterministic interpretation of terms, fulfillment requirements, and result vocabulary. Kit packages own reusable mechanisms and authorities, including the single commercial-settlement obligation lifecycle. Composition roots wire concrete domain and kit implementations into role packages.
 
+Each domain-owned storefront executable selects and validates one immutable `MarketDomainContract` at its outermost composition root before constructing persistence, services, workers, or the HTTP application. The validated object is then injected unchanged through application state, the lifespan-owned container, repositories, publication, negotiation, settlement, and fulfillment. A service must not recover domain behavior from module state, construct a replacement contract, or branch on a domain identity below that root.
+
+The VM storefront currently selects `compute.v1` once per process. This parameterization is deliberately behavior-preserving: existing single-domain rows have no domain discriminator and continue to be interpreted by the startup-selected contract, so restart requires no database migration. Per-record domain selection and dispatch belong to the multi-domain storefront composition layer.
+
 Two hooks remain separate when core-owned machinery or a typed invariant sits between them. They may be merged when the core does nothing between them and the split would expose only implementation detail.
 
 The registry is the schema-centralizing point for discovery. A registry publishes one filter/listing schema and remains opaque to market-domain payloads beyond its configured validation and filter vocabulary. A market-domain operator composes the relevant buyer and storefront plugins around that registry schema.

@@ -210,7 +210,6 @@ class TestDoProvision:
         sqlite_client = SimpleNamespace(update_escrow=AsyncMock())
         monkeypatch.setattr(fs, "build_fulfillment_client", lambda *_: fulfillment_client)
         monkeypatch.setattr(fs, "build_capacity_client", lambda *_: SimpleNamespace())
-        monkeypatch.setattr(fs, "get_sqlite_client", lambda: sqlite_client)
         monkeypatch.setattr(
             fs.settings, "provisioning",
             SimpleNamespace(
@@ -226,6 +225,7 @@ class TestDoProvision:
 
         result = await fs._do_provision(
             "ssh-ed25519 AAAA",
+            sqlite_client=sqlite_client,
             vm_host="kvm1",
             vm_target="tenant-abcd",
             on_job_submitted=_on_job_submitted,
@@ -262,7 +262,7 @@ class TestDoProvision:
     ):
         monkeypatch.setattr(fs, "build_fulfillment_client", lambda *_: fulfillment_client)
         monkeypatch.setattr(fs, "build_capacity_client", lambda *_: SimpleNamespace())
-        monkeypatch.setattr(fs, "get_sqlite_client", lambda: SimpleNamespace(update_escrow=AsyncMock()))
+        sqlite_client = SimpleNamespace(update_escrow=AsyncMock())
         monkeypatch.setattr(
             fs.settings, "provisioning",
             SimpleNamespace(
@@ -274,6 +274,7 @@ class TestDoProvision:
 
         await fs._do_provision(
             "ssh-ed25519 AAAA", vm_host="kvm1", vm_target="tenant-abcd",
+            sqlite_client=sqlite_client,
             capacity_reservation_id="res-1", escrow_uid="escrow-1",
         )
 
@@ -290,7 +291,7 @@ class TestDoProvision:
         )
         monkeypatch.setattr(fs, "build_fulfillment_client", lambda *_: fulfillment_client)
         monkeypatch.setattr(fs, "build_capacity_client", lambda *_: SimpleNamespace())
-        monkeypatch.setattr(fs, "get_sqlite_client", lambda: SimpleNamespace(update_escrow=AsyncMock()))
+        sqlite_client = SimpleNamespace(update_escrow=AsyncMock())
         monkeypatch.setattr(
             fs.settings, "provisioning",
             SimpleNamespace(
@@ -305,6 +306,7 @@ class TestDoProvision:
         with pytest.raises(ComputeProvisioningJobError, match="provisioning failed"):
             await fs._do_provision(
                 "ssh-ed25519 AAAA", vm_host="kvm1", vm_target="tenant-abcd",
+                sqlite_client=sqlite_client,
                 capacity_reservation_id="res-1", escrow_uid="escrow-1",
             )
         fulfillment_client.get_fulfillment_result.assert_not_awaited()

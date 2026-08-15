@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from functools import partial
 from typing import TYPE_CHECKING, Any
 
 from core_storefront.registry_publication import (
@@ -18,7 +19,6 @@ from domains.vms.listings.reconciler import (
 from registry_client import ListingRequest, UpdateListingRequest
 
 from market_storefront.utils.config import BASE_URL_OVERRIDE, settings
-from market_storefront.utils.sqlite_client import get_sqlite_client
 
 if TYPE_CHECKING:
     from core_storefront.multi_registry_client import MultiRegistryClient
@@ -26,7 +26,11 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-async def close_order(parameters: dict[str, Any] | None = None) -> dict[str, Any]:
+async def close_order(
+    parameters: dict[str, Any] | None = None,
+    *,
+    sqlite_client: Any,
+) -> dict[str, Any]:
     """Close an order locally and in the registry when registry discovery is enabled."""
     parameters = parameters or {}
     order_id = parameters.get("listing_id")
@@ -34,7 +38,6 @@ async def close_order(parameters: dict[str, Any] | None = None) -> dict[str, Any
         return {"status": "error", "message": "Missing listing_id for close_listing"}
 
     try:
-        sqlite_client = get_sqlite_client()
         await sqlite_client.update_listing(
             listing_id=order_id,
             status="closed",
@@ -49,14 +52,21 @@ async def close_order(parameters: dict[str, Any] | None = None) -> dict[str, Any
         enabled=settings.enable_registry_discovery,
         registry_client_factory=_make_registry_client,
         update_listing_request_factory=UpdateListingRequest,
-        select_target_registries=_registries_to_target,
-        record_publications=_record_publications,
+        select_target_registries=partial(
+            _registries_to_target,
+            sqlite_client=sqlite_client,
+        ),
+        record_publications=partial(
+            _record_publications,
+            sqlite_client=sqlite_client,
+        ),
     )
 
 
 async def close_stale_compute_listings_after_capacity_change(
     db_path: str,
     *,
+    sqlite_client: Any,
     home_site: str,
     configured_site_count: int,
     member_availability: dict[tuple[str | None, str], int] | None = None,
@@ -81,11 +91,14 @@ async def close_stale_compute_listings_after_capacity_change(
         site_pool_projection=site_pool_projection,
         site_capacity_buckets=site_capacity_buckets,
     ):
-        result = await close_order({"listing_id": listing_id})
+        result = await close_order(
+            {"listing_id": listing_id},
+            sqlite_client=sqlite_client,
+        )
         if str(result.get("status", "?")) in ("closed", "skipped", "queued"):
             closed_listing_ids.append(listing_id)
             continue
-        row = await get_sqlite_client().load_listing(listing_id=listing_id)
+        row = await sqlite_client.load_listing(listing_id=listing_id)
         if row and row.get("status") == "closed":
             closed_listing_ids.append(listing_id)
     mark_derived_listings_closed(
@@ -100,6 +113,7 @@ async def close_stale_compute_listings_after_capacity_change(
 async def reopen_available_compute_listings_after_capacity_change(
     db_path: str,
     *,
+    sqlite_client: Any,
     home_site: str,
     member_availability: dict[tuple[str | None, str], int] | None = None,
     site_pool_projection: dict[str, list[dict]] | None = None,
@@ -128,7 +142,7 @@ async def reopen_available_compute_listings_after_capacity_change(
         site_capacity_buckets=site_capacity_buckets,
     )
     for listing_id in reopened_listing_ids:
-        await get_sqlite_client().update_listing(listing_id=listing_id, status="open")
+        await sqlite_client.update_listing(listing_id=listing_id, status="open")
     mark_derived_listings_open(db_path, reopened_listing_ids)
     return reopened_listing_ids
 
@@ -154,7 +168,11 @@ def _make_registry_client() -> MultiRegistryClient:
     )
 
 
-async def publish_order_to_registry(order: Listing | dict) -> dict[str, Any]:
+async def publish_order_to_registry(
+    order: Listing | dict,
+    *,
+    sqlite_client: Any,
+) -> dict[str, Any]:
     """Publish a validated listing to every configured registry.
 
     Raw dictionaries are accepted for compatibility with stored rows, but they
@@ -170,7 +188,10 @@ async def publish_order_to_registry(order: Listing | dict) -> dict[str, Any]:
         registry_client_factory=_make_registry_client,
         listing_request_factory=ListingRequest,
         storefront_url=BASE_URL_OVERRIDE,
-        record_publications=_record_publications,
+        record_publications=partial(
+            _record_publications,
+            sqlite_client=sqlite_client,
+        ),
         on_published=_record_listing_published_stage_event,
     )
 
@@ -203,10 +224,11 @@ def _record_listing_published_stage_event(
 async def _registries_to_target(
     listing_id: str,
     fallback_urls: list[str],
+    *,
+    sqlite_client: Any,
 ) -> list[str]:
     """Return registry URLs that should receive update/delete for ``listing_id``."""
     try:
-        sqlite_client = get_sqlite_client()
         pubs = await sqlite_client.load_publications(listing_id=listing_id)
     except Exception:
         return list(fallback_urls)
@@ -217,11 +239,11 @@ async def _registries_to_target(
 async def _record_publications(
     listing_id: str,
     results: list[dict[str, Any]],
+    *,
+    sqlite_client: Any,
 ) -> None:
     """Persist one ``publications`` row per per-registry write result."""
-    try:
-        sqlite_client = get_sqlite_client()
-    except Exception:
+    if sqlite_client is None:
         return
     for result in results:
         payload = result.get("payload") or {}

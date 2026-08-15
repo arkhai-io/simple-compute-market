@@ -8,9 +8,9 @@ from market_identity import Ed25519Signer
 
 from market_fulfillment import VersionedEnvelope
 import market_storefront.container as container
-from market_storefront.services import publication_service
 from market_storefront.services import fulfillment_service
 from domains.vms.listings.reconciler import record_derived_listing
+from market_storefront.domain_runtime import build_vm_storefront_domain
 from market_storefront.utils.sqlite_client import SQLiteClient
 from tests.fake_site import (
     FakeSite,
@@ -42,7 +42,7 @@ def _identity_wiring(monkeypatch):
 
 @pytest.fixture
 def client(tmp_path):
-    return SQLiteClient(db_path=str(tmp_path / "agent.db"))
+    return SQLiteClient(db_path=str(tmp_path / "agent.db"), domain=build_vm_storefront_domain())
 
 
 async def _seed_compute_pool(client: SQLiteClient) -> None:
@@ -141,8 +141,6 @@ async def test_fulfill_compute_obligation_reports_error_when_onchain_fulfillment
         "pool-h200-1", 1,
         attributes={"gpu_model": "H200", "region": "California, US", "vm_host": "host-1"},
     )
-    monkeypatch.setattr(fulfillment_service, "get_sqlite_client", lambda: client)
-    monkeypatch.setattr(publication_service, "get_sqlite_client", lambda: client)
     monkeypatch.setattr(
         fulfillment_service,
         "ComputeProvisioningClient",
@@ -163,6 +161,7 @@ async def test_fulfill_compute_obligation_reports_error_when_onchain_fulfillment
 
     with site_capacity(fake, sqlite_client_factory=lambda: client):
         result = await fulfillment_service.fulfill_compute_obligation(
+            sqlite_client=client,
             client=alkahest,
             escrow_uid="escrow-1",
             ssh_public_key="ssh-ed25519 AAAA",
@@ -218,8 +217,6 @@ async def test_reservation_closes_oversized_dynamic_listings(client, monkeypatch
         "pool-h200-1", 4,
         attributes={"gpu_model": "H200", "region": "California, US", "vm_host": "host-1"},
     )
-    monkeypatch.setattr(fulfillment_service, "get_sqlite_client", lambda: client)
-    monkeypatch.setattr(publication_service, "get_sqlite_client", lambda: client)
     monkeypatch.setattr(
         fulfillment_service,
         "ComputeProvisioningClient",
@@ -234,6 +231,7 @@ async def test_reservation_closes_oversized_dynamic_listings(client, monkeypatch
 
     with site_capacity(fake, sqlite_client_factory=lambda: client) as aggregate:
         result = await fulfillment_service.fulfill_compute_obligation(
+            sqlite_client=client,
             client=None,
             escrow_uid="escrow-2x",
             ssh_public_key="ssh-ed25519 AAAA",
@@ -443,8 +441,6 @@ async def test_do_provision_end_to_end_delivers_credentials_for_storage(
         async def register_lease(self, registration):
             return registration
 
-    monkeypatch.setattr(fulfillment_service, "get_sqlite_client", lambda: client)
-    monkeypatch.setattr(publication_service, "get_sqlite_client", lambda: client)
     monkeypatch.setattr(
         fulfillment_service, "build_fulfillment_client", lambda *_: fulfillment_client
     )
@@ -466,6 +462,7 @@ async def test_do_provision_end_to_end_delivers_credentials_for_storage(
 
     with site_capacity(fake, sqlite_client_factory=lambda: client):
         result = await fulfillment_service.fulfill_compute_obligation(
+            sqlite_client=client,
             client=None,
             escrow_uid="escrow-e2e-1",
             ssh_public_key="ssh-ed25519 AAAA",
@@ -570,8 +567,6 @@ async def test_do_provision_result_fetch_is_safe_to_repeat(client, monkeypatch):
         async def register_lease(self, registration):
             return registration
 
-    monkeypatch.setattr(fulfillment_service, "get_sqlite_client", lambda: client)
-    monkeypatch.setattr(publication_service, "get_sqlite_client", lambda: client)
     monkeypatch.setattr(
         fulfillment_service, "build_fulfillment_client", lambda *_: fulfillment_client
     )
@@ -589,6 +584,7 @@ async def test_do_provision_result_fetch_is_safe_to_repeat(client, monkeypatch):
 
     with site_capacity(fake, sqlite_client_factory=lambda: client):
         first = await fulfillment_service.fulfill_compute_obligation(
+            sqlite_client=client,
             client=None, escrow_uid="escrow-dup-1", ssh_public_key="ssh-ed25519 AAAA",
             order=_compute_listing(), duration_seconds=3600, listing_id="listing-1",
         )

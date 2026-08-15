@@ -11,6 +11,7 @@ from market_settlement_runtime import (
     compile_settlement_publication_clause,
 )
 
+from market_storefront.domain_runtime import build_vm_storefront_domain
 from market_storefront.utils.sqlite_client import SQLiteClient
 
 
@@ -41,7 +42,7 @@ async def test_upsert_resources_from_csv_reports_matched_and_unrecognized(
 ):
     db_path = str(tmp_path / "agent.db")
     csv_path = tmp_path / "resources.csv"
-    sqlite_client = SQLiteClient(db_path=db_path)
+    sqlite_client = SQLiteClient(db_path=db_path, domain=build_vm_storefront_domain())
 
     _write_csv(
         csv_path,
@@ -78,7 +79,7 @@ async def test_upsert_resources_from_csv_reports_matched_and_unrecognized(
 async def test_upsert_resources_from_csv_invalid_known_schema_row_fails(tmp_path: Path):
     db_path = str(tmp_path / "agent.db")
     csv_path = tmp_path / "resources_invalid.csv"
-    sqlite_client = SQLiteClient(db_path=db_path)
+    sqlite_client = SQLiteClient(db_path=db_path, domain=build_vm_storefront_domain())
 
     # Missing attribute.sla for known compute.gpu schema should fail validation.
     _write_csv(
@@ -112,7 +113,7 @@ async def test_upsert_resources_from_csv_persists_per_row_pricing(tmp_path: Path
     loop to read."""
     db_path = str(tmp_path / "agent.db")
     csv_path = tmp_path / "resources_priced.csv"
-    sqlite_client = SQLiteClient(db_path=db_path)
+    sqlite_client = SQLiteClient(db_path=db_path, domain=build_vm_storefront_domain())
 
     usdc = "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48"
     _write_csv(
@@ -144,7 +145,7 @@ async def test_compute_resource_import_preserves_explicit_shared_host_metadata(
 ):
     db_path = str(tmp_path / "agent.db")
     csv_path = tmp_path / "resources_physical_host.csv"
-    sqlite_client = SQLiteClient(db_path=db_path)
+    sqlite_client = SQLiteClient(db_path=db_path, domain=build_vm_storefront_domain())
 
     _write_csv(
         csv_path,
@@ -172,7 +173,7 @@ async def test_bare_metal_compute_resource_import_preserves_exclusive_metadata(
 ):
     db_path = str(tmp_path / "agent.db")
     csv_path = tmp_path / "resources_bare_metal.csv"
-    sqlite_client = SQLiteClient(db_path=db_path)
+    sqlite_client = SQLiteClient(db_path=db_path, domain=build_vm_storefront_domain())
 
     _write_csv(
         csv_path,
@@ -201,7 +202,7 @@ async def test_upsert_resources_from_csv_generates_resource_id_when_missing(
 ):
     db_path = str(tmp_path / "agent.db")
     csv_path = tmp_path / "resources_no_id.csv"
-    sqlite_client = SQLiteClient(db_path=db_path)
+    sqlite_client = SQLiteClient(db_path=db_path, domain=build_vm_storefront_domain())
 
     _write_csv(
         csv_path,
@@ -237,7 +238,7 @@ async def test_csv_accepted_escrows_column_round_trips_through_sqlite(tmp_path: 
     publish loop."""
     db_path = str(tmp_path / "agent.db")
     csv_path = tmp_path / "resources_templates.csv"
-    sqlite_client = SQLiteClient(db_path=db_path)
+    sqlite_client = SQLiteClient(db_path=db_path, domain=build_vm_storefront_domain())
 
     usdc_template = EscrowTemplate(
         name="usdc",
@@ -282,7 +283,7 @@ async def test_csv_settlements_column_round_trips_as_complete_clauses(
 ):
     db_path = str(tmp_path / "agent.db")
     csv_path = tmp_path / "resources_settlements.csv"
-    sqlite_client = SQLiteClient(db_path=db_path)
+    sqlite_client = SQLiteClient(db_path=db_path, domain=build_vm_storefront_domain())
     clause = (
         '[{""mechanism"":""fiat.stripe.v1"",""asset"":""usd"",'
         '""rate"":""125"",""per"":""hour"",""mechanism_input"":'
@@ -327,7 +328,7 @@ async def test_csv_settlements_rejects_missing_common_field_atomically(
 ):
     db_path = str(tmp_path / "agent.db")
     csv_path = tmp_path / "resources_invalid_settlement.csv"
-    sqlite_client = SQLiteClient(db_path=db_path)
+    sqlite_client = SQLiteClient(db_path=db_path, domain=build_vm_storefront_domain())
     clause = '[{""mechanism"":""fiat.stripe.v1"",""rate"":""125"",""per"":""hour""}]'
     _write_csv(
         csv_path,
@@ -357,7 +358,7 @@ async def test_csv_accepted_escrows_column_without_templates_errors(tmp_path: Pa
     silently dropping the column."""
     db_path = str(tmp_path / "agent.db")
     csv_path = tmp_path / "resources_no_templates.csv"
-    sqlite_client = SQLiteClient(db_path=db_path)
+    sqlite_client = SQLiteClient(db_path=db_path, domain=build_vm_storefront_domain())
 
     _write_csv(
         csv_path,
@@ -381,7 +382,7 @@ async def test_csv_accepted_escrows_empty_cell_stores_null(tmp_path: Path):
     imports, the column round-trips as ``None``."""
     db_path = str(tmp_path / "agent.db")
     csv_path = tmp_path / "resources_empty_ae.csv"
-    sqlite_client = SQLiteClient(db_path=db_path)
+    sqlite_client = SQLiteClient(db_path=db_path, domain=build_vm_storefront_domain())
 
     _write_csv(
         csv_path,
@@ -406,7 +407,7 @@ async def test_csv_token_must_be_canonical_hex_before_persistence(
 ):
     db_path = str(tmp_path / "agent.db")
     csv_path = tmp_path / "resources_invalid_token.csv"
-    sqlite_client = SQLiteClient(db_path=db_path)
+    sqlite_client = SQLiteClient(db_path=db_path, domain=build_vm_storefront_domain())
     invalid = "0x" + ("z" * 40)
     _write_csv(
         csv_path,
@@ -431,7 +432,7 @@ async def test_csv_uninstalled_settlement_mechanism_fails_before_persistence(
 ):
     db_path = str(tmp_path / "agent.db")
     csv_path = tmp_path / "resources_uninstalled_settlement.csv"
-    sqlite_client = SQLiteClient(db_path=db_path)
+    sqlite_client = SQLiteClient(db_path=db_path, domain=build_vm_storefront_domain())
     clause = (
         '[{""mechanism"":""missing.v1"",""asset"":""usd"",'
         '""rate"":""1"",""per"":""hour""}]'

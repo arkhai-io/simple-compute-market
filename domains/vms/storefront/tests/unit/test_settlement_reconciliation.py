@@ -5,6 +5,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 
+from market_storefront.domain_runtime import build_vm_storefront_domain
 from market_storefront.services.listing_service import ListingService
 from tests.fake_site import TEST_MARKETPLACE_SIGNER
 
@@ -13,6 +14,7 @@ from tests.fake_site import TEST_MARKETPLACE_SIGNER
 async def test_readiness_reconciliation_preserves_listing_identity_and_accepted_terms(
     monkeypatch,
 ):
+    domain = build_vm_storefront_domain()
     accepted_terms = {
         "mechanism": "fiat.stripe.v1",
         "option_id": "accepted-option",
@@ -53,6 +55,7 @@ async def test_readiness_reconciliation_preserves_listing_identity_and_accepted_
         "accepted_terms": accepted_terms,
     }
     db = SimpleNamespace(
+        market_domain=domain,
         load_listing=AsyncMock(return_value=stored),
         update_listing=AsyncMock(),
     )
@@ -72,6 +75,7 @@ async def test_readiness_reconciliation_preserves_listing_identity_and_accepted_
         publish,
     )
     service = ListingService(
+        domain=domain,
         sqlite_client=db,
         marketplace_signer=TEST_MARKETPLACE_SIGNER,
         settlement_composition_provider=lambda: composition,

@@ -5,12 +5,13 @@ import sqlite3
 import pytest
 
 from domains.vms.listings.reconciler import available_compute_slices, listing_pool_key
+from market_storefront.domain_runtime import build_vm_storefront_domain
 from market_storefront.utils.sqlite_client import SQLiteClient
 
 
 @pytest.fixture
 def client(tmp_path):
-    return SQLiteClient(db_path=str(tmp_path / "agent.db"))
+    return SQLiteClient(db_path=str(tmp_path / "agent.db"), domain=build_vm_storefront_domain())
 
 
 async def _seed_compute_pool(client: SQLiteClient, *, gpu_count: int = 4) -> None:
@@ -160,7 +161,7 @@ def test_sqlite_migration_backfills_compute_allocation_correlation_fields(tmp_pa
     finally:
         conn.close()
 
-    SQLiteClient(db_path=str(db_path))
+    SQLiteClient(db_path=str(db_path), domain=build_vm_storefront_domain())
 
     conn = sqlite3.connect(db_path)
     try:
@@ -224,7 +225,7 @@ def test_sqlite_migration_accepts_pre_compute_inventory_schema(tmp_path):
     finally:
         conn.close()
 
-    SQLiteClient(db_path=str(db_path))
+    SQLiteClient(db_path=str(db_path), domain=build_vm_storefront_domain())
 
     conn = sqlite3.connect(db_path)
     try:

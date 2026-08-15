@@ -69,9 +69,10 @@ def test_proposal_payload_preserves_settlement_selection() -> None:
 
 @pytest_asyncio.fixture
 async def db(tmp_path):
+    from market_storefront.domain_runtime import build_vm_storefront_domain
     from market_storefront.utils.sqlite_client import SQLiteClient
 
-    return SQLiteClient(db_path=str(tmp_path / "negotiate_test.db"))
+    return SQLiteClient(db_path=str(tmp_path / "negotiate_test.db"), domain=build_vm_storefront_domain())
 
 
 async def _seed_listing(
@@ -144,6 +145,7 @@ async def client(db):
     )
 
     _container.resolved_sqlite_client = db
+    _container.resolved_market_domain = db.market_domain
 
     _container.resolved_marketplace_signer = _SELLER_SIGNER
     app = FastAPI()
@@ -167,16 +169,25 @@ async def client(db):
     )
 
     transport = httpx.ASGITransport(app=app)
-    with site_capacity(fake_site):
-        async with StorefrontClient(
-            "http://test",
-            signer=_BUYER_SIGNER,
-            caller_role="buyer",
-            expected_publishers=_EXPECTED_PUBLISHERS,
-            transport=transport,
-        ) as c:
-            yield c, db
+    with settings_overrides(
+        **{
+            "provisioning.identity.principals": [
+                _BUYER_SIGNER.identity.model_dump(mode="json"),
+                _SELLER_SIGNER.identity.model_dump(mode="json"),
+            ],
+        }
+    ):
+        with site_capacity(fake_site):
+            async with StorefrontClient(
+                "http://test",
+                signer=_BUYER_SIGNER,
+                caller_role="buyer",
+                expected_publishers=_EXPECTED_PUBLISHERS,
+                transport=transport,
+            ) as c:
+                yield c, db
     _container.resolved_sqlite_client = None
+    _container.resolved_market_domain = None
     _container.resolved_marketplace_signer = None
 
 

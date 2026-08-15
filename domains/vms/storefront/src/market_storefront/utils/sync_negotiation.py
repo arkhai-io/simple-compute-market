@@ -72,6 +72,7 @@ from domains.vms.negotiation.storefront_round import (
     SellerRoundResult,
 )
 from domains.vms.settlement.proposals import accepted_escrow_artifacts_from_proposal
+from market_core import MarketDomainContract
 from market_core.schemas import (
     EscrowProposal,
     SettlementObligation,
@@ -80,6 +81,7 @@ from market_core.schemas import (
     SettlementSelection,
 )
 from market_hosted_settlement import HostedObligationParams
+from market_storefront.services.capacity_client import build_capacity_client
 from market_identity import Identity
 from market_policy.negotiation_middleware import (
     NegotiationDecision,
@@ -137,23 +139,21 @@ def _seller_reference_amount(
     )
 
 
-async def _run_default_seller_round_policy(**kwargs: Any) -> SellerRoundResult:
-    kwargs.setdefault("negotiation_config", _negotiation_settings())
-    kwargs.setdefault("chains", _chain_settings())
-    kwargs.setdefault("extra_policy_paths", _extra_policy_paths())
-    kwargs.setdefault("default_min_price", _default_min_price())
-    return await vm_storefront_round._run_default_seller_round_policy(**kwargs)
 
 
-def _default_seller_round_hook(sqlite_client: Any) -> SellerRoundHook:
+def _default_seller_round_hook(
+    domain: MarketDomainContract,
+    sqlite_client: Any,
+) -> SellerRoundHook:
     # The round hook reads its availability snapshot through the
     # site-authority capacity client; embedded mode wraps the same
     # SQLite handle the rest of this flow uses.
-    from market_storefront.domain_runtime import get_market_domain_contract
-    from market_storefront.services.capacity_client import build_capacity_client
 
-    policy = get_market_domain_contract().storefront
-    assert policy is not None
+    policy = domain.storefront
+    if policy is None:
+        raise RuntimeError(
+            f"domain {domain.identity!s} has no storefront negotiation capability"
+        )
     return policy.run_negotiation_policy(
         build_capacity_client(lambda: sqlite_client),
         negotiation_config=_negotiation_settings(),
@@ -169,7 +169,10 @@ def _chain_config_paths() -> dict[str, str | None]:
     return {name: chain.alkahest_address_config_path for name, chain in CHAINS.items()}
 
 
-def _normalize_vm_message_terms(provision_terms: Any) -> Any | None:
+def _normalize_vm_message_terms(
+    domain: MarketDomainContract,
+    provision_terms: Any,
+) -> Any | None:
     """Validate the VM envelope before any negotiation policy runs."""
     if provision_terms is None:
         return None
@@ -178,9 +181,7 @@ def _normalize_vm_message_terms(provision_terms: Any) -> Any | None:
         if hasattr(provision_terms, "model_dump")
         else provision_terms
     )
-    from market_storefront.domain_runtime import get_market_domain_contract
-
-    return get_market_domain_contract().codecs.message(raw)
+    return domain.codecs.message(raw)
 
 
 def _reject_unsupported_resource_shape_request(
@@ -270,6 +271,38 @@ def _accepted_escrow_artifacts(
     if error:
         logger.debug("Could not materialize accepted escrow terms: %s", error)
     return artifacts
+
+def _build_accepted_escrow_artifacts(
+    *,
+    domain: MarketDomainContract,
+    proposal: EscrowProposal | dict[str, Any] | None,
+    agreed_amount: int,
+    duration_seconds: int,
+    buyer_principal: Identity,
+    seller_principal: Identity,
+    uses_scalar_amount: bool = True,
+) -> dict[str, Any]:
+    settlement = domain.settlement
+    if settlement is None:
+        raise RuntimeError(
+            f"domain {domain.identity!s} has no settlement-plan capability"
+        )
+    artifacts = settlement.build_plan(
+        proposal=proposal,
+        agreed_amount=agreed_amount,
+        duration_seconds=duration_seconds,
+        buyer_principal=buyer_principal,
+        seller_principal=seller_principal,
+        uses_scalar_amount=uses_scalar_amount,
+    )
+    if not isinstance(artifacts, dict):
+        raise TypeError(
+            f"domain {domain.identity!s} settlement-plan hook returned "
+            f"{type(artifacts).__name__}, expected dict"
+        )
+    return artifacts
+
+
 
 
 def _decision_wire(decision: Any) -> dict[str, Any]:
@@ -415,6 +448,7 @@ def _accepted_hosted_artifacts(
 
 def _accepted_settlement_artifacts(
     *,
+    domain: MarketDomainContract,
     proposal: EscrowProposal | dict[str, Any] | None,
     listing: dict[str, Any],
     agreed_amount: int,
@@ -457,7 +491,8 @@ def _accepted_settlement_artifacts(
             buyer_principal=buyer_principal,
             seller_principal=seller_principal,
         )
-    return _accepted_escrow_artifacts(
+    return _build_accepted_escrow_artifacts(
+        domain=domain,
         proposal=proposal,
         agreed_amount=agreed_amount,
         duration_seconds=duration_seconds,
@@ -637,6 +672,7 @@ _LIVE_LISTING_STATUSES = LIVE_LISTING_STATUSES
 async def _compute_round_zero_decision(
     *,
     sqlite_client: Any,
+    domain: MarketDomainContract,
     listing: Any,
     their_proposal: dict[str, Any] | None,
     requested_duration_seconds: int | None = None,
@@ -666,7 +702,7 @@ async def _compute_round_zero_decision(
             proposal=their_proposal,
         )
     ]
-    result = await _default_seller_round_hook(sqlite_client)(
+    result = await _default_seller_round_hook(domain, sqlite_client)(
         listing=listing,
         history=history,
         requested_duration_seconds=requested_duration_seconds,
@@ -687,6 +723,7 @@ async def _compute_round_zero_decision(
 
 async def start_sync_negotiation(
     *,
+    domain: MarketDomainContract,
     sqlite_client: Any,
     our_listing_id: str,
     buyer_principal: Identity,
@@ -725,7 +762,12 @@ async def start_sync_negotiation(
     listing) or if the buyer's duration / proposal doesn't match what
     the listing accepts.
     """
-    vm_message_terms = _normalize_vm_message_terms(provision_terms)
+    if getattr(sqlite_client, "market_domain", None) is not domain:
+        raise RuntimeError(
+            "negotiation and SQLite repository must share the exact "
+            "market-domain contract object"
+        )
+    vm_message_terms = _normalize_vm_message_terms(domain, provision_terms)
     requested_duration_seconds = (
         vm_message_terms.duration_seconds if vm_message_terms is not None else None
     )
@@ -782,7 +824,9 @@ async def start_sync_negotiation(
         )
     ]
     try:
-        round_hook = seller_round_hook or _default_seller_round_hook(sqlite_client)
+        round_hook = seller_round_hook or _default_seller_round_hook(
+            domain, sqlite_client
+        )
         round_result = await round_hook(
             listing=our_order,
             history=history,
@@ -899,7 +943,8 @@ async def start_sync_negotiation(
     if provision_terms is not None:
         response["accepted_provision_terms"] = provision_terms.model_dump()
     if accepted_proposal is not None:
-        artifacts = _accepted_escrow_artifacts(
+        artifacts = _build_accepted_escrow_artifacts(
+            domain=domain,
             proposal=accepted_proposal,
             agreed_amount=int(
                 agreed_amount if decision.action == "accept" else our_amount
@@ -947,6 +992,7 @@ async def start_sync_negotiation(
 
 async def continue_sync_negotiation(
     *,
+    domain: MarketDomainContract,
     sqlite_client: Any,
     neg_id: str,
     buyer_action: str,
@@ -967,6 +1013,11 @@ async def continue_sync_negotiation(
       - "exit": the buyer is walking away; we mark the thread terminal.
     """
     from core_storefront.stage_log import stage_event
+    if getattr(sqlite_client, "market_domain", None) is not domain:
+        raise RuntimeError(
+            "negotiation and SQLite repository must share the exact "
+            "market-domain contract object"
+        )
     from domains.vms.listings import determine_strategy_from_order
     from domains.vms.listings.models import Listing
 
@@ -1078,6 +1129,7 @@ async def continue_sync_negotiation(
             "seller_principal": seller_principal.model_dump(mode="json"),
         }
         artifacts = _accepted_settlement_artifacts(
+            domain=domain,
             proposal=buyer_pinned_proposal,
             listing=our_order_dict,
             agreed_amount=int(last_seller_amount),
@@ -1137,7 +1189,7 @@ async def continue_sync_negotiation(
             proposal=buyer_proposal or buyer_pinned_proposal,
         )
     )
-    round_hook = seller_round_hook or _default_seller_round_hook(sqlite_client)
+    round_hook = seller_round_hook or _default_seller_round_hook(domain, sqlite_client)
     round_result = await round_hook(
         listing=our_order,
         history=history,
@@ -1222,6 +1274,7 @@ async def continue_sync_negotiation(
     }
     if decision.action == "accept":
         artifacts = _accepted_settlement_artifacts(
+            domain=domain,
             proposal=buyer_pinned_proposal,
             listing=our_order_dict,
             agreed_amount=(

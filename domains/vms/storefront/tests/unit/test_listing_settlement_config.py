@@ -7,10 +7,12 @@ import pytest
 from market_settlement_runtime import SettlementPublicationClause
 from pydantic import ValidationError
 
+from market_storefront.domain_runtime import build_vm_storefront_domain
 from market_storefront.models.listing_models import VmCreateListingRequest
 from market_storefront.services.listing_service import ListingService
 from tests.fake_site import TEST_MARKETPLACE_SIGNER
 
+_DOMAIN = build_vm_storefront_domain()
 
 
 def test_vm_listing_request_rejects_removed_scalar_hosted_config() -> None:
@@ -51,7 +53,8 @@ def test_clause_only_listing_request_is_a_valid_publication_input() -> None:
         ],
     )
     service = ListingService(
-        sqlite_client=object(),
+        domain=_DOMAIN,
+        sqlite_client=SimpleNamespace(market_domain=_DOMAIN),
         marketplace_signer=TEST_MARKETPLACE_SIGNER,
     )
 
@@ -83,11 +86,15 @@ async def test_clause_only_create_persists_canonical_clause_before_publication(
         "rates": [{"field": "amount", "per": "hour", "value": "200"}],
         "params": {},
     }
-    db = SimpleNamespace(upsert_listing=AsyncMock())
+    db = SimpleNamespace(
+        market_domain=_DOMAIN,
+        upsert_listing=AsyncMock(),
+    )
     composition = SimpleNamespace(
         publication_artifacts=AsyncMock(return_value=([], [option], ()))
     )
     service = ListingService(
+        domain=_DOMAIN,
         sqlite_client=db,
         marketplace_signer=TEST_MARKETPLACE_SIGNER,
         settlement_composition_provider=lambda: composition,
@@ -131,7 +138,8 @@ async def test_clause_only_create_persists_canonical_clause_before_publication(
 @pytest.mark.asyncio
 async def test_direct_settlement_options_are_rejected() -> None:
     service = ListingService(
-        sqlite_client=object(),
+        domain=_DOMAIN,
+        sqlite_client=SimpleNamespace(market_domain=_DOMAIN),
         marketplace_signer=TEST_MARKETPLACE_SIGNER,
         settlement_composition_provider=lambda: object(),
     )
@@ -168,7 +176,8 @@ async def test_registration_composition_receives_ordered_hosted_clauses() -> Non
         publication_artifacts=AsyncMock(return_value=([], [option], ())),
     )
     service = ListingService(
-        sqlite_client=object(),
+        domain=_DOMAIN,
+        sqlite_client=SimpleNamespace(market_domain=_DOMAIN),
         marketplace_signer=TEST_MARKETPLACE_SIGNER,
         settlement_composition_provider=lambda: composition,
     )

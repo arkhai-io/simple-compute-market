@@ -404,7 +404,11 @@ def site_capacity(
         patch(
             "market_storefront.services.capacity_client.build_capacity_client",
             return_value=aggregate,
-        )
+        ),
+        patch(
+            "market_storefront.utils.sync_negotiation.build_capacity_client",
+            return_value=aggregate,
+        ),
     ]
     # fulfillment_service binds the name at import time.
     patches.append(

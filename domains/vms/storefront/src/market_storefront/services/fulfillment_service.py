@@ -6,6 +6,7 @@ import asyncio
 import logging
 from collections.abc import Awaitable, Callable
 from datetime import datetime, timezone
+from functools import partial
 from typing import Any
 
 from alkahest_py import AlkahestClient
@@ -38,7 +39,6 @@ from market_storefront.utils.config import (
     get_provisioning_authorities,
     settings,
 )
-from market_storefront.utils.sqlite_client import get_sqlite_client
 
 logger = logging.getLogger(__name__)
 
@@ -50,6 +50,7 @@ _VM_MARKET = "vms"
 
 async def _do_provision(
     ssh_public_key: str,
+    sqlite_client: Any,
     *,
     vm_host: str | None,
     vm_target: str,
@@ -74,7 +75,7 @@ async def _do_provision(
     hook this replaces.
     """
     fulfillment_client = build_fulfillment_client(
-        build_capacity_client(lambda: get_sqlite_client())
+        build_capacity_client(lambda: sqlite_client)
     )
 
     scheduled = await fulfillment_client.schedule_resource(
@@ -85,7 +86,7 @@ async def _do_provision(
     )
     if escrow_uid:
         await persist_escrow_fields_with_retry(
-            get_sqlite_client,
+            lambda: sqlite_client,
             escrow_uid=escrow_uid,
             capacity_reservation_id=capacity_reservation_id,
             settlement_resource_id=scheduled.settlement_resource_id,
@@ -262,9 +263,9 @@ async def _build_provisioning_job_spec(
     order_dict: dict | None,
     ssh_public_key: str,
     duration_seconds: int,
-    sqlite_client: Any | None = None,
+    sqlite_client: Any,
 ) -> dict | None:
-    db = sqlite_client or get_sqlite_client()
+    db = sqlite_client
     return await _vm_build_provisioning_job_spec(
         order_dict=order_dict,
         ssh_public_key=ssh_public_key,
@@ -275,6 +276,7 @@ async def _build_provisioning_job_spec(
 
 async def _apply_fulfillment_failure_policy_adapter(
     *,
+    sqlite_client: Any,
     capacity_reservation_id: str | None,
     escrow_uid: str,
     listing_id: str | None,
@@ -289,7 +291,7 @@ async def _apply_fulfillment_failure_policy_adapter(
     )
 
     await apply_fulfillment_failure_policy(
-        get_sqlite_client(),
+        sqlite_client,
         FulfillmentFailureContext(
             capacity_reservation_id=capacity_reservation_id,
             escrow_uid=escrow_uid,
@@ -301,7 +303,7 @@ async def _apply_fulfillment_failure_policy_adapter(
         ),
         # In remote-capacity mode the hold lives in the site ledger; the
         # policy's release_capacity action must go back through the client.
-        capacity=build_capacity_client(lambda: get_sqlite_client()),
+        capacity=build_capacity_client(lambda: sqlite_client),
     )
 
 
@@ -385,6 +387,7 @@ async def terminate_vm_lease(
 
 
 async def fulfill_compute_obligation(
+    sqlite_client: Any,
     client: AlkahestClient | None,
     escrow_uid: str,
     ssh_public_key: str,
@@ -413,7 +416,7 @@ async def fulfill_compute_obligation(
     """
     held_reservation: dict | None = None
     if negotiation_id:
-        db = get_sqlite_client()
+        db = sqlite_client
         hold = await db.load_capacity_hold(negotiation_id=negotiation_id)
         if hold:
             held_reservation = dict(hold.get("payload") or {})
@@ -436,15 +439,16 @@ async def fulfill_compute_obligation(
         settlement_mechanism=settlement_mechanism,
         chain_configs=CHAINS,
         base_url=BASE_URL_OVERRIDE,
-        get_sqlite_client=get_sqlite_client,
-        # Late-bound factory: tests monkeypatch this module's
-        # get_sqlite_client, and the capacity client must follow it.
-        capacity=build_capacity_client(lambda: get_sqlite_client()),
+        get_sqlite_client=lambda: sqlite_client,
+        capacity=build_capacity_client(lambda: sqlite_client),
         stage_event=stage_event,
-        provision_vm=_do_provision,
+        provision_vm=partial(_do_provision, sqlite_client=sqlite_client),
         schedule_shutdown=_do_shutdown,
         register_lease=_register_vm_lease_with_settings,
-        apply_failure_policy=_apply_fulfillment_failure_policy_adapter,
+        apply_failure_policy=partial(
+            _apply_fulfillment_failure_policy_adapter,
+            sqlite_client=sqlite_client,
+        ),
         held_reservation=held_reservation,
         site_id=site_id,
     )

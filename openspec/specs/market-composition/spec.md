@@ -251,6 +251,25 @@ Identity, wallet, and chain resources MUST be composed independently of settleme
 - **WHEN** VM composition installs hosted non-EVM settlement with Ed25519 identity and no Alkahest registration
 - **THEN** startup, readiness, publication, and servicing succeed without constructing a wallet or chain client
 
+### Requirement: Storefront roots inject one validated domain contract
+
+A domain-owned storefront composition root MUST receive one immutable versioned `MarketDomainContract`, validate it against the executable's supported domain identity and required declared capabilities before constructing role services, repositories, background workers, or the HTTP application, and inject that same contract through every domain-sensitive role boundary. Publication, negotiation, settlement-plan construction, fulfillment dispatch, and persisted domain-artifact normalization MUST NOT discover or replace the contract through module-global state.
+
+#### Scenario: VM storefront starts with its supported contract
+
+- **WHEN** the VM storefront root receives a supported `compute.v1` contract with its complete codec and storefront, publication, settlement, fulfillment, and compute-provisioning hook sets
+- **THEN** startup constructs its repository, application, routes, services, and workers around that exact contract object
+
+#### Scenario: Inapplicable contract is supplied
+
+- **WHEN** the VM storefront receives a wrong type, identity, version, undeclared capability, or incomplete required hook set
+- **THEN** validation fails before persistence, registry, background-task, or network side effects
+
+#### Scenario: A preceding single-domain database is reopened
+
+- **WHEN** the parameterized executable opens existing VM storefront state with the supported `compute.v1` contract
+- **THEN** no schema migration or carrier conversion is required and listing, negotiation, obligation, settlement, fulfillment, and operation identifiers retain their interpretation
+
 ## Evidence
 
 - Import boundaries: `core/tests/unit/test_carrier_purity.py` and `domains/vms/storefront/tests/unit/test_architecture_imports.py`.

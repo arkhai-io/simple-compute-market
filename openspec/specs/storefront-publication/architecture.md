@@ -8,6 +8,12 @@ A storefront is the seller's market-facing authority. It composes domain codecs,
 
 The storefront may publish to multiple registries, but each publication remains derived from seller state and signed under the complete canonical publisher principal expected by that registry. The listing ID and storefront URL remain stable commercial subjects; changing an authorized credential does not manufacture a new listing or transfer ownership implicitly.
 
+## One selected domain per storefront process
+
+The VM storefront validates one immutable `compute.v1` contract at its application root and passes that exact object into persistence, publication, negotiation, settlement, fulfillment, routes, and workers. Repository rehydration uses the same codec authority that validated the original write; a lower layer cannot replace it through a singleton, optional default, payload-shape guess, or domain-name branch.
+
+This process-wide selection preserves existing single-domain state and does not add a domain column. Accepted Alkahest and hosted terms remain pinned by their existing settlement carriers and identifiers. Per-record domain ownership is a separate multi-domain composition responsibility.
+
 ## Advisory publication, authoritative admission
 
 A listing is an offer based on the seller's latest complete capacity view. It is not a physical reservation.

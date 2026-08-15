@@ -15,6 +15,7 @@ not just documented.
 from __future__ import annotations
 
 import ast
+import tomllib
 from pathlib import Path
 
 
@@ -124,3 +125,51 @@ def test_domain_concept_modules_import_no_core_packages():
         "(only composition roots like domains/vms/{buyer,storefront} and the "
         "provisioning service may):\n" + "\n".join(violations)
     )
+
+
+def test_vm_storefront_has_one_default_contract_construction_root() -> None:
+    storefront_root = (
+        REPO / "domains" / "vms" / "storefront" / "src" / "market_storefront"
+    )
+    default_calls: list[str] = []
+    stale_accessors: list[str] = []
+    for path in _py_files(storefront_root):
+        source = path.read_text(encoding="utf-8")
+        if "get_market_domain_contract" in source:
+            stale_accessors.append(str(path.relative_to(REPO)))
+        tree = ast.parse(source, filename=str(path))
+        if any(
+            isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Name)
+            and node.func.id == "build_vm_storefront_domain"
+            for node in ast.walk(tree)
+        ):
+            default_calls.append(str(path.relative_to(REPO)))
+
+    assert stale_accessors == []
+    assert default_calls == [
+        "domains/vms/storefront/src/market_storefront/server.py"
+    ]
+
+
+def test_vm_storefront_imports_no_bare_metal_composition() -> None:
+    storefront_root = (
+        REPO / "domains" / "vms" / "storefront" / "src" / "market_storefront"
+    )
+    violations = _violations(
+        [storefront_root],
+        ("domains.bare_metal", "arkhai_bare_metal_storefront"),
+    )
+    assert not violations, "VM storefront must not import bare-metal roots:\n" + "\n".join(
+        violations
+    )
+
+
+def test_vm_storefront_wheel_declares_lower_layer_contract_package() -> None:
+    metadata = tomllib.loads(
+        (
+            REPO / "domains" / "vms" / "storefront" / "pyproject.toml"
+        ).read_text(encoding="utf-8")
+    )
+    dependencies = metadata["project"]["dependencies"]
+    assert any(dependency.startswith("arkhai-core>=") for dependency in dependencies)

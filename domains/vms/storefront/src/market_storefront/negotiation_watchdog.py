@@ -117,7 +117,7 @@ async def _watchdog_tick(sqlite_client: SQLiteClient) -> int:
     return len(stale)
 
 
-async def watchdog_loop() -> None:
+async def watchdog_loop(sqlite_client: SQLiteClient) -> None:
     """Continuously sweep for stale negotiations.
 
     Initial 15 s delay lets the agent finish startup before the first scan
@@ -125,7 +125,6 @@ async def watchdog_loop() -> None:
     caught up).
     """
     await asyncio.sleep(15)
-    sqlite_client = SQLiteClient(db_path=settings.db_path)
     logger.info(
         "negotiation_watchdog_loop: started (interval=%ds, timeout=%ds)",
         settings.negotiation_watchdog_interval,
