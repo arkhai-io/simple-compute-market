@@ -95,18 +95,6 @@ on:
           - decline
           - insufficient_funds
           - authentication
-  push:
-    branches: [main]
-    paths:
-      - .github/workflows/hosted-stripe-test.yml
-      - compose.hosted-settlement.yml
-      - e2e-tests/src/hosted_real_stripe/**
-      - e2e-tests/tests/e2e/roles/scenarios/vms/hosted/**
-      - domains/vms/buyer/**
-      - domains/vms/storefront/**
-      - kit/hosted-settlement/**
-      - scripts/prepare-hosted-compose.py
-      - scripts/verify-hosted-release.py
   schedule:
     - cron: "23 5 * * 2"
 
@@ -160,7 +148,7 @@ jobs:
       HOSTED_RELEASE_DIR: ${{ github.workspace }}/.protected-hosted-release
       EVIDENCE_DIR: ${{ github.workspace }}/stripe-test-evidence
       MARKETPLACE_RELEASE_DIR: ${{ github.workspace }}/.protected-marketplace-release
-      TRUSTED_MARKETPLACE_COMMIT: ${{ inputs.marketplace_commit || github.sha }}
+      TRUSTED_MARKETPLACE_COMMIT: ${{ inputs.marketplace_commit || vars.HOSTED_STRIPE_TEST_MARKETPLACE_COMMIT }}
       HOSTED_RELEASE_RUN_ID: ${{ inputs.hosted_release_run_id || vars.HOSTED_STRIPE_TEST_RELEASE_RUN_ID }}
       HOSTED_RELEASE_ARTIFACT: ${{ inputs.hosted_release_artifact || vars.HOSTED_STRIPE_TEST_RELEASE_ARTIFACT }}
       HOSTED_MANIFEST_SHA256: ${{ inputs.hosted_manifest_sha256 || vars.HOSTED_STRIPE_TEST_MANIFEST_SHA256 }}
@@ -250,7 +238,7 @@ jobs:
           test ! -e .dist
           tar -xzf "$MARKETPLACE_RELEASE_DIR/marketplace-wheelhouse.tar.gz" \
             -C "$GITHUB_WORKSPACE"
-          hosted_client_wheel="$(python -c 'import json, os; print(json.load(open(os.environ["HOSTED_RELEASE_DIR"] + "/release-manifest.json"))["payload"]["client_wheel"]["filename"])')"
+          hosted_client_wheel="$(uv run --no-project python -c 'import json, os; print(json.load(open(os.environ["HOSTED_RELEASE_DIR"] + "/release-manifest.json"))["payload"]["client_wheel"]["filename"])')"
           test -f "$HOSTED_RELEASE_DIR/$hosted_client_wheel"
           test -f ".dist/$hosted_client_wheel"
           echo "HOSTED_CLIENT_WHEEL_FILE=$hosted_client_wheel" >> "$GITHUB_ENV"
