@@ -134,10 +134,11 @@ scenario preflight; it never selects a test signer, default site, payload-
 guessed domain, direct executor, or provider simulator.
 
 The bare-metal image currently exposes the signed publication command seam but
-does not autonomously publish to the registry. Its stack may be brought up for
+does not autonomously publish to the registry, and a public settlement address
+alone does not compose a settlement authority. Its stack may be brought up for
 operator integration, but it is not release-qualified or discoverable-deal
-evidence until the accepted contribution lifecycle drives that seam and the
-installed buyer completes real access and revocation.
+evidence until accepted publication and settlement lifecycles are ready and
+the installed buyer completes real access and revocation.
 
 ## Stateful service persistence
 

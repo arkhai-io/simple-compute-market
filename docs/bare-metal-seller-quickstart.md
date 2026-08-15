@@ -146,6 +146,12 @@ operator must drive the ordinary signed publication command externally. A
 healthy but undiscoverable storefront is therefore an explicit blocker, not a
 successful seller deployment.
 
+Likewise, `BARE_METAL_STOREFRONT_EVM_ADDRESS` is only a public party binding;
+it does not create a chain client or prove Alkahest readiness. The current
+dedicated runtime reports commercial settlement unavailable unless an accepted
+settlement adapter is composed. Do not replace that missing authority with a
+test provider or mark the stack ready from the address alone.
+
 ## Release-qualified deal evidence
 
 Once signed registry publication, the buyer contribution, selected-site
