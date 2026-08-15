@@ -58,6 +58,7 @@ RUN --mount=type=cache,target=/root/.cache/uv \
             --refresh-package arkhai-kit-site-client \
             --refresh-package arkhai-vms \
             --refresh-package arkhai-bare-metal \
+            --refresh-package arkhai-bare-metal-storefront \
             --refresh-package arkhai-vms-storefront \
             --refresh-package arkhai-compute-provisioning; \
     else \
@@ -76,6 +77,7 @@ RUN --mount=type=cache,target=/root/.cache/uv \
             --refresh-package arkhai-kit-site-client \
             --refresh-package arkhai-vms \
             --refresh-package arkhai-bare-metal \
+            --refresh-package arkhai-bare-metal-storefront \
             --refresh-package arkhai-vms-storefront \
             --refresh-package arkhai-compute-provisioning; \
     fi
@@ -116,58 +118,16 @@ LABEL org.arkhai.dist-fingerprint="${DIST_FINGERPRINT}"
 
 COPY --chown=appuser:appuser --from=builder /app/.venv ./.venv
 ENV PATH="/app/.venv/bin:$PATH"
-# /app is the WORKDIR; domains/ is copied here. Console-script entry points
-# don't inherit CWD on sys.path, so we set PYTHONPATH explicitly.
-ENV PYTHONPATH="/app"
-# Dynaconf-driven config layering looks for the storefront TOML under
-# $XDG_CONFIG_HOME/arkhai/. Bind-mount the operator's TOML at
-# /etc/arkhai/storefront.toml.
 ENV XDG_CONFIG_HOME="/etc"
-
-# Copy application code. The market_storefront package is shipped at
-# /app/src/market_storefront so it's importable via the venv-installed
-# package; the domains/ tree is copied in for compute-domain policy
-# callables that the storefront's PolicyManager discovers at startup.
-COPY --chown=appuser:appuser domains/vms/storefront/src ./src
-COPY --chown=appuser:appuser domains/vms/storefront/scripts ./scripts
-COPY --chown=appuser:appuser domains/ ./domains/
-
-# Complete the two-phase uv install: deps were installed with
-# --no-install-project in the builder stage (for layer caching);
-# now install the project itself so the `market-storefront` console
-# script is written to .venv/bin/.
-# /.dist/ carries the internal wheels needed for --find-links resolution.
-COPY --chown=appuser:appuser domains/vms/storefront/pyproject.toml domains/vms/storefront/uv.lock ./
-# Same lock normalization as the builder stage (see comment there).
-RUN sed -E -i 's|registry = "[^"]*\.dist"|registry = "/.dist"|' uv.lock
-# Copy wheels directly from the build context (not from the builder stage).
-# Using --from=builder here would serve a cached /.dist that Docker baked at
-# the last full builder rebuild, silently ignoring any make dist updates since.
-# Sourcing from the build context means this layer invalidates whenever
-# .dist/ changes on disk, which is exactly what we want.
+# The runtime contains only installed artifacts.  Contribution packages and the
+# common shell are resolved from the staged wheelhouse; repository source trees
+# are never copied into the image.
 COPY .dist/ /.dist/
-# --no-sources: the pyproject's [tool.uv.sources] editable workspace paths
-# (../../../core, ../../../kit/*) exist for local dev only and cannot
-# resolve inside the image; every internal package installs from its
-# /.dist wheel instead.
 RUN --mount=type=cache,target=/root/.cache/uv \
-    uv sync --no-sources --no-dev --no-editable --find-links /.dist \
-        --refresh-package arkhai-core \
-        --refresh-package arkhai-core-storefront \
-        --refresh-package arkhai-core-registry-client \
-        --refresh-package arkhai-core-storefront-client \
-        --refresh-package arkhai-kit-policy \
-        --refresh-package arkhai-kit-settlement-runtime \
-        --refresh-package arkhai-kit-alkahest \
-        --refresh-package arkhai-kit-identity \
-        --refresh-package arkhai-hosted-settlement-client \
-        --refresh-package arkhai-kit-hosted-settlement \
-        --refresh-package arkhai-kit-config \
-        --refresh-package arkhai-kit-site-client \
-        --refresh-package arkhai-vms \
-        --refresh-package arkhai-bare-metal \
-        --refresh-package arkhai-vms-storefront \
-        --refresh-package arkhai-compute-provisioning
+    uv pip install --python /app/.venv/bin/python --no-deps --no-index \
+        --find-links /.dist \
+        arkhai-vms-storefront==0.3.0 \
+        arkhai-bare-metal-storefront==0.2.0
 
 # Fail the image build if the immutable hosted client regains a seller command
 # or any repository dependency was installed as an editable sibling source.

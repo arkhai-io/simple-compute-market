@@ -22,6 +22,7 @@ dependencies = [
     "arkhai-kit-hosted-settlement==0.1.0",
     "arkhai-kit-site>=0.3.0",
     "arkhai-bare-metal>=0.2.0",
+    "arkhai-bare-metal-storefront==0.2.0",
     "arkhai-vms>=0.2.0",
     "arkhai-compute-provisioning>=0.6.0",
     "arkhai-kit-fulfillment>=0.2.0",
