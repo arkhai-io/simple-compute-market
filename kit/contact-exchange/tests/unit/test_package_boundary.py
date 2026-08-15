@@ -6,12 +6,15 @@ from pathlib import Path
 _ALLOWED_IMPORT_ROOTS = {
     "__future__",
     "collections",
+    "dataclasses",
     "json",
     "market_contact_exchange",
     "market_core",
+    "market_identity",
     "market_settlement_runtime",
     "pydantic",
     "re",
+    "sqlite3",
     "typing",
 }
 

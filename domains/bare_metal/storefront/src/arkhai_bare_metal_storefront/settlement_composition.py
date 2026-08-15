@@ -14,6 +14,7 @@ from arkhai_bare_metal import (
 )
 from core_storefront.publication_runner import PublicationPayload
 from market_alkahest import create_alkahest_registration
+from market_contact_exchange import create_contact_exchange_registration
 from market_core.schemas import SettlementOption
 from market_hosted_settlement import (
     StripeSettlementConfig,
@@ -31,10 +32,14 @@ ALKAHEST_MECHANISM = "alkahest.v1"
 
 
 def build_bare_metal_settlement_registry() -> SettlementConfigurationRegistry:
-    """Install the two supported mechanisms through their shared facades."""
+    """Install the supported mechanisms through their shared facades."""
 
     return SettlementConfigurationRegistry(
-        (create_alkahest_registration(), create_stripe_registration())
+        (
+            create_alkahest_registration(),
+            create_stripe_registration(),
+            create_contact_exchange_registration(),
+        )
     )
 
 

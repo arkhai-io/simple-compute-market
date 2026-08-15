@@ -103,27 +103,37 @@ Section 6.
 
 ## 4. Introductions reveal surface
 
-- [ ] 4.1 Framework-free `IntroductionRouteService` in `kit/contact-exchange`
-      mirroring `HostedSettlementRouteService` (protocol callbacks for
-      authorization, persistence, projection; domain mounts the FastAPI routes):
-      signed start supplies the buyer's contact payload (resolving the open
-      question: the payload accompanies start, so "available to both" is a
-      well-defined terminal condition), the seller's payload is bound from
-      configuration at acceptance, and an idempotent authenticated read serves
-      each party the counterparty's payload plus the introduction package.
-      Acceptance is consent to reveal (resolving the consent question:
-      accept = deal; record the rationale in `design.md`).
-- [ ] 4.2 Persistence beside the obligation record: contact payloads in a new
-      table via kit migrations (pattern: `kit/hosted-settlement/migrations.py`),
-      size-bounded, keyed by `obligation_ref`; reads are stable across restart.
-- [ ] 4.3 Mount `/api/v1/introductions` in the bare-metal storefront
-      (`api.py`/`runtime.py`, beside the `/api/v1/settlements` family), with the
-      same request-signing authorization; reveal is refused before acceptance
-      and to non-parties.
-- [ ] 4.4 Evidence: kit route-service units (authorization, idempotency,
-      pre-acceptance refusal, non-party refusal); storefront integration test
-      persisting across a restart of the service.
-- [ ] 4.5 Closeout.
+- [x] 4.1 `IntroductionRouteService` in `kit/contact-exchange` mirrors the
+      hosted route service (protocol callbacks; domain mounts FastAPI routes):
+      signed start supplies the buyer's payload — resolving the timing
+      question: the payload accompanies start, so "available to both" is
+      well-defined — and an idempotent authenticated read serves each party
+      the counterparty's payload plus the introduction package. Acceptance is
+      consent to reveal (accept = deal). One amendment to the draft: the
+      seller's payload binds from configuration at the first introduction
+      operation, not at negotiation acceptance — acceptance stays payload-free
+      by construction, so deals that never start persist no contact data.
+- [x] 4.2 `contact_introductions` table via kit `SettlementMigration`s
+      (`CONTACT_EXCHANGE_MIGRATIONS`), keyed by `obligation_ref`,
+      size-bounded via the shared payload validator, with idempotent insert,
+      conflict rejection on changed payloads, and `delete_introduction` as the
+      lifecycle teardown hook; bare-metal `SQLiteClient` composes the
+      migration and wraps the sync helpers.
+- [x] 4.3 `/api/v1/introductions` mounted in the bare-metal storefront beside
+      the `/api/v1/settlements` family with the same request-signing
+      authorization (either party may read; only the buyer may start); the
+      domain `complete` callback drives the non-financial obligation to
+      collected through the settlement runtime, idempotently. The contact
+      registration joined `build_bare_metal_settlement_registry` (the §6.1
+      storefront half) since `[Settlement.contact]` cannot resolve without it.
+- [x] 4.4 Evidence: kit route-service units 8 (buyer-only start, idempotent
+      replay, changed-payload conflict, both-party reads, pre-start refusal,
+      unaccepted 404, non-party 403) + migration units 4 (restart round-trip,
+      idempotent/conflicting insert, deletion); storefront HTTP e2e 3 —
+      listing → selection accept → start (reveals, aggregate settlement
+      `complete`) → both-party reads → restart persistence → refusals.
+      Suites: contact kit 32, bare-metal storefront 102.
+- [x] 4.5 Closeout: hygiene clean; design decisions recorded.
 
 ## 5. Buyer surface
 

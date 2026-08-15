@@ -45,6 +45,26 @@ _CLAUSE_OPERATORS = frozenset(
 )
 
 
+def validate_contact_payload(value: Mapping[str, str]) -> dict[str, str]:
+    """Bound one opaque contact payload; shared by config and the reveal route."""
+
+    payload = dict(value)
+    if len(payload) > _MAX_PAYLOAD_ENTRIES:
+        raise ValueError(
+            f"contact payload allows at most {_MAX_PAYLOAD_ENTRIES} entries"
+        )
+    for key, item in payload.items():
+        if not isinstance(key, str) or not key or len(key) > _MAX_PAYLOAD_KEY_CHARS:
+            raise ValueError("contact payload keys must be short and non-empty")
+        if (
+            not isinstance(item, str)
+            or not item.strip()
+            or len(item) > _MAX_PAYLOAD_VALUE_CHARS
+        ):
+            raise ValueError("contact payload values must be non-blank and bounded")
+    return payload
+
+
 class ContactProfile(BaseModel):
     """One public offered introduction: a channel plus prose commercial terms.
 
@@ -97,18 +117,7 @@ class ContactSettlementConfig(BaseModel):
     @field_validator("contact_payload")
     @classmethod
     def bound_contact_payload(cls, value: dict[str, str]) -> dict[str, str]:
-        if len(value) > _MAX_PAYLOAD_ENTRIES:
-            raise ValueError(
-                f"contact payload allows at most {_MAX_PAYLOAD_ENTRIES} entries"
-            )
-        for key, item in value.items():
-            if not key or len(key) > _MAX_PAYLOAD_KEY_CHARS:
-                raise ValueError("contact payload keys must be short and non-empty")
-            if not item.strip() or len(item) > _MAX_PAYLOAD_VALUE_CHARS:
-                raise ValueError(
-                    "contact payload values must be non-blank and bounded"
-                )
-        return value
+        return validate_contact_payload(value)
 
     @field_validator("profiles")
     @classmethod

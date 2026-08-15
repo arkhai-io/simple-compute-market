@@ -1,6 +1,22 @@
 """Introduction-only settlement mechanism: contact exchange."""
 
 from .client import ContactExchangeClient
+from .introduction_routes import (
+    AuthorizedIntroductionRequest,
+    IntroductionAgreement,
+    IntroductionRecord,
+    IntroductionRouteCallbacks,
+    IntroductionRouteError,
+    IntroductionRouteService,
+    IntroductionStart,
+)
+from .migrations import (
+    CONTACT_EXCHANGE_INTRODUCTIONS_MIGRATION_ID,
+    CONTACT_EXCHANGE_MIGRATIONS,
+    delete_introduction,
+    insert_introduction,
+    load_introduction,
+)
 from .settlement_config import (
     CONTACT_CONFIG_KEY,
     INTRODUCTION_ASSET,
@@ -15,13 +31,23 @@ from .settlement_config import (
     contact_option_builder,
     contact_preflight,
     create_contact_exchange_registration,
+    validate_contact_payload,
     validate_contact_publication_input,
 )
 
 __all__ = [
     "CONTACT_CONFIG_KEY",
+    "CONTACT_EXCHANGE_INTRODUCTIONS_MIGRATION_ID",
+    "CONTACT_EXCHANGE_MIGRATIONS",
     "INTRODUCTION_ASSET",
     "MECHANISM",
+    "AuthorizedIntroductionRequest",
+    "IntroductionAgreement",
+    "IntroductionRecord",
+    "IntroductionRouteCallbacks",
+    "IntroductionRouteError",
+    "IntroductionRouteService",
+    "IntroductionStart",
     "ContactExchangeClient",
     "ContactProfile",
     "ContactPublicationInput",
@@ -33,5 +59,9 @@ __all__ = [
     "contact_option_builder",
     "contact_preflight",
     "create_contact_exchange_registration",
+    "delete_introduction",
+    "insert_introduction",
+    "load_introduction",
+    "validate_contact_payload",
     "validate_contact_publication_input",
 ]

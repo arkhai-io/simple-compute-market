@@ -78,6 +78,17 @@ registration) forbids underscores, so the earlier `contact_exchange.v1` spelling
 could never register. Hyphenated `contact-exchange.v1` is used everywhere: the
 mechanism ID, the `service_terms` namespace key, and discovery projections.
 
+### The seller payload binds at the first introduction operation
+
+The draft bound the seller's contact from configuration "at acceptance". The
+implementation binds it at introduction start instead: acceptance stays
+payload-free by construction — the accepted plan carries only the public
+introduction package — and a deal whose introduction is never started persists
+no contact data at all, which is the better PII posture. Both payloads persist
+atomically at start, so "available to both parties" remains the terminal
+condition. Acceptance-as-consent stands: accept = deal, and the reveal needs no
+second confirmation.
+
 ### Contact is held then revealed, never published
 
 Options and listings carry prose terms and a channel descriptor only — the registry
