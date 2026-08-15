@@ -24,13 +24,22 @@ from core_storefront.models.listing_models import (
     ReclaimRequest,
     RefundRequest,
 )
+from core_storefront.domain_registry import (
+    StorefrontDomainBinding,
+    StorefrontDomainRegistry,
+)
 from core_storefront.stage_log import stage_event
 from domains.vms.listings.resources import parse_resource_from_dict
-from market_identity import Signer
+from domains.vms.listings.models import Listing
+from domains.vms.negotiation.policies import _amount_from_proposal
+from market_capacity_publication import CapacityRuntime
+from market_core import MarketDomainContract
+from market_identity import Identity, Signer
 from market_settlement_runtime import (
     SettlementPublicationClause,
     compile_settlement_publication_clause,
 )
+from market_storefront.negotiation_runtime import compute_round_zero_decision
 
 logger = logging.getLogger(__name__)
 
@@ -39,27 +48,68 @@ class ListingService:
     def __init__(
         self,
         *,
+        registry: StorefrontDomainRegistry,
+        binding: StorefrontDomainBinding,
+        domain: MarketDomainContract,
+        capacity_runtime: CapacityRuntime,
         sqlite_client: Any,
         marketplace_signer: Signer,
-        alkahest_clients: dict[str, Any] | None = None,
-        settlement_composition_provider: Callable[[], Any] | None = None,
+        alkahest_clients: dict[str, Any],
+        settlement_composition_provider: Callable[[], Any],
     ) -> None:
         from market_storefront.utils.config import (
             CHAINS,
             get_evm_wallet_private_key,
         )
 
+        if getattr(sqlite_client, "domain_registry", None) is not registry:
+            raise RuntimeError(
+                "listing service and SQLite repository must share the exact "
+                "storefront domain registry object"
+            )
+        registration = registry.resolve_registration(binding)
+        if binding.offering_mode != "vm" or registration.contract is not domain:
+            raise RuntimeError(
+                "listing service requires the exact VM registry binding and domain"
+            )
+        if not callable(getattr(capacity_runtime, "client", None)):
+            raise TypeError("capacity_runtime must expose the kit client() contract")
+        if not callable(settlement_composition_provider):
+            raise TypeError("settlement_composition_provider must be callable")
+        self._registry = registry
+        self._binding = binding
+        self._domain = domain
+        self._capacity_runtime = capacity_runtime
         self._db = sqlite_client
         self._marketplace_signer = marketplace_signer
-        self._alkahest_clients: dict[str, Any] = alkahest_clients or {}
-        self._settlement_composition_provider = settlement_composition_provider or (
-            lambda: None
-        )
+        self._alkahest_clients = alkahest_clients
+        self._settlement_composition_provider = settlement_composition_provider
 
         self._token_transfers_available = bool(
             self._alkahest_clients and CHAINS and get_evm_wallet_private_key()
         )
         self._alkahest_available = bool(self._alkahest_clients)
+
+    @property
+    def domain_registry(self) -> StorefrontDomainRegistry:
+        """Return the frozen registry governing listing bindings."""
+        return self._registry
+
+    @property
+    def domain_binding(self) -> StorefrontDomainBinding:
+        """Return the exact VM binding governing new listings."""
+        return self._binding
+
+    @property
+    def market_domain(self) -> MarketDomainContract:
+        """Return the exact VM contract selected by the composition root."""
+        return self._domain
+
+    @property
+    def capacity_runtime(self) -> CapacityRuntime:
+        """Return the injected kit-owned capacity collaborator."""
+        return self._capacity_runtime
+
 
     async def _resolve_chain_for_escrow(
         self, escrow_uid: str
@@ -265,25 +315,6 @@ class ListingService:
             "accepted_escrows": list(request.accepted_escrows),
             "claimant_principal": self._marketplace_signer.identity,
         }
-        if request.settlement_config is not None:
-            spec = (
-                request.settlement_config.model_dump(mode="python")
-                if hasattr(request.settlement_config, "model_dump")
-                else dict(request.settlement_config)
-            )
-            resources.update(spec)
-            resolver_id = spec.get("resolver_id")
-            if resolver_id is not None:
-                stripe = composition.settlement_config.mechanism_config("stripe")
-                profiles = getattr(stripe, "condition_profiles", {}) if stripe else {}
-                condition = profiles.get(spec.get("condition_profile"))
-                configured = (
-                    condition.evaluator.resolver_id if condition is not None else None
-                )
-                if resolver_id != configured:
-                    raise ValueError(
-                        "listing resolver does not match configured condition profile"
-                    )
         try:
             accepted, options, _readiness = await composition.publication_artifacts(
                 resources,
@@ -305,11 +336,13 @@ class ListingService:
 
         try:
             normalized_offer = self._normalize_token_resource(request.offer)
-            from market_storefront.domain_runtime import (
-                get_market_domain_contract,
-            )
-
-            get_market_domain_contract().codecs.listing(normalized_offer)
+            offering_mode = normalized_offer.get("virtualization_type")
+            if offering_mode != self._binding.offering_mode:
+                raise ValueError(
+                    "offer_resource.virtualization_type must match the "
+                    f"selected offering mode {self._binding.offering_mode!r}"
+                )
+            self._domain.codecs.listing(normalized_offer)
             offer_resource = parse_resource_from_dict(normalized_offer)
         except Exception as exc:
             raise ValueError(f"Invalid offer resource: {exc}") from exc
@@ -318,11 +351,7 @@ class ListingService:
                 "Listing offer must be a compute resource (the buyer-as-maker "
                 "token-offer shape was removed with the demand_resource cutover)."
             )
-        if (
-            not request.accepted_escrows
-            and not getattr(request, "settlements", ())
-            and request.settlement_config is None
-        ):
+        if not request.accepted_escrows and not getattr(request, "settlements", ()):
             raise ValueError("at least one settlement input is required")
         demands = [
             d.model_dump(mode="json") if hasattr(d, "model_dump") else dict(d)
@@ -414,7 +443,10 @@ class ListingService:
             )
             return CreateListingResponse(status="created", listing_id=listing_id)
 
-        publish_result = await publish_order_to_registry(listing_dict)
+        publish_result = await publish_order_to_registry(
+            listing_dict,
+            sqlite_client=self._db,
+        )
         return CreateListingResponse(
             status="created",
             listing_id=listing_id,
@@ -468,7 +500,7 @@ class ListingService:
             "settlement_options": settlement_options,
         }
         listing = Listing.model_validate(updated)
-        await publish_order_to_registry(listing)
+        await publish_order_to_registry(listing, sqlite_client=self._db)
         return listing.model_dump(mode="json")
 
     async def close_listing(self, listing_id: str) -> CloseListingResponse:
@@ -481,7 +513,10 @@ class ListingService:
         """
         from market_storefront.services.publication_service import close_order
 
-        result = await close_order({"listing_id": listing_id})
+        result = await close_order(
+            {"listing_id": listing_id},
+            sqlite_client=self._db,
+        )
         return CloseListingResponse(
             status=result.get("status", "closed"),
             listing_id=listing_id,
@@ -495,24 +530,28 @@ class ListingService:
     ) -> EvaluateNegotiateResponse:
         """Dry-run the round-0 negotiation decision without creating a thread.
 
-        Loads the listing from SQLite, then delegates to
-        ``_compute_round_zero_decision`` — the same pure-compute function
-        used by ``start_sync_negotiation`` — so the result is identical to
-        what round 0 of a real negotiation would produce.
+        Loads the listing from SQLite, then delegates to the same VM policy
+        adapter used by round zero of a real negotiation.
 
         Raises ``ValueError`` if the listing doesn't exist or has no usable
         negotiation strategy. The controller converts these to HTTP 404.
         """
-        from domains.vms.listings.models import Listing
-        from domains.vms.negotiation.policies import _amount_from_proposal
-
-        from market_storefront.utils.sync_negotiation import (
-            _compute_round_zero_decision,
-        )
 
         row = await self._db.load_listing(listing_id=listing_id)
         if not row:
             raise ValueError(f"Listing {listing_id} not found")
+        listing_binding = await self._db.load_listing_binding(listing_id=listing_id)
+        if listing_binding is None:
+            raise ValueError(f"Listing {listing_id} has no durable domain binding")
+        if listing_binding.binding != self._binding:
+            raise ValueError(
+                f"Listing {listing_id} is not bound to the selected VM domain"
+            )
+        domain = self._registry.resolve(listing_binding.binding)
+        if domain is not self._domain:
+            raise RuntimeError(
+                "listing binding did not resolve to the startup-owned VM contract"
+            )
         listing = Listing.model_validate(row)
         their_amount_raw = _amount_from_proposal(proposal)
         if their_amount_raw is None:
@@ -526,10 +565,14 @@ class ListingService:
             direction,
             strategy_name,
             decision,
-        ) = await _compute_round_zero_decision(
-            sqlite_client=self._db,
+        ) = await compute_round_zero_decision(
+            repository=self._db,
+            registry=self._registry,
+            binding=listing_binding.binding,
+            domain=domain,
+            capacity_runtime=self._capacity_runtime,
             listing=listing,
-            their_proposal=proposal,
+            proposal=proposal,
             requested_duration_seconds=requested_duration_seconds,
         )
         decision_amount = _amount_from_proposal(decision.proposal)
@@ -691,12 +734,12 @@ class ListingService:
             await composition.runtime.bind_fulfillment(
                 str(obligation_ref),
                 payload.fulfillment_uid,
-                local_role="seller",
+                local_principal=composition.local_principal,
                 worker_id=worker_id,
             )
             checked = await composition.runtime.check(
                 obligation_ref=str(obligation_ref),
-                local_role="seller",
+                local_principal=composition.local_principal,
                 worker_id=worker_id,
             )
             if checked.status != "succeeded":
@@ -707,7 +750,7 @@ class ListingService:
                 }
             collected = await composition.runtime.collect(
                 obligation_ref=str(obligation_ref),
-                local_role="seller",
+                local_principal=composition.local_principal,
                 worker_id=worker_id,
             )
         except Exception as exc:
@@ -780,10 +823,25 @@ class ListingService:
                 ),
                 "listing_id": listing_id,
             }
+        persisted_obligation = await composition.repository.load_settlement_obligation(
+            str(obligation_ref)
+        )
+        if persisted_obligation is None:
+            return 409, {
+                "error": "Settlement obligation is not registered",
+                "detail": (
+                    f"Escrow {payload.escrow_uid} references an unknown canonical "
+                    "settlement obligation."
+                ),
+                "listing_id": listing_id,
+            }
+        payer_principal = Identity.model_validate(
+            persisted_obligation.get("payer_principal")
+        )
         try:
             reclaimed = await composition.runtime.reclaim(
                 obligation_ref=str(obligation_ref),
-                local_role="buyer",
+                local_principal=payer_principal,
                 worker_id=f"manual-reclaim:{listing_id}",
             )
         except Exception as exc:

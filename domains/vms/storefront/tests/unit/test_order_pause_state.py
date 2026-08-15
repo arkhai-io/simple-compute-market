@@ -2,25 +2,35 @@
 
 Tests:
 - ``set_order_paused`` / ``is_order_paused`` SQLiteClient helpers
-- ``StorefrontPausedError`` is raised by ``start_sync_negotiation`` when
+- ``StorefrontPausedError`` is raised by the shared negotiation runtime when
   the storefront is globally paused or the order is individually paused
 """
 
 from __future__ import annotations
 
-from unittest.mock import AsyncMock
 
 import pytest
 import pytest_asyncio
 
+from core_storefront.aggregation import fill_first
+from core_storefront.domain_registry import (
+    StorefrontListingBinding,
+    build_storefront_derivation_key,
+)
+from market_capacity_publication import CapacityBinding, CapacityRuntime, CapacitySite
 from market_core.schemas import EscrowProposal
 from market_identity import TrustedIdentitySet, create_signer
 
+from market_storefront.domain_runtime import (
+    build_vm_storefront_domain,
+    build_vm_storefront_registry,
+)
 from market_storefront.utils.sqlite_client import SQLiteClient
-from market_storefront.utils.sync_negotiation import (
+from market_negotiation_runtime import (
     OfferUnfulfillableError,
     StorefrontPausedError,
 )
+from market_storefront.negotiation_runtime import build_vm_negotiation_runtime
 
 
 _BUYER_SIGNER = create_signer("ed25519", b"\x41" * 32)
@@ -34,25 +44,109 @@ _PROVISIONING_AUTHORITIES = TrustedIdentitySet(
     )
 )
 
+
+async def _noop_reconcile(_context) -> None:
+    return None
+
+
+def _capacity_runtime() -> CapacityRuntime:
+    return CapacityRuntime(
+        sites=(
+            CapacitySite(
+                "site-test",
+                "http://capacity.test",
+                _PROVISIONING_AUTHORITIES,
+            ),
+        ),
+        signer=_SELLER_SIGNER,
+        placement=fill_first,
+        reconcile=_noop_reconcile,
+        site_client_factory=lambda _site, _signer: object(),
+    )
+
+
+async def _start(
+    *,
+    sqlite_client,
+    our_listing_id,
+    buyer_principal,
+    seller_principal,
+    proposal,
+    our_base_url,
+    their_agent_url,
+    provision_terms=None,
+):
+    registration = sqlite_client.domain_registry.resolve_mode("vm")
+    runtime = build_vm_negotiation_runtime(
+        registration.contract,
+        registry=sqlite_client.domain_registry,
+        binding=registration.binding,
+        capacity_runtime=_capacity_runtime(),
+    )
+    return await runtime.start(
+        repository=sqlite_client,
+        listing_id=our_listing_id,
+        buyer_principal=buyer_principal,
+        seller_principal=seller_principal,
+        actor_principal=buyer_principal,
+        proposal=proposal.model_dump(mode="json"),
+        terms=provision_terms,
+        seller_agent_url=our_base_url,
+        buyer_agent_url=their_agent_url,
+    )
+
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
 
 @pytest_asyncio.fixture
 async def db(tmp_path) -> SQLiteClient:
-    client = SQLiteClient(db_path=str(tmp_path / "test.db"))
-    # Seed a minimal order row to test pause helpers against
     from datetime import datetime
-    await client.upsert_listing(
+
+    domain = build_vm_storefront_domain()
+    registry = build_vm_storefront_registry(domain)
+    registration = registry.resolve_mode("vm")
+    client = SQLiteClient(
+        db_path=str(tmp_path / "test.db"),
+        registry=registry,
+    )
+    listing_binding = StorefrontListingBinding.from_source_envelope(
         listing_id="order-001",
+        site_id="site-test",
+        pool_id="pool-order-001",
+        binding=registration.binding,
+        derivation_key=build_storefront_derivation_key(
+            site_id="site-test",
+            offering_mode=registration.offering_mode,
+            binding=registration.binding,
+            source_identity={"pool_id": "pool-order-001"},
+        ),
+        source_envelope={
+            "kind": "vm.test-listing-source.v1",
+            "schema_version": 1,
+            "payload": {"pool_id": "pool-order-001"},
+        },
+        last_reconciled_at=datetime.now().isoformat(),
+    )
+    await client.upsert_listing_with_binding(
+        binding=listing_binding,
         status="open",
         created_at=datetime.now().isoformat(),
         updated_at=datetime.now().isoformat(),
-        offer_resource={"gpu_model": "H200", "gpu_count": 1, "sla": 99.9, "region": "California, US", "resource_id": "resource-order-001"},
+        offer_resource={
+            "gpu_model": "H200",
+            "gpu_count": 1,
+            "sla": 99.9,
+            "region": "California, US",
+            "resource_id": "resource-order-001",
+            "virtualization_type": "vm",
+        },
         accepted_escrows=[{
             "chain_name": "test",
             "escrow_address": "0x000000000000000000000000000000000000abcd",
-            "literal_fields": {"token": "0x0000000000000000000000000000000000000001"},
+            "literal_fields": {
+                "token": "0x0000000000000000000000000000000000000001",
+            },
             "rates": [{"field": "amount", "per": "hour", "value": "1000"}],
         }],
         fulfillment_resource=None,
@@ -60,6 +154,7 @@ async def db(tmp_path) -> SQLiteClient:
         storefront_url="http://seller:8001",
         seller_principal=_SELLER_PRINCIPAL,
     )
+    assert await client.load_listing_binding(listing_id="order-001") == listing_binding
     return client
 
 
@@ -79,6 +174,22 @@ def marketplace_signer(monkeypatch):
         lambda: _PROVISIONING_AUTHORITIES,
     )
     return _SELLER_SIGNER
+
+@pytest.fixture(autouse=True)
+def exact_capacity_binding(monkeypatch):
+    async def resolve(repository, listing_id):
+        binding = await repository.load_listing_binding(listing_id=listing_id)
+        assert binding is not None
+        return CapacityBinding(
+            binding.site_id,
+            binding.binding.offering_mode,
+            str(binding.pool_id),
+        )
+
+    monkeypatch.setattr(
+        "market_storefront.negotiation_runtime.capacity_binding_for_listing",
+        resolve,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -208,20 +319,19 @@ class TestStorefrontPausedError:
 
 
 # ---------------------------------------------------------------------------
-# start_sync_negotiation raises StorefrontPausedError when paused
+# Shared runtime pause guards
 # ---------------------------------------------------------------------------
 
-class TestStartSyncNegotiationPauseGuard:
-    """Test that pause checks fire before any DB work in start_sync_negotiation."""
+class TestNegotiationRuntimePauseGuard:
+    """Pause checks fire before negotiation policy or persistence."""
 
     async def test_global_pause_raises(self, db, monkeypatch):
         # Patch is_globally_paused to return True
         import market_storefront.server as server_mod
         monkeypatch.setattr(server_mod, "_GLOBALLY_PAUSED", True)
 
-        from market_storefront.utils.sync_negotiation import start_sync_negotiation
         with pytest.raises(StorefrontPausedError) as exc_info:
-            await start_sync_negotiation(sqlite_client=db,
+            await _start(sqlite_client=db,
             our_listing_id="order-001", buyer_principal=_BUYER_PRINCIPAL, seller_principal=_SELLER_PRINCIPAL, proposal=EscrowProposal(chain_name="anvil", escrow_address="0x"+"0"*40, fields={"amount": 5000, "token": "0x"+"a"*40}, expiration_unix=2000000000),
             our_base_url="http://seller:8001",
             their_agent_url="0xBuyer",)
@@ -233,9 +343,8 @@ class TestStartSyncNegotiationPauseGuard:
 
         await db.set_listing_paused(listing_id="order-001", paused=True)
 
-        from market_storefront.utils.sync_negotiation import start_sync_negotiation
         with pytest.raises(StorefrontPausedError) as exc_info:
-            await start_sync_negotiation(sqlite_client=db,
+            await _start(sqlite_client=db,
             our_listing_id="order-001", buyer_principal=_BUYER_PRINCIPAL, seller_principal=_SELLER_PRINCIPAL, proposal=EscrowProposal(chain_name="anvil", escrow_address="0x"+"0"*40, fields={"amount": 5000, "token": "0x"+"a"*40}, expiration_unix=2000000000),
             our_base_url="http://seller:8001",
             their_agent_url="0xBuyer",)
@@ -247,10 +356,9 @@ class TestStartSyncNegotiationPauseGuard:
         import market_storefront.server as server_mod
         monkeypatch.setattr(server_mod, "_GLOBALLY_PAUSED", False)
 
-        from market_storefront.utils.sync_negotiation import start_sync_negotiation
         # order-001 has no strategy set, so we expect ValueError not paused
         with pytest.raises((ValueError, Exception)) as exc_info:
-            await start_sync_negotiation(sqlite_client=db,
+            await _start(sqlite_client=db,
             our_listing_id="order-001", buyer_principal=_BUYER_PRINCIPAL, seller_principal=_SELLER_PRINCIPAL, proposal=EscrowProposal(chain_name="anvil", escrow_address="0x"+"0"*40, fields={"amount": 5000, "token": "0x"+"a"*40}, expiration_unix=2000000000),
             our_base_url="http://seller:8001",
             their_agent_url="0xBuyer",)
@@ -269,10 +377,9 @@ class TestStartSyncNegotiationPauseGuard:
         import market_storefront.server as server_mod
         monkeypatch.setattr(server_mod, "_GLOBALLY_PAUSED", False)
 
-        from market_storefront.utils.sync_negotiation import start_sync_negotiation
         from market_core.schemas import EscrowProposal, ProvisionTerms
         with pytest.raises(OfferUnfulfillableError) as exc_info:
-            await start_sync_negotiation(sqlite_client=db,
+            await _start(sqlite_client=db,
             our_listing_id="order-001", buyer_principal=_BUYER_PRINCIPAL, seller_principal=_SELLER_PRINCIPAL, proposal=EscrowProposal(chain_name="anvil", escrow_address="0x"+"0"*40, fields={"amount": 5000, "token": "0x"+"a"*40}, expiration_unix=2000000000),
             provision_terms=ProvisionTerms(
                 kind="compute.v1",

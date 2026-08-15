@@ -12,7 +12,7 @@ from pydantic import BaseModel, Field, model_validator
 
 Party = Literal["buyer", "seller"]
 OperationKind = Literal[
-    "materialize", "status", "fulfill", "check", "collect", "reclaim"
+    "materialize", "status", "fulfill", "cleanup", "check", "collect", "reclaim"
 ]
 OperationState = Literal["pending", "in_progress", "succeeded", "manual_required"]
 MaterializationState = Literal[
@@ -99,6 +99,7 @@ class SettlementObligationRecord(BaseModel):
     mechanism_ref: str | None = None
     mechanism_status: str | None = None
     mechanism_state: dict[str, Any] = Field(default_factory=dict)
+    mechanism_params: dict[str, Any] = Field(default_factory=dict)
     buyer_action: dict[str, Any] | None = None
     condition_anchor: str | None = None
     fulfillment_ref: str | None = None
@@ -202,6 +203,7 @@ class SettlementOperationOutcome(BaseModel):
     obligation_ref: str
     operation: OperationKind
     status: Literal["succeeded", "pending", "manual_required", "busy", "terminal"]
+    action: dict[str, Any] | None = None
     receipt: dict[str, Any] | None = None
 
 

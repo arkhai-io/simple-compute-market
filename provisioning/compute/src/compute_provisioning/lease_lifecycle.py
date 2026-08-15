@@ -113,7 +113,6 @@ class LeaseLifecycleService:
         *,
         executor_release: ExecutorReleasePort,
         release_jobs: ReleaseJobPort | None = None,
-        default_executor_kind: str | None = None,
         capacity_released_notifier: CapacityReleasedNotifier | None = None,
         capacity_release_outbox: CapacityReleaseOutboxPort | None = None,
         parse_utc_value: ParseUtc = parse_utc,
@@ -122,7 +121,6 @@ class LeaseLifecycleService:
         self._site_authority = site_authority
         self._executor_release = executor_release
         self._release_jobs = release_jobs
-        self._default_executor_kind = default_executor_kind
         self._capacity_released_notifier = capacity_released_notifier
         self._capacity_release_outbox = (
             capacity_release_outbox or InMemoryCapacityReleaseOutbox()
@@ -169,7 +167,7 @@ class LeaseLifecycleService:
         attached = self._site_authority.attach_lease_reservation(
             capacity_reservation_id=body.capacity_reservation_id,
             escrow_uid=body.escrow_uid,
-            executor_kind=body.executor_kind or self._default_executor_kind,
+            executor_kind=body.executor_kind,
             executor_target=body.executor_target,
             executor_ref=body.executor_ref,
             lease_start_utc=_datetime_value(body.lease_start_utc),
@@ -179,7 +177,7 @@ class LeaseLifecycleService:
         if attached is None and not body.capacity_reservation_id:
             attached = self._site_authority.attach_lease_reservation(
                 escrow_uid=body.escrow_uid,
-                executor_kind=body.executor_kind or self._default_executor_kind,
+                executor_kind=body.executor_kind,
                 executor_target=body.executor_target,
                 executor_ref=body.executor_ref,
                 lease_start_utc=_datetime_value(body.lease_start_utc),

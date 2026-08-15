@@ -14,6 +14,7 @@ SETTLEMENT_DEFINITIONS = (
     "stripeSettlement",
     "alkahestSettlement",
     "settlement",
+    "pricing",
     "wallet",
     "chains",
 )

@@ -76,3 +76,29 @@ def test_fail_preserves_sanitized_action_context_without_opening() -> None:
     assert opened == []
     assert caught.value.metadata.kind == "browser_redirect"
     assert "checkout.invalid" not in str(caught.value)
+
+
+def test_bank_instructions_are_displayed_transiently_even_for_open_policy() -> None:
+    printed: list[str] = []
+    handler = BuyerActionHandler(
+        BuyerActionPolicy.OPEN,
+        open_url=lambda _url: pytest.fail("bank instructions are not a URL"),
+        print_url=printed.append,
+    )
+    metadata = handler.handle(
+        {
+            "kind": "bank_instructions",
+            "expires_at_unix": 1_800_000_000,
+            "bank_instructions": {
+                "currency": "usd",
+                "reference": "transient-reference",
+            },
+        }
+    )
+    assert printed == ['{"currency":"usd","reference":"transient-reference"}']
+    assert metadata is not None
+    assert metadata.as_event() == {
+        "action_kind": "bank_instructions",
+        "action_expires_at_unix": 1_800_000_000,
+    }
+    assert "transient-reference" not in repr(handler)

@@ -1,21 +1,47 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
+import json
 import os
 import time
 import tomllib
 import uuid
 from pathlib import Path
 from typing import Any, Literal, cast
-
-import httpx
-from market_identity import Identity, ProfileRepository, TrustedIdentitySet, create_signer
+from core_buyer.orchestration import make_publisher_trust_resolver
+from core_buyer.orchestrator import BuyConfig
 from core_buyer.profile_service import BuyerProfileService
+from core_buyer.registry_config import RegistryAuthority
+from domains.vms.buyer.hosted_authorization import prepare_hosted_funding_authorization
+from domains.vms.buyer.hosted_settlement import (
+    poll_hosted_settlement,
+    reclaim_hosted_settlement,
+    start_hosted_settlement,
+)
+from hosted_settlement_client import (
+    FundingMode,
+    FundingProfile,
+    InstrumentKind,
+    InstrumentReadiness,
+)
+from market_hosted_settlement import (
+    FundingSelection,
+    StripeSettlementConfig,
+    payer_command_context_from_config,
+)
+from market_identity import (
+    AuthorityPayerBinding,
+    Identity,
+    ProfileRepository,
+    TrustedIdentitySet,
+    create_signer,
+)
 from market_settlement_runtime import derive_obligation_ref
 from market_site_client import SiteCapacityAdminClient
 from registry_client import SyncRegistryClient
-from vm_provisioning_operator import HostCreate, SyncProvisioningClient
 from storefront_client import SyncStorefrontClient
+from vm_provisioning_operator import HostCreate, SyncProvisioningClient
 
 from .authority import released_authority_client
 from .driver import (
@@ -27,7 +53,6 @@ from .driver import (
     NegotiationSnapshot,
     RuntimeSnapshot,
     TerminalSnapshot,
-    stable_operation_ref,
 )
 
 _RESOURCE_ID_PREFIX = "hosted-e2e-vm"
@@ -68,17 +93,22 @@ def _signer(config: dict[str, Any], credential: str):
     return signer
 
 
-def _buyer_profile_signer(config: dict[str, Any]):
+def _buyer_profile(
+    config: dict[str, Any],
+) -> tuple[object, object, BuyerProfileService]:
     profile_config = config.get("BuyerProfile")
     if not isinstance(profile_config, dict):
         raise RuntimeError("buyer configuration has no profile-store reference")
     store_path = profile_config.get("store_path")
     if not isinstance(store_path, str):
         raise RuntimeError("buyer profile-store reference is malformed")
-    _profile, signer = BuyerProfileService(
-        repository=ProfileRepository(Path(store_path))
-    ).resolve_fresh_signer()
-    return signer
+    path = Path(store_path)
+    service = BuyerProfileService(
+        repository=ProfileRepository(path),
+        run_logs_directory=path.parent / "runs",
+    )
+    profile, signer = service.resolve_fresh_signer()
+    return profile, signer, service
 
 
 def _primary_registry_authority(config: dict[str, Any]) -> dict[str, Any]:
@@ -100,18 +130,34 @@ def _primary_registry_authority(config: dict[str, Any]) -> dict[str, Any]:
     return authority
 
 
-def _option(listing) -> dict[str, Any]:
+def _option(listing, funding_profile: str) -> dict[str, Any]:
     options = listing.extra.get("settlement_options", [])
-    hosted = [item for item in options if item.get("mechanism") == "fiat.stripe.v1"]
+    hosted = [
+        item
+        for item in options
+        if item.get("mechanism") == "fiat.stripe.v1"
+        and item.get("params", {}).get("funding_profile") == funding_profile
+    ]
     if len(hosted) != 1:
-        raise AssertionError("hosted listing did not publish exactly one fiat.stripe.v1 option")
+        raise AssertionError("hosted listing did not publish the exact selected profile")
     return hosted[0]
+
+
+async def _payer_facade_call(context, signer, operation: str, **kwargs: Any) -> Any:
+    """Run one direct payer operation and always close its released client."""
+
+    facade = context.facade(signer)
+    try:
+        return await getattr(facade, operation)(**kwargs)
+    finally:
+        await facade.aclose()
 
 
 class NetworkMarketplacePort:
     """Public HTTP driver for registry, storefront, buyer, VM, and authority seams."""
 
     def __init__(self, *, buyer_config: Path) -> None:
+        self.buyer_config_path = buyer_config
         self.buyer_config = _config(buyer_config)
         storefront_path = Path(_required("HOSTED_SETTLEMENT_E2E_STOREFRONT_CONFIG"))
         if not storefront_path.is_file():
@@ -122,14 +168,42 @@ class NetworkMarketplacePort:
         self.provisioning_url = _required("HOSTED_PROVISIONING_URL")
         self.authority_url = _required("HOSTED_SETTLEMENT_AUTHORITY_URL")
         self.account_ref = _required("HOSTED_SETTLEMENT_E2E_ACCOUNT_REF")
-        self._buyer_signer = _buyer_profile_signer(self.buyer_config)
-        buyer_signer = self._buyer_signer
-        self._buyer_authority = released_authority_client(
-            config_path=storefront_path,
-            signer=buyer_signer,
-            caller_role="payer",
-            base_url=self.authority_url,
+        profile, buyer_signer, profiles = _buyer_profile(self.buyer_config)
+        self._buyer_profile = profile
+        self._buyer_signer = buyer_signer
+        self._profiles = profiles
+        self._stripe_config = StripeSettlementConfig.model_validate(
+            self.buyer_config["Settlement"]["stripe"]
         )
+        self._funding_profile = FundingProfile(
+            _required("HOSTED_SETTLEMENT_E2E_FUNDING_PROFILE")
+        )
+        self._interaction = FundingMode(_required("HOSTED_SETTLEMENT_E2E_INTERACTION"))
+        self._payer_context = payer_command_context_from_config(
+            self._stripe_config,
+            profiles=profiles,
+            dispatch_action=lambda _action, _binding: None,
+        )
+        payer = asyncio.run(
+            _payer_facade_call(
+                self._payer_context,
+                buyer_signer,
+                "create",
+                country=self._stripe_config.country,
+            )
+        )
+        self._payer_binding = AuthorityPayerBinding(
+            authority_id=str(self._stripe_config.authority_id),
+            environment=str(self._stripe_config.environment),
+            binding_ref=payer.payer_profile_ref,
+            bound_principal=buyer_signer.identity,
+        )
+        self._profiles.set_authority_payer_binding(
+            profile.profile_id,
+            self._payer_binding,
+        )
+        self._setup_ref: str | None = None
+        self._selected_instrument_ref: str | None = None
         seller_signer = _signer(
             self.storefront_config,
             _required("HOSTED_SETTLEMENT_E2E_STOREFRONT_IDENTITY_CREDENTIAL"),
@@ -230,6 +304,96 @@ class NetworkMarketplacePort:
             production_manifest_digest=expected_manifest,
         )
 
+    def ensure_payer_profile_fixture(
+        self,
+        funding_profile: str,
+        interaction: str,
+    ) -> dict[str, Any]:
+        profile = FundingProfile(funding_profile)
+        mode = FundingMode(interaction)
+        if profile is not self._funding_profile or mode is not self._interaction:
+            raise AssertionError("payer fixture differs from the selected protected lane")
+        action: dict[str, Any] | None = None
+        ready = mode is FundingMode.INTERACTIVE
+        if mode is FundingMode.SAVED_INSTRUMENT:
+            expected_kind = (
+                InstrumentKind.CARD
+                if profile is FundingProfile.CARD
+                else InstrumentKind.US_BANK_ACCOUNT
+            )
+            instruments = asyncio.run(
+                _payer_facade_call(
+                    self._payer_context,
+                    self._buyer_signer,
+                    "list_instruments",
+                    payer_profile_ref=self._payer_binding.binding_ref,
+                )
+            )
+            selected = next(
+                (
+                    item
+                    for item in instruments.instruments
+                    if item.kind is expected_kind
+                    and item.readiness is InstrumentReadiness.READY
+                    and not item.revoked
+                ),
+                None,
+            )
+            if selected is None:
+                setup = asyncio.run(
+                    _payer_facade_call(
+                        self._payer_context,
+                        self._buyer_signer,
+                        "start_setup",
+                        payer_profile_ref=self._payer_binding.binding_ref,
+                        funding_profile=profile,
+                        label="Protected test instrument",
+                    )
+                )
+                self._setup_ref = setup.setup_ref
+                action = (
+                    None
+                    if setup.action is None
+                    else setup.action.model_dump(mode="json", exclude_none=True)
+                )
+            else:
+                self._selected_instrument_ref = selected.instrument_ref
+                ready = True
+        return {
+            "available": True,
+            "selected_owner_bound": True,
+            "historical_owner_recoverable": True,
+            "opaque_binding_persisted": True,
+            "action_persisted": False,
+            "saved_instrument_ready": ready,
+            "setup_action": action,
+        }
+
+    def complete_payer_setup(self) -> dict[str, Any]:
+        setup_ref = self._setup_ref
+        if setup_ref is None:
+            raise AssertionError("protected payer setup is not pending")
+        deadline = time.monotonic() + float(
+            os.environ.get("HOSTED_SETTLEMENT_E2E_LIFECYCLE_TIMEOUT", "180")
+        )
+        while time.monotonic() < deadline:
+            setup = asyncio.run(
+                _payer_facade_call(
+                    self._payer_context,
+                    self._buyer_signer,
+                    "setup_status",
+                    payer_profile_ref=self._payer_binding.binding_ref,
+                    setup_ref=setup_ref,
+                )
+            )
+            if setup.readiness is InstrumentReadiness.READY:
+                return self.ensure_payer_profile_fixture(
+                    self._funding_profile.value,
+                    self._interaction.value,
+                )
+            time.sleep(0.5)
+        raise TimeoutError("protected payer setup did not become ready")
+
     def verify_runtime(self) -> RuntimeSnapshot:
         status = httpx.get(self.storefront_url + "/health", timeout=10)
         authority = released_authority_client(
@@ -295,19 +459,26 @@ class NetworkMarketplacePort:
     def create_and_publish_listing(self) -> ListingSnapshot:
         created = self.seller.create_listing(
             offer={**_OFFER, "resource_id": self._resource_id},
-            settlement_config={
-                "account_ref": self.account_ref,
-                "currency": "usd",
-                "rate_minor_units": 2000,
-                "condition_profile": "vm-fulfillment",
-            },
+            settlements=[
+                {
+                    "mechanism": "fiat.stripe.v1",
+                    "asset": "usd",
+                    "rate": "20",
+                    "per": "hour",
+                    "mechanism_input": {
+                        "funding_profile": self._funding_profile.value,
+                        "interaction": self._interaction.value,
+                        "funds_flow": "separate_charges_transfers",
+                    },
+                }
+            ],
             max_duration_seconds=3600,
             paused=False,
         )
         if not created.listing_id:
             raise AssertionError("hosted listing create returned no listing identity")
         listing = self.seller.get_listing(created.listing_id)
-        option = _option(listing)
+        option = _option(listing, self._funding_profile.value)
         self._listing_id = created.listing_id
         return ListingSnapshot(
             listing_id=created.listing_id,
@@ -318,24 +489,12 @@ class NetworkMarketplacePort:
         discovered = self.registry.get_listing(listing_id)
         if str(discovered.id) != listing_id or discovered.status != "open":
             raise AssertionError("registry discovery did not return the open hosted listing")
-        if (
-            len(
-                [
-                    item
-                    for item in discovered.settlement_options
-                    if item.get("mechanism") == "fiat.stripe.v1"
-                ]
-            )
-            != 1
-        ):
-            raise AssertionError("registry did not project the hosted settlement option")
+        _option(discovered, self._funding_profile.value)
         return str(discovered.id)
 
     def negotiate(self, registry_listing_id: str) -> NegotiationSnapshot:
         listing = self.registry.get_listing(registry_listing_id)
-        option = [
-            item for item in listing.settlement_options if item.get("mechanism") == "fiat.stripe.v1"
-        ][0]
+        option = _option(listing, self._funding_profile.value)
         expiration_unix = int(time.time()) + (
             _REFUND_EXPIRATION_SECONDS if self._stripe_test_case == "refund" else 3600
         )
@@ -367,7 +526,14 @@ class NetworkMarketplacePort:
         obligations = plan.get("obligations") or []
         if len(obligations) != 1 or obligations[0].get("mechanism") != "fiat.stripe.v1":
             raise AssertionError("accepted Terms did not pin one hosted obligation")
-        self._accepted_obligation = obligations[0]
+        accepted = obligations[0]
+        params = accepted.get("params", {})
+        if (
+            params.get("funding_profile") != self._funding_profile.value
+            or params.get("interaction") != self._interaction.value
+        ):
+            raise AssertionError("accepted Terms changed the exact funding profile")
+        self._accepted_obligation = accepted
         return NegotiationSnapshot(
             negotiation_id=str(negotiation_id),
             accepted_terms={"selection": selection, "plan": plan},
@@ -377,55 +543,97 @@ class NetworkMarketplacePort:
     def materialize(self, negotiation_id: str) -> MaterializationSnapshot:
         obligation = dict(self._accepted_obligation)
         obligation_ref = derive_obligation_ref(negotiation_id, 0, obligation)
-        from domains.vms.buyer.hosted_settlement import start_hosted_settlement
-
+        authorization = prepare_hosted_funding_authorization(
+            buyer_profile_id=str(self._buyer_profile.profile_id),
+            principal=self._buyer_signer.identity,
+            signer=self._buyer_signer,
+            stripe_config=self._stripe_config,
+            obligation_ref=obligation_ref,
+            obligation=obligation,
+            selection=FundingSelection(
+                mode=self._interaction,
+                instrument_ref=self._selected_instrument_ref,
+            ),
+            automatic=False,
+            profiles=self._profiles,
+        )
         started = start_hosted_settlement(
             seller_url=self.storefront_url,
             negotiation_id=negotiation_id,
             obligation_ref=obligation_ref,
-            payer_principal=Identity.model_validate(obligation.get("payer_principal")),
-            claimant_principal=Identity.model_validate(obligation.get("claimant_principal")),
+            funding_authorization_ref=authorization.funding_authorization_ref,
             principal=self._buyer_signer.identity,
             signer=self._buyer_signer,
             resolve_seller_principals=self._publisher_resolver(),
         )
-        action = started.get("action") or {}
+        action_value = started.get("action")
+        action: BuyerAction | None = None
+        if action_value is not None:
+            if not isinstance(action_value, dict):
+                raise AssertionError("hosted materialization returned malformed payer action")
+            expires_at = action_value.get("expires_at_unix")
+            if not isinstance(expires_at, int):
+                raise AssertionError("hosted materialization returned no action expiry")
+            action = BuyerAction(
+                kind=str(action_value.get("kind")),
+                expires_at_unix=expires_at,
+                url=(
+                    str(action_value["url"])
+                    if isinstance(action_value.get("url"), str)
+                    else None
+                ),
+            )
         settlement_ref = started.get("settlement_ref")
-        expires_at = action.get("expires_at_unix") or started.get("action_expires_at_unix")
-        if not settlement_ref or not action.get("url"):
-            raise AssertionError("hosted materialization returned no Checkout action")
-        if not isinstance(expires_at, int):
-            raise AssertionError("hosted materialization returned no action expiry")
+        if not isinstance(settlement_ref, str) or not settlement_ref:
+            raise AssertionError("hosted materialization returned no settlement identity")
         amount = int(obligation["amount"])
         currency = str(obligation["asset"])
-        operation_ref = stable_operation_ref("materialize", obligation_ref)
-        self._operations[str(settlement_ref)] = operation_ref
+        condition = obligation.get("params", {}).get("condition")
+        condition_hash = hashlib.sha256(
+            json.dumps(condition, separators=(",", ":"), sort_keys=True).encode()
+        ).hexdigest()
+        self._operations[settlement_ref] = obligation_ref
         return MaterializationSnapshot(
             obligation_ref=obligation_ref,
-            settlement_ref=str(settlement_ref),
-            operation_ref=operation_ref,
-            action=BuyerAction(
-                kind=str(action.get("kind") or started.get("action_kind") or "redirect"),
-                expires_at_unix=expires_at,
-                url=str(action["url"]),
-            ),
+            settlement_ref=settlement_ref,
+            operation_ref=obligation_ref,
+            action=action,
             amount=amount,
             currency=currency,
             expiration_unix=int(obligation["expiration_unix"]),
             destination_account_ref=self.account_ref,
-            transfer_group=str(settlement_ref),
-            source_relation="checkout-charge",
+            transfer_group=settlement_ref,
+            source_relation="profile-funding",
+            accepted_negotiation_id=negotiation_id,
+            accepted_funding_profile=self._funding_profile.value,
+            accepted_condition_hash=condition_hash,
+            funding_authorization_bound=True,
         )
+
+    def observe_pending_funding(self, settlement_ref: str) -> dict[str, Any]:
+        status = self._buyer_status(settlement_ref)
+        funding_state = status.get("funding_state")
+        if funding_state not in {
+            "awaiting_external",
+            "action_required",
+            "succeeded_unavailable",
+        }:
+            funding_state = status.get("financial_state")
+        return {
+            "funding_state": (
+                "awaiting_payment"
+                if funding_state in {"awaiting_external", "action_required", "awaiting_payment"}
+                else "pending"
+            ),
+            "fulfillment_started": bool(status.get("fulfillment_ref")),
+        }
 
     def wait_funded(self, settlement_ref: str) -> bool:
         timeout = float(os.environ.get("HOSTED_SETTLEMENT_E2E_LIFECYCLE_TIMEOUT", "180"))
         deadline = time.monotonic() + timeout
         while time.monotonic() < deadline:
-            status = self._buyer_authority.get_status(
-                settlement_ref,
-                request_id=f"stripe-test-status-{uuid.uuid4().hex}",
-            )
-            if status.financial_state.value in {"funded", "collected", "refunded"}:
+            status = self._buyer_status(settlement_ref)
+            if status.get("status") in {"ready", "collected", "reclaimed"}:
                 if self._stripe_test_case == "refund":
                     self._reconcile_refund_materialization(settlement_ref)
                 return True
@@ -433,8 +641,6 @@ class NetworkMarketplacePort:
         return False
 
     def _reconcile_refund_materialization(self, settlement_ref: str) -> None:
-        from domains.vms.buyer.hosted_settlement import poll_hosted_settlement
-
         status: dict[str, Any] | None = None
         try:
             status = self._buyer_call(
@@ -489,8 +695,6 @@ class NetworkMarketplacePort:
         )
 
     def reclaim(self, settlement_ref: str) -> TerminalSnapshot:
-        from domains.vms.buyer.hosted_settlement import reclaim_hosted_settlement
-
         result = self._buyer_call(reclaim_hosted_settlement, settlement_ref)
         if result.get("status") != "reclaimed":
             result = self._wait_public_status(settlement_ref, {"reclaimed"})
@@ -522,8 +726,6 @@ class NetworkMarketplacePort:
         return self.reclaim(settlement_ref)
 
     def _buyer_status(self, settlement_ref: str) -> dict[str, Any]:
-        from domains.vms.buyer.hosted_settlement import poll_hosted_settlement
-
         return self._buyer_call(poll_hosted_settlement, settlement_ref)
 
     def _buyer_call(
@@ -557,9 +759,6 @@ class NetworkMarketplacePort:
         return listing_id
 
     def _publisher_resolver(self):
-        from core_buyer.orchestration import make_publisher_trust_resolver
-        from core_buyer.orchestrator import BuyConfig
-
         listing = self.registry.get_listing(self._require_listing_id()).to_dict()
         listing["source_registry_url"] = self.registry_url
         listing["source_registry_authority"] = self._registry_authority.authority

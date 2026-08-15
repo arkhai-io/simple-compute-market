@@ -26,8 +26,8 @@ def _build_market_domain_contract() -> MarketDomainContract:
     from apicredits_storefront.services.publication_service import (
         publish_order_to_registry,
     )
-    from apicredits_storefront.utils.sync_negotiation import (
-        _accepted_escrow_artifacts,
+    from apicredits_storefront.negotiation_runtime import (
+        build_api_credit_accepted_artifacts,
     )
     from core_storefront.escrow_verification import verify_escrow_for_settlement
     from domains.apicredits.domain_runtime import market_domain
@@ -54,7 +54,7 @@ def _build_market_domain_contract() -> MarketDomainContract:
             ),
             settlement=ImmutableSettlementCapability(
                 verify=verify_escrow_for_settlement,
-                build_plan=_accepted_escrow_artifacts,
+                build_plan=build_api_credit_accepted_artifacts,
             ),
             fulfillment=ImmutableFulfillmentCapability(
                 fulfill=fulfill_credit_obligation,

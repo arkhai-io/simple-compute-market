@@ -100,6 +100,54 @@ Typed mechanism registration controls which clients are constructed and which ne
 
 Configuration and readiness are admission inputs, not durable-plan interpreters. Once Terms are accepted, the stored canonical mechanism, exact parameters, payer/claimant direction, and operation identities govern recovery. Disabling or deprioritizing a mechanism may stop new publication, but funded obligations continue authoritative status, collection, and reclaim convergence through their original client.
 
+## Profile-bound hosted servicing
+
+New hosted settlement records bind the accepted funding profile and the operation-scoped authorization reference without changing the already derived agreement or obligation identity. The binding is immutable and participates in the materialization operation fingerprint, so an exact retry can converge after an unknown acknowledgement while changed reuse fails before another financial effect.
+
+Only the hosted authority's normalized `funded` result after the selected profile's success and availability gate releases the selected domain fulfillment hook. Redirect completion, confirmation, transfer instructions, pending ACH, webhook timing, and local policy are not funding evidence. Provider-neutral reason, deadline, and action metadata may be projected, but raw URLs and provider payloads are transient and authority-owned.
+
+Reclaim uses the same opaque settlement and operation identity and never asks marketplace code to choose refund, return, reversal, or dispute behavior. A pre-collection return blocks collection; a post-fulfillment/pre-collection return preserves fulfillment attribution while domain teardown and hosted financial recovery converge independently. A post-collection loss becomes operator-required state rather than rewriting completed marketplace identities.
+
+## Accepted domain continuity
+
+The accepted negotiation binding is a second routing dimension beside the
+settlement mechanism. It selects the domain plan builder and schema-opaque
+fulfillment hook while the mechanism registry selects financial effects. Core
+carriers retain the accepted buyer, site, mode, domain payload, and public
+operation identity without provider configuration or credentials. Hooks return
+validated lifecycle projections, including a domain result that is decoded by
+only the selected contract.
+
+Fulfillment contexts persist the exact binding and site. Restart, result
+retrieval, failure handling, and teardown compare those values before any call;
+they do not consult current listings or payload kinds. Provisioning remains the
+executor authority and dispatches teardown from its durable executor kind, so
+the storefront never derives VM versus bare-metal teardown locally.
+
+## Bare-metal hosted servicing
+
+The bare-metal callback reconstructs one immutable accepted binding before hosted preparation. Funding deadline is already bounded by the signed option and physical feasibility; pending funding neither renews a hold nor selects current capacity. After `funded`, the callback reserves and commits at the accepted site and begins one fulfillment under deterministic identities. It polls provisioning-owned state, signs credential-free lease-ready evidence, and lets the shared runtime collect only after authoritative evidence.
+
+Reclaim consults the same journal and physical lifecycle. Successful access evidence, reserved or unknown collection, and any uncertain physical authority block a contradictory reclaim. A pre-collection return blocks collection and converges financial recovery with independent teardown; a post-collection loss records operator-required state. Lease teardown never becomes a second financial operation.
+
+## API-credit hosted servicing
+
+The shared worker remains the only driver of materialize/status/check/collect
+and reclaim operation leases. Once status persists authoritative hosted
+`ready`, the API-credit fulfillment callback derives the obligation-scoped
+fulfillment ID and asks the credits authority to issue. Commit-then-fail is
+reconciled through the authority's fulfillment lookup before another mutation.
+The resulting credential goes to the private buyer result repository, while a
+seller-signed portable evidence digest becomes the public fulfillment
+reference. Condition evaluation precedes collection.
+
+The before-reclaim callback uses that same fulfillment ID to resolve any
+uncertain issuance. A committed grant is persisted as fulfillment and makes the
+shared reclaim service reject; an unknown grant leaves reclaim eligible.
+Operation journals, immutable grant digests, and evidence idempotency together
+close restart and acknowledgement-loss races without a cross-authority
+transaction.
+
 ## Current limits
 
 Heartbeat evidence remains persisted but is not an automated adjudication

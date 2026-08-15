@@ -35,11 +35,14 @@ An architecture companion does not replace a normative requirement. When explana
 
 ## Hosted settlement acceptance ownership
 
-Hosted settlement acceptance spans two capabilities, with no third test
-topology contract:
+Hosted settlement acceptance is distributed by authority boundary; no test or
+composition surface may redefine another owner's contract:
 
 | Durable decision | Owning permanent documentation |
 |---|---|
+| Exact `card.v1`, `us_bank_transfer.v1`, and `us_ach_debit.v1` option identity, independent readiness, compatibility, and bounded buyer automation | [`settlement-configuration/spec.md`](settlement-configuration/spec.md) and [`settlement-configuration/architecture.md`](settlement-configuration/architecture.md) |
+| Direct buyer payer/profile/authorization calls and storefront-mediated escrow calls remain separate lanes over the released client | [`buyer-orchestration/spec.md`](buyer-orchestration/spec.md), [`market-composition/spec.md`](market-composition/spec.md), and their architecture companions |
+| Accepted authorization, authoritative funding, immutable runtime recovery, fulfillment/reclaim exclusion, and recovery-only legacy card handling | [`storefront-publication/spec.md`](storefront-publication/spec.md), [`settlement-servicing/spec.md`](settlement-servicing/spec.md), and their architecture companions |
 | Provider-neutral scripted outcomes prove only Arkhai journal, retry, reconciliation, inbox, and idempotency behavior at the hosted producer's internal provider boundary | [`test-compatibility/spec.md`](test-compatibility/spec.md) and [`test-compatibility/architecture.md`](test-compatibility/architecture.md) |
 | Supported Stripe behavior is accepted only by the marketplace-owned protected `stripe-test` system lane | [`test-compatibility/spec.md`](test-compatibility/spec.md), [`test-compatibility/architecture.md`](test-compatibility/architecture.md), and [`docs/development/TESTING.md`](../../docs/development/TESTING.md) |
 | Protected reports keep marketplace consumer identity separate from the hosted manifest, client, image, signed repository/workflow/source identity, and protected producer-run identity and apply one sanitization/failure taxonomy | [`test-compatibility/spec.md`](test-compatibility/spec.md) and [`docs/development/TESTING.md`](../../docs/development/TESTING.md) |

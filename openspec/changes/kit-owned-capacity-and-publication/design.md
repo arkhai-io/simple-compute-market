@@ -44,6 +44,42 @@ claim carries units. The client's reserve, commit, and release handling is not. 
 the cleanest division in the change and should be stated so the extraction does not drag
 claim shape into kit.
 
+### Implementation comparison and chosen behavior
+
+The re-verification at implementation time found 675 lines in the VM
+`capacity_client.py` after prerequisite work, 263 in API credits, and no
+equivalent bare-metal runtime. VM publication was 267 lines and API-credit
+publication 213; bare metal had pure candidate/projection helpers but no
+registry lifecycle.
+
+The copies diverged in four load-bearing ways:
+
+- API credits configured a distinct trusted authority set per stable site ID;
+  VM applied one configured authority set to every URL and also invented a
+  `default` site from `authority_url` or the provisioning URL. The kit models
+  explicit `CapacitySite` entries and permits either trust-set shape through
+  injection, but never invents a site or URL.
+- VM handled mixed-direction `capacity_changed` deltas by closing and reopening;
+  API credits handled only consuming and released deltas. Delta delivery and
+  close-before-reopen order moved to kit while the candidate hook chooses the
+  affected domain candidates; VM retains the mixed-direction rule.
+- VM duplicated home-site availability under a `(None, resource_id)` key and
+  both domains could search another site for the same resource. The selected
+  authority is market state, so the shared projection exposes only exact
+  `(site_id, resource_id)` keys and recorded bindings never fan out on retry.
+- Publication callbacks differed in schema validation, event fields, and stale
+  candidate selection. Those are genuine domain semantics and remain injected
+  hooks. Registry fan-out, result persistence, target selection, local status
+  transitions, and deterministic close-before-reopen execution moved to kit.
+
+Each publication candidate now carries
+`CapacityBinding(site_id, offering_mode, source_id)`. The domain codec proves
+that the selected Resource Pool declares that offering mode and projects the
+same mode publicly. Kit compares the supplied binding with durable state before
+publish, close, reopen, reserve, commit, or release. Missing, changed, or
+unconfigured bindings fail closed rather than entering placement or recovery
+fallback.
+
 ## Risks / Trade-offs
 
 - **[Over-extracting the capacity client]** → Named above. Extract what a second

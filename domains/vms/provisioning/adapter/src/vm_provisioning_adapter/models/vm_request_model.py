@@ -29,6 +29,7 @@ def build_create_params(host: str, body: CreateVmRequest) -> AnsibleJobParams:
     return AnsibleJobParams(
         vm_host=host,
         vm_action="create",
+        executor_kind="vm",
         vm_target=body.vm_target,
         image_setup_type=body.image_setup_type,
         vm_ram=body.vm_ram,
@@ -65,6 +66,7 @@ def build_simple_params(
     return AnsibleJobParams(
         vm_host=host,
         vm_action=action,
+        executor_kind="vm",
         vm_target=vm_name,
         max_retries=body.max_retries,
     )

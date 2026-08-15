@@ -24,8 +24,13 @@ This module owns what is genuinely API-credits vocabulary:
 from __future__ import annotations
 
 import logging
+import re
 
 from market_identity import Identity, IdentityScheme
+from market_alkahest.schemas import (
+    EscrowProposal,
+    normalize_proposal_against_accepted_escrows,
+)
 from domains.apicredits.listings.models import coerce_resource_dict
 from market_policy.scalar_policies import (  # shared alkahest-scalar vocabulary
     _amount_from_proposal,
@@ -107,34 +112,79 @@ def api_credits_round_zero_guard(
         )
 
     proposal = their_last_proposal(history)
-    accepted = _loads_json_list(listing.get("accepted_escrows"))
     accepted_proposal_dict = None
-    if isinstance(proposal, dict):
+    if isinstance(proposal, dict) and proposal.get("settlement_selection") is not None:
         try:
-            from market_alkahest.schemas import (
-                EscrowProposal,
-                normalize_proposal_against_accepted_escrows,
-            )
-
-            accepted_proposal = normalize_proposal_against_accepted_escrows(
-                proposal=EscrowProposal.model_validate(proposal),
-                accepted_escrows=accepted if accepted else None,
-            )
-            accepted_proposal_dict = accepted_proposal.model_dump()
+            selection = proposal["settlement_selection"]
+            if not isinstance(selection, dict) or set(selection) != {
+                "mechanism",
+                "option_id",
+                "expiration_unix",
+            }:
+                raise ValueError("selection has invalid fields")
+            mechanism = selection["mechanism"]
+            option_id = selection["option_id"]
+            expiration_unix = selection["expiration_unix"]
+            if not isinstance(mechanism, str) or not mechanism:
+                raise ValueError("selection mechanism is required")
+            if (
+                not isinstance(option_id, str)
+                or re.fullmatch(r"[0-9a-f]{64}", option_id) is None
+            ):
+                raise ValueError("selection option_id is invalid")
+            if (
+                isinstance(expiration_unix, bool)
+                or not isinstance(expiration_unix, int)
+                or expiration_unix <= 0
+            ):
+                raise ValueError("selection expiration is invalid")
+            options = _loads_json_list(listing.get("settlement_options"))
+            matches = [
+                option
+                for option in options
+                if isinstance(option, dict)
+                and option.get("option_id") == option_id
+                and option.get("mechanism") == mechanism
+            ]
+            if len(matches) != 1:
+                raise ValueError("selection does not exact-match one listing option")
+            context.intermediate["accepted_settlement_selection"] = dict(selection)
+            context.intermediate["accepted_settlement_option"] = matches[0]
         except Exception as exc:
             return (
                 NegotiationDecision(
                     action="reject",
-                    reason=f"invalid_escrow_proposal:{exc}",
+                    reason=f"invalid_settlement_selection:{exc}",
                 ),
                 context,
             )
+    else:
+        accepted = _loads_json_list(listing.get("accepted_escrows"))
+        if isinstance(proposal, dict):
+            try:
+                accepted_proposal = normalize_proposal_against_accepted_escrows(
+                    proposal=EscrowProposal.model_validate(proposal),
+                    accepted_escrows=accepted if accepted else None,
+                )
+                accepted_proposal_dict = accepted_proposal.model_dump()
+            except Exception as exc:
+                return (
+                    NegotiationDecision(
+                        action="reject",
+                        reason=f"invalid_escrow_proposal:{exc}",
+                    ),
+                    context,
+                )
 
-    if accepted_proposal_dict is not None:
-        context.intermediate["accepted_escrow_proposal"] = accepted_proposal_dict
+        if accepted_proposal_dict is not None:
+            context.intermediate["accepted_escrow_proposal"] = accepted_proposal_dict
 
     proposal_for_scalar = (
-        accepted_proposal_dict if accepted_proposal_dict is not None else proposal
+        proposal
+        if context.intermediate.get("accepted_settlement_selection") is not None
+        else accepted_proposal_dict
+        if accepted_proposal_dict is not None
+        else proposal
     )
     uses_scalar_amount = proposal_uses_scalar_amount(listing, proposal_for_scalar)
     context.intermediate["uses_scalar_amount"] = uses_scalar_amount

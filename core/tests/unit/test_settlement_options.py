@@ -16,7 +16,8 @@ def _option() -> SettlementOption:
     params = {
         "account_ref": "account-1",
         "funds_flow": "separate_charges_transfers",
-        "payment_method_types": ["card"],
+        "funding_profile": "card.v1",
+        "interaction": "interactive",
         "condition": {"protocol": "arkhai.condition.v1"},
     }
     option_id = derive_settlement_option_id(

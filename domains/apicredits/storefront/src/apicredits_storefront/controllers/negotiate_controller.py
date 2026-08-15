@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Mapping
+from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi_utils.cbv import cbv
@@ -10,16 +12,23 @@ from pydantic import ValidationError
 
 import apicredits_storefront.container as _container
 from apicredits_storefront.middleware import buyer_auth
+from apicredits_storefront.utils.config import BASE_URL_OVERRIDE
 from core_storefront.models.negotiation_models import (
     NegotiateContinueRequest,
     NegotiateContinueResponse,
     NegotiateNewRequest,
     NegotiateNewResponse,
 )
+from market_negotiation_runtime import (
+    NegotiationRuntime,
+    OfferUnfulfillableError,
+    StorefrontPausedError,
+)
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/v1/negotiate", tags=["negotiate"])
+
 
 def _seller_principal():
     signer = _container.resolved_marketplace_signer
@@ -28,13 +37,36 @@ def _seller_principal():
     return signer.identity
 
 
+def _proposal_payload(proposal: Any, settlement_selection: Any) -> Any:
+    if settlement_selection is None:
+        return proposal
+    selection = settlement_selection.model_dump(mode="json")
+    if proposal is None:
+        return {"settlement_selection": selection}
+    payload = (
+        dict(proposal)
+        if isinstance(proposal, dict)
+        else proposal.model_dump(mode="json")
+    )
+    payload["settlement_selection"] = selection
+    return payload
+
+
 @cbv(router)
 class NegotiateController:
     def __init__(
         self,
         db=Depends(lambda: _container.resolved_sqlite_client),
+        runtime: NegotiationRuntime = Depends(
+            lambda: _container.resolved_negotiation_runtime
+        ),
     ) -> None:
+        if runtime is None:
+            raise RuntimeError(
+                "negotiation controller requires the composed kit runtime"
+            )
         self._db = db
+        self._runtime = runtime
 
     @router.post(
         "/new",
@@ -49,32 +81,38 @@ class NegotiateController:
         body: NegotiateNewRequest,
         request: Request,
     ) -> NegotiateNewResponse:
-        from apicredits_storefront.utils.config import BASE_URL_OVERRIDE
-        from apicredits_storefront.utils.sync_negotiation import (
-            OfferUnfulfillableError,
-            StorefrontPausedError,
-            start_sync_negotiation,
-        )
 
         seller_principal = _seller_principal()
-        await buyer_auth._verify(
+        auth = await buyer_auth._verify(
             request,
             "negotiate_new",
             body.listing_id,
             expected_principal=body.buyer_principal,
             body=body,
+            allow_exact_retry=True,
         )
+        if auth.exact_retry:
+            if auth.recorded_outcome is None:
+                raise HTTPException(status_code=409, detail="request retry is pending")
+            status_code, payload = auth.recorded_outcome
+            if status_code >= 400:
+                raise HTTPException(status_code=status_code, detail=payload)
+            return NegotiateNewResponse.model_validate(payload)
 
         try:
-            result = await start_sync_negotiation(
-                sqlite_client=self._db,
-                our_listing_id=body.listing_id,
+            result = await self._runtime.start(
+                repository=self._db,
+                listing_id=body.listing_id,
                 buyer_principal=body.buyer_principal,
                 seller_principal=seller_principal,
-                provision_terms=body.provision_terms,
-                proposal=body.proposal,
-                our_base_url=BASE_URL_OVERRIDE or "",
-                their_agent_url=body.buyer_agent_url,
+                actor_principal=auth.principal,
+                terms=body.provision_terms,
+                proposal=_proposal_payload(
+                    body.proposal,
+                    body.settlement_selection,
+                ),
+                seller_agent_url=BASE_URL_OVERRIDE or "",
+                buyer_agent_url=body.buyer_agent_url,
             )
         except StorefrontPausedError as exc:
             raise HTTPException(
@@ -112,8 +150,6 @@ class NegotiateController:
         except Exception as exc:
             logger.error("[NEGOTIATE/new] %s", exc, exc_info=True)
             raise HTTPException(status_code=500, detail=str(exc))
-        result["buyer_principal"] = body.buyer_principal
-        result["seller_principal"] = seller_principal
         return NegotiateNewResponse(**result)
 
     @router.post(
@@ -130,33 +166,74 @@ class NegotiateController:
         body: NegotiateContinueRequest,
         request: Request,
     ) -> NegotiateContinueResponse:
-        from apicredits_storefront.utils.sync_negotiation import (
-            continue_sync_negotiation,
-        )
 
         seller_principal = _seller_principal()
-        await buyer_auth._verify(
+        auth = await buyer_auth._verify(
             request,
             "negotiate_continue",
             neg_id,
             expected_principal=body.buyer_principal,
             body=body,
+            allow_exact_retry=True,
         )
+        if auth.exact_retry:
+            if auth.recorded_outcome is None:
+                raise HTTPException(status_code=409, detail="request retry is pending")
+            status_code, payload = auth.recorded_outcome
+            if status_code >= 400:
+                raise HTTPException(status_code=status_code, detail=payload)
+            return NegotiateContinueResponse.model_validate(payload)
 
-        if body.action == "counter" and body.proposal is None:
+        if (
+            body.action == "counter"
+            and body.proposal is None
+            and body.settlement_selection is None
+        ):
             raise HTTPException(
                 status_code=400,
                 detail="'proposal' required for counter",
             )
 
+        proposal_payload = _proposal_payload(
+            body.proposal,
+            body.settlement_selection,
+        )
+        candidate_selection = (
+            proposal_payload.get("settlement_selection")
+            if isinstance(proposal_payload, Mapping)
+            else None
+        )
+        if body.action == "accept" and candidate_selection is not None:
+            thread = await self._db.load_negotiation_thread_row(negotiation_id=neg_id)
+            carrier = (
+                thread.get("buyer_escrow_proposal")
+                if isinstance(thread, Mapping)
+                and isinstance(thread.get("buyer_escrow_proposal"), Mapping)
+                else {}
+            )
+            pinned_selection = carrier.get("settlement_selection")
+            if (
+                not isinstance(candidate_selection, Mapping)
+                or not isinstance(pinned_selection, Mapping)
+                or dict(candidate_selection) != dict(pinned_selection)
+            ):
+                raise HTTPException(
+                    status_code=409,
+                    detail=(
+                        "opening settlement selection cannot change during negotiation"
+                    ),
+                )
+
         try:
-            result = await continue_sync_negotiation(
-                sqlite_client=self._db,
-                neg_id=neg_id,
+            result = await self._runtime.continue_negotiation(
+                repository=self._db,
+                negotiation_id=neg_id,
                 buyer_action=body.action,
-                buyer_proposal=body.proposal,
+                buyer_proposal=proposal_payload,
                 buyer_reason=body.reason,
                 buyer_principal=body.buyer_principal,
+                actor_principal=auth.principal,
+                actor_role="buyer",
                 seller_principal=seller_principal,
             )
         except ValueError as exc:
@@ -164,6 +241,4 @@ class NegotiateController:
         except Exception as exc:
             logger.error("[NEGOTIATE/%s] %s", neg_id, exc, exc_info=True)
             raise HTTPException(status_code=500, detail=str(exc))
-        result["buyer_principal"] = body.buyer_principal
-        result["seller_principal"] = seller_principal
         return NegotiateContinueResponse(**result)

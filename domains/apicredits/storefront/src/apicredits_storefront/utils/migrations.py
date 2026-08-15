@@ -28,9 +28,43 @@ def _migrate_escrow_settlement_identity(conn: sqlite3.Connection) -> None:
     )
 
 
+def _migrate_issuance_evidence(conn: sqlite3.Connection) -> None:
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS api_credit_issuance_evidence (
+          evidence_digest TEXT PRIMARY KEY,
+          fulfillment_id TEXT NOT NULL UNIQUE,
+          signed_evidence TEXT NOT NULL,
+          created_at TEXT NOT NULL
+        )
+        """
+    )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS api_credit_private_results (
+          credentials_ref TEXT PRIMARY KEY,
+          fulfillment_id TEXT NOT NULL UNIQUE,
+          owner_scheme TEXT NOT NULL,
+          owner_id TEXT NOT NULL,
+          key_id TEXT NOT NULL,
+          secret TEXT NOT NULL,
+          created_at TEXT NOT NULL
+        )
+        """
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_api_credit_private_result_owner "
+        "ON api_credit_private_results(owner_scheme, owner_id, credentials_ref)"
+    )
+
+
 APICREDITS_MIGRATIONS = (
     Migration(
         "20260810_001_escrow_settlement_identity",
         _migrate_escrow_settlement_identity,
+    ),
+    Migration(
+        "20260815_002_issuance_evidence",
+        _migrate_issuance_evidence,
     ),
 )

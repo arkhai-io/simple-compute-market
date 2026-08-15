@@ -19,7 +19,6 @@ lease tails — is the ledger's.
 
 from __future__ import annotations
 
-import asyncio
 import functools
 import logging
 from collections.abc import Callable, Iterable, Mapping
@@ -37,15 +36,13 @@ from compute_provisioning import (
 from core_storefront.aggregation import (
     PLACEMENT_POLICIES,
     AggregateCapacityClient,
-    fill_first,
     most_available,
 )
-from core_storefront.capacity import (
-    CapacityDelta,
-    CapacitySubscriber,
-)
-from core_storefront.capacity_remote import (
-    site_events_poller,
+from market_capacity_publication import (
+    CapacityBinding,
+    CapacityReconcileContext,
+    CapacityRuntime,
+    CapacitySite,
 )
 from market_fulfillment import VersionedEnvelope
 from market_site import dict_resource_satisfies_claim
@@ -68,104 +65,37 @@ SQLiteClientFactory = Callable[[], Any]
 
 
 def _capacity_settings() -> tuple[dict[str, str], str]:
-    """Resolve ``(sites{name→url}, placement)`` from public settings.
-
-    Read at call time so tests that patch
-    ``market_storefront.utils.config.settings`` are honored. Sites come
-    from the ``[capacity.sites]`` table (name → authority URL); with no
-    table, ``authority_url`` becomes the single site named "default",
-    falling back to the provisioning service — that process hosts the
-    site authority.
-    """
+    """Resolve explicit stable site IDs and the configured placement policy."""
     from market_storefront.utils import config
 
     cap = getattr(config.settings, "capacity", None)
     placement = str(getattr(cap, "placement", "") or "fill_first").strip()
-
-    sites: dict[str, str] = {}
     raw_sites = getattr(cap, "sites", None)
-    if raw_sites:
-        for name, url in dict(raw_sites).items():
-            url = str(url or "").strip()
-            if url:
-                sites[str(name)] = url.rstrip("/")
-    if not sites:
-        url = str(getattr(cap, "authority_url", "") or "").strip()
-        if not url:
-            url = str(
-                getattr(
-                    getattr(config.settings, "provisioning", None),
-                    "service_url",
-                    "",
-                )
-                or ""
-            )
-        if url:
-            sites["default"] = url.rstrip("/")
-    if not sites:
+    if not raw_sites:
         raise RuntimeError(
-            "No capacity site authority configured: set "
-            "[capacity].authority_url / [capacity.sites], or "
-            "[provisioning].service_url (the provisioning service hosts "
-            "the site authority).",
+            "No capacity site authority configured: [capacity.sites] must map "
+            "each stable site ID to an authority URL."
         )
+    sites: dict[str, str] = {}
+    for raw_name, raw_url in dict(raw_sites).items():
+        site_id = str(raw_name).strip()
+        url = str(raw_url or "").strip().rstrip("/")
+        if not site_id or not url:
+            raise RuntimeError("capacity site IDs and authority URLs must be non-empty")
+        sites[site_id] = url
     return sites, placement
 
 
-async def member_availability_view(
-    client: Any,
-    db_path: str | None = None,
-) -> dict[tuple[str | None, str], int]:
-    """Available units per pool member, from the aggregated snapshots.
-
-    Keyed ``(site, resource_id)`` — the aggregator's member key. The
-    home site (the first configured one) is also keyed ``(None, rid)``,
-    matching members that carry no site tag.
-    """
-    view: dict[tuple[str | None, str], int] = {}
-    sites = remote_site_clients(client)
-    if not sites:
-        return view
-    home_site = next(iter(sites))
-    for row in await client.snapshot():
-        resource_id = row.get("resource_id")
-        available = row.get("available_units")
-        if not resource_id or available is None:
-            continue
-        site = row.get("site") or home_site
-        available = max(int(available), 0)
-        if site == home_site:
-            view[(None, str(resource_id))] = available
-        view[(str(site), str(resource_id))] = available
-    return view
-
-
-# Delta kinds that shrink availability and can strand open derived
-# listings whose GPU slice no longer fits.
 _CONSUMING_DELTA_KINDS = frozenset({"reserved", "committed", "lease_truncated"})
-
-# A mixed-direction capacity registration (e.g. GPU count grew while RAM
-# shrank) can simultaneously strand some listings and free up others;
-# neither "consuming" nor "released" alone is safe, so both
-# reconciliation passes run.
 _MIXED_DIRECTION_DELTA_KINDS = frozenset({"capacity_changed"})
 
 
-def _make_listing_reconcile_subscriber(
+def _capacity_reconciler(
     sqlite_client_factory: SQLiteClientFactory,
-    client: Any,
-) -> CapacitySubscriber:
-    """Reconcile derived listings against site-authority availability.
+) -> Callable[[CapacityReconcileContext], Any]:
+    """Supply VM candidate semantics to the kit-owned reconciliation loop."""
 
-    This is the storefront's *reaction* to a capacity delta, not part of
-    the moving deal's flow — another seller's reservation invalidates
-    our listings just the same. Consuming deltas close stranded
-    listings, "released" reopens ones that fit again, and a mixed-
-    direction "capacity_changed" registration runs both passes since it
-    can do both at once.
-    """
-
-    async def _reconcile_listings(delta: CapacityDelta) -> None:
+    async def _reconcile(context: CapacityReconcileContext) -> None:
         from core_storefront.stage_log import stage_event
 
         from market_storefront.services.publication_service import (
@@ -173,16 +103,8 @@ def _make_listing_reconcile_subscriber(
             reopen_available_compute_listings_after_capacity_change,
         )
 
-        sites = remote_site_clients(client)
-        home_site = next(iter(sites), None)
-        if home_site is None:
-            return
-        db_path = sqlite_client_factory().db_path
-        availability = await member_availability_view(client, db_path)
-        # Structural capacity source is local tables unless this site is
-        # explicitly opted into the projection-sourced path -- see
-        # reconciler.available_compute_slices' own docstring for what
-        # each source actually provides.
+        home_site = context.projections[0].site_id
+        db = sqlite_client_factory()
         projection = (
             site_pool_projection()
             if bool(
@@ -195,15 +117,24 @@ def _make_listing_reconcile_subscriber(
             else None
         )
         buckets = site_capacity_buckets() if projection is not None else None
-        if (
-            delta.kind in _CONSUMING_DELTA_KINDS
+        delta = context.delta
+        close = (
+            delta is None
+            or delta.kind in _CONSUMING_DELTA_KINDS
             or delta.kind in _MIXED_DIRECTION_DELTA_KINDS
-        ):
+        )
+        reopen = (
+            delta is None
+            or delta.kind == "released"
+            or delta.kind in _MIXED_DIRECTION_DELTA_KINDS
+        )
+        if close:
             closed = await close_stale_compute_listings_after_capacity_change(
-                db_path,
+                db.db_path,
+                sqlite_client=db,
                 home_site=home_site,
-                configured_site_count=len(sites),
-                member_availability=availability,
+                configured_site_count=len(context.projections),
+                member_availability=dict(context.availability),
                 site_pool_projection=projection,
                 site_capacity_buckets=buckets,
             )
@@ -211,16 +142,17 @@ def _make_listing_reconcile_subscriber(
                 stage_event(
                     "provision",
                     "stale_compute_listings_closed",
-                    resource_id=delta.resource_id,
-                    site=delta.site,
-                    capacity_version=delta.version,
+                    resource_id=delta.resource_id if delta is not None else None,
+                    site=delta.site if delta is not None else None,
+                    capacity_version=delta.version if delta is not None else None,
                     closed_listing_ids=closed,
                 )
-        if delta.kind == "released" or delta.kind in _MIXED_DIRECTION_DELTA_KINDS:
+        if reopen:
             reopened = await reopen_available_compute_listings_after_capacity_change(
-                db_path,
+                db.db_path,
+                sqlite_client=db,
                 home_site=home_site,
-                member_availability=availability,
+                member_availability=dict(context.availability),
                 site_pool_projection=projection,
                 site_capacity_buckets=buckets,
             )
@@ -228,33 +160,44 @@ def _make_listing_reconcile_subscriber(
                 stage_event(
                     "provision",
                     "compute_listings_reopened",
-                    resource_id=delta.resource_id,
-                    site=delta.site,
-                    capacity_version=delta.version,
+                    resource_id=delta.resource_id if delta is not None else None,
+                    site=delta.site if delta is not None else None,
+                    capacity_version=delta.version if delta is not None else None,
                     reopened_listing_ids=reopened,
                 )
 
-    return _reconcile_listings
+    return _reconcile
 
 
-# One aggregator per configuration: deltas come from the per-site
-# pollers (not from whichever client instance happened to mutate), and
-# the reservation→site routing cache must survive across build calls
-# within the process.
-_aggregate_state: dict[str, Any] = {"key": None, "client": None}
+_capacity_runtime_state: dict[str, Any] = {"key": None, "runtime": None}
 
 
-def _aggregate_for(
+def build_capacity_runtime_for(
     sqlite_client_factory: SQLiteClientFactory,
-    sites: Mapping[str, str],
-    placement_name: str,
-) -> AggregateCapacityClient:
-    from market_storefront import container
+    *,
+    signer: Any,
+) -> CapacityRuntime:
+    """Compose the kit runtime from explicit repository and signer collaborators."""
 
-    signer = container.resolved_marketplace_signer
     if signer is None:
         raise RuntimeError("storefront marketplace signer is unavailable")
+    sites, placement_name = _capacity_settings()
     expected_authorities = get_provisioning_authorities()
+    placement = PLACEMENT_POLICIES.get(placement_name)
+    if placement is None:
+        raise RuntimeError(
+            f"unknown capacity placement policy {placement_name!r}; "
+            f"expected one of {sorted(PLACEMENT_POLICIES)}"
+        )
+    if placement is most_available:
+        placement = functools.partial(
+            most_available,
+            claim_matcher=functools.partial(
+                dict_resource_satisfies_claim,
+                unit_claim_keys=VM_UNIT_CLAIM_KEYS,
+            ),
+        )
+    db_path = str(getattr(sqlite_client_factory(), "db_path", ""))
     key = (
         tuple(sorted(sites.items())),
         placement_name,
@@ -264,62 +207,67 @@ def _aggregate_for(
             (principal.scheme.value, principal.identifier)
             for principal in expected_authorities.identities
         ),
+        db_path,
     )
-    if _aggregate_state["key"] == key:
-        return _aggregate_state["client"]
-    placement = PLACEMENT_POLICIES.get(placement_name)
-    if placement is None:
-        logger.warning(
-            "[CAPACITY] Unknown placement policy %r — using fill_first (known: %s)",
-            placement_name,
-            sorted(PLACEMENT_POLICIES),
-        )
-        placement = fill_first
-    if placement is most_available:
-        # This domain's backing site is kit/site, which owns the only
-        # full claim-parsing and feasibility semantics — inject its exact
-        # matcher rather than ranking against the aggregator's own
-        # deliberately coarse default (pool/resource/dimensions only,
-        # not region/gpu_model/etc). PLACEMENT_POLICIES itself stays
-        # generic; this substitution is domain-composition-local, not a
-        # change to what other domains get when they select
-        # "most_available".
-        placement = functools.partial(
-            most_available,
-            claim_matcher=functools.partial(
-                dict_resource_satisfies_claim,
-                unit_claim_keys=VM_UNIT_CLAIM_KEYS,
+    if _capacity_runtime_state["key"] != key:
+        _capacity_runtime_state["key"] = key
+        _capacity_runtime_state["runtime"] = CapacityRuntime(
+            sites=tuple(
+                CapacitySite(site_id, url, expected_authorities)
+                for site_id, url in sites.items()
             ),
+            signer=signer,
+            placement=placement,
+            reconcile=_capacity_reconciler(sqlite_client_factory),
         )
-    aggregate = AggregateCapacityClient(
-        {
-            name: SiteCapacityClient(
-                url,
-                signer=signer,
-                expected_authorities=expected_authorities,
-            )
-            for name, url in sites.items()
-        },
-        placement=placement,
+    return _capacity_runtime_state["runtime"]
+
+
+def build_capacity_runtime(
+    sqlite_client_factory: SQLiteClientFactory,
+) -> CapacityRuntime:
+    """Return the root-composed runtime for legacy non-root VM call sites."""
+
+    from market_storefront import container
+
+    return build_capacity_runtime_for(
+        sqlite_client_factory,
+        signer=container.resolved_marketplace_signer,
     )
-    aggregate.subscribe(
-        _make_listing_reconcile_subscriber(sqlite_client_factory, aggregate),
-    )
-    _aggregate_state["key"] = key
-    _aggregate_state["client"] = aggregate
-    return aggregate
 
 
 def build_capacity_client(
     sqlite_client_factory: SQLiteClientFactory,
 ) -> AggregateCapacityClient:
-    """Assemble the storefront's capacity client with default subscribers.
+    """Return the kit-owned runtime's aggregate capacity transport."""
+    return build_capacity_runtime(sqlite_client_factory).client()
 
-    Always an ``AggregateCapacityClient`` over the configured site
-    authorities (one site is just the degenerate aggregation).
-    """
-    sites, placement_name = _capacity_settings()
-    return _aggregate_for(sqlite_client_factory, sites, placement_name)
+async def capacity_binding_for_listing(
+    sqlite_client: Any,
+    listing_id: str,
+) -> CapacityBinding:
+    """Resolve the VM candidate's exact durable site, mode, and source."""
+    from domains.vms.listings.models import Listing
+
+    durable = await sqlite_client.load_listing_binding(listing_id=listing_id)
+    row = await sqlite_client.load_listing(listing_id=listing_id)
+    source_id = (
+        durable.pool_id or durable.physical_resource_id
+        if durable is not None
+        else None
+    )
+    if durable is None or source_id is None or row is None:
+        raise RuntimeError(
+            f"listing {listing_id!r} has no complete durable capacity binding"
+        )
+    listing = Listing.model_validate(row)
+    mode = listing.offer_resource.virtualization_type
+    offering_mode = mode.value if hasattr(mode, "value") else str(mode or "")
+    if offering_mode != durable.binding.offering_mode:
+        raise RuntimeError(
+            f"listing {listing_id!r} offering mode disagrees with its durable binding"
+        )
+    return CapacityBinding(durable.site_id, offering_mode, source_id)
 
 
 # ---------------------------------------------------------------------------
@@ -337,25 +285,12 @@ def build_capacity_client(
 
 
 class AggregateFulfillmentClient:
-    """Routes fulfillment scheduling/acceptance calls to the owning site.
+    """Routes fulfillment calls to an explicitly recorded trusted site.
 
-    Shares its ``capacity_reservation_id`` → site routing cache with the
-    paired ``AggregateCapacityClient`` (same dict instance, via
-    ``build_fulfillment_client``'s ``reservation_sites=``), so a
-    reservation's site is learned once, at ``reserve()`` time, and reused
-    for both the capacity and fulfillment surfaces — not re-learned or
-    tracked twice.
-
-    A cold cache (process restart) falls back to trying every configured
-    site in turn, same as ``AggregateCapacityClient.commit``/``release``.
-    This is safe, not just convenient: `schedule_resource`/`begin_fulfillment`
-    retries are idempotent by `capacity_reservation_id` (see
-    `openspec/specs/fulfillment/spec.md`, "Durable settlement persistence" --
-    an equivalent retry returns the existing row rather than erroring), so a
-    wrong-site attempt before the right one costs latency, not correctness. A
-    site that doesn't recognize the reservation answers 404
-    (`SettlementEntityNotFoundError`), which routes to the next site exactly
-    like a capacity `commit`/`release` refusal does today.
+    The shared reservation cache remains available to legacy callers, but
+    record-bound storefront flows pass ``site_id`` on every call.  A targeted
+    call addresses exactly that configured client and propagates its refusal
+    or error without consulting the cache or another site.
     """
 
     def __init__(
@@ -390,7 +325,13 @@ class AggregateFulfillmentClient:
     async def schedule_resource(
         self,
         request: FulfillmentScheduleRequest,
+        *,
+        site_id: str | None = None,
     ) -> FulfillmentScheduleResponse:
+        if site_id is not None:
+            result = await self._sites[site_id].schedule_resource(request)
+            self._reservation_sites[str(request.capacity_reservation_id)] = site_id
+            return result
         last_error: Exception | None = None
         for name in self._route_order(request.capacity_reservation_id):
             try:
@@ -412,7 +353,13 @@ class AggregateFulfillmentClient:
     async def begin_fulfillment(
         self,
         body: FulfillmentRequestBody,
+        *,
+        site_id: str | None = None,
     ) -> FulfillmentAcceptanceResponse:
+        if site_id is not None:
+            result = await self._sites[site_id].begin_fulfillment(body)
+            self._reservation_sites[str(body.capacity_reservation_id)] = site_id
+            return result
         last_error: Exception | None = None
         for name in self._route_order(body.capacity_reservation_id):
             try:
@@ -435,11 +382,14 @@ class AggregateFulfillmentClient:
         fulfillment_id: str,
         *,
         capacity_reservation_id: str | None = None,
+        site_id: str | None = None,
     ) -> FulfillmentStatusResponse:
         """Read fulfillment status, routed by ``capacity_reservation_id`` if
         the caller has it (it's keyed on that, not ``fulfillment_id``, in the
         shared routing cache — pass it whenever available, e.g. from the
         storefront's own persisted workflow state)."""
+        if site_id is not None:
+            return await self._sites[site_id].get_fulfillment_status(fulfillment_id)
         last_error: Exception | None = None
         for name in self._route_order(capacity_reservation_id):
             try:
@@ -461,8 +411,11 @@ class AggregateFulfillmentClient:
         fulfillment_id: str,
         *,
         capacity_reservation_id: str | None = None,
+        site_id: str | None = None,
     ) -> VersionedEnvelope[dict[str, Any]]:
         """Read fulfillment result; see ``get_fulfillment_status`` on routing."""
+        if site_id is not None:
+            return await self._sites[site_id].get_fulfillment_result(fulfillment_id)
         last_error: Exception | None = None
         for name in self._route_order(capacity_reservation_id):
             try:
@@ -478,6 +431,16 @@ class AggregateFulfillmentClient:
                 continue
         assert last_error is not None
         raise last_error
+
+    async def begin_fulfillment_teardown(
+        self,
+        fulfillment_id: str,
+        *,
+        site_id: str,
+    ) -> Any:
+        """Begin teardown only at the accepted fulfillment's recorded site."""
+
+        return await self._sites[site_id].begin_fulfillment_teardown(fulfillment_id)
 
 
 _fulfillment_aggregate_state: dict[str, Any] = {"key": None, "client": None}
@@ -530,22 +493,6 @@ def build_fulfillment_client(
     return aggregate
 
 
-def remote_site_clients(client: Any) -> dict[str, SiteCapacityClient]:
-    """The per-site remote clients behind a capacity client, by site name.
-
-    Used by callers that need the beyond-the-protocol surface
-    (reservation lists, event feeds) — those are per-site conversations,
-    not aggregate ones.
-    """
-    if isinstance(client, AggregateCapacityClient):
-        return {
-            name: client.site(name)
-            for name in client.site_names
-            if isinstance(client.site(name), SiteCapacityClient)
-        }
-    if isinstance(client, SiteCapacityClient):
-        return {"default": client}
-    return {}
 
 
 def site_pool_projection() -> dict[str, list[dict[str, Any]]]:
@@ -594,19 +541,9 @@ def site_capacity_buckets() -> dict[str, list[dict[str, Any]]]:
     return result
 
 
-async def capacity_events_poller_loop() -> None:
-    """Tail every site authority's capacity-event feed into the local bus.
-
-    The delivery half of capacity-scoped events: one poller per
-    configured site, each positioning at its feed head, running one full
-    listing reconcile to converge with anything missed while down, then
-    polling for new versions and emitting each as a site-tagged
-    ``CapacityDelta`` on the aggregate bus. A feed head that moves
-    backwards (ledger reset) re-runs the full reconcile instead of
-    replaying.
-    """
+async def capacity_events_poller_loop(sqlite_client: Any) -> None:
+    """Delegate multi-site event delivery and reconciliation to the kit."""
     from market_storefront.utils import config
-    from market_storefront.utils.sqlite_client import get_sqlite_client
 
     interval = float(
         getattr(
@@ -616,56 +553,6 @@ async def capacity_events_poller_loop() -> None:
         )
         or 5
     )
-    aggregate = build_capacity_client(lambda: get_sqlite_client())
-    site_clients = remote_site_clients(aggregate)
-    home_site = next(iter(site_clients))
-    configured_site_count = len(site_clients)
-
-    async def _full_reconcile() -> None:
-        from market_storefront.services.publication_service import (
-            close_stale_compute_listings_after_capacity_change,
-            reopen_available_compute_listings_after_capacity_change,
-        )
-
-        db_path = get_sqlite_client().db_path
-        availability = await member_availability_view(aggregate, db_path)
-        projection = (
-            site_pool_projection()
-            if bool(
-                getattr(
-                    getattr(settings, "capacity", None),
-                    "use_site_projection_for_listings",
-                    False,
-                )
-            )
-            else None
-        )
-        buckets = site_capacity_buckets() if projection is not None else None
-        await close_stale_compute_listings_after_capacity_change(
-            db_path,
-            home_site=home_site,
-            configured_site_count=configured_site_count,
-            member_availability=availability,
-            site_pool_projection=projection,
-            site_capacity_buckets=buckets,
-        )
-        await reopen_available_compute_listings_after_capacity_change(
-            db_path,
-            home_site=home_site,
-            member_availability=availability,
-            site_pool_projection=projection,
-            site_capacity_buckets=buckets,
-        )
-
-    await asyncio.gather(
-        *(
-            site_events_poller(
-                aggregate,
-                name,
-                client,
-                interval,
-                full_reconcile=_full_reconcile,
-            )
-            for name, client in site_clients.items()
-        )
+    await build_capacity_runtime(lambda: sqlite_client).poll_events(
+        interval_seconds=interval
     )

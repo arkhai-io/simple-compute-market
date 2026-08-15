@@ -52,6 +52,10 @@ class DealContext:
     accepted_provision_terms: dict[str, Any] | None = None
     settlement_selection: dict[str, Any] | None = None
     settlement_operation_identities: tuple[str, ...] = ()
+    funding_authorizations: tuple[tuple[str, str], ...] = ()
+
+    def funding_authorization_ref(self, obligation_ref: str) -> str | None:
+        return dict(self.funding_authorizations).get(obligation_ref)
 
 
 def accepted_settlement_mechanism(deal: DealContext) -> str:
@@ -234,6 +238,7 @@ def load_deal_context(
     accepted_provision_terms: dict[str, Any] | None = None
     settlement_selection: dict[str, Any] | None = None
     settlement_operation_identities: tuple[str, ...] = ()
+    funding_authorizations: dict[str, str] = {}
     last_status: str | None = None
 
     def _capture_accepted_terms(ev: dict[str, Any]) -> None:
@@ -412,6 +417,28 @@ def load_deal_context(
                 negotiation_id = str(ev["negotiation_id"])
             if ev.get("listing_id"):
                 listing_id = str(ev["listing_id"])
+        if ev_type == "funding_authorized":
+            operation_ref = ev.get("obligation_ref")
+            authorization_ref = ev.get("funding_authorization_ref")
+            if (
+                not isinstance(operation_ref, str)
+                or len(operation_ref) != 64
+                or any(character not in "0123456789abcdef" for character in operation_ref)
+                or not isinstance(authorization_ref, str)
+                or not authorization_ref
+                or authorization_ref != authorization_ref.strip()
+                or len(authorization_ref) > 256
+                or any(ord(character) < 0x20 for character in authorization_ref)
+            ):
+                raise typer.BadParameter(
+                    f"Run-log {run_id!r} has a malformed funding authorization."
+                )
+            prior = funding_authorizations.get(operation_ref)
+            if prior is not None and prior != authorization_ref:
+                raise typer.BadParameter(
+                    f"Run-log {run_id!r} has conflicting funding authorizations."
+                )
+            funding_authorizations[operation_ref] = authorization_ref
         if ev_type == "escrow_created":
             uid = ev.get("escrow_uid")
             if isinstance(uid, str) and uid:
@@ -528,6 +555,7 @@ def load_deal_context(
         accepted_provision_terms=accepted_provision_terms,
         settlement_selection=settlement_selection,
         settlement_operation_identities=settlement_operation_identities,
+        funding_authorizations=tuple(sorted(funding_authorizations.items())),
     )
 
 

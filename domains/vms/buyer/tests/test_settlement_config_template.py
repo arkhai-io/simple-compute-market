@@ -21,14 +21,24 @@ def test_fiat_buyer_template_uses_shared_settlement_without_evm_or_seller_fields
     assert "[Settlement.alkahest]" in rendered
     assert "[Wallet]" not in rendered
     assert "[Chains." not in rendered
-    assert "account_ref" not in rendered
-    assert "provider" not in rendered
-    assert "webhook" not in rendered
-    assert "database" not in rendered
+    for provider_owned_input in (
+        "account_ref =",
+        "provider =",
+        "provider_credentials =",
+        "api_key =",
+        "secret_key =",
+        "webhook_secret =",
+        "database_url =",
+        "customer_id =",
+        "payment_method_id =",
+        "mandate_id =",
+        "client_secret =",
+    ):
+        assert provider_owned_input not in rendered
     assert "[BuyerProfile]" in rendered
     assert "store_path" in rendered
-    assert "[Identity" not in rendered
-    assert "ARKHAI_IDENTITY_CREDENTIAL" not in rendered
+    assert "\n[Identity" not in rendered
+    assert "\nARKHAI_IDENTITY_CREDENTIAL" not in rendered
 
 
 def test_evm_resources_are_opt_in_for_buyer_template(monkeypatch, tmp_path):

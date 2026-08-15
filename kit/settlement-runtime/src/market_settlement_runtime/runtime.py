@@ -114,6 +114,24 @@ class SettlementRuntime:
         )
         return self._outcome(record, "materialize", "succeeded", receipt)
 
+    async def bind_mechanism_params(
+        self,
+        obligation_ref: str,
+        mechanism_params: Mapping[str, Any],
+        *,
+        local_principal: Identity,
+    ) -> SettlementObligationRecord:
+        """Bind immutable, mechanism-safe materialization inputs after acceptance."""
+        record = await self._load(obligation_ref)
+        self._require_principal(record, local_principal, "payer")
+        if not mechanism_params:
+            raise ValueError("mechanism_params must be non-empty")
+        row = await self._repository.bind_settlement_mechanism_params(
+            obligation_ref=obligation_ref,
+            mechanism_params=dict(mechanism_params),
+        )
+        return SettlementObligationRecord.model_validate(row)
+
     async def bind_fulfillment(
         self,
         obligation_ref: str,
@@ -211,6 +229,63 @@ class SettlementRuntime:
             uncertain=True,
         )
 
+    async def reserve_cleanup(
+        self,
+        obligation_ref: str,
+        *,
+        local_principal: Identity,
+        worker_id: str,
+    ) -> SettlementOperationOutcome:
+        """Reserve durable domain cleanup after a pre-collection terminal result."""
+
+        record = await self._load(obligation_ref)
+        self._require_principal(record, local_principal, "claimant")
+        self._require_fulfillment(record)
+        reserved = await self._reserve(record, "cleanup", worker_id, local_principal)
+        if reserved is None:
+            return self._outcome(record, "cleanup", "busy")
+        terminal = self._terminal_outcome(record, "cleanup", reserved)
+        if terminal is not None:
+            return terminal
+        return self._outcome(record, "cleanup", "pending")
+
+    async def complete_cleanup(
+        self,
+        obligation_ref: str,
+        *,
+        local_principal: Identity,
+        worker_id: str,
+    ) -> SettlementOperationOutcome:
+        record = await self._load(obligation_ref)
+        self._require_principal(record, local_principal, "claimant")
+        receipt = {"cleanup": "complete"}
+        await self._finish(
+            record,
+            "cleanup",
+            worker_id,
+            state="succeeded",
+            receipt=receipt,
+        )
+        return self._outcome(record, "cleanup", "succeeded", receipt)
+
+    async def retry_cleanup(
+        self,
+        obligation_ref: str,
+        error: Exception,
+        *,
+        local_principal: Identity,
+        worker_id: str,
+    ) -> None:
+        record = await self._load(obligation_ref)
+        self._require_principal(record, local_principal, "claimant")
+        await self._finish_retry(
+            record,
+            "cleanup",
+            worker_id,
+            error,
+            uncertain=False,
+        )
+
     async def materialize(
         self,
         *,
@@ -231,7 +306,7 @@ class SettlementRuntime:
             return terminal
         try:
             result = await client.materialize(
-                record.obligation,
+                self._operation_obligation(record),
                 operation_ref=settlement_operation_ref(
                     record.obligation_ref, "materialize"
                 ),
@@ -260,6 +335,7 @@ class SettlementRuntime:
             if state == "succeeded"
             else "pending",
             result.receipt,
+            action=result.buyer_action,
         )
 
     async def reconcile_status(
@@ -271,7 +347,9 @@ class SettlementRuntime:
     ) -> SettlementOperationOutcome:
         record = await self._load(obligation_ref)
         self._require_participant(record, local_principal, operation="reconcile")
-        if record.collection_state == "succeeded":
+        if record.collection_state == "succeeded" and not record.mechanism_state.get(
+            "terminal_risk_monitoring"
+        ):
             return self._outcome(
                 record,
                 "status",
@@ -295,7 +373,7 @@ class SettlementRuntime:
             return terminal
         try:
             result = await client.get_status(
-                record.obligation,
+                self._operation_obligation(record),
                 mechanism_ref=mechanism_ref,
                 operation_ref=settlement_operation_ref(record.obligation_ref, "status"),
                 mechanism_state=dict(record.mechanism_state),
@@ -305,11 +383,16 @@ class SettlementRuntime:
         except Exception as exc:
             await self._finish_retry(record, "status", worker_id, exc, uncertain=False)
             raise
+        terminal_status = result.status in {"reclaimed", "expired", "failed"}
+        if result.status == "collected" and not result.mechanism_state.get(
+            "terminal_risk_monitoring"
+        ):
+            terminal_status = True
         state = (
             "manual_required"
             if result.status == "manual_required"
             else "succeeded"
-            if result.status in {"collected", "reclaimed", "expired", "failed"}
+            if terminal_status
             else "pending"
         )
         await self._finish_status(record, worker_id, result, state)
@@ -318,10 +401,11 @@ class SettlementRuntime:
             "status",
             "manual_required"
             if state == "manual_required"
-            else "terminal"
+            else "succeeded"
             if state == "succeeded"
             else "pending",
             result.receipt,
+            action=result.buyer_action,
         )
 
     async def check(
@@ -350,7 +434,7 @@ class SettlementRuntime:
             return terminal
         try:
             result = await client.check(
-                record.obligation,
+                self._operation_obligation(record),
                 mechanism_ref=mechanism_ref,
                 fulfillment_ref=fulfillment_ref,
                 operation_ref=settlement_operation_ref(record.obligation_ref, "check"),
@@ -413,7 +497,7 @@ class SettlementRuntime:
             return terminal
         try:
             result = await client.collect(
-                record.obligation,
+                self._operation_obligation(record),
                 mechanism_ref=mechanism_ref,
                 fulfillment_ref=fulfillment_ref,
                 operation_ref=settlement_operation_ref(
@@ -448,6 +532,19 @@ class SettlementRuntime:
         mechanism_ref = self._require_materialized(record)
         if self._clock() < float(record.obligation["expiration_unix"]):
             raise ValueError("obligation has not expired")
+        if (
+            record.mechanism_status == "failed"
+            and record.fulfillment_ref is not None
+            and record.collection_state != "succeeded"
+        ):
+            cleanup = await self._repository.load_settlement_operation(
+                record.obligation_ref,
+                "cleanup",
+            )
+            if cleanup is None or cleanup.get("state") != "succeeded":
+                raise ValueError(
+                    "domain cleanup must complete before reclaiming returned funding"
+                )
         client = self._client(record)
         reserved = await self._reserve(record, "reclaim", worker_id, local_principal)
         if reserved is None:
@@ -457,7 +554,7 @@ class SettlementRuntime:
             return terminal
         try:
             result = await client.reclaim_expired(
-                record.obligation,
+                self._operation_obligation(record),
                 mechanism_ref=mechanism_ref,
                 operation_ref=settlement_operation_ref(
                     record.obligation_ref, "reclaim"
@@ -491,6 +588,27 @@ class SettlementRuntime:
             return self._clients[mechanism]
         except KeyError as exc:
             raise ValueError(f"no conditional escrow client for {mechanism!r}") from exc
+
+    @staticmethod
+    def _operation_obligation(record: SettlementObligationRecord) -> dict[str, Any]:
+        snapshot = dict(record.obligation)
+        if not record.mechanism_params:
+            return snapshot
+        raw_params = snapshot.get("params")
+        if raw_params is None:
+            params: dict[str, Any] = {}
+        elif isinstance(raw_params, Mapping):
+            params = dict(raw_params)
+        else:
+            raise ValueError("settlement obligation params must be an object")
+        for key, value in record.mechanism_params.items():
+            if key in params and params[key] != value:
+                raise ValueError(
+                    f"immutable mechanism parameter {key!r} conflicts with accepted terms"
+                )
+            params[key] = value
+        snapshot["params"] = params
+        return snapshot
 
     @staticmethod
     def _require_participant(
@@ -598,7 +716,7 @@ class SettlementRuntime:
             mechanism_ref=result.mechanism_ref,
             mechanism_status=result.status,
             mechanism_state=result.mechanism_state,
-            buyer_action=result.buyer_action,
+            buyer_action=_safe_buyer_action(result.buyer_action),
             condition_anchor=result.condition_anchor,
         )
 
@@ -619,7 +737,7 @@ class SettlementRuntime:
             mechanism_ref=result.mechanism_ref,
             mechanism_status=result.status,
             mechanism_state=result.mechanism_state,
-            buyer_action=result.buyer_action,
+            buyer_action=_safe_buyer_action(result.buyer_action),
             condition_anchor=result.condition_anchor,
         )
 
@@ -669,6 +787,8 @@ class SettlementRuntime:
         operation: str,
         status: str,
         receipt: dict[str, Any] | None = None,
+        *,
+        action: dict[str, Any] | None = None,
     ) -> SettlementOperationOutcome:
         return SettlementOperationOutcome.model_validate(
             {
@@ -676,8 +796,22 @@ class SettlementRuntime:
                 "operation": operation,
                 "status": status,
                 "receipt": receipt,
+                "action": action,
             }
         )
+
+
+def _safe_buyer_action(action: Mapping[str, Any] | None) -> dict[str, Any] | None:
+    """Persist action lifecycle metadata without URLs or payment instructions."""
+
+    if not action:
+        return None
+    safe = {
+        key: action[key]
+        for key in ("kind", "expires_at_unix")
+        if key in action and action[key] is not None
+    }
+    return safe or None
 
 
 def settlement_operation_ref(obligation_ref: str, operation: str) -> str:
@@ -706,5 +840,6 @@ def _request_hash(
         "operation": operation,
         "principal": principal_binding,
         "request": dict(request_values or {}),
+        "mechanism_params": record.mechanism_params,
     }
     return hashlib.sha256(canonical_json(payload).encode()).hexdigest()

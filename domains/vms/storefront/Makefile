@@ -12,9 +12,9 @@ DIST_DIR ?= ../../../.dist
 # Podman may reuse cross-stage layers after an internal wheel changes. Make the
 # wheel set an explicit cache key for both image stages.
 DIST_FINGERPRINT := $(shell find $(DIST_DIR) -maxdepth 1 -type f -name '*.whl' -exec cksum {} + 2>/dev/null | LC_ALL=C sort | cksum | awk '{print $$1}')
-HOSTED_RELEASE_TRUST ?= ../../../manifests/hosted-settlement-v0.1.0-trust.json
+HOSTED_RELEASE_TRUST ?= ../../../manifests/hosted-settlement-v0.2.0-trust.json
 HOSTED_RELEASE_MANIFEST ?= $(DIST_DIR)/release-manifest.json
-HOSTED_CLIENT_WHEEL ?= $(DIST_DIR)/arkhai_hosted_settlement_client-0.1.0-py3-none-any.whl
+HOSTED_CLIENT_WHEEL ?= $(DIST_DIR)/arkhai_hosted_settlement_client-0.2.0-py3-none-any.whl
 VERIFY_HOSTED_RELEASE = uv run --no-project --with 'eth-account>=0.13,<0.14' \
 	python ../../../scripts/verify-hosted-release.py \
 	--trust $(HOSTED_RELEASE_TRUST) \
@@ -33,13 +33,17 @@ reinit: verify-hosted-release ## Force-reinstall verified internal wheels.
 	uv sync --find-links $(DIST_DIR) \
 	--upgrade-package arkhai-core                    --reinstall-package arkhai-core \
 	--upgrade-package arkhai-core-storefront         --reinstall-package arkhai-core-storefront \
+	--upgrade-package arkhai-kit-capacity-publication --reinstall-package arkhai-kit-capacity-publication \
 	--upgrade-package arkhai-vms-storefront       --reinstall-package arkhai-vms-storefront \
 	--upgrade-package arkhai-bare-metal             --reinstall-package arkhai-bare-metal \
+	--upgrade-package arkhai-bare-metal-storefront  --reinstall-package arkhai-bare-metal-storefront \
 	--upgrade-package arkhai-kit-identity            --reinstall-package arkhai-kit-identity \
 	--upgrade-package arkhai-kit-alkahest            --reinstall-package arkhai-kit-alkahest \
 	--upgrade-package arkhai-kit-config              --reinstall-package arkhai-kit-config \
 	--upgrade-package arkhai-kit-policy              --reinstall-package arkhai-kit-policy \
 	--upgrade-package arkhai-kit-settlement-runtime  --reinstall-package arkhai-kit-settlement-runtime \
+	--upgrade-package arkhai-kit-storefront         --reinstall-package arkhai-kit-storefront \
+	--upgrade-package arkhai-kit-negotiation-runtime --reinstall-package arkhai-kit-negotiation-runtime \
 	--upgrade-package arkhai-hosted-settlement-client --reinstall-package arkhai-hosted-settlement-client \
 	--upgrade-package arkhai-kit-hosted-settlement     --reinstall-package arkhai-kit-hosted-settlement \
 	--upgrade-package arkhai-kit-site                --reinstall-package arkhai-kit-site \

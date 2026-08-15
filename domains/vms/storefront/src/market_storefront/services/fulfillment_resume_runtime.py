@@ -18,7 +18,12 @@ from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from compute_provisioning import FulfillmentRequestBody, FulfillmentScheduleRequest
-from market_fulfillment import VersionedEnvelope
+from market_fulfillment import (
+    FULFILLMENT_RESULT_KIND,
+    FULFILLMENT_RESULT_SCHEMA_VERSION,
+    FulfillmentResultPayload,
+    VersionedEnvelope,
+)
 
 from market_storefront.services.capacity_client import (
     build_capacity_client,
@@ -31,7 +36,7 @@ from market_storefront.services.vm_fulfillment_service import (
     _lease_window_strings,
     persist_escrow_fields_with_retry,
 )
-from market_storefront.utils.sqlite_client import SQLiteClient, get_sqlite_client
+from market_storefront.utils.sqlite_client import SQLiteClient
 
 logger = logging.getLogger(__name__)
 
@@ -61,6 +66,7 @@ async def _refresh_capacity_lease(
     lease_start_utc: str,
     lease_end_utc: str,
     capacity_client: Any,
+    site_id: str,
 ) -> None:
     if capacity_client is None or not reservation_id or not resource_id:
         return
@@ -71,6 +77,7 @@ async def _refresh_capacity_lease(
             lease_start_utc=lease_start_utc,
             lease_end_utc=lease_end_utc,
             idempotency_ref=escrow_uid,
+            site_id=site_id,
         )
     except Exception:
         logger.exception(
@@ -267,6 +274,7 @@ async def converge_post_physical_delivery(
     submit_fulfillment: Callable[..., Awaitable[str]] | None = None,
     bind_fulfillment_fn: Callable[..., Awaitable[Any]] | None = None,
     alkahest_client: Any | None = None,
+    site_id: str,
 ) -> bool:
     """Converge the durable storefront effects after physical success."""
     escrow_uid = str(escrow["escrow_uid"])
@@ -285,6 +293,7 @@ async def converge_post_physical_delivery(
         lease_start_utc=lease_start_utc,
         lease_end_utc=lease_end_utc,
         capacity_client=capacity_client,
+        site_id=site_id,
     )
     await _store_fulfillment_credentials(
         sqlite_client=sqlite_client,
@@ -345,6 +354,7 @@ async def _ensure_recovery_capacity(
     capacity_client: Any | None,
     reservation_id: Any,
     settlement_resource_id: Any,
+    thread_binding: Any,
 ) -> tuple[str | None, str | None]:
     if reservation_id:
         return str(reservation_id), (
@@ -356,15 +366,18 @@ async def _ensure_recovery_capacity(
             escrow_uid,
         )
         return None, None
-    from domains.vms.listings.reconciler import site_id_for_listing
-
-    listing_id = context.get("listing_id")
-    site_id = (
-        site_id_for_listing(sqlite_client.db_path, listing_id) if listing_id else None
-    )
+    listing_id = thread_binding.listing_id
+    site_id = thread_binding.site_id
+    if context.get("listing_id") not in (None, listing_id):
+        raise RuntimeError("recovery context listing disagrees with accepted binding")
+    claim = dict(context.get("required_attributes") or {})
+    claimed_mode = claim.get("executor_kind")
+    if claimed_mode not in (None, thread_binding.binding.offering_mode):
+        raise RuntimeError("recovery context offering mode disagrees with binding")
+    claim["executor_kind"] = thread_binding.binding.offering_mode
     try:
         reserved = await capacity_client.reserve(
-            claim=context.get("required_attributes") or None,
+            claim=claim,
             deal_ref={"listing_id": listing_id, "escrow_uid": escrow_uid},
             lease_start_utc=context.get("start_utc"),
             lease_duration_seconds=int(context.get("duration_seconds") or 3600),
@@ -409,6 +422,7 @@ async def _ensure_recovery_fulfillment_started(
     reservation_id: str,
     settlement_resource_id: str | None,
     fulfillment_id: Any,
+    site_id: str,
 ) -> tuple[str, str | None]:
     resource_id = settlement_resource_id
     if fulfillment_id:
@@ -417,7 +431,8 @@ async def _ensure_recovery_fulfillment_started(
         scheduled = await fulfillment_client.schedule_resource(
             FulfillmentScheduleRequest(
                 capacity_reservation_id=reservation_id, market="vms"
-            )
+            ),
+            site_id=site_id,
         )
         resource_id = str(scheduled.settlement_resource_id)
         await persist_escrow_fields_with_retry(
@@ -432,7 +447,8 @@ async def _ensure_recovery_fulfillment_started(
             capacity_reservation_id=reservation_id,
             market="vms",
             fulfillment_request=VersionedEnvelope.model_validate(request_envelope),
-        )
+        ),
+        site_id=site_id,
     )
     fid = str(accepted.fulfillment_id)
     await persist_escrow_fields_with_retry(
@@ -453,9 +469,12 @@ async def _load_active_physical_result(
     fulfillment_client: Any,
     fulfillment_id: str,
     reservation_id: str,
+    site_id: str,
 ) -> tuple[dict[str, Any], dict[str, Any] | None] | None:
     status = await fulfillment_client.get_fulfillment_status(
-        fulfillment_id, capacity_reservation_id=reservation_id
+        fulfillment_id,
+        capacity_reservation_id=reservation_id,
+        site_id=site_id,
     )
     if status.state == "failed":
         await persist_escrow_fields_with_retry(
@@ -469,8 +488,41 @@ async def _load_active_physical_result(
     if status.state != "active":
         return None
     result_envelope = await fulfillment_client.get_fulfillment_result(
-        fulfillment_id, capacity_reservation_id=reservation_id
+        fulfillment_id,
+        capacity_reservation_id=reservation_id,
+        site_id=site_id,
     )
+    if (
+        result_envelope.kind != FULFILLMENT_RESULT_KIND
+        or result_envelope.schema_version != FULFILLMENT_RESULT_SCHEMA_VERSION
+    ):
+        raise RuntimeError(
+            "physical fulfillment returned an unsupported result envelope"
+        )
+    try:
+        result_payload = FulfillmentResultPayload.model_validate(
+            result_envelope.payload
+        )
+    except (TypeError, ValueError) as exc:
+        raise RuntimeError(
+            "physical fulfillment returned a malformed result payload"
+        ) from exc
+    if (
+        result_payload.fulfillment_id != fulfillment_id
+        or result_payload.capacity_reservation_id != reservation_id
+        or result_payload.state != "active"
+    ):
+        raise RuntimeError(
+            "physical fulfillment result disagrees with active lifecycle"
+        )
+    domain_result = result_payload.domain_result
+    if (
+        domain_result is None
+        or domain_result.kind != "vm.fulfillment.result.v1"
+        or domain_result.schema_version != 1
+        or not isinstance(domain_result.payload, dict)
+    ):
+        raise RuntimeError("physical fulfillment returned an unsupported VM result")
     legacy = _fulfillment_result_to_legacy_shape(result_envelope)
     authentication = legacy.pop("authentication", None)
     await persist_escrow_fields_with_retry(
@@ -508,6 +560,16 @@ async def converge_escrow_once(
             escrow.get("escrow_uid"),
         )
         return False
+    raw_context = json.loads(escrow["fulfillment_context"])
+    negotiation_id = escrow.get("negotiation_id")
+    if not negotiation_id:
+        raise RuntimeError(f"escrow {escrow.get('escrow_uid')!r} has no negotiation")
+    thread_binding = await sqlite_client.validate_fulfillment_context_binding(
+        negotiation_id=str(negotiation_id),
+        context=raw_context,
+        registry=sqlite_client.domain_registry,
+    )
+    site_id = thread_binding.site_id
     escrow_uid = str(escrow["escrow_uid"])
     request_envelope = context.get("fulfillment_request")
     if not escrow.get("fulfillment_id") and not isinstance(request_envelope, dict):
@@ -523,6 +585,7 @@ async def converge_escrow_once(
         capacity_client=capacity_client,
         reservation_id=escrow.get("capacity_reservation_id"),
         settlement_resource_id=escrow.get("settlement_resource_id"),
+        thread_binding=thread_binding,
     )
     if not reservation_id:
         return False
@@ -534,13 +597,16 @@ async def converge_escrow_once(
         reservation_id=reservation_id,
         settlement_resource_id=resource_id,
         fulfillment_id=escrow.get("fulfillment_id"),
+        site_id=site_id,
     )
+    sqlite_client.domain_registry.resolve(thread_binding.binding)
     physical = await _load_active_physical_result(
         escrow_uid=escrow_uid,
         sqlite_client=sqlite_client,
         fulfillment_client=fulfillment_client,
         fulfillment_id=fulfillment_id,
         reservation_id=reservation_id,
+        site_id=site_id,
     )
     if physical is None:
         return False
@@ -566,12 +632,13 @@ async def converge_escrow_once(
         submit_fulfillment=submit_fulfillment,
         bind_fulfillment_fn=bind_fulfillment_fn,
         alkahest_client=alkahest_client,
+        site_id=site_id,
     )
 
 
 async def resume_incomplete_fulfillments_once(
     *,
-    sqlite_client: SQLiteClient | None = None,
+    sqlite_client: SQLiteClient,
     fulfillment_client: Any | None = None,
     capacity_client: Any | None = None,
     limit: int = 50,
@@ -583,7 +650,7 @@ async def resume_incomplete_fulfillments_once(
     alkahest_client: Any | None = None,
 ) -> int:
     """Run one bounded recovery sweep and return the number progressed."""
-    db = sqlite_client or get_sqlite_client()
+    db = sqlite_client
     capacity = capacity_client or build_capacity_client(lambda: db)
     remote = fulfillment_client or build_fulfillment_client(capacity)
     worker = owner or f"fulfillment-resume:{uuid.uuid4()}"
@@ -613,7 +680,7 @@ async def resume_incomplete_fulfillments_once(
             await composition.runtime.bind_fulfillment(
                 obligation_ref,
                 fulfillment_ref,
-                local_role="seller",
+                local_principal=composition.local_principal,
             )
             await composition.worker.wake(obligation_ref)
 
@@ -667,12 +734,12 @@ async def resume_incomplete_fulfillments_once(
     return progressed
 
 
-async def fulfillment_resume_loop() -> None:
+async def fulfillment_resume_loop(sqlite_client: SQLiteClient) -> None:
     """Periodically sweep unfinished accepted VM escrows."""
     from market_storefront.utils.config import settings
 
     interval = float(getattr(settings, "fulfillment_resume_sweep_interval", 30))
-    db = SQLiteClient(get_sqlite_client().db_path)
+    db = sqlite_client
     while True:
         await resume_incomplete_fulfillments_once(sqlite_client=db)
         await asyncio.sleep(interval)

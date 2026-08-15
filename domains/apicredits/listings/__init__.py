@@ -7,8 +7,10 @@ from domains.apicredits.listings.models import (
     resource_is_api_credits,
 )
 from domains.apicredits.listings.pricing import (
+    checked_credit_total,
     determine_strategy_from_order,
     extract_unit_price_from_order,
+    selected_unit_price,
 )
 from domains.apicredits.listings.reconciler import (
     listing_quota_resource_id,
@@ -20,8 +22,10 @@ __all__ = [
     "API_CREDITS_KIND",
     "ApiCreditsResource",
     "coerce_resource_dict",
+    "checked_credit_total",
     "determine_strategy_from_order",
     "extract_unit_price_from_order",
+    "selected_unit_price",
     "listing_quota_resource_id",
     "reopenable_credit_listing_ids",
     "resource_is_api_credits",

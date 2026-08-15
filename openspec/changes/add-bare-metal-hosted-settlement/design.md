@@ -1,8 +1,8 @@
 ## Context
 
-See `proposal.md` for motivation and the hard prerequisite list. This design is deliberately implementation-ready but not currently implementation-unblocked.
+All local prerequisites are accepted in this checkout. The runnable `arkhai-bare-metal-buyer` contribution uses the core plugin and persistent-identity boundary; the dedicated storefront uses `MarketDomainContract`, `SettlementConfigurationRegistry`, `SettlementRuntime`, trusted selected-site capacity/fulfillment clients, and the shared hosted transport/route service. The POOLS-7 cutover owns Capacity Reservation, fulfillment result/recovery, access teardown, and capacity release. Permanent capability specs now state the one-domain composition, selected-site, hosted servicing, and physical-result contracts.
 
-The checkout has a versioned `arkhai_bare_metal` contract and a concrete storefront package. The storefront's own `settlement_service.py` still describes commercial verification without fulfillment claims, and `settlement.py` produces an Alkahest plan. There is no `domains/bare_metal/buyer` package. Permanent `storefront-publication` documentation still says bare metal lacks a complete runnable storefront composition. `market-platform-bare-metal-10-storefront-composition` and POOLS-7 report completed task artifacts, but the former retains unresolved design questions and their accepted current-state behavior has not yet closed the permanent-document/code/evidence gap this change depends on. `kit-storefront-composition-seam` is `0/22`; two other referenced shared-composition changes are absent. `consume-expanded-stripe-funding` is planned but not implemented.
+Accepted inventory: `domains/bare_metal/{src/arkhai_bare_metal, buyer/src/arkhai_bare_metal_buyer, storefront/src/arkhai_bare_metal_storefront}` own codecs, buyer commands, accepted binding, publication, callbacks, persistence, and HTTP composition; `core/buyer/core_buyer/hosted_settlement.py` owns the schema-opaque buyer transport and hosted settle hook; `kit/settlement-runtime/market_settlement_runtime`, `kit/hosted-settlement/market_hosted_settlement`, `kit/site-client`, and `provisioning/compute-provisioning` own the canonical shared route service/runtime, hosted adapter facade, site, and fulfillment mechanisms; `compose.bare-metal.yml`, the bare-metal Helm chart, domain/root Makefiles, and role pyprojects own packaging and deployment. Focused domain/buyer/storefront/shared-runtime/site/provisioning suites own deterministic local evidence. Signed hosted producer artifacts, protected Stripe rails, and real disposable-host access/revocation/teardown remain external qualification evidence rather than local prerequisites.
 
 The durable architectural boundaries are already clear:
 
@@ -229,13 +229,13 @@ Rollback before mutation disables `fiat.stripe.v1` and restores the matching art
 
 ## Design promotion record
 
-| Accepted decision | Permanent destination |
+| Accepted decision | Exact permanent destination |
 |---|---|
-| Evidence-backed prerequisite gate and one-domain shared composition | `openspec/specs/market-composition/spec.md`, companion architecture, and `docs/development/ARCHITECTURE.md` |
-| Profile/resource/site/deadline readiness intersection and immutable accepted binding | `openspec/specs/storefront-publication/spec.md`, companion architecture, and bare-metal seller/buyer docs |
-| Exact buyer selection, safe actions, resume, real-access success, and reclaim/teardown distinction | `openspec/specs/buyer-orchestration/spec.md`, companion architecture, and bare-metal buyer docs |
-| Hold/funding deadline distinction and ordered funding-to-fulfillment-to-collection lifecycle | `openspec/specs/settlement-servicing/spec.md` and companion architecture |
-| Selected-resource physical result, credential-free evidence input, teardown/quarantine/release | `openspec/specs/physical-provisioning/spec.md` and companion architecture |
-| Artifact topology, identities/secrets, migrations, cutover, and rollback | `openspec/specs/deployment-state/spec.md`, companion architecture, `docs/development/DEPLOYMENT_AND_CONFIG.md`, and quickstarts |
-| Focused ownership and real whole-host release evidence | `openspec/specs/test-compatibility/spec.md`, companion architecture, and `docs/development/TESTING.md` |
-| Current delivery/goal state after acceptance | `docs/development/ROADMAP.md` |
+| Evidence-backed prerequisite gate and one-domain shared composition | `openspec/specs/market-composition/spec.md` — “Bare-metal hosted settlement composes through shared role seams”; `docs/development/ARCHITECTURE.md` — “Bare-metal hosted adoption” |
+| Profile/resource/site/deadline readiness intersection and immutable accepted binding | `openspec/specs/storefront-publication/spec.md` — “Bare-metal hosted alternatives intersect financial and physical readiness”; `docs/bare-metal-seller-quickstart.md` — “Configure public bindings” |
+| Exact buyer selection, safe actions, resume, real-access success, and reclaim/teardown distinction | `openspec/specs/buyer-orchestration/spec.md` — “Bare-metal buyers preserve accepted hosted authority”; installed `market bare-metal` command group |
+| Hold/funding deadline distinction and ordered funding-to-fulfillment-to-collection lifecycle | `openspec/specs/settlement-servicing/spec.md` — “Bare-metal hosted servicing preserves financial and physical ordering” |
+| Selected-resource physical result, credential-free evidence input, teardown/quarantine/release | `openspec/specs/physical-provisioning/spec.md` — “Bare-metal hosted fulfillment consumes authoritative funding” |
+| Artifact topology, identities/secrets, migrations, cutover, and rollback | `openspec/specs/deployment-state/spec.md` — “Bare-metal hosted roles preserve authority and secret boundaries”; `docs/development/DEPLOYMENT_AND_CONFIG.md` — “Bare-metal hosted role configuration” |
+| Focused ownership and real whole-host release evidence | `openspec/specs/test-compatibility/spec.md` — “Bare-metal hosted evidence is attributed by layer”; `docs/development/TESTING.md` — “Bare-metal hosted lanes” |
+| Current delivery/goal state after acceptance | `docs/development/ROADMAP.md` — “Hosted settlement release status” |

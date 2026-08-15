@@ -8,27 +8,36 @@ control flow over sources.
 
 from __future__ import annotations
 
-from collections.abc import Callable, Iterable, Mapping, Sequence
-from dataclasses import dataclass, field
+from collections.abc import Callable, Iterable
+from dataclasses import dataclass
 from typing import Any
 
-from .publication_plugins import build_publication_source
 from .publication_sources import PublicationSource
 
-Payload = tuple[list[dict[str, Any]], list[dict[str, Any]], int | None]
+LegacyPayload = tuple[list[dict[str, Any]], list[dict[str, Any]], int | None]
+
+
+@dataclass(frozen=True)
+class PublicationPayload:
+    """Complete mechanism-neutral listing publication payload."""
+
+    accepted_escrows: tuple[dict[str, Any], ...] = ()
+    settlement_options: tuple[dict[str, Any], ...] = ()
+    publication_clauses: tuple[dict[str, Any], ...] = ()
+    demands: tuple[dict[str, Any], ...] = ()
+    max_duration_seconds: int | None = None
+
+    def __post_init__(self) -> None:
+        if self.max_duration_seconds is not None and self.max_duration_seconds <= 0:
+            raise ValueError("max_duration_seconds must be positive")
+
+
+Payload = PublicationPayload | LegacyPayload
 PayloadBuilder = Callable[
     [PublicationSource, dict[str, Any], dict[str, Any]],
     Payload | str,
 ]
-PublishOffer = Callable[
-    [
-        dict[str, Any],
-        list[dict[str, Any]],
-        list[dict[str, Any]],
-        int | None,
-    ],
-    dict[str, Any],
-]
+PublishOffer = Callable[..., dict[str, Any]]
 
 
 @dataclass(frozen=True)
@@ -125,25 +134,21 @@ class PublicationCommand:
 
 @dataclass(frozen=True)
 class PublicationSourceSelection:
-    """Core-owned selection of domain publication sources.
+    """Sources built once from the startup-owned frozen domain registry."""
 
-    Storefront composition roots use this as the small command-facing wrapper:
-    choose source entry-point names, provide per-source infrastructure kwargs,
-    then let core build sources and run publication cycles.
-    """
+    sources: tuple[PublicationSource, ...]
 
-    source_names: Sequence[str]
-    source_kwargs_by_name: Mapping[str, Mapping[str, Any]] = field(default_factory=dict)
+    def __post_init__(self) -> None:
+        names = tuple(source.name for source in self.sources)
+        if len(names) != len(set(names)):
+            raise ValueError("publication source names must be unique")
+
+    @property
+    def source_names(self) -> tuple[str, ...]:
+        return tuple(source.name for source in self.sources)
 
     def build_sources(self) -> tuple[PublicationSource, ...]:
-        """Build the selected publication source adapters."""
-        return build_publication_sources_by_name(
-            self.source_names,
-            source_kwargs_by_name={
-                name: dict(kwargs)
-                for name, kwargs in self.source_kwargs_by_name.items()
-            },
-        )
+        return self.sources
 
     def close_stale(
         self,
@@ -151,16 +156,14 @@ class PublicationSourceSelection:
         db_path: str,
         base_url: str,
     ) -> dict[str, list[str]]:
-        """Close stale listings for the selected sources."""
         return close_stale_publication_listings(
-            self.build_sources(),
+            self.sources,
             db_path=db_path,
             base_url=base_url,
         )
 
     def open_keys(self, db_path: str) -> set[str]:
-        """Return open publication keys for the selected sources."""
-        return open_publication_keys(self.build_sources(), db_path)
+        return open_publication_keys(self.sources, db_path)
 
     def command(
         self,
@@ -170,7 +173,6 @@ class PublicationSourceSelection:
         build_payload: PayloadBuilder,
         publish_offer: PublishOffer,
     ) -> PublicationCommand:
-        """Create a reusable command object for this source selection."""
         return PublicationCommand(
             selection=self,
             db_path=db_path,
@@ -190,38 +192,19 @@ class PublicationSourceSelection:
         close_stale: bool = True,
         skip_open: bool = True,
     ) -> PublicationCycleResult:
-        """Run one publication cycle for the selected sources."""
-        return self.run_command(
-            db_path=db_path,
-            base_url=base_url,
-            build_payload=build_payload,
-            publish_offer=publish_offer,
-            skip_ids=skip_ids,
-            close_stale=close_stale,
-            skip_open=skip_open,
-        ).cycle
-
-    def run_command(
-        self,
-        *,
-        db_path: str,
-        base_url: str,
-        build_payload: PayloadBuilder,
-        publish_offer: PublishOffer,
-        skip_ids: set[str] | None = None,
-        close_stale: bool = True,
-        skip_open: bool = True,
-    ) -> PublicationCommandResult:
-        """Run one command-style publication cycle for the selected sources."""
-        return run_publication_command(
-            self,
-            db_path=db_path,
-            base_url=base_url,
-            build_payload=build_payload,
-            publish_offer=publish_offer,
-            skip_ids=skip_ids,
-            close_stale=close_stale,
-            skip_open=skip_open,
+        return (
+            self.command(
+                db_path=db_path,
+                base_url=base_url,
+                build_payload=build_payload,
+                publish_offer=publish_offer,
+            )
+            .run(
+                skip_ids=skip_ids,
+                close_stale=close_stale,
+                skip_open=skip_open,
+            )
+            .cycle
         )
 
 
@@ -232,10 +215,7 @@ def close_stale_publication_listings(
     base_url: str,
 ) -> dict[str, list[str]]:
     """Close stale listings for every configured publication source."""
-    return {
-        source.name: source.close_stale(db_path, base_url)
-        for source in sources
-    }
+    return {source.name: source.close_stale(db_path, base_url) for source in sources}
 
 
 def open_publication_keys(
@@ -247,53 +227,6 @@ def open_publication_keys(
     for source in sources:
         covered.update(source.open_keys(db_path))
     return covered
-
-
-def build_publication_source_selection(
-    source_names: Sequence[str],
-    *,
-    source_kwargs_by_name: Mapping[str, Mapping[str, Any]] | None = None,
-) -> PublicationSourceSelection:
-    """Build a command-facing selected-source composition by entry-point name."""
-    return PublicationSourceSelection(
-        source_names=tuple(source_names),
-        source_kwargs_by_name=source_kwargs_by_name or {},
-    )
-
-
-def build_publication_sources_by_name(
-    source_names: Sequence[str],
-    *,
-    source_kwargs_by_name: Mapping[str, Mapping[str, Any]] | None = None,
-) -> tuple[PublicationSource, ...]:
-    """Build selected domain publication sources from entry-point names."""
-    kwargs_by_name = source_kwargs_by_name or {}
-    return tuple(
-        build_publication_source(name, **kwargs_by_name.get(name, {}))
-        for name in source_names
-    )
-
-
-def publish_source_by_name(
-    source_name: str,
-    *,
-    source_kwargs: dict[str, Any] | None = None,
-    db_path: str,
-    base_url: str,
-    build_payload: PayloadBuilder,
-    publish_offer: PublishOffer,
-    skip_ids: set[str] | None = None,
-) -> tuple[list[dict[str, Any]], list[tuple[dict[str, Any], str]], list[dict[str, Any]]]:
-    """Load one publication source by name and publish one round."""
-    source = build_publication_source(source_name, **(source_kwargs or {}))
-    return publish_round(
-        [source],
-        db_path=db_path,
-        base_url=base_url,
-        build_payload=build_payload,
-        publish_offer=publish_offer,
-        skip_ids=skip_ids,
-    )
 
 
 def run_publication_cycle(
@@ -342,32 +275,6 @@ def run_publication_cycle(
     )
 
 
-def run_publication_cycle_by_name(
-    source_names: Sequence[str],
-    *,
-    source_kwargs_by_name: Mapping[str, Mapping[str, Any]] | None = None,
-    db_path: str,
-    base_url: str,
-    build_payload: PayloadBuilder,
-    publish_offer: PublishOffer,
-    skip_ids: set[str] | None = None,
-    close_stale: bool = True,
-    skip_open: bool = True,
-) -> PublicationCycleResult:
-    """Build selected sources by name and run one publication cycle."""
-    return run_publication_command_by_name(
-        source_names,
-        source_kwargs_by_name=source_kwargs_by_name,
-        db_path=db_path,
-        base_url=base_url,
-        build_payload=build_payload,
-        publish_offer=publish_offer,
-        skip_ids=skip_ids,
-        close_stale=close_stale,
-        skip_open=skip_open,
-    ).cycle
-
-
 def run_publication_command(
     selection: PublicationSourceSelection,
     *,
@@ -393,34 +300,6 @@ def run_publication_command(
     return PublicationCommandResult(cycle=cycle)
 
 
-def run_publication_command_by_name(
-    source_names: Sequence[str],
-    *,
-    source_kwargs_by_name: Mapping[str, Mapping[str, Any]] | None = None,
-    db_path: str,
-    base_url: str,
-    build_payload: PayloadBuilder,
-    publish_offer: PublishOffer,
-    skip_ids: set[str] | None = None,
-    close_stale: bool = True,
-    skip_open: bool = True,
-) -> PublicationCommandResult:
-    """Build selected sources by name and run the CLI-facing command."""
-    return run_publication_command(
-        build_publication_source_selection(
-            source_names,
-            source_kwargs_by_name=source_kwargs_by_name,
-        ),
-        db_path=db_path,
-        base_url=base_url,
-        build_payload=build_payload,
-        publish_offer=publish_offer,
-        skip_ids=skip_ids,
-        close_stale=close_stale,
-        skip_open=skip_open,
-    )
-
-
 def publish_round(
     sources: Iterable[PublicationSource],
     *,
@@ -429,7 +308,9 @@ def publish_round(
     build_payload: PayloadBuilder,
     publish_offer: PublishOffer,
     skip_ids: set[str] | None = None,
-) -> tuple[list[dict[str, Any]], list[tuple[dict[str, Any], str]], list[dict[str, Any]]]:
+) -> tuple[
+    list[dict[str, Any]], list[tuple[dict[str, Any], str]], list[dict[str, Any]]
+]:
     """Publish one round of candidates from the configured sources.
 
     Returns ``(published, failed, skipped)``. Domain semantics live in each
@@ -452,56 +333,99 @@ def publish_round(
             if isinstance(payload, str):
                 failed.append((candidate, payload))
                 continue
-            accepted_escrows, demands, max_duration_seconds = payload
+            extended_payload = isinstance(payload, PublicationPayload)
+            if extended_payload:
+                accepted_escrows = list(payload.accepted_escrows)
+                settlement_options = list(payload.settlement_options)
+                publication_clauses = list(payload.publication_clauses)
+                demands = list(payload.demands)
+                max_duration_seconds = payload.max_duration_seconds
+            else:
+                accepted_escrows, demands, max_duration_seconds = payload
+                settlement_options = []
+                publication_clauses = []
 
             try:
-                reopened = source.reopen_existing(
-                    db_path,
-                    base_url,
-                    candidate,
-                    offer,
-                    accepted_escrows,
-                    demands,
-                    max_duration_seconds,
-                )
+                if extended_payload:
+                    reopened = source.reopen_existing(
+                        db_path,
+                        base_url,
+                        candidate,
+                        offer,
+                        accepted_escrows,
+                        demands,
+                        max_duration_seconds,
+                        settlement_options=settlement_options,
+                        publication_clauses=publication_clauses,
+                    )
+                else:
+                    reopened = source.reopen_existing(
+                        db_path,
+                        base_url,
+                        candidate,
+                        offer,
+                        accepted_escrows,
+                        demands,
+                        max_duration_seconds,
+                    )
             except Exception as exc:
                 failed.append((candidate, f"{source.reopen_error_label}: {exc}"))
                 continue
 
             if reopened is not None:
                 if reopened.get("status") in {"published", "disabled"}:
-                    published.append({
-                        "resource": candidate,
-                        "response": reopened,
-                        "accepted_escrows": accepted_escrows,
-                        "demands": demands,
-                    })
+                    published.append(
+                        {
+                            "resource": candidate,
+                            "response": reopened,
+                            "accepted_escrows": accepted_escrows,
+                            "settlement_options": settlement_options,
+                            "publication_clauses": publication_clauses,
+                            "demands": demands,
+                        }
+                    )
                 else:
-                    failed.append((
-                        candidate,
-                        reopened.get("message") or str(reopened),
-                    ))
+                    failed.append(
+                        (
+                            candidate,
+                            reopened.get("message") or str(reopened),
+                        )
+                    )
                 continue
 
             try:
-                response = publish_offer(
-                    offer,
-                    accepted_escrows,
-                    demands,
-                    max_duration_seconds,
-                )
+                if extended_payload:
+                    response = publish_offer(
+                        offer,
+                        accepted_escrows,
+                        demands,
+                        max_duration_seconds,
+                        settlement_options=settlement_options,
+                        publication_clauses=publication_clauses,
+                    )
+                else:
+                    response = publish_offer(
+                        offer,
+                        accepted_escrows,
+                        demands,
+                        max_duration_seconds,
+                    )
                 if response.get("listing_id"):
                     source.record_published(
                         db_path,
                         candidate,
                         str(response["listing_id"]),
                     )
-                published.append({
-                    "resource": candidate,
-                    "response": response,
-                    "accepted_escrows": accepted_escrows,
-                    "demands": demands,
-                })
+                published.append(
+                    {
+                        "resource": candidate,
+                        "response": response,
+                        "accepted_escrows": accepted_escrows,
+                        "settlement_options": settlement_options,
+                        "publication_clauses": publication_clauses,
+                        "demands": demands,
+                    }
+                )
             except Exception as exc:
                 failed.append((candidate, str(exc)))
 

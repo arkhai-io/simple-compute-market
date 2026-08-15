@@ -18,10 +18,16 @@ from core_storefront.models.negotiation_models import (
 )
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi_utils.cbv import cbv
+from market_negotiation_runtime import (
+    NegotiationRuntime,
+    OfferUnfulfillableError,
+    StorefrontPausedError,
+)
 from pydantic import ValidationError
 
 import market_storefront.container as _container
 from market_storefront.middleware import buyer_auth
+from market_storefront.utils.config import BASE_URL_OVERRIDE
 
 logger = logging.getLogger(__name__)
 
@@ -47,8 +53,16 @@ class NegotiateController:
     def __init__(
         self,
         db=Depends(lambda: _container.resolved_sqlite_client),
+        runtime: NegotiationRuntime = Depends(
+            lambda: _container.resolved_negotiation_runtime
+        ),
     ) -> None:
+        if runtime is None:
+            raise RuntimeError(
+                "negotiation controller requires the composed kit runtime"
+            )
         self._db = db
+        self._runtime = runtime
 
     @router.post(
         "/new",
@@ -64,12 +78,6 @@ class NegotiateController:
         body: NegotiateNewRequest,
         request: Request,
     ) -> NegotiateNewResponse:
-        from market_storefront.utils.config import BASE_URL_OVERRIDE
-        from market_storefront.utils.sync_negotiation import (
-            OfferUnfulfillableError,
-            StorefrontPausedError,
-            start_sync_negotiation,
-        )
 
         auth = await buyer_auth._verify(
             request,
@@ -93,18 +101,19 @@ class NegotiateController:
                 status_code=503, detail="storefront identity unavailable"
             )
         try:
-            result = await start_sync_negotiation(
-                sqlite_client=self._db,
-                our_listing_id=body.listing_id,
+            result = await self._runtime.start(
+                repository=self._db,
+                listing_id=body.listing_id,
                 buyer_principal=body.buyer_principal,
                 seller_principal=signer.identity,
-                provision_terms=body.provision_terms,
+                actor_principal=auth.principal,
+                terms=body.provision_terms,
                 proposal=_proposal_payload(
                     body.proposal,
                     body.settlement_selection,
                 ),
-                our_base_url=base_url,
-                their_agent_url=body.buyer_agent_url,
+                seller_agent_url=base_url,
+                buyer_agent_url=body.buyer_agent_url,
             )
         except StorefrontPausedError as exc:
             raise HTTPException(
@@ -159,8 +168,6 @@ class NegotiateController:
         body: NegotiateContinueRequest,
         request: Request,
     ) -> NegotiateContinueResponse:
-        from market_storefront.utils.sync_negotiation import continue_sync_negotiation
-
         auth = await buyer_auth._verify(
             request,
             "negotiate_continue",
@@ -187,9 +194,9 @@ class NegotiateController:
             )
 
         try:
-            result = await continue_sync_negotiation(
-                sqlite_client=self._db,
-                neg_id=neg_id,
+            result = await self._runtime.continue_negotiation(
+                repository=self._db,
+                negotiation_id=neg_id,
                 buyer_action=body.action,
                 buyer_proposal=_proposal_payload(
                     body.proposal,
@@ -198,6 +205,7 @@ class NegotiateController:
                 buyer_reason=body.reason,
                 buyer_principal=body.buyer_principal,
                 actor_principal=auth.principal,
+                actor_role="buyer",
             )
         except ValueError as exc:
             raise HTTPException(status_code=404, detail=str(exc))

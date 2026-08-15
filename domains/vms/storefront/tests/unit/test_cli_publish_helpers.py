@@ -20,6 +20,13 @@ from typing import ClassVar
 from unittest.mock import patch
 
 import pytest
+from core_storefront.domain_registry import (
+    StorefrontListingBinding,
+    build_storefront_derivation_key,
+)
+from core_storefront.sqlite_migrations import (
+    migrate_storefront_domain_bindings_schema,
+)
 from domains.vms.listings.reconciler import (
     listing_resource_key,
 )
@@ -29,7 +36,6 @@ from market_settlement_runtime import SettlementPublicationClause
 from market_storefront import cli_publish
 from market_storefront.cli_publish import (
     _available_resources,
-    _bare_metal_publication_source_selection,
     _open_listing_ids,
     _open_listing_resource_keys,
     _open_order_resource_ids,
@@ -38,12 +44,19 @@ from market_storefront.cli_publish import (
     _site_pool_projection_sync,
     _stale_open_listing_ids,
 )
+from market_storefront.domain_runtime import (
+    build_vm_storefront_domain,
+    build_vm_storefront_registry,
+)
 from tests._settings_overrides import settings_overrides
 
 _SITE_SIGNER = Ed25519Signer(b"\x51" * 32)
 _SITE_AUTHORITIES = TrustedIdentitySet(
     identities=(Ed25519Signer(b"\x52" * 32).identity,)
 )
+_VM_DOMAIN = build_vm_storefront_domain()
+_VM_REGISTRY = build_vm_storefront_registry(_VM_DOMAIN)
+_VM_BINDING = _VM_REGISTRY.resolve_mode("vm").binding
 
 
 @pytest.fixture(autouse=True)
@@ -55,6 +68,9 @@ def _site_projection_identity(monkeypatch):
     )
     monkeypatch.setattr(
         agent_config, "get_provisioning_authorities", lambda: _SITE_AUTHORITIES
+    )
+    monkeypatch.setattr(
+        cli_publish, "_site_topology_sync", lambda: ("site-a", 1)
     )
 
 
@@ -89,6 +105,9 @@ def _init_db(path: str) -> None:
                 created_at TEXT DEFAULT CURRENT_TIMESTAMP,
                 updated_at TEXT DEFAULT CURRENT_TIMESTAMP
             );
+            CREATE TABLE negotiation_threads (
+                negotiation_id TEXT PRIMARY KEY
+            );
             CREATE TABLE compute_allocations (
                 allocation_id TEXT PRIMARY KEY,
                 resource_id TEXT NOT NULL,
@@ -102,6 +121,7 @@ def _init_db(path: str) -> None:
             );
             """
         )
+        migrate_storefront_domain_bindings_schema(conn)
         conn.commit()
     finally:
         conn.close()
@@ -161,21 +181,61 @@ def _insert_allocation(
 
 
 def _insert_order(
-    path: str, order_id: str, status: str, resource_id: str | None
+    path: str,
+    order_id: str,
+    status: str,
+    resource_id: str | None,
+    *,
+    gpu_count: int = 1,
 ) -> None:
     offer = {
         "gpu_model": "RTX 4090",
-        "gpu_count": 1,
+        "gpu_count": gpu_count,
         "sla": 95.0,
         "region": "New York, US",
     }
     if resource_id:
         offer["resource_id"] = resource_id
+    source = {
+        "kind": "compute.listing_source",
+        "schema_version": 1,
+        "payload": {
+            "site_id": "site-a",
+            "resource_id": resource_id,
+            "gpu_count": gpu_count,
+        },
+    }
+    binding = StorefrontListingBinding.from_source_envelope(
+        listing_id=order_id,
+        site_id="site-a",
+        binding=_VM_BINDING,
+        derivation_key=build_storefront_derivation_key(
+            site_id="site-a",
+            offering_mode=_VM_BINDING.offering_mode,
+            binding=_VM_BINDING,
+            source_identity=source,
+        ),
+        source_envelope=source,
+        last_reconciled_at="2026-08-15T00:00:00Z",
+        physical_resource_id=resource_id,
+    )
+    values = binding.as_record()
     conn = sqlite3.connect(path)
     try:
+        conn.execute("PRAGMA foreign_keys = ON")
         conn.execute(
             "INSERT INTO listings (listing_id, status, offer_resource) VALUES (?, ?, ?)",
             (order_id, status, json.dumps(offer)),
+        )
+        conn.execute(
+            """
+            INSERT INTO storefront_listing_bindings(
+              listing_id, site_id, pool_id, physical_resource_id,
+              offering_mode, domain_identity, contract_major, contract_minor,
+              derivation_key, source_envelope_json, last_reconciled_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            tuple(values.values()),
         )
         conn.commit()
     finally:
@@ -222,31 +282,11 @@ def test_open_listing_resource_keys_include_gpu_slice(tmp_path):
     db = str(tmp_path / "agent.db")
     _init_db(db)
     _insert_order(db, "o1", "open", "compute-001")
-    _insert_order(db, "o2", "open", "compute-002")
-    conn = sqlite3.connect(db)
-    try:
-        conn.execute(
-            "UPDATE listings SET offer_resource = ? WHERE listing_id = ?",
-            (
-                json.dumps(
-                    {
-                        "resource_id": "compute-002",
-                        "gpu_model": "RTX 4090",
-                        "gpu_count": 2,
-                        "sla": 95.0,
-                        "region": "New York, US",
-                    }
-                ),
-                "o2",
-            ),
-        )
-        conn.commit()
-    finally:
-        conn.close()
+    _insert_order(db, "o2", "open", "compute-002", gpu_count=2)
 
     assert _open_listing_resource_keys(db) == {
-        listing_resource_key("default", "compute-001", 1),
-        listing_resource_key("default", "compute-002", 2),
+        listing_resource_key("site-a", "compute-001", 1),
+        listing_resource_key("site-a", "compute-002", 2),
     }
 
 
@@ -270,7 +310,7 @@ def test_available_resources_derives_slices_from_gpu_capacity(tmp_path):
 
     assert [r["gpu_count"] for r in rows] == [1, 2, 3, 4]
     assert {r["resource_key"] for r in rows} == {
-        listing_resource_key("default", "compute-4x", n) for n in (1, 2, 3, 4)
+        listing_resource_key("site-a", "compute-4x", n) for n in (1, 2, 3, 4)
     }
 
 
@@ -291,7 +331,7 @@ def test_available_resources_closes_oversized_slices_when_capacity_held(
     monkeypatch.setattr(
         cli_publish,
         "_member_availability_sync",
-        lambda: {(None, "compute-4x"): 2, ("default", "compute-4x"): 2},
+        lambda: {("site-a", "compute-4x"): 2},
     )
 
     rows = _available_resources(db)
@@ -365,7 +405,8 @@ class TestPoolHintResolutionSettings:
             "rate": "2",
             "per": "hour",
             "mechanism_input": {
-                "method": "card",
+                "funding_profile": "card.v1",
+                "interaction": "interactive",
                 "funds_flow": "separate_charges_transfers",
             },
         }
@@ -408,31 +449,17 @@ def test_stale_open_listing_ids_finds_slices_above_available_capacity(
         gpu_count=4,
     )
     for gpu_count in (1, 2, 3, 4):
-        _insert_order(db, f"listing-{gpu_count}x", "open", "compute-4x")
-        conn = sqlite3.connect(db)
-        try:
-            conn.execute(
-                "UPDATE listings SET offer_resource = ? WHERE listing_id = ?",
-                (
-                    json.dumps(
-                        {
-                            "resource_id": "compute-4x",
-                            "gpu_model": "RTX 4090",
-                            "gpu_count": gpu_count,
-                            "sla": 95.0,
-                            "region": "NY",
-                        }
-                    ),
-                    f"listing-{gpu_count}x",
-                ),
-            )
-            conn.commit()
-        finally:
-            conn.close()
+        _insert_order(
+            db,
+            f"listing-{gpu_count}x",
+            "open",
+            "compute-4x",
+            gpu_count=gpu_count,
+        )
     monkeypatch.setattr(
         cli_publish,
         "_member_availability_sync",
-        lambda: {(None, "compute-4x"): 2, ("default", "compute-4x"): 2},
+        lambda: {("site-a", "compute-4x"): 2},
     )
 
     assert _stale_open_listing_ids(db) == ["listing-3x", "listing-4x"]
@@ -446,37 +473,27 @@ def test_vm_publish_adapters_do_not_include_bare_metal() -> None:
     assert [adapter.name for adapter in _publication_adapters()] == ["vms"]
 
 
-def test_publication_selection_can_compose_bare_metal(monkeypatch) -> None:
-    def fake_build_source(name, **_kwargs):
-        from core_storefront.publication_sources import PublicationSource
+def test_publication_selection_uses_configured_vm_registry(monkeypatch) -> None:
+    from core_storefront.publication_runner import PublicationSourceSelection
 
-        return PublicationSource(
-            name=name,
-            open_keys=lambda _db: set(),
-            close_stale=lambda _db, _url: [],
-            available_candidates=lambda _db: [],
-            skip_keys=lambda _candidate: set(),
-            offer_resource=lambda candidate: candidate,
-            record_published=lambda *_args: None,
-            reopen_existing=lambda *_args: None,
-            reopen_error_label="reopen fake",
-        )
-
+    registry = object()
+    observed = []
     monkeypatch.setattr(
-        "core_storefront.publication_runner.build_publication_source",
-        fake_build_source,
+        "market_storefront.utils.config.storefront_domain_registry",
+        lambda: registry,
+    )
+    monkeypatch.setattr(
+        cli_publish,
+        "build_vm_storefront_publication_selection",
+        lambda candidate, callbacks: (
+            observed.append((candidate, callbacks))
+            or PublicationSourceSelection(sources=())
+        ),
     )
 
-    assert [
-        source.name
-        for source in _bare_metal_publication_source_selection().build_sources()
-    ] == ["bare_metal"]
-    assert [
-        source.name
-        for source in _publication_source_selection(
-            ("vms", "bare_metal")
-        ).build_sources()
-    ] == ["vms", "bare_metal"]
+    assert _publication_source_selection().source_names == ()
+    assert observed[0][0] is registry
+    assert observed[0][1].__class__.__name__ == "VmPublicationSourceCallbacks"
 
 
 def test_open_order_ids_returns_only_open(tmp_path):

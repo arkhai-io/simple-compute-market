@@ -37,7 +37,8 @@ class PublishFromQuotaRequest(BaseModel):
         description="Quota resource in the credits service's ledger."
     )
     service_name: str
-    accepted_escrows: list[dict[str, Any]]
+    accepted_escrows: list[dict[str, Any]] = Field(default_factory=list)
+    settlement_clauses: list[dict[str, Any]] | None = None
     description: str | None = None
     openapi_url: str | None = None
     base_url: str | None = None

@@ -14,8 +14,18 @@ from market_identity import (
 
 from arkhai_bare_metal_storefront.domain_runtime import get_market_domain_contract
 from arkhai_bare_metal_storefront.runtime import BareMetalStorefrontRuntime
-from arkhai_bare_metal_storefront.server import build_bare_metal_storefront_app
+from arkhai_bare_metal_storefront.server import (
+    build_bare_metal_storefront_app,
+    build_bare_metal_storefront_registry,
+)
 from arkhai_bare_metal_storefront.sqlite_client import SQLiteClient
+
+
+def _app(runtime: BareMetalStorefrontRuntime):
+    return build_bare_metal_storefront_app(
+        registry=build_bare_metal_storefront_registry(domain=runtime.domain),
+        runtime=runtime,
+    )
 
 SELLER_SECRET_HEX = "11" * 32
 SELLER_SIGNER = Eip191Signer(bytes.fromhex(SELLER_SECRET_HEX))
@@ -74,6 +84,9 @@ async def _insert_listing(runtime: BareMetalStorefrontRuntime) -> None:
         updated_at="2026-01-01T00:00:00Z",
         seller_principal=runtime.seller_principal,
         storefront_url=runtime.storefront_url,
+        site_id="site-a",
+        pool_id="pool-a",
+        physical_resource_id="resource-1",
         listing={
             "kind": "bare_metal.v1",
             "machine_id": "machine-1",
@@ -88,7 +101,7 @@ async def _insert_listing(runtime: BareMetalStorefrontRuntime) -> None:
 async def test_listing_routes_return_exact_validated_domain_payload(tmp_path) -> None:
     runtime = _runtime(str(tmp_path / "storefront.db"))
     await _insert_listing(runtime)
-    app = build_bare_metal_storefront_app(runtime=runtime)
+    app = _app(runtime)
 
     with TestClient(app) as client:
         response = client.get("/api/v1/listings/listing-1")
@@ -98,6 +111,7 @@ async def test_listing_routes_return_exact_validated_domain_payload(tmp_path) ->
     assert response.status_code == 200
     assert response.json()["offer_resource"] == {
         "kind": "bare_metal.v1",
+        "virtualization_type": "bare_metal",
         "machine_id": "machine-1",
         "physical_host_id": "physical-host-1",
         "access_methods": ["ssh"],
@@ -113,7 +127,7 @@ async def test_listing_routes_return_exact_validated_domain_payload(tmp_path) ->
 async def test_pause_is_admin_authenticated_and_survives_app_restart(tmp_path) -> None:
     path = str(tmp_path / "storefront.db")
     first_runtime = _runtime(path)
-    first_app = build_bare_metal_storefront_app(runtime=first_runtime)
+    first_app = _app(first_runtime)
 
     with TestClient(first_app) as client:
         assert client.post("/api/v1/admin/pause").status_code == 401
@@ -128,7 +142,7 @@ async def test_pause_is_admin_authenticated_and_survives_app_restart(tmp_path) -
         assert paused.json() == {"paused": True, "message": "storefront paused"}
 
     second_runtime = _runtime(path)
-    second_app = build_bare_metal_storefront_app(runtime=second_runtime)
+    second_app = _app(second_runtime)
     with TestClient(second_app) as client:
         status = client.get(
             "/api/v1/system/status",
@@ -154,7 +168,7 @@ async def test_pause_is_admin_authenticated_and_survives_app_restart(tmp_path) -
 
 async def test_health_is_truthful_about_uncomposed_authorities(tmp_path) -> None:
     runtime = _runtime(str(tmp_path / "storefront.db"))
-    app = build_bare_metal_storefront_app(runtime=runtime)
+    app = _app(runtime)
 
     with TestClient(app) as client:
         response = client.get("/health")
@@ -170,9 +184,7 @@ async def test_health_is_truthful_about_uncomposed_authorities(tmp_path) -> None
             "fulfillment": "unavailable",
         },
         "paused": False,
-        "agent_id": "seller-1",
-        "chain_id": None,
+        "principal": SELLER_SIGNER.identity.model_dump(mode="json"),
+        "sites": [],
         "resource_count": 0,
-        "site_projections": None,
-        "listing_mode_explanations": None,
     }

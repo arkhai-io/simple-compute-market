@@ -1,83 +1,55 @@
-"""Discovery of publication capabilities on installed market domains."""
+"""Publication-source construction from the frozen storefront registry."""
 
 from __future__ import annotations
 
-from importlib.metadata import entry_points
+from collections.abc import Mapping
 from typing import Any
 
-from market_core import MarketDomainContract, validate_domain_contract
-
+from .domain_registry import StorefrontDomainRegistry
 from .publication_sources import PublicationSource
 
-STOREFRONT_DOMAIN_GROUP = "market.storefront_domains"
 
+def build_registry_publication_sources(
+    registry: StorefrontDomainRegistry,
+    *,
+    source_kwargs_by_contribution: Mapping[str, Mapping[str, Any]] | None = None,
+) -> tuple[PublicationSource, ...]:
+    """Build each configured source once from its registered exact contract.
 
-def _iter_entry_points() -> list[Any]:
-    return list(entry_points(group=STOREFRONT_DOMAIN_GROUP))
+    Entry points were already loaded and validated while constructing ``registry``.
+    This function therefore cannot discover a different contract during a publish
+    cycle and has no one-domain/default path.
+    """
 
-
-def _load_domain_entry_point(name: str) -> MarketDomainContract:
-    normalized = name.replace("-", "_")
-    matches = [
-        entry_point
-        for entry_point in _iter_entry_points()
-        if entry_point.name == name
-        or entry_point.name.replace("-", "_") == normalized
-    ]
-    if not matches:
-        available = ", ".join(list_publication_source_factories()) or "(none)"
+    kwargs_by_contribution = source_kwargs_by_contribution or {}
+    unknown = set(kwargs_by_contribution).difference(
+        registration.contribution_id for registration in registry.registrations
+    )
+    if unknown:
         raise KeyError(
-            f"Unknown storefront market domain {name!r}. "
-            f"Installed publication domains: {available}"
+            "publication source kwargs name unknown contributions: "
+            + ", ".join(sorted(unknown))
         )
-    if len(matches) > 1:
-        providers = ", ".join(
-            str(getattr(entry_point, "value", entry_point))
-            for entry_point in matches
-        )
-        raise RuntimeError(
-            f"Multiple storefront market domains named {name!r}: {providers}"
-        )
-    loaded = matches[0].load()
-    if not isinstance(loaded, MarketDomainContract):
-        raise TypeError(
-            f"Storefront market domain {name!r} must resolve to a "
-            f"MarketDomainContract, got {type(loaded).__name__}"
-        )
-    return validate_domain_contract(loaded)
 
-
-def build_publication_source(name: str, **kwargs: Any) -> PublicationSource:
-    """Build a selected domain's declared publication source."""
-    domain = _load_domain_entry_point(name)
-    if domain.publication is None:
-        raise TypeError(
-            f"Storefront market domain {domain.identity!s} does not declare "
-            "the publication capability"
+    sources: list[PublicationSource] = []
+    seen_names: set[str] = set()
+    for registration in registry.registrations:
+        publication = registration.contract.publication
+        if publication is None or publication.source_factory is None:
+            raise TypeError(
+                f"storefront contribution {registration.contribution_id!r} has no "
+                "publication source factory"
+            )
+        source = publication.source_factory(
+            **dict(kwargs_by_contribution.get(registration.contribution_id, {}))
         )
-    if domain.publication.source_factory is None:
-        raise TypeError(
-            f"Storefront market domain {domain.identity!s} has direct "
-            "publication but no publication source factory"
-        )
-    source = domain.publication.source_factory(**kwargs)
-    if not isinstance(source, PublicationSource):
-        raise TypeError(
-            f"Storefront market domain {domain.identity!s} returned "
-            f"{type(source).__name__}, expected PublicationSource"
-        )
-    return source
-
-
-def list_publication_source_factories() -> list[str]:
-    """List installed domain entry points that declare publication."""
-    names: list[str] = []
-    for entry_point in _iter_entry_points():
-        loaded = entry_point.load()
-        if (
-            isinstance(loaded, MarketDomainContract)
-            and loaded.publication is not None
-            and loaded.publication.source_factory is not None
-        ):
-            names.append(entry_point.name)
-    return sorted(set(names))
+        if not isinstance(source, PublicationSource):
+            raise TypeError(
+                f"storefront contribution {registration.contribution_id!r} returned "
+                f"{type(source).__name__}, expected PublicationSource"
+            )
+        if source.name in seen_names:
+            raise ValueError(f"duplicate publication source name {source.name!r}")
+        seen_names.add(source.name)
+        sources.append(source)
+    return tuple(sources)

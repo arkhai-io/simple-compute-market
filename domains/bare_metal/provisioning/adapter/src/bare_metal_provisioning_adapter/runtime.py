@@ -16,12 +16,20 @@ from bare_metal_provisioning_adapter.services.bare_metal_lease_service import (
 from bare_metal_provisioning_adapter.services.bare_metal_operations_service import (
     BareMetalOperationsService,
 )
+from bare_metal_provisioning_adapter.services.bare_metal_fulfillment_provider import (
+    BareMetalFulfillmentProvider,
+)
+from bare_metal_provisioning_adapter.services.bare_metal_pool_config_handler import (
+    BareMetalPoolConfigHandler,
+)
 
 
 @dataclass
 class BareMetalProvisioningRuntime:
     lease_service: BareMetalLeaseService
     operations_service: BareMetalOperationsService
+    fulfillment_provider: BareMetalFulfillmentProvider
+    pool_config_handler: BareMetalPoolConfigHandler
 
     def readiness(self) -> dict[str, bool]:
         return {"operations_service": self.operations_service is not None}
@@ -37,6 +45,8 @@ class BareMetalProvisioningRuntime:
                     self.operations_service.reclaim_access_for_reservation
                 ),
             ),
+            fulfillment_provider=self.fulfillment_provider,
+            pool_config_handler=self.pool_config_handler,
             readiness_check=self.readiness,
         )
 
@@ -54,12 +64,18 @@ def build_bare_metal_runtime(
     config,
     host_service,
 ) -> BareMetalProvisioningRuntime:
+    operations_service = BareMetalOperationsService(
+        job_service=job_service,
+        job_queue_provider=job_queue_provider,
+        settings=config,
+        host_service=host_service,
+    )
     return BareMetalProvisioningRuntime(
         lease_service=BareMetalLeaseService(site_authority=site_authority),
-        operations_service=BareMetalOperationsService(
+        operations_service=operations_service,
+        fulfillment_provider=BareMetalFulfillmentProvider(
+            operations_service=operations_service,
             job_service=job_service,
-            job_queue_provider=job_queue_provider,
-            settings=config,
-            host_service=host_service,
         ),
+        pool_config_handler=BareMetalPoolConfigHandler(),
     )

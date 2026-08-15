@@ -29,6 +29,14 @@ Internal Python boundaries are exercised as distributions. Prerequisite packages
 
 The architectural purpose is reproducibility: package metadata and wheel contents, not checkout-relative imports, determine what a consumer receives. Pure-Python wheel checks prevent a host-built native artifact from being mistaken for a target-platform image dependency.
 
+## Bare-metal seller artifact
+
+The bare-metal storefront is a separately installable role distribution and dedicated image. The image installs only staged wheels, runs as an unprivileged user, persists seller state and reservation-to-site routing tables in one role-owned SQLite database, and invokes the `bare-metal-storefront` command. It includes the bare-metal domain and shared storefront, identity, policy, site-client, settlement-runtime, and compute-provisioning client boundaries; it does not include or import the VM storefront implementation.
+
+The role accepts public seller identity and stable site identifiers independently from signer Secrets. Each site record contains an exact canonical authority principal and a private routing URL. Startup parses and validates the entire set before constructing clients or opening the API; database construction applies the role's ordered migrations before serving. The dedicated `helm/charts/bare-metal-storefront` chart references both signer material and the complete site-binding JSON from existing Secrets, mounts one persistent data boundary, and configures `/health` startup, liveness, and readiness probes. Health and operator diagnostics report the canonical seller principal plus each site ID and authority principal, but never a routing URL or signer material.
+
+VM-only, bare-metal-only, and combined deployments select storefront processes independently. A combined seller may connect both processes to the same provisioning authority, but each storefront owns its database, health, service URL, and migration boundary. Disabled roles have no readiness dependency, volume, Secret mount, or service reference from enabled peers.
+
 ## Compatibility posture
 
 Schema evolution is additive by default. A non-additive change needs an explicit expand/contract plan that identifies the period in which old and new readers or writers coexist. Public package and wire compatibility similarly belong to the owning capability rather than being inferred from a shared repository version.
@@ -108,6 +116,55 @@ Alkahest E2E remains an independent mechanism composition. Local
 EAS/allowlisted-arbiter validation is a condition-boundary concern, not a
 hosted financial-provider profile; this repository currently exposes no
 standalone hosted local-EAS operator target.
+
+## Expanded consumer cutover and rollback
+
+The expanded consumer activates as one compatibility set: exact hosted client wheel, signed manifest, API `0.2.0`, schema `5`, payer-profile and purchase-authorization capabilities, three exact funding profiles, service image coordinate, marketplace config, and role-scoped signer Secrets. Config migration converts new-publication card method input to `card.v1` clauses and refuses ambiguity; historical accepted card rows remain a recovery concern rather than a runtime alias.
+
+The buyer profile store does not change schema for expanded funding. Its schema-1 authority binding already stores the complete safe consumer projection—authority, environment, opaque binding reference, bound principal, and lifecycle state—so consumer commands update that owner-only field atomically rather than migrating profiles or adding instrument, provider, action, or commercial state. The settlement database separately migrates accepted hosted obligations because it owns immutable profile, authorization, legacy classification, and recovery identity.
+
+Marketplace deployment carries only public authority trust, exact release pins, account/condition references, profile/currency/country policy, local buyer profile locations, and marketplace signer Secret references. Provider credentials, Customer/PaymentMethod/mandate data, stable instrument state, webhooks, hosted databases/migrations, reconciliation, and provider recovery remain outside marketplace packages and workloads.
+
+Before activation, rollback restores the matching prior client, config, image coordinates, and Secret mapping together. After new profile publication or purchase authorization occurs, rollback cannot reinterpret accepted state; operators roll forward using immutable obligation, authorization, and hosted operation identities. Protected profile evidence remains blocked unless every signed producer artifact and selected Stripe rail prerequisite is available.
+
+## Multi-domain storefront activation
+
+The deployment unit is one shared storefront shell, one single-writer SQLite
+database, and a set of installed domain contribution wheels. Public config
+names each contribution, mode, domain identity, and contract version; trusted
+site bindings are independent. Image, Compose, and Helm surfaces install and
+render the same set and never embed signer/provider/SSH/private-result data.
+
+Legacy state is an explicit expand/contract boundary, not an automatic startup
+guess. Operators quiesce effects, select one migration adapter, inspect its
+complete read-only report, then request restrictive backup plus atomic
+replacement. Only rows with exact site and pool/resource provenance migrate.
+Once common bindings have participated in effects, rollback is forward
+recovery using those immutable bindings.
+
+## Bare-metal hosted topology
+
+The bare-metal buyer and storefront remain separate released wheels and role processes. The buyer contribution reads only strict public registry/trust/default configuration and resolves its signer from the core profile service. The storefront mounts one shared settlement JSON Secret containing public authority/account/trust/release settings. Hosted-only startup leaves the EVM address empty and creates no wallet, RPC, chain, or Alkahest client. Compose and Helm carry selected-site bindings and provisioning trust separately from financial trust; neither surface mounts Stripe, payer-profile, provider, or buyer SSH private material.
+
+The storefront database owns accepted hosted-binding and bare lifecycle migrations in the role's ordered migration set. Activation may disable hosted before effects; after an accepted hosted mutation, recovery keeps the compatible artifact/config set pinned until financial and physical operation journals are safe. Protected activation additionally verifies the independently signed hosted release and disposable target before publication.
+
+## API-credit hosted topology
+
+The deployable API-credit path consists of independent registry, credits
+authority, gated application, storefront, buyer/driver, portable evidence
+resolver, and hosted authority roles. Hosted-only buyer/storefront composition
+uses Ed25519 marketplace signer Secrets and has no wallet/chain volume. The
+marketplace images install the hosted consumer and shared runtime wheels but do
+not receive Stripe/provider credentials or hosted persistence.
+
+The credits authority owns canonical owner, immutable fulfillment/grant
+digests, key hashes, balance, quota, credential, and consumption migrations.
+The storefront owns accepted negotiation, settlement operation, private
+buyer-result, and signed issuance-evidence migrations. Public configuration
+pins authority/manifest/client/API/schema/capabilities, exact funding profiles,
+seller account and evidence resolver. Rollback is safe before accepted hosted
+effects; afterward both authorities recover forward under their immutable
+identities.
 
 ## Current limits
 

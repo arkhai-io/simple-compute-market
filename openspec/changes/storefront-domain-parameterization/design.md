@@ -174,10 +174,18 @@ After a dependent change persists domain/offering-mode discriminators, rollback 
 
 | Accepted decision | Permanent location |
 |---|---|
-| Domain-owned storefront roots select and inject one validated contract; core remains schema-opaque | `openspec/specs/market-composition/spec.md` and `docs/development/ARCHITECTURE.md#composition-from-above-and-below` |
-| Module-global domain resolution and lower-layer fallback are forbidden | `openspec/specs/market-composition/spec.md` |
-| One contract governs publication, negotiation, settlement, fulfillment, and repository normalization for a single-domain record | `openspec/specs/storefront-publication/spec.md` |
+| Domain-owned storefront roots select and inject one validated contract; core remains schema-opaque | `openspec/specs/market-composition/{spec,architecture}.md` and `docs/development/ARCHITECTURE.md#composition-from-above-and-below` |
+| Module-global domain resolution, replacement objects, domain-name branches, and lower-layer fallback are forbidden | `openspec/specs/market-composition/{spec,architecture}.md` |
+| One contract governs publication, negotiation, settlement, fulfillment, and repository normalization for a single-domain record | `openspec/specs/storefront-publication/{spec,architecture}.md` |
 | Invalid identity/version/capability fails before startup work or side effects | `openspec/specs/market-composition/spec.md` and `openspec/specs/storefront-publication/spec.md` |
-| Injection identity, compatibility matrix, parity, and package-direction test ownership | `openspec/specs/test-compatibility/spec.md`; `docs/development/TESTING.md` only if durable methodology changes |
-| No schema/config/deployment migration and code-only pre-dependent rollback | Active change only as transition detail; no permanent documentation unless implementation finds a durable operational rule |
-| Prerequisite completion and remaining multi-domain discriminator/routing gap | `docs/development/ROADMAP.md` multi-domain storefront goal |
+| Injection identity, compatibility matrix, parity, restart, and package-direction test ownership | `openspec/specs/test-compatibility/{spec,architecture}.md` and `docs/development/TESTING.md#four-level-hierarchy` |
+| Single-domain restart requires no schema/carrier rewrite; later per-record ownership is a separate change | `openspec/specs/market-composition/{spec,architecture}.md`, `openspec/specs/storefront-publication/{spec,architecture}.md`, and `docs/development/ARCHITECTURE.md#composition-from-above-and-below` |
+| Prerequisite completion and the remaining per-record discriminator/routing gap | `docs/development/ROADMAP.md#goal-3--one-storefront-serving-several-compute-family-domains` |
+
+## Closeout evidence
+
+- Production now constructs the ordinary VM contract only in the default application statement, validates caller-supplied contracts before app/lifespan construction, and carries the exact object through the container, SQLite repository, listing/publication, negotiation, settlement, fulfillment, routes, and workers. No getter, optional domain default, compatibility alias, or production reference to this change remains.
+- Persistence schemas, migrations, public carriers, configuration, Compose/Helm topology, Dockerfile, package dependency declarations, and lockfiles are unchanged. Restart coverage reopens real listing, negotiation, obligation, settlement, fulfillment, and operation identifiers and compares the SQLite schema before and after construction.
+- Permanent requirements and rationale are promoted to the three owning specifications and companion architecture documents, `docs/development/{ARCHITECTURE,TESTING,ROADMAP}.md`, with the remaining per-record selection gap assigned to the multi-domain storefront change.
+- `multi-domain-storefront-composition` explicitly replaces this exact-object seam with record-bound registrations and rejects defaults/fallbacks. `kit-storefront-composition-seam` explicitly extends the injected-contract shape and prohibits moving module lookup into kit.
+- Per assignment, no formatter, linter, build, test, type check, package build/install, comment-hygiene command, bare-metal test, or OpenSpec validation was run. Tasks 3.1–3.4, 4.3, and 5.1 remain unchecked for Main to execute after integration.

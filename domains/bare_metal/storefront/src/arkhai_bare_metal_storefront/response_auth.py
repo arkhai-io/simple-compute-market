@@ -10,6 +10,9 @@ from fastapi import Request
 from fastapi.responses import JSONResponse, Response
 from market_identity import EMPTY_BODY
 
+from market_storefront_kit import get_storefront_container
+
+from .runtime import BareMetalStorefrontRuntime
 from core_storefront.auth import AuthenticatedPrincipal, signed_response_headers
 
 
@@ -61,8 +64,14 @@ async def authenticate_response(request: Request, call_next):
     context = getattr(request.state, "marketplace_response_auth", None)
     if context is None:
         return response
-    runtime = getattr(request.app.state, "runtime", None)
-    if runtime is None:
+    try:
+        runtime = get_storefront_container(request)
+    except RuntimeError:
+        return JSONResponse(
+            content={"detail": "storefront runtime unavailable"},
+            status_code=503,
+        )
+    if not isinstance(runtime, BareMetalStorefrontRuntime):
         return JSONResponse(
             content={"detail": "storefront runtime unavailable"},
             status_code=503,

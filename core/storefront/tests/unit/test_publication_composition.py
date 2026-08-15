@@ -1,26 +1,44 @@
-from core_storefront.publication_composition import (
-    build_storefront_publication_selection,
-)
+from core_storefront import publication_composition
+from core_storefront.publication_sources import PublicationSource
 
 
-def test_schema_opaque_selection_preserves_names_order_and_selected_kwargs():
-    selection = build_storefront_publication_selection(
-        ("external_one", "external_two"),
-        source_kwargs_by_name={
-            "external_one": {"one": True},
-            "external_two": {"two": True},
-            "unused": {"ignored": True},
-        },
+def _source(name: str) -> PublicationSource:
+    return PublicationSource(
+        name=name,
+        open_keys=lambda _db: set(),
+        close_stale=lambda _db, _url: [],
+        available_candidates=lambda _db: [],
+        skip_keys=lambda _candidate: set(),
+        offer_resource=lambda candidate: candidate,
+        record_published=lambda *_args: None,
+        reopen_existing=lambda *_args: None,
+        reopen_error_label=name,
     )
 
-    assert tuple(selection.source_names) == ("external_one", "external_two")
-    assert selection.source_kwargs_by_name == {
-        "external_one": {"one": True},
-        "external_two": {"two": True},
-    }
 
+def test_selection_freezes_sources_built_from_the_supplied_registry(monkeypatch):
+    registry = object()
+    observed = []
 
-def test_empty_domain_selection_is_valid():
-    selection = build_storefront_publication_selection(())
-    assert tuple(selection.source_names) == ()
-    assert selection.source_kwargs_by_name == {}
+    def build(candidate, **kwargs):
+        observed.append((candidate, kwargs))
+        return (_source("vms"), _source("bare_metal"))
+
+    monkeypatch.setattr(
+        publication_composition,
+        "build_registry_publication_sources",
+        build,
+    )
+
+    selection = publication_composition.build_storefront_publication_selection(
+        registry,
+        source_kwargs_by_contribution={"vms": {"one": True}},
+    )
+
+    assert selection.source_names == ("vms", "bare_metal")
+    assert observed == [
+        (
+            registry,
+            {"source_kwargs_by_contribution": {"vms": {"one": True}}},
+        )
+    ]

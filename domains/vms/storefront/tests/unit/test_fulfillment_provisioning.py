@@ -4,9 +4,8 @@ Covers ``_fulfillment_result_to_legacy_shape``, ``_poll_fulfillment_until_termin
 and ``_connectivity_settings_from_storefront_config`` -- the pure/mockable
 pieces of ``_do_provision``'s replacement of the legacy direct-executor-dispatch
 path with ``schedule_resource`` -> ``begin_fulfillment`` -> poll status/result.
-``_do_provision`` itself is exercised indirectly through these; a full
-end-to-end test needs the real settlement/negotiation fixtures
-``test_fulfillment_service.py`` already sets up.
+``_do_provision`` itself uses a real SQLite listing/thread/escrow binding while
+the capacity and fulfillment network boundaries remain deterministic doubles.
 """
 
 from __future__ import annotations
@@ -36,6 +35,10 @@ from compute_provisioning import ComputeProvisioningTimeoutError
 from market_fulfillment import VersionedEnvelope
 from market_storefront.services import fulfillment_service as fs
 from market_storefront.services import vm_fulfillment_service as vfs
+from tests.fulfillment_fixtures import (
+    make_vm_lifecycle_fixture,
+    vm_fulfillment_result,
+)
 
 
 class TestFulfillmentResultToLegacyShape:
@@ -185,32 +188,21 @@ class TestDoProvision:
                 return_value=SimpleNamespace(state="active", failure_message=None)
             ),
             get_fulfillment_result=AsyncMock(
-                return_value=VersionedEnvelope(
-                    kind="fulfillment.result.v1",
-                    schema_version=1,
-                    payload={
-                        "provisioned_resources": [{"provisioned_resource_id": "res-1", "status": "active"}],
-                        "domain_result": {
-                            "kind": "vm.fulfillment.result.v1",
-                            "schema_version": 1,
-                            "payload": {
-                                "connection_info": {"vm_name": "vm-1"},
-                                "credentials": [],
-                            },
-                        },
-                    },
+                return_value=vm_fulfillment_result(
+                    provisioned_resource_id="res-1",
+                    connection_info={"vm_name": "vm-1"},
                 )
             ),
         )
         return client
 
     async def test_schedules_begins_polls_and_returns_result(
-        self, monkeypatch, fulfillment_client,
+        self, monkeypatch, fulfillment_client, tmp_path,
     ):
-        sqlite_client = SimpleNamespace(update_escrow=AsyncMock())
+        lifecycle = await make_vm_lifecycle_fixture(tmp_path / "schedule.db")
+        sqlite_client = lifecycle.db
         monkeypatch.setattr(fs, "build_fulfillment_client", lambda *_: fulfillment_client)
         monkeypatch.setattr(fs, "build_capacity_client", lambda *_: SimpleNamespace())
-        monkeypatch.setattr(fs, "get_sqlite_client", lambda: sqlite_client)
         monkeypatch.setattr(
             fs.settings, "provisioning",
             SimpleNamespace(
@@ -226,6 +218,7 @@ class TestDoProvision:
 
         result = await fs._do_provision(
             "ssh-ed25519 AAAA",
+            sqlite_client=sqlite_client,
             vm_host="kvm1",
             vm_target="tenant-abcd",
             on_job_submitted=_on_job_submitted,
@@ -238,31 +231,59 @@ class TestDoProvision:
         assert schedule_request.capacity_reservation_id == "res-1"
         assert schedule_request.market == "vms"
 
+        assert fulfillment_client.schedule_resource.await_args.kwargs == {
+            "site_id": "site-1"
+        }
         # Restart-safety persistence: capacity_reservation_id and
         # settlement_resource_id written as soon as scheduling confirms them.
-        sqlite_client.update_escrow.assert_any_await(
-            escrow_uid="escrow-1",
-            capacity_reservation_id="res-1",
-            settlement_resource_id="kvm1",
-        )
+        persisted = await sqlite_client.load_escrow(escrow_uid="escrow-1")
+        assert persisted is not None
+        assert persisted["capacity_reservation_id"] == "res-1"
+        assert persisted["settlement_resource_id"] == "kvm1"
+        context = json.loads(persisted["fulfillment_context"])
+        assert context["storefront_domain_binding"] == {
+            "negotiation_id": "neg-1",
+            "listing_id": "listing-1",
+            "site_id": "site-1",
+            "offering_mode": "vm",
+            "domain_identity": "compute.v1",
+            "contract_major": 1,
+            "contract_minor": 0,
+        }
 
         fulfillment_client.begin_fulfillment.assert_awaited_once()
         begin_body = fulfillment_client.begin_fulfillment.await_args.args[0]
         assert begin_body.capacity_reservation_id == "res-1"
         assert begin_body.fulfillment_request.payload["vm_target"] == "tenant-abcd"
+        assert begin_body.market == "vms"
         assert begin_body.fulfillment_request.payload["ssh_pubkey"] == "ssh-ed25519 AAAA"
         assert "connectivity" not in begin_body.fulfillment_request.payload
+        assert fulfillment_client.begin_fulfillment.await_args.kwargs == {
+            "site_id": "site-1"
+        }
+        fulfillment_client.get_fulfillment_status.assert_awaited_once_with(
+            "fulfillment-1",
+            capacity_reservation_id="res-1",
+            site_id="site-1",
+        )
+        fulfillment_client.get_fulfillment_result.assert_awaited_once_with(
+            "fulfillment-1",
+            capacity_reservation_id="res-1",
+            site_id="site-1",
+        )
 
         assert job_ids == ["fulfillment-1"]
         assert result["vm_name"] == "vm-1"
         assert result["provisioned_resource_ids"] == ["res-1"]
 
     async def test_includes_connectivity_when_frp_configured(
-        self, monkeypatch, fulfillment_client,
+        self, monkeypatch, fulfillment_client, tmp_path,
     ):
         monkeypatch.setattr(fs, "build_fulfillment_client", lambda *_: fulfillment_client)
         monkeypatch.setattr(fs, "build_capacity_client", lambda *_: SimpleNamespace())
-        monkeypatch.setattr(fs, "get_sqlite_client", lambda: SimpleNamespace(update_escrow=AsyncMock()))
+        sqlite_client = (
+            await make_vm_lifecycle_fixture(tmp_path / "connectivity.db")
+        ).db
         monkeypatch.setattr(
             fs.settings, "provisioning",
             SimpleNamespace(
@@ -274,6 +295,7 @@ class TestDoProvision:
 
         await fs._do_provision(
             "ssh-ed25519 AAAA", vm_host="kvm1", vm_target="tenant-abcd",
+            sqlite_client=sqlite_client,
             capacity_reservation_id="res-1", escrow_uid="escrow-1",
         )
 
@@ -284,13 +306,17 @@ class TestDoProvision:
             "frp_dashboard_password": None,
         }
 
-    async def test_failed_state_raises(self, monkeypatch, fulfillment_client):
+    async def test_failed_state_raises(
+        self, monkeypatch, fulfillment_client, tmp_path,
+    ):
         fulfillment_client.get_fulfillment_status = AsyncMock(
             return_value=SimpleNamespace(state="failed", failure_message="provisioning failed")
         )
         monkeypatch.setattr(fs, "build_fulfillment_client", lambda *_: fulfillment_client)
         monkeypatch.setattr(fs, "build_capacity_client", lambda *_: SimpleNamespace())
-        monkeypatch.setattr(fs, "get_sqlite_client", lambda: SimpleNamespace(update_escrow=AsyncMock()))
+        sqlite_client = (
+            await make_vm_lifecycle_fixture(tmp_path / "failure.db")
+        ).db
         monkeypatch.setattr(
             fs.settings, "provisioning",
             SimpleNamespace(
@@ -305,6 +331,7 @@ class TestDoProvision:
         with pytest.raises(ComputeProvisioningJobError, match="provisioning failed"):
             await fs._do_provision(
                 "ssh-ed25519 AAAA", vm_host="kvm1", vm_target="tenant-abcd",
+                sqlite_client=sqlite_client,
                 capacity_reservation_id="res-1", escrow_uid="escrow-1",
             )
         fulfillment_client.get_fulfillment_result.assert_not_awaited()
@@ -317,10 +344,13 @@ class TestDoProvision:
         status = await fs._poll_fulfillment_until_terminal(
             client, "fulfillment-1", capacity_reservation_id="res-1",
             timeout=5.0, poll_interval=0.01,
+            site_id="site-1",
         )
         assert status.state == "active"
         client.get_fulfillment_status.assert_awaited_once_with(
-            "fulfillment-1", capacity_reservation_id="res-1",
+            "fulfillment-1",
+            capacity_reservation_id="res-1",
+            site_id="site-1",
         )
 
     async def test_returns_on_failed(self):
@@ -332,6 +362,7 @@ class TestDoProvision:
         status = await fs._poll_fulfillment_until_terminal(
             client, "fulfillment-1", capacity_reservation_id="res-1",
             timeout=5.0, poll_interval=0.01,
+            site_id="site-1",
         )
         assert status.state == "failed"
         assert status.failure_message == "boom"
@@ -346,6 +377,7 @@ class TestDoProvision:
         status = await fs._poll_fulfillment_until_terminal(
             client, "fulfillment-1", capacity_reservation_id="res-1",
             timeout=5.0, poll_interval=0.001,
+            site_id="site-1",
         )
         assert status.state == "active"
 
@@ -359,6 +391,7 @@ class TestDoProvision:
             await fs._poll_fulfillment_until_terminal(
                 client, "fulfillment-1", capacity_reservation_id="res-1",
                 timeout=0.02, poll_interval=0.01,
+                site_id="site-1",
             )
 
 
@@ -413,6 +446,7 @@ class TestPersistEscrowFieldsWithRetry:
 @pytest.mark.asyncio
 async def test_generated_vm_target_survives_context_fulfillment_and_lease_registration(
     monkeypatch,
+    tmp_path,
 ):
     """Exercise target generation across context, fulfillment, and lease seams.
 
@@ -428,16 +462,24 @@ async def test_generated_vm_target_survives_context_fulfillment_and_lease_regist
     )
     monkeypatch.setattr(vfs, "build_vm_fulfillment_plan", lambda **_: plan)
 
-    sqlite_client = SimpleNamespace(
-        update_escrow=AsyncMock(),
-        update_listing=AsyncMock(),
-        store_credential=AsyncMock(),
+    lifecycle = await make_vm_lifecycle_fixture(tmp_path / "target-survival.db")
+    sqlite_client = lifecycle.db
+
+    async def capacity_binding_for_listing(repository, listing_id):
+        assert repository is sqlite_client
+        assert listing_id == lifecycle.thread_binding.listing_id
+        return lifecycle.capacity_binding
+
+    monkeypatch.setattr(
+        "market_storefront.services.capacity_client.capacity_binding_for_listing",
+        capacity_binding_for_listing,
     )
     capacity = SimpleNamespace(
         reserve=AsyncMock(return_value={
             "capacity_reservation_id": "reservation-1",
             "resource_id": "resource-1",
             "vm_host": "host-1",
+            "site": "site-1",
         }),
         commit=AsyncMock(),
     )
@@ -466,6 +508,8 @@ async def test_generated_vm_target_survives_context_fulfillment_and_lease_regist
         escrow_uid="escrow-1",
         ssh_public_key="ssh-ed25519 test",
         order={"listing_id": "listing-1"},
+        listing_id="listing-1",
+        site_id="site-1",
         get_sqlite_client=lambda: sqlite_client,
         capacity=capacity,
         stage_event=lambda *args, **kwargs: None,
@@ -475,16 +519,15 @@ async def test_generated_vm_target_survives_context_fulfillment_and_lease_regist
     )
     await asyncio.sleep(0)
 
-    context_write = next(
-        call for call in sqlite_client.update_escrow.await_args_list
-        if "fulfillment_context" in call.kwargs
-    )
-    context = json.loads(context_write.kwargs["fulfillment_context"])
+    persisted = await sqlite_client.load_escrow(escrow_uid="escrow-1")
+    assert persisted is not None
+    context = json.loads(persisted["fulfillment_context"])
     payload = context["payload"]["fulfillment_request"]["payload"]
     persisted_vm_target = payload["vm_target"]
     assert isinstance(persisted_vm_target, str)
     assert persisted_vm_target.startswith("tenant-")
     assert payload["ssh_pubkey"] == "ssh-ed25519 test"
+    assert capacity.reserve.await_args.args == (lifecycle.capacity_binding,)
     assert observed == {
         "provision": persisted_vm_target,
         "lease": persisted_vm_target,
@@ -495,6 +538,7 @@ async def test_generated_vm_target_survives_context_fulfillment_and_lease_regist
 @pytest.mark.asyncio
 async def test_post_provision_commit_and_lease_registration_do_not_require_resource_id(
     monkeypatch,
+    tmp_path,
 ):
     """Regression test for the opaque-reservation post-provision gap.
 
@@ -514,15 +558,23 @@ async def test_post_provision_commit_and_lease_registration_do_not_require_resou
     )
     monkeypatch.setattr(vfs, "build_vm_fulfillment_plan", lambda **_: plan)
 
-    sqlite_client = SimpleNamespace(
-        update_escrow=AsyncMock(),
-        update_listing=AsyncMock(),
-        store_credential=AsyncMock(),
+    lifecycle = await make_vm_lifecycle_fixture(tmp_path / "opaque-reservation.db")
+    sqlite_client = lifecycle.db
+
+    async def capacity_binding_for_listing(repository, listing_id):
+        assert repository is sqlite_client
+        assert listing_id == lifecycle.thread_binding.listing_id
+        return lifecycle.capacity_binding
+
+    monkeypatch.setattr(
+        "market_storefront.services.capacity_client.capacity_binding_for_listing",
+        capacity_binding_for_listing,
     )
     capacity = SimpleNamespace(
         reserve=AsyncMock(return_value={
             "capacity_reservation_id": "reservation-1",
             # No resource_id/vm_host -- the real opaque-reservation shape.
+            "site": "site-1",
         }),
         commit=AsyncMock(),
     )
@@ -540,6 +592,8 @@ async def test_post_provision_commit_and_lease_registration_do_not_require_resou
         escrow_uid="escrow-1",
         ssh_public_key="ssh-ed25519 test",
         order={"listing_id": "listing-1"},
+        listing_id="listing-1",
+        site_id="site-1",
         get_sqlite_client=lambda: sqlite_client,
         capacity=capacity,
         stage_event=lambda *args, **kwargs: None,
@@ -550,6 +604,7 @@ async def test_post_provision_commit_and_lease_registration_do_not_require_resou
     await asyncio.sleep(0)
 
     assert result["status"] == "fulfilled"
+    assert capacity.reserve.await_args.args == (lifecycle.capacity_binding,)
     # `commit()` is also called earlier, atomically, when there is no
     # pre-existing TTL hold to refresh (`_reserve_capacity_for_obligation` ->
     # `_commit_fresh_reservation`); this test only asserts the *post-provision*

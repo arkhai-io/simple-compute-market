@@ -23,18 +23,7 @@ class PublicationSource:
     skip_keys: Callable[[dict[str, Any]], set[str]]
     offer_resource: Callable[[dict[str, Any]], dict[str, Any]]
     record_published: Callable[[str, dict[str, Any], str], None]
-    reopen_existing: Callable[
-        [
-            str,
-            str,
-            dict[str, Any],
-            dict[str, Any],
-            list[dict[str, Any]],
-            list[dict[str, Any]],
-            int | None,
-        ],
-        dict[str, Any] | None,
-    ]
+    reopen_existing: Callable[..., dict[str, Any] | None]
     reopen_error_label: str
     pricing_resource: Callable[
         [dict[str, Any], dict[str, Any]],

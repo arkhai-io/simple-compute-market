@@ -7,12 +7,20 @@ step, no agent-card publication, and no heartbeat loop.
 
 import asyncio
 import logging
+from functools import partial
+from typing import Any
 
 from core_storefront.app_startup import (
     StorefrontBackgroundTask,
     StorefrontStartupStep,
     run_storefront_startup_steps,
     start_storefront_background_task,
+)
+from core_storefront.stage_log import stage_event
+from market_core import MarketDomainContract
+from market_storefront_kit import (
+    NegotiationWatchdogPolicy,
+    run_negotiation_watchdog,
 )
 
 from market_storefront.utils.config import (
@@ -144,21 +152,31 @@ async def _seed_resources_if_empty() -> None:
         )
 
 
-def _start_negotiation_watchdog() -> None:
-    from market_storefront.negotiation_watchdog import (
-        watchdog_loop as _neg_watchdog_loop,
+def _negotiation_watchdog_policy() -> NegotiationWatchdogPolicy:
+    return NegotiationWatchdogPolicy(
+        timeout_seconds=float(settings.negotiation_timeout_seconds),
+        interval_seconds=float(settings.negotiation_watchdog_interval),
     )
 
+
+def _start_negotiation_watchdog(sqlite_client: Any) -> None:
+    policy = _negotiation_watchdog_policy()
     start_storefront_background_task(
         StorefrontBackgroundTask(
             name="negotiation_watchdog",
-            task_factory=_neg_watchdog_loop,
+            task_factory=partial(
+                run_negotiation_watchdog,
+                sqlite_client,
+                policy,
+                emit_stage_event=stage_event,
+                logger=logger,
+            ),
             log_message=(
                 "[STARTUP] Negotiation watchdog started (interval=%ds, timeout=%ds)"
             ),
             log_args=(
-                settings.negotiation_watchdog_interval,
-                settings.negotiation_timeout_seconds,
+                policy.interval_seconds,
+                policy.timeout_seconds,
             ),
         ),
         logger=logger,
@@ -194,7 +212,7 @@ def _start_settlement_servicing() -> None:
     )
 
 
-def _start_fulfillment_resume() -> None:
+def _start_fulfillment_resume(sqlite_client: Any) -> None:
     from market_storefront.services.fulfillment_resume_runtime import (
         fulfillment_resume_loop,
     )
@@ -202,7 +220,7 @@ def _start_fulfillment_resume() -> None:
     start_storefront_background_task(
         StorefrontBackgroundTask(
             name="fulfillment_resume",
-            task_factory=fulfillment_resume_loop,
+            task_factory=partial(fulfillment_resume_loop, sqlite_client),
             log_message="[STARTUP] Fulfillment resume worker started (interval=%ss)",
             log_args=(getattr(settings, "fulfillment_resume_sweep_interval", 30),),
         ),
@@ -210,26 +228,26 @@ def _start_fulfillment_resume() -> None:
     )
 
 
-def _start_capacity_events_poller() -> None:
+def _start_capacity_events_poller(sqlite_client: Any) -> None:
     # Tail every authority's capacity-event feed after provisioning preflight.
     from market_storefront.services.capacity_client import capacity_events_poller_loop
 
     start_storefront_background_task(
         StorefrontBackgroundTask(
             name="capacity_events_poller",
-            task_factory=capacity_events_poller_loop,
+            task_factory=partial(capacity_events_poller_loop, sqlite_client),
         ),
         logger=logger,
     )
 
 
-async def _load_site_projections() -> None:
+async def _load_site_projections(sqlite_client: Any) -> None:
     from market_storefront.services.site_projection_cache import load_site_projections
 
-    await load_site_projections()
+    await load_site_projections(sqlite_client)
 
 
-def _start_site_projection_poller() -> None:
+def _start_site_projection_poller(sqlite_client: Any) -> None:
     from market_storefront.services.site_projection_cache import (
         site_projection_poller_loop,
     )
@@ -237,14 +255,46 @@ def _start_site_projection_poller() -> None:
     start_storefront_background_task(
         StorefrontBackgroundTask(
             name="site_projection_poller",
-            task_factory=site_projection_poller_loop,
+            task_factory=partial(site_projection_poller_loop, sqlite_client),
         ),
         logger=logger,
     )
 
 
-async def _startup_tasks() -> None:
-    """Initialize background tasks. Called from server.py lifespan."""
+def _assert_startup_registry(registry: Any, domain: MarketDomainContract) -> Any:
+    """Reject mixed composition before preflight or background work."""
+    import market_storefront.container as _container
+
+    sqlite_client = _container.resolved_sqlite_client
+    listing_service = _container.resolved_listing_service
+    negotiation_service = _container.resolved_negotiation_service
+    settlement_composition = _container.resolved_settlement_composition
+    callback = getattr(negotiation_service, "_continue_negotiation", None)
+    callback_registry = getattr(callback, "keywords", {}).get("registry")
+    collaborators = (
+        ("container", _container.resolved_domain_registry),
+        ("SQLite repository", getattr(sqlite_client, "domain_registry", None)),
+        ("listing service", getattr(listing_service, "domain_registry", None)),
+        ("negotiation callback", callback_registry),
+    )
+    for label, collaborator_registry in collaborators:
+        if collaborator_registry is not registry:
+            raise RuntimeError(
+                f"{label} is not bound to the app-selected storefront "
+                "domain registry object"
+            )
+    if registry.registration_for_contract(domain).contract is not domain:
+        raise RuntimeError("settlement domain is not the startup-owned contract")
+    if getattr(settlement_composition, "domain", None) is not domain:
+        raise RuntimeError(
+            "settlement composition is not bound to its registered contract"
+        )
+    return sqlite_client
+
+
+async def _startup_tasks(*, registry: Any, domain: MarketDomainContract) -> None:
+    """Initialize background tasks for one frozen storefront registry."""
+    sqlite_client = _assert_startup_registry(registry, domain)
     await run_storefront_startup_steps(
         (
             StorefrontStartupStep("join_zerotier", _maybe_join_zerotier_network),
@@ -259,27 +309,30 @@ async def _startup_tasks() -> None:
             ),
             StorefrontStartupStep(
                 "negotiation_watchdog",
-                _start_negotiation_watchdog,
+                partial(_start_negotiation_watchdog, sqlite_client),
             ),
             StorefrontStartupStep(
                 "settlement_mechanism_preflight",
                 _preflight_settlement_mechanisms,
             ),
             StorefrontStartupStep("settlement_servicing", _start_settlement_servicing),
-            StorefrontStartupStep("fulfillment_resume", _start_fulfillment_resume),
+            StorefrontStartupStep(
+                "fulfillment_resume",
+                partial(_start_fulfillment_resume, sqlite_client),
+            ),
             StorefrontStartupStep("preflight_provisioning", _preflight_provisioning),
             StorefrontStartupStep(
                 "load_site_projections",
-                _load_site_projections,
+                partial(_load_site_projections, sqlite_client),
                 error_message="[STARTUP] Site projection load failed: %s",
             ),
             StorefrontStartupStep(
                 "site_projection_poller",
-                _start_site_projection_poller,
+                partial(_start_site_projection_poller, sqlite_client),
             ),
             StorefrontStartupStep(
                 "capacity_events_poller",
-                _start_capacity_events_poller,
+                partial(_start_capacity_events_poller, sqlite_client),
             ),
         ),
         logger=logger,

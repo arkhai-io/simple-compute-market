@@ -65,7 +65,7 @@ class BareMetalSettlementService:
         )
         if thread is None:
             raise SettlementRequestError("negotiation not found", status_code=404)
-        if thread.get("buyer_principal") != buyer_principal:
+        if Identity.model_validate(thread.get("buyer_principal")) != buyer_principal:
             raise SettlementRequestError("negotiation buyer mismatch", status_code=403)
         return thread
 
@@ -238,7 +238,7 @@ class BareMetalSettlementService:
         try:
             outcome = await self.settlement_runtime.adopt(
                 records[matched_index].obligation_ref,
-                local_role="seller",
+                local_principal=Identity.model_validate(thread["seller_principal"]),
                 mechanism_ref=escrow_uid,
                 receipt=None,
                 condition_anchor=None,

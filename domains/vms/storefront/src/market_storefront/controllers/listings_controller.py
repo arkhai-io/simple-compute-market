@@ -177,7 +177,10 @@ class ListingsController:
             publish_order_to_registry,
         )
 
-        publish_result = await publish_order_to_registry(listing)
+        publish_result = await publish_order_to_registry(
+            listing,
+            sqlite_client=self._db,
+        )
         registry_status = publish_result.get("status", "unknown")
         return PauseListingResponse(
             listing_id=listing_id,
@@ -303,10 +306,8 @@ class AdminListingsController:
     ) -> EvaluateNegotiateResponse:
         """Dry-run the seller's round-0 negotiation decision without creating a thread.
 
-        Delegates to ``ListingService.evaluate_negotiate``, which calls
-        ``_compute_round_zero_decision`` — the same pure-compute function used
-        by the real ``/negotiate/new`` flow. The result is identical to what
-        round 0 of a real negotiation would produce for the given price.
+        Delegates to ``ListingService.evaluate_negotiate`` and the same
+        domain policy adapter used by round zero of the shared runtime.
 
         Returns HTTP 404 if the listing doesn't exist or has no usable strategy.
         """

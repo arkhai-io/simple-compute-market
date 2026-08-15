@@ -82,14 +82,10 @@ class _MockResponse:
         pass
 
 
-
 def _request_header(req, name: str) -> str:
     lowered = name.lower()
-    return next(
-        value
-        for key, value in req.header_items()
-        if key.lower() == lowered
-    )
+    return next(value for key, value in req.header_items() if key.lower() == lowered)
+
 
 def _urlopen_fake(responses, captured=None):
     it = iter(responses)
@@ -108,6 +104,15 @@ def _urlopen_fake(responses, captured=None):
             _SELLER_SIGNER.identity.model_dump(mode="json"),
         )
         is_opening = req.full_url.endswith("/api/v1/negotiate/new")
+        if is_opening:
+            payload.setdefault(
+                "accepted_provision_terms",
+                request_body["provision_terms"],
+            )
+            payload.setdefault(
+                "accepted_escrow_proposal",
+                request_body["proposal"],
+            )
         operation = "negotiate_new" if is_opening else "negotiate_continue"
         resource = (
             request_body["listing_id"]
@@ -142,8 +147,17 @@ def _urlopen_fake(responses, captured=None):
     return _fn
 
 
-def _negotiate(*, responses, captured=None, quantity=100, initial=3, ceiling=3,
-               key_mode="new", key_id=None, max_rounds=10):
+def _negotiate(
+    *,
+    responses,
+    captured=None,
+    quantity=100,
+    initial=3,
+    ceiling=3,
+    key_mode="new",
+    key_id=None,
+    max_rounds=10,
+):
     with patch("core_buyer.negotiation_client.urllib.request.urlopen") as mock_urlopen:
         mock_urlopen.side_effect = _urlopen_fake(responses, captured)
         return negotiate_with_seller(
@@ -155,7 +169,9 @@ def _negotiate(*, responses, captured=None, quantity=100, initial=3, ceiling=3,
             max_price=ceiling,
             unit_count=float(quantity),
             provision_terms=make_api_credits_provision_terms(
-                quantity=quantity, key_mode=key_mode, key_id=key_id,
+                quantity=quantity,
+                key_mode=key_mode,
+                key_id=key_id,
             ),
             escrow_proposal=_escrow_proposal(),
             max_rounds=max_rounds,
@@ -172,12 +188,18 @@ def test_round0_payload_carries_quantity_key_and_scaled_amount():
     captured: list[dict] = []
     outcome = _negotiate(
         responses=[
-            {"negotiation_id": "neg-1", "action": "accept",
-             "proposal": _seller_proposal(300)},
+            {
+                "negotiation_id": "neg-1",
+                "action": "accept",
+                "proposal": _seller_proposal(300),
+            },
         ],
         captured=captured,
-        quantity=100, initial=3, ceiling=3,
-        key_mode="existing", key_id="ak_42",
+        quantity=100,
+        initial=3,
+        ceiling=3,
+        key_mode="existing",
+        key_id="ak_42",
     )
     assert outcome.status == "agreed"
     assert outcome.agreed_amount == 300
@@ -198,12 +220,17 @@ def test_seller_counter_above_scaled_ceiling_exits():
     ends the negotiation."""
     outcome = _negotiate(
         responses=[
-            {"negotiation_id": "neg-2", "action": "counter",
-             "proposal": _seller_proposal(500)},
+            {
+                "negotiation_id": "neg-2",
+                "action": "counter",
+                "proposal": _seller_proposal(500),
+            },
             # The buyer's exit is POSTed; the seller echoes.
             {"negotiation_id": "neg-2", "action": "exit"},
         ],
-        quantity=100, initial=3, ceiling=3,
+        quantity=100,
+        initial=3,
+        ceiling=3,
     )
     assert outcome.status == "exited"
     assert outcome.reason == "price_above_bound"
@@ -214,12 +241,20 @@ def test_answer_key_challenge_is_inert_against_v1_sellers():
     and listed_price accepts at the bound."""
     outcome = _negotiate(
         responses=[
-            {"negotiation_id": "neg-3", "action": "counter",
-             "proposal": _seller_proposal(300)},
-            {"negotiation_id": "neg-3", "action": "accept",
-             "proposal": _seller_proposal(300)},
+            {
+                "negotiation_id": "neg-3",
+                "action": "counter",
+                "proposal": _seller_proposal(300),
+            },
+            {
+                "negotiation_id": "neg-3",
+                "action": "accept",
+                "proposal": _seller_proposal(300),
+            },
         ],
-        quantity=100, initial=3, ceiling=3,
+        quantity=100,
+        initial=3,
+        ceiling=3,
     )
     assert outcome.status == "agreed"
     assert outcome.agreed_amount == 300
@@ -231,13 +266,19 @@ def test_answer_key_challenge_exits_cleanly_when_challenged():
     exhaustion, never a silent pass."""
     outcome = _negotiate(
         responses=[
-            {"negotiation_id": "neg-4", "action": "counter",
-             "proposal": _seller_proposal(300, key_challenge={"nonce": "abc123"})},
+            {
+                "negotiation_id": "neg-4",
+                "action": "counter",
+                "proposal": _seller_proposal(300, key_challenge={"nonce": "abc123"}),
+            },
             # The buyer's exit is POSTed; the seller acknowledges.
             {"negotiation_id": "neg-4", "action": "exit"},
         ],
-        quantity=100, initial=3, ceiling=3,
-        key_mode="existing", key_id="ak_42",
+        quantity=100,
+        initial=3,
+        ceiling=3,
+        key_mode="existing",
+        key_id="ak_42",
     )
     assert outcome.status == "exited"
     assert outcome.reason is not None

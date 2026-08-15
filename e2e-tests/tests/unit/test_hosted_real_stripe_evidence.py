@@ -1,21 +1,25 @@
 from __future__ import annotations
 
+import base64
 import json
 import stat
 from dataclasses import replace
 from pathlib import Path
 
 import pytest
+from market_identity import Ed25519Signer
 
 from src.hosted_real_stripe.evidence import (
     CollectionEvidence,
     EvidenceValidationError,
+    FundingEvidence,
     HostedReleaseIdentityEvidence,
     IdentityEvidence,
     MarketplaceIdentityEvidence,
     ProviderEvidence,
     StripeTestEvidence,
     opaque_ref,
+    verify_evidence_signature,
     write_evidence,
 )
 from src.hosted_real_stripe.gates import (
@@ -34,12 +38,25 @@ HOSTED_COMMIT = "d" * 40
 DIGEST = "sha256:" + "b" * 64
 IMAGE = "sha256:" + "c" * 64
 WHEEL = "sha256:" + "e" * 64
+MARKET_DIGEST = "sha256:" + "f" * 64
+MARKET_IMAGE = "sha256:" + "0" * 64
 
 
 def _identities() -> IdentityEvidence:
     return IdentityEvidence(
         marketplace=MarketplaceIdentityEvidence(
-            repository="arkhai/simple-market-service", commit=COMMIT
+            repository="arkhai/simple-market-service",
+            commit=COMMIT,
+            workflow_run_id="654321",
+            workflow_ref=".github/workflows/publish.yml@refs/tags/v0.2.0",
+            manifest_sha256=MARKET_DIGEST,
+            image_digest=MARKET_IMAGE,
+            image=(
+                "ghcr.io/arkhai/simple-market-service@" + MARKET_IMAGE
+            ),
+            wheelhouse_sha256="sha256:" + "1" * 64,
+            settlement_config_schema_sha256="sha256:" + "2" * 64,
+            provenance_sha256="sha256:" + "3" * 64,
         ),
         hosted_release=HostedReleaseIdentityEvidence(
             repository="arkhai/hosted-settlement-service",
@@ -51,6 +68,19 @@ def _identities() -> IdentityEvidence:
             image_digest=IMAGE,
         ),
         run_ref=opaque_ref("run", "trusted-run-identity"),
+    )
+
+def _funding() -> FundingEvidence:
+    return FundingEvidence(
+        profile="card.v1",
+        interaction="interactive",
+        payer_profile_bound=True,
+        authorization_obligation_bound=True,
+        authorization_operation_scoped=True,
+        accepted_profile_preserved=True,
+        authoritative_funding_observed=True,
+        transient_action_observed=True,
+        delayed_state_observed=False,
     )
 
 
@@ -93,6 +123,15 @@ def test_release_gate_binds_all_signed_and_observed_identities(tmp_path: Path) -
     compose_env.write_text(
         "\n".join(
             (
+                "HOSTED_MARKETPLACE_VERIFIED_ARTIFACT_PROVENANCE_SHA256=" + DIGEST,
+                "HOSTED_MARKETPLACE_VERIFIED_ARTIFACT_SCHEMA_SHA256=" + DIGEST,
+                "HOSTED_MARKETPLACE_VERIFIED_ARTIFACT_WHEELHOUSE_SHA256=" + DIGEST,
+                "HOSTED_MARKETPLACE_VERIFIED_IMAGE=registry.example/marketplace@" + MARKET_IMAGE,
+                "HOSTED_MARKETPLACE_VERIFIED_MANIFEST_SHA256=" + MARKET_DIGEST,
+                "HOSTED_MARKETPLACE_VERIFIED_REPOSITORY=arkhai/simple-market-service",
+                "HOSTED_MARKETPLACE_VERIFIED_SOURCE_COMMIT=" + COMMIT,
+                "HOSTED_MARKETPLACE_VERIFIED_WORKFLOW_REF=.github/workflows/publish.yml@refs/tags/v0.2.0",
+                "HOSTED_MARKETPLACE_VERIFIED_WORKFLOW_RUN_ID=654321",
                 "HOSTED_SETTLEMENT_VERIFIED_IMAGE=registry.example/authority@" + IMAGE,
                 "HOSTED_SETTLEMENT_VERIFIED_MANIFEST_SHA256=" + DIGEST,
                 "HOSTED_SETTLEMENT_VERIFIED_CLIENT_WHEEL_SHA256=" + WHEEL,
@@ -104,6 +143,16 @@ def test_release_gate_binds_all_signed_and_observed_identities(tmp_path: Path) -
                 "HOSTED_SETTLEMENT_VERIFIED_AUTHORITY_ID=hosted-authority",
                 "HOSTED_SETTLEMENT_VERIFIED_AUTHORITY_SCHEME=eip191",
                 "HOSTED_SETTLEMENT_VERIFIED_AUTHORITY_ADDRESS=0x" + "1" * 40,
+                "HOSTED_SETTLEMENT_VERIFIED_API_VERSION=0.2.0",
+                "HOSTED_SETTLEMENT_VERIFIED_SCHEMA_VERSION=5",
+                "HOSTED_SETTLEMENT_VERIFIED_RELEASE_VERSION=0.2.0",
+                "HOSTED_SETTLEMENT_VERIFIED_CONFORMANCE_SHA256=" + DIGEST,
+                "HOSTED_SETTLEMENT_VERIFIED_MIGRATIONS_SHA256=" + DIGEST,
+                "HOSTED_SETTLEMENT_VERIFIED_OPENAPI_SHA256=" + DIGEST,
+                "HOSTED_SETTLEMENT_VERIFIED_PROVENANCE_SHA256=" + DIGEST,
+                "HOSTED_SETTLEMENT_VERIFIED_SERVICE_WHEEL_SHA256=" + DIGEST,
+                "HOSTED_SETTLEMENT_VERIFIED_FUNDING_PROFILES=card.v1,us_bank_transfer.v1,us_ach_debit.v1",
+                "HOSTED_SETTLEMENT_VERIFIED_CAPABILITIES=scheme-tagged-identities.v1,account-owner-admission.v1,account-owner-rotation.v1,account-owner-retirement.v1,signer-injected-client.v1,provider-neutral-seller-onboarding.v1,conditional-escrow.v2,stripe-connect-separate-charges-transfers.v2,portable-attestation.v1,eas-arbiter.v1,payer-profile.v1,funding-authorization.v1,funding-profile.card.v1,funding-profile.us_bank_transfer.v1,funding-profile.us_ach_debit.v1,normalized-funding-reversal.v1,operator-recovery-redaction.v1",
             )
         )
         + "\n",
@@ -112,6 +161,10 @@ def test_release_gate_binds_all_signed_and_observed_identities(tmp_path: Path) -
     identity = require_release_identity(
         marketplace_commit=COMMIT,
         observed_marketplace_commit=COMMIT,
+        marketplace_workflow_run_id="654321",
+        marketplace_workflow_ref=".github/workflows/publish.yml@refs/tags/v0.2.0",
+        marketplace_manifest_sha256=MARKET_DIGEST,
+        marketplace_image_digest=MARKET_IMAGE,
         hosted_source_commit=HOSTED_COMMIT,
         hosted_workflow_run_id="123456",
         hosted_workflow_ref=".github/workflows/release.yml@main",
@@ -121,10 +174,17 @@ def test_release_gate_binds_all_signed_and_observed_identities(tmp_path: Path) -
         compose_env_path=compose_env,
     )
     assert identity.hosted_image_digest == IMAGE
+    assert identity.marketplace_image == (
+        "registry.example/marketplace@" + MARKET_IMAGE
+    )
     with pytest.raises(ReleaseIdentityRejected):
         require_release_identity(
             marketplace_commit=COMMIT,
             observed_marketplace_commit="f" * 40,
+            marketplace_workflow_run_id="654321",
+            marketplace_workflow_ref=".github/workflows/publish.yml@refs/tags/v0.2.0",
+            marketplace_manifest_sha256=MARKET_DIGEST,
+            marketplace_image_digest=MARKET_IMAGE,
             hosted_source_commit=HOSTED_COMMIT,
             hosted_workflow_run_id="123456",
             hosted_workflow_ref=".github/workflows/release.yml@main",
@@ -181,7 +241,24 @@ def test_account_gate_accepts_transfer_only_application_controlled_account() -> 
     )
 
 
-def test_evidence_is_allowlisted_private_and_rejects_provider_values(tmp_path: Path) -> None:
+def test_evidence_is_allowlisted_private_signed_and_rejects_provider_values(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    seed = bytes(range(32))
+    signer = Ed25519Signer(seed)
+    monkeypatch.setenv(
+        "HOSTED_SETTLEMENT_E2E_EVIDENCE_SIGNER_SCHEME",
+        "ed25519",
+    )
+    monkeypatch.setenv(
+        "HOSTED_SETTLEMENT_E2E_EVIDENCE_SIGNER_IDENTIFIER",
+        signer.identity.identifier,
+    )
+    monkeypatch.setenv(
+        "HOSTED_SETTLEMENT_E2E_EVIDENCE_SIGNER_CREDENTIAL",
+        base64.urlsafe_b64encode(seed).rstrip(b"=").decode(),
+    )
     collection = _collection()
     report = StripeTestEvidence(
         identities=_identities(),
@@ -189,21 +266,41 @@ def test_evidence_is_allowlisted_private_and_rejects_provider_values(tmp_path: P
         scenario="collection",
         result="passed",
         stage="complete",
+        funding=_funding(),
         operation_ref=collection.operation_ref,
         collection=collection,
     )
     output = tmp_path / "evidence.json"
     write_evidence(output, report)
     payload = json.loads(output.read_text(encoding="utf-8"))
-    assert payload["schema"] == "arkhai.hosted-settlement-stripe-test-evidence.v2"
+    assert payload["schema"] == "arkhai.hosted-settlement-stripe-test-evidence.v3"
     assert payload["lane"] == "stripe-test"
     assert (
         payload["identities"]["marketplace"]["repository"]
         != payload["identities"]["hosted_release"]["repository"]
     )
+    assert payload["evidence_signature"]["signer"] == signer.identity.model_dump(mode="json")
+    verify_evidence_signature(payload, expected_signer=signer.identity)
+    modified = dict(payload)
+    modified["stage"] = "funding"
+    with pytest.raises(EvidenceValidationError, match="signature verification failed"):
+        verify_evidence_signature(modified, expected_signer=signer.identity)
     assert "simulat" not in output.read_text(encoding="utf-8").lower()
     assert stat.S_IMODE(output.stat().st_mode) == 0o600
 
     unsafe = replace(report, operation_ref="acct_provider_identifier")
     with pytest.raises(EvidenceValidationError):
         write_evidence(tmp_path / "unsafe.json", unsafe)
+
+    leaked = replace(
+        report,
+        identities=replace(
+            report.identities,
+            marketplace=replace(
+                report.identities.marketplace,
+                workflow_ref="https://checkout.stripe.com/action",
+            ),
+        ),
+    )
+    with pytest.raises(EvidenceValidationError):
+        write_evidence(tmp_path / "leaked.json", leaked)

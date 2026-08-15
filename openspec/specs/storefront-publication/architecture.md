@@ -8,6 +8,33 @@ A storefront is the seller's market-facing authority. It composes domain codecs,
 
 The storefront may publish to multiple registries, but each publication remains derived from seller state and signed under the complete canonical publisher principal expected by that registry. The listing ID and storefront URL remain stable commercial subjects; changing an authorized credential does not manufacture a new listing or transfer ownership implicitly.
 
+## Immutable domain ownership and publication
+
+The common storefront validates every explicitly configured contribution at
+its application root and freezes each exact contract. Bare metal exports one
+validated contract builder through `market.storefront_contributions`; its
+standalone executable composes that same contribution with bare-metal seller
+policy and provisioning adapters. A shared shell can therefore select it
+without importing VM services or replacing domain-owned codecs and lifecycle
+semantics.
+
+Every derived listing persists one common binding containing trusted site,
+offering mode, exact domain identity/version, public source envelope, and
+collision-safe pool or Physical Resource provenance. Public
+`virtualization_type` is projected from this binding, not guessed from a
+listing payload. One pool may therefore produce distinct VM and bare-metal
+listings without creating competing domain-specific mapping authorities.
+Negotiation and artifact bindings copy the frozen selection, and repository
+rehydration resolves it only through the installed contribution registry;
+neither a singleton, optional default, payload-shape guess, nor domain-name
+branch may replace it.
+
+Publication runners are built from the configured registry once. Disabling a
+contribution removes its source and wait path; withdrawing a pool mode closes
+new listings for only that mode. Accepted records retain their binding.
+Mapped capacity traffic pins the selected site and never falls back to another
+authority on refusal or outage.
+
 ## Advisory publication, authoritative admission
 
 A listing is an offer based on the seller's latest complete capacity view. It is not a physical reservation.
@@ -41,7 +68,11 @@ This separation prevents address-shaped data from silently becoming authorizatio
 
 ## Trusted site routing
 
-`site_id` is storefront-owned configuration bound to a provisioning connection. It is not accepted as an untrusted routing assertion from a counterparty or remote projection. This keeps market-visible location choice separate from authority selection and prevents opaque identifiers from encoding credentials or endpoints.
+`site_id` is storefront-owned configuration bound to one exact provisioning authority URL and canonical principal. Authority URLs are excluded from reprs, health, status, logs, and public results; credentials enter only through signer injection. Listing reconciliation freezes the trusted site and Physical Resource in an immutable common binding, and accepted negotiations copy it before agreement artifacts are stored.
+
+Bare-metal fulfillment reloads this binding for every step. Site-targeted capacity reservation, scheduling, fulfillment begin/status/result, teardown, and capacity release use the configured client selected by the recorded site or the durable reservation-to-site map. A buyer assertion, provider response, or opaque artifact cannot replace the site, URL, principal, Physical Resource, machine, or physical-host identity. Restart therefore changes neither authority nor executor, and capacity is released exactly once only after authoritative teardown succeeds.
+
+The result channel is pull-based: the storefront polls the recorded fulfillment and converts its versioned bare-metal envelope to a buyer-safe receipt and access result. Provider payloads, private SSH material, authority URLs, and credentials are not copied into market state or responses.
 
 ## Role and service-peer identity
 
@@ -74,6 +105,31 @@ The storefront owns seller settlement status and administration because it is th
 Command defaults, CSV resource rows, projected reconciliation records, and direct listing requests converge on the same typed clause model before builders run. A resource's clause list replaces command defaults as a whole. Rates are human decimal asset quantities at input and are normalized exactly once by the owning mechanism to currency minor units or token base units; non-exact conversion fails rather than rounding. Legacy publication config and CSV input use an explicit preview/write/backup migration and ambiguous multi-mechanism scalar pricing requires manual resolution.
 
 Readiness recovery may add a deterministic option without changing listing identity. Loss of readiness may remove that option from future offers, but accepted Terms remain pinned. Seller operations live under `market-storefront settlement`: the common status command is observational, while mechanism-owned subcommands expose genuine differences such as hosted onboarding or an Alkahest check without creating separate publication paths. Normal `publish` accepts only mechanism-neutral clauses.
+
+## Exact hosted alternatives and accepted authorization
+
+Hosted publication treats every complete ready profile clause as an independent option. The option and accepted plan bind the exact profile alongside money, destination account, condition, parties, and expiry policy. Readiness is evaluated per clause and per profile, so adding or losing one rail does not rewrite another option or an already accepted agreement.
+
+The buyer obtains its operation-scoped funding authorization only after accepted terms are durable. Storefront start accepts the accepted negotiation and obligation identities plus that safe reference, then reloads all commercial inputs from seller-owned state. Payer profiles, saved instruments, buyer automation policy, and provider data never enter listings, accepted terms, storefront persistence, or evidence.
+
+Historical card-only plans are classified from persisted state and decoded only for recovery. New config, publication, negotiation, and start accept the explicit `card.v1` profile; there is no public legacy alias that could generate a second identity for the same old plan.
+
+## Bare-metal hosted readiness
+
+Bare-metal publication begins with one complete fresh signed selected-site projection and the trusted domain listing derived from it. It then intersects access capability, authoritative availability, exact hosted profile/currency/country/account/condition readiness, offer and funding deadlines, and maximum fulfillment duration. Every ready profile becomes a deterministic independent option; an unready profile becomes a sanitized blocker without suppressing its ready peers. Stale or conflicting site/resource facts close or omit the option, never trigger site fallback or mutate an accepted binding.
+
+The common publication runner carries `settlement_options` independently from legacy `accepted_escrows`. The dedicated publication command authenticates registry mutation with the storefront signer and records the exact derived source only after success.
+
+## API-credit hosted publication
+
+Quota availability and settlement readiness are separate inputs. Publication
+first requires an authoritative sellable API-credit resource, then compiles
+each complete ready mechanism clause independently. Hosted clauses become
+distinct deterministic `SettlementOption` objects; Alkahest entries remain
+legacy `accepted_escrows`. The listing schema and registry projections allow an
+empty escrow list, so a hosted-only listing does not manufacture a chain
+carrier. Accepted negotiation persists the exact selected option and a
+quantity-scaled integer amount for later server-authoritative preparation.
 
 ## Related contracts
 

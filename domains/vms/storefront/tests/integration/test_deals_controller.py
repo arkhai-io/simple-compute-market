@@ -17,6 +17,7 @@ from market_identity import (
 )
 
 import market_storefront.container as _container
+from market_storefront.domain_runtime import build_vm_storefront_domain, build_vm_storefront_registry
 from market_storefront.utils.sqlite_client import SQLiteClient
 
 BUYER = Ed25519Signer(b"\x31" * 32)
@@ -68,7 +69,7 @@ def _signed_headers(
 
 @pytest_asyncio.fixture
 async def client(tmp_path):
-    db = SQLiteClient(db_path=str(tmp_path / "deals-test.db"))
+    db = SQLiteClient(db_path=str(tmp_path / "deals-test.db"), registry=build_vm_storefront_registry(build_vm_storefront_domain()))
     await db.create_negotiation_thread(
         negotiation_id="neg-hb-1",
         our_listing_id="lst-1",

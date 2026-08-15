@@ -90,6 +90,15 @@ agents:
     # config.* lands in the public storefront.toml ConfigMap. Private identity
     # and wallet credentials are accepted only through Secret references.
     config:
+      storefrontDomains:
+        - contribution: vms
+          offeringMode: vm
+          domainIdentity: compute.v1
+          contractVersion: "1.0"
+        - contribution: bare_metal
+          offeringMode: bare_metal
+          domainIdentity: bare_metal.v1
+          contractVersion: "1.0"
       registryAuthority:
         principals:
           - scheme: eip191

@@ -1,0 +1,17 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: {{ include "bare-metal-storefront.fullname" . }}-health-test
+  labels:
+    {{- include "bare-metal-storefront.labels" . | nindent 4 }}
+  annotations:
+    helm.sh/hook: test
+spec:
+  restartPolicy: Never
+  containers:
+    - name: health
+      image: busybox:1.36
+      command:
+        - wget
+        - -qO-
+        - {{ printf "http://%s:%d/health" (include "bare-metal-storefront.fullname" .) (int .Values.service.port) | quote }}

@@ -10,7 +10,6 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-import sqlite3
 import time
 import uuid
 from datetime import datetime, timezone
@@ -61,7 +60,11 @@ from market_storefront.models.capacity_admin_models import (
     UsageStartedEventRequest,
 )
 from market_storefront.server import _set_globally_paused
-from market_storefront.services.capacity_client import remote_site_clients
+from market_capacity_publication import (
+    CapacityBinding,
+    CapacityBindingError,
+    remote_site_clients,
+)
 from market_storefront.settlement_composition import (
     build_storefront_publication_clause_compiler,
 )
@@ -86,9 +89,13 @@ class AdminController:
     def __init__(
         self,
         db=Depends(lambda: _container.resolved_sqlite_client),  # noqa: B008
+        capacity_runtime=Depends(  # noqa: B008
+            lambda: _container.resolved_capacity_runtime
+        ),
         _key: None = Depends(require_admin_key),
     ) -> None:
         self._db = db
+        self._capacity_runtime = capacity_runtime
 
     @staticmethod
     def _operator(request: Request) -> AuthenticatedPrincipal:
@@ -246,8 +253,13 @@ class AdminController:
 
         truncated: dict[str, Any] | None = None
         if not body.dry_run:
-            capacity = self._capacity()
-            truncated = await capacity.truncate_lease(
+            from market_storefront.services.capacity_client import (
+                capacity_binding_for_listing,
+            )
+
+            binding = await capacity_binding_for_listing(self._db, listing_id)
+            truncated = await self._runtime().truncate_lease(
+                binding,
                 capacity_reservation_id=capacity_reservation_id,
                 lease_end_utc=interrupted_at,
             )
@@ -641,6 +653,43 @@ class AdminController:
                 return held[0]
         return None
 
+    def _runtime(self) -> Any:
+        if self._capacity_runtime is None:
+            raise RuntimeError("capacity runtime is unavailable")
+        return self._capacity_runtime
+
+    async def _reservation_binding(
+        self,
+        *,
+        site_id: str,
+        capacity_reservation_id: str,
+    ) -> tuple[dict[str, Any] | None, CapacityBinding, str | None]:
+        """Resolve one reservation through its supplied authority and durable listing."""
+        from market_site_client import SiteCapacityClientError
+        from market_storefront.services.capacity_client import (
+            capacity_binding_for_listing,
+        )
+
+        try:
+            reservation = await self._runtime().site_client(site_id).get_reservation(
+                capacity_reservation_id
+            )
+        except SiteCapacityClientError as exc:
+            if exc.status_code != 404:
+                raise
+            reservation = None
+        deal_ref = (reservation or {}).get("deal_ref") or {}
+        listing_id = deal_ref.get("listing_id")
+        if isinstance(listing_id, str) and listing_id.strip():
+            binding = await capacity_binding_for_listing(self._db, listing_id)
+            if binding.site_id != site_id:
+                raise CapacityBindingError(
+                    "reservation authority disagrees with the durable listing binding"
+                )
+            return reservation, binding, listing_id
+        source_id = str((reservation or {}).get("resource_id") or capacity_reservation_id)
+        return reservation, CapacityBinding(site_id, "vm", source_id), None
+
     async def _mirror_resources_to_site_authority(self, source: str) -> None:
         """Compatibility no-op for callers completing local admin mutations.
 
@@ -657,6 +706,7 @@ class AdminController:
         self,
         *,
         capacity_reservation_id: str,
+        site_id: str,
         event_name: str,
         state: str,
         close_oversized: bool = False,
@@ -667,34 +717,33 @@ class AdminController:
         failure_message: str | None = None,
         **_extra: Any,
     ) -> FulfillmentEventResponse:
-        """Record a deal-scoped event and reconcile derived listings.
-
-        The reservation itself lives in the site authority's ledger.
-        Progress events (started / usage-started / release-started) carry
-        no capacity effect — a held reservation is held in every one of
-        those states — so they only stage and reconcile;
-        ``release_reservation`` (capacity-released, failed) returns the
-        units through the capacity client. A release that finds nothing
-        is tolerated: the watchdog or failure policy usually got there
-        first, and these events must stay idempotent.
-        """
+        """Record an event against its exact site and reservation identity."""
         result: dict[str, Any] = {"resource_id": provider_resource_id}
-        if release_reservation:
-            try:
-                released = await self._capacity().release(
+        try:
+            _reservation, binding, _listing_id = await self._reservation_binding(
+                site_id=site_id,
+                capacity_reservation_id=capacity_reservation_id,
+            )
+            if release_reservation:
+                released = await self._runtime().release(
+                    binding,
                     capacity_reservation_id=capacity_reservation_id,
                     failure_reason=failure_reason,
                     failure_message=failure_message,
                 )
-            except Exception as exc:
-                raise HTTPException(
-                    status_code=502,
-                    detail=f"Could not release reservation {capacity_reservation_id!r} "
-                    f"at the site authority: {exc}",
-                ) from exc
-            if released is not None:
-                result = released
-                result.setdefault("gpu_count", released.get("allocated_gpu_count"))
+                if released is not None:
+                    result = released
+                    result.setdefault(
+                        "gpu_count", released.get("allocated_gpu_count")
+                    )
+        except CapacityBindingError as exc:
+            raise HTTPException(status_code=500, detail=str(exc)) from exc
+        except Exception as exc:
+            raise HTTPException(
+                status_code=502,
+                detail=f"Could not reach site {site_id!r} for reservation "
+                f"{capacity_reservation_id!r}: {exc}",
+            ) from exc
         closed_listing_ids = (
             await self._close_oversized_compute_listings() if close_oversized else []
         )
@@ -721,19 +770,11 @@ class AdminController:
         )
 
     def _capacity(self) -> Any:
-        from market_storefront.services.capacity_client import build_capacity_client
-
-        return build_capacity_client(lambda: self._db)
+        return self._runtime().client()
 
     def _site_topology(self) -> tuple[str | None, int]:
-        """(home_site, configured_site_count) as of right now.
-
-        Computed fresh on every call rather than cached -- the count is
-        load-bearing for whether an unmapped listing's site may be
-        defaulted or must be left ambiguous, so it must reflect the
-        actual current configuration, not a value that could go stale.
-        """
-        sites = remote_site_clients(self._capacity())
+        """Return the configured home site and exact site count."""
+        sites = self._runtime().site_ids
         return next(iter(sites), None), len(sites)
 
     async def _member_availability(self) -> dict | None:
@@ -743,15 +784,8 @@ class AdminController:
         transient authority outage must not close (or worse, reopen)
         everything on ignorance.
         """
-        from market_storefront.services.capacity_client import (
-            member_availability_view,
-        )
-
         try:
-            return await member_availability_view(
-                self._capacity(),
-                self._db.db_path,
-            )
+            return await self._runtime().availability()
         except Exception as exc:
             logger.warning(
                 "[ADMIN] Could not snapshot site-authority capacity: %s",
@@ -762,8 +796,6 @@ class AdminController:
     async def _close_oversized_compute_listings(self) -> list[str]:
         from domains.vms.listings.reconciler import (
             mark_derived_listings_closed,
-            record_derived_listing,
-            site_id_for_listing,
             stale_open_listing_ids,
         )
 
@@ -779,54 +811,6 @@ class AdminController:
             configured_site_count=configured_site_count,
             member_availability=availability,
         )
-        if closed_listing_ids:
-            conn = sqlite3.connect(
-                f"file:{self._db.db_path}?mode=ro&nolock=1",
-                uri=True,
-                timeout=5,
-            )
-            try:
-                placeholders = ", ".join("?" for _ in closed_listing_ids)
-                rows = conn.execute(
-                    f"""
-                    SELECT listing_id, offer_resource
-                    FROM listings
-                    WHERE listing_id IN ({placeholders})
-                    """,
-                    tuple(closed_listing_ids),
-                ).fetchall()
-            finally:
-                conn.close()
-            for listing_id, raw_offer in rows:
-                try:
-                    offer = json.loads(raw_offer or "{}")
-                except json.JSONDecodeError:
-                    continue
-                if not isinstance(offer, dict) or offer.get("gpu_count") is None:
-                    continue
-                resource_id = offer.get("resource_id")
-                pool_id = offer.get("pool_id")
-                if not resource_id and not pool_id:
-                    continue
-                # stale_open_listing_ids resolved a site for this listing
-                # either from its own mapping or (only with exactly one
-                # configured site) the home_site fallback -- re-derive
-                # the same way here rather than assuming a prior mapping
-                # row exists.
-                listing_site_id = site_id_for_listing(self._db.db_path, str(listing_id))
-                if listing_site_id is None:
-                    if configured_site_count != 1:
-                        continue
-                    listing_site_id = home_site
-                record_derived_listing(
-                    self._db.db_path,
-                    listing_id=str(listing_id),
-                    site_id=listing_site_id,
-                    resource_id=str(resource_id) if resource_id else None,
-                    pool_id=str(pool_id) if pool_id else None,
-                    gpu_count=int(offer["gpu_count"]),
-                    status="closed",
-                )
         for listing_id in closed_listing_ids:
             await self._db.update_listing(listing_id=listing_id, status="closed")
         mark_derived_listings_closed(
@@ -870,6 +854,7 @@ class AdminController:
     ) -> FulfillmentEventResponse:
         return await self._apply_fulfillment_event(
             capacity_reservation_id=body.capacity_reservation_id,
+            site_id=body.site_id,
             event_name="started",
             state="provisioning",
             close_oversized=True,
@@ -889,6 +874,7 @@ class AdminController:
     ) -> FulfillmentEventResponse:
         return await self._apply_fulfillment_event(
             capacity_reservation_id=body.capacity_reservation_id,
+            site_id=body.site_id,
             event_name="usage_started",
             state="leased",
             close_oversized=True,
@@ -911,6 +897,7 @@ class AdminController:
     ) -> FulfillmentEventResponse:
         return await self._apply_fulfillment_event(
             capacity_reservation_id=body.capacity_reservation_id,
+            site_id=body.site_id,
             event_name="release_started",
             state="releasing",
             close_oversized=True,
@@ -929,6 +916,7 @@ class AdminController:
     ) -> FulfillmentEventResponse:
         return await self._apply_fulfillment_event(
             capacity_reservation_id=body.capacity_reservation_id,
+            site_id=body.site_id,
             event_name="capacity_released",
             state="released",
             close_oversized=False,
@@ -948,11 +936,31 @@ class AdminController:
         self,
         body: FulfillmentFailedEventRequest,
     ) -> FulfillmentEventResponse:
+        try:
+            reservation, _binding, listing_id = await self._reservation_binding(
+                site_id=body.site_id,
+                capacity_reservation_id=body.capacity_reservation_id,
+            )
+        except CapacityBindingError as exc:
+            raise HTTPException(status_code=500, detail=str(exc)) from exc
+        except Exception as exc:
+            raise HTTPException(
+                status_code=502,
+                detail=f"Could not reach site {body.site_id!r} for reservation "
+                f"{body.capacity_reservation_id!r}: {exc}",
+            ) from exc
+        if reservation is None or listing_id is None:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Reservation {body.capacity_reservation_id!r} not found",
+            )
+        deal_ref = reservation.get("deal_ref") or {}
         result = await apply_fulfillment_failure_policy(
             self._db,
             FulfillmentFailureContext(
                 capacity_reservation_id=body.capacity_reservation_id,
-                escrow_uid=body.escrow_uid,
+                escrow_uid=body.escrow_uid or deal_ref.get("escrow_uid"),
+                listing_id=listing_id,
                 provider_id=body.provider_id,
                 provider_job_id=body.provider_job_id,
                 provider_resource_id=body.resource_id,
@@ -962,6 +970,7 @@ class AdminController:
                 logs_ref=body.logs_ref,
                 source="admin_event",
             ),
+            capacity=self._runtime(),
         )
         if "release_capacity" in configured_failure_actions() and result.state is None:
             raise HTTPException(
@@ -979,27 +988,16 @@ class AdminController:
             reopened_listing_ids=result.reopened_listing_ids,
         )
 
-    def _open_derived_compute_listing_ids(self) -> set[str]:
-        """Snapshot open derived listings before an reservation changes capacity."""
-        conn = sqlite3.connect(
-            f"file:{self._db.db_path}?mode=ro&nolock=1",
-            uri=True,
-            timeout=5,
-        )
-        try:
-            rows = conn.execute(
-                """
-                SELECT d.listing_id
-                FROM derived_compute_listings d
-                JOIN listings l ON l.listing_id = d.listing_id
-                WHERE d.status = 'open' AND l.status = 'open'
-                """
-            ).fetchall()
-        except sqlite3.OperationalError:
-            return set()
-        finally:
-            conn.close()
-        return {str(row[0]) for row in rows}
+    async def _open_bound_vm_listing_ids(self) -> set[str]:
+        """Snapshot open listings with canonical durable VM bindings."""
+        listing_ids: set[str] = set()
+        rows = await self._db.list_listings(status="open", limit=10_000)
+        for row in rows:
+            listing_id = str(row["listing_id"])
+            binding = await self._db.load_listing_binding(listing_id=listing_id)
+            if binding is not None and binding.binding.offering_mode == "vm":
+                listing_ids.add(listing_id)
+        return listing_ids
 
     async def _closed_since_snapshot(self, listing_ids: set[str]) -> set[str]:
         closed: set[str] = set()
@@ -1025,42 +1023,42 @@ class AdminController:
         every other reservation, so partial GPU capacity accounting and
         derived-listing reconciliation stay consistent across consumers.
         """
-        from domains.vms.listings.reconciler import site_id_for_listing
-
-        open_listing_ids = self._open_derived_compute_listing_ids()
-        site_id = (
-            site_id_for_listing(self._db.db_path, body.listing_id)
-            if body.listing_id
-            else None
+        from market_storefront.services.capacity_client import (
+            capacity_binding_for_listing,
         )
+
+        if not body.listing_id:
+            raise HTTPException(
+                status_code=400,
+                detail="A durable VM listing binding is required",
+            )
+        open_listing_ids = await self._open_bound_vm_listing_ids()
         try:
-            reserved = await self._capacity().reserve(
-                claim=body.required_attributes or None,
+            binding = await capacity_binding_for_listing(self._db, body.listing_id)
+        except RuntimeError as exc:
+            raise HTTPException(status_code=500, detail=str(exc)) from exc
+        claim = dict(body.required_attributes or {})
+        claim["executor_kind"] = binding.offering_mode
+        try:
+            reserved = await self._runtime().reserve(
+                binding,
+                claim=claim,
                 deal_ref={
                     "listing_id": body.listing_id,
                     "escrow_uid": body.escrow_uid,
                     "reserved_by": "admin",
                 },
-                site=site_id,
             )
-        except KeyError as exc:
-            # The listing's own recorded site_id doesn't match any
-            # currently configured site -- a stale mapping, not a
-            # capacity answer. Distinct from "no capacity" so an
-            # operator debugging this doesn't chase the wrong problem.
+        except CapacityBindingError as exc:
             raise HTTPException(
                 status_code=500,
                 detail=f"Listing {body.listing_id!r} is mapped to site "
-                f"{site_id!r}, which is not currently configured",
+                f"{binding.site_id!r}, which is not currently configured",
             ) from exc
         except Exception as exc:
-            if site_id is None:
-                raise
-            # The mapped site itself could not be reached -- also
-            # distinct from a live "no capacity" refusal.
             raise HTTPException(
                 status_code=502,
-                detail=f"Could not reach site {site_id!r} for listing "
+                detail=f"Could not reach site {binding.site_id!r} for listing "
                 f"{body.listing_id!r}: {exc}",
             ) from exc
         if not reserved:
@@ -1163,9 +1161,6 @@ class AdminController:
         )
 
     async def _release_site_ledger_holds(self) -> list[str]:
-        from market_storefront.services.capacity_client import (
-            remote_site_clients,
-        )
 
         released: list[str] = []
         try:

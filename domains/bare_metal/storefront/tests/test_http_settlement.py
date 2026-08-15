@@ -1,11 +1,15 @@
 from __future__ import annotations
 
+from dataclasses import replace
+from types import SimpleNamespace
+import json
 import sqlite3
 import time
 import uuid
 
 from fastapi.testclient import TestClient
 from market_core.schemas import SettlementPlan
+from market_fulfillment import VersionedEnvelope
 from market_settlement_runtime import derive_obligation_ref
 from market_identity import (
     EMPTY_BODY,
@@ -19,8 +23,18 @@ from market_identity import (
 from arkhai_bare_metal import BareMetalMessage, BareMetalTerms
 from arkhai_bare_metal_storefront.domain_runtime import get_market_domain_contract
 from arkhai_bare_metal_storefront.runtime import BareMetalStorefrontRuntime
-from arkhai_bare_metal_storefront.server import build_bare_metal_storefront_app
+from arkhai_bare_metal_storefront.server import (
+    build_bare_metal_storefront_app,
+    build_bare_metal_storefront_registry,
+)
 from arkhai_bare_metal_storefront.sqlite_client import SQLiteClient
+
+
+def _app(runtime: BareMetalStorefrontRuntime):
+    return build_bare_metal_storefront_app(
+        registry=build_bare_metal_storefront_registry(domain=runtime.domain),
+        runtime=runtime,
+    )
 
 PRIVATE_KEY = bytes.fromhex(
     "5de4111afa1a4b94908f83103eb1f1706367c2e68ca870fc3fb9a804cdab365a"
@@ -81,6 +95,8 @@ def _plan(**kwargs):
     )
     return {
         "settlement_plan": {
+            "buyer_principal": kwargs["buyer_principal"].model_dump(mode="json"),
+            "seller_principal": kwargs["seller_principal"].model_dump(mode="json"),
             "obligations": [
                 {
                     "payer": "seller",
@@ -137,6 +153,9 @@ async def _accepted_runtime(
         updated_at="now",
         seller_principal=runtime.seller_principal,
         storefront_url=runtime.storefront_url,
+        site_id="site-a",
+        pool_id="pool-a",
+        physical_resource_id="resource-1",
         listing={
             "kind": "bare_metal.v1",
             "machine_id": "machine-1",
@@ -190,7 +209,7 @@ async def test_settlement_is_verified_idempotently_without_fulfillment_claims(
 
     path = str(tmp_path / "storefront.db")
     runtime, negotiation_id = await _accepted_runtime(path, verifier)
-    app = build_bare_metal_storefront_app(runtime=runtime)
+    app = _app(runtime)
     body = _settle_body(negotiation_id)
 
     with TestClient(app) as client:
@@ -224,7 +243,7 @@ async def test_settlement_is_verified_idempotently_without_fulfillment_claims(
         chain_config_paths={"anvil": None},
         escrow_verifier=verifier,
     )
-    with TestClient(build_bare_metal_storefront_app(runtime=restarted)) as client:
+    with TestClient(_app(restarted)) as client:
         restart_retry = client.post(
             f"/api/v1/settle/{ESCROW_UID}",
             json=body,
@@ -245,7 +264,7 @@ async def test_settlement_is_verified_idempotently_without_fulfillment_claims(
         "buyer_principal": BUYER_SIGNER.identity.model_dump(mode="json"),
         "seller_principal": SELLER_SIGNER.identity.model_dump(mode="json"),
         "status": "settlement_verified",
-        "fulfillment_available": False,
+        "fulfillment_available": True,
     }
     assert first.status_code == 200
     assert first.json() == expected
@@ -266,7 +285,11 @@ async def test_settlement_is_verified_idempotently_without_fulfillment_claims(
     aggregate = await restarted.settlement_runtime.get_status(negotiation_id)
     expiration_unix = aggregate.obligations[1].obligation["expiration_unix"]
     obligations = SettlementPlan.model_validate(
-        _plan(proposal={"expiration_unix": expiration_unix})["settlement_plan"]
+        _plan(
+            proposal={"expiration_unix": expiration_unix},
+            buyer_principal=BUYER_SIGNER.identity,
+            seller_principal=SELLER_SIGNER.identity,
+        )["settlement_plan"]
     ).model_dump(mode="json")["obligations"]
     assert aggregate.status == "active"
     assert len(aggregate.obligations) == 2
@@ -318,7 +341,7 @@ async def test_settlement_rejects_replacement_access_input_and_failed_verificati
         str(tmp_path / "storefront.db"),
         verifier,
     )
-    app = build_bare_metal_storefront_app(runtime=runtime)
+    app = _app(runtime)
 
     with TestClient(app) as client:
         replacement_body = {
@@ -352,7 +375,7 @@ async def test_settlement_rejects_unmatched_obligation_without_registering_claim
         str(tmp_path / "storefront.db"),
         verifier,
     )
-    with TestClient(build_bare_metal_storefront_app(runtime=runtime)) as client:
+    with TestClient(_app(runtime)) as client:
         body = _settle_body(negotiation_id)
         response = client.post(
             f"/api/v1/settle/{ESCROW_UID}",
@@ -389,7 +412,7 @@ async def test_status_fails_closed_without_canonical_verified_adoption(
     )
     assert inserted
 
-    with TestClient(build_bare_metal_storefront_app(runtime=runtime)) as client:
+    with TestClient(_app(runtime)) as client:
         response = client.get(
             f"/api/v1/settle/{ESCROW_UID}/status",
             headers=_headers("settle_status", ESCROW_UID, method="GET"),
@@ -399,3 +422,217 @@ async def test_status_fails_closed_without_canonical_verified_adoption(
     assert response.json()["detail"] == (
         "verified settlement lifecycle is inconsistent"
     )
+
+
+
+class _FulfillmentSite:
+    def __init__(self) -> None:
+        self.releases = []
+
+    async def list_reservations(self):
+        return []
+
+    async def release(self, **request):
+        self.releases.append(request)
+        return {"state": "released"}
+
+
+class _CapacityClient:
+    def __init__(self) -> None:
+        self.site_client = _FulfillmentSite()
+        self.reservation_sites = {}
+        self.reserve_calls = []
+
+    def site(self, site_id):
+        assert site_id == "site-a"
+        return self.site_client
+
+    async def reserve(self, **request):
+        self.reserve_calls.append(request)
+        self.reservation_sites["reservation-a"] = request["site"]
+        return {
+            "capacity_reservation_id": "reservation-a",
+            "site": request["site"],
+        }
+
+
+class _ProvisioningClient:
+    def __init__(self, *, torn_down: bool = False) -> None:
+        self.begin_calls = []
+        self.teardown_calls = []
+        self.torn_down = torn_down
+
+    async def schedule_resource(self, request):
+        return SimpleNamespace(
+            settlement_resource_id="settlement-resource-a",
+            pool_id="pool-a",
+            resource_kind="compute.bare-metal",
+            provider="bare_metal.ansible",
+            attributes={
+                "machine_id": "machine-1",
+                "physical_host_id": "host-1",
+            },
+        )
+
+    async def begin_fulfillment(self, body):
+        self.begin_calls.append(body)
+        return SimpleNamespace(
+            fulfillment_id="fulfillment-a",
+            capacity_reservation_id="reservation-a",
+            state="dispatch_pending",
+        )
+
+    async def get_fulfillment_status(self, fulfillment_id, **request):
+        assert fulfillment_id == "fulfillment-a"
+        return SimpleNamespace(
+            state="torn_down" if self.torn_down else "active",
+            failure_reason=None,
+            failure_message=None,
+        )
+
+    async def get_fulfillment_result(self, fulfillment_id, **request):
+        return VersionedEnvelope(
+            kind="fulfillment.result.v1",
+            schema_version=1,
+            payload={
+                "fulfillment_id": fulfillment_id,
+                "capacity_reservation_id": "reservation-a",
+                "state": "active",
+                "provisioned_resources": [],
+                "domain_result": {
+                    "kind": "bare_metal.fulfillment.result.v1",
+                    "schema_version": 1,
+                    "payload": {
+                        "kind": "bare_metal.v1",
+                        "action": "node_grant_access",
+                        "machine_id": "machine-1",
+                        "physical_host_id": "host-1",
+                        "ssh_user": "tenant-a",
+                        "status": "success",
+                        "details": {
+                            "private_key": "must-not-cross-storefront"
+                        },
+                    },
+                },
+            },
+        )
+
+    async def begin_fulfillment_teardown(self, fulfillment_id, **request):
+        self.teardown_calls.append((fulfillment_id, request))
+        self.torn_down = True
+        return SimpleNamespace(
+            fulfillment_id=fulfillment_id,
+            capacity_reservation_id="reservation-a",
+            state="teardown_dispatch_pending",
+        )
+
+
+async def test_http_fulfillment_restarts_on_recorded_site_and_redacts_result(
+    tmp_path,
+) -> None:
+    async def verifier(**_kwargs):
+        return 1
+
+    path = str(tmp_path / "storefront.db")
+    runtime, negotiation_id = await _accepted_runtime(path, verifier)
+    capacity = _CapacityClient()
+    provisioning = _ProvisioningClient()
+    runtime = replace(
+        runtime,
+        capacity_client=capacity,
+        fulfillment_client=provisioning,
+    )
+    settle_body = _settle_body(negotiation_id)
+    begin_body = {
+        "negotiation_id": negotiation_id,
+        "escrow_uid": ESCROW_UID,
+        "buyer_principal": BUYER_SIGNER.identity.model_dump(mode="json"),
+    }
+
+    with TestClient(_app(runtime)) as client:
+        settled = client.post(
+            f"/api/v1/settle/{ESCROW_UID}",
+            json=settle_body,
+            headers=_headers("settle_escrow", ESCROW_UID, settle_body),
+        )
+        begun = client.post(
+            "/api/v1/fulfillments/begin",
+            json=begin_body,
+            headers=_headers(
+                "bare_metal_fulfillment_begin",
+                negotiation_id,
+                begin_body,
+            ),
+        )
+        ready = client.get(
+            f"/api/v1/fulfillments/{negotiation_id}/status",
+            headers=_headers(
+                "bare_metal_fulfillment_status",
+                negotiation_id,
+                method="GET",
+            ),
+        )
+        result = client.get(
+            f"/api/v1/fulfillments/{negotiation_id}/result",
+            headers=_headers(
+                "bare_metal_fulfillment_result",
+                negotiation_id,
+                method="GET",
+            ),
+        )
+        tearing_down = client.post(
+            f"/api/v1/fulfillments/{negotiation_id}/teardown",
+            headers=_headers(
+                "bare_metal_fulfillment_teardown",
+                negotiation_id,
+            ),
+        )
+
+    restarted_capacity = _CapacityClient()
+    restarted = replace(
+        runtime,
+        db=SQLiteClient(path, domain=runtime.domain),
+        capacity_client=restarted_capacity,
+        fulfillment_client=_ProvisioningClient(torn_down=True),
+    )
+    with TestClient(_app(restarted)) as client:
+        released = client.get(
+            f"/api/v1/fulfillments/{negotiation_id}/status",
+            headers=_headers(
+                "bare_metal_fulfillment_status",
+                negotiation_id,
+                method="GET",
+            ),
+        )
+        repeated = client.get(
+            f"/api/v1/fulfillments/{negotiation_id}/status",
+            headers=_headers(
+                "bare_metal_fulfillment_status",
+                negotiation_id,
+                method="GET",
+            ),
+        )
+
+    assert settled.status_code == 200
+    assert begun.status_code == 200
+    assert ready.json()["state"] == "active"
+    assert tearing_down.json()["state"] == "teardown_dispatch_pending"
+    assert released.json()["state"] == "released"
+    assert repeated.json() == released.json()
+    assert capacity.reserve_calls[0]["site"] == "site-a"
+    assert capacity.reserve_calls[0]["claim"]["resource_id"] == "resource-1"
+    assert len(provisioning.begin_calls) == 1
+    assert len(provisioning.teardown_calls) == 1
+    assert len(restarted_capacity.site_client.releases) == 1
+    public_result = result.json()
+    assert public_result["receipt"]["status"] == "ready"
+    assert public_result["result"]["ssh_user"] == "tenant-a"
+    serialized_result = json.dumps(public_result, sort_keys=True)
+    for forbidden in (
+        "authority_url",
+        "credential",
+        "private_key",
+        "provider",
+        "provider_metadata",
+    ):
+        assert forbidden not in serialized_result

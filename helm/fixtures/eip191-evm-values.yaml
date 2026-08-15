@@ -86,6 +86,15 @@ storefront:
         secretName: evm-bob-runtime
         configKey: storefront.secrets.toml
       config:
+        storefrontDomains:
+          - contribution: vms
+            offeringMode: vm
+            domainIdentity: compute.v1
+            contractVersion: "1.0"
+          - contribution: bare_metal
+            offeringMode: bare_metal
+            domainIdentity: bare_metal.v1
+            contractVersion: "1.0"
         registryAuthority:
           authority: registry-a
           principals:

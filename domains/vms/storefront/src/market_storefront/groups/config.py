@@ -217,17 +217,56 @@ def config_migrate(
         "--inventory",
         help="Resource CSV to migrate when --scope publication is selected.",
     ),
+    legacy_contribution: str | None = typer.Option(
+        None,
+        "--legacy-contribution",
+        help="Exact installed contribution owning the legacy storefront database.",
+    ),
+    legacy_offering_mode: str | None = typer.Option(
+        None,
+        "--legacy-offering-mode",
+        help="Exact pool offering mode asserted for every legacy row.",
+    ),
+    legacy_domain: str | None = typer.Option(
+        None,
+        "--legacy-domain",
+        help="Exact market domain identity asserted for every legacy row.",
+    ),
+    legacy_contract_version: str | None = typer.Option(
+        None,
+        "--legacy-contract-version",
+        help="Exact major.minor market-domain contract version.",
+    ),
 ) -> None:
-    """Migrate settlement configuration or legacy publication pricing."""
+    """Migrate settlement/publication config or one legacy storefront database."""
 
-    if scope not in {"settlement", "publication"}:
+    supported = {"settlement", "publication", "storefront-domains"}
+    if scope not in supported:
         typer.secho(
-            "Supported scopes: settlement, publication.",
+            "Supported scopes: settlement, publication, storefront-domains.",
             err=True,
             fg=typer.colors.RED,
         )
         raise typer.Exit(2)
+    legacy_values = (
+        legacy_contribution,
+        legacy_offering_mode,
+        legacy_domain,
+        legacy_contract_version,
+    )
+    if scope != "storefront-domains" and any(value is not None for value in legacy_values):
+        raise typer.BadParameter(
+            "--legacy-* assertions apply only to --scope storefront-domains"
+        )
+    if scope == "storefront-domains" and any(value is None for value in legacy_values):
+        raise typer.BadParameter(
+            "--scope storefront-domains requires --legacy-contribution, "
+            "--legacy-offering-mode, --legacy-domain, and "
+            "--legacy-contract-version"
+        )
     if scope == "settlement" and inventory is not None:
+        raise typer.BadParameter("--inventory applies only to --scope publication")
+    if scope == "storefront-domains" and inventory is not None:
         raise typer.BadParameter("--inventory applies only to --scope publication")
     try:
         if scope == "settlement":
@@ -241,27 +280,65 @@ def config_migrate(
                 validator=_validate_settlement_candidate,
             )
             lines = format_migration_result(result)
-        elif inventory is None:
-            result = migrate_publication_config(
-                storefront_config_file(),
-                check=check,
-                write=write,
-                backup=backup,
-                validator=_validate_settlement_candidate,
-            )
+        elif scope == "publication":
+            if inventory is None:
+                result = migrate_publication_config(
+                    storefront_config_file(),
+                    check=check,
+                    write=write,
+                    backup=backup,
+                    validator=_validate_settlement_candidate,
+                )
+            else:
+                config_path = storefront_config_file()
+                config_document = tomllib.loads(
+                    config_path.read_text(encoding="utf-8")
+                )
+                result = migrate_publication_csv(
+                    inventory,
+                    storefront_config=config_document,
+                    check=check,
+                    write=write,
+                    backup=backup,
+                    clause_compiler=_seller_publication_clause_compiler(
+                        config_document
+                    ),
+                )
             lines = format_publication_migration_result(result)
         else:
-            config_path = storefront_config_file()
-            config_document = tomllib.loads(config_path.read_text(encoding="utf-8"))
-            result = migrate_publication_csv(
-                inventory,
-                storefront_config=config_document,
-                check=check,
-                write=write,
-                backup=backup,
-                clause_compiler=_seller_publication_clause_compiler(config_document),
+            from market_core import ContractVersion, DomainIdentity
+
+            from market_storefront.domain_migration import (
+                LegacyStorefrontSelection,
+                StorefrontDomainMigrationError,
+                migrate_storefront_domains,
             )
-            lines = format_publication_migration_result(result)
+            from market_storefront.utils.config import settings
+
+            try:
+                major_text, minor_text = str(legacy_contract_version).split(".", 1)
+                version = ContractVersion(int(major_text), int(minor_text))
+            except (TypeError, ValueError) as exc:
+                raise typer.BadParameter(
+                    "--legacy-contract-version must be major.minor"
+                ) from exc
+            try:
+                result = migrate_storefront_domains(
+                    str(settings.db_path),
+                    selection=LegacyStorefrontSelection(
+                        contribution_id=str(legacy_contribution),
+                        offering_mode=str(legacy_offering_mode),
+                        domain_identity=DomainIdentity(str(legacy_domain)),
+                        contract_version=version,
+                    ),
+                    check=check,
+                    write=write,
+                    backup=backup,
+                )
+            except StorefrontDomainMigrationError as exc:
+                typer.secho(str(exc), err=True, fg=typer.colors.RED)
+                raise typer.Exit(1) from exc
+            lines = result.redacted_lines()
     except SettlementMigrationError as exc:
         typer.secho(str(exc), err=True, fg=typer.colors.RED)
         raise typer.Exit(1) from exc
@@ -408,8 +485,9 @@ _INIT_USER_TEMPLATE = """\
 
 [pricing]
 # settlements = [                             # complete structured publication
-#   { mechanism = "fiat.stripe.v1", asset = "usd", rate = "2", per = "hour",
-#     mechanism_input = { method = "card", funds_flow = "separate_charges_transfers" } },
+#   { mechanism = "fiat.stripe.v1", asset = "usd", rate = "2", per = "hour", mechanism_input = { funding_profile = "card.v1", interaction = "interactive", funds_flow = "separate_charges_transfers" } },
+#   { mechanism = "fiat.stripe.v1", asset = "usd", rate = "2", per = "hour", mechanism_input = { funding_profile = "us_bank_transfer.v1", interaction = "interactive", funds_flow = "separate_charges_transfers" } },
+#   { mechanism = "fiat.stripe.v1", asset = "usd", rate = "2", per = "hour", mechanism_input = { funding_profile = "us_ach_debit.v1", interaction = "interactive", funds_flow = "separate_charges_transfers" } },
 # ]
 # Per-resource or command clauses replace this list; fields are never merged.
 # default_min_price = "1"                      # negotiation floor when a resource row has no min_price;

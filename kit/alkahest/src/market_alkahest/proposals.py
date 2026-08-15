@@ -202,13 +202,19 @@ def accepted_escrow_artifacts_from_proposal(
             service_terms=service_terms,
         )
         out["settlement_plan"] = plan.model_dump(mode="json")
-        # LEGACY mirror of the plan's alkahest obligations, kept for
-        # buyers that predate the settlement-plan carrier. Leaves with
-        # the client-wheel wire bump.
-        out["accepted_escrow_terms"] = [
-            terms.model_dump(mode="json")
-            for terms in escrow_terms_from_settlement_plan(plan)
-        ]
+        # Legacy escrow terms remain part of the signed JSON response until
+        # the client wire carrier is retired. Keep uint256 fields in their
+        # canonical decimal-string form at that boundary.
+        accepted_terms: list[dict[str, Any]] = []
+        for terms in escrow_terms_from_settlement_plan(plan):
+            payload = terms.model_dump(mode="json")
+            obligation_data = dict(payload.get("obligation_data") or {})
+            amount = obligation_data.get("amount")
+            if isinstance(amount, int) and not isinstance(amount, bool):
+                obligation_data["amount"] = str(amount)
+            payload["obligation_data"] = obligation_data
+            accepted_terms.append(payload)
+        out["accepted_escrow_terms"] = accepted_terms
     except Exception as exc:
         out["accepted_escrow_terms_error"] = str(exc)
     return out

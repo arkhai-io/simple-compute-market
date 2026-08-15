@@ -42,6 +42,7 @@ class BareMetalListing(BaseModel):
     """Bare-metal domain payload carried by a registry listing."""
 
     kind: Literal["bare_metal.v1"] = BARE_METAL_SCHEMA_KIND
+    virtualization_type: Literal["bare_metal"] = "bare_metal"
     machine_id: str = Field(
         description="Bare-metal executor-local machine identity.",
     )
@@ -85,9 +86,7 @@ class BareMetalListing(BaseModel):
             and self.max_duration_seconds is not None
             and self.min_duration_seconds > self.max_duration_seconds
         ):
-            raise ValueError(
-                "min_duration_seconds must be <= max_duration_seconds"
-            )
+            raise ValueError("min_duration_seconds must be <= max_duration_seconds")
         return self
 
 
@@ -133,9 +132,7 @@ class BareMetalMessage(BaseModel):
         if self.access_method == SSH_ACCESS_METHOD and not (
             self.ssh_public_key or self.access_ref
         ):
-            raise ValueError(
-                "ssh_public_key or access_ref is required for SSH access"
-            )
+            raise ValueError("ssh_public_key or access_ref is required for SSH access")
         return self
 
 
@@ -178,9 +175,7 @@ class BareMetalTerms(BaseModel):
         if self.access_method == SSH_ACCESS_METHOD and not (
             self.ssh_public_key or self.access_ref
         ):
-            raise ValueError(
-                "ssh_public_key or access_ref is required for SSH access"
-            )
+            raise ValueError("ssh_public_key or access_ref is required for SSH access")
         return self
 
 
@@ -188,7 +183,14 @@ class BareMetalMaterialization(BaseModel):
     """Settlement-to-fulfillment handoff for a bare-metal agreement."""
 
     kind: Literal["bare_metal.v1"] = BARE_METAL_SCHEMA_KIND
-    escrow_uid: str = Field(description="On-chain escrow UID from the deal.")
+    escrow_uid: str | None = Field(
+        default=None,
+        description="Legacy Alkahest escrow UID from the accepted deal.",
+    )
+    settlement_obligation_ref: str | None = Field(
+        default=None,
+        description="Hosted settlement obligation identity from accepted state.",
+    )
     machine_id: str = Field(
         description="Bare-metal executor-local machine identity.",
     )
@@ -225,14 +227,16 @@ class BareMetalMaterialization(BaseModel):
 
     @model_validator(mode="after")
     def _validate_materialization(self) -> "BareMetalMaterialization":
-        for field_name in (
-            "escrow_uid",
-            "machine_id",
-            "physical_host_id",
-            "access_method",
-        ):
+        for field_name in ("machine_id", "physical_host_id", "access_method"):
             if not str(getattr(self, field_name)).strip():
                 raise ValueError(f"{field_name} must be non-empty")
+        settlement_ids = (self.escrow_uid, self.settlement_obligation_ref)
+        if sum(value is not None for value in settlement_ids) != 1:
+            raise ValueError(
+                "exactly one escrow_uid or settlement_obligation_ref is required"
+            )
+        if any(value is not None and not value.strip() for value in settlement_ids):
+            raise ValueError("settlement identity must be non-empty")
         if (
             self.lease_start_utc is not None
             and self.lease_start_utc >= self.lease_end_utc
@@ -241,9 +245,7 @@ class BareMetalMaterialization(BaseModel):
         if self.access_method == SSH_ACCESS_METHOD and not (
             self.ssh_public_key or self.access_ref
         ):
-            raise ValueError(
-                "ssh_public_key or access_ref is required for SSH access"
-            )
+            raise ValueError("ssh_public_key or access_ref is required for SSH access")
         return self
 
 
@@ -289,12 +291,16 @@ class BareMetalLeaseCreate(BaseModel):
 
     capacity_reservation_id: str | None = Field(
         default=None,
-        description=(
-            "Site reservation identifier. If omitted, the provisioner may look "
-            "up the live reservation by escrow_uid."
-        ),
+        description="Site reservation identifier for this exact lease.",
     )
-    escrow_uid: str = Field(description="On-chain escrow UID from the deal.")
+    escrow_uid: str | None = Field(
+        default=None,
+        description="Legacy Alkahest escrow UID from the accepted deal.",
+    )
+    settlement_obligation_ref: str | None = Field(
+        default=None,
+        description="Hosted settlement obligation identity from accepted state.",
+    )
     machine_id: str = Field(
         description=(
             "Bare-metal executor-local machine identity. This is not a global "
@@ -328,11 +334,30 @@ class BareMetalLeaseCreate(BaseModel):
 
     @model_validator(mode="after")
     def _validate_non_empty_ids(self) -> "BareMetalLeaseCreate":
-        for field_name in ("escrow_uid", "machine_id", "physical_host_id"):
+        for field_name in ("machine_id", "physical_host_id"):
             value = getattr(self, field_name)
             if not str(value).strip():
                 raise ValueError(f"{field_name} must be non-empty")
+        settlement_ids = (self.escrow_uid, self.settlement_obligation_ref)
+        if sum(value is not None for value in settlement_ids) != 1:
+            raise ValueError(
+                "exactly one escrow_uid or settlement_obligation_ref is required"
+            )
+        if any(value is not None and not value.strip() for value in settlement_ids):
+            raise ValueError("settlement identity must be non-empty")
         return self
+
+    @property
+    def settlement_identity(self) -> str:
+        return str(self.settlement_obligation_ref or self.escrow_uid)
+
+    @property
+    def settlement_identity_kind(self) -> str:
+        return (
+            "hosted_obligation"
+            if self.settlement_obligation_ref is not None
+            else "alkahest_escrow"
+        )
 
 
 class BareMetalLeaseView(BaseModel):
@@ -371,6 +396,18 @@ class BareMetalAccessResult(BaseModel):
         default=None,
         description="On-chain escrow UID associated with the lease.",
     )
+    settlement_obligation_ref: str | None = Field(
+        default=None,
+        description="Hosted settlement obligation identity associated with the lease.",
+    )
+    access_grant_ref: str | None = Field(
+        default=None,
+        description="Opaque access-authority operation reference.",
+    )
+    lease_expires_at: datetime | None = Field(
+        default=None,
+        description="Authoritative lease expiry for access-ready projection.",
+    )
     timestamp: str | None = Field(
         default=None,
         description="Executor-reported completion timestamp.",
@@ -388,8 +425,7 @@ class BareMetalAccessResult(BaseModel):
     def _validate_action(self) -> "BareMetalAccessResult":
         if self.action not in BARE_METAL_ACCESS_ACTIONS:
             raise ValueError(
-                "action must be one of "
-                f"{', '.join(BARE_METAL_ACCESS_ACTIONS)}"
+                f"action must be one of {', '.join(BARE_METAL_ACCESS_ACTIONS)}"
             )
         if not self.machine_id.strip():
             raise ValueError("machine_id must be non-empty")
@@ -411,6 +447,7 @@ def materialization_to_lease_create(
     return BareMetalLeaseCreate(
         capacity_reservation_id=capacity_reservation_id,
         escrow_uid=materialization.escrow_uid,
+        settlement_obligation_ref=materialization.settlement_obligation_ref,
         machine_id=materialization.machine_id,
         physical_host_id=materialization.physical_host_id,
         lease_start_utc=materialization.lease_start_utc,

@@ -195,9 +195,14 @@ principals = [{{ range $i, $principal := $principals }}{{ if $i }}, {{ end }}{ s
 {{- $provIdentity := $prov.identity | default dict -}}
 {{- $neg := $seller.negotiation | default dict -}}
 {{- $settlement := $cfg.settlement | default dict -}}
+{{- $pricing := $cfg.pricing | default dict -}}
 {{- $stripe := $settlement.stripe | default dict -}}
 {{- $alkahest := $settlement.alkahest | default dict -}}
 {{- $registryAuthority := $cfg.registryAuthority | default dict -}}
+{{- $domains := required "storefront config.storefrontDomains requires at least one explicit registration" $cfg.storefrontDomains -}}
+{{- if lt (len $domains) 1 -}}
+  {{- fail "storefront config.storefrontDomains requires at least one explicit registration" -}}
+{{- end -}}
 {{- if ne (int ($root.Values.image.settlementConfigSchemaVersion | default 0)) (int ($settlement.schema_version | default 0)) -}}
   {{- fail "storefront image and Settlement config schema versions must match" -}}
 {{- end -}}
@@ -244,6 +249,18 @@ principals = [{{ range $i, $principal := $principals }}{{ if $i }}, {{ end }}{ s
   {{- end -}}
 {{- end -}}
 {{- $expectedAuthority := $stripe.authority | default dict -}}
+{{- if $stripe.enabled -}}
+  {{- $conditionProfile := required "enabled Stripe settlement requires condition_profile" $stripe.condition_profile -}}
+  {{- if not (hasKey ($stripe.condition_profiles | default dict) $conditionProfile) -}}
+    {{- fail "enabled Stripe settlement condition_profile must name a configured condition profile" -}}
+  {{- end -}}
+  {{- $condition := index $stripe.condition_profiles $conditionProfile -}}
+  {{- $evaluator := $condition.evaluator | default dict -}}
+  {{- $resolverID := required "enabled Stripe condition profile evaluator requires resolver_id" $evaluator.resolver_id -}}
+  {{- if not (hasKey ($stripe.resolvers | default dict) $resolverID) -}}
+    {{- fail "enabled Stripe condition profile resolver_id must name a configured resolver" -}}
+  {{- end -}}
+{{- end -}}
 # Rendered by the storefront helm chart (ConfigMap layer — non-sensitive).
 # Source of truth lives in helm/charts/storefront/values.yaml under agents:.
 # Sensitive values come from the Secret overlay (storefront.secrets.toml).
@@ -258,6 +275,14 @@ log_file_path       = {{ $seller.logFilePath | quote }}
 resources_csv_path  = {{ $seller.resourcesCsvPath | quote }}
 {{- end }}
 auto_register       = {{ $agent.autoRegister | default true }}
+{{- range $index, $domain := $domains }}
+
+[[storefront_domains]]
+contribution = {{ required (printf "storefrontDomains[%d].contribution is required" $index) $domain.contribution | quote }}
+offering_mode = {{ required (printf "storefrontDomains[%d].offeringMode is required" $index) $domain.offeringMode | quote }}
+domain_identity = {{ required (printf "storefrontDomains[%d].domainIdentity is required" $index) $domain.domainIdentity | quote }}
+contract_version = {{ required (printf "storefrontDomains[%d].contractVersion is required" $index) $domain.contractVersion | quote }}
+{{- end }}
 
 [Identity.principal]
 scheme = {{ required "storefront agent identity.principal.scheme is required" $identity.principal.scheme | quote }}
@@ -319,6 +344,20 @@ poll_interval = {{ $prov.pollInterval | int }}
 [provisioning.identity]
 {{ include "storefront.principalsToml" (dict "label" "provisioning identity" "principals" $provIdentity.principals) }}
 
+{{- if $pricing }}
+[pricing]
+{{- if hasKey $pricing "default_min_price" }}
+default_min_price = {{ include "storefront.tomlLiteral" $pricing.default_min_price }}
+{{- end }}
+{{- if hasKey $pricing "default_token_address" }}
+default_token_address = {{ include "storefront.tomlLiteral" $pricing.default_token_address }}
+{{- end }}
+{{- if hasKey $pricing "default_max_duration_seconds" }}
+default_max_duration_seconds = {{ $pricing.default_max_duration_seconds | int }}
+{{- end }}
+settlements = {{ include "storefront.tomlLiteral" $pricing.settlements }}
+{{- end }}
+
 [Settlement]
 schema_version = {{ $settlement.schema_version | default 1 }}
 priority = [{{ range $i, $mechanism := ($settlement.priority | default list) }}{{ if $i }}, {{ end }}{{ $mechanism | quote }}{{ end }}]
@@ -338,13 +377,14 @@ environment = {{ $stripe.environment | quote }}
 {{- if $stripe.expected_manifest_digest }}
 expected_manifest_digest = {{ $stripe.expected_manifest_digest | quote }}
 {{- end }}
-expected_api_version = {{ $stripe.expected_api_version | default "0.1.0" | quote }}
-expected_schema_version = {{ $stripe.expected_schema_version | default 4 }}
+expected_api_version = {{ $stripe.expected_api_version | default "0.2.0" | quote }}
+expected_schema_version = {{ $stripe.expected_schema_version | default 5 }}
 required_capabilities = [{{ range $i, $cap := ($stripe.required_capabilities | default list) }}{{ if $i }}, {{ end }}{{ $cap | quote }}{{ end }}]
 {{- if $stripe.account_ref }}
 account_ref = {{ $stripe.account_ref | quote }}
 {{- end }}
 currency = {{ $stripe.currency | default "usd" | quote }}
+country = {{ $stripe.country | default "US" | quote }}
 {{- if $stripe.condition_profile }}
 condition_profile = {{ $stripe.condition_profile | quote }}
 {{- end }}

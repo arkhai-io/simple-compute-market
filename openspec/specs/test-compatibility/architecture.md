@@ -45,6 +45,10 @@ Scenario fixtures create the precise resource and policy state they assert, rema
 
 A moved or extracted boundary may require wheel-content checks, typing markers, dependency-direction tests, consumer suites, composition startup, duplicate-registration checks, and retry/idempotency coverage in addition to ordinary unit tests. Which checks apply follows the authority being changed.
 
+For an injected domain boundary, focused tests supply a compatible contract object distinct from the default and assert object identity at application, container, repository, codec, settlement, and fulfillment seams. Invalid type, identity, version, declarations, and hook sets are rejected at the root with stateful collaborators left untouched. Existing HTTP and package suites continue to own observable workflow parity; restart coverage reopens real persisted identifiers and confirms that parameterization adds no schema rewrite.
+
+Architecture tests inspect production imports and package metadata rather than test monkeypatch patterns. They enforce one default contract construction site, no lower-layer singleton accessor, no concrete cross-domain import, and an installed dependency on the lower-layer contract package.
+
 ## Hosted settlement evidence ownership
 
 Hosted settlement has one provider-authentic system lane and two lower-level
@@ -97,6 +101,40 @@ skip secret-bearing tests. Alkahest system E2E remains a separate mechanism
 lane. Local EAS/allowlisted-arbiter work is condition-boundary conformance
 only; it is not part of hosted financial evidence, and there is currently no
 standalone hosted local-EAS operator target.
+
+## Expanded consumer evidence matrix
+
+Credential-free marketplace tests own exact profile configuration and option identity, per-profile readiness/publication, persistent opaque payer binding, direct payer and authorization helpers, bounded automation, storefront mediation, transient action redaction, delayed funding gates, immutable journals, legacy recovery, reclaim races, and package boundaries. They use the released provider-neutral client with deterministic ports and never stand in for Stripe assertions.
+
+The protected VM lane attributes each selected `card.v1`, `us_bank_transfer.v1`, `us_ach_debit.v1`, and off-session `requires_action` assertion separately. Reports keep marketplace source/commit distinct from the hosted signed manifest, client, image, schema/migrations, provenance, repository/workflow/source, and protected workflow run. A missing rail, account, mandate, browser, or signed-release prerequisite is an unavailable assertion, not permission to substitute another profile or local simulation.
+
+Reports permit only public lifecycle stages, profile/currency, normalized outcomes, timestamps, attempts, and bounded hashed opaque correlations. Recursive canary scanning rejects credentials, provider/customer/payment-method/mandate/bank/card data, raw actions or URLs, payloads, events, requests, source-bearing local paths, and unrestricted logs before evidence is signed.
+
+## Multi-domain storefront evidence ownership
+
+Core tests own contribution discovery, frozen registry invariants, exact-object
+resolution, schema-opaque carriers, publication source fan-out, immutable
+bindings, and cross-swap rejection. VM composition tests own adapters, selected-site calls, exact mode projection, migration, and restart. Bare-metal domain/buyer/storefront tests own trusted option and accepted-binding codecs, hosted-only composition, schema-opaque buyer transport consumption, per-profile publication, funding gates, deterministic selected-site reservation/fulfillment, access-ready evidence, collect/reclaim exclusion, restart, loss/return recovery, and teardown convergence. Deployment tests inspect staged wheels and rendered public/secret separation.
+
+Protected bare-metal proof consumes the exact signed hosted producer release and an isolated disposable whole host. It must observe each selected funding profile, no physical effect before authoritative funding, authenticated access with buyer-owned SSH material, collection after portable evidence, later access failure after revocation, executor teardown, Capacity Reservation release, and capacity republication. Signed producer inputs, Stripe test-mode prerequisites, and disposable hardware are external blockers; deterministic local ports cannot claim them.
+
+## API-credit hosted evidence ownership
+
+The shared transport/runtime suites prove request shape, signature delegation,
+replay, operation leases, delayed states, and collect/reclaim exclusion.
+API-credit domain and buyer suites prove strict carriers, selection, pricing,
+accepted identity, wallet-free policy, and recovery. Credits-authority suites
+prove canonical ownership and fulfillment-keyed exact-once grants.
+API-credit storefront suites prove funding-gated issuance, unknown-outcome
+lookup, private credentials, signed evidence, restart, and Alkahest
+independence.
+
+Only the protected system lane may attribute Stripe interaction and
+authoritative provider funding to the exact signed hosted release. It also owns
+deployed portable-resolution evidence and a real new-key/use-to-402/existing-key
+top-up path. Missing producer artifacts, Stripe capabilities, browser inputs,
+or deployed resolver remain named external blockers; deterministic ports prove
+only marketplace behavior.
 
 ## Current limits
 

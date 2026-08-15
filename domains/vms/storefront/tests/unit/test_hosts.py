@@ -21,6 +21,7 @@ from domains.vms.listings.models import (
     Region,
     VirtualizationType,
 )
+from market_storefront.domain_runtime import build_vm_storefront_domain, build_vm_storefront_registry
 from market_storefront.utils.sqlite_client import SQLiteClient
 
 
@@ -42,7 +43,7 @@ def tmp_db():
 
 @pytest.fixture
 def client(tmp_db):
-    return SQLiteClient(db_path=tmp_db)
+    return SQLiteClient(db_path=tmp_db, registry=build_vm_storefront_registry(build_vm_storefront_domain()))
 
 
 # ---------------------------------------------------------------------------

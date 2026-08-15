@@ -89,6 +89,15 @@ storefront:
         secretName: ""
         configKey: storefront.secrets.toml
       config:
+        storefrontDomains:
+          - contribution: vms
+            offeringMode: vm
+            domainIdentity: compute.v1
+            contractVersion: "1.0"
+          - contribution: bare_metal
+            offeringMode: bare_metal
+            domainIdentity: bare_metal.v1
+            contractVersion: "1.0"
         registryAuthority:
           authority: registry-a
           principals:
@@ -112,6 +121,35 @@ storefront:
               - escrow_shape_guard
               - bisection
           integrations: {}
+        pricing:
+          default_min_price: "100"
+          default_token_address: ""
+          default_max_duration_seconds: 0
+          settlements:
+            - mechanism: fiat.stripe.v1
+              asset: usd
+              rate: "100"
+              per: hour
+              mechanism_input:
+                funding_profile: card.v1
+                interaction: interactive
+                funds_flow: separate_charges_transfers
+            - mechanism: fiat.stripe.v1
+              asset: usd
+              rate: "100"
+              per: hour
+              mechanism_input:
+                funding_profile: us_bank_transfer.v1
+                interaction: interactive
+                funds_flow: separate_charges_transfers
+            - mechanism: fiat.stripe.v1
+              asset: usd
+              rate: "100"
+              per: hour
+              mechanism_input:
+                funding_profile: us_ach_debit.v1
+                interaction: interactive
+                funds_flow: separate_charges_transfers
         settlement:
           schema_version: 1
           priority: ["fiat.stripe.v1"]
@@ -120,27 +158,51 @@ storefront:
             base_url: https://hosted-settlement.example.test
             authority_id: hosted-authority
             environment: test
+            account_ref: account-protected
             authority:
               principals:
                 - scheme: ed25519
                   identifier: 6yzxO_euOl9hQWih-wknLTl3HsS4UjcngV5GbK-O4WM
             expected_manifest_digest: sha256:4859b12cb8703a3c1db85c9636be903f493ae9a9ad1795ffb18a8f801a843a7e
-            expected_api_version: 0.1.0
-            expected_schema_version: 4
+            expected_api_version: 0.2.0
+            expected_schema_version: 5
             required_capabilities:
-              - account-owner-retirement.v1
-              - conditional-escrow.v1
-              - stripe-connect-separate-charges-transfers.v1
-              - portable-attestation.v1
-              - eas-arbiter.v1
               - scheme-tagged-identities.v1
               - account-owner-admission.v1
               - account-owner-rotation.v1
+              - account-owner-retirement.v1
               - signer-injected-client.v1
               - provider-neutral-seller-onboarding.v1
+              - conditional-escrow.v2
+              - stripe-connect-separate-charges-transfers.v2
+              - portable-attestation.v1
+              - eas-arbiter.v1
+              - payer-profile.v1
+              - funding-authorization.v1
+              - funding-profile.card.v1
+              - funding-profile.us_bank_transfer.v1
+              - funding-profile.us_ach_debit.v1
+              - normalized-funding-reversal.v1
+              - operator-recovery-redaction.v1
             currency: usd
+            country: US
+            condition_profile: vm-fulfillment
             request_timeout_seconds: 10.0
             preflight_timeout_seconds: 5.0
             allow_insecure_loopback: false
-            condition_profiles: {}
-            resolvers: {}
+            condition_profiles:
+              vm-fulfillment:
+                condition_id: vm-fulfillment
+                evaluator:
+                  kind: builtin.v1
+                  version: trivial.v1
+                  resolver_id: vm-portable
+                  params:
+                    kind: trivial
+                demand:
+                  encoding: application/jcs+json
+                  value: {}
+            resolvers:
+              vm-portable:
+                chain_name: fiat.stripe.v1
+                evidence_mode: portable-remote.v1

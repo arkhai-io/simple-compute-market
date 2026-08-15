@@ -39,9 +39,16 @@ from market_site_client.client import (
 class FakeSite:
     """Dict-backed capacity ledger with the server's v2 identity boundary."""
 
-    def __init__(self, *, caller: Signer, authority: Signer) -> None:
+    def __init__(
+        self,
+        *,
+        caller: Signer,
+        authority: Signer,
+        deliverable_modes: set[str] | frozenset[str] | None = None,
+    ) -> None:
         self.caller = caller
         self.authority = authority
+        self.deliverable_modes = frozenset(deliverable_modes or ())
         self.resources: dict[str, dict[str, Any]] = {}
         self.reservations: dict[str, dict[str, Any]] = {}
         self.events: list[dict[str, Any]] = []
@@ -465,6 +472,12 @@ class FakeSite:
 
     def _match(self, claim: dict[str, Any]) -> dict[str, Any] | None:
         claim = claim or {}
+        executor_kind = claim.get("executor_kind")
+        if (
+            not isinstance(executor_kind, str)
+            or executor_kind not in self.deliverable_modes
+        ):
+            return None
         dimensions = claim.get("dimensions") or {}
         requested = int(dimensions.get("gpu_count") or claim.get("gpu_count") or 1)
         required_resource_type = claim.get("resource_type")
@@ -481,7 +494,12 @@ class FakeSite:
             mismatched = any(
                 attributes.get(key, top_level.get(key)) != value
                 for key, value in claim.items()
-                if key not in ("gpu_count", "dimensions", "resource_type")
+                if key not in (
+                    "gpu_count",
+                    "dimensions",
+                    "resource_type",
+                    "executor_kind",
+                )
             )
             if mismatched or self._available(resource_id) < requested:
                 continue

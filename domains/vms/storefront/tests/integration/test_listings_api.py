@@ -22,12 +22,22 @@ import pytest_asyncio
 from fastapi import FastAPI
 from market_identity import Ed25519Signer, TrustedIdentitySet
 from storefront_client.client import StorefrontClient, StorefrontClientError
+from core_storefront.site_projections import (
+    ProjectionCache,
+    ProjectionIdentity,
+    ProjectionState,
+)
 
 import market_storefront.container as _container
 from market_storefront.controllers.listings_controller import router as listings_router
 from market_storefront.middleware import admin_identity as _admin_identity
 from market_storefront.middleware.seller_auth import listing_lifecycle_middleware
+from market_storefront.domain_runtime import build_vm_storefront_domain, build_vm_storefront_registry
+from market_storefront.publication_binding import prepare_vm_listing_binding
+from market_storefront.services import site_projection_cache
 from market_storefront.utils.sqlite_client import SQLiteClient
+from tests._settings_overrides import settings_overrides
+from tests.listing_service_fixtures import vm_listing_collaborators
 
 _TEST_MARKETPLACE_SIGNER = Ed25519Signer(b"\x31" * 32)
 _TEST_ADMIN_SIGNER = Ed25519Signer(b"\x32" * 32)
@@ -39,6 +49,10 @@ _TEST_ADMINISTRATORS = TrustedIdentitySet(identities=(_TEST_ADMIN_SIGNER.identit
 _TEST_PROVISIONING_AUTHORITIES = TrustedIdentitySet(
     identities=(_TEST_PROVISIONING_SIGNER.identity,)
 )
+_HOME_SITE = "site-test"
+
+def _unused_settlement_composition() -> object:
+    return object()
 
 
 def _configure_administrator_auth(
@@ -62,7 +76,7 @@ def _configure_administrator_auth(
 
 @pytest_asyncio.fixture
 async def db(tmp_path) -> SQLiteClient:
-    return SQLiteClient(db_path=str(tmp_path / "listings_test.db"))
+    return SQLiteClient(db_path=str(tmp_path / "listings_test.db"), registry=build_vm_storefront_registry(build_vm_storefront_domain()))
 
 
 async def _seed_listing(
@@ -77,16 +91,16 @@ async def _seed_listing(
         "gpu_count": 1,
         "sla": 99.9,
         "region": "California, US",
+        "virtualization_type": "vm",
     }
     if valid_capacity_identity:
         offer_resource["resource_id"] = f"res-{listing_id}"
-    await db.upsert_listing(
-        listing_id=listing_id,
-        status=status,
-        created_at=datetime.now().isoformat(),
-        updated_at=datetime.now().isoformat(),
-        offer_resource=offer_resource,
-        accepted_escrows=[
+    listing_kwargs = {
+        "status": status,
+        "created_at": datetime.now().isoformat(),
+        "updated_at": datetime.now().isoformat(),
+        "offer_resource": offer_resource,
+        "accepted_escrows": [
             {
                 "chain_name": "anvil",
                 "escrow_address": "0x" + "11" * 20,
@@ -96,10 +110,45 @@ async def _seed_listing(
                 "rates": [{"field": "amount", "per": "hour", "value": "9000"}],
             }
         ],
-        fulfillment_resource=None,
-        max_duration_seconds=7200,
-        storefront_url="http://seller:8001",
-        seller_principal=_TEST_SELLER_PRINCIPAL,
+        "fulfillment_resource": None,
+        "max_duration_seconds": 7200,
+        "storefront_url": "http://seller:8001",
+        "seller_principal": _TEST_SELLER_PRINCIPAL,
+    }
+    if valid_capacity_identity:
+        await db.upsert_listing_with_binding(
+            binding=prepare_vm_listing_binding(
+                listing_id=listing_id,
+                candidate={
+                    "site_id": _HOME_SITE,
+                    "pool_id": "pool-vm",
+                    "resource_id": f"res-{listing_id}",
+                    "gpu_count": 1,
+                },
+            ),
+            **listing_kwargs,
+        )
+    else:
+        await db.upsert_listing(listing_id=listing_id, **listing_kwargs)
+
+
+def _vm_pool_projection_caches():
+    resource_pools = ProjectionCache(client=None)
+    resource_pools._value = [{
+        "resource_pool_id": "pool-vm",
+        "pool_metadata": {
+            "policy_tags": {"deliverable_modes": ["vm"]},
+        },
+        "resources": [],
+    }]
+    resource_pools._state = ProjectionState.loaded
+    resource_pools._identity = ProjectionIdentity(
+        revision=1,
+        digest="vm-pool",
+    )
+    return site_projection_cache.SiteProjectionCaches(
+        resource_pools=resource_pools,
+        capacity_buckets=ProjectionCache(client=None),
     )
 
 
@@ -117,14 +166,25 @@ async def client(
     _configure_administrator_auth(app, db, monkeypatch)
 
     transport = httpx.ASGITransport(app=app)
-    async with StorefrontClient(
-        "http://test",
-        signer=_TEST_ADMIN_SIGNER,
-        caller_role="admin",
-        expected_publishers=_TEST_PUBLISHERS,
-        transport=transport,
-    ) as c:
-        yield c, db
+    with (
+        patch.dict(
+            site_projection_cache._caches,
+            {_HOME_SITE: _vm_pool_projection_caches()},
+            clear=True,
+        ),
+        settings_overrides(
+            enable_registry_discovery=False,
+            registry__urls=[],
+        ),
+    ):
+        async with StorefrontClient(
+            "http://test",
+            signer=_TEST_ADMIN_SIGNER,
+            caller_role="admin",
+            expected_publishers=_TEST_PUBLISHERS,
+            transport=transport,
+        ) as c:
+            yield c, db
 
     _container.resolved_sqlite_client = None
     _container.resolved_listing_service = None
@@ -291,8 +351,7 @@ class TestResumeListing:
         c, db = client
         await _seed_listing(db, "resume-registry-check")
         result = await c.resume_listing("resume-registry-check")
-        assert hasattr(result, "registry_status")
-        assert isinstance(result.registry_status, str)
+        assert result.registry_status == "disabled"
         assert "registry_status" not in result.extra
 
     async def test_pause_response_has_no_registry_status(self, client):
@@ -341,11 +400,21 @@ async def admin_client(
 ) -> AsyncIterator[tuple[StorefrontClient, SQLiteClient]]:
     from market_storefront.controllers.listings_controller import admin_router
     from market_storefront.services.listing_service import ListingService
+    collaborators = vm_listing_collaborators(
+        db.domain_registry,
+        signer=_TEST_MARKETPLACE_SIGNER,
+        authorities=_TEST_PROVISIONING_AUTHORITIES,
+    )
 
     listing_svc = ListingService(
+        registry=collaborators.registry,
+        binding=collaborators.binding,
+        domain=collaborators.domain,
+        capacity_runtime=collaborators.capacity_runtime,
         sqlite_client=db,
-        alkahest_clients=None,
+        alkahest_clients={},
         marketplace_signer=_TEST_MARKETPLACE_SIGNER,
+        settlement_composition_provider=_unused_settlement_composition,
     )
     monkeypatch.setattr(
         "market_storefront.services.capacity_client.get_provisioning_authorities",
@@ -360,16 +429,20 @@ async def admin_client(
     app.include_router(listings_router)
     app.include_router(admin_router)
     _configure_administrator_auth(app, db, monkeypatch)
-
     transport = httpx.ASGITransport(app=app)
-    async with StorefrontClient(
-        "http://test",
-        signer=_TEST_ADMIN_SIGNER,
-        caller_role="admin",
-        expected_publishers=_TEST_PUBLISHERS,
-        transport=transport,
-    ) as c:
-        yield c, db
+    with patch.dict(
+        site_projection_cache._caches,
+        {_HOME_SITE: _vm_pool_projection_caches()},
+        clear=True,
+    ):
+        async with StorefrontClient(
+            "http://test",
+            signer=_TEST_ADMIN_SIGNER,
+            caller_role="admin",
+            expected_publishers=_TEST_PUBLISHERS,
+            transport=transport,
+        ) as c:
+            yield c, db
 
     _container.resolved_sqlite_client = None
     _container.resolved_listing_service = None
@@ -384,11 +457,21 @@ async def unsigned_admin_client(
     """Admin router exposed to an unsigned raw transport."""
     from market_storefront.controllers.listings_controller import admin_router
     from market_storefront.services.listing_service import ListingService
+    collaborators = vm_listing_collaborators(
+        db.domain_registry,
+        signer=_TEST_MARKETPLACE_SIGNER,
+        authorities=_TEST_PROVISIONING_AUTHORITIES,
+    )
 
     listing_svc = ListingService(
+        registry=collaborators.registry,
+        binding=collaborators.binding,
+        domain=collaborators.domain,
+        capacity_runtime=collaborators.capacity_runtime,
         sqlite_client=db,
-        alkahest_clients=None,
+        alkahest_clients={},
         marketplace_signer=_TEST_MARKETPLACE_SIGNER,
+        settlement_composition_provider=_unused_settlement_composition,
     )
 
     _container.resolved_sqlite_client = db
@@ -418,6 +501,7 @@ _OFFER = {
     "gpu_count": 1,
     "sla": 99.0,
     "region": "California, US",
+    "virtualization_type": "vm",
 }
 # Stub accepted_escrows for API-contract tests. Address-correctness is the
 # storefront's concern at negotiate time; at listing-create time the
@@ -619,9 +703,18 @@ async def seller_auth_full_client(db):
             assert clauses is None
             return list(resources["accepted_escrows"]), [], ()
 
+    collaborators = vm_listing_collaborators(
+        db.domain_registry,
+        signer=_TEST_MARKETPLACE_SIGNER,
+        authorities=_TEST_PROVISIONING_AUTHORITIES,
+    )
     listing_svc = ListingService(
+        registry=collaborators.registry,
+        binding=collaborators.binding,
+        domain=collaborators.domain,
+        capacity_runtime=collaborators.capacity_runtime,
         sqlite_client=db,
-        alkahest_clients=None,
+        alkahest_clients={},
         marketplace_signer=_TEST_MARKETPLACE_SIGNER,
         settlement_composition_provider=lambda: _AcceptedEscrowComposition(),
     )
@@ -671,7 +764,10 @@ class TestLegacyInvalidListingRemoval:
             result = await c.close_listing("legacy-invalid-close")
 
         assert result.status == "closed"
-        close_order.assert_awaited_once_with({"listing_id": "legacy-invalid-close"})
+        close_order.assert_awaited_once_with(
+            {"listing_id": "legacy-invalid-close"},
+            sqlite_client=db,
+        )
 
 
 class TestCreateListing:

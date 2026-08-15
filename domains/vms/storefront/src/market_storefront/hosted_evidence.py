@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Literal
 
-from hosted_settlement_client import (
+from market_hosted_settlement import (
     ConditionDescriptor,
     EasFulfillmentRef,
     PortableRemoteFulfillmentRef,

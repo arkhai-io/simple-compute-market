@@ -15,6 +15,11 @@ from core_buyer.buyer_config import (
     resolve_fresh_buyer_identity,
     resolve_recovery_buyer_identity,
 )
+from core_buyer.hosted_settlement import (
+    HostedProjection,
+    HostedSettlementTransport,
+    make_hosted_settle_hook,
+)
 from core_buyer.explanation import (
     EXPLANATION_SCHEMA_VERSION,
     build_buyer_explanation,
@@ -73,6 +78,9 @@ __all__ = [
     "RegistryDiscovery",
     "RegistryQueryPlan",
     "RegistryAuthority",
+    "HostedProjection",
+    "HostedSettlementTransport",
+    "make_hosted_settle_hook",
     "SelectedSettlementOption",
     "SettleFn",
     "SettlementClauseStage",
@@ -86,6 +94,7 @@ __all__ = [
     "query_registry_for_matches_multi",
     "resolve_fresh_buyer_identity",
     "resolve_recovery_buyer_identity",
+    "resolve_discovery_timeout",
     "resolve_indexer_urls",
     "resolve_registry_api_keys",
     "resolve_registry_authorities",

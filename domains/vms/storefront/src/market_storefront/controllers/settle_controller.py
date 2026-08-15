@@ -5,7 +5,6 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
-import uuid
 from typing import Any
 
 from arkhai_vms import VmProvisionTerms
@@ -22,24 +21,19 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import JSONResponse
 from fastapi_utils.cbv import cbv
 from market_identity import Identity
-from market_settlement_runtime import SettlementObligationRecord
+from market_settlement_runtime import (
+    HostedSettlementRouteError,
+    HostedSettlementStart,
+)
 
 import market_storefront.container as _container
+from market_storefront.hosted_routes import build_vm_hosted_route_service
 from market_storefront.middleware import buyer_auth
 from market_storefront.middleware.admin_auth import require_admin_key
-from market_storefront.models.hosted_settlement_models import (
-    SettlementPublicResponse,
-    SettlementStartRequest,
-)
+from market_storefront.models.hosted_settlement_models import SettlementPublicResponse
 from market_storefront.models.settle_models import VmSettleRequest
 from market_storefront.services.admin_settle_service import AdminSettleService
-from market_storefront.settlement_composition import (
-    ensure_hosted_fulfillment,
-    hosted_settlement_projection,
-    load_hosted_agreement,
-    serialize_settlement_job,
-    truncate_lease_for_terminal_settlement,
-)
+from market_storefront.settlement_composition import serialize_settlement_job
 from market_storefront.utils.escrow_verification import EscrowVerificationError
 
 logger = logging.getLogger(__name__)
@@ -255,40 +249,34 @@ class SettlementsController:
             )
         return composition
 
-    async def _record(self, settlement_ref: str) -> SettlementObligationRecord:
-        composition = self._composition()
-        row = await composition.repository.load_settlement_obligation_by_mechanism_ref(
-            settlement_ref
-        )
-        if row is None:
-            raise HTTPException(status_code=404, detail="settlement not found")
-        record = SettlementObligationRecord.model_validate(row)
-        if record.obligation.get("mechanism") != "fiat.stripe.v1":
-            raise HTTPException(status_code=404, detail="settlement not found")
-        return record
+    def _service(self):
+        async def authorize(
+            request_context: Request,
+            operation: str,
+            resource_id: str,
+            expected_principal: Identity,
+            body: Any,
+        ):
+            return await buyer_auth._verify(
+                request_context,
+                operation,
+                resource_id,
+                expected_principal,
+                dict(body) if body is not None else None,
+            )
 
-    async def _authorize(
-        self,
-        request: Request,
-        *,
-        operation: str,
-        resource_id: str,
-        record: SettlementObligationRecord,
-    ) -> None:
-        agreement = await load_hosted_agreement(
+        return build_vm_hosted_route_service(
+            composition=self._composition(),
             sqlite_client=self._db,
-            negotiation_id=record.agreement_ref,
-            obligation_ref=record.obligation_ref,
+            authorize_request=authorize,
         )
-        auth = await buyer_auth._verify(
-            request,
-            operation,
-            resource_id,
-            agreement.buyer_principal,
-        )
-        if auth.exact_retry and auth.recorded_outcome is None:
-            raise HTTPException(status_code=409, detail="request retry is pending")
-        return auth
+
+    @staticmethod
+    def _raise_route_error(exc: HostedSettlementRouteError) -> None:
+        raise HTTPException(
+            status_code=exc.status_code,
+            detail=exc.detail,
+        ) from exc
 
     @settlements_router.post(
         "/settlements",
@@ -297,75 +285,14 @@ class SettlementsController:
     )
     async def start(
         self,
-        body: SettlementStartRequest,
+        body: HostedSettlementStart,
         request: Request,
     ) -> SettlementPublicResponse:
-        composition = self._composition()
         try:
-            agreement = await load_hosted_agreement(
-                sqlite_client=self._db,
-                negotiation_id=body.negotiation_id,
-                obligation_ref=body.obligation_ref,
-            )
-        except ValueError as exc:
-            raise HTTPException(status_code=404, detail=str(exc)) from exc
-        if (
-            body.payer_principal != agreement.buyer_principal
-            or body.claimant_principal != composition.local_principal
-        ):
-            raise HTTPException(status_code=403, detail="settlement parties mismatch")
-        auth = await buyer_auth._verify(
-            request,
-            "settlement_start",
-            agreement.obligation_ref,
-            agreement.buyer_principal,
-            body.model_dump(mode="json"),
-        )
-        if auth.exact_retry:
-            if auth.recorded_outcome is None:
-                raise HTTPException(status_code=409, detail="request retry is pending")
-            status_code, payload = auth.recorded_outcome
-            if status_code >= 400:
-                raise HTTPException(status_code=status_code, detail=payload)
-            return SettlementPublicResponse.model_validate(payload)
-
-        records = await composition.runtime.register_plan(
-            agreement_ref=agreement.negotiation_id,
-            obligations=[agreement.obligation],
-        )
-        record = records[0]
-        worker_id = f"settlement-start:{uuid.uuid4().hex}"
-        try:
-            await composition.runtime.materialize(
-                obligation_ref=record.obligation_ref,
-                local_principal=agreement.buyer_principal,
-                worker_id=worker_id,
-            )
-            row = await composition.repository.load_settlement_obligation(
-                record.obligation_ref
-            )
-            assert row is not None
-            record = SettlementObligationRecord.model_validate(row)
-            if record.mechanism_status == "ready":
-                record = await ensure_hosted_fulfillment(
-                    composition=composition,
-                    sqlite_client=self._db,
-                    record=record,
-                    worker_id=f"settlement-fulfill:{uuid.uuid4().hex}",
-                )
-            projected = await hosted_settlement_projection(
-                composition=composition,
-                record=record,
-            )
-        except Exception as exc:
-            logger.warning(
-                "[SETTLEMENTS] Hosted settlement start failed after durable reservation"
-            )
-            raise HTTPException(
-                status_code=503,
-                detail="hosted settlement authority is temporarily unavailable",
-            ) from exc
-        return SettlementPublicResponse(**projected)
+            projected = await self._service().start(request, body)
+        except HostedSettlementRouteError as exc:
+            self._raise_route_error(exc)
+        return SettlementPublicResponse.model_validate(projected)
 
     @settlements_router.get(
         "/settlements/{settlement_ref}",
@@ -377,45 +304,11 @@ class SettlementsController:
         settlement_ref: str,
         request: Request,
     ) -> SettlementPublicResponse:
-        composition = self._composition()
-        record = await self._record(settlement_ref)
-        await self._authorize(
-            request,
-            operation="settlement_status",
-            resource_id=settlement_ref,
-            record=record,
-        )
         try:
-            await composition.runtime.reconcile_status(
-                obligation_ref=record.obligation_ref,
-                local_principal=record.payer_principal,
-                worker_id=f"settlement-status:{uuid.uuid4().hex}",
-            )
-            row = await composition.repository.load_settlement_obligation(
-                record.obligation_ref
-            )
-            assert row is not None
-            record = SettlementObligationRecord.model_validate(row)
-            if record.mechanism_status == "ready" and not record.fulfillment_ref:
-                record = await ensure_hosted_fulfillment(
-                    composition=composition,
-                    sqlite_client=self._db,
-                    record=record,
-                    worker_id=f"settlement-fulfill:{uuid.uuid4().hex}",
-                )
-            projected = await hosted_settlement_projection(
-                composition=composition,
-                record=record,
-            )
-        except Exception as exc:
-            logger.exception(
-                "[SETTLEMENTS] Hosted settlement status reconciliation failed"
-            )
-            raise HTTPException(
-                status_code=503,
-                detail="hosted settlement status is temporarily unavailable",
-            ) from exc
-        return SettlementPublicResponse(**projected)
+            projected = await self._service().status(request, settlement_ref)
+        except HostedSettlementRouteError as exc:
+            self._raise_route_error(exc)
+        return SettlementPublicResponse.model_validate(projected)
 
     @settlements_router.post(
         "/settlements/{settlement_ref}/reclaim",
@@ -427,51 +320,11 @@ class SettlementsController:
         settlement_ref: str,
         request: Request,
     ) -> SettlementPublicResponse:
-        composition = self._composition()
-        record = await self._record(settlement_ref)
-        await self._authorize(
-            request,
-            operation="settlement_reclaim",
-            resource_id=settlement_ref,
-            record=record,
-        )
         try:
-            outcome = await composition.runtime.reclaim(
-                obligation_ref=record.obligation_ref,
-                local_principal=record.payer_principal,
-                worker_id=f"settlement-reclaim:{uuid.uuid4().hex}",
-            )
-            if outcome.status == "busy":
-                raise HTTPException(
-                    status_code=409,
-                    detail="settlement fulfillment or collection already reserved",
-                )
-            if outcome.status == "succeeded":
-                await truncate_lease_for_terminal_settlement(
-                    escrow_uid=settlement_ref,
-                    reason="hosted settlement reclaimed",
-                    sqlite_client=self._db,
-                )
-            row = await composition.repository.load_settlement_obligation(
-                record.obligation_ref
-            )
-            assert row is not None
-            record = SettlementObligationRecord.model_validate(row)
-            projected = await hosted_settlement_projection(
-                composition=composition,
-                record=record,
-            )
-        except HTTPException:
-            raise
-        except ValueError as exc:
-            raise HTTPException(status_code=409, detail=str(exc)) from exc
-        except Exception as exc:
-            logger.warning("[SETTLEMENTS] Hosted reclaim reconciliation failed")
-            raise HTTPException(
-                status_code=503,
-                detail="hosted settlement reclaim is temporarily unavailable",
-            ) from exc
-        return SettlementPublicResponse(**projected)
+            projected = await self._service().reclaim(request, settlement_ref)
+        except HostedSettlementRouteError as exc:
+            self._raise_route_error(exc)
+        return SettlementPublicResponse.model_validate(projected)
 
 
 # ---------------------------------------------------------------------------

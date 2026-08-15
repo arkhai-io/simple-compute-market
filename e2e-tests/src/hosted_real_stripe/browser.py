@@ -47,7 +47,7 @@ class StripeTestInputs:
 
 @dataclass(frozen=True)
 class BrowserPaymentResult:
-    checkout_session_id: str
+    checkout_session_id: str | None
     outcome: CheckoutOutcome
 
 
@@ -77,8 +77,18 @@ class ChromiumCheckout:
         except Exception as exc:
             raise ChromiumUnavailable("protected Chromium is unavailable") from exc
 
-    def pay(self, checkout_url: str, *, outcome: CheckoutOutcome) -> BrowserPaymentResult:
+    def pay(
+        self,
+        checkout_url: str,
+        *,
+        outcome: CheckoutOutcome,
+        funding_profile: str = "card.v1",
+    ) -> BrowserPaymentResult:
         session_id = checkout_session_id(checkout_url)
+        if funding_profile not in {"card.v1", "us_ach_debit.v1"}:
+            raise CheckoutContractError("selected profile has no Checkout payment form")
+        if funding_profile == "us_ach_debit.v1" and outcome != "success":
+            raise CheckoutContractError("ACH Checkout supports only the protected success input")
         test_inputs = StripeTestInputs.for_outcome(outcome)
         factory = self._playwright_factory or _load_playwright
         try:
@@ -93,39 +103,42 @@ class ChromiumCheckout:
                     page = context.new_page()
                     page.set_default_timeout(self._timeout_ms)
                     page.goto(checkout_url, wait_until="domcontentloaded")
-                    page.locator("input[name='cardNumber'], #cardNumber").first.wait_for(
-                        state="visible", timeout=self._timeout_ms
-                    )
                     _fill_optional(page, ("input[name='email']", "#email"), test_inputs.email)
-                    _fill_required(
-                        page,
-                        ("input[name='cardNumber']", "#cardNumber"),
-                        test_inputs.card_number,
-                        "card number",
-                    )
-                    _fill_required(
-                        page,
-                        ("input[name='cardExpiry']", "#cardExpiry"),
-                        test_inputs.expiry,
-                        "card expiry",
-                    )
-                    _fill_required(
-                        page,
-                        ("input[name='cardCvc']", "#cardCvc"),
-                        test_inputs.cvc,
-                        "card CVC",
-                    )
-                    _fill_optional(
-                        page,
-                        ("input[name='billingName']", "#billingName"),
-                        test_inputs.cardholder_name,
-                    )
-                    _fill_optional(
-                        page,
-                        ("input[name='postalCode']", "#billingPostalCode"),
-                        test_inputs.postal_code,
-                    )
-                    _disable_optional_save_details(page)
+                    if funding_profile == "card.v1":
+                        page.locator("input[name='cardNumber'], #cardNumber").first.wait_for(
+                            state="visible", timeout=self._timeout_ms
+                        )
+                        _fill_required(
+                            page,
+                            ("input[name='cardNumber']", "#cardNumber"),
+                            test_inputs.card_number,
+                            "card number",
+                        )
+                        _fill_required(
+                            page,
+                            ("input[name='cardExpiry']", "#cardExpiry"),
+                            test_inputs.expiry,
+                            "card expiry",
+                        )
+                        _fill_required(
+                            page,
+                            ("input[name='cardCvc']", "#cardCvc"),
+                            test_inputs.cvc,
+                            "card CVC",
+                        )
+                        _fill_optional(
+                            page,
+                            ("input[name='billingName']", "#billingName"),
+                            test_inputs.cardholder_name,
+                        )
+                        _fill_optional(
+                            page,
+                            ("input[name='postalCode']", "#billingPostalCode"),
+                            test_inputs.postal_code,
+                        )
+                        _disable_optional_save_details(page)
+                    else:
+                        _fill_ach(page, test_inputs)
                     submit = _first_visible(
                         page,
                         (
@@ -159,6 +172,109 @@ class ChromiumCheckout:
                 "Stripe test Checkout did not reach the selected outcome"
             ) from exc
         return BrowserPaymentResult(checkout_session_id=session_id, outcome=outcome)
+
+    def confirm(self, action_url: str) -> BrowserPaymentResult:
+        parsed = urlsplit(action_url)
+        hostname = parsed.hostname or ""
+        if parsed.scheme != "https" or not (
+            hostname == "hooks.stripe.com" or hostname.endswith(".stripe.com")
+        ):
+            raise CheckoutContractError("confirmation is not a Stripe-hosted action")
+        factory = self._playwright_factory or _load_playwright
+        try:
+            with factory() as playwright:
+                browser = playwright.chromium.launch(
+                    headless=True,
+                    env=_browser_environment(),
+                )
+                try:
+                    page = browser.new_context().new_page()
+                    page.goto(action_url, wait_until="domcontentloaded", timeout=self._timeout_ms)
+                    _complete_authentication(page, self._timeout_ms)
+                    page.wait_for_timeout(min(5_000, self._timeout_ms))
+                    _raise_if_interactive_captcha(page)
+                finally:
+                    browser.close()
+        except (CheckoutContractError, ChromiumUnavailable):
+            raise
+        except Exception as exc:
+            raise CheckoutContractError("Stripe confirmation action did not complete") from exc
+        return BrowserPaymentResult(checkout_session_id=None, outcome="success")
+
+    def complete_setup(
+        self,
+        action_url: str,
+        *,
+        funding_profile: str,
+    ) -> BrowserPaymentResult:
+        """Complete one protected setup-mode Checkout without retaining its URL."""
+
+        session_id = checkout_session_id(action_url)
+        if funding_profile not in {"card.v1", "us_ach_debit.v1"}:
+            raise CheckoutContractError("selected profile has no saved instrument setup")
+        test_inputs = StripeTestInputs.for_outcome("success")
+        factory = self._playwright_factory or _load_playwright
+        try:
+            with factory() as playwright:
+                browser = playwright.chromium.launch(
+                    headless=True,
+                    env=_browser_environment(),
+                )
+                try:
+                    page = browser.new_context().new_page()
+                    page.set_default_timeout(self._timeout_ms)
+                    page.goto(action_url, wait_until="domcontentloaded")
+                    _fill_optional(page, ("input[name='email']", "#email"), test_inputs.email)
+                    if funding_profile == "card.v1":
+                        _fill_required(
+                            page,
+                            ("input[name='cardNumber']", "#cardNumber"),
+                            test_inputs.card_number,
+                            "card number",
+                        )
+                        _fill_required(
+                            page,
+                            ("input[name='cardExpiry']", "#cardExpiry"),
+                            test_inputs.expiry,
+                            "card expiry",
+                        )
+                        _fill_required(
+                            page,
+                            ("input[name='cardCvc']", "#cardCvc"),
+                            test_inputs.cvc,
+                            "card CVC",
+                        )
+                        _fill_optional(
+                            page,
+                            ("input[name='billingName']", "#billingName"),
+                            test_inputs.cardholder_name,
+                        )
+                        _fill_optional(
+                            page,
+                            ("input[name='postalCode']", "#billingPostalCode"),
+                            test_inputs.postal_code,
+                        )
+                    else:
+                        _fill_ach(page, test_inputs)
+                    submit = _first_visible(
+                        page,
+                        (
+                            "button[data-testid='hosted-payment-submit-button']",
+                            "button[type='submit']",
+                        ),
+                    )
+                    if submit is None:
+                        raise CheckoutContractError("Checkout setup submit action is unavailable")
+                    submit.click()
+                    page.wait_for_timeout(min(5_000, self._timeout_ms))
+                    _raise_if_interactive_captcha(page)
+                finally:
+                    browser.close()
+        except (CheckoutContractError, ChromiumUnavailable):
+            raise
+        except Exception as exc:
+            raise CheckoutContractError("Stripe test instrument setup did not complete") from exc
+        return BrowserPaymentResult(checkout_session_id=session_id, outcome="success")
 
 
 def checkout_session_id(checkout_url: str) -> str:
@@ -207,6 +323,34 @@ def _fill_optional(page: Any, selectors: tuple[str, ...], value: str) -> None:
     locator = _first_visible(page, selectors)
     if locator is not None:
         locator.fill(value)
+
+def _fill_ach(page: Any, test_inputs: StripeTestInputs) -> None:
+    _fill_required(
+        page,
+        ("input[name='routingNumber']", "#routingNumber"),
+        "110000000",
+        "ACH routing number",
+    )
+    _fill_required(
+        page,
+        ("input[name='accountNumber']", "#accountNumber"),
+        "000123456789",
+        "ACH account number",
+    )
+    _fill_optional(
+        page,
+        ("input[name='billingName']", "#billingName"),
+        test_inputs.cardholder_name,
+    )
+    mandate = _first_visible(
+        page,
+        (
+            "input[name='mandateConsent']",
+            "input[data-testid='mandate-consent-checkbox']",
+        ),
+    )
+    if mandate is not None and not mandate.is_checked():
+        mandate.check()
 
 
 def _disable_optional_save_details(page: Any) -> None:

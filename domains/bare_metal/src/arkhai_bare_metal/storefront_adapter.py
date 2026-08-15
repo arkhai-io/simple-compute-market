@@ -91,6 +91,8 @@ def reopen_bare_metal_listing_adapter(
     max_duration_seconds: int | None,
     *,
     publish_existing_listing: PublishExistingListing,
+    settlement_options: list[dict[str, Any]] | None = None,
+    publication_clauses: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any] | None:
     """Reopen a tracked listing through caller-supplied publication."""
     return reopen_derived_bare_metal_listing_if_present(
@@ -102,6 +104,8 @@ def reopen_bare_metal_listing_adapter(
         demands=demands,
         max_duration_seconds=max_duration_seconds,
         publish_existing_listing=publish_existing_listing,
+        settlement_options=settlement_options,
+        publication_clauses=publication_clauses,
     )
 
 
@@ -121,6 +125,9 @@ def bare_metal_publication_adapter(
         accepted_escrows: list[dict[str, Any]],
         demands: list[dict[str, Any]],
         max_duration_seconds: int | None,
+        *,
+        settlement_options: list[dict[str, Any]] | None = None,
+        publication_clauses: list[dict[str, Any]] | None = None,
     ) -> dict[str, Any] | None:
         return reopen_bare_metal_listing_adapter(
             db_path,
@@ -131,24 +138,22 @@ def bare_metal_publication_adapter(
             demands,
             max_duration_seconds,
             publish_existing_listing=publish_existing_listing,
+            settlement_options=settlement_options,
+            publication_clauses=publication_clauses,
         )
 
     return PublicationSource(
         name="bare_metal",
         open_keys=open_bare_metal_listing_keys,
-        close_stale=lambda db_path, base_url: (
-            close_stale_bare_metal_publications(
-                db_path=db_path,
-                base_url=base_url,
-                projection_snapshot=projection_snapshot,
-                close_listing=close_listing,
-            )
+        close_stale=lambda db_path, base_url: close_stale_bare_metal_publications(
+            db_path=db_path,
+            base_url=base_url,
+            projection_snapshot=projection_snapshot,
+            close_listing=close_listing,
         ),
-        available_candidates=lambda db_path: (
-            available_bare_metal_listing_candidates(
-                db_path,
-                projection_snapshot=projection_snapshot,
-            )
+        available_candidates=lambda db_path: available_bare_metal_listing_candidates(
+            db_path,
+            projection_snapshot=projection_snapshot,
         ),
         skip_keys=bare_metal_candidate_skip_keys,
         offer_resource=lambda candidate: dict(candidate["offer_resource"]),

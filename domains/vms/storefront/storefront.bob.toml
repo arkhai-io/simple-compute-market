@@ -15,6 +15,19 @@ log_file_path       = "./logs/bob.log"
 # the CSV content is delivered through the agent Secret, not a file path.
 resources_csv_path  = "/app/resources.csv"
 
+[[storefront_domains]]
+contribution = "vms"
+offering_mode = "vm"
+domain_identity = "compute.v1"
+contract_version = "1.0"
+
+[[storefront_domains]]
+contribution = "bare_metal"
+offering_mode = "bare_metal"
+domain_identity = "bare_metal.v1"
+contract_version = "1.0"
+
+
 [Identity.principal]
 scheme = "eip191"
 identifier = "0x3c44cdddb6a900fa2b585dd299e03d12fa4293bc"

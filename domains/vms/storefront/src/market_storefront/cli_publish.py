@@ -18,6 +18,7 @@ Assumes the seller agent is already running (mirror of `market buy`).
 """
 
 from __future__ import annotations
+import asyncio
 
 import json
 import logging
@@ -50,7 +51,6 @@ from domains.vms.listings.reconciler import (
     load_derived_listing_for_slice,
     mark_derived_listings_closed,
     open_listing_resource_keys,
-    record_derived_listing,
     reopen_local_derived_listing,
     stale_open_listing_ids,
 )
@@ -73,14 +73,11 @@ from storefront_client import (
     SyncStorefrontClient,
 )
 
+from .publication_binding import record_vm_listing_binding
 from .cli_common import _resolve_db_path, resolve_storefront_url
 from .publication_wiring import (
-    BareMetalPublicationSourceCallbacks,
     VmPublicationSourceCallbacks,
-    build_bare_metal_publication_source_kwargs,
-    build_bare_metal_storefront_publication_selection,
-    build_storefront_publication_selection,
-    build_vm_publication_source_kwargs,
+    build_vm_storefront_publication_selection,
 )
 
 # ``utils.config`` initializes process-global Dynaconf state from the operator
@@ -284,31 +281,25 @@ def _site_capacity_buckets_sync() -> dict[str, list[dict[str, Any]]] | None:
     return buckets or None
 
 
-def _member_availability_sync() -> dict[tuple[str | None, str], int] | None:
-    """Aggregated site availability, fetched synchronously for CLI flows.
-
-    Keyed ``(site, resource_id)`` like ``member_availability_view``;
-    ``None`` when no authority answers — publishing then assumes
-    members are fully available and the reserve path corrects it.
-    """
+def _member_availability_sync() -> dict[tuple[str, str], int] | None:
+    """Fetch exact site/resource availability for CLI publication."""
     snapshot = _capacity_snapshot_sync()
     if snapshot is None:
         return None
-    view: dict[tuple[str | None, str], int] = {}
-    home_site = next(
-        (str(row.get("site")) for row in snapshot if row.get("home_site")),
-        None,
-    )
+    view: dict[tuple[str, str], int] = {}
     for row in snapshot:
         resource_id = row.get("resource_id")
+        site = row.get("site")
         available = row.get("available_units")
-        if not resource_id or available is None:
+        if (
+            not isinstance(site, str)
+            or not site.strip()
+            or not isinstance(resource_id, str)
+            or not resource_id.strip()
+            or available is None
+        ):
             continue
-        site = str(row.get("site")) if row.get("site") else None
-        available = max(int(available), 0)
-        if site is not None and site == home_site:
-            view[(None, str(resource_id))] = available
-        view[(site, str(resource_id))] = available
+        view[(site, resource_id)] = max(int(available), 0)
     return view
 
 
@@ -430,9 +421,6 @@ def _stale_open_listing_ids(db_path: str) -> list[str]:
     if home_site is None:
         return []
     availability = _member_availability_sync()
-    if availability is None:
-        # No authority answered — closing on ignorance over-closes.
-        return []
     projection = _site_pool_projection_if_enabled()
     return stale_open_listing_ids(
         db_path,
@@ -483,7 +471,6 @@ def _publish_offer(
     max_duration_seconds: int | None,
     *,
     settlements: list[dict[str, Any]] | None = None,
-    settlement_config: dict[str, Any] | None = None,
 ) -> dict:
     """POST /listings/create and return the callback response mapping."""
     from .utils.config import resolve_marketplace_signer
@@ -500,7 +487,6 @@ def _publish_offer(
                 offer=offer,
                 accepted_escrows=accepted_escrows,
                 settlements=settlements,
-                settlement_config=settlement_config,
                 demands=demands,
                 max_duration_seconds=max_duration_seconds,
             )
@@ -718,15 +704,12 @@ def _record_published_vm_listing(
     candidate: dict[str, Any],
     listing_id: str,
 ) -> None:
-    record_derived_listing(
-        db_path,
-        listing_id=listing_id,
-        site_id=str(candidate["site_id"]),
-        pool_id=str(candidate["pool_id"]) if candidate.get("pool_id") else None,
-        resource_id=str(candidate["resource_id"])
-        if candidate.get("resource_id")
-        else None,
-        gpu_count=int(candidate["gpu_count"]),
+    asyncio.run(
+        record_vm_listing_binding(
+            db_path=db_path,
+            listing_id=listing_id,
+            candidate=candidate,
+        )
     )
 
 
@@ -769,47 +752,15 @@ def _vm_publication_source_callbacks(
     )
 
 
-def _bare_metal_publication_source_callbacks() -> BareMetalPublicationSourceCallbacks:
-    return BareMetalPublicationSourceCallbacks(
-        capacity_snapshot=_capacity_snapshot_sync,
-        close_listing=_close_order,
-        publish_existing_listing=_publish_existing_listing_to_registries,
-    )
-
-
-def _publication_source_kwargs() -> dict[str, Any]:
-    return build_vm_publication_source_kwargs(_vm_publication_source_callbacks())
-
-
-def _bare_metal_publication_source_kwargs() -> dict[str, Any]:
-    """Infrastructure callbacks for the bare-metal publication adapter."""
-    return build_bare_metal_publication_source_kwargs(
-        _bare_metal_publication_source_callbacks(),
-    )
-
-
 def _publication_source_selection(
-    source_names: tuple[str, ...] = ("vms",),
     command_settlements: tuple[SettlementPublicationClause, ...] | None = None,
 ) -> PublicationSourceSelection:
-    """Storefront publication source selection.
+    """Build the VM source from its exact frozen contribution registry."""
+    from market_storefront.utils.config import storefront_domain_registry
 
-    The legacy VM CLI still defaults to VM slice publication only. Passing
-    selected source names lets the core composition helper build bare-metal or
-    combined source selections without making the VM adapter own bare-metal
-    semantics.
-    """
-    return build_storefront_publication_selection(
-        source_names=source_names,
-        vm_callbacks=_vm_publication_source_callbacks(command_settlements),
-        bare_metal_callbacks=_bare_metal_publication_source_callbacks(),
-    )
-
-
-def _bare_metal_publication_source_selection() -> PublicationSourceSelection:
-    """Bare-metal-only publication selection for future composition roots."""
-    return build_bare_metal_storefront_publication_selection(
-        _bare_metal_publication_source_callbacks(),
+    return build_vm_storefront_publication_selection(
+        storefront_domain_registry(),
+        _vm_publication_source_callbacks(command_settlements),
     )
 
 
@@ -964,7 +915,9 @@ def _offer_resource_for_listing(res: dict[str, Any]) -> dict[str, Any]:
     interruptible = isinstance(alkahest, dict) and bool(
         alkahest.get("interruptible", False)
     )
-    return vm_offer_resource_for_listing(res, interruptible=interruptible)
+    offer = vm_offer_resource_for_listing(res, interruptible=interruptible)
+    offer["virtualization_type"] = "vm"
+    return offer
 
 
 def _compile_publication_clauses(

@@ -28,8 +28,11 @@ from market_storefront.middleware.admin_identity import (
     administrator_identity_middleware,
     initialize_administrator_identities,
 )
+from market_storefront.domain_runtime import build_vm_storefront_domain, build_vm_storefront_registry
 from market_storefront.utils.sqlite_client import SQLiteClient
 from storefront_client.client import StorefrontClient, StorefrontClientError
+from market_storefront.publication_binding import prepare_vm_listing_binding
+from tests.fake_site import FakeSite, site_capacity
 
 _TEST_SELLER_PRINCIPAL = Identity(
     scheme="eip191",
@@ -51,7 +54,10 @@ PROVISIONING_AUTHORITIES = TrustedIdentitySet(
 @pytest_asyncio.fixture
 async def db(tmp_path):
     db_path = tmp_path / "settle_test.db"
-    return SQLiteClient(db_path=str(db_path))
+    return SQLiteClient(
+        db_path=str(db_path),
+        registry=build_vm_storefront_registry(build_vm_storefront_domain()),
+    )
 
 
 async def _seed_listing(
@@ -62,16 +68,27 @@ async def _seed_listing(
 ) -> None:
     """Seed a minimal compute listing into SQLite for evaluate tests."""
     now = datetime.now().isoformat()
-    await db.upsert_listing(
-        listing_id=listing_id,
+    resource_id = resource_id or f"res-{listing_id}"
+    await db.upsert_listing_with_binding(
+        binding=prepare_vm_listing_binding(
+            listing_id=listing_id,
+            candidate={
+                "site_id": "site-test",
+                "pool_id": resource_id,
+                "gpu_count": 1,
+            },
+        ),
         status="open",
         created_at=now,
         updated_at=now,
         paused=False,
         offer_resource={
-            "resource_id": resource_id or f"res-{listing_id}",
-            "gpu_model": "H200", "gpu_count": 1, "sla": 99.0,
+            "resource_id": resource_id,
+            "gpu_model": "H200",
+            "gpu_count": 1,
+            "sla": 99.0,
             "region": "California, US",
+            "virtualization_type": "vm",
         },
         accepted_escrows=[{
             "chain_name": "anvil",
@@ -86,9 +103,15 @@ async def _seed_listing(
     )
 
 
+@pytest.fixture
+def capacity_site() -> FakeSite:
+    return FakeSite(deliverable_modes={"vm"})
+
+
 @pytest_asyncio.fixture
 async def admin_client(
     db,
+    capacity_site,
     monkeypatch,
 ) -> AsyncIterator[tuple[StorefrontClient, SQLiteClient]]:
     """Admin settle controller wired with real v2 identity authentication."""
@@ -101,6 +124,7 @@ async def admin_client(
         "market_storefront.services.capacity_client.get_provisioning_authorities",
         lambda: PROVISIONING_AUTHORITIES,
     )
+    monkeypatch.setattr(_container, "resolved_alkahest_clients", {})
     _container.resolved_sqlite_client = db
     _container.resolved_marketplace_signer = STOREFRONT_SIGNER
 
@@ -109,14 +133,19 @@ async def admin_client(
     app.middleware("http")(administrator_identity_middleware)
 
     transport = httpx.ASGITransport(app=app)
-    async with StorefrontClient(
-        "http://test",
-        signer=ADMIN_SIGNER,
-        caller_role="admin",
-        expected_publishers=STOREFRONT_AUTHORITIES,
-        transport=transport,
-    ) as c:
-        yield c, db
+    with site_capacity(
+        capacity_site,
+        site_name="site-test",
+        sqlite_client_factory=lambda: db,
+    ):
+        async with StorefrontClient(
+            "http://test",
+            signer=ADMIN_SIGNER,
+            caller_role="admin",
+            expected_publishers=STOREFRONT_AUTHORITIES,
+            transport=transport,
+        ) as c:
+            yield c, db
 
     _container.resolved_sqlite_client = None
     _container.resolved_marketplace_signer = None
@@ -216,15 +245,12 @@ class TestEvaluateSettle:
         """Known listing but empty inventory → would_submit=False with reason."""
         c, db = admin_client
         await _seed_listing(db, "settle-eval-no-inv")
-        from tests.fake_site import FakeSite, site_capacity
-
-        with site_capacity(FakeSite()):
-            result = await c.evaluate_settle(
-                "eval-escrow-1",
-                listing_id="settle-eval-no-inv",
-                ssh_public_key="",
-                duration_seconds=3600,
-            )
+        result = await c.evaluate_settle(
+            "eval-escrow-1",
+            listing_id="settle-eval-no-inv",
+            ssh_public_key="",
+            duration_seconds=3600,
+        )
         assert isinstance(result, dict)
         # No inventory registered → no host matches
         assert result.get("would_submit") is False
@@ -241,10 +267,14 @@ class TestEvaluateSettle:
         )
         assert result.get("escrow_uid") == "echo-escrow-uid"
 
-    async def test_no_db_writes_on_evaluate(self, admin_client):
+    async def test_no_db_writes_on_evaluate(self, admin_client, capacity_site):
         """evaluate_settle must not create settlement_jobs rows or reserve inventory."""
         c, db = admin_client
-        await _seed_listing(db, "settle-eval-nowrite")
+        await _seed_listing(
+            db,
+            "settle-eval-nowrite",
+            resource_id="r-eval-1",
+        )
 
         # Seed a resource so the select could potentially reserve it
         await db.upsert_resource(
@@ -256,12 +286,22 @@ class TestEvaluateSettle:
             value=1,
             attributes={"gpu_model": "H200", "region": "California, US", "vm_host": "host1"},
         )
+        capacity_site.add_resource(
+            "r-eval-1",
+            1,
+            attributes={
+                "gpu_model": "H200",
+                "region": "California, US",
+                "vm_host": "host1",
+            },
+        )
 
-        await c.evaluate_settle(
+        result = await c.evaluate_settle(
             "no-write-eval-uid",
             listing_id="settle-eval-nowrite",
             duration_seconds=3600,
         )
+        assert result.get("would_submit") is True
 
         # Settlement job must not be created
         job = await db.load_escrow(escrow_uid="no-write-eval-uid")
@@ -274,9 +314,14 @@ class TestEvaluateSettle:
             f"evaluate_settle reserved a resource (state={resource.get('state')!r}) "
             "— it must use reserve=False (read-only inventory selection)."
         )
+        assert capacity_site._available("r-eval-1") == 1
 
-    async def test_with_matching_inventory_returns_would_submit_true(self, admin_client):
-        """Listing + matching inventory resource → would_submit=True with vm_host."""
+    async def test_with_matching_inventory_returns_would_submit_true(
+        self,
+        admin_client,
+        capacity_site,
+    ):
+        """Listing + matching site resource → would_submit=True with vm_host."""
         c, db = admin_client
         await _seed_listing(
             db,
@@ -292,24 +337,21 @@ class TestEvaluateSettle:
             value=1,
             attributes={"gpu_model": "H200", "region": "California, US", "vm_host": "host-match"},
         )
-
-        from tests.fake_site import FakeSite, site_capacity
-
-        fake = FakeSite()
-        fake.add_resource(
-            "r-eval-match", 1,
+        capacity_site.add_resource(
+            "r-eval-match",
+            1,
             attributes={
-                "gpu_model": "H200", "region": "California, US",
+                "gpu_model": "H200",
+                "region": "California, US",
                 "vm_host": "host-match",
             },
         )
-        with site_capacity(fake):
-            result = await c.evaluate_settle(
-                "match-escrow-uid",
-                listing_id="settle-eval-match",
-                ssh_public_key="ssh-ed25519 AAAAC3 test@test",
-                duration_seconds=3600,
-            )
+        result = await c.evaluate_settle(
+            "match-escrow-uid",
+            listing_id="settle-eval-match",
+            ssh_public_key="ssh-ed25519 AAAAC3 test@test",
+            duration_seconds=3600,
+        )
 
         assert result.get("would_submit") is True, (
             f"Expected would_submit=True with matching inventory. reason={result.get('reason')!r}"

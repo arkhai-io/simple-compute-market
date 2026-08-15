@@ -4,12 +4,14 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
+from market_capacity_publication import CapacityBinding
 from market_identity import Ed25519Signer
 
 from market_storefront.failure_actions import (
     FulfillmentFailureContext,
     apply_fulfillment_failure_policy,
 )
+from market_storefront.domain_runtime import build_vm_storefront_domain, build_vm_storefront_registry
 from market_storefront.utils.sqlite_client import SQLiteClient
 
 BUYER_PRINCIPAL = Ed25519Signer(b"\x51" * 32).identity
@@ -18,14 +20,26 @@ BUYER_EVM_ADDRESS = "0x" + "bb" * 20
 
 @pytest.mark.asyncio
 async def test_failure_policy_releases_capacity_and_runs_webhook(tmp_path, monkeypatch):
-    from tests.fake_site import FakeSite, site_capacity
+    from tests.fake_site import FakeSite, capacity_runtime_over
 
-    db = SQLiteClient(db_path=str(tmp_path / "failure-policy.db"))
-    fake = FakeSite()
+    db = SQLiteClient(db_path=str(tmp_path / "failure-policy.db"), registry=build_vm_storefront_registry(build_vm_storefront_domain()))
+    fake = FakeSite(deliverable_modes={"vm"})
     fake.add_resource(
         "gpu-host-1",
         2,
         attributes={"gpu_model": "H200", "region": "California, US", "vm_host": "kvm1"},
+    )
+    binding = CapacityBinding("site-test", "vm", "pool-test")
+    capacity = capacity_runtime_over(fake, site_name=binding.site_id)
+
+    async def resolve_capacity_binding(repository, listing_id):
+        assert repository is db
+        assert listing_id == "listing-1x"
+        return binding
+
+    monkeypatch.setattr(
+        "market_storefront.services.capacity_client.capacity_binding_for_listing",
+        resolve_capacity_binding,
     )
 
     async def fake_webhook(payload):
@@ -41,23 +55,29 @@ async def test_failure_policy_releases_capacity_and_runs_webhook(tmp_path, monke
     webhook = AsyncMock(side_effect=fake_webhook)
     monkeypatch.setattr("market_storefront.failure_actions._send_webhook", webhook)
 
-    with site_capacity(fake) as capacity:
-        reserved = await capacity.reserve(
-            claim={"resource_id": "gpu-host-1", "gpu_count": 1},
-            deal_ref={"listing_id": "listing-1x", "escrow_uid": "escrow-1"},
-        )
-        assert reserved is not None
+    reserved = await capacity.reserve(
+        binding,
+        claim={
+            "executor_kind": "vm",
+            "resource_id": "gpu-host-1",
+            "gpu_count": 1,
+        },
+        deal_ref={"listing_id": "listing-1x", "escrow_uid": "escrow-1"},
+    )
+    assert reserved is not None
 
-        result = await apply_fulfillment_failure_policy(
-            db,
-            FulfillmentFailureContext(
-                capacity_reservation_id=reserved["capacity_reservation_id"],
-                escrow_uid="escrow-1",
-                reason="provisioning_error",
-                message="host rejected request",
-                source="test",
-            ),
-        )
+    result = await apply_fulfillment_failure_policy(
+        db,
+        FulfillmentFailureContext(
+            listing_id="listing-1x",
+            capacity_reservation_id=reserved["capacity_reservation_id"],
+            escrow_uid="escrow-1",
+            reason="provisioning_error",
+            message="host rejected request",
+            source="test",
+        ),
+        capacity=capacity,
+    )
 
     assert result.state == "released"
     assert result.resource_id == "gpu-host-1"

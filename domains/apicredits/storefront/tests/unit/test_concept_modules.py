@@ -48,6 +48,8 @@ def _offer(resource_id="svc-quota"):
         "openapi_url": "https://api.acme.example/openapi.json",
         "base_url": "https://api.acme.example",
         "resource_id": resource_id,
+        "capacity_site_id": "tokens",
+        "offering_mode": "api_credits",
     }
 
 
@@ -151,11 +153,11 @@ def test_reconciler_close_on_exhaustion_and_reopen():
         {**_listing("svc-b"), "listing_id": "L-b", "status": "open"},
         {**_listing("svc-a"), "listing_id": "L-c", "status": "closed"},
     ]
-    availability = {(None, "svc-a"): 0, (None, "svc-b"): 12}
+    availability = {("tokens", "svc-a"): 0, ("tokens", "svc-b"): 12}
     assert stale_open_credit_listing_ids(rows, availability=availability) == ["L-a"]
     assert reopenable_credit_listing_ids(rows, availability=availability) == []
 
-    availability = {(None, "svc-a"): 3, (None, "svc-b"): 12}
+    availability = {("tokens", "svc-a"): 3, ("tokens", "svc-b"): 12}
     assert stale_open_credit_listing_ids(rows, availability=availability) == []
     assert reopenable_credit_listing_ids(rows, availability=availability) == ["L-c"]
 

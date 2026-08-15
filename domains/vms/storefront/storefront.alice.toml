@@ -19,6 +19,13 @@ db_path             = "./src/market_storefront/data/storefront/agent.db"
 log_file_path       = "./logs/alice.log"
 resources_csv_path  = "/app/resources.csv"
 
+[[storefront_domains]]
+contribution = "vms"
+offering_mode = "vm"
+domain_identity = "compute.v1"
+contract_version = "1.0"
+
+
 [Identity.principal]
 scheme = "eip191"
 identifier = "0x15d34aaf54267db7d7c367839aaf71a00a2c6a65"

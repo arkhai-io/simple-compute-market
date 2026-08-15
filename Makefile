@@ -8,11 +8,13 @@ GIT_NAME   ?= simple-compute-market
 FOUNDRY_VERSION := v1.5.1
 DIST_DIR := ${CURDIR}/.dist
 IDENTITY_WHEEL := $(DIST_DIR)/arkhai_kit_identity-0.3.0-py3-none-any.whl
-HOSTED_RELEASE_TRUST ?= manifests/hosted-settlement-v0.1.0-trust.json
+HOSTED_RELEASE_TRUST ?= manifests/hosted-settlement-v0.2.0-trust.json
 HOSTED_RELEASE_DIR ?= $(DIST_DIR)
 HOSTED_RELEASE_MANIFEST ?= $(HOSTED_RELEASE_DIR)/release-manifest.json
-HOSTED_CLIENT_WHEEL ?= $(HOSTED_RELEASE_DIR)/arkhai_hosted_settlement_client-0.1.0-py3-none-any.whl
+HOSTED_CLIENT_WHEEL ?= $(HOSTED_RELEASE_DIR)/arkhai_hosted_settlement_client-0.2.0-py3-none-any.whl
 HOSTED_COMPOSE_ENV ?= $(DIST_DIR)/hosted-settlement-compose.env
+HOSTED_MARKETPLACE_RELEASE_DIR ?= $(DIST_DIR)/marketplace-release
+HOSTED_MARKETPLACE_RELEASE_MANIFEST ?= $(HOSTED_MARKETPLACE_RELEASE_DIR)/marketplace-release-manifest.json
 HOSTED_PRODUCTION_MANIFEST_SHA256 ?=
 HOSTED_PRODUCTION_CLIENT_WHEEL_SHA256 ?=
 HOSTED_PRODUCTION_IMAGE_DIGEST ?=
@@ -20,15 +22,21 @@ HOSTED_PRODUCTION_SOURCE_COMMIT ?=
 HOSTED_PRODUCTION_WORKFLOW_REF ?=
 HOSTED_PRODUCTION_WORKFLOW_RUN_ID ?=
 HOSTED_MARKETPLACE_COMMIT ?=
+HOSTED_MARKETPLACE_WORKFLOW_RUN_ID ?=
+HOSTED_MARKETPLACE_WORKFLOW_REF ?=
+HOSTED_MARKETPLACE_MANIFEST_SHA256 ?=
+HOSTED_MARKETPLACE_IMAGE_DIGEST ?=
 HOSTED_STRIPE_TEST_RUN_REF ?=
 HOSTED_STRIPE_TEST_SCENARIO ?=
+HOSTED_STRIPE_TEST_FUNDING_PROFILE ?=
+HOSTED_STRIPE_TEST_INTERACTION ?=
 HOSTED_STRIPE_TEST_ACCOUNT_REF ?=
 HOSTED_STRIPE_TEST_AUTHORITY_ENVIRONMENT ?=
 HOSTED_STRIPE_TEST_AUTHORITY_ENV_FILE ?=
 HOSTED_STRIPE_TEST_EVIDENCE ?= $(DIST_DIR)/hosted-stripe-test-evidence.json
 HOSTED_RELEASE_FILES := release-manifest.json \
-	arkhai_hosted_settlement_client-0.1.0-py3-none-any.whl \
-	openapi-v0.1.0.json conformance-v0.1.0.json migrations-v4.json \
+	arkhai_hosted_settlement_client-0.2.0-py3-none-any.whl \
+	openapi-v0.2.0.json conformance-v0.2.0.json migrations-v5.json \
 	sbom.spdx.json provenance.intoto.json
 VERIFY_HOSTED_RELEASE = uv run --no-project --with 'eth-account>=0.13,<0.14' \
 	python scripts/verify-hosted-release.py \
@@ -36,9 +44,11 @@ VERIFY_HOSTED_RELEASE = uv run --no-project --with 'eth-account>=0.13,<0.14' \
 	--manifest $(HOSTED_RELEASE_MANIFEST) \
 	--wheel $(HOSTED_CLIENT_WHEEL)
 
-.PHONY: review-wheelhouse review-wheelhouse-scope build build-dev build-seller build-apicredits-service build-apicredits-storefront build-apicredits-sample-app test test-core test-provisioning test-provisioning-iac test-registry test-storefront test-vms-buyer test-apicredits test-apicredits-middleware test-kits dist dist-storefront-client dist-policy dist-compute-provisioning dist-compute-provisioning-service dist-kits dist-hosted-client verify-hosted-release dist-registry-client dist-registry dist-identity dist-core dist-arkhai-core-buyer dist-arkhai-core-storefront dist-alkahest dist-config dist-clean init init-prerequisites init-submodules init-zero-tier init-buyer init-storefront init-arkhai-core-registry push-runtime-artifacts push-images push-dev-images push-helm push-wheelhouse
-.PHONY: test-release-tooling test-deployment-packaging prepare-hosted-compose hosted-preflight hosted-compose-up hosted-compose-start hosted-compose-restart hosted-compose-clean hosted-stripe-test hosted-stripe-test-stop
+.PHONY: review-wheelhouse review-wheelhouse-scope build build-dev build-seller build-apicredits-service build-apicredits-storefront build-apicredits-sample-app test test-core test-provisioning test-provisioning-iac test-registry test-storefront test-vms-buyer test-apicredits test-apicredits-middleware test-kits dist dist-storefront-client dist-policy dist-compute-provisioning dist-compute-provisioning-service dist-kits dist-hosted-client verify-hosted-release dist-registry-client dist-registry dist-identity dist-core dist-arkhai-core-buyer dist-arkhai-core-storefront dist-bare-metal-storefront dist-alkahest dist-config dist-clean init init-prerequisites init-submodules init-zero-tier init-buyer init-storefront init-arkhai-core-registry push-runtime-artifacts push-images push-dev-image
+.PHONY: test-release-tooling test-deployment-packaging prepare-hosted-compose hosted-preflight hosted-compose-up hosted-compose-restart hosted-compose-clean hosted-stripe-test hosted-stripe-test-stop
 .PHONY: dist-arkhai-core-registry
+.PHONY: build-bare-metal-storefront
+.PHONY: dist-bare-metal-buyer
 
 # ---------------------------------------------------------------------------
 # Dist — build pure-Python wheels for internal packages before image builds.
@@ -120,31 +130,48 @@ dist-arkhai-core-storefront: ## Build arkhai-core-storefront wheel into .dist/
 	@ls $(DIST_DIR)/arkhai_core_storefront-*-none-any.whl > /dev/null 2>&1 || \
 		(echo "ERROR: arkhai-core-storefront produced a platform-specific wheel — must build inside Docker" && exit 1)
 
+dist-bare-metal-buyer: dist-core dist-arkhai-core-buyer dist-registry-client dist-kits dist-hosted-client ## Build the bare-metal buyer contribution wheel.
+	cd domains && $(MAKE) dist-bare-metal-buyer DIST_DIR=$(DIST_DIR)
+
+dist-bare-metal-storefront: dist-core dist-arkhai-core-storefront dist-kits ## Build the bare-metal storefront contribution wheel.
+	cd domains && $(MAKE) dist-bare-metal-storefront DIST_DIR=$(DIST_DIR)
+
 verify-hosted-release: ## Verify the staged signed production release and exact client wheel.
 	$(VERIFY_HOSTED_RELEASE)
 
 hosted-preflight: prepare-hosted-compose
 
 prepare-hosted-compose: ## Verify production inputs and render a non-secret Compose env.
+	@test -n "$(HOSTED_MARKETPLACE_MANIFEST_SHA256)" || { echo "ERROR: missing HOSTED_MARKETPLACE_MANIFEST_SHA256"; exit 1; }
+	@test -n "$(HOSTED_MARKETPLACE_COMMIT)" || { echo "ERROR: missing HOSTED_MARKETPLACE_COMMIT"; exit 1; }
+	@test -n "$(HOSTED_MARKETPLACE_WORKFLOW_REF)" || { echo "ERROR: missing HOSTED_MARKETPLACE_WORKFLOW_REF"; exit 1; }
+	@test -n "$(HOSTED_MARKETPLACE_WORKFLOW_RUN_ID)" || { echo "ERROR: missing HOSTED_MARKETPLACE_WORKFLOW_RUN_ID"; exit 1; }
+	@test -n "$(HOSTED_MARKETPLACE_IMAGE_DIGEST)" || { echo "ERROR: missing HOSTED_MARKETPLACE_IMAGE_DIGEST"; exit 1; }
+	@test -f "$(HOSTED_MARKETPLACE_RELEASE_MANIFEST)" || { echo "ERROR: missing attested HOSTED_MARKETPLACE_RELEASE_MANIFEST"; exit 1; }
+	gh attestation verify "$(HOSTED_MARKETPLACE_RELEASE_MANIFEST)" \
+		--repo arkhai/simple-market-service
 	uv run --no-project --with 'eth-account>=0.13,<0.14' \
 		python scripts/prepare-hosted-compose.py \
 		--trust "$(HOSTED_RELEASE_TRUST)" \
 		--manifest "$(HOSTED_RELEASE_MANIFEST)" \
 		--wheel "$(HOSTED_CLIENT_WHEEL)" \
+		--marketplace-manifest "$(HOSTED_MARKETPLACE_RELEASE_MANIFEST)" \
+		--marketplace-manifest-sha256 "$(HOSTED_MARKETPLACE_MANIFEST_SHA256)" \
+		--marketplace-source-commit "$(HOSTED_MARKETPLACE_COMMIT)" \
+		--marketplace-workflow-ref "$(HOSTED_MARKETPLACE_WORKFLOW_REF)" \
+		--marketplace-workflow-run-id "$(HOSTED_MARKETPLACE_WORKFLOW_RUN_ID)" \
+		--marketplace-image-digest "$(HOSTED_MARKETPLACE_IMAGE_DIGEST)" \
 		--output "$(HOSTED_COMPOSE_ENV)"
 
 
-hosted-compose-start: hosted-preflight ## Start a clean production hosted stack.
-	$(MAKE) hosted-compose-clean
+hosted-compose-up: hosted-preflight ## Start or converge the production stack without deleting authority state.
 	docker compose --profile hosted-production --env-file "$(HOSTED_COMPOSE_ENV)" \
 			-f domains/vms/compose.yml -f compose.hosted-settlement.yml -f compose.vms-fiat.yml up -d --wait
 
-hosted-compose-up: hosted-compose-start ## Compatibility alias for clean startup.
-
-hosted-compose-restart: ## Restart while preserving hosted named volumes.
-	@test -f "$(HOSTED_COMPOSE_ENV)" || { echo "ERROR: missing generated Compose env $(HOSTED_COMPOSE_ENV); run make hosted-preflight"; exit 1; }
+hosted-compose-restart: hosted-preflight ## Recreate from newly verified inputs while preserving named volumes.
 	docker compose --profile hosted-production --env-file "$(HOSTED_COMPOSE_ENV)" \
-			-f domains/vms/compose.yml -f compose.hosted-settlement.yml -f compose.vms-fiat.yml restart
+			-f domains/vms/compose.yml -f compose.hosted-settlement.yml -f compose.vms-fiat.yml \
+			up -d --wait --force-recreate
 
 hosted-compose-clean: ## Tear down partial or complete hosted stacks and delete volumes.
 	@env_file="$(HOSTED_COMPOSE_ENV)"; temporary=; \
@@ -152,6 +179,7 @@ hosted-compose-clean: ## Tear down partial or complete hosted stacks and delete 
 		temporary=$$(mktemp); env_file="$$temporary"; \
 		printf '%s\n' \
 			'HOSTED_SETTLEMENT_VERIFIED_IMAGE=invalid/cleanup@sha256:0000000000000000000000000000000000000000000000000000000000000000' \
+			'HOSTED_MARKETPLACE_VERIFIED_IMAGE=invalid/cleanup@sha256:0000000000000000000000000000000000000000000000000000000000000000' \
 			'HOSTED_SETTLEMENT_VERIFIED_MANIFEST_DIGEST=sha256:0000000000000000000000000000000000000000000000000000000000000000' \
 			'HOSTED_SETTLEMENT_VERIFIED_RELEASE_DIR=$(CURDIR)' > "$$env_file"; \
 	fi; \
@@ -193,8 +221,14 @@ hosted-stripe-test: hosted-preflight ## Run one protected Stripe test-mode syste
 	@test -n "$(HOSTED_PRODUCTION_WORKFLOW_REF)" || { echo "ERROR: missing HOSTED_PRODUCTION_WORKFLOW_REF"; exit 1; }
 	@test -n "$(HOSTED_PRODUCTION_WORKFLOW_RUN_ID)" || { echo "ERROR: missing HOSTED_PRODUCTION_WORKFLOW_RUN_ID"; exit 1; }
 	@test -n "$(HOSTED_MARKETPLACE_COMMIT)" || { echo "ERROR: missing HOSTED_MARKETPLACE_COMMIT"; exit 1; }
+	@test -n "$(HOSTED_MARKETPLACE_WORKFLOW_RUN_ID)" || { echo "ERROR: missing HOSTED_MARKETPLACE_WORKFLOW_RUN_ID"; exit 1; }
+	@test -n "$(HOSTED_MARKETPLACE_WORKFLOW_REF)" || { echo "ERROR: missing HOSTED_MARKETPLACE_WORKFLOW_REF"; exit 1; }
+	@test -n "$(HOSTED_MARKETPLACE_MANIFEST_SHA256)" || { echo "ERROR: missing HOSTED_MARKETPLACE_MANIFEST_SHA256"; exit 1; }
+	@test -n "$(HOSTED_MARKETPLACE_IMAGE_DIGEST)" || { echo "ERROR: missing HOSTED_MARKETPLACE_IMAGE_DIGEST"; exit 1; }
 	@test -n "$(HOSTED_STRIPE_TEST_RUN_REF)" || { echo "ERROR: missing HOSTED_STRIPE_TEST_RUN_REF"; exit 1; }
 	@test -n "$(HOSTED_STRIPE_TEST_SCENARIO)" || { echo "ERROR: missing HOSTED_STRIPE_TEST_SCENARIO"; exit 1; }
+	@test -n "$(HOSTED_STRIPE_TEST_FUNDING_PROFILE)" || { echo "ERROR: missing HOSTED_STRIPE_TEST_FUNDING_PROFILE"; exit 1; }
+	@test -n "$(HOSTED_STRIPE_TEST_INTERACTION)" || { echo "ERROR: missing HOSTED_STRIPE_TEST_INTERACTION"; exit 1; }
 	@test -n "$(HOSTED_STRIPE_TEST_ACCOUNT_REF)" || { echo "ERROR: missing HOSTED_STRIPE_TEST_ACCOUNT_REF"; exit 1; }
 	@test -n "$(HOSTED_STRIPE_TEST_AUTHORITY_ENVIRONMENT)" || { echo "ERROR: missing HOSTED_STRIPE_TEST_AUTHORITY_ENVIRONMENT"; exit 1; }
 	@test -f "$(HOSTED_STRIPE_TEST_AUTHORITY_ENV_FILE)" || { echo "ERROR: missing HOSTED_STRIPE_TEST_AUTHORITY_ENV_FILE"; exit 1; }
@@ -209,8 +243,14 @@ hosted-stripe-test: hosted-preflight ## Run one protected Stripe test-mode syste
 		--hosted-workflow-run-id "$(HOSTED_PRODUCTION_WORKFLOW_RUN_ID)" \
 		--marketplace-commit "$(HOSTED_MARKETPLACE_COMMIT)" \
 		--observed-marketplace-commit "$$(git rev-parse HEAD)" \
+		--marketplace-workflow-run-id "$(HOSTED_MARKETPLACE_WORKFLOW_RUN_ID)" \
+		--marketplace-workflow-ref "$(HOSTED_MARKETPLACE_WORKFLOW_REF)" \
+		--marketplace-manifest-sha256 "$(HOSTED_MARKETPLACE_MANIFEST_SHA256)" \
+		--marketplace-image-digest "$(HOSTED_MARKETPLACE_IMAGE_DIGEST)" \
 		--run-identity "$(HOSTED_STRIPE_TEST_RUN_REF)" \
 		--scenario "$(HOSTED_STRIPE_TEST_SCENARIO)" \
+		--funding-profile "$(HOSTED_STRIPE_TEST_FUNDING_PROFILE)" \
+		--interaction "$(HOSTED_STRIPE_TEST_INTERACTION)" \
 		--account-ref "$(HOSTED_STRIPE_TEST_ACCOUNT_REF)" \
 		--authority-environment "$(HOSTED_STRIPE_TEST_AUTHORITY_ENVIRONMENT)" \
 		--hosted-service-env-base "$(HOSTED_STRIPE_TEST_AUTHORITY_ENV_FILE)" \
@@ -286,7 +326,7 @@ test-kits:
 # (registry, storefront, provisioning) and the buyer CLI binary. `build-dev`
 # adds the test chain + integration-test image needed for the local e2e stack.
 build: init-prerequisites dist build-buyer
-	$(MAKE) -j3 build-registry build-storefront build-provisioning
+	$(MAKE) -j4 build-registry build-storefront build-bare-metal-storefront build-provisioning
 	$(MAKE) -j3 build-apicredits-service build-apicredits-storefront build-apicredits-sample-app
 
 build-dev: build build-dev-env build-test-image
@@ -296,7 +336,7 @@ build-dev: build build-dev-env build-test-image
 # consume via --find-links. Skips `build-registry` (sellers point at
 # someone else's registry).
 build-seller: init-prerequisites dist-kits dist-storefront-client dist-identity dist-core dist-arkhai-core-storefront dist-alkahest dist-config dist-policy dist-compute-provisioning dist-domains dist-compute-provisioning-service dist-registry-client ## Build only what a seller needs: storefront + provisioning images.
-	$(MAKE) -j2 build-storefront build-provisioning
+	$(MAKE) -j3 build-storefront build-bare-metal-storefront build-provisioning
 
 # Same as build-seller, but the provisioning image's in-container appuser
 # is built with the current host user's UID/GID. Required on hosts where
@@ -324,6 +364,11 @@ build-registry:
 
 build-storefront:
 	cd domains/vms/storefront && make build
+
+build-bare-metal-storefront:
+	docker build --ulimit nofile=65536:65536 \
+		-f domains/bare_metal/storefront/Dockerfile \
+		-t arkhai:bare-metal-storefront .
 
 build-provisioning:
 	cd provisioning/compute/service && make build

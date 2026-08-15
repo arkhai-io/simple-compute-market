@@ -53,6 +53,7 @@ RUN --mount=type=cache,target=/root/.cache/uv \
         --refresh-package arkhai-kit-alkahest \
         --refresh-package arkhai-kit-identity \
         --refresh-package arkhai-kit-settlement-runtime \
+        --refresh-package arkhai-kit-storefront \
         --refresh-package arkhai-hosted-settlement-client \
         --refresh-package arkhai-kit-hosted-settlement \
         --refresh-package arkhai-kit-site-client \

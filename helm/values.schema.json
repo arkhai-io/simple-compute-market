@@ -229,23 +229,32 @@
         "environment": {"type": "string", "minLength": 1},
         "authority": {"$ref": "#/definitions/trustedIdentitySet"},
         "expected_manifest_digest": {"pattern": "^sha256:[0-9a-f]{64}$"},
-        "expected_api_version": {"const": "0.1.0"},
-        "expected_schema_version": {"const": 4},
+        "expected_api_version": {"const": "0.2.0"},
+        "expected_schema_version": {"const": 5},
         "required_capabilities": {
-          "type": "array",
-          "uniqueItems": true,
-          "items": {"type": "string", "minLength": 1},
-          "allOf": [
-            {"contains": {"const": "scheme-tagged-identities.v1"}},
-            {"contains": {"const": "account-owner-admission.v1"}},
-            {"contains": {"const": "account-owner-retirement.v1"}},
-            {"contains": {"const": "account-owner-rotation.v1"}},
-            {"contains": {"const": "signer-injected-client.v1"}},
-            {"contains": {"const": "provider-neutral-seller-onboarding.v1"}}
+          "const": [
+            "scheme-tagged-identities.v1",
+            "account-owner-admission.v1",
+            "account-owner-rotation.v1",
+            "account-owner-retirement.v1",
+            "signer-injected-client.v1",
+            "provider-neutral-seller-onboarding.v1",
+            "conditional-escrow.v2",
+            "stripe-connect-separate-charges-transfers.v2",
+            "portable-attestation.v1",
+            "eas-arbiter.v1",
+            "payer-profile.v1",
+            "funding-authorization.v1",
+            "funding-profile.card.v1",
+            "funding-profile.us_bank_transfer.v1",
+            "funding-profile.us_ach_debit.v1",
+            "normalized-funding-reversal.v1",
+            "operator-recovery-redaction.v1"
           ]
         },
         "account_ref": {"type": "string", "minLength": 1},
-        "currency": {"type": "string", "pattern": "^[a-z]{3}$"},
+        "currency": {"const": "usd"},
+        "country": {"const": "US"},
         "condition_profile": {"type": "string", "minLength": 1},
         "condition_profiles": {"type": "object", "additionalProperties": {"type": "object"}},
         "resolvers": {
@@ -268,11 +277,19 @@
       "then": {
         "required": [
           "base_url",
+          "authority_id",
+          "environment",
           "authority",
           "expected_manifest_digest",
           "expected_api_version",
           "expected_schema_version",
-          "required_capabilities"
+          "required_capabilities",
+          "account_ref",
+          "currency",
+          "country",
+          "condition_profile",
+          "condition_profiles",
+          "resolvers"
         ]
       }
     },
@@ -338,6 +355,79 @@
         }
       ]
     },
+    "pricing": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["settlements"],
+      "properties": {
+        "default_min_price": {"type": ["string", "number"]},
+        "default_token_address": {"type": "string"},
+        "default_max_duration_seconds": {"type": "integer", "minimum": 0},
+        "settlements": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "oneOf": [
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["mechanism", "asset", "rate", "per", "mechanism_input"],
+                "properties": {
+                  "mechanism": {"const": "fiat.stripe.v1"},
+                  "asset": {"const": "usd"},
+                  "rate": {
+                    "anyOf": [
+                      {"type": "number", "exclusiveMinimum": 0},
+                      {"type": "string", "pattern": "^(?:[1-9][0-9]*(?:\\.[0-9]+)?|0\\.[0-9]*[1-9][0-9]*)$"}
+                    ]
+                  },
+                  "per": {"type": "string", "minLength": 1},
+                  "mechanism_input": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": ["funding_profile", "interaction", "funds_flow"],
+                    "properties": {
+                      "funding_profile": {"enum": ["card.v1", "us_bank_transfer.v1", "us_ach_debit.v1"]},
+                      "interaction": {"enum": ["interactive", "saved_instrument"]},
+                      "funds_flow": {"const": "separate_charges_transfers"}
+                    },
+                    "allOf": [
+                      {
+                        "if": {
+                          "properties": {"funding_profile": {"const": "us_bank_transfer.v1"}},
+                          "required": ["funding_profile"]
+                        },
+                        "then": {
+                          "properties": {"interaction": {"const": "interactive"}},
+                          "required": ["interaction"]
+                        }
+                      }
+                    ]
+                  }
+                }
+              },
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["mechanism", "asset", "rate", "per", "mechanism_input"],
+                "properties": {
+                  "mechanism": {"const": "alkahest.v1"},
+                  "asset": {"type": "string", "minLength": 1},
+                  "rate": {
+                    "anyOf": [
+                      {"type": "number", "exclusiveMinimum": 0},
+                      {"type": "string", "pattern": "^(?:[1-9][0-9]*(?:\\.[0-9]+)?|0\\.[0-9]*[1-9][0-9]*)$"}
+                    ]
+                  },
+                  "per": {"type": "string", "minLength": 1},
+                  "mechanism_input": {"type": "object"}
+                }
+              }
+            ]
+          }
+        }
+      }
+    },
     "wallet": {
       "type": "object",
       "additionalProperties": false,
@@ -355,6 +445,27 @@
         "properties": {
           "rpc_url": {"type": "string", "minLength": 1},
           "chain_id": {"type": "integer", "minimum": 1}
+        }
+      }
+    },
+    "storefrontDomains": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "contribution",
+          "offeringMode",
+          "domainIdentity",
+          "contractVersion"
+        ],
+        "properties": {
+          "contribution": {"type": "string", "minLength": 1},
+          "offeringMode": {"type": "string", "minLength": 1},
+          "domainIdentity": {"type": "string", "minLength": 1},
+          "contractVersion": {"type": "string", "pattern": "^[1-9][0-9]*\\.[0-9]+$"}
         }
       }
     },
@@ -377,13 +488,15 @@
         },
         "config": {
           "type": "object",
-          "required": ["registryAuthority"],
+          "required": ["registryAuthority", "storefrontDomains"],
           "properties": {
             "hostedSettlement": false,
             "chain": false,
             "settlement": {"$ref": "#/definitions/settlement"},
+            "pricing": {"$ref": "#/definitions/pricing"},
             "wallet": {"$ref": "#/definitions/wallet"},
             "chains": {"$ref": "#/definitions/chains"},
+            "storefrontDomains": {"$ref": "#/definitions/storefrontDomains"},
             "registryAuthority": {"$ref": "#/definitions/registryAuthority"}
           }
         }
@@ -424,6 +537,47 @@
                 "properties": {
                   "wallet": {"required": ["address"]},
                   "chains": {"minProperties": 1}
+                }
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "config": {
+                "properties": {
+                  "settlement": {
+                    "properties": {
+                      "stripe": {
+                        "properties": {"enabled": {"const": true}},
+                        "required": ["enabled"]
+                      }
+                    },
+                    "required": ["stripe"]
+                  }
+                },
+                "required": ["settlement"]
+              }
+            },
+            "required": ["config"]
+          },
+          "then": {
+            "properties": {
+              "config": {
+                "required": ["pricing"],
+                "properties": {
+                  "pricing": {
+                    "properties": {
+                      "settlements": {
+                        "contains": {
+                          "type": "object",
+                          "properties": {"mechanism": {"const": "fiat.stripe.v1"}},
+                          "required": ["mechanism"]
+                        }
+                      }
+                    }
+                  }
                 }
               }
             }

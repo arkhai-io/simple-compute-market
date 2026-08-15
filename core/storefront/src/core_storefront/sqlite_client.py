@@ -24,15 +24,29 @@ import os
 import sqlite3
 import time
 import uuid
+from collections.abc import Collection, Mapping, Sequence
 from datetime import datetime
 from decimal import Decimal, InvalidOperation
-from collections.abc import Collection, Sequence
 from typing import Any
+
+from market_core import DomainIdentity, MarketDomainContract
 from market_identity import Identity, ReplayIdentity, ReplayReservation
+
 from core_storefront.auth import ReplayClaim
-
-
-from .sqlite_migrations import MigrationLike, apply_schema_migrations
+from core_storefront.domain_registry import (
+    PreparedStorefrontDomainArtifact,
+    StorefrontDomainBinding,
+    StorefrontDomainBindingError,
+    StorefrontDomainRegistry,
+    StorefrontListingBinding,
+    StorefrontThreadBinding,
+    bind_fulfillment_context,
+)
+from .sqlite_migrations import (
+    LegacyMigrationInputs,
+    MigrationLike,
+    apply_schema_migrations,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -147,11 +161,13 @@ class SQLiteClient:
         local_listing_principal: Identity | None = None,
         expected_legacy_sellers: Collection[str] = (),
         extra_migrations: Sequence[MigrationLike] = (),
+        legacy_migration_inputs: LegacyMigrationInputs | None = None,
     ):
         self.db_path = db_path
         self._local_listing_principal = local_listing_principal
         self._expected_legacy_sellers = tuple(expected_legacy_sellers)
         self._extra_migrations = tuple(extra_migrations)
+        self._legacy_migration_inputs = legacy_migration_inputs
         self._ensure_parent_dir()
         self._ensure_tables_sync()
 
@@ -612,6 +628,7 @@ class SQLiteClient:
                 conn,
                 local_listing_principal=self._local_listing_principal,
                 expected_legacy_sellers=self._expected_legacy_sellers,
+                legacy_inputs=self._legacy_migration_inputs,
             )
             # Credentials table (off-chain only, never exposed on-chain)
             cur.execute(
@@ -942,6 +959,7 @@ class SQLiteClient:
                 ),
                 local_listing_principal=self._local_listing_principal,
                 expected_legacy_sellers=self._expected_legacy_sellers,
+                legacy_inputs=self._legacy_migration_inputs,
             )
             # Domain-owned indexes may depend on migrated columns.
             self._ensure_domain_indexes(cur)
@@ -1113,6 +1131,84 @@ class SQLiteClient:
 
         return await asyncio.to_thread(_delete)
 
+    def _execute_listing_upsert(
+        self,
+        conn: sqlite3.Connection,
+        *,
+        listing_id: str,
+        status: str,
+        created_at: str,
+        updated_at: str,
+        offer_resource: Any,
+        fulfillment_resource: Any | None,
+        max_duration_seconds: int | None,
+        storefront_url: str,
+        seller_principal: Identity,
+        oracle_address: str | None,
+        paused: bool,
+        accepted_escrows: Any | None,
+        settlement_options: Any | None,
+        publication_clauses: Any | None,
+        demands: Any | None,
+    ) -> None:
+        seller_scheme, seller_identifier = _principal_columns(seller_principal)
+        conn.execute(
+            """
+            INSERT INTO listings(
+              listing_id,
+              status,
+              created_at,
+              updated_at,
+              offer_resource,
+              fulfillment_resource,
+              max_duration_seconds,
+              storefront_url,
+              seller_scheme,
+              seller_identifier,
+              oracle_address,
+              paused,
+              accepted_escrows,
+              settlement_options,
+              publication_clauses,
+              demands
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(listing_id) DO UPDATE SET
+              status=excluded.status,
+              updated_at=excluded.updated_at,
+              offer_resource=excluded.offer_resource,
+              fulfillment_resource=excluded.fulfillment_resource,
+              max_duration_seconds=excluded.max_duration_seconds,
+              storefront_url=excluded.storefront_url,
+              seller_scheme=excluded.seller_scheme,
+              seller_identifier=excluded.seller_identifier,
+              oracle_address=excluded.oracle_address,
+              paused=excluded.paused,
+              accepted_escrows=excluded.accepted_escrows,
+              settlement_options=excluded.settlement_options,
+              publication_clauses=excluded.publication_clauses,
+              demands=excluded.demands
+            """,
+            (
+                listing_id,
+                status,
+                created_at,
+                updated_at,
+                self._serialize_resource(offer_resource),
+                self._serialize_resource(fulfillment_resource),
+                max_duration_seconds,
+                storefront_url,
+                seller_scheme,
+                seller_identifier,
+                oracle_address,
+                1 if paused else 0,
+                self._serialize_resource(accepted_escrows),
+                self._serialize_resource(settlement_options),
+                self._serialize_resource(publication_clauses),
+                self._serialize_resource(demands),
+            ),
+        )
+
     async def upsert_listing(
         self,
         *,
@@ -1132,69 +1228,216 @@ class SQLiteClient:
         publication_clauses: Any | None = None,
         demands: Any | None = None,
     ) -> None:
-        seller_scheme, seller_identifier = _principal_columns(seller_principal)
+        def _save() -> None:
+            with sqlite3.connect(self.db_path) as conn:
+                self._execute_listing_upsert(
+                    conn,
+                    listing_id=listing_id,
+                    status=status,
+                    created_at=created_at,
+                    updated_at=updated_at,
+                    offer_resource=offer_resource,
+                    fulfillment_resource=fulfillment_resource,
+                    max_duration_seconds=max_duration_seconds,
+                    storefront_url=storefront_url,
+                    seller_principal=seller_principal,
+                    oracle_address=oracle_address,
+                    paused=paused,
+                    accepted_escrows=accepted_escrows,
+                    settlement_options=settlement_options,
+                    publication_clauses=publication_clauses,
+                    demands=demands,
+                )
+
+        await asyncio.to_thread(_save)
+
+    async def upsert_listing_with_binding(
+        self,
+        *,
+        binding: StorefrontListingBinding,
+        status: str,
+        created_at: str,
+        updated_at: str,
+        offer_resource: Any,
+        fulfillment_resource: Any | None,
+        max_duration_seconds: int | None,
+        storefront_url: str,
+        seller_principal: Identity,
+        oracle_address: str | None = None,
+        paused: bool = False,
+        accepted_escrows: Any | None = None,
+        settlement_options: Any | None = None,
+        publication_clauses: Any | None = None,
+        demands: Any | None = None,
+    ) -> None:
+        """Persist a mutable listing projection and immutable binding atomically."""
+
+        normalized_offer = self._normalize_resource(offer_resource)
+        if normalized_offer is None:
+            raise ValueError("offer_resource must be a mapping")
+        public_mode = normalized_offer.get("virtualization_type")
+        if public_mode != binding.binding.offering_mode:
+            raise StorefrontDomainBindingError(
+                "offer_resource.virtualization_type must equal the durable "
+                f"offering mode {binding.binding.offering_mode!r}"
+            )
 
         def _save() -> None:
             conn = sqlite3.connect(self.db_path)
             try:
-                cur = conn.cursor()
-                cur.execute(
+                conn.execute("BEGIN IMMEDIATE")
+                self._execute_listing_upsert(
+                    conn,
+                    listing_id=binding.listing_id,
+                    status=status,
+                    created_at=created_at,
+                    updated_at=updated_at,
+                    offer_resource=offer_resource,
+                    fulfillment_resource=fulfillment_resource,
+                    max_duration_seconds=max_duration_seconds,
+                    storefront_url=storefront_url,
+                    seller_principal=seller_principal,
+                    oracle_address=oracle_address,
+                    paused=paused,
+                    accepted_escrows=accepted_escrows,
+                    settlement_options=settlement_options,
+                    publication_clauses=publication_clauses,
+                    demands=demands,
+                )
+                conn.execute(
                     """
-                    INSERT INTO listings(
-                      listing_id,
-                      status,
-                      created_at,
-                      updated_at,
-                      offer_resource,
-                      fulfillment_resource,
-                      max_duration_seconds,
-                      storefront_url,
-                      seller_scheme,
-                      seller_identifier,
-                      oracle_address,
-                      paused,
-                      accepted_escrows,
-                      settlement_options,
-                      publication_clauses,
-                      demands
+                    INSERT INTO storefront_listing_bindings(
+                      listing_id, site_id, pool_id, physical_resource_id,
+                      offering_mode, domain_identity, contract_major,
+                      contract_minor, derivation_key, source_envelope_json,
+                      last_reconciled_at
                     )
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     ON CONFLICT(listing_id) DO UPDATE SET
-                      status=excluded.status,
-                      updated_at=excluded.updated_at,
-                      offer_resource=excluded.offer_resource,
-                      fulfillment_resource=excluded.fulfillment_resource,
-                      max_duration_seconds=excluded.max_duration_seconds,
-                      storefront_url=excluded.storefront_url,
-                      seller_scheme=excluded.seller_scheme,
-                      seller_identifier=excluded.seller_identifier,
-                      oracle_address=excluded.oracle_address,
-                      paused=excluded.paused,
-                      accepted_escrows=excluded.accepted_escrows,
-                      settlement_options=excluded.settlement_options,
-                      publication_clauses=excluded.publication_clauses,
-                      demands=excluded.demands
+                      last_reconciled_at=excluded.last_reconciled_at
                     """,
                     (
-                        listing_id,
-                        status,
-                        created_at,
-                        updated_at,
-                        self._serialize_resource(offer_resource),
-                        self._serialize_resource(fulfillment_resource),
-                        max_duration_seconds,
-                        storefront_url,
-                        seller_scheme,
-                        seller_identifier,
-                        oracle_address,
-                        1 if paused else 0,
-                        self._serialize_resource(accepted_escrows),
-                        self._serialize_resource(settlement_options),
-                        self._serialize_resource(publication_clauses),
-                        self._serialize_resource(demands),
+                        binding.listing_id,
+                        binding.site_id,
+                        binding.pool_id,
+                        binding.physical_resource_id,
+                        binding.binding.offering_mode,
+                        str(binding.binding.domain_identity),
+                        binding.binding.contract_major,
+                        binding.binding.contract_minor,
+                        binding.derivation_key,
+                        binding.source_envelope_json,
+                        binding.last_reconciled_at,
                     ),
                 )
+                stored = conn.execute(
+                    """
+                    SELECT site_id, pool_id, physical_resource_id, offering_mode,
+                           domain_identity, contract_major, contract_minor,
+                           derivation_key, source_envelope_json
+                    FROM storefront_listing_bindings
+                    WHERE listing_id=?
+                    """,
+                    (binding.listing_id,),
+                ).fetchone()
+                expected = (
+                    binding.site_id,
+                    binding.pool_id,
+                    binding.physical_resource_id,
+                    binding.binding.offering_mode,
+                    str(binding.binding.domain_identity),
+                    binding.binding.contract_major,
+                    binding.binding.contract_minor,
+                    binding.derivation_key,
+                    binding.source_envelope_json,
+                )
+                if stored != expected:
+                    raise StorefrontDomainBindingError(
+                        f"listing {binding.listing_id!r} already has a "
+                        "different immutable domain binding"
+                    )
                 conn.commit()
+            except Exception:
+                conn.rollback()
+                raise
+            finally:
+                conn.close()
+
+        await asyncio.to_thread(_save)
+
+    async def record_listing_binding(
+        self,
+        *,
+        binding: StorefrontListingBinding,
+    ) -> None:
+        """Attach a validated immutable binding to an already persisted listing."""
+
+        self._domain_registry.resolve(binding.binding)
+
+        def _save() -> None:
+            conn = sqlite3.connect(self.db_path)
+            try:
+                conn.execute("BEGIN IMMEDIATE")
+                row = conn.execute(
+                    "SELECT offer_resource FROM listings WHERE listing_id=?",
+                    (binding.listing_id,),
+                ).fetchone()
+                if row is None:
+                    raise KeyError(
+                        f"unknown listing {binding.listing_id!r}"
+                    )
+                offer = self._normalize_resource(row[0])
+                if (
+                    not isinstance(offer, dict)
+                    or offer.get("virtualization_type")
+                    != binding.binding.offering_mode
+                ):
+                    raise StorefrontDomainBindingError(
+                        "persisted offer_resource mode disagrees with binding"
+                    )
+                values = binding.as_record()
+                conn.execute(
+                    """
+                    INSERT INTO storefront_listing_bindings(
+                      listing_id, site_id, pool_id, physical_resource_id,
+                      offering_mode, domain_identity, contract_major,
+                      contract_minor, derivation_key, source_envelope_json,
+                      last_reconciled_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(listing_id) DO UPDATE SET
+                      last_reconciled_at=excluded.last_reconciled_at
+                    """,
+                    tuple(values.values()),
+                )
+                stored = conn.execute(
+                    """
+                    SELECT site_id, pool_id, physical_resource_id, offering_mode,
+                           domain_identity, contract_major, contract_minor,
+                           derivation_key, source_envelope_json
+                    FROM storefront_listing_bindings WHERE listing_id=?
+                    """,
+                    (binding.listing_id,),
+                ).fetchone()
+                expected = (
+                    binding.site_id,
+                    binding.pool_id,
+                    binding.physical_resource_id,
+                    binding.binding.offering_mode,
+                    str(binding.binding.domain_identity),
+                    binding.binding.contract_major,
+                    binding.binding.contract_minor,
+                    binding.derivation_key,
+                    binding.source_envelope_json,
+                )
+                if stored != expected:
+                    raise StorefrontDomainBindingError(
+                        f"listing {binding.listing_id!r} already has a "
+                        "different immutable domain binding"
+                    )
+                conn.commit()
+            except Exception:
+                conn.rollback()
+                raise
             finally:
                 conn.close()
 
@@ -1324,6 +1567,432 @@ class SQLiteClient:
                 conn.close()
 
         return await asyncio.to_thread(_load)
+
+    @staticmethod
+    def _listing_binding_from_row(row: tuple[Any, ...]) -> StorefrontListingBinding:
+        return StorefrontListingBinding(
+            listing_id=str(row[0]),
+            site_id=str(row[1]),
+            pool_id=str(row[2]) if row[2] is not None else None,
+            physical_resource_id=str(row[3]) if row[3] is not None else None,
+            binding=StorefrontDomainBinding(
+                offering_mode=str(row[4]),
+                domain_identity=DomainIdentity(str(row[5])),
+                contract_major=int(row[6]),
+                contract_minor=int(row[7]),
+            ),
+            derivation_key=str(row[8]),
+            source_envelope_json=str(row[9]),
+            last_reconciled_at=str(row[10]),
+        )
+
+    @staticmethod
+    def _thread_binding_from_row(row: tuple[Any, ...]) -> StorefrontThreadBinding:
+        if any(value is None for value in row[1:]):
+            raise StorefrontDomainBindingError(
+                f"negotiation {row[0]!r} has no complete domain binding"
+            )
+        return StorefrontThreadBinding(
+            negotiation_id=str(row[0]),
+            listing_id=str(row[1]),
+            site_id=str(row[2]),
+            binding=StorefrontDomainBinding(
+                offering_mode=str(row[3]),
+                domain_identity=DomainIdentity(str(row[4])),
+                contract_major=int(row[5]),
+                contract_minor=int(row[6]),
+            ),
+        )
+
+    async def load_listing_binding(
+        self,
+        *,
+        listing_id: str,
+    ) -> StorefrontListingBinding | None:
+        def _load() -> StorefrontListingBinding | None:
+            with sqlite3.connect(self.db_path) as conn:
+                row = conn.execute(
+                    """
+                    SELECT listing_id, site_id, pool_id, physical_resource_id,
+                           offering_mode, domain_identity, contract_major,
+                           contract_minor, derivation_key, source_envelope_json,
+                           last_reconciled_at
+                    FROM storefront_listing_bindings
+                    WHERE listing_id=?
+                    """,
+                    (listing_id,),
+                ).fetchone()
+                return self._listing_binding_from_row(row) if row else None
+
+        return await asyncio.to_thread(_load)
+
+    async def load_listing_binding_by_derivation(
+        self,
+        *,
+        derivation_key: str,
+    ) -> StorefrontListingBinding | None:
+        def _load() -> StorefrontListingBinding | None:
+            with sqlite3.connect(self.db_path) as conn:
+                row = conn.execute(
+                    """
+                    SELECT listing_id, site_id, pool_id, physical_resource_id,
+                           offering_mode, domain_identity, contract_major,
+                           contract_minor, derivation_key, source_envelope_json,
+                           last_reconciled_at
+                    FROM storefront_listing_bindings
+                    WHERE derivation_key=?
+                    """,
+                    (derivation_key,),
+                ).fetchone()
+                return self._listing_binding_from_row(row) if row else None
+
+        return await asyncio.to_thread(_load)
+
+    async def list_storefront_domain_bindings(
+        self,
+    ) -> tuple[StorefrontDomainBinding, ...]:
+        def _load() -> tuple[StorefrontDomainBinding, ...]:
+            with sqlite3.connect(self.db_path) as conn:
+                rows = conn.execute(
+                    """
+                    SELECT DISTINCT offering_mode, domain_identity,
+                                    contract_major, contract_minor
+                    FROM (
+                      SELECT offering_mode, domain_identity,
+                             contract_major, contract_minor
+                      FROM storefront_listing_bindings
+                      UNION
+                      SELECT offering_mode, domain_identity,
+                             contract_major, contract_minor
+                      FROM negotiation_threads
+                      WHERE domain_identity IS NOT NULL
+                    )
+                    ORDER BY offering_mode, domain_identity,
+                             contract_major, contract_minor
+                    """
+                ).fetchall()
+                return tuple(
+                    StorefrontDomainBinding(
+                        offering_mode=str(row[0]),
+                        domain_identity=DomainIdentity(str(row[1])),
+                        contract_major=int(row[2]),
+                        contract_minor=int(row[3]),
+                    )
+                    for row in rows
+                )
+
+        return await asyncio.to_thread(_load)
+
+    async def load_thread_binding(
+        self,
+        *,
+        negotiation_id: str,
+    ) -> StorefrontThreadBinding:
+        def _load() -> StorefrontThreadBinding:
+            with sqlite3.connect(self.db_path) as conn:
+                row = conn.execute(
+                    """
+                    SELECT negotiation_id, domain_listing_id, site_id,
+                           offering_mode, domain_identity,
+                           contract_major, contract_minor
+                    FROM negotiation_threads
+                    WHERE negotiation_id=?
+                    """,
+                    (negotiation_id,),
+                ).fetchone()
+                if row is None:
+                    raise KeyError(f"unknown negotiation {negotiation_id!r}")
+                return self._thread_binding_from_row(row)
+
+        return await asyncio.to_thread(_load)
+
+    async def copy_listing_binding_to_thread(
+        self,
+        *,
+        negotiation_id: str,
+        listing_id: str,
+    ) -> StorefrontThreadBinding:
+        """Backfill an unbound thread exactly once from its authoritative listing."""
+
+        def _copy() -> StorefrontThreadBinding:
+            conn = sqlite3.connect(self.db_path)
+            try:
+                conn.execute("BEGIN IMMEDIATE")
+                listing_row = conn.execute(
+                    """
+                    SELECT listing_id, site_id, offering_mode, domain_identity,
+                           contract_major, contract_minor
+                    FROM storefront_listing_bindings
+                    WHERE listing_id=?
+                    """,
+                    (listing_id,),
+                ).fetchone()
+                if listing_row is None:
+                    raise StorefrontDomainBindingError(
+                        f"listing {listing_id!r} has no domain binding"
+                    )
+                cursor = conn.execute(
+                    """
+                    UPDATE negotiation_threads
+                    SET domain_listing_id=?, site_id=?, offering_mode=?,
+                        domain_identity=?, contract_major=?, contract_minor=?
+                    WHERE negotiation_id=?
+                      AND domain_identity IS NULL
+                    """,
+                    (*listing_row, negotiation_id),
+                )
+                row = conn.execute(
+                    """
+                    SELECT negotiation_id, domain_listing_id, site_id,
+                           offering_mode, domain_identity,
+                           contract_major, contract_minor
+                    FROM negotiation_threads
+                    WHERE negotiation_id=?
+                    """,
+                    (negotiation_id,),
+                ).fetchone()
+                if row is None:
+                    raise KeyError(f"unknown negotiation {negotiation_id!r}")
+                copied = self._thread_binding_from_row(row)
+                expected = StorefrontThreadBinding(
+                    negotiation_id=negotiation_id,
+                    listing_id=str(listing_row[0]),
+                    site_id=str(listing_row[1]),
+                    binding=StorefrontDomainBinding(
+                        offering_mode=str(listing_row[2]),
+                        domain_identity=DomainIdentity(str(listing_row[3])),
+                        contract_major=int(listing_row[4]),
+                        contract_minor=int(listing_row[5]),
+                    ),
+                )
+                if copied != expected:
+                    raise StorefrontDomainBindingError(
+                        f"negotiation {negotiation_id!r} already has a "
+                        "different immutable domain binding"
+                    )
+                conn.commit()
+                return copied
+            except Exception:
+                conn.rollback()
+                raise
+            finally:
+                conn.close()
+
+        return await asyncio.to_thread(_copy)
+    @staticmethod
+    def _artifact_codec_name(artifact_slot: str) -> str:
+        if not isinstance(artifact_slot, str) or not artifact_slot.strip():
+            raise ValueError("artifact_slot must be a non-empty string")
+        codec_name = artifact_slot.partition(":")[0]
+        if codec_name not in {
+            "message",
+            "terms",
+            "materialization",
+            "receipt",
+            "result",
+        }:
+            raise ValueError(f"unsupported storefront domain artifact slot {artifact_slot!r}")
+        return codec_name
+
+    @staticmethod
+    def _canonical_artifact_json(value: Any) -> str:
+        if hasattr(value, "model_dump"):
+            value = value.model_dump(mode="json")
+        return json.dumps(
+            value,
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=False,
+            allow_nan=False,
+        )
+
+    def prepare_domain_artifact(
+        self,
+        *,
+        artifact_slot: str,
+        value: Any,
+        binding: StorefrontDomainBinding,
+        registry: StorefrontDomainRegistry,
+    ) -> tuple[PreparedStorefrontDomainArtifact, Any]:
+        """Run the exact selected codec before an atomic persistence operation."""
+
+        codec_name = self._artifact_codec_name(artifact_slot)
+        contract = registry.resolve(binding)
+        normalized = getattr(contract.codecs, codec_name)(value)
+        return (
+            PreparedStorefrontDomainArtifact(
+                artifact_slot=artifact_slot,
+                binding=binding,
+                artifact_json=self._canonical_artifact_json(normalized),
+            ),
+            normalized,
+        )
+
+    async def save_domain_artifact(
+        self,
+        *,
+        negotiation_id: str,
+        artifact_slot: str,
+        value: Any,
+        registry: StorefrontDomainRegistry,
+    ) -> Any:
+        """Normalize and persist a domain artifact under the thread's contract."""
+
+        codec_name = self._artifact_codec_name(artifact_slot)
+
+        def _save() -> Any:
+            conn = sqlite3.connect(self.db_path)
+            try:
+                conn.execute("BEGIN IMMEDIATE")
+                row = conn.execute(
+                    """
+                    SELECT negotiation_id, domain_listing_id, site_id,
+                           offering_mode, domain_identity,
+                           contract_major, contract_minor
+                    FROM negotiation_threads
+                    WHERE negotiation_id=?
+                    """,
+                    (negotiation_id,),
+                ).fetchone()
+                if row is None:
+                    raise KeyError(f"unknown negotiation {negotiation_id!r}")
+                thread_binding = self._thread_binding_from_row(row)
+                contract = registry.resolve(thread_binding.binding)
+                codec = getattr(contract.codecs, codec_name)
+                normalized = codec(value)
+                artifact_json = self._canonical_artifact_json(normalized)
+                binding = thread_binding.binding
+                conn.execute(
+                    """
+                    INSERT OR IGNORE INTO storefront_domain_artifacts(
+                      negotiation_id, artifact_slot, offering_mode,
+                      domain_identity, contract_major, contract_minor,
+                      artifact_json
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        negotiation_id,
+                        artifact_slot,
+                        binding.offering_mode,
+                        str(binding.domain_identity),
+                        binding.contract_major,
+                        binding.contract_minor,
+                        artifact_json,
+                    ),
+                )
+                stored = conn.execute(
+                    """
+                    SELECT offering_mode, domain_identity, contract_major,
+                           contract_minor, artifact_json
+                    FROM storefront_domain_artifacts
+                    WHERE negotiation_id=? AND artifact_slot=?
+                    """,
+                    (negotiation_id, artifact_slot),
+                ).fetchone()
+                expected = (
+                    binding.offering_mode,
+                    str(binding.domain_identity),
+                    binding.contract_major,
+                    binding.contract_minor,
+                    artifact_json,
+                )
+                if stored != expected:
+                    raise StorefrontDomainBindingError(
+                        f"domain artifact {artifact_slot!r} for negotiation "
+                        f"{negotiation_id!r} conflicts with durable state"
+                    )
+                conn.commit()
+                return normalized
+            except Exception:
+                conn.rollback()
+                raise
+            finally:
+                conn.close()
+
+        return await asyncio.to_thread(_save)
+
+    async def load_domain_artifact(
+        self,
+        *,
+        negotiation_id: str,
+        artifact_slot: str,
+        registry: StorefrontDomainRegistry,
+    ) -> Any | None:
+        """Load and decode an artifact only with its accepted thread contract."""
+
+        codec_name = self._artifact_codec_name(artifact_slot)
+
+        def _load() -> Any | None:
+            with sqlite3.connect(self.db_path) as conn:
+                row = conn.execute(
+                    """
+                    SELECT thread.negotiation_id, thread.domain_listing_id,
+                           thread.site_id, thread.offering_mode,
+                           thread.domain_identity, thread.contract_major,
+                           thread.contract_minor, artifact.offering_mode,
+                           artifact.domain_identity, artifact.contract_major,
+                           artifact.contract_minor, artifact.artifact_json
+                    FROM negotiation_threads thread
+                    LEFT JOIN storefront_domain_artifacts artifact
+                      ON artifact.negotiation_id=thread.negotiation_id
+                     AND artifact.artifact_slot=?
+                    WHERE thread.negotiation_id=?
+                    """,
+                    (artifact_slot, negotiation_id),
+                ).fetchone()
+                if row is None:
+                    raise KeyError(f"unknown negotiation {negotiation_id!r}")
+                thread_binding = self._thread_binding_from_row(row[:7])
+                if row[7] is None:
+                    return None
+                artifact_binding = StorefrontDomainBinding(
+                    offering_mode=str(row[7]),
+                    domain_identity=DomainIdentity(str(row[8])),
+                    contract_major=int(row[9]),
+                    contract_minor=int(row[10]),
+                )
+                if artifact_binding != thread_binding.binding:
+                    raise StorefrontDomainBindingError(
+                        f"domain artifact {artifact_slot!r} disagrees with "
+                        f"negotiation {negotiation_id!r}"
+                    )
+                contract = registry.resolve(thread_binding.binding)
+                return getattr(contract.codecs, codec_name)(json.loads(str(row[11])))
+
+        return await asyncio.to_thread(_load)
+
+    @staticmethod
+    def bind_fulfillment_context(
+        context: Mapping[str, Any],
+        *,
+        thread_binding: StorefrontThreadBinding,
+    ) -> dict[str, Any]:
+        return bind_fulfillment_context(
+            context,
+            thread_binding=thread_binding,
+        )
+
+    async def validate_fulfillment_context_binding(
+        self,
+        *,
+        negotiation_id: str,
+        context: Mapping[str, Any],
+        registry: StorefrontDomainRegistry,
+    ) -> StorefrontThreadBinding:
+        thread_binding = await self.load_thread_binding(
+            negotiation_id=negotiation_id
+        )
+        registry.resolve(thread_binding.binding)
+        expected = self.bind_fulfillment_context(
+            {},
+            thread_binding=thread_binding,
+        )["storefront_domain_binding"]
+        if context.get("storefront_domain_binding") != expected:
+            raise StorefrontDomainBindingError(
+                f"fulfillment context disagrees with negotiation {negotiation_id!r}"
+            )
+        return thread_binding
 
     async def save_negotiation_message(
         self,
@@ -2590,6 +3259,301 @@ class SQLiteClient:
 
         await asyncio.to_thread(_delete)
 
+    async def create_negotiation_opening(
+        self,
+        *,
+        thread: Any,
+        initial_message: Any,
+        binding: object | None,
+        domain_artifact: object | None = None,
+    ) -> None:
+        """Atomically persist an opening, its immutable binding, and first message."""
+
+        def field(record: Any, name: str) -> Any:
+            if isinstance(record, Mapping):
+                return record[name]
+            return getattr(record, name)
+
+        negotiation_id = str(field(thread, "negotiation_id"))
+        listing_id = str(field(thread, "listing_id"))
+        if binding is not None and not isinstance(binding, StorefrontThreadBinding):
+            raise TypeError("binding must be a StorefrontThreadBinding")
+        thread_binding = binding
+        if thread_binding is not None and (
+            thread_binding.negotiation_id != negotiation_id
+            or thread_binding.listing_id != listing_id
+        ):
+            raise StorefrontDomainBindingError(
+                "opening binding must name the negotiation and authoritative listing"
+            )
+        prepared_artifact: PreparedStorefrontDomainArtifact | None
+        if domain_artifact is None:
+            prepared_artifact = None
+        elif isinstance(domain_artifact, PreparedStorefrontDomainArtifact):
+            prepared_artifact = domain_artifact
+        else:
+            raise TypeError(
+                "domain_artifact must be a PreparedStorefrontDomainArtifact"
+            )
+        if (
+            prepared_artifact is not None
+            and (
+                thread_binding is None
+                or prepared_artifact.binding != thread_binding.binding
+            )
+        ):
+            raise StorefrontDomainBindingError(
+                "opening artifact must use the exact thread domain binding"
+            )
+
+        buyer_principal = Identity.model_validate(field(thread, "buyer_principal"))
+        seller_principal = Identity.model_validate(field(thread, "seller_principal"))
+        buyer_scheme, buyer_identifier = _principal_columns(buyer_principal)
+        seller_scheme, seller_identifier = _principal_columns(seller_principal)
+        sender_principal = Identity.model_validate(
+            field(initial_message, "sender_principal")
+        )
+        sender_scheme, sender_identifier = _principal_columns(sender_principal)
+        binding_values: tuple[Any, ...] = (
+            (
+                thread_binding.listing_id,
+                thread_binding.site_id,
+                thread_binding.binding.offering_mode,
+                str(thread_binding.binding.domain_identity),
+                thread_binding.binding.contract_major,
+                thread_binding.binding.contract_minor,
+            )
+            if thread_binding is not None
+            else (None, None, None, None, None, None)
+        )
+        proposal = field(thread, "pinned_proposal")
+        terms_wire = field(thread, "terms_wire")
+        proposal_json = (
+            self._canonical_artifact_json(proposal) if proposal is not None else None
+        )
+        terms_json = (
+            self._canonical_artifact_json(terms_wire) if terms_wire is not None else None
+        )
+        seller_initial_amount = _amount_to_db_text(
+            field(thread, "seller_initial_amount")
+        )
+        seller_amount = _amount_to_db_text(
+            field(initial_message, "seller_amount")
+        )
+        buyer_amount = _amount_to_db_text(
+            field(initial_message, "buyer_amount")
+        )
+        proposed_amount = _amount_to_db_text(
+            field(initial_message, "proposed_amount")
+        )
+        round_number = field(initial_message, "round_number")
+        if round_number is None:
+            round_number = 0
+
+        def _create() -> None:
+            conn = sqlite3.connect(self.db_path)
+            try:
+                conn.execute("BEGIN IMMEDIATE")
+                now = datetime.now().isoformat()
+                conn.execute(
+                    """
+                    INSERT OR IGNORE INTO negotiation_threads(
+                      negotiation_id, our_listing_id, their_listing_id,
+                      our_agent_id, their_agent_id, status,
+                      requested_duration_seconds, requested_start_utc,
+                      buyer_escrow_proposal, provision_terms,
+                      buyer_scheme, buyer_identifier,
+                      seller_scheme, seller_identifier,
+                      domain_listing_id, site_id, offering_mode,
+                      domain_identity, contract_major, contract_minor,
+                      created_at, updated_at
+                    )
+                    VALUES (
+                      ?, ?, ?, ?, ?, 'active', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+                      ?, ?, ?, ?, ?, ?
+                    )
+                    """,
+                    (
+                        negotiation_id,
+                        listing_id,
+                        str(field(thread, "counterparty_listing_id")),
+                        str(field(thread, "seller_agent_url")),
+                        str(field(thread, "buyer_agent_url")),
+                        field(thread, "requested_duration_seconds"),
+                        field(thread, "requested_start_utc"),
+                        proposal_json,
+                        terms_json,
+                        buyer_scheme,
+                        buyer_identifier,
+                        seller_scheme,
+                        seller_identifier,
+                        *binding_values,
+                        now,
+                        now,
+                    ),
+                )
+                durable_thread = conn.execute(
+                    """
+                    SELECT our_listing_id, their_listing_id,
+                           our_agent_id, their_agent_id,
+                           requested_duration_seconds, requested_start_utc,
+                           buyer_escrow_proposal, provision_terms,
+                           buyer_scheme, buyer_identifier,
+                           seller_scheme, seller_identifier,
+                           domain_listing_id, site_id, offering_mode,
+                           domain_identity, contract_major, contract_minor
+                    FROM negotiation_threads
+                    WHERE negotiation_id=?
+                    """,
+                    (negotiation_id,),
+                ).fetchone()
+                expected_thread = (
+                    listing_id,
+                    str(field(thread, "counterparty_listing_id")),
+                    str(field(thread, "seller_agent_url")),
+                    str(field(thread, "buyer_agent_url")),
+                    field(thread, "requested_duration_seconds"),
+                    field(thread, "requested_start_utc"),
+                    proposal_json,
+                    terms_json,
+                    buyer_scheme,
+                    buyer_identifier,
+                    seller_scheme,
+                    seller_identifier,
+                    *binding_values,
+                )
+                if durable_thread != expected_thread:
+                    raise StorefrontDomainBindingError(
+                        f"negotiation {negotiation_id!r} conflicts with "
+                        "the durable opening"
+                    )
+                conn.execute(
+                    """
+                    INSERT OR IGNORE INTO negotiation_local_state(
+                      negotiation_id, owner_id, our_initial_price, our_strategy
+                    )
+                    VALUES (?, ?, ?, ?)
+                    """,
+                    (
+                        negotiation_id,
+                        str(field(thread, "owner_id")),
+                        seller_initial_amount,
+                        field(thread, "strategy_label"),
+                    ),
+                )
+                durable_local = conn.execute(
+                    """
+                    SELECT our_initial_price, our_strategy
+                    FROM negotiation_local_state
+                    WHERE negotiation_id=? AND owner_id=?
+                    """,
+                    (negotiation_id, str(field(thread, "owner_id"))),
+                ).fetchone()
+                if durable_local != (
+                    seller_initial_amount,
+                    field(thread, "strategy_label"),
+                ):
+                    raise StorefrontDomainBindingError(
+                        f"negotiation {negotiation_id!r} local opening state conflicts"
+                    )
+                conn.execute(
+                    """
+                    INSERT OR IGNORE INTO negotiation_messages(
+                      negotiation_id, round, sender_role,
+                      sender_scheme, sender_identifier,
+                      our_price, their_price, proposed_price,
+                      action_taken, message_type, timestamp
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        negotiation_id,
+                        int(round_number),
+                        str(field(initial_message, "sender_role")),
+                        sender_scheme,
+                        sender_identifier,
+                        seller_amount,
+                        buyer_amount,
+                        proposed_amount,
+                        str(field(initial_message, "action_taken")),
+                        str(field(initial_message, "message_type")),
+                        str(field(initial_message, "timestamp")),
+                    ),
+                )
+                durable_message = conn.execute(
+                    """
+                    SELECT sender_role, sender_scheme, sender_identifier,
+                           our_price, their_price, proposed_price,
+                           action_taken, message_type, timestamp
+                    FROM negotiation_messages
+                    WHERE negotiation_id=? AND round=?
+                    """,
+                    (negotiation_id, int(round_number)),
+                ).fetchone()
+                expected_message = (
+                    str(field(initial_message, "sender_role")),
+                    sender_scheme,
+                    sender_identifier,
+                    seller_amount,
+                    buyer_amount,
+                    proposed_amount,
+                    str(field(initial_message, "action_taken")),
+                    str(field(initial_message, "message_type")),
+                    str(field(initial_message, "timestamp")),
+                )
+                if durable_message != expected_message:
+                    raise StorefrontDomainBindingError(
+                        f"negotiation {negotiation_id!r} initial message conflicts"
+                    )
+                if prepared_artifact is not None:
+                    domain_binding = prepared_artifact.binding
+                    conn.execute(
+                        """
+                        INSERT OR IGNORE INTO storefront_domain_artifacts(
+                          negotiation_id, artifact_slot, offering_mode,
+                          domain_identity, contract_major, contract_minor,
+                          artifact_json
+                        )
+                        VALUES (?, ?, ?, ?, ?, ?, ?)
+                        """,
+                        (
+                            negotiation_id,
+                            prepared_artifact.artifact_slot,
+                            domain_binding.offering_mode,
+                            str(domain_binding.domain_identity),
+                            domain_binding.contract_major,
+                            domain_binding.contract_minor,
+                            prepared_artifact.artifact_json,
+                        ),
+                    )
+                    durable_artifact = conn.execute(
+                        """
+                        SELECT offering_mode, domain_identity,
+                               contract_major, contract_minor, artifact_json
+                        FROM storefront_domain_artifacts
+                        WHERE negotiation_id=? AND artifact_slot=?
+                        """,
+                        (negotiation_id, prepared_artifact.artifact_slot),
+                    ).fetchone()
+                    if durable_artifact != (
+                        domain_binding.offering_mode,
+                        str(domain_binding.domain_identity),
+                        domain_binding.contract_major,
+                        domain_binding.contract_minor,
+                        prepared_artifact.artifact_json,
+                    ):
+                        raise StorefrontDomainBindingError(
+                            f"negotiation {negotiation_id!r} opening artifact conflicts"
+                        )
+                conn.commit()
+            except Exception:
+                conn.rollback()
+                raise
+            finally:
+                conn.close()
+
+        await asyncio.to_thread(_create)
+
     async def create_negotiation_thread(
         self,
         *,
@@ -2608,6 +3572,7 @@ class SQLiteClient:
         requested_start_utc: str | None = None,
         buyer_escrow_proposal: dict[str, Any] | None = None,
         provision_terms: dict[str, Any] | None = None,
+        binding: StorefrontThreadBinding | None = None,
     ) -> None:
         """Create a new negotiation thread with private local state.
 
@@ -2630,6 +3595,25 @@ class SQLiteClient:
         """
         buyer_scheme, buyer_identifier = _principal_columns(buyer_principal)
         seller_scheme, seller_identifier = _principal_columns(seller_principal)
+        if binding is not None and (
+            binding.negotiation_id != negotiation_id
+            or binding.listing_id != our_listing_id
+        ):
+            raise StorefrontDomainBindingError(
+                "thread binding must name the negotiation and authoritative listing"
+            )
+        binding_values: tuple[Any, ...] = (
+            (
+                binding.listing_id,
+                binding.site_id,
+                binding.binding.offering_mode,
+                str(binding.binding.domain_identity),
+                binding.binding.contract_major,
+                binding.binding.contract_minor,
+            )
+            if binding is not None
+            else (None, None, None, None, None, None)
+        )
 
         def _create() -> None:
             conn = sqlite3.connect(self.db_path)
@@ -2659,9 +3643,14 @@ class SQLiteClient:
                         provision_terms,
                         buyer_scheme, buyer_identifier,
                         seller_scheme, seller_identifier,
+                        domain_listing_id, site_id, offering_mode,
+                        domain_identity, contract_major, contract_minor,
                         created_at, updated_at
                     )
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    VALUES (
+                      ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+                      ?, ?, ?, ?
+                    )
                     """,
                     (
                         negotiation_id,
@@ -2678,6 +3667,7 @@ class SQLiteClient:
                         buyer_identifier,
                         seller_scheme,
                         seller_identifier,
+                        *binding_values,
                         timestamp,
                         timestamp,
                     ),
@@ -2685,7 +3675,9 @@ class SQLiteClient:
                 durable = cur.execute(
                     """
                     SELECT buyer_scheme, buyer_identifier,
-                           seller_scheme, seller_identifier
+                           seller_scheme, seller_identifier,
+                           domain_listing_id, site_id, offering_mode,
+                           domain_identity, contract_major, contract_minor
                     FROM negotiation_threads
                     WHERE negotiation_id = ?
                     """,
@@ -2696,9 +3688,11 @@ class SQLiteClient:
                     buyer_identifier,
                     seller_scheme,
                     seller_identifier,
+                    *binding_values,
                 ):
                     raise ValueError(
-                        "negotiation identifier is already bound to different principals"
+                        "negotiation identifier is already bound to different "
+                        "principals or domain binding"
                     )
 
                 # Insert private local state (upsert if needed)

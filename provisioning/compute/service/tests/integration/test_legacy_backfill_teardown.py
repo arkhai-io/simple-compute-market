@@ -152,24 +152,18 @@ def test_pre_cutover_vm_lease_backfills_and_tears_down_to_release():
         ),
     )
     ledger = CapacityLedgerService(session_factory=session_factory)
-    executor_release = ExecutorReleaseDispatcher(
-        {
-            VM_EXECUTOR_KIND: VmReleaseExecutor(
-                settlement_repository=settlement_repository,
-                session_factory=session_factory,
-                teardown_port=FulfillmentServiceTeardownPort(lambda: fulfillment_service),
-            ),
-        },
-        default_executor_kind=VM_EXECUTOR_KIND,
-    )
-    release_jobs = ReleaseJobDispatcher(
-        {
-            VM_EXECUTOR_KIND: VmFulfillmentReleaseJobPort(
-                teardown_port=FulfillmentServiceTeardownPort(lambda: fulfillment_service),
-            ),
-        },
-        default_executor_kind=VM_EXECUTOR_KIND,
-    )
+    executor_release = ExecutorReleaseDispatcher({
+        VM_EXECUTOR_KIND: VmReleaseExecutor(
+            settlement_repository=settlement_repository,
+            session_factory=session_factory,
+            teardown_port=FulfillmentServiceTeardownPort(lambda: fulfillment_service),
+        ),
+    })
+    release_jobs = ReleaseJobDispatcher({
+        VM_EXECUTOR_KIND: VmFulfillmentReleaseJobPort(
+            teardown_port=FulfillmentServiceTeardownPort(lambda: fulfillment_service),
+        ),
+    })
     settings = _settings()
     lease_lifecycle = LeaseLifecycleService(
         settings=settings,

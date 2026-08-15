@@ -16,8 +16,9 @@ from __future__ import annotations
 
 import logging
 import os
-from pathlib import Path
+import stat
 from collections.abc import Mapping
+from pathlib import Path
 from typing import Any
 
 from dynaconf import Dynaconf
@@ -50,6 +51,7 @@ def _build_settings() -> Dynaconf:
     )
     return s
 
+
 def resolve_evm_wallet() -> tuple[str, str]:
     """Resolve explicit, matching Alkahest mechanism credentials."""
     address = str(settings.get("wallet.address", "") or "")
@@ -79,6 +81,54 @@ def _coerce_chains_table(raw: Any) -> dict[str, dict[str, Any]]:
     return out
 
 
+def _plain_config_value(value: Any) -> Any:
+    """Recursively detach Dynaconf containers from typed configuration."""
+    if hasattr(value, "items"):
+        return {str(key): _plain_config_value(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_plain_config_value(item) for item in value]
+    return value
+
+
+def settlement_config_mapping(source: Dynaconf | None = None) -> dict[str, Any]:
+    """Return the one canonical settlement table for registry resolution."""
+    raw = (source or settings).get("settlement")
+    if raw is None:
+        return {}
+    value = _plain_config_value(raw)
+    if not isinstance(value, dict):
+        raise ValueError("Settlement must be a table")
+    return value
+
+
+def settlement_publication_defaults(
+    source: Dynaconf | None = None,
+) -> tuple[Any, ...]:
+    """Validate configured API-credit settlement publication clauses."""
+    active = source or settings
+    raw = _plain_config_value(active.get("pricing.settlements", []) or [])
+    if not isinstance(raw, list) or any(not isinstance(item, dict) for item in raw):
+        raise ValueError("pricing.settlements must be a list of complete clauses")
+    if not raw:
+        return ()
+    from apicredits_storefront.settlement_composition import (
+        build_storefront_settlement_registry,
+    )
+    from market_settlement_runtime import compile_settlement_publication_clause
+
+    registry = build_storefront_settlement_registry()
+    config = registry.resolve(settlement_config_mapping(active), role="seller")
+    return tuple(
+        compile_settlement_publication_clause(
+            item,
+            registry=registry,
+            config=config,
+            role="seller",
+        )
+        for item in raw
+    )
+
+
 settings: Dynaconf = _build_settings()
 CHAINS: dict[str, ChainConfig] = chains_from_config(
     {"chains": _coerce_chains_table(settings.get("chains"))},
@@ -89,6 +139,7 @@ if not CHAINS:
         "[CONFIG] no [chains.<name>] tables configured — the storefront "
         "will fail when it needs to dispatch any on-chain call."
     )
+
 
 def resolve_identity_config() -> IdentityConfig:
     """Load the public marketplace principal without reading its credential."""
@@ -107,6 +158,7 @@ def resolve_identity_config() -> IdentityConfig:
     except (TypeError, ValueError) as exc:
         raise RuntimeError("invalid storefront marketplace identity") from exc
     return config
+
 
 def resolve_admin_identities() -> TrustedIdentitySet:
     """Load the ordered public principals trusted for admin requests."""
@@ -200,8 +252,28 @@ def credits_service_url() -> str:
 
 
 def credits_admin_key() -> str:
-    """Resolve the credits-service mechanism credential without fallback."""
-    return str(settings.get("credits.admin_key", "") or "")
+    """Resolve one exact credits-service mechanism credential."""
+    inline = str(settings.get("credits.admin_key", "") or "")
+    file_name = str(settings.get("credits.admin_key_file", "") or "")
+    if inline and file_name:
+        raise RuntimeError(
+            "credits.admin_key and credits.admin_key_file are mutually exclusive"
+        )
+    if inline:
+        return inline
+    if not file_name:
+        return ""
+    path = Path(file_name)
+    try:
+        metadata = path.lstat()
+        if not stat.S_ISREG(metadata.st_mode):
+            raise RuntimeError("credits.admin_key_file must be a regular file")
+        value = path.read_text(encoding="utf-8").strip()
+    except OSError as exc:
+        raise RuntimeError("credits.admin_key_file cannot be read") from exc
+    if not value:
+        raise RuntimeError("credits.admin_key_file is empty")
+    return value
 
 
 AGENT_ID: str = _validate_agent_id(settings.get("agent_id", ""))

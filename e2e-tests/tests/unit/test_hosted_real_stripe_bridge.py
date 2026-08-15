@@ -36,14 +36,21 @@ class _Marketplace:
         self.calls.append("materialize")
         assert negotiation_id == "negotiation-001"
         return SimpleNamespace(
+            obligation_ref="obligation-001",
             settlement_ref="settlement-001",
             operation_ref="market-operation-001",
             amount=1250,
             currency="usd",
             expiration_unix=2_000_000_000,
+            destination_account_ref="account-001",
             transfer_group="market-group-001",
+            accepted_negotiation_id=negotiation_id,
+            accepted_funding_profile="card.v1",
+            accepted_condition_hash="11" * 32,
+            funding_authorization_bound=True,
             action=SimpleNamespace(
-                kind="redirect",
+                kind="payment",
+                expires_at_unix=2_000_000_000,
                 url="https://checkout.stripe.com/c/pay/private",
             ),
         )
@@ -51,6 +58,11 @@ class _Marketplace:
     def wait_funded(self, settlement_ref: str):
         self.calls.append("wait_funded")
         return settlement_ref == "settlement-001"
+
+    def observe_pending_funding(self, settlement_ref: str):
+        self.calls.append("observe_pending")
+        assert settlement_ref == "settlement-001"
+        return {"funding_state": "awaiting_payment", "fulfillment_started": False}
 
     def complete_vm_fulfillment(self, settlement_ref: str):
         self.calls.append("fulfill")
@@ -91,6 +103,7 @@ def test_bridge_drives_public_marketplace_ports_without_test_provider_readiness(
         "ok": True,
         "marketplace_state": "collected",
         "authority_state": "collected",
+        "effect_operation_ref": "market-operation-001",
         "fulfillment_state": "fulfilled",
     }
     assert marketplace.calls == [

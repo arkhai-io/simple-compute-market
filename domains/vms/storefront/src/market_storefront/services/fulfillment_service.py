@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 from collections.abc import Awaitable, Callable
 from datetime import datetime, timezone
+from functools import partial
 from typing import Any
 
 from alkahest_py import AlkahestClient
@@ -23,6 +25,7 @@ from market_fulfillment import VersionedEnvelope
 
 from market_storefront.services.capacity_client import (
     build_capacity_client,
+    build_capacity_runtime,
     build_fulfillment_client,
 )
 from market_storefront.services.vm_fulfillment_service import (
@@ -38,7 +41,6 @@ from market_storefront.utils.config import (
     get_provisioning_authorities,
     settings,
 )
-from market_storefront.utils.sqlite_client import get_sqlite_client
 
 logger = logging.getLogger(__name__)
 
@@ -50,6 +52,7 @@ _VM_MARKET = "vms"
 
 async def _do_provision(
     ssh_public_key: str,
+    sqlite_client: Any,
     *,
     vm_host: str | None,
     vm_target: str,
@@ -73,19 +76,54 @@ async def _do_provision(
     ``fulfillment_id`` but before polling starts, mirroring the legacy job-id
     hook this replaces.
     """
+    escrow = await sqlite_client.load_escrow(escrow_uid=escrow_uid)
+    if escrow is None or not escrow.get("negotiation_id"):
+        raise RuntimeError(
+            f"escrow {escrow_uid!r} has no accepted negotiation binding"
+        )
+    thread_binding = await sqlite_client.load_thread_binding(
+        negotiation_id=str(escrow["negotiation_id"])
+    )
+    sqlite_client.domain_registry.resolve(thread_binding.binding)
+    raw_context = escrow.get("fulfillment_context")
+    if isinstance(raw_context, str):
+        try:
+            context = json.loads(raw_context)
+        except json.JSONDecodeError as exc:
+            raise RuntimeError("stored fulfillment context is malformed") from exc
+    elif isinstance(raw_context, dict):
+        context = dict(raw_context)
+    elif raw_context is None:
+        context = {}
+    else:
+        raise RuntimeError("stored fulfillment context must be an object")
+    bound_context = sqlite_client.bind_fulfillment_context(
+        context,
+        thread_binding=thread_binding,
+    )
+    await sqlite_client.update_escrow(
+        escrow_uid=escrow_uid,
+        fulfillment_context=json.dumps(
+            bound_context,
+            sort_keys=True,
+            separators=(",", ":"),
+        ),
+    )
+    site_id = thread_binding.site_id
     fulfillment_client = build_fulfillment_client(
-        build_capacity_client(lambda: get_sqlite_client())
+        build_capacity_client(lambda: sqlite_client)
     )
 
     scheduled = await fulfillment_client.schedule_resource(
         FulfillmentScheduleRequest(
             capacity_reservation_id=capacity_reservation_id,
             market=_VM_MARKET,
-        )
+        ),
+        site_id=site_id,
     )
     if escrow_uid:
         await persist_escrow_fields_with_retry(
-            get_sqlite_client,
+            lambda: sqlite_client,
             escrow_uid=escrow_uid,
             capacity_reservation_id=capacity_reservation_id,
             settlement_resource_id=scheduled.settlement_resource_id,
@@ -108,7 +146,8 @@ async def _do_provision(
                 schema_version=1,
                 payload=request_payload,
             ),
-        )
+        ),
+        site_id=site_id,
     )
 
     if on_job_submitted is not None:
@@ -129,6 +168,7 @@ async def _do_provision(
         capacity_reservation_id=capacity_reservation_id,
         timeout=timeout,
         poll_interval=poll_interval,
+        site_id=site_id,
     )
     if status.state == "failed":
         raise ComputeProvisioningJobError(
@@ -138,6 +178,7 @@ async def _do_provision(
     envelope = await fulfillment_client.get_fulfillment_result(
         accepted.fulfillment_id,
         capacity_reservation_id=capacity_reservation_id,
+        site_id=site_id,
     )
     return _fulfillment_result_to_legacy_shape(envelope)
 
@@ -171,6 +212,7 @@ async def _poll_fulfillment_until_terminal(
     capacity_reservation_id: str,
     timeout: float,
     poll_interval: float,
+    site_id: str,
 ) -> Any:
     """Poll ``get_fulfillment_status`` until ``active``/``failed`` or timeout.
 
@@ -184,6 +226,7 @@ async def _poll_fulfillment_until_terminal(
         status = await fulfillment_client.get_fulfillment_status(
             fulfillment_id,
             capacity_reservation_id=capacity_reservation_id,
+            site_id=site_id,
         )
         if status.state in ("active", "failed"):
             return status
@@ -262,9 +305,9 @@ async def _build_provisioning_job_spec(
     order_dict: dict | None,
     ssh_public_key: str,
     duration_seconds: int,
-    sqlite_client: Any | None = None,
+    sqlite_client: Any,
 ) -> dict | None:
-    db = sqlite_client or get_sqlite_client()
+    db = sqlite_client
     return await _vm_build_provisioning_job_spec(
         order_dict=order_dict,
         ssh_public_key=ssh_public_key,
@@ -275,6 +318,7 @@ async def _build_provisioning_job_spec(
 
 async def _apply_fulfillment_failure_policy_adapter(
     *,
+    sqlite_client: Any,
     capacity_reservation_id: str | None,
     escrow_uid: str,
     listing_id: str | None,
@@ -289,7 +333,7 @@ async def _apply_fulfillment_failure_policy_adapter(
     )
 
     await apply_fulfillment_failure_policy(
-        get_sqlite_client(),
+        sqlite_client,
         FulfillmentFailureContext(
             capacity_reservation_id=capacity_reservation_id,
             escrow_uid=escrow_uid,
@@ -301,7 +345,7 @@ async def _apply_fulfillment_failure_policy_adapter(
         ),
         # In remote-capacity mode the hold lives in the site ledger; the
         # policy's release_capacity action must go back through the client.
-        capacity=build_capacity_client(lambda: get_sqlite_client()),
+        capacity=build_capacity_runtime(lambda: sqlite_client),
     )
 
 
@@ -385,6 +429,7 @@ async def terminate_vm_lease(
 
 
 async def fulfill_compute_obligation(
+    sqlite_client: Any,
     client: AlkahestClient | None,
     escrow_uid: str,
     ssh_public_key: str,
@@ -413,7 +458,7 @@ async def fulfill_compute_obligation(
     """
     held_reservation: dict | None = None
     if negotiation_id:
-        db = get_sqlite_client()
+        db = sqlite_client
         hold = await db.load_capacity_hold(negotiation_id=negotiation_id)
         if hold:
             held_reservation = dict(hold.get("payload") or {})
@@ -436,15 +481,16 @@ async def fulfill_compute_obligation(
         settlement_mechanism=settlement_mechanism,
         chain_configs=CHAINS,
         base_url=BASE_URL_OVERRIDE,
-        get_sqlite_client=get_sqlite_client,
-        # Late-bound factory: tests monkeypatch this module's
-        # get_sqlite_client, and the capacity client must follow it.
-        capacity=build_capacity_client(lambda: get_sqlite_client()),
+        get_sqlite_client=lambda: sqlite_client,
+        capacity=build_capacity_runtime(lambda: sqlite_client),
         stage_event=stage_event,
-        provision_vm=_do_provision,
+        provision_vm=partial(_do_provision, sqlite_client=sqlite_client),
         schedule_shutdown=_do_shutdown,
         register_lease=_register_vm_lease_with_settings,
-        apply_failure_policy=_apply_fulfillment_failure_policy_adapter,
+        apply_failure_policy=partial(
+            _apply_fulfillment_failure_policy_adapter,
+            sqlite_client=sqlite_client,
+        ),
         held_reservation=held_reservation,
         site_id=site_id,
     )

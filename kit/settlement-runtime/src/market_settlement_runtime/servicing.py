@@ -16,9 +16,7 @@ from .runtime import SettlementRuntime
 logger = logging.getLogger(__name__)
 EventCallback = Callable[[str, dict[str, Any]], Any]
 TerminalCallback = Callable[[SettlementObligationRecord, str, str | None], Any]
-ReadyCallback = Callable[
-    [SettlementObligationRecord, str], Awaitable[None] | None
-]
+ReadyCallback = Callable[[SettlementObligationRecord, str], Awaitable[None] | None]
 
 
 class _ServicingStepError(RuntimeError):
@@ -131,11 +129,40 @@ class SettlementServicingWorker:
         if status.status == "busy":
             return
         record = await self._reload(initial.obligation_ref)
-        if status.status in {"manual_required", "terminal"}:
+        if (
+            record.mechanism_status == "failed"
+            and record.fulfillment_ref is not None
+            and record.collection_state != "succeeded"
+        ):
+            await self._cleanup(record, record.last_error)
+            return
+        if record.mechanism_status in {
+            "reclaimed",
+            "expired",
+            "failed",
+            "manual_required",
+        }:
+            await self._terminal(
+                record,
+                record.mechanism_status,
+                record.last_error,
+            )
+            return
+        if status.status == "terminal":
             await self._terminal(
                 record,
                 record.mechanism_status or status.status,
                 record.last_error,
+            )
+            return
+        if record.collection_state == "succeeded":
+            if not record.mechanism_state.get("terminal_risk_monitoring"):
+                await self._terminal(record, "collected", None)
+                return
+            await self._schedule(record.obligation_ref, "status", now)
+            await self._emit(
+                "settlement_terminal_risk_monitored",
+                {"obligation_ref": record.obligation_ref},
             )
             return
         if record.mechanism_status != "ready":
@@ -205,6 +232,41 @@ class SettlementServicingWorker:
         elif collected.status == "manual_required":
             await self._terminal(record, "manual_required", record.last_error)
 
+    async def _cleanup(
+        self,
+        record: SettlementObligationRecord,
+        reason: str | None,
+    ) -> None:
+        reserved = await self._runtime.reserve_cleanup(
+            record.obligation_ref,
+            local_principal=record.claimant_principal,
+            worker_id=self._worker_id,
+        )
+        if reserved.status in {"busy", "succeeded"}:
+            return
+        try:
+            if self._on_terminal is not None:
+                result = self._on_terminal(record, "failed", reason)
+                if inspect.isawaitable(result):
+                    await result
+            await self._runtime.complete_cleanup(
+                record.obligation_ref,
+                local_principal=record.claimant_principal,
+                worker_id=self._worker_id,
+            )
+        except Exception as exc:
+            await self._runtime.retry_cleanup(
+                record.obligation_ref,
+                exc,
+                local_principal=record.claimant_principal,
+                worker_id=self._worker_id,
+            )
+            raise _ServicingStepError("cleanup", exc) from exc
+        await self._emit(
+            "settlement_cleanup_complete",
+            {"obligation_ref": record.obligation_ref},
+        )
+
     async def _reload(self, obligation_ref: str) -> SettlementObligationRecord:
         row = await self._repository.load_settlement_obligation(obligation_ref)
         if row is None:
@@ -235,6 +297,8 @@ class SettlementServicingWorker:
 
     @staticmethod
     def _operation_for(record: SettlementObligationRecord) -> str:
+        if record.collection_state == "succeeded":
+            return "status"
         if record.condition_state == "ready":
             return "collect"
         if record.mechanism_status == "ready":

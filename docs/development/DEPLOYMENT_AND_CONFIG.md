@@ -110,6 +110,36 @@ separate mechanism resources and never determine profile selection. ConfigMaps,
 arguments, image layers, run logs, evidence, output, and examples contain no
 resolved signing value.
 
+## Per-domain stack composition
+
+Each domain stack owns its public topology while consuming shared core/kit
+authorities:
+
+- `compose.vms.yml` composes the VM storefront and compute authorities.
+- `compose.apicredits.yml` composes the API-credit registry, credits authority,
+  gated sample service, and API-credit storefront.
+- `compose.bare-metal.yml` composes the dedicated bare-metal storefront with a
+  compute-family registry and the selected-site provisioning authority.
+
+Storefront images install their distributions from the staged `.dist`
+wheelhouse; runtime images do not resolve editable sibling source. API-credit
+and bare-metal SQLite/queue/registry stores occupy separate named volumes.
+
+Stack files carry public URLs, canonical principals, explicit Resource Pool
+offering modes, and exact selected-site bindings. Signer, API-admin,
+provisioning SSH, hosted-authority, and buyer credentials are independent
+role-scoped file references with no committed fallback. Missing identity,
+inventory, pool declaration, site authority, or credential blocks startup or
+scenario preflight; it never selects a test signer, default site, payload-
+guessed domain, direct executor, or provider simulator.
+
+The bare-metal image currently exposes the signed publication command seam but
+does not autonomously publish to the registry, and a public settlement address
+alone does not compose a settlement authority. Its stack may be brought up for
+operator integration, but it is not release-qualified or discoverable-deal
+evidence until accepted publication and settlement lifecycles are ready and
+the installed buyer completes real access and revocation.
+
 ## Stateful service persistence
 
 Each service owns its own database; there is no shared database between
@@ -119,6 +149,33 @@ persistence ownership"). A SQLite-backed, single-writer service uses
 single-writer model does not tolerate the overlapping old/new pod
 window a `RollingUpdate` strategy would otherwise produce against a
 shared volume.
+
+### Combined compute-family storefront
+
+The storefront image installs the shared `arkhai-core-storefront` shell plus
+each enabled domain contribution from staged `.dist` wheels. Public
+configuration contains a non-empty `storefront_domains` list; every row names
+one contribution, exact offering mode, domain identity, and contract version.
+Trusted provisioning authorities remain separately configured site bindings.
+The Helm chart and Compose profile run one storefront process against one
+single-writer SQLite volume; they do not start one container per domain.
+
+`storefront_domains` is public routing metadata only. Signing credentials,
+provider settings, SSH material, tenant credentials, hosted provider objects,
+and private domain results remain in role-owned Secret channels and never enter
+ConfigMaps, command arguments, images, listing bindings, or migration reports.
+Startup rejects missing wheels, duplicate modes/identities, assertion mismatch,
+unsupported versions, incomplete capabilities, or recoverable bindings that
+the frozen registry cannot resolve.
+
+Before enabling the combined image over an existing database, quiesce effects
+and run `market-storefront migrate-storefront-domains --contribution <id>` in
+check mode. Write mode requires the same explicit contribution and creates a
+restrictive same-directory backup before fsync and atomic replacement.
+Mixed/ambiguous rows, missing site or pool/resource provenance, public-mode
+conflicts, orphan relationships, and derivation collisions fail without
+mutating the source. Once accepted effects use common bindings, rollback is
+forward recovery under those bindings, not restoration of an unbound schema.
 
 ## Migrations at startup
 
@@ -173,6 +230,31 @@ configuration projections.
 Role CLIs reject legacy settlement keys and expose the same explicit migration contract. The storefront additionally rejects legacy publication pricing that would synthesize options from `min_price`, `token`, or raw `accepted_escrows`. A check is read-only and reports paths and actions with values redacted. A write requires `--backup`, validates the complete candidate before mutation, creates a restrictive same-directory `.bak`, fsyncs, and atomically replaces the source. Conflicting old and new values fail rather than choosing one. Repeating a completed migration is a no-op.
 
 Publication config and inventory CSV migrate separately from the `[Settlement]` hierarchy. The migration converts an unambiguous single-mechanism legacy price into one complete typed clause. It refuses a dual-mechanism source whose one scalar price has no authoritative asset scale, and refuses CSV rows whose legacy `accepted_escrows` lack a resolvable rate. Resource `settlements` replace command/config defaults as a whole after cutover.
+
+Expanded hosted configuration uses exact funding-profile clauses rather than `payment_method_types` or provider method strings. One seller clause names one of `card.v1`, `us_bank_transfer.v1`, or `us_ach_debit.v1`, its lowercase currency, positive rate, interaction capability, and typed condition input. Config may declare all three; preflight reports readiness per profile and suppresses only the clauses whose profile/currency/country/authority contract is unavailable. Buyer config carries the same exact client/API `0.2.0`/schema `5`/capability pins and references the owner-restricted local buyer profile store. The opaque authority/environment payer binding is stored only in that profile; saved instrument refs remain authority-side or transient.
+
+The expanded cutover coordinates buyer and storefront config, the exact hosted client wheel, signed manifest and service-image coordinate, generated templates, Compose/Helm values, and role-scoped marketplace signer Secrets. A legacy unambiguous card publication clause migrates to `card.v1`; accepted historical card obligations are not rewritten. Before the first new publication or purchase authorization, rollback restores the matching prior artifacts and config together. After an effect begins, recovery rolls forward under the accepted funding profile, authorization, and marketplace operation identities.
+
+Marketplace schemas reject provider credentials and IDs, Customer/PaymentMethod/mandate/bank/card data, stable instruments in storefront state, action URLs, webhooks, hosted databases/migrations, provider reconciliation, and recovery controls. The hosted authority remains the only process that receives those inputs.
+
+For an API-credit hosted-only role, set settlement priority to
+`fiat.stripe.v1`, provide an Ed25519 marketplace identity through the normal
+role credential Secret, and leave wallet/chains absent. The storefront requires
+the public hosted authority/release pins, seller account, exact funding-profile
+clauses, credits-service URL plus admin-key file, and portable issuance-evidence
+resolver trust. The buyer requires its selected durable profile and matching
+opaque authority binding. API bearer secrets are returned only through the
+authenticated buyer result route; they do not belong in TOML, environment
+variables, listings, settlement evidence, logs, images, or ConfigMaps.
+
+The API-credit storefront distribution and image install
+`arkhai-kit-hosted-settlement` and the released hosted client from the staged
+wheelhouse. The storefront owns the settlement operation journal, private
+buyer-result table, and signed issuance-evidence table; the credits service
+independently owns keys, request-digested grants, balances, quota, credentials,
+and its migration history. Restart either authority against its own volume.
+Never source-share a sibling package or mount one service's database into the
+other.
 
 For each buyer and storefront configuration overlay, use this production
 sequence:
@@ -238,6 +320,15 @@ Stripe credentials, or provider state. Those belong to the hosted service's
 independent release and chart. Marketplace packages consume the exact hosted
 client wheel and identity interface bound by that signed release manifest;
 editable sibling sources and compatible-major substitution are rejected.
+
+### Bare-metal hosted role configuration
+
+`arkhai-bare-metal-buyer` is an installed core buyer-domain wheel. Its TOML contains a registry URL, registry authority/trust pins, and bounded public defaults only; the XDG buyer profile service resolves the fresh or run-recorded signer. The `bare-metal` commands use authenticated discovery and the shared schema-opaque hosted storefront transport. Raw payer/instrument/provider values and action material are not domain configuration or durable CLI output.
+
+The bare-metal storefront accepts one strict shared settlement JSON root through `BARE_METAL_STOREFRONT_SETTLEMENT`. Hosted-only configuration leaves `BARE_METAL_STOREFRONT_EVM_ADDRESS` empty and constructs no Alkahest wallet, chain, or RPC client. Publication additionally requires authenticated registry trust, exact typed clauses, per-profile funding deadlines, offer/fulfillment bounds, fresh signed selected-site projections, and a maximum lease duration. The Compose wrapper exposes those as public/config inputs; the Helm chart mounts the settlement JSON from an existing Secret. Neither deployment surface carries Stripe credentials or hosted provider state.
+
+The hosted authority remains a separately verified deployment. The storefront needs its public URL, authority/environment trust, seller account reference, contract fingerprint, supported profile/currency/country policy, and exact manifest/client/API capability pins through the shared settlement config. The selected-site authority keeps inventory, executor routing, provisioning SSH credentials, and teardown ownership. The buyer, storefront, site authority, and hosted authority each retain independent signer credentials and databases.
+
 
 Local cross-repository Compose uses the same verified supply-chain path.
 `make prepare-hosted-compose` verifies the configured trust policy, signed
@@ -320,15 +411,9 @@ configuration, processes, webhook material, and browser state. Accepted
 external financial objects are recovered, transferred, or refunded through
 their original durable identities rather than being deleted or recreated.
 
-The sanitized report identifies the marketplace repository and exact commit
-separately from the hosted manifest digest, client wheel hash, service image
-digest, and signed release repository/workflow reference/source commit. It
-records the protected producer workflow run identity separately as
-orchestration evidence and includes only allowlisted scenario/stage, opaque
-operation identity, normalized
-state/amount/currency/cardinality, failure class, and bounded diagnostics. It
-contains no credentials, action URLs, account/customer/card data, raw
-webhooks, unrestricted provider payloads, or marketplace configuration secrets.
+The protected matrix runs and attributes `card.v1`, `us_bank_transfer.v1`, `us_ach_debit.v1`, and off-session `requires_action` separately. Each selected rail must have its exact signed-release, account, currency/country, instrument or funding path, mandate where applicable, transient browser/action, and supported Stripe test-mode prerequisite. A missing prerequisite makes only that assertion unavailable and cannot be replaced by another profile, a provider-port script, or a credential-free marketplace result.
+
+The sanitized report keeps the marketplace repository/commit independent from hosted manifest/client/image/API/schema/migrations/provenance/repository/workflow/source identities and the protected workflow run. It contains only selected profile/currency, public lifecycle stages, normalized outcomes, attempts/timestamps, failure class, and bounded hashed opaque correlations. Recursive canary validation rejects credentials, provider/customer/payment-method/mandate/bank/card data, raw actions or URLs, provider payloads/events/requests, source-bearing local paths, and marketplace configuration secrets before evidence is signed.
 
 Default and fork workflows do not receive protected release access, Stripe
 credentials, connected-account identifiers, webhook secrets, or browser

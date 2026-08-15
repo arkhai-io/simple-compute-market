@@ -48,13 +48,18 @@ def repo():
 
 
 def _requirement(**dimensions):
-    return SettlementRequirement(resource_kind="compute", dimensions=dimensions or {"units": 1})
+    return SettlementRequirement(
+        executor_kind="vm",
+        resource_kind="compute",
+        dimensions=dimensions or {"units": 1},
+    )
 
 
 def _resource(provider="ansible"):
     return SettlementResource(
         settlement_resource_id="res-1",
         pool_id="pool-1",
+        executor_kind="vm",
         resource_kind="compute",
         provider=provider,
         attributes={},

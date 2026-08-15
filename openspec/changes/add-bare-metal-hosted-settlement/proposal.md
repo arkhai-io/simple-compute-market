@@ -1,22 +1,16 @@
 ## Why
 
-Bare metal has domain codecs, trusted resource publication, and executor/lease components, but the current permanent contract still does not establish a complete runnable buyer-to-storefront fulfillment path. Hosted funding can be adopted only after those real composition, selected-site, fulfillment, result, recovery, and teardown prerequisites exist; this change records that gate and the exact whole-host commercial contract rather than treating verified settlement or a fake fulfillment flag as delivery.
+Bare metal now has a runnable buyer, a dedicated storefront composition, trusted selected-site capacity and provisioning clients, durable fulfillment/recovery/teardown, and the shared expanded hosted settlement seams. This change adopts hosted funding without treating verification or a fake fulfillment flag as delivery: authoritative funding gates physical effects, portable lease-ready evidence gates collection, and physical teardown remains independent from financial reclaim.
 
-## Hard prerequisites and current blockers
+## Prerequisite resolution and external qualification blockers
 
-Implementation beyond prerequisite verification MUST NOT begin until all of the following are present in the checkout, accepted into permanent specs/architecture, and proven by focused/integration evidence:
+The runnable `arkhai-bare-metal-buyer`, dedicated seller composition, POOLS-7 selected-site fulfillment cutover, shared one-domain storefront seams, persistent buyer profiles, and expanded hosted consumer are present and promoted in this checkout. Bare metal consumes their APIs directly; it introduces no VM import, hosted transport copy, local route implementation, direct executor bypass, fake provisioner, or hard-coded resource.
 
-- A runnable bare-metal buyer (`bare-metal-buyer-domain` is referenced but no change directory or buyer package currently exists).
-- Runnable bare-metal seller/composition and real fulfillment/teardown contracts from `market-platform-bare-metal-10-storefront-composition`. Its task artifact reports complete, but permanent `storefront-publication` still states that bare metal lacks a complete runnable storefront; promotion/acceptance and real lifecycle evidence remain required.
-- POOLS-7 selected-site scheduling, durable fulfillment, result, recovery, and teardown from `pools-7-storefront-fulfillment-cutover`. Its task artifact reports complete, but this change must verify those contracts are promoted and consumed by the bare-metal root rather than relying on planning status.
-- A completed shared storefront/domain composition seam. `kit-storefront-composition-seam` is currently `0/22`; referenced `storefront-domain-parameterization` and `multi-domain-storefront-composition` changes are absent and must be restored, recreated, or explicitly superseded with an accepted equivalent.
-- Implemented `consume-expanded-stripe-funding`, not merely its planning artifacts, including exact producer release, persistent buyer profiles, shared transport/adapter/runtime, migrations, deployment, and evidence.
-
-No task may satisfy a missing prerequisite with a bare-metal-local copy, no-op/fake provisioner, hard-coded site/resource, test-only buyer, or unverifiable completion claim.
+Production qualification remains externally blocked until operators supply and verify the exact signed hosted manifest/client/service image/provenance and all protected Stripe test-mode account/rail/instrument/mandate/browser inputs. Release-qualified whole-host evidence additionally requires a disposable real target on which authenticated access and later revocation, executor teardown, Capacity Reservation release, and capacity republication are observed. Local deterministic tests and generated configuration do not substitute for either external lane.
 
 ## What Changes
 
-- After the gates pass, register Alkahest and `fiat.stripe.v1` through the completed shared registry/runtime in runnable bare-metal buyer and storefront roots. Hosted-only Ed25519 roles require no wallet or chain.
+- Register Alkahest and `fiat.stripe.v1` through the completed shared registry/runtime in runnable bare-metal buyer and storefront roots. Hosted-only Ed25519 roles require no wallet or chain.
 - Add mechanism-neutral settlement alternatives to trusted bare-metal publication. Publish one exact hosted option per ready profile only when hosted authority/release, seller account, condition resolver, currency/rate, Physical Resource/site mapping, access capability, capacity/offer window, and funding deadline are coherent.
 - Add exact buyer selection and server-authoritative obligation derivation from the versioned bare-metal demand, trusted listing, accepted seller terms, and selected site. Buyer input cannot invent or override Physical Resource, physical host, site, pool, executor machine/provider, seller/claimant, price, access policy, condition, or expiry.
 - Do not commit, allocate, schedule, or provision a physical host before authoritative hosted funding. A pre-existing billable negotiation-time hold may remain only until its accepted deadline; on funded state, use that exact hold/selected trusted site and ordinary Capacity Reservation, shared fulfillment, and bare-metal executor contracts exactly once.

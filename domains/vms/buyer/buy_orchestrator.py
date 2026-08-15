@@ -33,6 +33,7 @@ from core_buyer.orchestration import (  # noqa: F401 — re-exports
     DEFAULT_SETTLEMENT_POLL_INTERVAL,
     DEFAULT_SETTLEMENT_TIMEOUT,
     BuildEscrowProposalFn,
+    RevalidateSettlementFn,
     _signed_json,
     poll_settlement_status,
     submit_settlement_request,
@@ -81,6 +82,7 @@ def make_legacy_negotiate_hook(
     max_negotiation_rounds: int,
     derive_prices: Optional[Callable[[dict[str, Any]], tuple[int, int]]],
     chain: Optional[list[Any]],
+    revalidate_settlement: RevalidateSettlementFn | None = None,
 ) -> NegotiateFn:
     """Build the compute-instantiated negotiate hook over the core stage."""
     return _core_make_negotiate_hook(
@@ -96,6 +98,7 @@ def make_legacy_negotiate_hook(
         max_negotiation_rounds=max_negotiation_rounds,
         derive_prices=derive_prices,
         chain=chain,
+        revalidate_settlement=revalidate_settlement,
     )
 
 

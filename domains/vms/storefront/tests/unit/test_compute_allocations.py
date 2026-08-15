@@ -5,12 +5,13 @@ import sqlite3
 import pytest
 
 from domains.vms.listings.reconciler import available_compute_slices, listing_pool_key
+from market_storefront.domain_runtime import build_vm_storefront_domain, build_vm_storefront_registry
 from market_storefront.utils.sqlite_client import SQLiteClient
 
 
 @pytest.fixture
 def client(tmp_path):
-    return SQLiteClient(db_path=str(tmp_path / "agent.db"))
+    return SQLiteClient(db_path=str(tmp_path / "agent.db"), registry=build_vm_storefront_registry(build_vm_storefront_domain()))
 
 
 async def _seed_compute_pool(client: SQLiteClient, *, gpu_count: int = 4) -> None:
@@ -73,27 +74,19 @@ def test_sqlite_schema_includes_derived_compute_listings(client):
         "last_reconciled_at",
     } <= cols
 
-
-def test_sqlite_schema_includes_derived_bare_metal_listings(client):
+def test_vm_schema_does_not_create_bare_metal_listing_tables(client):
     conn = sqlite3.connect(client.db_path)
     try:
-        cols = {
-            row[1]
-            for row in conn.execute(
-                "PRAGMA table_info(derived_bare_metal_listings)"
-            ).fetchall()
-        }
+        row = conn.execute(
+            "SELECT 1 FROM sqlite_master "
+            "WHERE type = 'table' AND name = 'derived_bare_metal_listings'"
+        ).fetchone()
     finally:
         conn.close()
 
-    assert {
-        "listing_id",
-        "machine_id",
-        "physical_host_id",
-        "status",
-        "derivation_key",
-        "last_reconciled_at",
-    } <= cols
+    assert row is None
+
+
 
 
 def test_sqlite_schema_includes_compute_allocation_correlation_fields(client):
@@ -160,7 +153,7 @@ def test_sqlite_migration_backfills_compute_allocation_correlation_fields(tmp_pa
     finally:
         conn.close()
 
-    SQLiteClient(db_path=str(db_path))
+    SQLiteClient(db_path=str(db_path), registry=build_vm_storefront_registry(build_vm_storefront_domain()))
 
     conn = sqlite3.connect(db_path)
     try:
@@ -224,7 +217,7 @@ def test_sqlite_migration_accepts_pre_compute_inventory_schema(tmp_path):
     finally:
         conn.close()
 
-    SQLiteClient(db_path=str(db_path))
+    SQLiteClient(db_path=str(db_path), registry=build_vm_storefront_registry(build_vm_storefront_domain()))
 
     conn = sqlite3.connect(db_path)
     try:
@@ -282,10 +275,8 @@ async def test_fungible_pool_derives_one_listing_set_across_members(client):
 
 @pytest.mark.asyncio
 async def test_member_availability_view_governs_slices(client):
-    """Remote-capacity mode: consumption comes from the aggregated site
-    snapshots keyed (site, resource_id); totals and market attributes
-    stay local. Members without a site tag match the home-site (None)
-    key."""
+    """Remote-capacity mode consumes the exact site-scoped availability
+    projection while preserving local totals and market attributes."""
     await _seed_fungible_compute_pool(client)
 
     # Site ledgers say one member is fully consumed, the other has 2 free.
@@ -293,8 +284,8 @@ async def test_member_availability_view_governs_slices(client):
         client.db_path,
         home_site="home-site",
         member_availability={
-            (None, "pool-h200-a"): 0,
-            (None, "pool-h200-b"): 2,
+            ("home-site", "pool-h200-a"): 0,
+            ("home-site", "pool-h200-b"): 2,
         },
     )
     assert [row["gpu_count"] for row in rows] == [1, 2]
@@ -307,8 +298,8 @@ async def test_member_availability_view_governs_slices(client):
         client.db_path,
         home_site="home-site",
         member_availability={
-            (None, "pool-h200-a"): 99,   # capped to the member's 4
-            # pool-h200-b not covered → 0
+            ("home-site", "pool-h200-a"): 99,  # capped to the member's 4
+            # pool-h200-b not covered -> 0
         },
     )
     assert [row["gpu_count"] for row in rows] == [1, 2, 3, 4]
@@ -340,7 +331,7 @@ async def test_member_at_another_site_keys_by_site_name(client):
     wrong_site_only = available_compute_slices(
         client.db_path,
         home_site="home-site",
-        member_availability={(None, "pool-h200-1"): 4},  # wrong site
+        member_availability={("home-site", "pool-h200-1"): 4},  # wrong site
     )
     assert wrong_site_only == []  # the member's own site says nothing → 0
 

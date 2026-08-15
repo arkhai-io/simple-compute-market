@@ -1,7 +1,9 @@
 """Schema-opaque HTTP routes owned by the bare-metal composition."""
 
 from __future__ import annotations
+import base64
 
+from collections.abc import Mapping
 import json
 from typing import Annotated, Any
 
@@ -15,25 +17,42 @@ from core_storefront.models.negotiation_models import (
     NegotiationDetailResponse,
     NegotiationListResponse,
 )
-from core_storefront.models.system_models import AdminPauseResponse, HealthResponse
+from core_storefront.models.system_models import AdminPauseResponse
 from fastapi import APIRouter, HTTPException, Query, Request
 
 from market_identity import EMPTY_BODY, Identity
+from market_storefront_kit import get_storefront_container
+from market_settlement_runtime import (
+    HostedSettlementRouteError,
+    HostedSettlementStart,
+)
 from .models import (
+    BareMetalFulfillRequest,
+    BareMetalFulfillmentResponse,
+    BareMetalFulfillmentResultResponse,
+    BareMetalHealthResponse,
     BareMetalSettleRequest,
     BareMetalSettleResponse,
     BareMetalSettleStatusResponse,
 )
+from .fulfillment_service import BareMetalFulfillmentError
 from .negotiation_service import NegotiationRequestError
 from .runtime import BareMetalStorefrontRuntime
 from .settlement_service import SettlementRequestError
+from .hosted_routes import build_bare_metal_hosted_route_service
 from .response_auth import bind_response_auth
 
 router = APIRouter()
 
 
 def _runtime(request: Request) -> BareMetalStorefrontRuntime:
-    runtime = getattr(request.app.state, "runtime", None)
+    try:
+        runtime = get_storefront_container(request)
+    except RuntimeError as exc:
+        raise HTTPException(
+            status_code=503,
+            detail="storefront runtime unavailable",
+        ) from exc
     if not isinstance(runtime, BareMetalStorefrontRuntime):
         raise HTTPException(status_code=503, detail="storefront runtime unavailable")
     return runtime
@@ -111,15 +130,95 @@ async def _admin(
     )
 
 
+async def _authorize_hosted_request(
+    request: Request,
+    operation: str,
+    resource: str,
+    expected_principal: Identity,
+    body: Mapping[str, Any] | None,
+) -> Any:
+    runtime = _runtime(request)
+    try:
+        authenticated = await authenticate_request(
+            headers=request.headers,
+            method=request.method,
+            operation=operation,
+            resource=resource,
+            body=body if body is not None else EMPTY_BODY,
+            expected_role="buyer",
+            replay_store=runtime.db,
+            expected_principal=expected_principal,
+        )
+    except AuthError as exc:
+        raise HostedSettlementRouteError(exc.status_code, exc.detail) from exc
+    bind_response_auth(
+        request,
+        authenticated,
+        operation=operation,
+        resource=resource,
+    )
+    return authenticated
+
+
+def _hosted_service(request: Request) -> Any:
+    runtime = _runtime(request)
+    if runtime.settlement_composition is None:
+        raise HTTPException(status_code=404, detail="hosted settlement is disabled")
+    if runtime.hosted_domain_callbacks is None:
+        raise HTTPException(
+            status_code=503,
+            detail="bare-metal hosted lifecycle is unavailable",
+        )
+    return build_bare_metal_hosted_route_service(
+        repository=runtime.settlement_repository,
+        runtime=runtime.settlement_runtime,
+        domain_callbacks=runtime.hosted_domain_callbacks,
+        authorize_request=_authorize_hosted_request,
+    )
+
+
+@router.post("/api/v1/settlements")
+async def start_hosted_settlement(
+    body: HostedSettlementStart,
+    request: Request,
+) -> Mapping[str, Any]:
+    try:
+        return await _hosted_service(request).start(request, body)
+    except HostedSettlementRouteError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
+
+
+@router.get("/api/v1/settlements/{settlement_ref}")
+async def hosted_settlement_status(
+    settlement_ref: str,
+    request: Request,
+) -> Mapping[str, Any]:
+    try:
+        return await _hosted_service(request).status(request, settlement_ref)
+    except HostedSettlementRouteError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
+
+
+@router.post("/api/v1/settlements/{settlement_ref}/reclaim")
+async def reclaim_hosted_settlement(
+    settlement_ref: str,
+    request: Request,
+) -> Mapping[str, Any]:
+    try:
+        return await _hosted_service(request).reclaim(request, settlement_ref)
+    except HostedSettlementRouteError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
+
+
 def _listing_response(
     runtime: BareMetalStorefrontRuntime, row: dict[str, Any]
 ) -> dict[str, Any]:
     raw = row.get("offer_resource")
     if isinstance(raw, str):
         raw = json.loads(raw)
-    listing = runtime.domain.codecs.listing(raw)
+    runtime.domain.codecs.listing(raw)
     normalized = dict(row)
-    normalized["offer_resource"] = listing.model_dump(mode="json", exclude_none=True)
+    normalized["offer_resource"] = raw
     return normalized
 
 
@@ -203,7 +302,7 @@ async def negotiate_continue(
     )
     if thread is None:
         raise HTTPException(status_code=404, detail="negotiation not found")
-    if thread.get("buyer_principal") != identity:
+    if Identity.model_validate(thread.get("buyer_principal")) != identity:
         raise HTTPException(status_code=403, detail="negotiation buyer mismatch")
     if thread.get("terminal_state") is not None:
         raise HTTPException(status_code=409, detail="negotiation is terminal")
@@ -337,17 +436,212 @@ async def settle_status(
         raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
 
 
-@router.get("/health", response_model=HealthResponse)
-@router.get("/api/v1/system/health", response_model=HealthResponse)
-async def health(request: Request) -> HealthResponse:
-    return HealthResponse.model_validate(await _runtime(request).health())
+async def _fulfillment_identity(
+    *,
+    request: Request,
+    runtime: BareMetalStorefrontRuntime,
+    negotiation_id: str,
+    operation: str,
+) -> Identity:
+    thread = await runtime.db.load_negotiation_thread_row(
+        negotiation_id=negotiation_id,
+    )
+    if thread is None:
+        raise BareMetalFulfillmentError(
+            "negotiation not found",
+            status_code=404,
+        )
+    return await _buyer(
+        request=request,
+        runtime=runtime,
+        operation=operation,
+        resource=negotiation_id,
+        expected_principal=Identity.model_validate(thread["buyer_principal"]),
+    )
 
 
-@router.get("/api/v1/system/status", response_model=HealthResponse)
-async def system_status(request: Request) -> HealthResponse:
+@router.post(
+    "/api/v1/fulfillments/begin",
+    response_model=BareMetalFulfillmentResponse,
+)
+async def begin_fulfillment(
+    body: BareMetalFulfillRequest,
+    request: Request,
+) -> BareMetalFulfillmentResponse:
+    runtime = _runtime(request)
+    try:
+        identity = await _buyer(
+            request=request,
+            runtime=runtime,
+            operation="bare_metal_fulfillment_begin",
+            resource=body.negotiation_id,
+            expected_principal=body.buyer_principal,
+            body=body.model_dump(mode="json"),
+        )
+        lifecycle = await runtime.fulfillment_service().begin(
+            negotiation_id=body.negotiation_id,
+            escrow_uid=body.escrow_uid,
+            buyer_principal=identity,
+        )
+        return BareMetalFulfillmentResponse.model_validate(lifecycle)
+    except BareMetalFulfillmentError as exc:
+        raise HTTPException(
+            status_code=exc.status_code,
+            detail=exc.detail,
+        ) from exc
+
+
+@router.get(
+    "/api/v1/fulfillments/{negotiation_id}/status",
+    response_model=BareMetalFulfillmentResponse,
+)
+async def fulfillment_status(
+    negotiation_id: str,
+    request: Request,
+) -> BareMetalFulfillmentResponse:
+    runtime = _runtime(request)
+    try:
+        identity = await _fulfillment_identity(
+            request=request,
+            runtime=runtime,
+            negotiation_id=negotiation_id,
+            operation="bare_metal_fulfillment_status",
+        )
+        lifecycle = await runtime.fulfillment_service().status(
+            negotiation_id=negotiation_id,
+            buyer_principal=identity,
+        )
+        return BareMetalFulfillmentResponse.model_validate(lifecycle)
+    except BareMetalFulfillmentError as exc:
+        raise HTTPException(
+            status_code=exc.status_code,
+            detail=exc.detail,
+        ) from exc
+
+
+@router.get(
+    "/api/v1/fulfillments/{negotiation_id}/result",
+    response_model=BareMetalFulfillmentResultResponse,
+)
+async def fulfillment_result(
+    negotiation_id: str,
+    request: Request,
+) -> BareMetalFulfillmentResultResponse:
+    runtime = _runtime(request)
+    try:
+        identity = await _fulfillment_identity(
+            request=request,
+            runtime=runtime,
+            negotiation_id=negotiation_id,
+            operation="bare_metal_fulfillment_result",
+        )
+        lifecycle = await runtime.fulfillment_service().status(
+            negotiation_id=negotiation_id,
+            buyer_principal=identity,
+        )
+        if lifecycle["state"] not in {
+            "active",
+            "teardown_dispatch_pending",
+            "tearing_down",
+            "teardown_failed",
+            "torn_down",
+            "released",
+        }:
+            raise BareMetalFulfillmentError(
+                "bare-metal fulfillment result is not ready"
+            )
+        receipt = await runtime.db.load_bare_metal_receipt(
+            negotiation_id=negotiation_id,
+        )
+        result = await runtime.db.load_bare_metal_result(
+            negotiation_id=negotiation_id,
+        )
+        if receipt is None or result is None:
+            raise BareMetalFulfillmentError(
+                "bare-metal fulfillment result is not ready"
+            )
+        return BareMetalFulfillmentResultResponse(
+            negotiation_id=negotiation_id,
+            receipt=receipt,
+            result=result,
+        )
+    except BareMetalFulfillmentError as exc:
+        raise HTTPException(
+            status_code=exc.status_code,
+            detail=exc.detail,
+        ) from exc
+
+
+@router.post(
+    "/api/v1/fulfillments/{negotiation_id}/teardown",
+    response_model=BareMetalFulfillmentResponse,
+)
+async def teardown_fulfillment(
+    negotiation_id: str,
+    request: Request,
+) -> BareMetalFulfillmentResponse:
+    runtime = _runtime(request)
+    try:
+        identity = await _fulfillment_identity(
+            request=request,
+            runtime=runtime,
+            negotiation_id=negotiation_id,
+            operation="bare_metal_fulfillment_teardown",
+        )
+        lifecycle = await runtime.fulfillment_service().teardown(
+            negotiation_id=negotiation_id,
+            buyer_principal=identity,
+        )
+        return BareMetalFulfillmentResponse.model_validate(lifecycle)
+    except BareMetalFulfillmentError as exc:
+        raise HTTPException(
+            status_code=exc.status_code,
+            detail=exc.detail,
+        ) from exc
+
+
+@router.get("/api/v1/evidence/bare-metal/{evidence_digest}")
+async def hosted_lease_evidence(
+    evidence_digest: str,
+    request: Request,
+) -> dict[str, Any]:
+    """Resolve one content-addressed lease-ready document with seller proof."""
+
+    if len(evidence_digest) != 64 or any(
+        char not in "0123456789abcdef" for char in evidence_digest
+    ):
+        raise HTTPException(status_code=404, detail="evidence not found")
+    runtime = _runtime(request)
+    evidence = await runtime.db.load_bare_metal_hosted_evidence(
+        evidence_digest="sha256:" + evidence_digest
+    )
+    if evidence is None:
+        raise HTTPException(status_code=404, detail="evidence not found")
+    material = evidence.canonical_json().encode("utf-8")
+    proof = (
+        base64.urlsafe_b64encode(runtime.marketplace_signer.sign(material))
+        .rstrip(b"=")
+        .decode("ascii")
+    )
+    return {
+        "protocol": "arkhai.bare-metal-evidence-signature.v1",
+        "seller_principal": runtime.seller_principal.model_dump(mode="json"),
+        "evidence": evidence.model_dump(mode="json"),
+        "proof": proof,
+    }
+
+
+@router.get("/health", response_model=BareMetalHealthResponse)
+@router.get("/api/v1/system/health", response_model=BareMetalHealthResponse)
+async def health(request: Request) -> BareMetalHealthResponse:
+    return BareMetalHealthResponse.model_validate(await _runtime(request).health())
+
+
+@router.get("/api/v1/system/status", response_model=BareMetalHealthResponse)
+async def system_status(request: Request) -> BareMetalHealthResponse:
     runtime = _runtime(request)
     await _admin(request=request, runtime=runtime, operation="system_status")
-    return HealthResponse.model_validate(await runtime.health())
+    return BareMetalHealthResponse.model_validate(await runtime.health())
 
 
 @router.post("/api/v1/admin/pause", response_model=AdminPauseResponse)

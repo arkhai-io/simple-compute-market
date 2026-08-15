@@ -168,6 +168,11 @@ async def notify_storefront_capacity_released(
 ) -> bool:
     """Translate a release fact into the versioned narrow event-sink contract."""
     released_at = reservation.get("released_at")
+    executor_kind = reservation.get("executor_kind")
+    if not executor_kind:
+        raise ValueError(
+            "capacity release cannot be published without executor_kind"
+        )
     event = LifecycleEvent(
         event_id=(
             f"capacity_released:{reservation['capacity_reservation_id']}:"
@@ -175,7 +180,7 @@ async def notify_storefront_capacity_released(
         ),
         capacity_reservation_id=str(reservation["capacity_reservation_id"]),
         deal_ref=dict(reservation.get("deal_ref") or {}),
-        executor_kind=str(reservation.get("executor_kind") or "vm"),
+        executor_kind=str(executor_kind),
         event_kind="capacity_released",
         payload={"released_at": released_at},
         occurred_at=datetime.now(timezone.utc),

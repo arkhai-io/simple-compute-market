@@ -74,12 +74,32 @@ def wheels(tmp_path_factory: pytest.TempPathFactory) -> dict[str, Path]:
         "policy": (REPO / "kit" / "policy", "arkhai_kit_policy-*.whl"),
         "alkahest": (REPO / "kit" / "alkahest", "arkhai_kit_alkahest-*.whl"),
         "identity": (REPO / "kit" / "identity", "arkhai_kit_identity-*.whl"),
+        "capacity_publication": (
+            REPO / "kit" / "capacity-publication",
+            "arkhai_kit_capacity_publication-*.whl",
+        ),
+        "storefront_kit": (
+            REPO / "kit" / "storefront",
+            "arkhai_kit_storefront-*.whl",
+        ),
         "config": (REPO / "kit" / "config", "arkhai_kit_config-*.whl"),
         "site": (REPO / "kit" / "site", "arkhai_kit_site-*.whl"),
         "site_client": (REPO / "kit" / "site-client", "arkhai_kit_site_client-*.whl"),
         "settlement_runtime": (
             REPO / "kit" / "settlement-runtime",
             "arkhai_kit_settlement_runtime-*.whl",
+        ),
+        "hosted_settlement": (
+            REPO / "kit" / "hosted-settlement",
+            "arkhai_kit_hosted_settlement-*.whl",
+        ),
+        "resource_pools": (
+            REPO / "kit" / "resource-pools",
+            "arkhai_kit_resource_pools-*.whl",
+        ),
+        "negotiation_runtime": (
+            REPO / "kit" / "negotiation-runtime",
+            "arkhai_kit_negotiation_runtime-*.whl",
         ),
     }
     built: dict[str, Path] = {}
@@ -94,6 +114,11 @@ def wheels(tmp_path_factory: pytest.TempPathFactory) -> dict[str, Path]:
         matches = sorted(output.glob(pattern))
         assert len(matches) == 1
         built[name] = matches[0]
+    hosted_clients = sorted(
+        (REPO / ".dist").glob("arkhai_hosted_settlement_client-0.2.0-py3-none-any.whl")
+    )
+    assert len(hosted_clients) == 1
+    shutil.copy2(hosted_clients[0], output / hosted_clients[0].name)
     return built
 
 
@@ -161,6 +186,14 @@ def test_storefront_wheels_require_settlement_runtime(
     for name in ("storefront", "vms_storefront", "bare_metal_storefront"):
         metadata = _metadata(wheels[name])
         assert "Requires-Dist: arkhai-kit-settlement-runtime>=0.1.0" in metadata, name
+
+
+def test_migrated_storefront_wheels_require_negotiation_runtime(
+    wheels: dict[str, Path],
+) -> None:
+    for name in ("storefront", "vms_storefront"):
+        metadata = _metadata(wheels[name])
+        assert "Requires-Dist: arkhai-kit-negotiation-runtime==0.1.0" in metadata, name
 
 
 def test_storefront_wheel_exports_contract_constant(

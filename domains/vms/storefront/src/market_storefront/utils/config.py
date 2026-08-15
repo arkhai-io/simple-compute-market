@@ -102,6 +102,24 @@ def settlement_config_mapping(source: Dynaconf | None = None) -> dict[str, Any]:
         raise ValueError("Settlement must be a table")
     return value
 
+def storefront_domain_registry(
+    source: Dynaconf | None = None,
+    *,
+    installed: Any = None,
+):
+    """Build the frozen registry from explicit public contribution assertions."""
+
+    from core_storefront.domain_plugins import (
+        discover_storefront_domain_registry,
+        parse_storefront_contribution_selections,
+    )
+
+    active = source or settings
+    raw = _plain_config_value(active.get("storefront_domains"))
+    selections = parse_storefront_contribution_selections(raw)
+    kwargs = {} if installed is None else {"installed": installed}
+    return discover_storefront_domain_registry(selections, **kwargs)
+
 
 def settlement_publication_defaults(
     source: Dynaconf | None = None,

@@ -37,7 +37,7 @@ class NegotiationSnapshot:
 class BuyerAction:
     kind: str
     expires_at_unix: int
-    url: str = field(repr=False)
+    url: str | None = field(default=None, repr=False)
 
 
 @dataclass(frozen=True)
@@ -45,13 +45,17 @@ class MaterializationSnapshot:
     obligation_ref: str
     settlement_ref: str
     operation_ref: str
-    action: BuyerAction
+    action: BuyerAction | None
     amount: int
     currency: str
     expiration_unix: int
     destination_account_ref: str
     transfer_group: str
     source_relation: str
+    accepted_negotiation_id: str
+    accepted_funding_profile: str
+    accepted_condition_hash: str
+    funding_authorization_bound: bool
 
 
 @dataclass(frozen=True)
@@ -75,6 +79,15 @@ class MarketplacePort(Protocol):
 
     def verify_runtime(self) -> RuntimeSnapshot: ...
 
+    def ensure_payer_profile_fixture(
+        self,
+        funding_profile: str,
+        interaction: str,
+    ) -> dict[str, object]: ...
+
+    def complete_payer_setup(self) -> dict[str, object]: ...
+
+
     def create_and_publish_listing(self) -> ListingSnapshot: ...
 
     def discover_listing(self, listing_id: str) -> str: ...
@@ -82,6 +95,9 @@ class MarketplacePort(Protocol):
     def negotiate(self, registry_listing_id: str) -> NegotiationSnapshot: ...
 
     def materialize(self, negotiation_id: str) -> MaterializationSnapshot: ...
+
+    def observe_pending_funding(self, settlement_ref: str) -> dict[str, object]: ...
+
 
     def wait_funded(self, settlement_ref: str) -> bool: ...
 

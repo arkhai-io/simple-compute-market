@@ -701,7 +701,7 @@ class AnsibleJobService:
             ),
             vm_target=params.get("vm_target"),
             vm_action=params.get("vm_action") or executor_action,
-            executor_kind=params.get("executor_kind", "vm"),
+            executor_kind=params["executor_kind"],
             executor_action=executor_action,
             executor_target=executor_target,
             executor_ref=params.get("executor_ref"),

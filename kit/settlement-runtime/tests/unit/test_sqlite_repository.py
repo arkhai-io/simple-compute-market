@@ -9,6 +9,7 @@ from market_identity import Identity, IdentityScheme
 
 from market_settlement_runtime import (
     SETTLEMENT_MIGRATION_ID,
+    SETTLEMENT_MECHANISM_PARAMS_MIGRATION_ID,
     SETTLEMENT_PRINCIPAL_MIGRATION_ID,
     SettlementObligationRecord,
     SettlementOperationRecord,
@@ -32,12 +33,12 @@ def obligation(*, payer: str = "buyer") -> dict:
     return {
         "payer": payer,
         "claimant": "seller" if payer == "buyer" else "buyer",
-        "payer_principal": (
-            BUYER if payer == "buyer" else SELLER
-        ).model_dump(mode="json"),
-        "claimant_principal": (
-            SELLER if payer == "buyer" else BUYER
-        ).model_dump(mode="json"),
+        "payer_principal": (BUYER if payer == "buyer" else SELLER).model_dump(
+            mode="json"
+        ),
+        "claimant_principal": (SELLER if payer == "buyer" else BUYER).model_dump(
+            mode="json"
+        ),
         "mechanism": "test.v1",
         "expiration_unix": 100,
     }
@@ -281,10 +282,7 @@ def test_legacy_principal_migration_rolls_back_invalid_population(
     conn = sqlite3.connect(path)
     try:
         columns = {
-            row[1]
-            for row in conn.execute(
-                "PRAGMA table_info(settlement_obligations)"
-            )
+            row[1] for row in conn.execute("PRAGMA table_info(settlement_obligations)")
         }
         applied = conn.execute(
             "SELECT 1 FROM schema_migrations WHERE id=?",
@@ -376,7 +374,7 @@ async def test_legacy_migration_preserves_id_and_exact_state(tmp_path) -> None:
     assert SETTLEMENT_MIGRATION_ID in ids
     assert SETTLEMENT_PRINCIPAL_MIGRATION_ID in ids
     assert settlement_migrations()[0].id == SETTLEMENT_MIGRATION_ID
-    assert settlement_migrations()[-1].id == SETTLEMENT_PRINCIPAL_MIGRATION_ID
+    assert settlement_migrations()[-1].id == SETTLEMENT_MECHANISM_PARAMS_MIGRATION_ID
 
 
 def test_legacy_conflict_rolls_back_whole_migration(tmp_path) -> None:
@@ -417,3 +415,41 @@ def test_legacy_conflict_rolls_back_whole_migration(tmp_path) -> None:
             )
     finally:
         conn.close()
+
+
+async def test_materialization_params_are_immutable_and_identity_preserving(
+    tmp_path,
+) -> None:
+    repository = SettlementSQLiteRepository(str(tmp_path / "mechanism-params.db"))
+    record = SettlementObligationRecord.from_obligation(
+        agreement_ref="agreement",
+        obligation_index=0,
+        obligation=obligation(),
+    )
+    stored = await repository.upsert_settlement_obligation(record.model_dump())
+    params = {"authorization_ref": "accepted-authorization-1"}
+
+    bound = await repository.bind_settlement_mechanism_params(
+        obligation_ref=record.obligation_ref,
+        mechanism_params=params,
+    )
+    retried = await repository.bind_settlement_mechanism_params(
+        obligation_ref=record.obligation_ref,
+        mechanism_params=params,
+    )
+    with pytest.raises(ValueError, match="immutable"):
+        await repository.bind_settlement_mechanism_params(
+            obligation_ref=record.obligation_ref,
+            mechanism_params={"authorization_ref": "changed"},
+        )
+
+    assert (
+        bound["obligation_ref"] == retried["obligation_ref"] == stored["obligation_ref"]
+    )
+    assert (
+        bound["obligation_hash"]
+        == retried["obligation_hash"]
+        == stored["obligation_hash"]
+    )
+    assert bound["obligation"] == retried["obligation"] == stored["obligation"]
+    assert bound["mechanism_params"] == retried["mechanism_params"] == params

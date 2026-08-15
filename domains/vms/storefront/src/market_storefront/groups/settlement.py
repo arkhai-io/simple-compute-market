@@ -5,19 +5,10 @@ from __future__ import annotations
 import asyncio
 import json
 import webbrowser
-from collections.abc import Mapping
 from typing import Any
 
 import typer
-from hosted_settlement_client import (
-    ClientConfig,
-    HostedSettlementClient,
-    SellerOnboarding,
-)
-from market_hosted_settlement import (
-    MarketplaceSignerAdapter,
-    adapt_expected_authorities,
-)
+from market_hosted_settlement import onboard_hosted_seller
 from market_settlement_runtime import MechanismReadiness, SettlementConfig
 
 settlement_app = typer.Typer(no_args_is_help=True)
@@ -133,27 +124,6 @@ def stripe_status(
     _finish_status(_select_status(statuses, "fiat.stripe.v1"), as_json=as_json)
 
 
-def _stripe_client(config: SettlementConfig, resources: Mapping[str, Any]) -> HostedSettlementClient:
-    stripe = config.mechanism_config("stripe")
-    if stripe is None or not stripe.enabled:
-        raise typer.BadParameter("Settlement.stripe is not enabled")
-    signer = resources.get("marketplace_signer")
-    if signer is None or stripe.authority is None or not stripe.base_url:
-        raise typer.BadParameter("Settlement.stripe client configuration is incomplete")
-    return HostedSettlementClient(
-        ClientConfig(
-            base_url=stripe.base_url,
-            signer=MarketplaceSignerAdapter(signer),
-            caller_role="seller",
-            authority_id=stripe.authority_id or "",
-            environment=stripe.environment or "",
-            expected_authorities=adapt_expected_authorities(stripe.authority.as_trusted_set()),
-            timeout_seconds=stripe.request_timeout_seconds,
-            allow_insecure_loopback=stripe.allow_insecure_loopback,
-        )
-    )
-
-
 @stripe_app.command("onboard")
 def stripe_onboard(
     no_browser: bool = typer.Option(
@@ -167,17 +137,21 @@ def stripe_onboard(
     stripe = config.mechanism_config("stripe")
     if stripe is None or not stripe.account_ref:
         raise typer.BadParameter("Settlement.stripe.account_ref is required")
-    client = _stripe_client(config, resources)
-    try:
-        workflow = SellerOnboarding(client, open_url=webbrowser.open)
-        result = workflow.onboard(stripe.account_ref, open_browser=not no_browser)
-        if no_browser:
-            typer.echo(str(result.url))
-        else:
-            typer.echo("Opened a transient Stripe onboarding link in the browser.")
-        typer.echo(f"expires_at_unix={result.expires_at_unix}")
-    finally:
-        client.close()
+    signer = resources.get("marketplace_signer")
+    if signer is None:
+        raise typer.BadParameter("Settlement.stripe signer is required")
+    result = onboard_hosted_seller(
+        stripe,
+        signer=signer,
+        account_ref=stripe.account_ref,
+        open_browser=not no_browser,
+        open_url=webbrowser.open,
+    )
+    if no_browser:
+        typer.echo(str(result.url))
+    else:
+        typer.echo("Opened a transient Stripe onboarding link in the browser.")
+    typer.echo(f"expires_at_unix={result.expires_at_unix}")
 
 
 @alkahest_app.command("check")

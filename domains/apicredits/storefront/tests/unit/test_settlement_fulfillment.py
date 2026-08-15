@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import sqlite3
 import json
 from dataclasses import replace
 from datetime import datetime
@@ -13,6 +14,8 @@ import pytest
 
 from domains.apicredits.settlement import fulfillment as fulfillment_module
 from domains.apicredits.settlement.credits_client import (
+    CreditIssuanceRequest,
+    CreditIssuanceResult,
     CreditsServiceClient,
     CreditsServiceError,
 )
@@ -28,7 +31,35 @@ _OFFER = {
     "service_name": "Acme Inference",
     "base_url": "https://api.acme.example",
     "resource_id": "svc-quota",
+    "capacity_site_id": "tokens",
+    "offering_mode": "api_credits",
 }
+
+
+def _issuance_result(
+    request: CreditIssuanceRequest,
+    *,
+    secret: str | None = "ak_new.s3cret",
+    already_issued: bool = False,
+) -> CreditIssuanceResult:
+    return CreditIssuanceResult(
+        fulfillment_id=request.fulfillment_id,
+        grant_id=request.fulfillment_id,
+        obligation_ref=request.obligation_ref,
+        mechanism=request.mechanism,
+        owner=request.owner,
+        service=request.service,
+        resource_id=request.resource_id,
+        quantity=request.quantity,
+        key_mode=request.key.mode,
+        key_id=request.key.key_id or "ak_new",
+        balance=request.quantity,
+        request_digest=request.request_digest,
+        committed_at_unix=2_000_000_000,
+        capacity_reservation_id=request.capacity_reservation_id,
+        already_issued=already_issued,
+        secret=secret,
+    )
 
 
 def _settlement_request(negotiation_id: str) -> ApiCreditsSettleRequest:
@@ -49,6 +80,170 @@ def _events():
     return recorded, stage_event
 
 
+def _private_results(tmp_path):
+    from apicredits_storefront.services.issuance_evidence import (
+        ApiCreditPrivateResultRepository,
+    )
+    from apicredits_storefront.utils.migrations import _migrate_issuance_evidence
+
+    db_path = tmp_path / "hosted-private-results.db"
+    with sqlite3.connect(db_path) as connection:
+        _migrate_issuance_evidence(connection)
+    return ApiCreditPrivateResultRepository(db_path)
+
+
+def _hosted_agreement(*, key_mode: str, key_id: str | None = None):
+    return SimpleNamespace(
+        obligation_ref=f"obligation-{key_mode}",
+        buyer_principal=_BUYER_PRINCIPAL,
+        service="Acme Inference",
+        resource_id="svc-quota",
+        quantity=3,
+        key_mode=key_mode,
+        key_id=key_id,
+    )
+
+
+async def test_hosted_new_key_response_loss_retries_and_stores_rotated_secret(
+    tmp_path,
+):
+    from apicredits_storefront.settlement_composition import _committed_issuance
+
+    private_results = _private_results(tmp_path)
+    calls: list[CreditIssuanceRequest] = []
+    committed: CreditIssuanceResult | None = None
+
+    class ResponseLossClient:
+        async def submit_credit_issuance(self, request):
+            nonlocal committed
+            calls.append(request)
+            if len(calls) == 1:
+                committed = _issuance_result(
+                    request,
+                    secret=None,
+                    already_issued=True,
+                )
+                raise ConnectionError("issuance response lost after commit")
+            return _issuance_result(
+                request,
+                secret="ak_new.rotated-secret",
+                already_issued=True,
+            )
+
+        async def get_credit_issuance(self, fulfillment_id):
+            assert committed is not None
+            assert fulfillment_id == committed.fulfillment_id
+            return committed
+
+    agreement = _hosted_agreement(key_mode="new")
+    request, issuance = await _committed_issuance(
+        SimpleNamespace(
+            credits_client=ResponseLossClient(),
+            private_results=private_results,
+        ),
+        agreement,
+    )
+
+    assert len(calls) == 2
+    assert calls == [request, request]
+    assert issuance.secret == "ak_new.rotated-secret"
+    credentials_ref = private_results.credentials_ref(
+        request.fulfillment_id,
+        _BUYER_PRINCIPAL,
+    )
+    stored = private_results.get(
+        credentials_ref=credentials_ref,
+        owner=_BUYER_PRINCIPAL,
+    )
+    assert stored is not None
+    assert stored.secret == "ak_new.rotated-secret"
+
+
+async def test_hosted_existing_key_response_loss_remains_secret_free(tmp_path):
+    from apicredits_storefront.settlement_composition import _committed_issuance
+
+    private_results = _private_results(tmp_path)
+    calls: list[CreditIssuanceRequest] = []
+    committed: CreditIssuanceResult | None = None
+
+    class ResponseLossClient:
+        async def submit_credit_issuance(self, request):
+            nonlocal committed
+            calls.append(request)
+            committed = _issuance_result(
+                request,
+                secret=None,
+                already_issued=True,
+            )
+            raise ConnectionError("issuance response lost after commit")
+
+        async def get_credit_issuance(self, fulfillment_id):
+            assert committed is not None
+            assert fulfillment_id == committed.fulfillment_id
+            return committed
+
+    agreement = _hosted_agreement(
+        key_mode="existing",
+        key_id="ak_existing",
+    )
+    request, issuance = await _committed_issuance(
+        SimpleNamespace(
+            credits_client=ResponseLossClient(),
+            private_results=private_results,
+        ),
+        agreement,
+    )
+
+    assert len(calls) == 1
+    assert issuance.key_id == "ak_existing"
+    assert issuance.secret is None
+    assert (
+        private_results.get(
+            credentials_ref=private_results.credentials_ref(
+                request.fulfillment_id,
+                _BUYER_PRINCIPAL,
+            ),
+            owner=_BUYER_PRINCIPAL,
+        )
+        is None
+    )
+
+
+async def test_hosted_new_key_recovery_refuses_missing_rotated_secret(tmp_path):
+    from apicredits_storefront.settlement_composition import _committed_issuance
+
+    private_results = _private_results(tmp_path)
+    calls: list[CreditIssuanceRequest] = []
+
+    class SecretlessClient:
+        async def submit_credit_issuance(self, request):
+            calls.append(request)
+            if len(calls) == 1:
+                raise ConnectionError("issuance response lost after commit")
+            return _issuance_result(
+                request,
+                secret=None,
+                already_issued=True,
+            )
+
+        async def get_credit_issuance(self, _fulfillment_id):
+            return _issuance_result(
+                calls[0],
+                secret=None,
+                already_issued=True,
+            )
+
+    agreement = _hosted_agreement(key_mode="new")
+    with pytest.raises(RuntimeError, match="no recoverable bearer secret"):
+        await _committed_issuance(
+            SimpleNamespace(
+                credits_client=SecretlessClient(),
+                private_results=private_results,
+            ),
+            agreement,
+        )
+
+
 # ---------------------------------------------------------------------------
 # fulfill_api_credits_obligation
 # ---------------------------------------------------------------------------
@@ -57,16 +252,9 @@ def _events():
 async def test_fulfillment_issues_and_returns_credentials_once(monkeypatch):
     issued = {}
 
-    async def fake_issue(self, **kwargs):
-        issued.update(kwargs)
-        return {
-            "key_id": "ak_new",
-            "secret": "ak_new.s3cret",
-            "quantity": kwargs["quantity"],
-            "balance": 3,
-            "capacity_reservation_id": kwargs.get("capacity_reservation_id"),
-            "already_issued": False,
-        }
+    async def fake_issue(self, request):
+        issued["request"] = request
+        return _issuance_result(request)
 
     monkeypatch.setattr(CreditsServiceClient, "submit_credit_issuance", fake_issue)
     events, stage_event = _events()
@@ -97,13 +285,13 @@ async def test_fulfillment_issues_and_returns_credentials_once(monkeypatch):
     assert "secret" not in payload
 
     # The negotiation-time hold rode the issuance call.
-    assert issued["capacity_reservation_id"] == "alloc-7"
-    assert issued["escrow_uid"] == "0xescrow1"
+    assert issued["request"].capacity_reservation_id == "alloc-7"
+    assert issued["request"].obligation_ref == "0xescrow1"
     assert [e[1] for e in events] == ["credits_issued", "fulfilled"]
 
 
 async def test_fulfillment_refusal_applies_failure_policy(monkeypatch):
-    async def fake_issue(self, **kwargs):
+    async def fake_issue(self, request):
         raise CreditsServiceError("quota_exhausted", "no units", status_code=409)
 
     monkeypatch.setattr(CreditsServiceClient, "submit_credit_issuance", fake_issue)
@@ -133,8 +321,8 @@ async def test_fulfillment_refusal_applies_failure_policy(monkeypatch):
 
 
 async def test_chain_failure_after_issuance_rolls_back(monkeypatch):
-    async def fake_issue(self, **kwargs):
-        return {"key_id": "ak_new", "secret": "s", "quantity": 3, "balance": 3}
+    async def fake_issue(self, request):
+        return _issuance_result(request, secret="ak_new.secret")
 
     async def fake_submit(**kwargs):
         raise RuntimeError("rpc down")
@@ -219,6 +407,7 @@ async def test_fulfillment_service_rejects_invalid_domain_listing(monkeypatch):
                     "kind": "api_credits.v1",
                     "service_name": " ",
                     "resource_id": "svc-quota",
+                    "capacity_site_id": "tokens",
                 },
             },
             quantity=3,
@@ -302,9 +491,9 @@ async def settled_db(tmp_path, monkeypatch):
     """A DB with an accepted token negotiation, via the real sync flow."""
     import market_policy.negotiation_thread as thread_module
 
-    from apicredits_storefront.services import capacity_client as cc_module
+    from apicredits_storefront import negotiation_runtime as negotiation_module
+    from apicredits_storefront.domain_runtime import get_market_domain_contract
     from apicredits_storefront.utils.sqlite_client import SQLiteClient
-    from apicredits_storefront.utils.sync_negotiation import start_sync_negotiation
     from apicredits_storefront.utils import config as config_module
     from market_core.schemas import EscrowProposal, ProvisionTerms
     from market_policy.identity import Identity
@@ -318,7 +507,7 @@ async def settled_db(tmp_path, monkeypatch):
             return None  # no hold; issuance reserves fresh
 
     monkeypatch.setattr(
-        cc_module,
+        negotiation_module,
         "build_capacity_client",
         lambda factory: _Capacity(),
     )
@@ -373,9 +562,11 @@ async def settled_db(tmp_path, monkeypatch):
         storefront_url="http://seller:8002",
         seller_principal=_SELLER_PRINCIPAL,
     )
-    response = await start_sync_negotiation(
-        sqlite_client=client,
-        our_listing_id="L-tok",
+    response = await negotiation_module.build_api_credit_negotiation_runtime(
+        get_market_domain_contract()
+    ).start(
+        repository=client,
+        listing_id="L-tok",
         buyer_principal=_BUYER_PRINCIPAL,
         seller_principal=_SELLER_PRINCIPAL,
         proposal=EscrowProposal(
@@ -386,13 +577,14 @@ async def settled_db(tmp_path, monkeypatch):
             rates=[{"field": "amount", "per": "token", "value": "100"}],
             expiration_unix=1_800_000_000,
         ),
-        provision_terms=ProvisionTerms(
+        terms=ProvisionTerms(
             kind="api_credits.v1",
             version=1,
             payload={"quantity": 3, "key": {"mode": "new"}},
         ),
-        our_base_url="http://seller:8002",
-        their_agent_url="http://buyer:9000",
+        seller_agent_url="http://seller:8002",
+        buyer_agent_url="http://buyer:9000",
+        actor_principal=_BUYER_PRINCIPAL,
     )
     assert response["action"] == "accept"
     assert response.get("settlement_plan"), response

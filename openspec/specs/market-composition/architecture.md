@@ -65,9 +65,81 @@ Composition roots register installed settlement mechanisms explicitly. Each regi
 
 Registration controls construction, not lifecycle ownership. A composition injects the marketplace signer, wallet, chains, or other shared resources only into mechanisms that declare them, then passes the resulting clients into the one settlement runtime. A fiat-only VM composition therefore starts without constructing EVM resources, while a dual-mechanism composition still shares obligation identity, journals, leases, retries, and aggregate status.
 
-## Executable ownership
+## Frozen storefront registry and executable ownership
 
-The buyer CLI and registry executable are core-owned because their control flow is schema-opaque and extended through domain entry points or configuration. Storefront executables remain domain-owned composition roots where domain adapters and seller policy are wired into shared storefront machinery. A package move does not alter these authority boundaries.
+The compute-family storefront executable is core-owned, schema-opaque role
+machinery extended from below. Installed domain packages publish one validated
+`StorefrontDomainContribution` through the canonical
+`market.storefront_contributions` entry group. Public configuration selects an
+exact contribution/mode/domain/version set; startup validates it and freezes
+one registry before state or network effects. Each registry value retains the
+exact contract object plus its publication and legacy-migration hooks.
+
+Application, persistence, publication, negotiation, settlement, fulfillment,
+recovery, result, and teardown layers receive that same registry. Every listing
+binding freezes its selected contribution identity, contract version, Resource
+Pool offering mode, trusted site, and Physical Resource; negotiation copies the
+immutable binding before storing a domain artifact. Durable bindings resolve
+only to their pre-registered exact objects, and schema-opaque payloads are
+validated only by the selected contract. A one-domain storefront uses these
+same carriers with one explicit registration, never a separate executable or
+default, so adding a shared shell changes neither persistence nor routing.
+
+## Storefront composition kit
+
+`arkhai-kit-storefront`, imported as `market_storefront_kit`, is the reusable
+role-composition layer between the common schema-opaque storefront executable
+and the lower core storefront shell. A composition supplies the frozen
+`StorefrontDomainRegistry`, one selected durable binding, the exact registered
+`MarketDomainContract`, immutable service/container lifecycle callbacks, and
+an ordered route and middleware contribution. The kit places the registry in
+application state, builds the lifespan-owned container against the selected
+contract, and rejects even an equal contract reconstructed outside the
+registry. Domain codecs, negotiation policy, settlement, fulfillment, and
+publication semantics remain behind registered hooks; the kit never looks them
+up globally or interprets their payloads.
+
+The kit also owns storefront mechanisms whose control flow is common across
+domains. Alkahest client construction receives an immutable tuple of chain
+name, RPC URL, address-config path, private-key readiness, and missing
+requirements. The negotiation watchdog receives an existing repository plus
+timeout, interval, terminal-state, and event hooks. These inputs preserve
+operator and domain configuration without copying the factory or sweep loop.
+Per-chain construction failures remain isolated, and stale-thread write or
+event failures do not stop later threads or later sweeps.
+
+Multi-site capacity publication follows the same inversion. The capacity kit
+owns exact site projection, event reconciliation, registry fan-out, durable
+publication results, and close-before-reopen ordering. A domain contributes
+schema-opaque candidates, codecs, and durable binding hooks. Each candidate
+carries one exact `CapacityBinding(site_id, offering_mode, source_id)` whose
+mode is declared by the selected Resource Pool and matches the public offer.
+Commit, release, fulfillment, and restart use the recorded site and never
+default a mode or fan out to another authority.
+
+Settlement servicing keeps a domain-neutral
+`StorefrontSettlementFulfillmentInput` with the accepted thread binding, buyer
+principal, opaque domain input, and optional fulfillment anchor. At delivery,
+core constructs `StorefrontFulfillmentContext` by adding the accepted escrow
+identity and caller-owned authority ports, resolves the exact contract from the
+same frozen registry, invokes only that contract's fulfillment hook, and
+rejects a result that changes the negotiation, escrow, or site identity. The
+VM hook translates the opaque input into VM executor arguments; core and kit
+own lifecycle and dispatch, while the domain owns interpretation and the
+concrete effect.
+
+The buyer CLI and registry executable remain core-owned for the same
+schema-opaque reason. Each domain package exports one validated contribution
+while retaining its market meaning, codecs, publication semantics, seller
+policy,
+route and service contributions, and concrete fulfillment behavior. A
+one-domain executable or shared shell owns process configuration. The
+bare-metal contribution uses shared lifecycle contexts with its own
+site/capacity/fulfillment adapters and never imports VM services. The
+compute-family shell gives VM and bare metal the shared frozen-registry
+lifecycle, while API credits composes the same kit mechanisms at its own
+non-physical storefront boundary. No topology gains a default domain, global
+selector, or no-op fulfillment implementation.
 
 ## Identity composition
 
@@ -79,9 +151,40 @@ Chain and provider dependencies enter only after a composition root selects a co
 
 Hosted authentication remains a separately released protocol even when it uses the same marketplace signer and cryptographic scheme. The thin hosted adapter presents that signer through the exact manifest-pinned `hosted-settlement-client`, verifies that the manifest advertises the required identity contract before publishing fiat, and lets the client own hosted principal models, canonical bytes, headers, proofs, and response verification. This preserves each protocol's domain separation and prevents marketplace packages from copying or translating hosted wire logic.
 
+## Direct payer lane and mediated escrow lane
+
+The hosted kit has two provider-neutral entry surfaces over the same exact released client. Buyer-only payer profile, setup, instrument, and accepted-obligation authorization operations call the authority directly with the selected or recorded marketplace signer. Escrow materialization, status, condition, collect, reclaim, and recovery are composed into the shared settlement runtime and remain reachable to the buyer only through the authenticated storefront.
+
+This split does not add a second settlement lifecycle. The direct lane manages payer ownership and yields only an opaque operation-scoped authorization reference; the mediated lane owns durable obligation state and financial convergence. Neither lane copies client models or signing bytes, imports hosted service source, or admits provider configuration. API-credit and bare-metal composition remain separate adopters and gain no hosted dependency from the VM cutover.
+
+## Bare-metal hosted composition
+
+The installed bare-metal buyer consumes the core `HostedSettlementTransport` and hosted settle hook; the dedicated storefront binds `BareMetalHostedDomainCallbacks` into `market_settlement_runtime.HostedSettlementRouteService`. The route service owns accepted-state authentication, mechanism-neutral prepare/reserve/fulfill/project/cleanup order, and runtime wake-up. Bare metal owns only immutable physical binding derivation, selected-site lifecycle calls, result normalization, evidence publication, and teardown. Neither package imports VM code, `hosted_settlement_client`, provider models, or a second signed-wire implementation.
+
 ## Current limits
 
 The composition contract covers the shipped role protocols and versioned domain contracts; it is not a claim that every possible market shape fits the current phases. Auctions, sealed-bid protocols, arbitrary settlement plans, and a universal storefront executable require explicit changes rather than inference from the extension points.
+
+The frozen-registry, binding, and dispatch seams have deterministic repository
+evidence, but complete live VM/bare-metal restart, teardown, and
+capacity-restoration proof requires deployment against an external production
+site authority, provider, and the selected-site POOLS-7 lifecycle. The shipped
+bare-metal contribution and its exact hooks do not by themselves prove live
+hardware access or revocation. A no-op hook, synthetic result, or common-shell
+success cannot stand in for that proof.
+
+## API-credit hosted composition
+
+The API-credit buyer owns only domain selection and authorization inputs; its
+hosted lifecycle hook is constructed by core over
+`HostedSettlementTransport`. The storefront instantiates
+`HostedSettlementRouteService` from the settlement-runtime kit and injects
+API-credit accepted-state, reservation, fulfillment, projection, cleanup, and
+before-reclaim callbacks. This preserves one auth/replay/operation-journal
+implementation while keeping credits-service calls and issuance evidence in
+the domain role. Lazy Alkahest client construction is conditional on the
+registered policy, so hosted-only Ed25519 composition has no wallet or chain
+dependency.
 
 ## Related contracts
 

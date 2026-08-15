@@ -41,6 +41,7 @@ class HealthResponse(BaseModel):
     # fell back to a domain's structural default (unrecognized raw value).
     # A pool's absence means no fallback is owed, not that data is missing.
     listing_mode_explanations: dict[str, dict[str, str]] | None = None
+    storefront_domains: tuple[dict[str, str], ...] | None = None
 
 
 class AdminPauseResponse(BaseModel):

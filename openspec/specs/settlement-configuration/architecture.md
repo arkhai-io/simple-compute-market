@@ -68,6 +68,14 @@ Deployment stages migration tooling before the rejecting runtime, previews and b
 
 Run logs may retain the public configuration schema version and mechanism-set fingerprint, but durable plans and operation journals remain authoritative. Recovery uses the accepted canonical mechanism and stable operation identities even when that mechanism is disabled for new deals.
 
+## Expanded hosted funding profiles
+
+Hosted publication clauses use a closed profile vocabulary rather than provider payment-method strings. The profile is part of deterministic option identity because it selects materially different authorization, interaction, timing, and reclaim semantics even when the commercial rate and condition are otherwise identical. Each clause is preflighted independently so a bank-rail blocker cannot hide a ready card, ACH, or Alkahest alternative.
+
+Buyer compatibility combines the advertised public profile/currency/country/interaction contract with the selected local profile's active authority/environment binding. Discovery remains observational. Immediately before acceptance and exact purchase authorization, the buyer revalidates readiness without allowing the seller or current priority to choose a different profile.
+
+Off-session automation is an owner-local decision over one accepted obligation. It is bounded by exact authority, environment, profile, currency, per-purchase amount, aggregate window, and optional seller principals. The decision can authorize only the already accepted input; it cannot alter instrument, destination, expiry, obligation hash, or marketplace operation identity.
+
 ## Related contracts
 
 - [Settlement servicing](../settlement-servicing/spec.md)

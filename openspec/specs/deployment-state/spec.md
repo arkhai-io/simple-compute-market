@@ -4,6 +4,29 @@
 
 Define service topology, persistence ownership, migration execution, packaging, and rollout compatibility.
 ## Requirements
+
+### Requirement: Expanded hosted config cutover is explicit and atomic
+
+Marketplace config migration MUST replace new-publication `payment_method_types` with ordered exact funding-profile clauses, add buyer authority/environment payer-binding and optional bounded automation references, and pin the expanded signed hosted release capability set. Migration MUST reject ambiguous method/profile, currency/country, authority, or credential placement and MUST be idempotent. Buyer and storefront config, installed client wheel, expected manifest, image/release coordinates, and role Secret references MUST activate or roll back together before new profile publication or purchase authorization.
+
+#### Scenario: Legacy card config is migrated
+
+- **WHEN** an existing seller has one valid card-only hosted clause
+- **THEN** migration produces one explicit `card.v1` clause with the same effective rate/currency/account/condition and no public legacy alias
+
+#### Scenario: Partial rollout reaches publication
+
+- **WHEN** storefront config advertises a profile or payer/authorization capability absent from the installed exact client/manifest
+- **THEN** preflight fails before new publication or financial mutation and operators restore matching artifacts/config together
+
+### Requirement: Marketplace deployment never owns payer/provider state
+
+Compose, Helm, and bare process profiles MAY configure hosted public authority URL/identity, exact release pins, safe profile policy, public account reference, condition reference, buyer local profile path, and Secret references for marketplace signers. They MUST NOT configure or persist Stripe credentials, provider IDs, Customer/PaymentMethod/mandate/bank/card data, payer/instrument refs in storefront state, webhooks, hosted database/migrations, reconciliation, or provider recovery.
+
+#### Scenario: Helm values contain a Stripe secret
+
+- **WHEN** values or generated ConfigMaps/Secrets include a Stripe key, webhook secret, provider account ID, Customer ID, PaymentMethod ID, or raw setup/payment action
+- **THEN** schema/render/package validation fails rather than deploying it to a marketplace workload
 ### Requirement: Role-separated deployment
 Production topology MUST support independently operated registries, seller storefront/provisioning stacks, and ephemeral or long-running buyers; the local Anvil environment MUST remain a development-only fixture.
 
@@ -43,6 +66,29 @@ Published wheels MUST resolve internal runtime dependencies by distribution vers
 #### Scenario: Wheel is installed outside the monorepo
 - **WHEN** its dependencies are available from PyPI or `--find-links`
 - **THEN** installation succeeds without the repository's relative directory layout
+
+### Requirement: Independently deployable bare-metal seller role
+The bare-metal storefront MUST be buildable as a wheel from the repository `.dist` artifact set and as a dedicated image containing its declared domain and shared-role dependencies. It MUST own a writable database distinct from every other storefront, with separate immutable agreement-artifact, fulfillment-lifecycle, and reservation-to-site routing tables. Operator configuration MUST bind every stable site identifier to one exact authority URL and canonical principal, while signer credentials and complete routing records remain Secret-injected and diagnostics remain URL/credential-free.
+
+#### Scenario: Bare-metal storefront package is installed
+- **WHEN** the distribution is installed from staged wheels outside the source checkout
+- **THEN** the `bare-metal-storefront` entry point and `market.storefront_contributions` hook load without editable sibling packages
+
+#### Scenario: Operator enables only bare-metal
+- **WHEN** the bare-metal seller role is enabled and VM storefront is disabled
+- **THEN** the role starts with its own persistence and trusted-site configuration without waiting for or referencing a VM storefront
+
+#### Scenario: Operator enables both compute storefronts
+- **WHEN** VM and bare-metal seller roles use one provisioning service
+- **THEN** they remain separate processes with separate writable storefront databases and explicit public service URLs or gateway paths
+
+#### Scenario: Site configuration is diagnosed
+- **WHEN** health or operator status reports configured bare-metal site bindings
+- **THEN** it reports stable site IDs and canonical authority principals but no authority URL, signer credential, provider configuration, or private inventory
+
+#### Scenario: Helm deploys the one-domain role
+- **WHEN** an operator supplies public seller identity, existing signer and site-binding Secret references, one persistent volume, and a pinned dedicated image to `helm/charts/bare-metal-storefront`
+- **THEN** the chart renders one unprivileged storefront process with startup, liveness, and readiness probes and no wait or import dependency on the VM storefront
 
 ### Requirement: Installable compute provisioner
 
@@ -86,36 +132,80 @@ migration, database, ingress, or provider secrets.
 
 ### Requirement: Immutable hosted release consumption
 
-Marketplace packaging and deployment MUST pin one hosted release manifest that binds the exact client wheel version/hash, service image digest, OpenAPI and conformance-fixture hash, migration/schema version, SBOM, and build provenance. CI and deployment MUST verify the manifest and provenance signatures against an allowlisted hosted-repository identity and MUST reject floating image tags, unverified artifacts, or compatible-major substitution.
+Every deployable service MUST be bound to one immutable signed manifest containing exact wheel hashes and versions, image digest, API and schema versions, ordered database migration IDs and checksums, public capability IDs/versions, source commit and repository identity, and build workflow/ref identity. A marketplace hosted consumer MUST additionally pin the exact hosted client wheel/manifest, payer-profile, funding-profile, funding-authorization, action, identity, and conditional-escrow capabilities it consumes, plus the expected hosted image/release identity as an independently recorded coordinate. Deployment and startup MUST fail if any exact value or signature differs; mutable tags and compatible-major substitution are insufficient.
+
+#### Scenario: Consumer expects another funding contract
+
+- **WHEN** a consumer pins a payer profile, funding profile, authorization, action, schema, or client capability absent from the signed manifest
+- **THEN** consumer preflight fails before publication, setup, authorization, or financial mutation
+
+#### Scenario: Manifest artifact identity is changed
+
+- **WHEN** a wheel, image, schema, migration, source, repository, or workflow identity does not match the signed manifest
+- **THEN** deployment fails before schema mutation or serving traffic
 
 #### Scenario: Client wheel and image originate from different manifests
+
 - **WHEN** artifact hashes do not match one signed manifest
 - **THEN** packaging and deployment fail before the storefront starts or runs conformance tests
 
 #### Scenario: Hosted readiness is checked
+
 - **WHEN** the storefront starts with hosted settlement enabled
-- **THEN** `/health/ready` must report the exact expected manifest, API version, and required capabilities
+- **THEN** `/health/ready` reports the exact expected manifest, API version, and required capabilities
 
 ### Requirement: Marketplace deployment config contains consumer data only
 
-VM deployment configuration MAY contain the hosted service URL, request credential reference, preflight/request timeouts, expected contract/capability version, and trusted manifest identity. It MUST NOT contain Stripe/admin/webhook secrets, EAS signing keys, RPC private configuration, provider IDs, service database state, or service migration controls.
+Marketplace deployment configuration MUST contain only hosted public client inputs: HTTPS authority URL, expected authority principal, selected condition/evaluator contract, opaque public account reference, exact funding-profile and currency/country policy, exact client/manifest/API/schema/capability pins, local buyer profile location, and marketplace signer Secret references. It MUST NOT contain provider API keys, webhooks, Stripe account/customer/payment-method/mandate IDs, payer/instrument refs outside owner-only local profile metadata, hosted database or migration settings, provider retry/reconciliation policy, or provider recovery controls. Profile-specific readiness failures MUST remain safe public diagnostics.
+
+#### Scenario: Marketplace profile declares provider credentials
+
+- **WHEN** a storefront or buyer config contains a Stripe secret, provider ID, stable instrument ID, webhook, or hosted persistence field
+- **THEN** typed validation rejects it before process startup
+
+#### Scenario: Marketplace profile declares three exact profiles
+
+- **WHEN** public config and the signed release admit card, US bank transfer, and US ACH under USD/US policy
+- **THEN** readiness evaluates each exact profile independently without receiving provider configuration
 
 #### Scenario: VM chart renders with hosted settlement enabled
+
 - **WHEN** trusted hosted release values are supplied
 - **THEN** the chart configures only the storefront client/adapter and renders no hosted API, worker, migration, Secret, ingress, database, or service PVC
 
 ### Requirement: Packaging preserves provider separation
 
-Root and VM packaging, review-wheelhouse scope, publishing workflow, and storefront image MUST include the exact client and thin adapter when enabled. Only the independently released hosted image MAY contain Stripe/EVM implementations. Compose MAY consume that image by digest for E2E but MUST NOT build sibling source.
+Marketplace builds MUST consume the hosted client only as an exact manifest-pinned wheel from release artifacts, not through editable sibling source, copied models, service wheel, source mounts, or a shared environment. Marketplace release records MUST pin marketplace source separately from the hosted manifest, client wheel, service image, public contract/schema, migration/provenance, repository/workflow, source, and capability identities. Updating the hosted client MUST explicitly rebuild, upgrade, and reinstall the exact wheel before marketplace package, type, or protected checks.
+
+#### Scenario: Developer initializes hosted support
+
+- **WHEN** marketplace dependency initialization runs
+- **THEN** it installs the exact verified client wheel into the marketplace environment without mounting or importing hosted service source
+
+#### Scenario: Expanded client pin changes
+
+- **WHEN** payer/profile/authorization consumption requires a new client release
+- **THEN** marketplace lock and release evidence update the exact wheel/manifest together and stale environments fail verification
 
 #### Scenario: Release artifacts are inspected
+
 - **WHEN** marketplace wheels and storefront images are built
 - **THEN** they contain no Stripe SDK, hosted service package, EVM gateway implementation, provider credential, or copied hosted model and signature module
 
 
 ### Requirement: Identity configuration separates public and secret material
 
-Every deployed role MUST resolve a supported public principal and trust pins from ordinary profile configuration and its private signer credential from an approved Secret boundary. Wallet and chain configuration MUST remain optional and separate. ConfigMaps, rendered command arguments, image layers, release artifacts, logs, probes, and examples MUST NOT contain private signing material.
+Private identity credentials MUST arrive through role-scoped Secret references and MUST NOT enter committed values, ConfigMaps, manifests, run logs, public principal fields, public URLs, or generated evidence. Hosted consumer profiles MUST additionally keep provider credentials and provider/customer/payment-method/mandate/bank/card data out of all marketplace roles; opaque payer binding belongs only to owner-restricted local buyer profile state, while stable instrument refs remain authority-side or transient direct-client state. Runtime MUST derive the public principal from the credential and compare it with configured public identity before readiness.
+
+#### Scenario: Public identity configuration contains a private credential
+
+- **WHEN** a values file, ConfigMap, release artifact, readiness response, log, or conformance fixture contains private identity material
+- **THEN** validation fails and the value is not deployed or published
+
+#### Scenario: Hosted payer data enters storefront values
+
+- **WHEN** a storefront deployment declares a payer profile, instrument, Customer, PaymentMethod, mandate, bank detail, or action URL
+- **THEN** schema validation fails before render or startup
 
 #### Scenario: Fiat-only storefront is rendered
 
@@ -189,17 +279,17 @@ Typed configuration metadata MUST generate role-appropriate init templates, dott
 
 ### Requirement: Protected hosted test composition uses the production release
 
-Every hosted financial system E2E composition MUST consume one verified signed
-production hosted release by exact manifest digest, client wheel version and
-hash, service image digest, migration schema, OpenAPI/conformance identities,
-provenance, signed repository and workflow reference, and hosted source commit.
-It MUST NOT build, mount, import, or
-install sibling hosted source. The composition MUST run the ordinary migration,
-API, and reconciliation worker roles against Stripe test mode and preserve the
-authority store across selected restart scenarios. Production and test
-artifacts MUST contain no provider substitute, controlled clock or event API,
-synthetic event worker, test-provider credential, alternate fixture
-distribution, control protocol, or test-only service entry point.
+A protected marketplace-hosted test composition MUST inject role-scoped Stripe test credentials only into the hosted execution environment, exact manifest-pinned public hosted coordinates into marketplace roles, isolated marketplace signer credentials into their owning roles, and selected buyer payer/profile fixtures through direct client setup. The protected workflow MUST execute at least one exact ordinary `card.v1`, `us_bank_transfer.v1`, and `us_ach_debit.v1` lifecycle plus an off-session `requires_action` fallback through released marketplace and hosted artifacts. It MUST retain authoritative service state across selected consumer restarts and MUST keep provider credentials, payer/instrument data, action URLs, raw requests/events, and provider IDs out of marketplace storage, logs, and reports.
+
+#### Scenario: Protected profile matrix starts
+
+- **WHEN** the signed hosted release, role credentials, connected account, resolver, and exact three funding profiles pass preflight
+- **THEN** buyer and storefront exercise profile selection, accepted authorization, materialization, authoritative funding, VM fulfillment, condition, collection/reclaim, status, and selected restart/recovery boundaries through ordinary production paths
+
+#### Scenario: One external prerequisite is unavailable
+
+- **WHEN** Stripe test mode cannot supply a required rail/account/mandate/action outcome or the signed release is unverifiable
+- **THEN** the report marks that exact assertion unavailable with its prerequisite and does not substitute credential-free, simulated, or another-profile evidence
 
 #### Scenario: Protected Stripe composition starts
 
@@ -295,12 +385,97 @@ An operator MUST preview and explicitly import legacy buyer identity into one ex
 - **WHEN** replacement fails after one candidate was written
 - **THEN** startup refuses mixed state and recovery restores every recorded original before retry
 
+### Requirement: Multi-domain storefront configuration is explicit
+
+A compute-family storefront deployment MUST configure a non-empty public list of domain registrations, each naming one contribution, offering mode, exact domain identity, and supported contract version. The image MUST contain the shared shell and every enabled contribution as staged immutable wheels. Helm and Compose MUST run one process against one single-writer SQLite volume, render trusted sites independently, and keep signer credentials, provider settings, SSH material, and private results in Secret-only channels.
+
+#### Scenario: Combined storefront is rendered
+
+- **WHEN** VM and bare-metal registrations are configured with complete trusted sites
+- **THEN** the rendered workload starts one common storefront command and database with both public registrations and no private credential in ConfigMaps, arguments, or image layers
+
+#### Scenario: Registration package is absent
+
+- **WHEN** preflight cannot find a configured contribution or its complete exact contract
+- **THEN** activation remains quiesced and reports the missing contribution/mode/domain/version without serving new work
+
+### Requirement: Legacy storefront domain migration is transactional
+
+An operator MUST quiesce effects and run the explicitly selected contribution's migration adapter in read-only check mode before write. Write MUST require a restrictive same-directory backup, fsync the complete validated replacement, atomically replace the source, and retain stable listing, negotiation, settlement, obligation, reservation, fulfillment, operation, and provider identities. Missing provenance, mixed kinds, orphan relationships, collision, binding disagreement, or unsupported version MUST abort without partial source mutation. No adapter may infer a domain from payload shape or from having one installed contribution.
+
+#### Scenario: A valid VM database is activated
+
+- **WHEN** every legacy derived row proves its site and pool or Physical Resource provenance and the configured registration matches exactly
+- **THEN** migration records common listing/thread/fulfillment bindings, retires the old mapping as a writable authority, and an idempotent check succeeds after replacement
+
+#### Scenario: A legacy row is ambiguous
+
+- **WHEN** a row lacks trusted site/provenance, conflicts with public mode, is orphaned, duplicates a derivation identity, or names another contract
+- **THEN** check and write fail with redacted diagnostics while the source database and backup set remain unchanged
+
+#### Scenario: Replacement is interrupted
+
+- **WHEN** failure occurs after the original backup but before atomic replacement
+- **THEN** the original database remains byte-identical, the restrictive backup is retained for recovery, and startup does not activate mixed state
+### Requirement: Deployable stack per market domain
+
+Every market domain intended for deployment MUST have a stack definition that
+stands its services up through the repository's ordinary images and public
+process contracts. Domain stack definitions MUST follow the same topology
+conventions, select an exact domain contribution and version, persist each
+authority's state independently, and carry credentials only through explicit
+role-scoped Secret references. A domain without such a stack MUST NOT be
+described as deployable.
+
+#### Scenario: A domain is stood up
+
+- **WHEN** an operator stands up a market domain's services
+- **THEN** its stack definition composes the exact registry, storefront, domain authorities, and optional buyer role without source sharing, provider shortcuts, or committed secret values
+
+#### Scenario: A domain's deployment topology changes
+
+- **WHEN** a domain contribution moves between a standalone storefront and a shared multi-domain storefront process
+- **THEN** only the stack's contribution/config binding changes while public domain identity, selected-site routing, and scenario endpoints remain exact
+
+### Requirement: Bare-metal hosted roles remain independently secret-scoped
+
+The bare-metal storefront and buyer wheels MUST be installed through the repository wheelhouse. Storefront settlement configuration MUST contain only released hosted authority trust/account references and public profile policy; hosted provider credentials remain solely in the independently deployed hosted authority. Hosted-only storefronts and Ed25519 buyers MUST start without EVM address, wallet, chain, or RPC configuration. Compose and Helm MUST require exact identity trust, selected-site authority bindings, shared settlement configuration, funding windows, and immutable hosted release pins.
+
+#### Scenario: Hosted-only rollout
+
+- **WHEN** Alkahest is disabled and a released hosted authority plus selected-site fulfillment are configured
+- **THEN** storefront startup does not resolve a wallet or chain client
+- **AND** missing hosted trust, signer, site, funding-window, or release input fails before publication
+
+### Requirement: API-credit hosted deployment is wallet-free and authority-separated
+
+An API-credit buyer/storefront deployment MAY enable `fiat.stripe.v1` with
+Ed25519 marketplace identities and no wallet or chain settings. It MUST package
+the shared hosted kit, settlement runtime, storefront kit, negotiation runtime,
+API-credit domain, credits-authority client, and storefront composition as
+ordinary wheels/images. Public config MAY contain hosted authority/release
+trust, exact profiles/currency, seller account/condition/evidence resolver, and
+safe buyer-profile bindings. Marketplace workloads MUST NOT receive provider
+credentials or IDs, hosted payer/instrument data, raw actions, bearer secrets,
+or hosted database/migrations.
+
+#### Scenario: Hosted-only API-credit stack starts
+- **WHEN** registry, credits authority, storefront, buyer, resolver, and hosted authority have exact public Ed25519/release configuration
+- **THEN** listing, negotiation, authorization, issuance, evidence, and API consumption initialize without wallet or chain configuration
+
+#### Scenario: Storefront restarts after issuance
+- **WHEN** credits grant and evidence committed before marketplace collection
+- **THEN** the restarted storefront reloads its durable servicing/grant/evidence references and collects once without rebuilding another authority
+
 ## Evidence
 
 - Configurable registry endpoints and independently composed role stacks: core buyer registry configuration plus domain Compose and Helm manifests.
 - Service-owned persistence, provisioning migration init, and schema-drift rejection: registry Alembic tests, `provisioning/compute/service/tests/unit/test_database.py`, and `helm/charts/provisioning/templates/deployment.yaml`.
 - Wheel-directory dependency resolution without parent-path UV sources: package `pyproject.toml` files and package Makefiles using `--find-links`.
 - Extracted compute API/worker packaging and image lifecycle: `provisioning/compute/service/pyproject.toml`, `provisioning/compute/service/Dockerfile`, and its composition, worker, and image smoke tests.
+- Explicit contribution configuration and secret-free render surfaces: `domains/vms/storefront/tests/unit/test_config_loader.py`, `test_cli.py`, `helm/charts/storefront/templates/tests/storefront-environment-test.yaml`, and Helm schema fixtures.
+- Transactional legacy storefront migration, byte-stable refusal, restrictive backup, atomic replacement, and idempotency: `domains/vms/storefront/tests/unit/test_domain_migration.py`.
+- Bare-metal staged-wheel/image boundary and installed contribution: `domains/bare_metal/storefront/pyproject.toml`, `domains/bare_metal/storefront/Dockerfile`, `domains/bare_metal/storefront/tests/test_package.py`, `test_import_boundaries.py`, and `test_app_composition.py`.
 
 Repository-wide migration entrypoints and compatibility-preserving non-additive registry rollout remain proposed in `add-database-migration-commands` and `migrate-registry-to-postgres`.
 
@@ -311,3 +486,4 @@ Internal Python distributions MUST be built into the repository `.dist` director
 A touched project's `init` or `reinit` target MUST explicitly upgrade and reinstall changed internal distributions from `.dist`. Docker stages that resolve internal packages MUST copy `.dist` from the build context so wheel changes invalidate the relevant layer.
 
 The aggregate kit test target MUST build prerequisite kit wheels and invoke every kit subproject's default test suite. Standalone targets MAY remain for focused development, but aggregate coverage MUST not silently omit a kit.
+

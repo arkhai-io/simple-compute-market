@@ -319,7 +319,7 @@ provides-extras = ["dev", "stripe-test"]
 
 [[package]]
 name = "arkhai-hosted-settlement-client"
-version = "0.1.0"
+version = "0.2.0"
 source = { registry = "../.dist" }
 dependencies = [
     { name = "cryptography" },
@@ -329,7 +329,7 @@ dependencies = [
     { name = "rfc8785" },
 ]
 wheels = [
-    { path = "arkhai_hosted_settlement_client-0.1.0-py3-none-any.whl" },
+    { path = "arkhai_hosted_settlement_client-0.2.0-py3-none-any.whl" },
 ]
 
 [[package]]
@@ -470,6 +470,19 @@ wheels = [
 ]
 
 [[package]]
+name = "arkhai-kit-storefront"
+version = "0.1.0"
+source = { registry = "../.dist" }
+dependencies = [
+    { name = "alkahest-py" },
+    { name = "arkhai-core-storefront" },
+    { name = "arkhai-kit-alkahest" },
+]
+wheels = [
+    { path = "arkhai_kit_storefront-0.1.0-py3-none-any.whl" },
+]
+
+[[package]]
 name = "arkhai-vms"
 version = "0.2.0"
 source = { registry = "../.dist" }
@@ -543,6 +556,7 @@ dependencies = [
     { name = "arkhai-kit-settlement-runtime" },
     { name = "arkhai-kit-site" },
     { name = "arkhai-kit-site-client" },
+    { name = "arkhai-kit-storefront" },
     { name = "arkhai-vms" },
     { name = "dynaconf" },
     { name = "eth-account" },

@@ -28,6 +28,7 @@ import pytest
 
 from src.settings import settings
 from src.provisioning_test_client import ProvisioningTestClient
+from tests.e2e.roles.helpers.domain_deal import DomainDealState, require_state
 
 log = logging.getLogger(__name__)
 
@@ -37,8 +38,9 @@ log = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 @dataclass
-class DealState:
-    """Accumulates IDs and snapshots as the deal progresses."""
+class DealState(DomainDealState):
+    """VM-specific observations layered over the shared deal lifecycle."""
+    domain_identity: str = "vms.compute"
     # Phase 0 — service readiness
     _storefront_healthy: bool = False
     _registry_reachable: bool = False
@@ -116,15 +118,6 @@ class DealState:
     deal_lease: Optional[Any] = None
 
 
-def require_state(deal_state: DealState, *fields: str) -> None:
-    """Skip the current test if any required DealState field is None/False."""
-    for f in fields:
-        val = getattr(deal_state, f, None)
-        if not val:
-            pytest.skip(
-                f"Prerequisite not satisfied: DealState.{f} is {val!r}. "
-                f"An earlier test likely failed."
-            )
 
 
 def delete_mock_rules_if_present(provisioning_test_client, *rule_ids: str) -> None:

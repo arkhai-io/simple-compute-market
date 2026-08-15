@@ -8,6 +8,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
+from market_resource_pools import DEFAULT_POOL_ID, ResourcePool
 from market_resource_pools.db import Base as PoolsBase
 from market_site.db import Base as SiteBase
 from market_site.ledger import (
@@ -34,6 +35,16 @@ def ledger() -> CapacityLedgerService:
     Base.metadata.create_all(bind=engine)
     SiteBase.metadata.create_all(bind=engine)
     session_factory = sessionmaker(bind=engine)
+    with session_factory() as db, db.begin():
+        db.add(
+            ResourcePool(
+                id=DEFAULT_POOL_ID,
+                label="Default Pool",
+                provider="bare_metal",
+                enabled=True,
+                policy_tags={"deliverable_modes": ["bare_metal"]},
+            )
+        )
     svc = CapacityLedgerService(session_factory)
     svc.register_resource(
         resource_id="bare-metal-1",
@@ -51,7 +62,10 @@ def test_register_bare_metal_lease_attaches_executor_metadata(
     ledger: CapacityLedgerService,
 ):
     reserved = ledger.reserve(
-        claim={"allocation_mode": ALLOCATION_MODE_EXCLUSIVE},
+        claim={
+            "executor_kind": "bare_metal",
+            "allocation_mode": ALLOCATION_MODE_EXCLUSIVE,
+        },
         deal_ref={"escrow_uid": "0xbm"},
     )
     assert reserved is not None
@@ -91,7 +105,10 @@ def test_register_bare_metal_lease_by_escrow_when_capacity_reservation_id_omitte
     ledger: CapacityLedgerService,
 ):
     reserved = ledger.reserve(
-        claim={"allocation_mode": ALLOCATION_MODE_EXCLUSIVE},
+        claim={
+            "executor_kind": "bare_metal",
+            "allocation_mode": ALLOCATION_MODE_EXCLUSIVE,
+        },
         deal_ref={"escrow_uid": "0xbm"},
     )
     ledger.commit(

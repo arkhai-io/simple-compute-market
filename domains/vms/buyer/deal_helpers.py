@@ -122,7 +122,7 @@ def make_publisher_trust_resolver(
     current,
     signer,
 ):
-    from .run_log import RunLog, read_run_identity
+    from core_buyer.run_log import RunLog, read_run_identity
 
     refresh = _publisher_trust_refresh(signer)
 

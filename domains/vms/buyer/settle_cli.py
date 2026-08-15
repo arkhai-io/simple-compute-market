@@ -18,8 +18,12 @@ from types import SimpleNamespace
 import typer
 from arkhai_vms.provision_terms import VmProvisionPayload, VmProvisionTerms
 from market_core.schemas import SettlementPlan
-from market_identity import Identity
 from market_settlement_runtime import derive_obligation_ref
+from market_hosted_settlement import (
+    FundingMode,
+    FundingSelection,
+    StripeSettlementConfig,
+)
 from core_buyer.buyer_config import ResolvedBuyerIdentity
 from core_buyer.action_policy import (
     ACTION_REQUIRED_EXIT_CODE,
@@ -28,6 +32,7 @@ from core_buyer.action_policy import (
     BuyerActionRequired,
     resolve_buyer_action_policy,
 )
+from core_buyer.hosted_settlement import HostedSettlementTransport
 from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
@@ -47,10 +52,8 @@ from .deal_helpers import (
     resolve_chain_settings,
 )
 from .escrow_client import looks_like_propagation_lag
-from .hosted_settlement import (
-    start_hosted_settlement,
-    wait_for_hosted_settlement,
-)
+from .hosted_authorization import prepare_hosted_funding_authorization
+from .settlement_composition import resolve_buyer_settlement_policy
 from .run_log import read_run
 
 
@@ -117,6 +120,18 @@ def _hosted_obligation(deal) -> dict | None:
     return hosted[0].model_dump(mode="json")
 
 
+def _is_legacy_hosted_recovery(obligation: dict) -> bool:
+    params = obligation.get("params")
+    if not isinstance(params, dict):
+        return False
+    methods = params.get("payment_method_types")
+    if methods is None:
+        return False
+    if methods != ["card"] or "funding_profile" in params:
+        raise ValueError("accepted hosted settlement has ambiguous legacy funding")
+    return True
+
+
 def _accepted_provision_inputs(deal) -> tuple[str | None, int]:
     """Recover immutable provision inputs, reserving config for legacy absence."""
 
@@ -155,6 +170,9 @@ def run_settle_from_log(
     console: Console | None = None,
     action_policy: BuyerActionPolicy | None = None,
     identity: ResolvedBuyerIdentity | None = None,
+    funding_mode: FundingMode = FundingMode.INTERACTIVE,
+    instrument_ref: str | None = None,
+    automatic_funding: bool = False,
 ) -> dict:
     """Resume one accepted deal from its buyer run log.
 
@@ -173,7 +191,6 @@ def run_settle_from_log(
     identity = identity or resolve_recovery_buyer_identity(run_id)
     signer = identity.signer
     deal = load_deal_context(run_id, signer=signer)
-    resolve_seller_principals = make_deal_publisher_trust_resolver(run_id, deal, signer)
     log = open_run_log(
         run_id,
         signer=signer,
@@ -185,9 +202,16 @@ def run_settle_from_log(
         accepted_mechanism = accepted_settlement_mechanism(deal)
     except ValueError as exc:
         raise typer.BadParameter(str(exc)) from exc
+    resolve_seller_principals = make_deal_publisher_trust_resolver(run_id, deal, signer)
 
     hosted_obligation = _hosted_obligation(deal)
     if accepted_mechanism == "fiat.stripe.v1":
+        hosted_transport = HostedSettlementTransport(
+            seller_url=deal.seller_url,
+            principal=deal.buyer_principal,
+            signer=signer,
+            resolve_seller_principals=resolve_seller_principals,
+        )
         if hosted_obligation is None:
             raise typer.BadParameter(
                 "accepted hosted selection has no matching settlement obligation"
@@ -204,22 +228,55 @@ def run_settle_from_log(
             raise typer.BadParameter(
                 "accepted settlement operation identity conflicts with the run-log"
             )
-        started: dict | None = None
         settlement_ref = deal.settlement_ref
+        try:
+            legacy_hosted_recovery = _is_legacy_hosted_recovery(hosted_obligation)
+        except ValueError as exc:
+            raise typer.BadParameter(str(exc)) from exc
+        if legacy_hosted_recovery and settlement_ref is None:
+            raise typer.BadParameter(
+                "historical hosted card settlement has no recoverable settlement "
+                "reference; operator recovery is required"
+            )
+        funding_authorization_ref = deal.funding_authorization_ref(obligation_ref)
+        if settlement_ref is None and funding_authorization_ref is None:
+            try:
+                selection = FundingSelection(
+                    mode=funding_mode,
+                    instrument_ref=instrument_ref,
+                )
+                stripe_config = StripeSettlementConfig.model_validate(
+                    resolve_buyer_settlement_policy().config.mechanism_config("stripe")
+                )
+                authorization = prepare_hosted_funding_authorization(
+                    buyer_profile_id=str(identity.profile_id),
+                    principal=deal.buyer_principal,
+                    signer=signer,
+                    stripe_config=stripe_config,
+                    obligation_ref=obligation_ref,
+                    obligation=hosted_obligation,
+                    selection=selection,
+                    automatic=automatic_funding,
+                )
+            except BuyerActionRequired as exc:
+                typer.secho(str(exc), err=True, fg=typer.colors.YELLOW)
+                raise typer.Exit(ACTION_REQUIRED_EXIT_CODE) from exc
+            except ValueError as exc:
+                raise typer.BadParameter(str(exc)) from exc
+            funding_authorization_ref = authorization.funding_authorization_ref
+            log.event(
+                "funding_authorized",
+                obligation_ref=obligation_ref,
+                funding_profile=authorization.funding_profile.value,
+                funding_authorization_ref=funding_authorization_ref,
+                expires_at_unix=authorization.expires_at_unix,
+            )
+        started: dict | None = None
         if settlement_ref is None:
-            started = start_hosted_settlement(
-                seller_url=deal.seller_url,
+            started = hosted_transport.start(
                 negotiation_id=deal.negotiation_id,
                 obligation_ref=obligation_ref,
-                payer_principal=Identity.model_validate(
-                    hosted_obligation.get("payer_principal")
-                ),
-                claimant_principal=Identity.model_validate(
-                    hosted_obligation.get("claimant_principal")
-                ),
-                principal=deal.buyer_principal,
-                signer=signer,
-                resolve_seller_principals=resolve_seller_principals,
+                funding_authorization_ref=funding_authorization_ref,
             )
             settlement_ref = started.get("settlement_ref")
             if not isinstance(settlement_ref, str) or not settlement_ref:
@@ -274,16 +331,12 @@ def run_settle_from_log(
             )
 
         try:
-            final = wait_for_hosted_settlement(
-                seller_url=deal.seller_url,
+            final = hosted_transport.resume(
                 settlement_ref=settlement_ref,
-                principal=deal.buyer_principal,
-                signer=signer,
                 poll_interval=poll_interval,
                 total_timeout=settlement_timeout,
                 on_poll=_hosted_poll,
                 on_action=action_handler.handle,
-                resolve_seller_principals=resolve_seller_principals,
             )
         except BuyerActionRequired as exc:
             typer.secho(str(exc), err=True, fg=typer.colors.YELLOW)
@@ -591,6 +644,21 @@ def register(app: typer.Typer) -> None:
             help="Handle transient settlement actions: open, print, or fail. "
             "Defaults to open in an interactive terminal and print otherwise.",
         ),
+        funding_mode: FundingMode = typer.Option(
+            FundingMode.INTERACTIVE,
+            "--funding-mode",
+            help="Hosted payer mode when this run has no authorization yet.",
+        ),
+        instrument_ref: str | None = typer.Option(
+            None,
+            "--instrument-ref",
+            help="Transient opaque saved-instrument ref; never written to the run log.",
+        ),
+        automatic_funding: bool = typer.Option(
+            False,
+            "--automatic-funding",
+            help="Apply the disabled-by-default bounded off-session policy.",
+        ),
     ) -> None:
         """Resume a buy from the post-negotiation point.
 
@@ -611,4 +679,7 @@ def register(app: typer.Typer) -> None:
             poll_interval=poll_interval,
             settlement_timeout=settlement_timeout,
             action_policy=action_policy,
+            funding_mode=funding_mode,
+            instrument_ref=instrument_ref,
+            automatic_funding=automatic_funding,
         )

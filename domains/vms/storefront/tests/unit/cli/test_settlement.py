@@ -46,7 +46,7 @@ def test_common_status_json_is_sanitized_and_side_effect_free(monkeypatch, runne
     )
     monkeypatch.setattr(
         group,
-        "SellerOnboarding",
+        "onboard_hosted_seller",
         lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("side effect")),
     )
 
@@ -101,30 +101,30 @@ def test_mechanism_status_and_check_use_common_exit_contract(monkeypatch, runner
 def test_stripe_onboarding_uses_transient_hosted_workflow(monkeypatch, runner, app):
     from market_storefront.groups import settlement as group
 
-    closed: list[bool] = []
-    client = SimpleNamespace(close=lambda: closed.append(True))
+    signer = object()
     stripe_config = SimpleNamespace(enabled=True, account_ref="seller-main")
     config = SimpleNamespace(mechanism_config=lambda key: stripe_config if key == "stripe" else None)
-    monkeypatch.setattr(group, "_settlement_context", lambda: (object(), config, {}))
-    monkeypatch.setattr(group, "_stripe_client", lambda config, resources: client)
+    monkeypatch.setattr(
+        group,
+        "_settlement_context",
+        lambda: (object(), config, {"marketplace_signer": signer}),
+    )
+    calls = []
 
-    class Workflow:
-        def __init__(self, actual_client, *, open_url):
-            assert actual_client is client
-            self.open_url = open_url
+    def onboard(config, **kwargs):
+        calls.append((config, kwargs))
+        return SimpleNamespace(
+            url="https://connect.stripe.test/transient",
+            expires_at_unix=2_000_000_000,
+        )
 
-        def onboard(self, account_ref, *, open_browser):
-            assert account_ref == "seller-main"
-            assert open_browser is False
-            return SimpleNamespace(
-                url="https://connect.stripe.test/transient",
-                expires_at_unix=2_000_000_000,
-            )
-
-    monkeypatch.setattr(group, "SellerOnboarding", Workflow)
+    monkeypatch.setattr(group, "onboard_hosted_seller", onboard)
 
     result = runner.invoke(app, ["settlement", "stripe", "onboard", "--no-browser"])
 
     assert result.exit_code == 0
     assert "https://connect.stripe.test/transient" in result.output
-    assert closed == [True]
+    assert calls[0][0] is stripe_config
+    assert calls[0][1]["signer"] is signer
+    assert calls[0][1]["account_ref"] == "seller-main"
+    assert calls[0][1]["open_browser"] is False

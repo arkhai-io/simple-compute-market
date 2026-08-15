@@ -102,12 +102,41 @@ priority = ["fiat.stripe.v1"]
 
 [Settlement.stripe]
 enabled = true
-# Set the hosted base URL, authority/environment, signed manifest and API/schema
-# pins, required capabilities, and [Settlement.stripe.authority].principals.
+# Set the hosted base URL, authority/environment, exact signed manifest,
+# client/API 0.2.0/schema 5 and capability pins, USD/US policy, and
+# [Settlement.stripe.authority].principals.
 
 [Settlement.alkahest]
 enabled = false
 ```
+
+The selected durable marketplace profile must also have an active opaque payer
+binding for that exact hosted authority/environment. The binding contains no
+provider customer, instrument, mandate, or payment data. A saved instrument is
+selected only for the current direct authorization call and is never stored in
+TOML or the run log.
+
+Create and manage that opaque binding through the direct, signer-authenticated
+payer namespace:
+
+```bash
+market settlement stripe payer create --country US
+market settlement stripe payer show
+market settlement stripe payer setup start \
+  --funding-profile card.v1 --label primary-card --action open
+market settlement stripe payer setup status SETUP_REF --action open
+market settlement stripe payer instrument list
+market settlement stripe payer instrument default INSTRUMENT_REF
+```
+
+Saved setup accepts `card.v1` and `us_ach_debit.v1`; push
+`us_bank_transfer.v1` remains purchase-interactive. Use `instrument revoke` or
+`instrument delete` for the same opaque `INSTRUMENT_REF`. After a proven local
+profile rotation, `payer owner rotate` proves both retained signers; retire an
+old hosted owner with `payer owner retire --principal scheme:identifier`.
+`payer delete` deletes the hosted profile and retires the local binding. Add
+`--json` for the safe projection and `--action open|print|fail` for transient
+setup actions; neither output stores action values or payment data.
 
 An Alkahest buyer instead enables and prioritizes `alkahest.v1`, supplies
 `[Settlement.alkahest].address_config_path`, and fills the generated `[Wallet]`
@@ -139,7 +168,7 @@ market listing list
 market listing list --resource 'gpu_model=H200 gpu_count>=1'
 market listing list \
   --resource 'gpu_model in [H200,H100] region=us-east' \
-  --settlement 'mechanism=fiat.stripe.v1 asset=usd stripe.method=card'
+  --settlement 'mechanism=fiat.stripe.v1 asset=usd stripe.funding_profile=card.v1 stripe.interaction=interactive'
 market listing list \
   --resource 'gpu_model=H200' \
   --settlement 'mechanism=alkahest.v1 alkahest.chain=base_sepolia'
@@ -157,7 +186,7 @@ categories, then stops before negotiation or settlement.
 ```bash
 market buy \
   --resource 'gpu_model=H200 gpu_count>=1' \
-  --settlement 'mechanism=fiat.stripe.v1 asset=usd stripe.method=card' \
+  --settlement 'mechanism=fiat.stripe.v1 asset=usd stripe.funding_profile=card.v1 stripe.interaction=interactive' \
   --duration-hours 1 \
   --initial-price 2 \
   --max-price 2 \
@@ -228,20 +257,56 @@ market settlement alkahest escrow reclaim --escrow-uid <escrow_uid>
 market settlement alkahest chain check
 ```
 
-## Hosted Checkout settlement
+## Hosted funding profiles
 
-When a listing advertises `fiat.stripe.v1`, constrain it with a settlement
-clause such as `mechanism=fiat.stripe.v1 asset=usd stripe.method=card`.
-Discovery and negotiation use listing data only; no hosted-provider mutation
-occurs before seller acceptance. After acceptance, the CLI starts and polls the
-obligation through the seller storefront, not through a buyer-configured
-financial authority.
+When a listing advertises `fiat.stripe.v1`, constrain one exact option with a
+clause such as `mechanism=fiat.stripe.v1 asset=usd
+stripe.funding_profile=card.v1 stripe.interaction=interactive`. The other
+initial profiles are `us_bank_transfer.v1` and `us_ach_debit.v1`; they remain
+distinct choices even when price and condition match.
 
-Use `--action open` for interactive Checkout, `--action print` to hand the
-transient action to an external automation boundary, or `--action fail` when
-interaction is forbidden. The run log retains only the opaque settlement
-reference, lifecycle status, action kind, and expiry. It never retains an action
-URL or payment data. Resume the accepted run to retrieve a current action.
+Discovery uses the listing plus selected-profile readiness and performs no
+hosted mutation. After seller-accepted terms are durable, the CLI obtains one
+exact purchase authorization directly from the hosted authority using the
+selected or recorded marketplace signer, then starts, polls, and reclaims the
+obligation only through the seller storefront. The run log keeps the exact
+profile and opaque authorization/settlement references, never the payer or
+saved-instrument reference.
+
+Use `--action open` for interactive setup/payment/confirmation or bank
+instructions, `--action print` to hand the transient action to an external
+automation boundary, or `--action fail` when interaction is forbidden. Pending
+push transfer or ACH availability remains pending until authoritative funded
+state; displaying instructions or completing a redirect does not imply VM
+fulfillment. The run log keeps only safe public reason/deadline/action
+kind/expiry metadata and never an action URL, client secret, bank detail, or
+provider payload. Resume the accepted run to retrieve current state and action.
+
+## Buy API credits with hosted funding
+
+The API-credit buyer uses the same selected durable profile and hosted policy.
+It filters exact listing options before negotiation, then revalidates service,
+quantity, key mode/key ID, parties, currency, profile, and condition from the
+accepted seller state before authorization:
+
+```bash
+market credits buy \
+  --service-name vllm-chat \
+  --quantity 10 \
+  --new-key \
+  --funding-profile card.v1 \
+  --action open \
+  --yes
+```
+
+The returned API credential is buyer-only output, not hosted settlement
+evidence. Resume a recorded pending purchase with
+`market credits settle-status RUN_ID`; use
+`market credits settle-reclaim RUN_ID --reason expired` only when issuance did
+not commit. For an existing-key top-up, replace `--new-key` with
+`--existing-key KEY_ID`; another marketplace principal is rejected by the
+credits authority. Hosted-only API-credit commands do not require wallet,
+chain, RPC, or gas configuration.
 
 ## Common pitfalls
 

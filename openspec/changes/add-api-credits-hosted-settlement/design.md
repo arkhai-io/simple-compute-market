@@ -240,3 +240,32 @@ Protected evidence extends the existing signed report model with exact API-credi
 | Completion state and remaining bare-metal adopter | `docs/development/ROADMAP.md` |
 
 Implementation closeout records the exact promoted headings, runs comment hygiene, removes temporary change/migration commentary from production code, verifies touched import placement, and compresses completed tasks only after all owned validation and documentation destinations are complete.
+
+## Design promotion record
+
+Promoted on 2026-08-15:
+
+| Accepted decision | Permanent heading |
+|---|---|
+| Canonical principal-bound exact-once hosted grant identity | `openspec/specs/api-credits/spec.md` — **Hosted settlement grants are principal-bound and exact once**; `architecture.md` — **Hosted issuance and evidence** |
+| Signed portable secret-free issuance evidence and resolution | `openspec/specs/api-credits/spec.md` — **Hosted issuance evidence is signed, portable, and secret-free**; `architecture.md` — **Hosted issuance and evidence** |
+| Shared buyer transport and callback-driven storefront service | `openspec/specs/market-composition/spec.md` — **API-credit hosted composition uses shared seams**; `architecture.md` — **API-credit hosted composition** |
+| Exact API-credit buyer selection, action, resume, and credential boundary | `openspec/specs/buyer-orchestration/spec.md` — **API-credit hosted buys share accepted-state transport**; `architecture.md` — **API-credit hosted recovery** |
+| Independent quota/readiness and mechanism-neutral publication | `openspec/specs/storefront-publication/spec.md` — **API-credit publication composes independent settlement alternatives**; `architecture.md` — **API-credit hosted publication** |
+| Funding → issuance → evidence → condition → collection and reclaim exclusion | `openspec/specs/settlement-servicing/spec.md` — **API-credit hosted servicing orders financial and domain effects**; `architecture.md` — **API-credit hosted servicing** |
+| Wallet-free role topology, migrations, package and secret ownership | `openspec/specs/deployment-state/spec.md` — **API-credit hosted deployment is wallet-free and authority-separated**; `architecture.md` — **API-credit hosted topology** |
+| Deterministic versus protected evidence attribution | `openspec/specs/test-compatibility/spec.md` — **Hosted API-credit evidence is attributed at its owning boundary**; `architecture.md` — **API-credit hosted evidence ownership** |
+| Repository current-state implementation and operations | `docs/development/ARCHITECTURE.md` — **API-credit hosted settlement**; `DEPLOYMENT_AND_CONFIG.md` — **Settlement consumer configuration and cutover**; `TESTING.md` — **Hosted Settlement Evidence**; `docs/buyer-quickstart.md` — **Buy API credits with hosted funding**; `docs/cookbooks/vllm-apicredits-seller.md` — **Storefront config** |
+| Completion state and remaining external evidence | `docs/development/ROADMAP.md` — **Design promotion (2026-08-15, API-credit hosted adoption)** |
+
+The implementation uses `core_buyer.HostedSettlementTransport` and
+`market_settlement_runtime.HostedSettlementRouteService`; API-credit and VM
+callers contain no copied hosted transport/routes. Credits authority and
+storefront migrations preserve Alkahest grant identities while new hosted work
+uses deterministic fulfillment IDs and canonical principal ownership.
+
+External evidence remains intentionally unpromoted as observed behavior: the
+exact producer-signed expanded hosted release has no protected acceptance record
+in this checkout, and protected Stripe account/browser inputs plus a deployed
+portable resolver are unavailable. Local deterministic tests and structural
+checks must not be cited for those assertions.

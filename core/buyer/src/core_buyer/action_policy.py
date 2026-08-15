@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from enum import Enum
@@ -70,16 +71,27 @@ class BuyerActionHandler:
     )
 
     def handle(self, action: Mapping[str, Any]) -> BuyerActionMetadata | None:
-        """Handle a URL-bearing action without returning or persisting the URL."""
+        """Handle one transient action without retaining its value."""
 
         url = action.get("url")
-        if not isinstance(url, str) or not url:
+        instructions = action.get("bank_instructions")
+        browser_action = isinstance(url, str) and bool(url)
+        if browser_action:
+            material = url
+        elif isinstance(instructions, Mapping) and instructions:
+            material = json.dumps(
+                dict(instructions),
+                ensure_ascii=False,
+                separators=(",", ":"),
+                sort_keys=True,
+            )
+        else:
             return None
         kind_value = action.get("kind")
         kind = kind_value if isinstance(kind_value, str) and kind_value else None
         expiry_value = action.get("expires_at_unix")
         expiry = expiry_value if isinstance(expiry_value, int) else None
-        marker = (kind, expiry, hashlib.sha256(url.encode("utf-8")).digest())
+        marker = (kind, expiry, hashlib.sha256(material.encode("utf-8")).digest())
         if marker in self._seen:
             return BuyerActionMetadata(kind=kind, expires_at_unix=expiry)
         self._seen.add(marker)
@@ -90,12 +102,12 @@ class BuyerActionHandler:
 
         if self.policy is BuyerActionPolicy.FAIL:
             raise BuyerActionRequired(metadata)
-        if self.policy is BuyerActionPolicy.OPEN:
+        if self.policy is BuyerActionPolicy.OPEN and browser_action:
             if self.open_url is None:
                 raise RuntimeError("buyer action policy open has no URL opener")
-            self.open_url(url)
+            self.open_url(material)
         else:
             if self.print_url is None:
-                raise RuntimeError("buyer action policy print has no URL printer")
-            self.print_url(url)
+                raise RuntimeError("buyer action policy display has no transient printer")
+            self.print_url(material)
         return metadata

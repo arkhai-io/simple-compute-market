@@ -223,7 +223,8 @@ def _clause_for_legacy_price(
             rate=_decimal_text(amount / (Decimal(10) ** exponent)),
             per="hour",
             mechanism_input={
-                "method": "card",
+                "funding_profile": "card.v1",
+                "interaction": "interactive",
                 "funds_flow": "separate_charges_transfers",
             },
         )
@@ -246,6 +247,100 @@ def _clause_for_legacy_price(
     )
 
 
+def _migrate_existing_settlement_clauses(
+    existing: list[Any],
+) -> tuple[list[Any], tuple[str, ...], tuple[str, ...]]:
+    migrated = copy.deepcopy(existing)
+    actions: list[str] = []
+    conflicts: list[str] = []
+    for index, raw_clause in enumerate(migrated):
+        if not isinstance(raw_clause, MutableMapping):
+            continue
+        if _plain(raw_clause.get("mechanism")) != _STRIPE:
+            continue
+        raw_input = raw_clause.get("mechanism_input")
+        if not isinstance(raw_input, MutableMapping):
+            conflicts.append(
+                f"Pricing.settlements[{index}] Stripe mechanism_input must be a table"
+            )
+            continue
+        method_present = "method" in raw_input
+        methods_present = "payment_method_types" in raw_input
+        profile_present = "funding_profile" in raw_input
+        legacy_count = int(method_present) + int(methods_present)
+        if profile_present and legacy_count:
+            conflicts.append(
+                f"Pricing.settlements[{index}] mixes funding_profile with legacy methods"
+            )
+            continue
+        if legacy_count > 1:
+            conflicts.append(
+                f"Pricing.settlements[{index}] has ambiguous legacy method fields"
+            )
+            continue
+        expected_fields = {"funding_profile", "interaction", "funds_flow"}
+        if not legacy_count:
+            profile = _plain(raw_input.get("funding_profile"))
+            interaction = _plain(raw_input.get("interaction"))
+            funds_flow = _plain(raw_input.get("funds_flow"))
+            allowed_interactions = {
+                "card.v1": {"interactive", "saved_instrument"},
+                "us_bank_transfer.v1": {"interactive"},
+                "us_ach_debit.v1": {"interactive", "saved_instrument"},
+            }
+            if (
+                not isinstance(profile, str)
+                or profile not in allowed_interactions
+                or set(raw_input) != expected_fields
+                or interaction not in allowed_interactions.get(profile, set())
+                or funds_flow != "separate_charges_transfers"
+            ):
+                conflicts.append(
+                    f"Pricing.settlements[{index}] has a partial or unsupported exact funding profile"
+                )
+            continue
+        if method_present:
+            legacy = _plain(raw_input.get("method"))
+            supported = legacy == "card"
+        else:
+            legacy = _plain(raw_input.get("payment_method_types"))
+            supported = legacy == ["card"]
+        if not supported:
+            conflicts.append(
+                f"Pricing.settlements[{index}] has unsupported legacy methods"
+            )
+            continue
+        allowed_legacy_fields = {
+            "method" if method_present else "payment_method_types",
+            "interaction",
+            "funds_flow",
+        }
+        if set(raw_input) - allowed_legacy_fields:
+            conflicts.append(
+                f"Pricing.settlements[{index}] legacy input has unsupported fields"
+            )
+            continue
+        interaction = _plain(raw_input.get("interaction"))
+        funds_flow = _plain(raw_input.get("funds_flow"))
+        if interaction not in (None, "interactive") or funds_flow not in (
+            None,
+            "separate_charges_transfers",
+        ):
+            conflicts.append(
+                f"Pricing.settlements[{index}] conflicts with the card.v1 legacy mapping"
+            )
+            continue
+        raw_input.pop("method", None)
+        raw_input.pop("payment_method_types", None)
+        raw_input["funding_profile"] = "card.v1"
+        raw_input["interaction"] = "interactive"
+        raw_input["funds_flow"] = "separate_charges_transfers"
+        actions.append(
+            f"Pricing.settlements[{index}].mechanism_input <- card.v1"
+        )
+    return migrated, tuple(actions), tuple(conflicts)
+
+
 def migrate_publication_config(
     path: str | os.PathLike[str],
     *,
@@ -254,7 +349,7 @@ def migrate_publication_config(
     backup: bool = False,
     validator: Callable[[Mapping[str, Any], str], None] | None = None,
 ) -> PublicationMigrationResult:
-    """Migrate one unambiguous storefront pricing default without guessing."""
+    """Migrate unambiguous legacy storefront pricing into exact typed clauses."""
 
     _mode(check=check, write=write, backup=backup)
     config_path = Path(path)
@@ -277,7 +372,40 @@ def migrate_publication_config(
         )
     existing = _plain(pricing.get("settlements"))
     if isinstance(existing, list) and existing:
-        return PublicationMigrationResult(config_path, "toml", False, False, (), ())
+        clauses, actions, conflicts = _migrate_existing_settlement_clauses(existing)
+        if conflicts:
+            if write:
+                raise SettlementMigrationValidationError("; ".join(conflicts))
+            return PublicationMigrationResult(
+                config_path, "toml", False, False, (), conflicts
+            )
+        if not actions:
+            return PublicationMigrationResult(
+                config_path, "toml", False, False, (), ()
+            )
+        planned = copy.deepcopy(document)
+        _mutable_table(planned, "Pricing")["settlements"] = clauses
+        candidate_text = tomlkit.dumps(planned)
+        parsed_candidate = tomllib.loads(candidate_text)
+        if validator is not None:
+            validator(parsed_candidate, "seller")
+        if check:
+            return PublicationMigrationResult(
+                config_path, "toml", True, False, actions, ()
+            )
+        if validator is None:
+            raise SettlementMigrationValidationError(
+                "write mode requires a typed storefront candidate validator"
+            )
+        backup_path = atomic_write_with_backup(
+            config_path,
+            original=original,
+            candidate=candidate_text.encode("utf-8"),
+            original_stat=source_stat,
+        )
+        return PublicationMigrationResult(
+            config_path, "toml", True, True, actions, (), backup_path
+        )
     has_legacy = (
         any(
             _plain(pricing.get(name)) not in (None, "")

@@ -10,6 +10,9 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 COMPOSE = (REPO_ROOT / "compose.hosted-settlement.yml").read_text(encoding="utf-8")
 ROOT_MAKE = (REPO_ROOT / "Makefile").read_text(encoding="utf-8")
 E2E_MAKE = (REPO_ROOT / "e2e-tests" / "Makefile").read_text(encoding="utf-8")
+WORKFLOW = (REPO_ROOT / ".github" / "workflows" / "hosted-stripe-test.yml").read_text(
+    encoding="utf-8"
+)
 
 
 def test_authority_port_coexists_with_registry_container_port() -> None:
@@ -80,16 +83,58 @@ def test_only_hosted_service_secret_environment_is_required() -> None:
         assert token in preparer
 
 
-def test_clean_and_restart_targets_have_opposite_volume_behavior() -> None:
+def test_protected_report_signer_is_role_scoped_masked_and_ephemeral() -> None:
+    assert ".evidence_signer_credential" in WORKFLOW
+    assert ".evidence_signer_scheme" in WORKFLOW
+    assert ".evidence_signer_identifier" in WORKFLOW
+    assert 'echo "::add-mask::$value"' in WORKFLOW
+    for variable in (
+        "HOSTED_SETTLEMENT_E2E_EVIDENCE_SIGNER_CREDENTIAL",
+        "HOSTED_SETTLEMENT_E2E_EVIDENCE_SIGNER_SCHEME",
+        "HOSTED_SETTLEMENT_E2E_EVIDENCE_SIGNER_IDENTIFIER",
+    ):
+        assert f"export {variable}=" in WORKFLOW
+        assert f"unset {variable}" in WORKFLOW
+
+
+def test_protected_lane_activates_one_attested_marketplace_consumer_image() -> None:
+    storefront = COMPOSE.split("  bob-storefront:", 1)[1].split("\nvolumes:", 1)[0]
+    assert (
+        "image: ${HOSTED_MARKETPLACE_VERIFIED_IMAGE:?run the selected marketplace "
+        "release preflight}"
+    ) in storefront
+    preflight = ROOT_MAKE.split("prepare-hosted-compose:", 1)[1].split(
+        "hosted-compose-up:", 1
+    )[0]
+    assert 'gh attestation verify "$(HOSTED_MARKETPLACE_RELEASE_MANIFEST)"' in preflight
+    assert "--marketplace-manifest-sha256" in preflight
+    assert "--marketplace-image-digest" in preflight
+    assert "Download exact attested marketplace consumer release" in WORKFLOW
+    assert "MARKETPLACE_RELEASE_ARTIFACT" in WORKFLOW
+    assert (
+        'HOSTED_MARKETPLACE_RELEASE_MANIFEST="$MARKETPLACE_RELEASE_DIR/'
+        'marketplace-release-manifest.json"'
+    ) in WORKFLOW
+
+
+def test_up_restart_and_clean_have_distinct_volume_and_recreate_behavior() -> None:
+    up = ROOT_MAKE.split("hosted-compose-up:", 1)[1].split(
+        "hosted-compose-restart:", 1
+    )[0]
     restart = ROOT_MAKE.split("hosted-compose-restart:", 1)[1].split(
         "hosted-compose-clean:", 1
     )[0]
     clean = ROOT_MAKE.split("hosted-compose-clean:", 1)[1].split(
         "hosted-stripe-test:", 1
     )[0]
-    assert " restart" in restart
-    assert " down -v --remove-orphans" in clean
+    assert "hosted-preflight" in up
+    assert "up -d --wait" in up
+    assert "down" not in up
+    assert "--force-recreate" not in up
+    assert "up -d --wait --force-recreate" in restart
+    assert " restart" not in restart
     assert "down -v" not in restart
+    assert " down -v --remove-orphans" in clean
     for variable in (
         "VMS_REGISTRY_ADMIN_API_KEY",
         "VMS_REGISTRY_BOOTSTRAP_API_KEY",
@@ -104,7 +149,7 @@ def test_clean_and_restart_targets_have_opposite_volume_behavior() -> None:
 def test_only_production_and_protected_stripe_targets_exist() -> None:
     for target in (
         "hosted-preflight:",
-        "hosted-compose-start:",
+        "hosted-compose-up:",
         "hosted-compose-restart:",
         "hosted-compose-clean:",
         "hosted-stripe-test:",
@@ -116,6 +161,7 @@ def test_only_production_and_protected_stripe_targets_exist() -> None:
         "hosted-local-eas:",
         "build-hosted:",
         "hosted-real-stripe:",
+        "hosted-compose-start:",
     ):
         assert retired not in ROOT_MAKE
         assert retired not in E2E_MAKE
@@ -182,10 +228,35 @@ def test_wallet_free_fixtures_have_only_public_portable_configuration() -> None:
     for filename, expected_url in expected_urls.items():
         path = REPO_ROOT / "e2e-tests" / "config" / filename
         document = tomllib.loads(path.read_text(encoding="utf-8"))
-        assert "Identity" in document
+        if filename == "hosted-storefront.toml":
+            assert "Identity" in document
+        else:
+            assert "BuyerProfile" in document
         assert document["Settlement"]["stripe"]["enabled"] is True
         assert document["Settlement"]["stripe"]["base_url"] == expected_url
         assert field_paths(document).isdisjoint(forbidden)
+        stripe = document["Settlement"]["stripe"]
+        assert stripe["expected_api_version"] == "0.2.0"
+        assert stripe["expected_schema_version"] == 5
+        assert set(stripe["required_capabilities"]) == {
+            "scheme-tagged-identities.v1",
+            "account-owner-admission.v1",
+            "account-owner-rotation.v1",
+            "account-owner-retirement.v1",
+            "signer-injected-client.v1",
+            "provider-neutral-seller-onboarding.v1",
+            "conditional-escrow.v2",
+            "stripe-connect-separate-charges-transfers.v2",
+            "portable-attestation.v1",
+            "eas-arbiter.v1",
+            "payer-profile.v1",
+            "funding-authorization.v1",
+            "funding-profile.card.v1",
+            "funding-profile.us_bank_transfer.v1",
+            "funding-profile.us_ach_debit.v1",
+            "normalized-funding-reversal.v1",
+            "operator-recovery-redaction.v1",
+        }
 
 
 def test_marketplace_hosted_configs_contain_no_provider_fixture_identity() -> None:
@@ -224,9 +295,9 @@ def test_ready_gate_rejects_digest_schema_and_capability_mismatch(
     spec.loader.exec_module(module)
     production = {
         "manifest_digest": "sha256:" + "1" * 64,
-        "api_version": "0.1.0",
-        "schema_version": 4,
-        "capabilities": ["required.v1"],
+        "api_version": "0.2.0",
+        "schema_version": 5,
+        "capabilities": ["required.v2"],
     }
     response = {
         "ready": True,

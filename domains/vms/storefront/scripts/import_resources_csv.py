@@ -20,6 +20,8 @@ try:
 except IndexError:
     pass
 
+from arkhai_vms.domain_runtime import market_domain
+from market_core import validate_domain_contract
 from market_storefront.settlement_composition import (
     build_storefront_publication_clause_compiler,
 )
@@ -52,7 +54,10 @@ def _resolve_db_path(cli_db_path: str | None) -> str:
 
 
 async def _run(csv_path: str, db_path: str, dry_run: bool) -> int:
-    client = SQLiteClient(db_path=db_path)
+    client = SQLiteClient(
+        db_path=db_path,
+        domain=validate_domain_contract(market_domain()),
+    )
     report = await client.upsert_resources_from_csv(
         csv_path=csv_path,
         dry_run=dry_run,

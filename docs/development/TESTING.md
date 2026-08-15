@@ -41,6 +41,18 @@ seam; patching around it defeats the purpose of the seam and produces
 tests that break when internal call structure changes even though
 behavior didn't.
 
+**Composition-boundary convention:** When a role receives a versioned domain contract, unit tests should inject a distinct compatible object and assert object identity at each constructor boundary rather than patching the default resolver. Fail-closed cases belong at the composition root and must assert that persistence, network, and worker collaborators were not constructed. Existing integration tests remain responsible for public behavior and persisted-state parity.
+
+**Negotiation-runtime convention:** Protocol invariants are tested once in
+`kit/negotiation-runtime/tests/unit` with an in-memory recording repository and
+injected opaque domain hooks. Those tests prove canonical-principal checks,
+round and terminal ordering, transcript recovery, acceptance persistence, and
+fail-before-effect behavior for recorded binding mismatches. Storefront tests
+then prove only their domain adapters: term decoding, seller policy input,
+accepted-artifact construction, and domain persistence/effect hooks. A domain
+test must invoke `NegotiationRuntime`; reintroducing a local lifecycle helper
+would test the duplication rather than the production composition.
+
 ### 2. Integration Tests
 
 **What they cover:** End-to-end request → response paths with the full
@@ -150,17 +162,26 @@ not any one service's internal logic.
 
 **Current location:** `e2e-tests/tests/e2e/`.
 
-<!-- Confirmed current and real (openspec/specs/test-compatibility/spec.md's
-"Dependency-aware e2e stages" and "Exact e2e state dependencies"
-requirements): downstream e2e stages declare which prior stage's state
-they consume via `require_state`, using one exact producer/consumer
-field name per staged value, and skip with the missing field name
-rather than failing on an unrelated symptom -- see
-`e2e-tests/tests/e2e/roles/scenarios/vms/conftest.py` and
-`e2e-tests/tests/e2e/roles/README.md`. The specific scenario structure
-beyond that skeleton (which stages exist today, the dry-run/advance
-pattern's current shape, specific test file layout) still needs
-confirming before being restated here in detail. -->
+Every deployable domain owns one release-qualified complete-deal scenario:
+discovery, negotiation, settlement, delivery, and domain-defined teardown.
+The teardown observation follows the resource sold: VM capacity is released,
+an API-credit grant is consumed until the authority returns HTTP 402, and a
+bare-metal lease is released only when authenticated access is revoked and the
+selected-site authority reports teardown. A health check or static Compose
+render is not deal evidence.
+
+The scenarios share `DomainDealState`, exact event ordering, profiled buyer
+configuration, and public client helpers from
+`e2e-tests/tests/e2e/roles/helpers/domain_deal.py` and
+`e2e-tests/tests/e2e/roles/buyer_cli.py`. The helpers keep domain results
+opaque: they do not assume a VM listing, provisioning job, host field, API key,
+Physical Resource, site, or teardown payload. A scenario supplies its codecs
+and domain assertions instead of copying another domain's control flow.
+
+Staged scenarios use `require_state` with one exact producer/consumer field.
+When an earlier stage or external authority is unavailable, the dependent
+stage names that prerequisite and remains blocked; it is never counted as a
+successful live deal.
 
 The e2e test pod cannot import service internals — it uses typed
 clients, explicit test controllers, and stage/event APIs over HTTP, the
@@ -242,6 +263,65 @@ under its own `tests/` root, matching the four-level hierarchy above.
 System-level tests live in the separate `e2e-tests` package, itself
 split into `unit/` (its own helper logic), `smoke/`, and `e2e/`.
 
+## Pool Offering-Mode Enforcement
+
+Pool offering-mode coverage follows the lowest-meaningful-level rule while
+proving that no execution layer relies on another layer's earlier decision:
+
+- `kit/resource-pools` unit tests own declaration shape, typed reads,
+  membership, absent-as-empty behavior, and identical validation across
+  individual and bulk administration.
+- `kit/site` unit tests own explicit claim identity and reservation admission.
+  They assert that neither a VM-shaped resource nor any resource attribute
+  supplies a missing mode, that an undeclared mode creates no hold, and that
+  pool authorization remains independent of exclusive/shareable physical
+  accounting.
+- `kit/fulfillment` scheduler tests withdraw a declaration after reservation;
+  orchestration tests withdraw it after provider input is prepared and assert
+  no provider dispatch occurs.
+- Provisioning migration tests cover fresh bootstrap, the system-owned default
+  pool, exact derivation from provider/playbook/delegate configuration,
+  idempotent rerun, narrowing, INFO evidence, malformed drift, single-proof
+  backfill, conflicting proof, unproved active rows, and terminal rows.
+- The deployed `e2e_pool_declared_modes` scenario sends an unsupported explicit
+  mode for a real matching capacity resource and observes HTTP 409 plus no
+  reservation row. It stops at the reservation boundary by design: provider
+  failure would be evidence that admission occurred too late.
+
+An executor-default inventory is part of closeout for changes to this boundary.
+Search production compute contracts, persistence, dispatch, result, release,
+site, storefront, and domain adapters for default arguments, `or` fallbacks,
+and attribute-based inference; a passing focused suite alone cannot prove their
+absence.
+
+## Multi-Domain Storefront Composition
+
+The common shell owns a boundary matrix rather than duplicating complete domain
+scenarios at every level:
+
+- core storefront unit tests cover contribution discovery, duplicate/unknown
+  rejection, exact-object registry resolution, immutable listing/thread
+  bindings, lifecycle carriers, publication fan-out, and schema-opaque result
+  dispatch;
+- VM storefront tests cover installed contribution wiring, exact public
+  `virtualization_type`, configured source selection, negotiation/settlement
+  adapters, selected-site capacity calls, restart recovery, and transactional
+  legacy migration;
+- bare-metal domain/storefront tests own only bare-metal codecs, publication
+  semantics, and the production lifecycle hook supplied by that package;
+- deployment tests render one combined image/command/database, both explicit
+  registrations, disabled-domain absence, and secret canary exclusion;
+- the system lane must observe a real VM deal and a real selected-site POOLS-7
+  bare-metal deal concurrently, including result, teardown, and restored
+  capacity. It remains blocked—not mocked—until the production bare-metal
+  contribution and its live provisioning prerequisites are installed.
+
+Every cross-swap test asserts the unselected policy, repository mutation,
+capacity/provider call, result decoder, and teardown spy remain untouched.
+Restart fixtures route from recorded bindings even when current publication
+configuration changes. Migration tests compare source bytes on failed check or
+write and prove the successful rerun idempotent.
+
 ## Marketplace Identity Verification
 
 Identity tests follow the same lowest-meaningful-level rule while exercising
@@ -313,78 +393,61 @@ Hosted settlement has one provider-authentic system lane:
 make hosted-stripe-test
 ```
 
-This protected target verifies one exact ordinary signed hosted production
-release and then runs the marketplace-owned wallet-free VM lifecycle against
-Stripe test mode. Publication, discovery, negotiation, exact
-`fiat.stripe.v1` selection, materialization, buyer action, funding,
-fulfillment evidence, collection or reclaim, status, restart, and recovery use
-released marketplace and hosted clients and ordinary network contracts.
-Chromium completes Checkout, Stripe CLI forwards the real signed event to the
-loopback authority mapping, and Stripe retrieval APIs verify the exact related
-payment, charge, transfer, or refund. Provider behavior is not inferred from a
-local substitute.
+This protected target verifies one exact ordinary signed hosted production release and one exact marketplace consumer release, then runs the wallet-free VM lifecycle against Stripe test mode. It attributes `card.v1`, `us_bank_transfer.v1`, `us_ach_debit.v1`, and off-session `requires_action` separately through ordinary publication, discovery, negotiation, exact post-acceptance funding authorization, storefront-mediated materialization/status/reclaim, transient buyer action, authoritative funding, VM fulfillment evidence, condition evaluation, collection or eligible reclaim, restart, and recovery.
 
-Preflight completes before publication or financial mutation and requires:
+Credential-free marketplace checks own the behavior that does not require Stripe: exact profile config and deterministic option identity, independent readiness/publication, local persistent payer binding, direct released-client payer and authorization helpers, bounded automation policy, storefront mediation, action redaction, delayed funding gates, immutable runtime journals, legacy card recovery, fulfillment/reclaim exclusion, package contents, release verification, and evidence-schema canaries. Deterministic hosted ports describe provider-neutral outcomes and never establish Stripe behavior.
 
-- the exact marketplace commit and signed hosted production manifest, client
-  wheel hash/version, service image digest, signed release repository/workflow
-  reference, and hosted source commit;
-- the independently trusted protected producer workflow run identity, recorded
-  as orchestration evidence rather than a signed-manifest field;
-- a test-mode secret (`sk_test` or least-privilege `rk_test`), Stripe
-  connectivity, and non-live returned objects;
-- the expected allowlisted connected account with the required ownership,
-  charge/transfer capabilities, and readiness;
+API-credit hosted checks additionally divide ownership as follows:
+
+- API-credit domain/buyer tests own strict `settlement_options`, exact
+  quantity-scaled minor-unit pricing, selection and accepted-party/key-target
+  validation, wallet-free policy resolution, transient actions, and recorded
+  resume/reclaim identities;
+- credits-authority tests own canonical principal ownership, deterministic
+  fulfillment identity, immutable request-digest conflicts, exact-once quota,
+  grant and balance mutation, and safe credential retry behavior;
+- storefront tests own accepted-state preparation, no issuance before
+  authoritative funding, commit-then-fail retrieval, private credential
+  isolation, canonical signed portable evidence, condition-before-collection,
+  reclaim exclusion, restart, and independent Alkahest behavior; and
+- protected system evidence owns only the ordinary signed producer release,
+  Stripe interaction/funding, deployed resolver, new-key consumption to 402,
+  and same-profile existing-key top-up.
+
+If the signed producer, protected Stripe account/browser inputs, or deployed
+resolver is unavailable, those exact assertions remain blocked. A deterministic
+hosted port, local resolver double, or successful Alkahest deal cannot be
+reported as their substitute.
+
+Protected preflight completes before publication or financial mutation and requires:
+
+- the exact marketplace commit and signed hosted production manifest, client wheel hash/version, service image digest, API/schema/migrations, conformance and provenance identities, signed release repository/workflow reference, hosted source commit, and independently recorded protected workflow run;
+- a test-mode secret (`sk_test` or least-privilege `rk_test`), Stripe connectivity, and non-live returned objects;
+- the expected allowlisted connected account with the exact ownership, funding-profile, currency/country, charge/transfer, and readiness capabilities for the selected scenario;
+- a supported interactive or saved-instrument/mandate/funding path for the selected profile;
 - Stripe CLI forwarding to the exact loopback webhook endpoint; and
-- Chromium and the official Stripe test payment inputs for the selected case.
+- Chromium plus the official Stripe test input required by that profile and action.
 
-A missing prerequisite is a failed explicit run, not a skip. Terminal results
-are classified as `product` (a tested contract is wrong), `account`
-(ownership/capability/readiness is unsuitable), `environment`
-(credential/artifact/Stripe/CLI/browser/network access is unavailable), or
-`timeout` (a named state did not converge within its bound after valid
-preflight). Classification never weakens an assertion.
+Unavailable external prerequisites are recorded per assertion. They do not become a silent skip and do not permit substituting another funding profile, a credential-free result, or a scripted provider result. Terminal executed outcomes are classified as `product` (the observed contract is wrong), `account` (ownership/capability/readiness is unsuitable), `environment` (artifact/credential/Stripe/CLI/browser/network access is unavailable), or `timeout` (a named state did not converge after valid preflight).
 
-System recovery uses real omissions: webhook forwarding, the authority API, or
-the ordinary worker may be stopped and restarted while preserving the
-authority store and original marketplace operation identity. Setup and
-read-only polling may retry within declared bounds. Financial mutations remain
-inside production code and retain the original durable idempotency identity;
-the harness never issues a replacement mutation under a new identity.
+System recovery uses real omissions: webhook forwarding, the authority API, the ordinary worker, or the marketplace consumer may be stopped and restarted while preserving authority and marketplace state and the original obligation, authorization, settlement, and operation identities. Financial mutations remain inside production paths and exact retry cannot issue a replacement mutation under a new identity.
 
-Deterministic timeout placement, unknown acknowledgement, delayed visibility,
-provider unavailability, exact-attempt failure, and event-order cases belong
-to credential-free hosted-producer integration tests. Those tests inject a
-small provider-neutral scripted collaborator directly at the internal
-financial-provider or webhook-inbox boundary and exercise the production
-journal, leases, retry policy, reconciliation, inbox, and lifecycle. They
-assert Arkhai behavior under declared outcomes, do not reproduce provider
-objects or public protocols, and are not Stripe evidence. Marketplace public
-checks separately cover released-client conformance, adapter mapping,
-orchestration, configuration, packaging, and production-release verification
-without provider mutation or protected credentials.
+Protected evidence is schema-validated and signed by the marketplace evidence signer. It keeps the marketplace repository/commit distinct from hosted manifest/client/image/API/schema/migrations/provenance/repository/workflow/source and protected-run identities. Reports permit only selected profile/currency, public lifecycle stages, normalized outcomes, attempts, timestamps, and bounded hashed opaque correlations. Credentials, provider/customer/payment-method/mandate/bank/card identifiers or data, raw setup/payment/confirmation/bank-instruction actions and URLs, payloads, events, requests, source-bearing local paths, and unrestricted logs are rejected before signing.
 
-Protected evidence contains only the marketplace repository and exact commit,
-the separately identified hosted manifest/client/image and signed
-repository/workflow-reference/source coordinates, the protected producer
-workflow run identity as orchestration evidence, scenario and stage, unique
-run identity, opaque durable operation
-identity, normalized state/amount/currency/cardinality, failure class, and
-bounded diagnostics. Logs and reports exclude credentials, Checkout or Account
-Link URLs, account/customer/card data, raw webhooks, unrestricted provider
-payloads, and unrelated provider objects.
-
-Alkahest remains an independent mechanism E2E and can be selected with:
+Alkahest remains an independent mechanism E2E:
 
 ```console
 make -C e2e-tests test-buyer-machine \
   BUYER_MODULE=e2e_alkahest_escrow_codecs
 ```
 
-Local EAS/allowlisted-arbiter behavior is condition-boundary conformance only,
-not hosted financial evidence. There is currently no standalone hosted
-local-EAS operator target; do not infer Stripe or hosted finance behavior from
-focused condition tests.
+Local EAS/allowlisted-arbiter behavior is condition-boundary conformance only, not hosted financial evidence. There is no standalone hosted local-EAS operator target; focused condition tests do not establish hosted financial behavior.
+
+### Bare-metal hosted lanes
+
+Credential-free bare-metal suites own exact trusted option/party/resource derivation, ready-profile publication, hosted-only registry composition, action redaction, immutable accepted binding persistence, no reservation before authoritative funding, selected-site reservation/fulfillment replay, access-ready evidence, restart and collect/reclaim exclusion, return/loss projection, teardown independence, buyer-wheel discovery, and Alkahest non-regression. These tests use provider-neutral ports and real local persistence; they do not claim Stripe or physical-host behavior.
+
+The protected marketplace lane must use the ordinary signed hosted release for all three profiles and a disposable selected-site whole host. Acceptance observes authenticated discovery through collection or eligible reclaim, real access using buyer-only SSH material, lease expiry/revocation, executor teardown, and capacity release. Missing signed artifacts, Stripe account/rail prerequisites, or a disposable host remain named external blockers. A fake fulfillment flag, local evidence fixture, or no-op teardown never satisfies the protected lane.
 
 ## Boundary-Change Validation
 

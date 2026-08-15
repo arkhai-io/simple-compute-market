@@ -399,7 +399,7 @@ class SettlementConfigurationRegistry:
             )
         except ValueError as exc:
             raise SettlementConfigurationError(
-                f"invalid publication input for {mechanism_id!r}: {exc}"
+                f"invalid publication input for {mechanism_id!r}"
             ) from exc
         if not isinstance(validated, registration.publication_input_model):
             raise SettlementConfigurationError(
@@ -465,7 +465,7 @@ class SettlementConfigurationRegistry:
                 typed[config_key] = registration.config_model.model_validate(section)
             except ValueError as exc:
                 raise SettlementConfigurationError(
-                    f"invalid Settlement.{config_key}: {exc}"
+                    f"invalid Settlement.{config_key}"
                 ) from exc
         return self.validate(
             SettlementConfig(

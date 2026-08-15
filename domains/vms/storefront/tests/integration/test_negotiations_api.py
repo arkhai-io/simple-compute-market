@@ -20,16 +20,23 @@ import httpx
 import pytest
 import pytest_asyncio
 from fastapi import FastAPI
+from market_capacity_publication import CapacityBinding, CapacityRuntime, CapacitySite
 from market_identity import Ed25519Signer, TrustedIdentitySet
 
 import market_storefront.container as _container
 import market_storefront.middleware.admin_identity as _admin_identity
 from market_storefront.controllers.negotiations_controller import router as negotiations_router
+from core_storefront.aggregation import fill_first
+from core_storefront.domain_registry import (
+    StorefrontListingBinding,
+    build_storefront_derivation_key,
+)
 from core_storefront.services.negotiation_service import NegotiationService
 from core_storefront.stage_log import stage_event
 
+from market_storefront.domain_runtime import build_vm_storefront_domain, build_vm_storefront_registry
 from market_storefront.utils.sqlite_client import SQLiteClient
-from market_storefront.utils.sync_negotiation import continue_sync_negotiation
+from market_storefront.negotiation_runtime import build_vm_negotiation_runtime
 from storefront_client.client import StorefrontClient, StorefrontClientError
 
 
@@ -39,6 +46,25 @@ _SELLER_SIGNER = Ed25519Signer(b"\x33" * 32)
 _SELLER_TRUST = TrustedIdentitySet(identities=(_SELLER_SIGNER.identity,))
 _ADMIN_TRUST = TrustedIdentitySet(identities=(_ADMIN_SIGNER.identity,))
 
+async def _noop_reconcile(_context) -> None:
+    return None
+
+
+def _capacity_runtime() -> CapacityRuntime:
+    return CapacityRuntime(
+        sites=(
+            CapacitySite(
+                "site-test",
+                "http://capacity.test",
+                _SELLER_TRUST,
+            ),
+        ),
+        signer=_SELLER_SIGNER,
+        placement=fill_first,
+        reconcile=_noop_reconcile,
+        site_client_factory=lambda _site, _signer: object(),
+    )
+
 
 
 # ---------------------------------------------------------------------------
@@ -47,17 +73,55 @@ _ADMIN_TRUST = TrustedIdentitySet(identities=(_ADMIN_SIGNER.identity,))
 
 @pytest_asyncio.fixture
 async def db(tmp_path) -> SQLiteClient:
-    return SQLiteClient(db_path=str(tmp_path / "neg_test.db"))
+    domain = build_vm_storefront_domain()
+    registry = build_vm_storefront_registry(domain)
+    return SQLiteClient(
+        db_path=str(tmp_path / "neg_test.db"),
+        registry=registry,
+    )
 
 
 async def _seed_order(db: SQLiteClient, order_id: str) -> None:
-    await db.upsert_listing(
+    registration = db.domain_registry.resolve_mode("vm")
+    listing_binding = StorefrontListingBinding.from_source_envelope(
         listing_id=order_id,
+        site_id="site-test",
+        pool_id=f"pool-{order_id}",
+        binding=registration.binding,
+        derivation_key=build_storefront_derivation_key(
+            site_id="site-test",
+            offering_mode=registration.offering_mode,
+            binding=registration.binding,
+            source_identity={"pool_id": f"pool-{order_id}"},
+        ),
+        source_envelope={
+            "kind": "vm.test-listing-source.v1",
+            "schema_version": 1,
+            "payload": {"pool_id": f"pool-{order_id}"},
+        },
+        last_reconciled_at=datetime.now().isoformat(),
+    )
+    await db.upsert_listing_with_binding(
+        binding=listing_binding,
         status="open",
         created_at=datetime.now().isoformat(),
         updated_at=datetime.now().isoformat(),
-        offer_resource={"resource_id": f"res-{order_id}", "gpu_model": "H200", "gpu_count": 1, "sla": 99.9, "region": "California, US"},
-        accepted_escrows=[{"chain_name": "anvil", "escrow_address": "0x" + "11" * 20, "literal_fields": {"token": "0x0000000000000000000000000000000000000001"}, "rates": [{"field": "amount", "per": "hour", "value": "9000"}]}],
+        offer_resource={
+            "resource_id": f"res-{order_id}",
+            "gpu_model": "H200",
+            "gpu_count": 1,
+            "sla": 99.9,
+            "region": "California, US",
+            "virtualization_type": "vm",
+        },
+        accepted_escrows=[{
+            "chain_name": "anvil",
+            "escrow_address": "0x" + "11" * 20,
+            "literal_fields": {
+                "token": "0x0000000000000000000000000000000000000001",
+            },
+            "rates": [{"field": "amount", "per": "hour", "value": "9000"}],
+        }],
         fulfillment_resource=None,
         max_duration_seconds=7200,
         storefront_url="http://seller:8001",
@@ -138,12 +202,27 @@ async def _seed_thread(
             conn.close()
 
     await asyncio.to_thread(_insert)
+    thread_binding = await db.copy_listing_binding_to_thread(
+        negotiation_id=neg_id,
+        listing_id=order_id,
+    )
+    listing_binding = await db.load_listing_binding(listing_id=order_id)
+    assert listing_binding is not None
+    assert thread_binding.binding == listing_binding.binding
+    assert thread_binding.site_id == listing_binding.site_id
 
 
 def _make_negotiation_service(db: SQLiteClient) -> NegotiationService:
+    registration = db.domain_registry.resolve_mode("vm")
+    runtime = build_vm_negotiation_runtime(
+        registration.contract,
+        registry=db.domain_registry,
+        binding=registration.binding,
+        capacity_runtime=_capacity_runtime(),
+    )
     return NegotiationService(
         sqlite_client=db,
-        continue_negotiation=continue_sync_negotiation,
+        continue_negotiation=runtime.continue_negotiation,
         stage_event=stage_event,
     )
 
@@ -152,6 +231,21 @@ def _make_negotiation_service(db: SQLiteClient) -> NegotiationService:
 async def api(db, monkeypatch) -> AsyncIterator[tuple[FastAPI, SQLiteClient]]:
     import market_policy.negotiation_thread as _nt_module
     from market_policy.identity import Identity as PolicyIdentity
+
+    async def capacity_binding_for_listing(_repository, listing_id):
+        assert _repository is db
+        listing_binding = await db.load_listing_binding(listing_id=listing_id)
+        assert listing_binding is not None
+        return CapacityBinding(
+            listing_binding.site_id,
+            listing_binding.binding.offering_mode,
+            str(listing_binding.pool_id),
+        )
+
+    monkeypatch.setattr(
+        "market_storefront.negotiation_runtime.capacity_binding_for_listing",
+        capacity_binding_for_listing,
+    )
 
     _nt_module._thread_store = None
     _nt_module.get_thread_store(

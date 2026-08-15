@@ -192,3 +192,91 @@ async def test_expired_obligation_dispatches_terminal_outcome(tmp_path) -> None:
     )
     assert await worker.run_once() == 1
     assert terminals == ["expired"]
+
+
+
+class ReturnedClient(PollingClient):
+    async def get_status(
+        self, obligation, *, mechanism_ref, operation_ref, mechanism_state
+    ):
+        return StatusOutcome(
+            status="failed",
+            mechanism_ref=mechanism_ref,
+            mechanism_state=mechanism_state,
+            receipt={"funding_reason": "returned"},
+        )
+
+
+async def test_return_cleanup_retries_durably_after_restart(tmp_path) -> None:
+    repository = SettlementSQLiteRepository(str(tmp_path / "returned.db"))
+    client = ReturnedClient()
+    runtime = SettlementRuntime(repository, {"test.v1": client})
+    record = (
+        await runtime.register_plan(
+            agreement_ref="returned-agreement",
+            obligations=[
+                {
+                    "payer": "buyer",
+                    "claimant": "seller",
+                    "payer_principal": BUYER.model_dump(mode="json"),
+                    "claimant_principal": SELLER.model_dump(mode="json"),
+                    "mechanism": "test.v1",
+                    "expiration_unix": 4_102_444_800,
+                }
+            ],
+        )
+    )[0]
+    await runtime.adopt(
+        record.obligation_ref,
+        local_principal=SELLER,
+        mechanism_ref="returned-escrow",
+    )
+    await runtime.bind_fulfillment(
+        record.obligation_ref,
+        "durable-fulfillment-evidence",
+        local_principal=SELLER,
+    )
+    attempts: list[str] = []
+
+    async def cleanup(_record, _outcome, _reason):
+        attempts.append("cleanup")
+        if len(attempts) == 1:
+            raise RuntimeError("capacity service unavailable")
+
+    first = SettlementServicingWorker(
+        runtime,
+        repository,
+        worker_id="cleanup-one",
+        interval_seconds=1,
+        on_terminal=cleanup,
+    )
+    assert await first.run_once() == 1
+    pending = await repository.load_settlement_operation(
+        record.obligation_ref,
+        "cleanup",
+    )
+    assert pending is not None
+    assert pending["state"] == "pending"
+    assert pending["next_attempt_unix"] is not None
+
+    await first.wake(record.obligation_ref)
+    restarted = SettlementServicingWorker(
+        SettlementRuntime(repository, {"test.v1": client}),
+        repository,
+        worker_id="cleanup-two",
+        interval_seconds=1,
+        on_terminal=cleanup,
+    )
+    assert await restarted.run_once() == 1
+
+    completed = await repository.load_settlement_operation(
+        record.obligation_ref,
+        "cleanup",
+    )
+    stored = await repository.load_settlement_obligation(record.obligation_ref)
+    assert completed is not None
+    assert completed["state"] == "succeeded"
+    assert attempts == ["cleanup", "cleanup"]
+    assert stored is not None
+    assert stored["fulfillment_ref"] == "durable-fulfillment-evidence"
+    assert stored["collection_state"] == "pending"

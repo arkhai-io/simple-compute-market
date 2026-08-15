@@ -25,6 +25,8 @@ class _PublicationInput(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     chain: str | None = None
+    funding_profile: str | None = None
+    interaction: str | None = None
 
 
 def _registration(
@@ -38,6 +40,12 @@ def _registration(
     async def preflight(section, resources, role):
         del role
         calls.append(f"preflight:{mechanism}")
+        if mechanism == "fiat.stripe.v1" and resources.get("publication_clauses"):
+            profiles = [
+                str(item.get("mechanism_input", {}).get("funding_profile"))
+                for item in resources["publication_clauses"]
+            ]
+            calls.append("profiles:" + ",".join(profiles))
         selected_chains = {
             item.get("chain_name")
             for item in resources.get("accepted_escrows", ())
@@ -57,6 +65,14 @@ def _registration(
 
     def option_builder(section, readiness, resources, role):
         del section, readiness, role
+        clause = resources.get("publication_clause")
+        profile = (
+            clause.mechanism_input.get("funding_profile")
+            if isinstance(clause, SettlementPublicationClause)
+            else None
+        )
+        if profile == "us_bank_transfer.v1":
+            return {"accepted_escrows": [], "settlement_options": []}
         calls.append(f"option:{mechanism}")
         return {
             "accepted_escrows": list(resources.get(f"{key}_escrows", ())),
@@ -226,6 +242,43 @@ async def test_explicit_clauses_build_only_requested_mechanisms_in_clause_order(
     assert options == [{"mechanism": "fiat.stripe.v1"}]
     assert accepted == [{"mechanism": "alkahest.v1"}]
 
+
+
+@pytest.mark.asyncio
+async def test_hosted_profile_clauses_publish_independently_in_declared_order():
+    composition, calls = _composition(
+        priority=("fiat.stripe.v1", "alkahest.v1"),
+        stripe_ready=True,
+        alkahest_ready=True,
+    )
+    profiles = ("card.v1", "us_bank_transfer.v1", "us_ach_debit.v1")
+    clauses = [
+        SettlementPublicationClause(
+            mechanism="fiat.stripe.v1",
+            asset="usd",
+            rate="2",
+            per="hour",
+            mechanism_input={
+                "funding_profile": profile,
+                "interaction": "interactive",
+            },
+        )
+        for profile in profiles
+    ]
+
+    _accepted, options, _readiness = (
+        await VmSettlementComposition.publication_artifacts(
+            composition,
+            {"stripe_options": [{"mechanism": "fiat.stripe.v1"}]},
+            clauses=clauses,
+        )
+    )
+
+    assert options == [
+        {"mechanism": "fiat.stripe.v1"},
+        {"mechanism": "fiat.stripe.v1"},
+    ]
+    assert "profiles:card.v1,us_bank_transfer.v1,us_ach_debit.v1" in calls
 
 @pytest.mark.asyncio
 async def test_explicit_disabled_clause_is_rejected() -> None:

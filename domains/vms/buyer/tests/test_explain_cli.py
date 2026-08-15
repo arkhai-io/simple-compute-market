@@ -64,6 +64,7 @@ def test_listing_explain_emits_stable_json_and_stops_before_normal_selection(
         "_registry_context",
         lambda **_kwargs: (
             SimpleNamespace(),
+            SimpleNamespace(),
             ["http://registry"],
             {"http://registry": SimpleNamespace()},
             {},
@@ -85,7 +86,7 @@ def test_listing_explain_emits_stable_json_and_stops_before_normal_selection(
     monkeypatch.setattr(
         listing_cli,
         "resolve_buyer_settlement_policy",
-        lambda: Policy(),
+        lambda **_kwargs: Policy(),
     )
 
     result = runner.invoke(
@@ -122,7 +123,7 @@ def test_listing_rejects_clause_with_generated_fields_before_registry(
     monkeypatch.setattr(
         listing_cli,
         "resolve_buyer_settlement_policy",
-        lambda: policy,
+        lambda **_kwargs: policy,
     )
     monkeypatch.setattr(
         listing_cli,
@@ -141,4 +142,4 @@ def test_listing_rejects_clause_with_generated_fields_before_registry(
     assert "Accepted settlement fields:" in result.output
     assert "asset" in result.output
     assert "alkahest.chain" in result.output
-    assert "stripe.method" in result.output
+    assert "stripe.funding_profile" in result.output

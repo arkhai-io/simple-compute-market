@@ -74,6 +74,9 @@ class SettlementRuntimeRepository(Protocol):
     async def list_settlement_obligations(
         self, agreement_ref: str
     ) -> list[dict[str, Any]]: ...
+    async def bind_settlement_mechanism_params(
+        self, *, obligation_ref: str, mechanism_params: dict[str, Any]
+    ) -> dict[str, Any]: ...
     async def bind_settlement_fulfillment(
         self, *, obligation_ref: str, fulfillment_ref: str
     ) -> dict[str, Any]: ...

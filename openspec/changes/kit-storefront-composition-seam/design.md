@@ -71,6 +71,31 @@ behave identically after. Where the two copies already disagree, the extraction 
 which behavior was chosen and why, rather than quietly adopting whichever implementation
 was read first.
 
+### Implementation and drift record (2026-08-15)
+
+The implementation uses one `kit/storefront` distribution. Its composition
+object carries the exact validated contract, immutable service
+build/start/stop callbacks, ordered routers and middleware, and app metadata.
+The kit checks contract object identity across the app and lifespan container;
+there is no module-global domain fallback.
+
+The Alkahest copies agreed on failure isolation but differed in readiness
+inputs. VM required both wallet address and private key; API credits required
+only its private key. The shared factory therefore owns network/address
+resolution, construction, and per-chain warning/skip control flow, while each
+root contributes its own missing-requirements tuple. This preserves both
+readiness policies. Bare metal contributes its environment-derived private key
+and chain table to the same factory.
+
+The watchdog copies differed in timestamp parsing, loop diagnostics, and API
+credits' effective cadence: its old loop slept for a hard-coded 15 seconds
+while startup reported the configured 60-second value. The shared runtime
+keeps VM's tolerant timestamp parsing and per-row failure isolation. Logging
+flags remain domain supplied. API credits deliberately adopts its documented
+`negotiation_watchdog_interval` setting (60 seconds by default) rather than the
+unreported hard-coded cadence; VM preserves its configured 60-second default,
+and bare metal gains environment-supplied timeout and interval values.
+
 ## Risks / Trade-offs
 
 - **[The two copies have drifted and extraction picks a winner silently]** → Named

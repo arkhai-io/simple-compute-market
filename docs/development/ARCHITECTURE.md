@@ -52,7 +52,22 @@ plan    = settle(terms)
 receipt = service(plan)
 ```
 
-Core owns schema-opaque carriers and role structure around these phases: signed transport, round sequencing, persistence mechanics, and deterministic handoffs. Domain packages own listing vocabulary, message content, validation, deterministic interpretation of terms, fulfillment requirements, and result vocabulary. Kit packages own reusable mechanisms and authorities, including the single commercial-settlement obligation lifecycle. Composition roots wire concrete domain and kit implementations into role packages.
+Core owns schema-opaque carriers and role structure around these phases: signed transport, round sequencing, persistence mechanics, and deterministic handoffs. Domain packages own listing vocabulary, message content, validation, deterministic interpretation of terms, fulfillment requirements, and result vocabulary. Kit packages own reusable mechanisms and authorities, including the single commercial-settlement obligation lifecycle and the shared storefront application/lifecycle shell. Composition roots wire concrete domain and kit implementations into role packages.
+
+Each domain-owned storefront validates one immutable `MarketDomainContract` at its composition boundary before constructing persistence, services, workers, or the HTTP application. The validated object is carried through common listing/negotiation/artifact bindings and lifecycle contexts. Domain contributions expose that contract through `market.storefront_contributions`; shared core dispatch resolves only the frozen domain identity/version and never guesses from a payload or imports the domain.
+
+The VM and bare-metal storefronts can run as separate one-domain processes or as installed contributions selected by a shared shell. Bare metal owns its seller policy, site bindings, and provisioning adapters and imports no VM services. The common binding schema freezes offering mode, domain identity/version, site, and Physical Resource for both shapes, so restart and composition changes do not change the authority selected by an accepted agreement.
+
+The `arkhai-kit-storefront` distribution (`market_storefront_kit`) owns the
+shared FastAPI app, lifespan, container, ordered-route, middleware, Alkahest
+client-construction, and negotiation-watchdog composition seams. A
+domain-owned executable supplies one exact validated contract, immutable
+service lifecycle callbacks, its route contribution, and configuration. The
+VM, API-credit, and bare-metal roots all use this shell. Domain codecs, policy,
+settlement, fulfillment, and publication hooks stay in their injected
+contract; neither the kit nor a route recovers them from a global domain
+resolver. Extracted kit mechanisms have one implementation: domains retain
+only the values and hooks that instantiate them.
 
 Two hooks remain separate when core-owned machinery or a typed invariant sits between them. They may be merged when the core does nothing between them and the split would expose only implementation detail.
 
@@ -80,9 +95,10 @@ Core carrier packages must not import domain vocabulary. Domain packages may imp
 
 Kit is not a flat peer group. It has an explicit one-way hierarchy:
 
-1. **Foundation capabilities** — identity, configuration, generic policy, settlement-mechanism primitives, and `kit/settlement-runtime`'s domain-neutral obligation/operation lifecycle.
+1. **Foundation capabilities** — identity, configuration, generic policy, `kit/negotiation-runtime`'s schema-opaque round lifecycle, settlement-mechanism primitives, and `kit/settlement-runtime`'s domain-neutral obligation/operation lifecycle.
 2. **Authority capabilities** — `kit/site` and `kit/resource-pools`, which own capacity and pool administration and depend only on foundation capabilities.
 3. **Fulfillment lifecycle** — `kit/fulfillment`, which owns provider-neutral scheduling and provider execution contracts and may depend on authority capabilities.
+4. **Storefront role composition** — `kit/storefront`, which composes the core storefront shell with injected domain service and route hooks and may depend only on core storefront contracts and foundation capabilities.
 
 ```text
 kit/fulfillment
@@ -91,6 +107,10 @@ kit/fulfillment
 
 kit/site ───────────────> foundation only
 kit/resource-pools ─────> foundation only
+
+kit/storefront
+    ├──> core/storefront
+    └──> foundation only
 ```
 
 Dependencies never point upward. Imports guarded by `TYPE_CHECKING` still count as architectural dependencies. Kit packages never import deployed services or domain adapters.
@@ -104,6 +124,17 @@ dispatch. Storefront composition roots inject database repositories,
 mechanism clients, domain fulfillment and projection callables, and real
 failure actions. The kit does not import a storefront, domain, mechanism, or
 provider SDK.
+
+The negotiation-runtime distribution is
+`arkhai-kit-negotiation-runtime`, imported as
+`market_negotiation_runtime`. It owns signed round ordering, complete canonical
+principal checks, durable transcript and terminal-state transitions, exact
+continuation recovery, and the acceptance chokepoint. A storefront domain
+injects authoritative opening and continuation resolvers plus codecs, seller
+policy, agreement and artifact construction, and domain persistence/effect
+hooks. The runtime treats the selected domain binding and every payload as
+opaque; it never imports a domain or guesses one from a listing, terms, or
+proposal shape.
 
 The fulfillment distribution is `arkhai-kit-fulfillment`, imported as `market_fulfillment`. It owns both scheduling and provider-neutral fulfillment contracts. Keeping those contracts together avoids a reverse dependency from resource-pool administration into provisioning execution while preserving module-level separation between pure carriers and operational scheduling.
 
@@ -131,6 +162,68 @@ resolve provider values themselves. Rotation therefore advances new work while
 accepted runs recover under immutable ownership.
 
 See the [marketplace identity contract](../../openspec/specs/marketplace-identity/spec.md) and its [architecture](../../openspec/specs/marketplace-identity/architecture.md).
+
+### Capacity publication and multi-domain storefront composition
+
+`arkhai-kit-capacity-publication` owns the storefront-side multi-site capacity
+source, exact site projections, capacity-event reconciliation loop, registry
+fan-out, durable publication result recording, and close-before-reopen
+lifecycle. A domain contribution supplies only schema-opaque candidates and
+codecs plus hooks that resolve each listing's durable capacity binding.
+
+Every capacity-backed candidate carries
+`CapacityBinding(site_id, offering_mode, source_id)`. The site ID comes from
+trusted local composition, the offering mode must be declared by the selected
+Resource Pool and must equal the public offer's mode, and the opaque source ID
+identifies the pool, quota resource, or Physical Resource. Publication,
+reservation, commit, release, and restart recovery reload and compare that
+exact binding. An unknown site, missing mode, changed binding, or incomplete
+candidate fails closed; the runtime never invents a home site, scans other
+authorities after restart, or defaults an executor mode. VM and API-credit
+contributions inject their candidate derivation and binding codecs into this
+same runtime. The kit imports no VM, API-credit, bare-metal, provider, or
+deployed-service package.
+
+The storefront role is one domain-neutral compute-family shell. At startup it
+discovers installed `market.storefront.contributions`, applies the operator's
+explicit `[storefront_domains]` selection, and freezes one registry. Each
+registration binds a contribution ID, pool offering mode, exact domain
+identity, contract version, and the exact validated `MarketDomainContract`.
+One-domain deployments use the identical registry with one entry; there is no
+singleton, module getter, installed-order fallback, global selection, or
+contract reconstruction.
+
+The common database owns immutable listing, negotiation-thread, and domain
+artifact bindings. They retain the selected site, mode, domain
+identity/version, and collision-safe provenance. Opening a thread inherits its
+listing binding before domain policy runs. Publication, negotiation,
+settlement, fulfillment, result recovery, and teardown resolve only that
+recorded binding against the frozen registry. Selected-site calls are pinned
+and never fan out. Removing a mode closes new publication but does not
+reinterpret accepted work.
+
+Settlement retains domain-neutral `StorefrontSettlementFulfillmentInput`: the
+immutable thread binding, buyer principal, schema-opaque domain input, and any
+fulfillment anchor. When servicing reaches delivery, core adds the accepted
+escrow identity and caller-owned authority ports to form
+`StorefrontFulfillmentContext`, then invokes the fulfillment hook on the exact
+contract resolved from the binding. Core validates that the returned
+negotiation, escrow, and site identities did not change. The VM hook alone
+translates the opaque domain input into VM executor arguments. Core and kit
+therefore own lifecycle and dispatch while each domain owns payload meaning
+and concrete fulfillment; a missing hook fails closed rather than becoming a
+no-op.
+
+Legacy single-domain databases cross this boundary only through an explicit
+contribution migration adapter. Check mode validates the complete population.
+Write mode uses a restrictive backup and atomic replacement; ambiguity,
+orphaned provenance, cross-domain rows, or unsupported versions abort without
+partial state. The bare-metal contribution currently supplies codecs and
+publication semantics but not the production fulfillment hook. Complete live
+VM/bare-metal restart, teardown, and capacity-restoration proof remains gated
+on that external production contribution and its selected-site POOLS-7
+lifecycle; the shared shell does not manufacture evidence or substitute a
+no-op.
 
 ### Settlement configuration
 
@@ -163,6 +256,33 @@ to obtain vocabulary or policy.
 Preflight remains mechanism-owned but projects one sanitized readiness contract. Storefront publication combines enabled ready registrations with explicit typed clauses in configured mechanism order; it never uses one untyped price for multiple mechanisms. Buyer policy ranks only compatible advertised survivors after ordered explicit clauses. Priority and clauses apply before acceptance only. Accepted Terms and persisted operation identities remain authoritative through readiness or configuration changes.
 
 Typed metadata generates role-appropriate templates, edit validation, environment and Helm schema fragments, clause descriptors, and reference output. Marketplace schemas admit public consumer trust and policy but reject hosted provider, administrator, webhook, database, and service-migration state. See the [CLI query language](../../openspec/specs/cli-query-language/spec.md), [settlement configuration contract](../../openspec/specs/settlement-configuration/spec.md), and its [architecture](../../openspec/specs/settlement-configuration/architecture.md).
+
+### API-credit hosted settlement
+
+API credits composes the same registered hosted mechanism and shared operation
+journal as VM settlement, without importing VM routes or hosted-client models.
+Its listing publishes mechanism-neutral `settlement_options` independently of
+legacy Alkahest `accepted_escrows`. The seller reloads accepted negotiation
+artifacts to derive one obligation that pins service, quantity, key target,
+canonical buyer and claimant, amount, expiry, profile, and evidence condition;
+buyer input cannot override those fields at settlement start.
+
+The common hosted route service injects API-credit callbacks around
+authorization/replay and the mechanism runtime. Authoritative `funded` is the
+only transition that enters issuance. The credits authority keys its immutable
+grant by a deterministic fulfillment identity derived from the obligation and
+binds a canonical request digest, so retry or acknowledgement loss cannot
+double-reserve quota, create a second key, or increase balance twice. Buyer-only
+credentials live in the private result repository.
+
+The storefront signs a canonical secret-free issuance evidence body and
+publishes it through the configured portable resolver. Condition success and
+collection follow only after that evidence is authoritative. Reclaim first
+queries the credits authority under the same fulfillment identity: committed
+issuance becomes durable fulfillment and excludes reclaim; an unknown grant
+leaves eligible financial reclaim to the hosted mechanism. This keeps grant,
+evidence, collection, and reclaim races attributable without treating an API
+credential as settlement evidence.
 
 ## Runtime service map
 
@@ -211,6 +331,7 @@ Within a service, controllers stay thin: HTTP routing, request/response schemas,
 | Listing, negotiation, deal, and seller policy state | Storefront | Market-facing state, not physical inventory |
 | Capacity admission and reservation | Site authority | Serialization point for competing reservations |
 | Resource-pool metadata and provider configuration | Resource-pool service | Provisioning routing metadata; disabled pools remain resolvable |
+| Pool deliverable-mode authorization | Resource-pool operator and service | One explicit set per pool; absence authorizes no mode, and each execution layer rechecks it |
 | Settlement-resource selection | Fulfillment scheduler | Placement occurs before provider execution |
 | Provider-specific create/status/teardown | Fulfillment provider | Executes against the selected resource and does not substitute placement |
 | Asynchronous infrastructure job state | Compute provisioner | Durable job identity with in-process execution queue |
@@ -230,6 +351,13 @@ Storefront capacity pools and provisioning resource pools are separate concepts.
 
 A site authority owns resources, allocations, reservation expiry, capacity versions, and the event feed for one failure domain or datacenter. One storefront may aggregate several sites.
 
+Capacity claims name their requested offering mode explicitly. The authority
+records that value on the reservation and never derives it from host
+attributes, resource type, or a default executor. Admission refuses a matching
+resource when its pool does not authorize the mode; durable legacy rows are
+backfilled only from single-valued evidence and otherwise quarantined from
+execution.
+
 Each provisioning connection is bound to an operator-configured `site_id` and an exact service-peer principal. Marketplace version 2 proofs authenticate requests and signed responses or callbacks against those public trust pins; matching an address-like body value, administrator key, private-key field, or identifier under another scheme never substitutes for the configured principal and role. The trusted connection binding, not a counterparty assertion, selects the site.
 
 Capacity events are anonymous availability deltas broadcast through a pull feed. Deal-scoped fulfillment events are point-to-point to the owning storefront and retain deal context. A storefront reconciles listings in response to capacity deltas regardless of which seller action caused the change.
@@ -238,7 +366,22 @@ A site authority's client-facing surface splits into two separately typed client
 
 ### Resource pools
 
-Resource pools group physical settlement candidates and identify the provider plus provider-specific configuration used after selection. Pool disablement prevents new assignment but does not erase existing host membership or lifecycle records. Pool administration is distinct from scheduling policy.
+Resource pools group physical settlement candidates, identify the provider and
+provider-specific configuration used after selection, and declare the exact set
+of offering modes that configuration can deliver. The declaration belongs to
+the pool rather than each host because provider, playbook, and requirement
+delegate are pool-owned execution policy; missing or empty declarations deliver
+nothing. Pool disablement prevents new assignment but does not erase existing
+host membership or lifecycle records. Pool administration is distinct from
+scheduling policy.
+
+The site authority, fulfillment scheduler, and fulfillment orchestrator all use
+the shared pool-membership predicate at their own boundary. Rechecking before
+provider dispatch means narrowing a declaration blocks a held or assigned
+operation without rewriting its historical requested mode. This authorization
+does not replace physical accounting: a pool may authorize both VM slices and
+whole-host delivery while the exclusive/shareable conflict rule still prevents
+them from overlapping on one physical host.
 
 ## Shared vocabulary and identities
 
@@ -294,6 +437,14 @@ Commercial agreement identity does not cross the generic provisioning boundary m
 ### Discovery and negotiation
 
 The buyer discovers listings from a registry and drives signed synchronous request/response rounds against a storefront. Negotiation is a deterministic reduction of the shared message history to agreed terms. Seller policy evaluates listing data, captured side inputs, and the message history; protocol infrastructure does not reinterpret domain policy.
+
+VM and API-credit storefronts use that one kit lifecycle. Opening resolution
+selects the storefront's configured domain contract and listing before the
+runtime persists anything. Continuation resolution starts from the recorded
+thread, re-establishes the exact listing and canonical buyer/seller binding,
+then lets the selected domain validate its persisted terms before a policy or
+acceptance effect can run. Domain policy remains the only component that
+interprets the provision-term and proposal schemas.
 
 Normal buyer commands apply two separate constraint layers in fixed order: one filter-spec-typed resource query is pushed to the registry, then zero or more settlement clauses are evaluated locally against installed, enabled, compatible advertised options. Every comparison in one settlement clause must match the same option; repeated clauses are alternatives in command order. Explanation stops before negotiation and reports registry-owned predicates, local settlement rejections, and survivor counts without making a physical indexing claim.
 
@@ -393,11 +544,11 @@ A kind-routed `ReleaseJobPort` connects the two: for VM-backed reservations it r
 
 ### Local development
 
-Compose is organized by market domain and includes the shared development chain. There is no required long-running buyer service. Domain stacks contain their registry schema, storefront, and supporting services. The root compose file combines the domain stacks for full e2e work.
+Compose is organized by market domain and includes the shared development chain. There is no required long-running buyer service. The bare-metal seller uses its dedicated image, role-owned writable storefront database, durable reservation-to-site route map, and separately injected seller signer and trusted site-binding configuration. VM and bare-metal storefront services are independently selectable and may share a provisioning authority without sharing writable storefront databases. The root compose file combines domain stacks for full end-to-end work.
 
 ### Production and staging
 
-The Helm umbrella chart composes registry, storefront, compute provisioning, and optional development/test components.
+The deployment surfaces support registry, independently selectable VM and bare-metal storefront roles, compute provisioning, and optional development/test components. `helm/charts/bare-metal-storefront` installs the dedicated one-domain role with its own service, persistence boundary, health probes, public URL, external signer Secret, and external site-binding Secret; the umbrella/shared-shell chart may instead select installed domain contributions. Disabling one role creates no wait or reference from another.
 
 Configuration resolution, ConfigMap/Secret mounting, stateful-service persistence strategy, and migration-at-startup conventions are covered in [`docs/development/DEPLOYMENT_AND_CONFIG.md`](DEPLOYMENT_AND_CONFIG.md) and [the deployment and state specification](../../openspec/specs/deployment-state/spec.md).
 
@@ -465,47 +616,24 @@ A schema cutover that transfers ownership of active workloads between persistenc
 
 ## Hosted fiat settlement boundary
 
-`fiat.stripe.v1` is a second mechanism behind the kit-owned settlement
-runtime. The marketplace owns deterministic options and accepted plans, VM
-fulfillment, work leases, and opaque public settlement state. The separately
-released hosted settlement service is the sole financial authority: it owns
-Stripe custody, connected accounts, Checkout, transfers, refunds, provider
-recovery, EAS/RPC access, and condition authorization. Platform-custodied
-Stripe funds are never on-chain escrow. EAS and Alkahest-arbiter compatibility
-supplies only a release predicate.
+`fiat.stripe.v1` remains one mechanism behind the kit-owned settlement runtime, now with three exact consumer profiles: `card.v1`, `us_bank_transfer.v1`, and `us_ach_debit.v1`. The marketplace owns deterministic per-profile options and accepted plans, VM fulfillment, work leases, and provider-neutral public settlement state. The separately released hosted service is the sole payer-profile and financial authority: it owns provider customers and instruments, mandates, Checkout and confirmation, push-transfer instructions, debits, transfers, returns/refunds/reversals, webhooks, recovery, EAS/RPC access, and condition authorization. Platform-custodied funds are not on-chain escrow; EAS and Alkahest-arbiter compatibility supplies only a release predicate.
 
-The VM storefront consumes the released `hosted_settlement_client` through
-the thin `market_hosted_settlement` adapter. Buyer requests go to the
-storefront's `/api/v1/settlements` routes, never directly to the authority.
-Marketplace persistence contains opaque settlement references, lifecycle
-states, action kind/expiry, condition anchors, safe fulfillment references,
-and opaque receipts. Checkout URLs are retrieved for an immediate response
-and are not written to marketplace databases or run logs.
+The VM storefront consumes the released `hosted_settlement_client` through the thin `market_hosted_settlement` adapter. The buyer has one narrow direct-authority lane for payer profile/setup/instrument management and exact post-acceptance purchase authorization. Those operations use the selected or run-recorded persistent marketplace signer and the authority/environment-scoped opaque payer binding. Escrow materialization, status, condition, collection, reclaim, and recovery remain storefront-mediated. Neither core nor VM packages copy hosted wire models or signing behavior.
 
-Hosted system evidence preserves the same production ownership boundary. The
-hosted repository owns the financial-provider interface, Stripe adapter,
-operation journal, webhook inbox, reconciliation lifecycle, focused
-provider-port tests, and one ordinary signed production release containing only
-the released client and service. Its provider-neutral scripted test
-collaborator is injected directly at the internal test seam and is not an HTTP
-service, provider implementation, credential consumer, or production artifact.
+Every ready funding profile publishes as its own option. The accepted plan pins the profile, amount, currency, destination account, parties, condition, expiry policy, and deterministic marketplace operation identity. After accepted terms are durable, the buyer authorizes exactly that obligation and passes only the operation-scoped `funding_authorization_ref` to storefront start. Storefront persistence contains the exact profile, safe authorization and settlement refs, lifecycle reason/deadline/action kind and expiry, condition anchor, safe fulfillment reference, and opaque receipts. It never contains stable payer/instrument refs, provider identifiers, raw action URLs, bank/card/payment data, client secrets, or buyer automation policy.
 
-This repository owns the protected marketplace system scenario and consumes
-that exact production release through the released client, digest-pinned
-image, ordinary migration/API/worker roles, and public network contracts.
-Stripe-specific Checkout, webhook, connected-account, retrieval, transfer, and
-refund assertions come only from Stripe test mode. Restart and missed-webhook
-evidence pauses ordinary processes or real forwarding while preserving the
-authority store and original operation identity; arbitrary provider outcomes
-remain provider-port tests and assert only Arkhai behavior.
+Only authoritative hosted `funded` state after the selected profile's success and availability gate permits VM fulfillment. Setup/payment/confirmation actions, bank instructions, Checkout completion, or pending ACH do not. An unknown acknowledgement or restart reuses the immutable accepted obligation, authorization, settlement, and operation identities. Reclaim asks the hosted authority for a provider-neutral outcome and never selects a provider refund/return/reversal operation. Historical card-only rows retain recovery-only decoding under their original identities; new publication and negotiation accept only `card.v1`.
 
-Each protected report identifies the marketplace repository and exact consumer
-commit separately from the hosted manifest, client wheel, service image, and
-signed release repository/workflow reference/source commit, plus the protected
-producer workflow run identity recorded separately as orchestration evidence.
-Role-scoped preflight and
-sanitized evidence boundaries are defined by the deployment and testing
-capabilities. Alkahest E2E remains an independent mechanism lane, while local
-EAS/allowlisted-arbiter checks concern only the condition boundary and do not
-establish hosted financial behavior.
+Buyer-local off-session automation is an opt-in policy bounded by exact authority/environment, profile, currency, per-purchase amount, aggregate window, and optional seller principals. It can sign only the current accepted authorization. A policy refusal or hosted `requires_action` continues the same obligation through the ordinary transient `--action open|print|fail` path; it does not switch profile, instrument, amount, destination, or operation.
+
+Hosted system evidence preserves the production ownership boundary. Credential-free marketplace tests cover profile configuration/identity, independent readiness, direct payer and authorization helpers, action redaction, delayed funding gates, runtime journals, legacy recovery, reclaim races, and packaging using released provider-neutral contracts. The protected marketplace scenario alone attributes supported Stripe test-mode behavior for each profile and off-session action fallback. Its report identifies marketplace source separately from the hosted signed manifest, client, service image, API/schema/migrations, provenance, repository/workflow/source, and protected run, and marks unavailable external prerequisites rather than substituting local evidence.
+
+Alkahest remains an independent mechanism lane. API-credit and bare-metal hosted adoption are separate composition changes; the VM consumer does not install hosted dependencies or lifecycle code into those domains.
+
+### Bare-metal hosted adoption
+
+Bare metal composes the same provider-neutral hosted mechanism without importing VM packages or the released client directly. The installed buyer plugin uses the core `HostedSettlementTransport`; the seller binds bare-owned callbacks into the shared `HostedSettlementRouteService`. On first start, the seller rebuilds the accepted physical binding only from the durable negotiation thread, trusted listing, exact option, settlement plan, and canonical parties, then persists it under the obligation identity.
+
+Authoritative funding is the gate into the existing selected-site capacity and fulfillment clients. A deterministic fulfillment identity survives retries and restart. Access-ready state produces a credential-free public result and content-addressed lease-ready evidence; the resolver returns the canonical evidence with a marketplace-signer proof. Collection follows evidence. Reclaim is blocked after evidence, committed collection, or unknown physical authority. Financial return/loss recovery and post-collection lease teardown remain separate convergent lifecycles.
+
 

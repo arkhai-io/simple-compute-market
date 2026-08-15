@@ -57,7 +57,7 @@ class AnsiblePreparedJobParameters(BaseModel):
     vm_host: str = Field(min_length=1)
     vm_action: str = Field(min_length=1)
     vm_target: str | None = None
-    executor_kind: str = "vm"
+    executor_kind: str = Field(min_length=1)
     executor_action: str | None = None
     executor_target: str | None = None
     executor_ref: dict[str, Any] | None = None
