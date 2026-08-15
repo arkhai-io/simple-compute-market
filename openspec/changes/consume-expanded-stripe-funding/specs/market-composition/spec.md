@@ -39,7 +39,7 @@ The hosted-settlement kit MUST contain only the exact manifest-pinned released c
 - **WHEN** the Stripe payer command is registered
 - **THEN** its implementation is supplied by the hosted kit and persistent identity layer rather than by a domain or core provider model
 
-### Requirement: Cross-repository provider authority
+### Requirement: Cross-repository authority boundary
 
 Marketplace code MUST call hosted settlement only through the exact released client; it MUST NOT import, mount, install, or copy the hosted service source, provider adapters, settings, migrations, or financial state. The hosted service MUST remain provider/domain neutral and MUST NOT import marketplace domains. The client package MUST remain the only shared contract and MAY include provider-neutral payer profile, instrument readiness, funding authorization, action metadata, and conditional-escrow wire models.
 
@@ -48,7 +48,12 @@ Marketplace code MUST call hosted settlement only through the exact released cli
 - **WHEN** a buyer or storefront enables `fiat.stripe.v1`
 - **THEN** it supplies typed public config, selected marketplace identity, persistent opaque payer binding where applicable, and domain condition input through the released client without receiving provider credentials or storage access
 
-### Requirement: Composition roots inject signers and public verifier registry
+#### Scenario: Hosted contract changes
+
+- **WHEN** the service publishes a new incompatible contract
+- **THEN** marketplace CI and readiness reject it until the exact client/manifest pin and conformance fixtures are updated together
+
+### Requirement: Composition roots inject signers
 
 Buyer, registry, storefront, provisioning, and domain composition roots MUST load one selected signer from secret-bound identity configuration and construct only the counterparty verifier registry needed for the role. Hosted buyer composition MUST bind payer/profile and authorization calls to the selected or recorded persistent signer; hosted storefront composition MUST verify accepted buyer identity and use its own signer for mediated escrow calls. Public config, process arguments, logs, and durable public carriers MUST remain credential-free.
 
@@ -66,3 +71,18 @@ Buyer, registry, storefront, provisioning, and domain composition roots MUST loa
 
 - **WHEN** buyer and storefront principals use different supported schemes
 - **THEN** the registry verifies both through the marketplace identity kit without selecting a shared secret, wallet, or hosted payer model
+
+#### Scenario: VM composition selects hosted fiat
+
+- **WHEN** the VM root receives an Ed25519 signer and a manifest-compatible hosted adapter
+- **THEN** the same scheme-neutral core lifecycle runs without an Alkahest client, wallet derivation, or chain preflight
+
+#### Scenario: A chain mechanism is selected
+
+- **WHEN** a composition selects an Alkahest or other EVM effect
+- **THEN** its concrete mechanism adapter resolves the required wallet, chain, and provider dependencies without exposing them to scheme-neutral core orchestration
+
+#### Scenario: Hosted fiat is published
+
+- **WHEN** a composition installs the hosted adapter with a manifest-pinned hosted client
+- **THEN** the adapter verifies the required identity capability and delegates the hosted wire contract to that client rather than copying canonicalization, headers, signatures, or response verification

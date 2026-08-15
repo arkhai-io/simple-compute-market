@@ -68,7 +68,7 @@ The hosted registration performs observational calls only:
 
 Publication iterates ordered clauses and consumes the corresponding ready entry. It does not abort on the first blocked clause. The common readiness logger remains allowlist-driven; add only declared keys.
 
-Buyer readiness combines verified release capability with the selected persistent local profile's authority/environment binding and safe profile/instrument readiness. Discovery does no network mutation. Revalidation immediately before negotiation and purchase authorization prevents stale local metadata from authorizing a purchase.
+Buyer readiness combines verified release capability with the selected persistent local profile's authority/environment binding and safe interaction/instrument readiness. Explicit interactive ACH requires the active binding and an interaction-capable action policy, not a pre-existing saved mandate; only saved/off-session ACH requires the exact ready bank instrument and mandate. Discovery does no network mutation. Revalidation immediately before negotiation and purchase authorization prevents stale local metadata from authorizing a purchase.
 
 **Alternative considered:** create one `MechanismReadiness` registration per profile. Rejected because it would give one configured mechanism multiple priorities/clients and would make accepted `mechanism` unstable.
 
@@ -161,7 +161,7 @@ The value passed to `open`/`print` is never sent to run-log serialization. Durab
 
 Do not add ACH or bank-transfer jobs. `kit/settlement-runtime` continues to journal `materialize`, `status`, `fulfill`, `check`, `collect`, and `reclaim`. Profile and authorization live in immutable obligation params; normalized hosted reason/deadline/action metadata lives in mechanism state.
 
-Update adapter projections so only the producer's authoritative funded/available public state maps to runtime `ready`. `awaiting_payment`, setup complete, bank instructions issued, ACH processing, `requires_action`, webhook delivery, and provider pending all remain `pending`/`requires_action`. `returned` before fulfillment/collection prevents those effects and follows eligible reclaim/recovery. A post-collection loss maps to `manual_required`/incident while completed marketplace effects remain immutable.
+Update adapter projections so only the producer's authoritative funded/available public state maps to runtime `ready`. `awaiting_payment`, setup complete, bank instructions issued, ACH processing, `requires_action`, webhook delivery, and provider pending all remain `pending`/`requires_action`. A return before fulfillment prevents fulfillment/collection and follows eligible hosted reclaim/recovery. A return after VM fulfillment begins but before collection preserves the immutable fulfillment record, blocks collection, and orders domain-owned VM teardown/capacity cleanup to convergence while the hosted authority owns financial recovery. A post-collection loss maps to `manual_required`/incident while completed marketplace effects remain immutable.
 
 At the expiry edge, the existing runtime status retrieval and compare-and-set are authoritative. It reuses the accepted profile, authorization, settlement, obligation, and operation IDs. Current config/profile readiness is admission policy only and cannot redirect recovery.
 
@@ -185,7 +185,7 @@ Update `kit/hosted-settlement/pyproject.toml` and lock to the exact producer cli
 
 Compose and Helm schemas/config templates gain only exact public profile policy, authority release pins, buyer local-profile/config paths, and marketplace signer Secret references. They reject provider credentials/IDs, stable payer/instrument data, hosted persistence, and raw actions. The hosted service remains separately deployed.
 
-Credential-free tests use injected exact released-client collaborators at the hosted kit seam and the real common runtime/repositories. The protected lane expands the existing ordinary VM flow rather than adding a test-only financial client. Reports identify each selected profile and independent marketplace/producer release, and mark unavailable external Stripe assertions explicitly.
+Credential-free marketplace tests use injected exact released-client collaborators at the hosted kit seam and the real common runtime/repositories. Producer-internal provider-port and webhook-inbox recovery remain established by signed producer conformance evidence; marketplace tests verify that evidence and do not import or simulate hosted internals. The protected lane expands the existing ordinary VM flow rather than adding a test-only financial client. Reports identify each selected profile and independent marketplace/producer release, and mark unavailable external Stripe assertions explicitly.
 
 **Alternative considered:** pin only a compatible client version and check server capabilities at runtime. Rejected because released schema/canonicalization/profile behavior is security- and recovery-sensitive and must be exact.
 

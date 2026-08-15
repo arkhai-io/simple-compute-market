@@ -32,12 +32,17 @@ For hosted obligations, only the authority's provider-neutral `funded` state aft
 
 ### Requirement: Profile-specific reclaim and loss remain authority-owned
 
-The marketplace MUST request reclaim through the same opaque hosted settlement and operation identities and project provider-neutral pending/success/manual outcomes. It MUST NOT select a Stripe cancellation, return, refund, reversal, or dispute operation. A pre-collection funding return MUST block fulfillment/collection and follow hosted reclaim/recovery. A post-collection loss MUST project an incident/manual status without rewriting completed marketplace fulfillment or attempting local reclaim.
+The marketplace MUST request reclaim through the same opaque hosted settlement and operation identities and project provider-neutral pending/success/manual outcomes. It MUST NOT select a Stripe cancellation, return, refund, reversal, or dispute operation. A pre-fulfillment funding return MUST block fulfillment and collection and follow hosted reclaim/recovery. A return after fulfillment starts but before collection MUST preserve the immutable fulfillment record, block collection, order domain-owned VM teardown and capacity cleanup to convergence, and delegate financial return/reclaim entirely to the hosted authority. A post-collection loss MUST project an incident/manual status without rewriting completed marketplace fulfillment or attempting local reclaim.
 
 #### Scenario: ACH returns before fulfillment
 
 - **WHEN** hosted authority reports the accepted debit returned before the marketplace committed fulfillment
 - **THEN** the runtime performs no fulfillment or collection and follows the eligible reclaim/recovery state
+
+#### Scenario: Funding returns after VM fulfillment
+
+- **WHEN** authoritative funding returns after VM fulfillment committed but before collection reserved or succeeded
+- **THEN** collection remains blocked, the immutable fulfillment record remains attributable, VM teardown and capacity cleanup converge, and hosted financial recovery proceeds without marketplace-selected provider action
 
 #### Scenario: ACH return appears after collection
 

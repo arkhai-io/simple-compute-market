@@ -34,10 +34,10 @@ Hosted preflight MUST verify the exact signed client/API/schema and payer/profil
 
 Buyer compatibility for a hosted option MUST require the exact installed profile capability, supported USD/country policy, required interaction ability under the current action policy, and a selected local buyer profile with an active opaque payer binding ready for that authority/environment. Discovery-time checks MUST use only local profile metadata and advertised option data; they MUST perform no hosted mutation. Compatibility MUST be revalidated immediately before negotiation start and exact authorization.
 
-#### Scenario: Buyer lacks an ACH payer binding
+#### Scenario: Buyer selects an ACH interaction mode
 
-- **WHEN** an advertised ACH option survives resource filtering but the selected local profile has no ready binding or mandate for its authority
-- **THEN** the buyer rejects that option before negotiation while independently compatible card options remain
+- **WHEN** an advertised ACH option survives resource filtering and the selected local profile has an active authority/environment binding plus interaction capability
+- **THEN** explicit interactive mode remains compatible without a saved mandate, while saved/off-session mode requires the exact ready instrument and mandate
 
 #### Scenario: Local readiness changes after discovery
 
