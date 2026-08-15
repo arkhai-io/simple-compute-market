@@ -13,6 +13,9 @@ from market_identity import (
     Signer,
     create_signer,
     get_identity_verifier,
+    CredentialProviderKind,
+    CredentialReference,
+    EnvironmentCredentialProvider,
 )
 from conftest import ED25519_SEED, EIP191_KEY
 
@@ -119,3 +122,16 @@ def test_signer_secrets_are_not_representable_or_serializable(
         "scheme": signer.identity.scheme,
         "identifier": signer.identity.identifier,
     }
+
+
+def test_provider_resolved_seed_derives_only_the_canonical_public_principal() -> None:
+    encoded = base64.urlsafe_b64encode(ED25519_SEED).rstrip(b"=").decode("ascii")
+    reference = CredentialReference(
+        provider=CredentialProviderKind.ENVIRONMENT,
+        locator="BUYER_SEED",
+    )
+    secret = EnvironmentCredentialProvider({"BUYER_SEED": encoded}).load(reference)
+    signer = create_signer(IdentityScheme.ED25519, secret)
+    assert signer.identity == Ed25519Signer(ED25519_SEED).identity
+    assert encoded not in repr(reference)
+    assert encoded not in repr(signer)
