@@ -7,14 +7,16 @@ import inspect
 import json
 import re
 import uuid
+from collections.abc import Mapping, Sequence
 from decimal import Decimal, InvalidOperation
-from collections.abc import Mapping
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 from urllib.parse import urlsplit
 
 from hosted_settlement_client import (
     ClientConfig,
     ConditionDescriptor,
+    FundingMode,
+    FundingProfile,
     HostedSettlementAsyncClient,
 )
 from market_identity import Identity, TrustedIdentitySet
@@ -40,12 +42,36 @@ from .adapter import (
 )
 
 STRIPE_CONFIG_KEY = "stripe"
+SUPPORTED_FUNDING_PROFILES = (
+    FundingProfile.CARD,
+    FundingProfile.US_BANK_TRANSFER,
+    FundingProfile.US_ACH_DEBIT,
+)
+_PROFILE_CAPABILITIES = {
+    FundingProfile.CARD: "funding-profile.card.v1",
+    FundingProfile.US_BANK_TRANSFER: "funding-profile.us_bank_transfer.v1",
+    FundingProfile.US_ACH_DEBIT: "funding-profile.us_ach_debit.v1",
+}
+_PROFILE_INTERACTIONS = {
+    FundingProfile.CARD: (FundingMode.INTERACTIVE, FundingMode.SAVED_INSTRUMENT),
+    FundingProfile.US_BANK_TRANSFER: (FundingMode.INTERACTIVE,),
+    FundingProfile.US_ACH_DEBIT: (
+        FundingMode.INTERACTIVE,
+        FundingMode.SAVED_INSTRUMENT,
+    ),
+}
 REQUIRED_STRIPE_CAPABILITIES = tuple(
     sorted(
         REQUIRED_HOSTED_CAPABILITIES.union(
             {
-                "conditional-escrow.v1",
-                "stripe-connect-separate-charges-transfers.v1",
+                "conditional-escrow.v2",
+                "stripe-connect-separate-charges-transfers.v2",
+                "payer-profile.v1",
+                "funding-authorization.v1",
+                "funding-profile.card.v1",
+                "funding-profile.us_bank_transfer.v1",
+                "funding-profile.us_ach_debit.v1",
+                "normalized-funding-reversal.v1",
                 "portable-attestation.v1",
                 "eas-arbiter.v1",
             }
@@ -89,12 +115,22 @@ _THREE_DECIMAL_CURRENCIES = frozenset({"bhd", "jod", "kwd", "omr", "tnd"})
 
 
 class StripePublicationInput(BaseModel):
-    """Public hosted fields accepted from one publication clause."""
+    """Exact provider-neutral funding input for one ordered publication clause."""
 
     model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
 
-    method: Literal["card"] = "card"
+    funding_profile: Annotated[FundingProfile, Field(strict=False)]
+    interaction: Annotated[FundingMode, Field(strict=False)]
     funds_flow: Literal["separate_charges_transfers"] = "separate_charges_transfers"
+
+    @model_validator(mode="after")
+    def validate_profile_interaction(self) -> StripePublicationInput:
+        if self.interaction not in _PROFILE_INTERACTIONS[self.funding_profile]:
+            raise ValueError(
+                f"{self.funding_profile.value} does not support "
+                f"{self.interaction.value}"
+            )
+        return self
 
 
 class StripeAuthorityTrust(BaseModel):
@@ -146,15 +182,19 @@ class StripeSettlementConfig(BaseModel):
     environment: str | None = None
     authority: StripeAuthorityTrust | None = None
     expected_manifest_digest: str | None = None
-    expected_api_version: str = "0.1.0"
-    expected_schema_version: int = Field(default=4, ge=1)
+    expected_api_version: Literal["0.2.0"] = "0.2.0"
+    expected_schema_version: Literal[5] = 5
     required_capabilities: tuple[str, ...] = REQUIRED_STRIPE_CAPABILITIES
     account_ref: str | None = Field(
         default=None,
         json_schema_extra={"roles": ["seller"]},
     )
-    currency: str = Field(
+    currency: Literal["usd"] = Field(
         default="usd",
+        json_schema_extra={"roles": ["seller"]},
+    )
+    country: Literal["US"] = Field(
+        default="US",
         json_schema_extra={"roles": ["seller"]},
     )
     condition_profile: str | None = Field(
@@ -216,13 +256,6 @@ class StripeSettlementConfig(BaseModel):
             )
         return value
 
-    @field_validator("expected_api_version")
-    @classmethod
-    def validate_api_version(cls, value: str) -> str:
-        if not _API_VERSION.fullmatch(value):
-            raise ValueError("expected_api_version must be a semantic version")
-        return value
-
     @field_validator("required_capabilities", mode="before")
     @classmethod
     def accept_toml_capability_lists(cls, values: Any) -> Any:
@@ -231,18 +264,14 @@ class StripeSettlementConfig(BaseModel):
     @field_validator("required_capabilities")
     @classmethod
     def validate_capabilities(cls, values: tuple[str, ...]) -> tuple[str, ...]:
-        if any(not _TOKEN.fullmatch(value) for value in values):
-            raise ValueError("required capabilities must be public tokens")
         if len(set(values)) != len(values):
             raise ValueError("required capabilities must be unique")
-        return values
-
-    @field_validator("currency")
-    @classmethod
-    def validate_currency(cls, value: str) -> str:
-        if not _CURRENCY.fullmatch(value):
-            raise ValueError("currency must be lowercase ISO 4217")
-        return value
+        if set(values) != set(REQUIRED_STRIPE_CAPABILITIES):
+            raise ValueError(
+                "required capabilities must exactly match the released "
+                "hosted consumer contract"
+            )
+        return tuple(sorted(values))
 
     @model_validator(mode="after")
     def validate_cross_field_policy(self) -> StripeSettlementConfig:
@@ -373,17 +402,69 @@ def _raw_hosted_client(
     return raw, True
 
 
+def stripe_contract_fingerprint(config: StripeSettlementConfig) -> str:
+    """Bind advertised options to the exact consumer release contract."""
+
+    payload = {
+        "manifest_digest": config.expected_manifest_digest,
+        "api_version": config.expected_api_version,
+        "schema_version": config.expected_schema_version,
+        "capabilities": list(config.required_capabilities),
+    }
+    encoded = json.dumps(
+        payload,
+        ensure_ascii=False,
+        separators=(",", ":"),
+        sort_keys=True,
+    ).encode()
+    return "sha256:" + hashlib.sha256(encoded).hexdigest()
+
+
+def _profile_records(source: Any) -> dict[FundingProfile, Any]:
+    records: dict[FundingProfile, Any] = {}
+    for item in _value(source, "funding_profiles", ()) or ():
+        try:
+            profile = FundingProfile(_value(item, "profile"))
+        except (TypeError, ValueError):
+            continue
+        records[profile] = item
+    return records
+
+
+def _configured_interactions(
+    resources: Mapping[str, Any],
+) -> dict[FundingProfile, tuple[FundingMode, ...]]:
+    configured: dict[FundingProfile, list[FundingMode]] = {}
+    raw_clauses = resources.get("publication_clauses")
+    if not isinstance(raw_clauses, Sequence) or isinstance(raw_clauses, (str, bytes)):
+        return dict(_PROFILE_INTERACTIONS)
+    for raw_clause in raw_clauses:
+        clause = SettlementPublicationClause.model_validate(raw_clause)
+        if clause.mechanism != MECHANISM:
+            continue
+        publication = StripePublicationInput.model_validate(clause.mechanism_input)
+        interactions = configured.setdefault(publication.funding_profile, [])
+        if publication.interaction not in interactions:
+            interactions.append(publication.interaction)
+    return {
+        profile: tuple(interactions)
+        for profile, interactions in configured.items()
+    }
+
+
+def _profile_blocker(code: str, message: str) -> dict[str, str]:
+    return _blocker(code, message).model_dump(mode="json")
+
+
 async def stripe_preflight(
     section: BaseModel,
     resources: Mapping[str, Any],
     role: SettlementRole,
 ) -> MechanismReadiness:
-    """Read signed health/account state without invoking any mutation endpoint."""
+    """Read exact signed release and profile readiness without mutation."""
 
     config = StripeSettlementConfig.model_validate(section)
-    base_capabilities = tuple(
-        sorted(REQUIRED_HOSTED_CAPABILITIES.union(config.required_capabilities))
-    )
+    base_capabilities = config.required_capabilities
     if not config.enabled:
         return MechanismReadiness(
             mechanism=MECHANISM,
@@ -397,6 +478,10 @@ async def stripe_preflight(
         )
 
     blockers = _required_config_blockers(config, resources, role)
+    configured = _configured_interactions(resources)
+    profile_blockers: dict[FundingProfile, list[dict[str, str]]] = {
+        profile: [] for profile in configured
+    }
     reported_capabilities = base_capabilities
     raw: Any = None
     owned = False
@@ -410,6 +495,7 @@ async def stripe_preflight(
             reported_capabilities = tuple(
                 sorted(str(value) for value in health.capabilities)
             )
+            health_profiles = _profile_records(health)
             if not health.ready:
                 blockers.append(
                     _blocker(
@@ -436,14 +522,51 @@ async def stripe_preflight(
                         "the hosted schema version does not match",
                     )
                 )
-            missing = sorted(set(base_capabilities).difference(health.capabilities))
-            if missing:
+            if (
+                _value(health, "payer_profile_protocol")
+                != "arkhai.payer-profile.v1"
+                or _value(health, "funding_authorization_protocol")
+                != "arkhai.funding-authorization.v1"
+                or _value(health, "funding_profile_protocol")
+                != "arkhai.funding-profile.v1"
+            ):
+                blockers.append(
+                    _blocker(
+                        "hosted.contract_mismatch",
+                        "the hosted payer and funding contract does not match",
+                    )
+                )
+            profile_capabilities = set(_PROFILE_CAPABILITIES.values())
+            missing_common = sorted(
+                set(base_capabilities)
+                .difference(profile_capabilities)
+                .difference(health.capabilities)
+            )
+            if missing_common:
                 blockers.append(
                     _blocker(
                         "hosted.capability_missing",
                         "the hosted authority lacks a required public capability",
                     )
                 )
+            for profile in configured:
+                profile_health = health_profiles.get(profile)
+                if _PROFILE_CAPABILITIES[profile] not in health.capabilities:
+                    profile_blockers[profile].append(
+                        _profile_blocker(
+                            "hosted.profile_capability_missing",
+                            "the hosted authority lacks the exact funding profile capability",
+                        )
+                    )
+                if profile_health is None or not bool(
+                    _value(profile_health, "ready", False)
+                ):
+                    profile_blockers[profile].append(
+                        _profile_blocker(
+                            "hosted.profile_unready",
+                            "the hosted funding profile is not ready",
+                        )
+                    )
             if role == "seller" and config.account_ref:
                 account = await _await_if_needed(
                     raw.account_readiness(
@@ -451,6 +574,7 @@ async def stripe_preflight(
                         request_id=f"settlement-preflight:account:{preflight_id}",
                     )
                 )
+                account_profiles = _profile_records(account)
                 if account.account_ref != config.account_ref or not account.ready:
                     blockers.append(
                         _blocker(
@@ -465,6 +589,17 @@ async def stripe_preflight(
                             "the hosted seller account cannot receive transfers",
                         )
                     )
+                for profile in configured:
+                    profile_account = account_profiles.get(profile)
+                    if profile_account is None or not bool(
+                        _value(profile_account, "ready", False)
+                    ):
+                        profile_blockers[profile].append(
+                            _profile_blocker(
+                                "hosted.account_profile_unready",
+                                "the seller account is not ready for the funding profile",
+                            )
+                        )
         except Exception:
             blockers.append(
                 _blocker(
@@ -479,18 +614,45 @@ async def stripe_preflight(
                 except Exception:
                     pass
 
-    details: dict[str, Any] = {}
+    profiles: dict[str, Any] = {}
+    any_profile_ready = False
+    for profile in SUPPORTED_FUNDING_PROFILES:
+        if profile not in configured:
+            continue
+        ready = not blockers and not profile_blockers[profile]
+        any_profile_ready = any_profile_ready or ready
+        profiles[profile.value] = {
+            "ready": ready,
+            "blockers": profile_blockers[profile],
+            "interactions": sorted(
+                interaction.value for interaction in configured[profile]
+            ),
+            "currency": config.currency,
+            "country": config.country,
+        }
+    if not blockers and not any_profile_ready:
+        blockers.append(
+            _blocker(
+                "hosted.profiles_unready",
+                "no configured hosted funding profile is ready",
+            )
+        )
+    details: dict[str, Any] = {
+        "contract_fingerprint": stripe_contract_fingerprint(config),
+        "profiles": profiles,
+    }
     if config.environment is not None:
         details["environment"] = config.environment
     if role == "seller":
         details["currency"] = config.currency
+        details["country"] = config.country
     if role == "seller" and config.condition_profile is not None:
         details["condition_profile"] = config.condition_profile
     return MechanismReadiness(
         mechanism=MECHANISM,
         configured=True,
         enabled=True,
-        ready=not blockers,
+        ready=not blockers and any_profile_ready,
         blockers=tuple(blockers),
         capabilities=reported_capabilities,
         contract_version=config.expected_api_version,
@@ -580,63 +742,53 @@ def stripe_option_builder(
     resources: Mapping[str, Any],
     role: SettlementRole,
 ) -> dict[str, list[Any]]:
-    """Build one deterministic hosted SettlementOption wire mapping."""
+    """Build one deterministic option for one exact ready funding clause."""
 
     if role != "seller":
         raise ValueError("hosted listing options are seller-owned")
     config = StripeSettlementConfig.model_validate(section)
     if not config.enabled or not readiness.ready:
-        raise ValueError("hosted settlement is not ready for publication")
+        return {"accepted_escrows": [], "settlement_options": []}
     raw_clause = resources.get("publication_clause")
-    publication_input: StripePublicationInput | None = None
-    rate: Any
-    if raw_clause is not None:
-        clause = SettlementPublicationClause.model_validate(raw_clause)
-        if clause.mechanism != MECHANISM:
-            raise ValueError("publication clause does not select hosted settlement")
-        publication_input = StripePublicationInput.model_validate(
-            clause.mechanism_input
-        )
-        currency = clause.asset
-        profile_name = config.condition_profile
-        rate = _stripe_rate_minor_units(
-            clause,
-            configured_currency=config.currency,
-        )
-        rate_per = clause.per
-    else:
-        currency = resources.get("currency") or config.currency
-        profile_name = config.condition_profile
-        rate = resources.get("rate_minor_units")
-        rate_per = "hour"
+    if raw_clause is None:
+        raise ValueError("hosted publication requires one ordered exact clause")
+    clause = SettlementPublicationClause.model_validate(raw_clause)
+    if clause.mechanism != MECHANISM:
+        raise ValueError("publication clause does not select hosted settlement")
+    publication_input = StripePublicationInput.model_validate(clause.mechanism_input)
+    profiles = readiness.public_details.get("profiles")
+    profile_status = (
+        profiles.get(publication_input.funding_profile.value)
+        if isinstance(profiles, Mapping)
+        else None
+    )
+    if not isinstance(profile_status, Mapping) or profile_status.get("ready") is not True:
+        return {"accepted_escrows": [], "settlement_options": []}
+    expected_fingerprint = stripe_contract_fingerprint(config)
+    if readiness.public_details.get("contract_fingerprint") != expected_fingerprint:
+        return {"accepted_escrows": [], "settlement_options": []}
+
+    rate = _stripe_rate_minor_units(clause, configured_currency=config.currency)
     account_ref = resources.get("account_ref") or config.account_ref
-    condition = config.condition_profiles.get(profile_name or "")
+    condition = config.condition_profiles.get(config.condition_profile or "")
     claimant = resources.get("claimant_principal")
     if not isinstance(account_ref, str) or not account_ref:
         raise ValueError("hosted option requires an account reference")
-    if not isinstance(currency, str) or not _CURRENCY.fullmatch(currency):
-        raise ValueError("hosted option requires a lowercase ISO 4217 currency")
     if condition is None:
         raise ValueError("hosted option requires a configured condition profile")
-    if isinstance(rate, bool) or not isinstance(rate, int) or rate <= 0:
-        raise ValueError("hosted option requires a positive integer minor-unit rate")
-    rates = [{"field": "amount", "per": rate_per, "value": str(rate)}]
+    rates = [{"field": "amount", "per": clause.per, "value": str(rate)}]
     params = {
         "account_ref": account_ref,
         "claimant_principal": _principal_json(claimant),
-        "funds_flow": (
-            publication_input.funds_flow
-            if publication_input is not None
-            else "separate_charges_transfers"
-        ),
-        "payment_method_types": [
-            publication_input.method if publication_input is not None else "card"
-        ],
+        "funds_flow": publication_input.funds_flow,
+        "funding_profile": publication_input.funding_profile.value,
+        "interaction": publication_input.interaction.value,
+        "contract_fingerprint": expected_fingerprint,
         "condition": condition.model_dump(mode="json"),
     }
     identity_payload = {
         "mechanism": MECHANISM,
-        "asset": currency,
+        "asset": clause.asset,
         "rates": rates,
         "params": params,
     }
@@ -653,40 +805,115 @@ def stripe_option_builder(
     return {"accepted_escrows": [], "settlement_options": [option]}
 
 
+def _enum_value(value: Any) -> Any:
+    return getattr(value, "value", value)
+
+
+def _contains_exact(values: Any, expected: str) -> bool:
+    return (
+        isinstance(values, (set, frozenset, tuple, list))
+        and expected in {_enum_value(value) for value in values}
+    )
+
+
 def stripe_buyer_compatibility(
     section: BaseModel,
     option: Any,
     public_context: Mapping[str, Any],
 ) -> bool:
+    """Admit only exact options owned by the selected active local payer."""
+
     config = StripeSettlementConfig.model_validate(section)
     if not config.enabled or _value(option, "mechanism") != MECHANISM:
         return False
-    currency = _value(option, "asset")
-    accepted = public_context.get("currencies")
-    return (
-        not isinstance(accepted, (set, frozenset, tuple, list)) or currency in accepted
-    )
-
-
-def stripe_method_projection(option: Any) -> tuple[str, ...] | None:
-    """Project only advertised public payment-method values."""
-
     params = _value(option, "params", {})
-    methods = (
-        _value(params, "payment_method_types") if isinstance(params, Mapping) else None
+    if not isinstance(params, Mapping):
+        return False
+    try:
+        profile = FundingProfile(_value(params, "funding_profile"))
+        interaction = FundingMode(_value(params, "interaction"))
+    except (TypeError, ValueError):
+        return False
+    if interaction not in _PROFILE_INTERACTIONS[profile]:
+        return False
+    expected_fingerprint = stripe_contract_fingerprint(config)
+    advertised_fingerprint = _value(params, "contract_fingerprint")
+    context_fingerprint = public_context.get("contract_fingerprint")
+    if advertised_fingerprint != expected_fingerprint or (
+        context_fingerprint is not None
+        and context_fingerprint != expected_fingerprint
+    ):
+        return False
+    currency = _value(option, "asset")
+    if (
+        currency != config.currency
+        or not _contains_exact(public_context.get("funding_profiles"), profile.value)
+        or not _contains_exact(public_context.get("currencies"), config.currency)
+        or not _contains_exact(public_context.get("countries"), config.country)
+        or not _contains_exact(
+            public_context.get("interactions"), interaction.value
+        )
+    ):
+        return False
+
+    binding = public_context.get("selected_payer_binding")
+    selected_principal = public_context.get("selected_principal")
+    if binding is None or selected_principal is None:
+        return False
+    if (
+        _value(binding, "authority_id") != config.authority_id
+        or _value(binding, "environment") != config.environment
+        or _enum_value(_value(binding, "state")) != "active"
+        or not isinstance(_value(binding, "binding_ref"), str)
+    ):
+        return False
+    try:
+        bound = Identity.model_validate(_value(binding, "bound_principal"))
+        selected = Identity.model_validate(selected_principal)
+    except (TypeError, ValueError):
+        return False
+    if bound != selected:
+        return False
+
+    readiness = public_context.get("profile_readiness")
+    profile_readiness = (
+        readiness.get(profile.value) if isinstance(readiness, Mapping) else None
     )
-    if not isinstance(methods, (list, tuple)):
-        return None
-    projected = tuple(item for item in methods if isinstance(item, str) and item)
-    return projected or None
+    return (
+        isinstance(profile_readiness, Mapping)
+        and profile_readiness.get(interaction.value) is True
+    )
+
+
+def _stripe_param_projection(option: Any, name: str) -> str | None:
+    params = _value(option, "params", {})
+    value = _value(params, name) if isinstance(params, Mapping) else None
+    return value if isinstance(value, str) and value else None
+
+
+def stripe_funding_profile_projection(option: Any) -> str | None:
+    """Project the exact advertised funding profile."""
+
+    return _stripe_param_projection(option, "funding_profile")
+
+
+def stripe_currency_projection(option: Any) -> str | None:
+    """Project the lowercase advertised currency."""
+
+    value = _value(option, "asset")
+    return value if isinstance(value, str) and value else None
+
+
+def stripe_interaction_projection(option: Any) -> str | None:
+    """Project the exact advertised interaction mode."""
+
+    return _stripe_param_projection(option, "interaction")
 
 
 def stripe_funds_flow_projection(option: Any) -> str | None:
-    """Project the advertised public Connect funds flow."""
+    """Project the fixed provider-neutral funds flow."""
 
-    params = _value(option, "params", {})
-    value = _value(params, "funds_flow") if isinstance(params, Mapping) else None
-    return value if isinstance(value, str) and value else None
+    return _stripe_param_projection(option, "funds_flow")
 
 
 def validate_stripe_publication_input(
@@ -694,7 +921,7 @@ def validate_stripe_publication_input(
     value: BaseModel,
     role: SettlementRole,
 ) -> BaseModel:
-    """Validate typed public clause input without provider access."""
+    """Validate one exact public clause input without provider access."""
 
     StripeSettlementConfig.model_validate(section)
     if role != "seller":
@@ -702,7 +929,7 @@ def validate_stripe_publication_input(
     return StripePublicationInput.model_validate(value)
 
 
-def create_stripe_registration() -> MechanismRegistration:
+def create_stripe_registration(*, command_group: Any | None = None) -> MechanismRegistration:
     """Return the explicit common-contract registration for hosted Stripe."""
 
     return MechanismRegistration(
@@ -714,24 +941,54 @@ def create_stripe_registration() -> MechanismRegistration:
         client_factory=stripe_client_factory,
         option_builder=stripe_option_builder,
         buyer_compatibility=stripe_buyer_compatibility,
-        public_detail_keys=frozenset({"currency", "environment", "condition_profile"}),
+        command_group=command_group,
+        public_detail_keys=frozenset(
+            {
+                "contract_fingerprint",
+                "profiles",
+                "currency",
+                "country",
+                "environment",
+                "condition_profile",
+            }
+        ),
         clause_fields=(
             SettlementClauseField(
                 descriptor=FieldDescriptor(
-                    name="stripe.method",
+                    name="stripe.funding_profile",
                     value_type=QueryValueType.STRING,
                     operators=_CLAUSE_OPERATORS,
-                    description="advertised hosted payment method",
+                    description="exact hosted funding profile",
                 ),
                 roles=frozenset({"buyer", "seller"}),
-                projector=stripe_method_projection,
+                projector=stripe_funding_profile_projection,
+            ),
+            SettlementClauseField(
+                descriptor=FieldDescriptor(
+                    name="stripe.currency",
+                    value_type=QueryValueType.STRING,
+                    operators=_CLAUSE_OPERATORS,
+                    description="lowercase hosted settlement currency",
+                ),
+                roles=frozenset({"buyer", "seller"}),
+                projector=stripe_currency_projection,
+            ),
+            SettlementClauseField(
+                descriptor=FieldDescriptor(
+                    name="stripe.interaction",
+                    value_type=QueryValueType.STRING,
+                    operators=_CLAUSE_OPERATORS,
+                    description="exact hosted buyer interaction mode",
+                ),
+                roles=frozenset({"buyer", "seller"}),
+                projector=stripe_interaction_projection,
             ),
             SettlementClauseField(
                 descriptor=FieldDescriptor(
                     name="stripe.funds_flow",
                     value_type=QueryValueType.STRING,
                     operators=_CLAUSE_OPERATORS,
-                    description="advertised hosted Connect funds flow",
+                    description="fixed hosted separate charges/transfers flow",
                 ),
                 roles=frozenset({"buyer", "seller"}),
                 projector=stripe_funds_flow_projection,
@@ -745,16 +1002,20 @@ def create_stripe_registration() -> MechanismRegistration:
 __all__ = [
     "REQUIRED_STRIPE_CAPABILITIES",
     "STRIPE_CONFIG_KEY",
+    "SUPPORTED_FUNDING_PROFILES",
     "StripeAuthorityTrust",
     "StripeResolverConfig",
     "StripeSettlementConfig",
     "StripePublicationInput",
-    "stripe_funds_flow_projection",
-    "stripe_method_projection",
-    "validate_stripe_publication_input",
-    "create_stripe_registration",
     "stripe_buyer_compatibility",
     "stripe_client_factory",
+    "stripe_contract_fingerprint",
+    "stripe_currency_projection",
+    "stripe_funding_profile_projection",
+    "stripe_funds_flow_projection",
+    "stripe_interaction_projection",
     "stripe_option_builder",
     "stripe_preflight",
+    "validate_stripe_publication_input",
+    "create_stripe_registration",
 ]
