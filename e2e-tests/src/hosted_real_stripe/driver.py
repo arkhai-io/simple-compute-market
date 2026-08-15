@@ -66,6 +66,7 @@ from .runtime import (
     ProcessUnavailable,
     StripeWebhookForwarder,
     parse_lifecycle_command,
+    require_runtime_authority_identity,
 )
 from .stripe_api import (
     ExpectedEffect,
@@ -112,6 +113,7 @@ class _ScenarioResult:
     payment_outcome: object | None = None
     recovery: RecoveryEvidence | None = None
     loss: LossEvidence | None = None
+
 
 def run(args: argparse.Namespace) -> tuple[StripeTestEvidence, int]:
     release = require_release_identity(
@@ -175,11 +177,13 @@ def run(args: argparse.Namespace) -> tuple[StripeTestEvidence, int]:
         secret = require_test_secret(os.environ.get("STRIPE_SECRET_KEY"))
         account_id = require_connected_account(os.environ.get("STRIPE_CONNECTED_ACCOUNT_ID"))
         webhook_url = require_loopback_webhook(args.webhook_url)
-        buyer_identity_scheme = os.environ.get(
-            "HOSTED_SETTLEMENT_E2E_BUYER_IDENTITY_SCHEME", ""
-        )
+        buyer_identity_scheme = os.environ.get("HOSTED_SETTLEMENT_E2E_BUYER_IDENTITY_SCHEME", "")
         if buyer_identity_scheme not in {"eip191", "ed25519"}:
             raise AuthorizationUnavailable("protected buyer identity scheme is unavailable")
+        runtime_authority = require_runtime_authority_identity(
+            args.hosted_service_env_base,
+            release_authority_address=release.hosted_authority_address,
+        )
         stripe = StripeApi(secret, timeout=args.stripe_request_timeout)
 
         execution.stage = "account_readiness"
@@ -187,7 +191,7 @@ def run(args: argparse.Namespace) -> tuple[StripeTestEvidence, int]:
         require_ready_account(account, account_id)
         binding_contract = _maintained_account_binding(
             storefront_config=args.storefront_config,
-            authority_id=release.hosted_authority_id,
+            authority_id=runtime_authority.authority_id,
             account_ref=args.account_ref,
             provider_account_id=account_id,
             run_identity=run_identity,
@@ -206,9 +210,9 @@ def run(args: argparse.Namespace) -> tuple[StripeTestEvidence, int]:
                 EphemeralMarketplaceConfig(
                     template=args.storefront_config,
                     account_ref=args.account_ref,
-                    authority_id=release.hosted_authority_id,
-                    authority_scheme=release.hosted_authority_scheme,
-                    authority_address=release.hosted_authority_address,
+                    authority_id=runtime_authority.authority_id,
+                    authority_scheme=runtime_authority.scheme,
+                    authority_address=runtime_authority.identifier,
                     authority_environment=args.authority_environment,
                     manifest_digest=release.hosted_manifest_digest,
                     funding_profile=funding_profile,
@@ -216,9 +220,9 @@ def run(args: argparse.Namespace) -> tuple[StripeTestEvidence, int]:
                 ) as marketplace_config,
                 EphemeralBuyerConfig(
                     template=args.buyer_config,
-                    authority_id=release.hosted_authority_id,
-                    authority_scheme=release.hosted_authority_scheme,
-                    authority_address=release.hosted_authority_address,
+                    authority_id=runtime_authority.authority_id,
+                    authority_scheme=runtime_authority.scheme,
+                    authority_address=runtime_authority.identifier,
                     authority_environment=args.authority_environment,
                     manifest_digest=release.hosted_manifest_digest,
                     buyer_identity_scheme=buyer_identity_scheme,
@@ -388,8 +392,7 @@ def _require_profile_scenario(
     }:
         raise AuthorizationRejected("saved funding requires a card or ACH profile")
     if scenario == "off_session_success" and (
-        funding_profile not in {"card.v1", "us_ach_debit.v1"}
-        or interaction != "saved_instrument"
+        funding_profile not in {"card.v1", "us_ach_debit.v1"} or interaction != "saved_instrument"
     ):
         raise AuthorizationRejected("off-session scenarios require saved card or ACH funding")
     if scenario == "requires_action" and (
@@ -399,7 +402,9 @@ def _require_profile_scenario(
     if scenario in {"ach_return", "post_collection_loss"} and funding_profile != "us_ach_debit.v1":
         raise AuthorizationRejected("ACH loss scenarios require the ACH funding profile")
     if scenario in {"delayed_funding", "funding_restart"} and funding_profile == "card.v1":
-        raise AuthorizationRejected("delayed funding scenarios require an asynchronous bank profile")
+        raise AuthorizationRejected(
+            "delayed funding scenarios require an asynchronous bank profile"
+        )
     if scenario in {"decline", "insufficient_funds", "authentication"} and (
         funding_profile != "card.v1" or interaction != "interactive"
     ):
@@ -531,7 +536,9 @@ def _execute_scenario(
             or pending.get("fulfillment_started") is not False
             or pending.get("funding_profile") != funding_profile
         ):
-            raise LifecycleContractError("delayed funding did not remain pending before fulfillment")
+            raise LifecycleContractError(
+                "delayed funding did not remain pending before fulfillment"
+            )
         delayed_observed = True
         if scenario == "funding_restart":
             execution.stage = "recovery"
@@ -660,9 +667,12 @@ def _execute_scenario(
             "recover_eligible_pretransfer_refund",
             operation_ref=expected.marketplace_operation_id,
         )
-        if stripe.wait_for_refund(
-            expected, terminal, timeout=provider_timeout, poll_interval=poll_interval
-        ) != refund:
+        if (
+            stripe.wait_for_refund(
+                expected, terminal, timeout=provider_timeout, poll_interval=poll_interval
+            )
+            != refund
+        ):
             raise ProviderInvariantError("repeated refund recovery changed the original effect")
         recovery = (
             RecoveryEvidence(
@@ -700,8 +710,10 @@ def _execute_scenario(
     )
     recovery = None
     if scenario in {"missed_webhook", "api_restart", "funding_restart"}:
-        process = "webhook_forwarder" if scenario == "missed_webhook" else (
-            "api" if scenario == "api_restart" else "worker"
+        process = (
+            "webhook_forwarder"
+            if scenario == "missed_webhook"
+            else ("api" if scenario == "api_restart" else "worker")
         )
         recovery = RecoveryEvidence(
             kind=scenario,
@@ -760,10 +772,7 @@ def _prepared_effect(
     public_value = dict(value)
     action = public_value.pop("payer_action", None)
     _reject_private_fields(public_value)
-    if any(
-        value.get(field) is not True
-        for field in ("discovered", "negotiated", "materialized")
-    ):
+    if any(value.get(field) is not True for field in ("discovered", "negotiated", "materialized")):
         raise LifecycleContractError("marketplace lifecycle milestones are incomplete")
     if (
         value.get("accepted_mechanism") != "fiat.stripe.v1"
@@ -816,7 +825,9 @@ def _prepared_effect(
         if action_url is not None and not isinstance(action_url, str):
             raise LifecycleContractError("payer action URL is malformed")
         if action_kind == "bank_instructions" and action_url is not None:
-            raise LifecycleContractError("bank instructions must not be represented as an action URL")
+            raise LifecycleContractError(
+                "bank instructions must not be represented as an action URL"
+            )
     assert isinstance(operation_ref, str)
     assert isinstance(marketplace_operation_id, str)
     assert isinstance(transfer_group, str)
@@ -854,9 +865,7 @@ def _validate_payer_fixture(
         or value.get("opaque_binding_persisted") is not True
         or value.get("action_persisted") is not False
     ):
-        raise LifecycleContractError(
-            "payer fixture is not bound to the selected marketplace owner"
-        )
+        raise LifecycleContractError("payer fixture is not bound to the selected marketplace owner")
     if interaction != "saved_instrument" or value.get("saved_instrument_ready") is True:
         if setup_action is not None:
             raise LifecycleContractError("ready payer fixture returned a stale setup action")
@@ -992,6 +1001,7 @@ def _browser_outcome(scenario: Scenario) -> CheckoutOutcome:
     if scenario in {"decline", "insufficient_funds", "authentication"}:
         return cast(CheckoutOutcome, scenario)
     return "success"
+
 
 def _lifecycle_environment(
     args: argparse.Namespace,

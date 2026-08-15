@@ -6,13 +6,57 @@ from pathlib import Path
 import tomllib
 from collections.abc import Mapping, Sequence
 from typing import Any
+import pytest
+from market_identity import create_signer
 
 from src.hosted_real_stripe.runtime import (
     ComposeStack,
     EphemeralBuyerConfig,
     EphemeralMarketplaceConfig,
     EphemeralServiceEnv,
+    ProcessUnavailable,
+    require_runtime_authority_identity,
 )
+
+
+def test_runtime_authority_identity_is_derived_from_injected_credential(
+    tmp_path: Path,
+) -> None:
+    credential = base64.urlsafe_b64encode(bytes([17]) * 32).decode().rstrip("=")
+    environment = tmp_path / "authority.env"
+    environment.write_text(
+        "HOSTED_SETTLEMENT_AUTHORITY_ID=hosted-stripe-test-authority\n"
+        "HOSTED_SETTLEMENT_AUTHORITY_IDENTITY_SCHEME=ed25519\n"
+        f"HOSTED_SETTLEMENT_AUTHORITY_PRIVATE_KEY={credential}\n",
+        encoding="utf-8",
+    )
+
+    authority = require_runtime_authority_identity(
+        environment,
+        release_authority_address="0x" + ("22" * 20),
+    )
+
+    assert authority.authority_id == "hosted-stripe-test-authority"
+    assert authority.scheme == "ed25519"
+    assert authority.identifier == create_signer("ed25519", credential).identity.identifier
+
+
+def test_runtime_authority_identity_rejects_release_key_reuse(tmp_path: Path) -> None:
+    credential = "11" * 32
+    release_address = create_signer("eip191", credential).identity.identifier
+    environment = tmp_path / "authority.env"
+    environment.write_text(
+        "HOSTED_SETTLEMENT_AUTHORITY_ID=hosted-stripe-test-authority\n"
+        "HOSTED_SETTLEMENT_AUTHORITY_IDENTITY_SCHEME=eip191\n"
+        f"HOSTED_SETTLEMENT_AUTHORITY_PRIVATE_KEY={credential}\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ProcessUnavailable, match="must be independent"):
+        require_runtime_authority_identity(
+            environment,
+            release_authority_address=release_address,
+        )
 
 
 def test_compose_stack_uses_every_declared_compose_file(tmp_path: Path) -> None:
@@ -213,7 +257,9 @@ def test_ephemeral_container_inputs_use_shared_directory(
             values["HOSTED_SETTLEMENT_RELEASE_AUTHORITY_ADDRESS"]
             == "0x1fe2aa7fbaf5720f79a22a4ada4b8b37d4e0c008"
         )
-        assert values["HOSTED_SETTLEMENT_RELEASE_REPOSITORY"] == "arkhai-io/stripe-settlement-service"
+        assert (
+            values["HOSTED_SETTLEMENT_RELEASE_REPOSITORY"] == "arkhai-io/stripe-settlement-service"
+        )
         assert (
             values["HOSTED_SETTLEMENT_RELEASE_WORKFLOW_REF"]
             == ".github/workflows/release.yml@refs/tags/v0.2.0"

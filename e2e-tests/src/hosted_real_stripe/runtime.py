@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+from dataclasses import dataclass
 import queue
 import re
 import shutil
@@ -20,6 +21,7 @@ from market_identity import (
     CredentialReference,
     IdentityScheme,
     ProfileRepository,
+    create_signer,
 )
 from typing import Any, Mapping, Sequence
 
@@ -35,6 +37,43 @@ class ProcessUnavailable(RuntimeError):
 
 class LifecycleContractError(RuntimeError):
     """The marketplace-owned lifecycle bridge returned invalid state."""
+
+
+@dataclass(frozen=True)
+class RuntimeAuthorityIdentity:
+    """Public runtime response identity derived from its injected credential."""
+
+    authority_id: str
+    scheme: str
+    identifier: str
+
+
+def require_runtime_authority_identity(
+    environment_path: Path,
+    *,
+    release_authority_address: str,
+) -> RuntimeAuthorityIdentity:
+    values = _read_environment_file(environment_path)
+    authority_id = values.get("HOSTED_SETTLEMENT_AUTHORITY_ID", "")
+    scheme = values.get("HOSTED_SETTLEMENT_AUTHORITY_IDENTITY_SCHEME", "")
+    credential = values.get("HOSTED_SETTLEMENT_AUTHORITY_PRIVATE_KEY", "")
+    if not _SAFE_CONFIG_VALUE.fullmatch(authority_id) or scheme not in {
+        "eip191",
+        "ed25519",
+    }:
+        raise ProcessUnavailable("runtime authority identity is invalid")
+    try:
+        signer = create_signer(scheme, credential)
+    except (TypeError, ValueError) as exc:
+        raise ProcessUnavailable("runtime authority credential is invalid") from exc
+    identifier = signer.identity.identifier
+    if scheme == "eip191" and identifier == release_authority_address.lower():
+        raise ProcessUnavailable("runtime and release authority credentials must be independent")
+    return RuntimeAuthorityIdentity(
+        authority_id=authority_id,
+        scheme=scheme,
+        identifier=identifier,
+    )
 
 
 class LifecycleConvergenceTimeout(TimeoutError):
@@ -228,22 +267,7 @@ class EphemeralServiceEnv:
     def _read_base(self) -> dict[str, str]:
         if self._base_path is None:
             return {}
-        try:
-            text = self._base_path.read_text(encoding="utf-8")
-        except OSError as exc:
-            raise ProcessUnavailable("authority environment template is unavailable") from exc
-        values: dict[str, str] = {}
-        for line in text.splitlines():
-            stripped = line.strip()
-            if not stripped or stripped.startswith("#"):
-                continue
-            if "=" not in stripped:
-                raise ProcessUnavailable("authority environment template is malformed")
-            key, value = stripped.split("=", 1)
-            if not _valid_env_name(key) or key in values:
-                raise ProcessUnavailable("authority environment template is malformed")
-            values[key] = value
-        return values
+        return _read_environment_file(self._base_path)
 
     def __exit__(self, *_exc: object) -> None:
         if self.path is not None:
@@ -368,6 +392,7 @@ class EphemeralMarketplaceConfig:
                 pass
         self.path = None
         self._directory = None
+
 
 class EphemeralBuyerConfig:
     """Render role-correct buyer trust from the same staged producer identity."""
@@ -766,6 +791,25 @@ def parse_lifecycle_command(value: str | None) -> tuple[str, ...]:
     if not isinstance(command, list) or any(not isinstance(item, str) for item in command):
         raise LifecycleContractError("lifecycle command must be a JSON argv array")
     return tuple(command)
+
+
+def _read_environment_file(path: Path) -> dict[str, str]:
+    try:
+        text = path.read_text(encoding="utf-8")
+    except OSError as exc:
+        raise ProcessUnavailable("authority environment template is unavailable") from exc
+    values: dict[str, str] = {}
+    for line in text.splitlines():
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        if "=" not in stripped:
+            raise ProcessUnavailable("authority environment template is malformed")
+        key, value = stripped.split("=", 1)
+        if not _valid_env_name(key) or key in values:
+            raise ProcessUnavailable("authority environment template is malformed")
+        values[key] = value
+    return values
 
 
 def _valid_env_name(value: str) -> bool:
