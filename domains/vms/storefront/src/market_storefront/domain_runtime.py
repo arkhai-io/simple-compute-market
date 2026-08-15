@@ -2,11 +2,16 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import replace
+from typing import Any
 
 from arkhai_vms.domain_runtime import market_domain
 from core_storefront.domain_plugins import StorefrontDomainContribution
-
+from core_storefront.domain_lifecycle import (
+    StorefrontFulfillmentContext,
+    StorefrontSettlementBuildContext,
+)
 from core_storefront.domain_registry import (
     StorefrontDomainRegistration,
     StorefrontDomainRegistry,
@@ -40,6 +45,77 @@ _REQUIRED_VM_STOREFRONT_CAPABILITIES = frozenset(
 )
 
 
+def _build_vm_settlement_plan(
+    *,
+    context: StorefrontSettlementBuildContext,
+):
+    """Adapt the VM plan builder to the common selected-domain context."""
+
+    return build_vm_accepted_artifacts(
+        proposal=context.proposal,
+        agreed_amount=context.agreed_amount,
+        duration_seconds=context.duration_seconds,
+        buyer_principal=context.buyer_principal,
+        seller_principal=context.seller_principal,
+    )
+
+
+async def _fulfill_vm_context(
+    *,
+    context: StorefrontFulfillmentContext,
+) -> dict[str, Any]:
+    """Adapt the common frozen-binding carrier to VM fulfillment inputs."""
+
+    raw = context.domain_input
+    if not isinstance(raw, Mapping):
+        raise TypeError("VM fulfillment requires a domain_input mapping")
+    required = (
+        "ssh_public_key",
+        "order",
+        "duration_seconds",
+        "listing_id",
+        "settlement_mechanism",
+    )
+    missing = tuple(key for key in required if raw.get(key) is None)
+    if missing:
+        raise ValueError("VM fulfillment input is missing " + ", ".join(missing))
+    result = await fulfill_compute_obligation(
+        sqlite_client=context.ports.repository,
+        client=context.ports.fulfillment_client,
+        escrow_uid=context.escrow_uid,
+        ssh_public_key=str(raw["ssh_public_key"]),
+        order=raw["order"],
+        duration_seconds=int(raw["duration_seconds"]),
+        start_utc=raw.get("start_utc"),
+        listing_id=str(raw["listing_id"]),
+        negotiation_id=context.negotiation_id,
+        site_id=context.site_id,
+        settlement_mechanism=str(raw["settlement_mechanism"]),
+    )
+    result = dict(result or {})
+    order = raw["order"] if isinstance(raw["order"], Mapping) else {}
+    offer_resource = order.get("offer_resource")
+    if not isinstance(offer_resource, Mapping):
+        offer_resource = {}
+    physical_resource_id = result.get("physical_resource_id")
+    if physical_resource_id is None:
+        physical_resource_id = offer_resource.get("resource_id")
+    return {
+        "negotiation_id": context.negotiation_id,
+        "escrow_uid": context.escrow_uid,
+        "site_id": context.site_id,
+        "state": str(result.get("status") or "failed"),
+        "physical_resource_id": physical_resource_id,
+        "capacity_reservation_id": result.get("capacity_reservation_id"),
+        "settlement_resource_id": result.get("settlement_resource_id"),
+        "fulfillment_id": result.get("fulfillment_uid")
+        or result.get("fulfillment_id"),
+        "failure_reason": result.get("message")
+        if result.get("status") != "fulfilled"
+        else None,
+        "domain_result": result,
+    }
+
 def build_vm_storefront_domain() -> MarketDomainContract:
     """Construct the ordinary VM contract used by the storefront executable."""
     base = market_domain()
@@ -55,13 +131,13 @@ def build_vm_storefront_domain() -> MarketDomainContract:
             ),
             settlement=ImmutableSettlementCapability(
                 verify=verify_escrow_for_settlement,
-                build_plan=build_vm_accepted_artifacts,
+                build_plan=_build_vm_settlement_plan,
             ),
             fulfillment=ImmutableFulfillmentCapability(
-                fulfill=fulfill_compute_obligation,
+                fulfill=_fulfill_vm_context,
             ),
             compute_provisioning=ImmutableComputeProvisioningCapability(
-                provision=fulfill_compute_obligation,
+                provision=_fulfill_vm_context,
             ),
         )
     )

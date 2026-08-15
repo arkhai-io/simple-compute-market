@@ -326,6 +326,30 @@ Mechanism configuration and readiness MAY govern new option publication and admi
 - **WHEN** reconciliation resumes an existing funded hosted obligation after operators disable new hosted publication
 - **THEN** the runtime continues authoritative status/collection/reclaim recovery for that obligation rather than switching or abandoning it
 
+### Requirement: Accepted domain binding governs the servicing lifecycle
+
+Settlement verification, plan construction, materialization, condition/effect servicing, capacity, fulfillment scheduling, status/result projection, recovery, and teardown MUST resolve the exact contract bound to the accepted negotiation. A safe copy of that binding and trusted site MUST be persisted with the fulfillment context and compared on every restart. Live listing state, request payloads, current pool mode, result kind, and installed-contract order MUST NOT redirect accepted work.
+
+#### Scenario: VM and bare-metal obligations service concurrently
+
+- **WHEN** one process services accepted VM and bare-metal negotiations
+- **THEN** each operation invokes only its recorded contract through the domain-neutral settlement and fulfillment contexts and addresses only its recorded site
+
+#### Scenario: Selected result kind is wrong
+
+- **WHEN** the recorded site's fulfillment result contains a domain result rejected by the accepted contract's result codec
+- **THEN** recovery reports a data-integrity failure before persisting result or credential state and does not try another codec
+
+#### Scenario: Teardown repeats after restart
+
+- **WHEN** recovery repeats teardown for a recorded fulfillment/reservation
+- **THEN** it addresses the same site and durable identities while the provisioning authority dispatches its recorded executor kind; no current publication mode or VM default is consulted
+
+#### Scenario: Contract is unavailable after acceptance
+
+- **WHEN** a recoverable operation's exact domain/version is not installed or its site trust binding is missing
+- **THEN** the operation remains blocked under its original identities and no capacity, fulfillment, settlement, result, or teardown call occurs
+
 ## Evidence
 
 - Plan envelopes and lifecycle-universal fields:
@@ -343,3 +367,5 @@ Mechanism configuration and readiness MAY govern new option publication and admi
   `core/storefront/tests/unit/test_heartbeats.py`.
 - Alkahest mechanism dispatch and claim hooks:
   `kit/alkahest/tests/unit/test_claims.py` and `test_claim_hooks.py`.
+- Accepted-domain settlement/fulfillment carriers, exact-object dispatch, result codec routing, and mismatch rejection: `core/storefront/tests/unit/test_domain_lifecycle.py` and `domains/vms/storefront/tests/unit/test_settlement_composition.py`.
+- Selected-site restart and teardown routing: `domains/vms/storefront/tests/unit/test_fulfillment_resume_runtime.py`, `test_fulfillment_service.py`, and `test_lease_truncation.py`.

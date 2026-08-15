@@ -10,10 +10,11 @@ from arkhai_vms import make_vm_provision_terms
 from market_hosted_settlement import StripeResolverConfig
 from market_identity import Ed25519Signer
 from market_settlement_runtime import PreparedSettlement, derive_obligation_ref
+from core_storefront.domain_lifecycle import StorefrontSettlementFulfillmentInput
+from core_storefront.domain_registry import StorefrontThreadBinding
 
 from market_storefront.models.hosted_settlement_models import SettlementPublicResponse
 from market_storefront.settlement_composition import (
-    VmFulfillmentInput,
     VmProjectionContext,
     _hosted_evidence_input,
     _terminal_requires_lease_truncation,
@@ -65,16 +66,22 @@ def _prepared(db: SQLiteClient, *, escrow_uid: str = "0xescrow") -> PreparedSett
         local_principal=_SELLER,
         mechanism_ref=escrow_uid,
         mechanism_receipt={"verified": True},
-        fulfillment_input=VmFulfillmentInput(
-            provision=SimpleNamespace(
-                ssh_public_key="ssh-ed25519 AAAA",
-                duration_seconds=3600,
-                start_utc=None,
+        fulfillment_input=StorefrontSettlementFulfillmentInput(
+            buyer_principal=_BUYER,
+            thread_binding=StorefrontThreadBinding(
+                negotiation_id="neg-1",
+                listing_id="listing-1",
+                site_id="site-1",
+                binding=db.domain_registry.resolve_mode("vm").binding,
             ),
-            listing_id="listing-1",
-            order={"listing_id": "listing-1"},
-            negotiation_id="neg-1",
-            site_id="site-1",
+            domain_input={
+                "provision": make_vm_provision_terms(
+                    duration_seconds=3600,
+                    ssh_public_key="ssh-ed25519 AAAA",
+                ),
+                "listing_id": "listing-1",
+                "order": {"listing_id": "listing-1"},
+            },
         ),
         projection_context=VmProjectionContext(
             sqlite_client=db,
@@ -266,7 +273,10 @@ async def test_prepare_pins_the_exact_verified_obligation(tmp_path, monkeypatch)
     assert context.obligation_ref == derive_obligation_ref("neg-1", 1, obligations[1])
     assert context.obligation_index == 1
     verify.assert_awaited_once()
-    assert prepared.fulfillment_input.provision.ssh_public_key == "ssh-ed25519 accepted"
+    assert (
+        prepared.fulfillment_input.domain_input["provision"].ssh_public_key
+        == "ssh-ed25519 accepted"
+    )
 
 
 @pytest.mark.asyncio
@@ -382,12 +392,20 @@ async def test_reserve_persists_immutable_obligation_mapping_before_fulfillment(
 async def test_fulfillment_keeps_private_delivery_out_of_public_runtime_result(
     tmp_path,
 ):
-    result = {
+    private_result = {
         "status": "fulfilled",
         "message": "Compute obligation fulfilled",
         "fulfillment_uid": "0xfulfillment",
         "connection_details": "ssh tenant@host",
         "tenant_credentials": {"password": "secret", "key_type": "ed25519"},
+    }
+    result = {
+        "negotiation_id": "neg-1",
+        "escrow_uid": "0xescrow",
+        "site_id": "site-1",
+        "state": "fulfilled",
+        "fulfillment_id": "0xfulfillment",
+        "domain_result": private_result,
     }
     fulfill = AsyncMock(return_value=result)
     domain = build_vm_storefront_domain()
@@ -409,8 +427,8 @@ async def test_fulfillment_keeps_private_delivery_out_of_public_runtime_result(
     assert outcome.fulfillment_ref == "0xfulfillment"
     assert "connection_details" not in outcome.public_result
     assert "tenant_credentials" not in outcome.public_result
-    assert outcome.private_result == result
-    assert fulfill.await_args.kwargs["site_id"] == "site-1"
+    assert outcome.private_result == private_result
+    assert fulfill.await_args.kwargs["context"].site_id == "site-1"
 
 
 def test_composition_rejects_repository_domain_mismatch_before_registration(

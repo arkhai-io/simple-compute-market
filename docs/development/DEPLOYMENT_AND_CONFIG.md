@@ -120,6 +120,33 @@ single-writer model does not tolerate the overlapping old/new pod
 window a `RollingUpdate` strategy would otherwise produce against a
 shared volume.
 
+### Combined compute-family storefront
+
+The storefront image installs the shared `arkhai-core-storefront` shell plus
+each enabled domain contribution from staged `.dist` wheels. Public
+configuration contains a non-empty `storefront_domains` list; every row names
+one contribution, exact offering mode, domain identity, and contract version.
+Trusted provisioning authorities remain separately configured site bindings.
+The Helm chart and Compose profile run one storefront process against one
+single-writer SQLite volume; they do not start one container per domain.
+
+`storefront_domains` is public routing metadata only. Signing credentials,
+provider settings, SSH material, tenant credentials, hosted provider objects,
+and private domain results remain in role-owned Secret channels and never enter
+ConfigMaps, command arguments, images, listing bindings, or migration reports.
+Startup rejects missing wheels, duplicate modes/identities, assertion mismatch,
+unsupported versions, incomplete capabilities, or recoverable bindings that
+the frozen registry cannot resolve.
+
+Before enabling the combined image over an existing database, quiesce effects
+and run `market-storefront migrate-storefront-domains --contribution <id>` in
+check mode. Write mode requires the same explicit contribution and creates a
+restrictive same-directory backup before fsync and atomic replacement.
+Mixed/ambiguous rows, missing site or pool/resource provenance, public-mode
+conflicts, orphan relationships, and derivation collisions fail without
+mutating the source. Once accepted effects use common bindings, rollback is
+forward recovery under those bindings, not restoration of an unbound schema.
+
 ## Migrations at startup
 
 A deployed service applies its pending migrations before serving

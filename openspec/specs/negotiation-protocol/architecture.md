@@ -48,6 +48,16 @@ The principal credential remains distinct from the durable negotiation subject. 
 
 The service-local schema migration validates the complete identity-bearing population before converting address-shaped parties and message authors to canonical `eip191` principals. It preserves negotiation, message, listing, option, settlement-plan, and operation identities in one transaction. Malformed values, checksum or representation conflicts, incomplete party sets, and ambiguous ownership abort the transaction rather than leaving a mixed authorization boundary. A migrated nonterminal thread continues from its stored canonical history without replaying policy decisions.
 
+## Record-bound domain dispatch
+
+The negotiation shell never chooses a domain from an opening payload. It loads
+the authoritative listing binding, resolves its exact registered contract,
+treats caller discriminators as consistency assertions, validates the
+versioned provision envelope, and transactionally copies the binding into the
+new thread before seller policy runs. Continuation and accepted Terms resolve
+only from that thread binding, so a later publication/configuration change
+cannot cross-switch an in-flight negotiation.
+
 ## Related contracts
 
 - [Marketplace identity](../marketplace-identity/spec.md)

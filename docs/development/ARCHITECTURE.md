@@ -163,13 +163,13 @@ accepted runs recover under immutable ownership.
 
 See the [marketplace identity contract](../../openspec/specs/marketplace-identity/spec.md) and its [architecture](../../openspec/specs/marketplace-identity/architecture.md).
 
-### Capacity and publication composition
+### Capacity publication and multi-domain storefront composition
 
 `arkhai-kit-capacity-publication` owns the storefront-side multi-site capacity
 source, exact site projections, capacity-event reconciliation loop, registry
 fan-out, durable publication result recording, and close-before-reopen
-lifecycle. A domain contributes only schema-opaque candidates and codecs plus
-hooks that resolve each listing's durable capacity binding.
+lifecycle. A domain contribution supplies only schema-opaque candidates and
+codecs plus hooks that resolve each listing's durable capacity binding.
 
 Every capacity-backed candidate carries
 `CapacityBinding(site_id, offering_mode, source_id)`. The site ID comes from
@@ -179,12 +179,51 @@ identifies the pool, quota resource, or Physical Resource. Publication,
 reservation, commit, release, and restart recovery reload and compare that
 exact binding. An unknown site, missing mode, changed binding, or incomplete
 candidate fails closed; the runtime never invents a home site, scans other
-authorities after restart, or defaults an executor mode.
+authorities after restart, or defaults an executor mode. VM and API-credit
+contributions inject their candidate derivation and binding codecs into this
+same runtime. The kit imports no VM, API-credit, bare-metal, provider, or
+deployed-service package.
 
-VM and API-credit storefront roots inject their candidate derivation and
-binding codecs into the same runtime. The kit imports no VM, API-credit,
-bare-metal, provider, or deployed-service package, so another domain composes
-the lifecycle without copying it.
+The storefront role is one domain-neutral compute-family shell. At startup it
+discovers installed `market.storefront.contributions`, applies the operator's
+explicit `[storefront_domains]` selection, and freezes one registry. Each
+registration binds a contribution ID, pool offering mode, exact domain
+identity, contract version, and the exact validated `MarketDomainContract`.
+One-domain deployments use the identical registry with one entry; there is no
+singleton, module getter, installed-order fallback, global selection, or
+contract reconstruction.
+
+The common database owns immutable listing, negotiation-thread, and domain
+artifact bindings. They retain the selected site, mode, domain
+identity/version, and collision-safe provenance. Opening a thread inherits its
+listing binding before domain policy runs. Publication, negotiation,
+settlement, fulfillment, result recovery, and teardown resolve only that
+recorded binding against the frozen registry. Selected-site calls are pinned
+and never fan out. Removing a mode closes new publication but does not
+reinterpret accepted work.
+
+Settlement retains domain-neutral `StorefrontSettlementFulfillmentInput`: the
+immutable thread binding, buyer principal, schema-opaque domain input, and any
+fulfillment anchor. When servicing reaches delivery, core adds the accepted
+escrow identity and caller-owned authority ports to form
+`StorefrontFulfillmentContext`, then invokes the fulfillment hook on the exact
+contract resolved from the binding. Core validates that the returned
+negotiation, escrow, and site identities did not change. The VM hook alone
+translates the opaque domain input into VM executor arguments. Core and kit
+therefore own lifecycle and dispatch while each domain owns payload meaning
+and concrete fulfillment; a missing hook fails closed rather than becoming a
+no-op.
+
+Legacy single-domain databases cross this boundary only through an explicit
+contribution migration adapter. Check mode validates the complete population.
+Write mode uses a restrictive backup and atomic replacement; ambiguity,
+orphaned provenance, cross-domain rows, or unsupported versions abort without
+partial state. The bare-metal contribution currently supplies codecs and
+publication semantics but not the production fulfillment hook. Complete live
+VM/bare-metal restart, teardown, and capacity-restoration proof remains gated
+on that external production contribution and its selected-site POOLS-7
+lifecycle; the shared shell does not manufacture evidence or substitute a
+no-op.
 
 ### Settlement configuration
 

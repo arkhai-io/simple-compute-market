@@ -284,24 +284,29 @@ Identity, wallet, and chain resources MUST be composed independently of settleme
 - **WHEN** VM composition installs hosted non-EVM settlement with Ed25519 identity and no Alkahest registration
 - **THEN** startup, readiness, publication, and servicing succeed without constructing a wallet or chain client
 
-### Requirement: Storefront roots inject one validated domain contract
+### Requirement: Storefront roots inject a frozen domain registry
 
-A domain-owned storefront composition root MUST receive one immutable versioned `MarketDomainContract`, validate it against the executable's supported domain identity and required declared capabilities before constructing role services, repositories, background workers, or the HTTP application, and inject that same contract through every domain-sensitive role boundary. Publication, negotiation, settlement-plan construction, fulfillment dispatch, and persisted domain-artifact normalization MUST NOT discover or replace the contract through module-global state.
+A storefront composition root MUST discover and validate a non-empty configured set of complete storefront contributions once at startup. Each immutable registration MUST bind one explicit offering mode, one exact `DomainIdentity` and supported market-contract version, and one installed contribution. A one-domain deployment MUST use the same registry and shared role shell with one explicit registration. Core and kit packages MUST remain schema-opaque and MUST NOT import domain implementations, construct a contract from stored strings, or select a default.
 
-#### Scenario: VM storefront starts with its supported contract
+#### Scenario: VM and bare-metal contributions start together
 
-- **WHEN** the VM storefront root receives a supported `compute.v1` contract with its complete codec and storefront, publication, settlement, fulfillment, and compute-provisioning hook sets
-- **THEN** startup constructs its repository, application, routes, services, and workers around that exact contract object
+- **WHEN** the common compute-family storefront starts with installed `vms`/`vm`/`compute.v1`/`1.0` and `bare_metal`/`bare_metal`/`bare_metal.v1`/`1.0` contributions
+- **THEN** one frozen registry retains the exact validated objects and the common application, persistence, publication, negotiation, settlement, fulfillment, recovery, and teardown boundaries receive that same registry
 
-#### Scenario: Inapplicable contract is supplied
+#### Scenario: One explicit contribution starts
 
-- **WHEN** the VM storefront receives a wrong type, identity, version, undeclared capability, or incomplete required hook set
-- **THEN** validation fails before persistence, registry, background-task, or network side effects
+- **WHEN** an operator intentionally configures one complete supported contribution
+- **THEN** the same common shell starts with one registration and no missing-domain fallback or alternate role implementation
 
-#### Scenario: A preceding single-domain database is reopened
+#### Scenario: Registration is incomplete or ambiguous
 
-- **WHEN** the parameterized executable opens existing VM storefront state with the supported `compute.v1` contract
-- **THEN** no schema migration or carrier conversion is required and listing, negotiation, obligation, settlement, fulfillment, and operation identifiers retain their interpretation
+- **WHEN** configuration names a duplicate mode, identity, contribution, unsupported version, absent package, assertion mismatch, secret-bearing field, or incomplete capability set
+- **THEN** startup fails before persistence migration, network preflight, publication, or background work
+
+#### Scenario: Durable work names an unavailable contract
+
+- **WHEN** startup or recovery finds nonterminal state whose exact binding cannot resolve to a configured registration
+- **THEN** readiness fails for that record without reconstructing a contract, selecting another mode, or dispatching a side effect
 
 ### Requirement: Cross-cutting storefront runtime is kit-owned
 
@@ -406,3 +411,4 @@ binding is recorded.
 - Import boundaries: `core/tests/unit/test_carrier_purity.py` and `domains/vms/storefront/tests/unit/test_architecture_imports.py`.
 - Core CLI fallback and shipped plugin contracts: `core/buyer/tests/unit/test_cli.py`, `domains/vms/buyer/tests/test_plugin_export.py`, and `domains/apicredits/buyer/tests/test_plugin_export.py`.
 - Distribution entry points: `core/buyer/pyproject.toml`, `domains/vms/buyer/pyproject.toml`, and `domains/apicredits/buyer/pyproject.toml`.
+- Frozen storefront registry, startup discovery, record-bound lifecycle carriers, and exact-object resolution: `core/storefront/tests/unit/test_domain_registry.py`, `test_domain_plugins.py`, `test_app_composition.py`, and `test_domain_lifecycle.py`.
