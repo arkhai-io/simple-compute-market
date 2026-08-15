@@ -16,6 +16,7 @@ from arkhai_vms import make_vm_provision_terms
 from core_buyer.action_policy import BuyerActionPolicy
 from core_buyer.registry_config import RegistryAuthority
 from domains.vms.buyer.buy_cli import _make_hosted_settle_hook
+from domains.vms.buyer.buyer_client import NegotiationOutcome
 from domains.vms.buyer.negotiate_cli import _pricing_listing_for_selection
 from domains.vms.buyer.buy_orchestrator import (
     BuyConfig,
@@ -42,6 +43,8 @@ from market_core.schemas import (
     EscrowTerms,
     RateValue,
     SettlementOption,
+    SettlementObligation,
+    SettlementPlan,
     derive_settlement_option_id,
 )
 
@@ -233,8 +236,6 @@ def test_standalone_pricing_uses_selected_option_rate_and_units():
 def test_hosted_settle_uses_storefront_and_never_calls_authority_directly(
     monkeypatch,
 ):
-    from domains.vms.buyer.buyer_client import NegotiationOutcome
-    from market_core.schemas import SettlementObligation, SettlementPlan
 
     monkeypatch.setattr(
         "domains.vms.buyer.buy_cli.make_core_publisher_trust_resolver",
@@ -335,7 +336,6 @@ def test_hosted_settle_uses_storefront_and_never_calls_authority_directly(
 def test_hosted_settle_never_authorizes_or_starts_before_accepted_terms(
     monkeypatch,
 ) -> None:
-    from domains.vms.buyer.buyer_client import NegotiationOutcome
 
     monkeypatch.setattr(
         "domains.vms.buyer.buy_cli.prepare_hosted_funding_authorization",
@@ -643,8 +643,7 @@ class TestRunBuyDerivePrices:
 
         def fake_negotiate(**kwargs):
             seen_prices.append((kwargs["initial_price"], kwargs["max_price"]))
-            from domains.vms.buyer.buyer_client import NegotiationOutcome
-
+        
             return NegotiationOutcome(
                 status="exited",
                 agreed_amount=None,
@@ -714,8 +713,7 @@ class TestRunBuyDerivePrices:
 
         def fake_negotiate(**kwargs):
             called["negotiate"] = True
-            from domains.vms.buyer.buyer_client import NegotiationOutcome
-
+        
             return NegotiationOutcome(status="exited", rounds=0)
 
         monkeypatch.setattr(
@@ -757,8 +755,7 @@ def _agree_negotiate_factory(price: int = 100):
     """Build a fake negotiate_with_seller that always agrees at the given price."""
 
     def fake(**kwargs):
-        from domains.vms.buyer.buyer_client import NegotiationOutcome
-
+    
         provision_terms = kwargs.get("provision_terms")
         escrow_proposal = kwargs.get("escrow_proposal")
         return NegotiationOutcome(
