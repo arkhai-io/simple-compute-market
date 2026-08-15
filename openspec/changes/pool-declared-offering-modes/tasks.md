@@ -4,15 +4,15 @@ Sections 1–3 are additive and inert; Section 4 is the behavioral boundary.
 
 ## 1. Declared-mode vocabulary
 
-- [ ] 1.1 Re-verify `design.md`'s Context findings, particularly the ledger's
+- [x] 1.1 Re-verify `design.md`'s Context findings, particularly the ledger's
       executor-kind inference at both the reserve and supersede sites and the second
       implicit fallback in `deal_event_sink`.
-- [ ] 1.2 Add a deliverable-modes policy tag to `kit/resource-pools`' hint vocabulary
+- [x] 1.2 Add a deliverable-modes policy tag to `kit/resource-pools`' hint vocabulary
       with a typed reader, matching the existing tags' validation posture — well-formed
       set, no knowledge of which modes are meaningful.
-- [ ] 1.3 Confirm the declaration inherits projection, precedence, and administration
+- [x] 1.3 Confirm the declaration inherits projection, precedence, and administration
       from the existing hint mechanism with no new configuration channel.
-- [ ] 1.4 Focused tests: declared set projects and resolves; malformed declaration
+- [x] 1.4 Focused tests: declared set projects and resolves; malformed declaration
       rejected at the reader; absent declaration resolves to empty rather than to a
       permissive default.
 

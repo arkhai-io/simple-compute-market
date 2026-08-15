@@ -1,6 +1,6 @@
 [project]
 name = "arkhai-kit-resource-pools"
-version = "0.1.0"
+version = "0.2.0"
 license = "MIT"
 description = "Provider-neutral resource-pool administration: persistence, YAML reconciliation, and the pool-config handler protocol."
 requires-python = ">=3.12"
