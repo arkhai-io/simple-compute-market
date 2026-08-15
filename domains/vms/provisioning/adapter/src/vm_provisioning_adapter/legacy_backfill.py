@@ -27,6 +27,9 @@ from vm_provisioning_adapter.services.ansible_fulfillment_provider import (
     AnsibleFulfillmentProvider,
 )
 
+_LEGACY_EXECUTOR_KIND = "vm"
+
+
 _STATE_BY_LEASE_STATUS = {
     "provisioning": "dispatching",
     "leased": "active",
@@ -172,7 +175,7 @@ def compile_legacy_vm_fulfillment_backfill(
         resource = SettlementResource(
             settlement_resource_id=candidate.vm_host,
             pool_id=candidate.pool_id,
-            executor_kind="vm",
+            executor_kind=_LEGACY_EXECUTOR_KIND,
             resource_kind="vm",
             provider="ansible",
             attributes={"vm_host": candidate.vm_host},
@@ -200,6 +203,7 @@ def compile_legacy_vm_fulfillment_backfill(
         state=state,
         settlement_resource_id=candidate.vm_host,
         pool_id=candidate.pool_id,
+        executor_kind=_LEGACY_EXECUTOR_KIND,
         provider="ansible",
         resource_attributes={"vm_host": candidate.vm_host},
         provider_metadata=metadata,

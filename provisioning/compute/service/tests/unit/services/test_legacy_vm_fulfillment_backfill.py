@@ -64,6 +64,7 @@ def test_active_lease_becomes_active_with_provisioned_resource_and_teardown():
     draft = compile_legacy_vm_fulfillment_backfill(candidate, fulfillment_id="f-1")
 
     assert draft.state == "active"
+    assert draft.executor_kind == "vm"
     # provisioned_resource_id is a fulfillment-owned opaque identity, not
     # the raw VM target -- deterministic on (capacity_reservation_id,
     # target) so a re-run of this compiler against the same lease always
