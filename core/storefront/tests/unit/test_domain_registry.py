@@ -79,6 +79,10 @@ def test_two_exact_registrations_resolve_to_the_pre_registered_objects():
     assert registry.resolve(vm.binding) is vm.contract
     assert registry.resolve_registration(bare_metal.binding) is bare_metal
     assert registry.resolve(bare_metal.binding) is bare_metal.contract
+    assert registry.resolve_mode("vm") is vm
+    assert registry.resolve_mode("bare_metal") is bare_metal
+    with pytest.raises(StorefrontDomainBindingError, match="unknown.*offering mode"):
+        registry.resolve_mode("missing")
 
 
 def test_one_registration_is_still_explicit_and_has_no_default_lookup():
