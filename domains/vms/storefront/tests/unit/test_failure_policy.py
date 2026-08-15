@@ -10,7 +10,7 @@ from market_storefront.failure_actions import (
     FulfillmentFailureContext,
     apply_fulfillment_failure_policy,
 )
-from market_storefront.domain_runtime import build_vm_storefront_domain
+from market_storefront.domain_runtime import build_vm_storefront_domain, build_vm_storefront_registry
 from market_storefront.utils.sqlite_client import SQLiteClient
 
 BUYER_PRINCIPAL = Ed25519Signer(b"\x51" * 32).identity
@@ -21,10 +21,7 @@ BUYER_EVM_ADDRESS = "0x" + "bb" * 20
 async def test_failure_policy_releases_capacity_and_runs_webhook(tmp_path, monkeypatch):
     from tests.fake_site import FakeSite, site_capacity
 
-    db = SQLiteClient(
-        db_path=str(tmp_path / "failure-policy.db"),
-        domain=build_vm_storefront_domain(),
-    )
+    db = SQLiteClient(db_path=str(tmp_path / "failure-policy.db"), registry=build_vm_storefront_registry(build_vm_storefront_domain()))
     fake = FakeSite(deliverable_modes={"vm"})
     fake.add_resource(
         "gpu-host-1",

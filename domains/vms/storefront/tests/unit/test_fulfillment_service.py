@@ -10,7 +10,7 @@ from market_fulfillment import VersionedEnvelope
 import market_storefront.container as container
 from market_storefront.services import fulfillment_service
 from domains.vms.listings.reconciler import record_derived_listing
-from market_storefront.domain_runtime import build_vm_storefront_domain
+from market_storefront.domain_runtime import build_vm_storefront_domain, build_vm_storefront_registry
 from market_storefront.utils.sqlite_client import SQLiteClient
 from tests.fake_site import (
     FakeSite,
@@ -42,7 +42,7 @@ def _identity_wiring(monkeypatch):
 
 @pytest.fixture
 def client(tmp_path):
-    return SQLiteClient(db_path=str(tmp_path / "agent.db"), domain=build_vm_storefront_domain())
+    return SQLiteClient(db_path=str(tmp_path / "agent.db"), registry=build_vm_storefront_registry(build_vm_storefront_domain()))
 
 
 async def _seed_compute_pool(client: SQLiteClient) -> None:

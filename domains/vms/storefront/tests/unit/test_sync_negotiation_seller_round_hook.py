@@ -12,7 +12,7 @@ from market_policy.identity import Identity
 from market_policy.negotiation_middleware import NegotiationDecision
 from market_policy.negotiation_thread import get_thread_store
 
-from market_storefront.domain_runtime import build_vm_storefront_domain
+from market_storefront.domain_runtime import build_vm_storefront_domain, build_vm_storefront_registry
 from market_storefront.utils.sync_negotiation import (
     SellerRoundResult,
     _accepted_hosted_artifacts,
@@ -58,10 +58,7 @@ async def db(tmp_path):
 
     from market_storefront.utils.sqlite_client import SQLiteClient
 
-    client = SQLiteClient(
-        db_path=str(tmp_path / "seller_round_hook.db"),
-        domain=_DOMAIN,
-    )
+    client = SQLiteClient(db_path=str(tmp_path / "seller_round_hook.db"), registry=build_vm_storefront_registry(_DOMAIN))
     thread_module._thread_store = None
     get_thread_store(
         sqlite_client=client,
@@ -185,7 +182,7 @@ async def test_foreign_envelope_rejects_before_policy_or_repository_state(db) ->
 
     with pytest.raises(ValueError, match=r"compute\.v1"):
         await start_sync_negotiation(
-            domain=db.market_domain,
+            domain=db.domain_registry.resolve_mode("vm").contract,
             sqlite_client=db,
             our_listing_id="L-hook",
             buyer_principal=_BUYER,
@@ -219,7 +216,7 @@ async def test_start_sync_negotiation_uses_injected_seller_round_hook(db):
         )
 
     response = await start_sync_negotiation(
-        domain=db.market_domain,
+        domain=db.domain_registry.resolve_mode("vm").contract,
         sqlite_client=db,
         our_listing_id="L-hook",
         buyer_principal=_BUYER,
@@ -357,7 +354,7 @@ async def test_hosted_selection_is_persisted_and_materialized_as_plan(db):
 
     with site_capacity(site):
         response = await start_sync_negotiation(
-            domain=db.market_domain,
+            domain=db.domain_registry.resolve_mode("vm").contract,
             sqlite_client=db,
             our_listing_id="L-hosted",
             buyer_principal=_BUYER,
@@ -437,7 +434,7 @@ async def test_start_sync_negotiation_rejects_mismatched_resource_shape(db):
 
     with pytest.raises(OfferUnfulfillableError) as exc_info:
         await start_sync_negotiation(
-            domain=db.market_domain,
+            domain=db.domain_registry.resolve_mode("vm").contract,
             sqlite_client=db,
             our_listing_id="L-hook",
             buyer_principal=_BUYER,
@@ -479,7 +476,7 @@ async def test_start_sync_negotiation_permits_resource_shape_matching_listing(db
         )
 
     response = await start_sync_negotiation(
-        domain=db.market_domain,
+        domain=db.domain_registry.resolve_mode("vm").contract,
         sqlite_client=db,
         our_listing_id="L-hook",
         buyer_principal=_BUYER,
@@ -517,7 +514,7 @@ async def test_continue_sync_negotiation_uses_injected_seller_round_hook(db):
         )
 
     opened = await start_sync_negotiation(
-        domain=db.market_domain,
+        domain=db.domain_registry.resolve_mode("vm").contract,
         sqlite_client=db,
         our_listing_id="L-hook",
         buyer_principal=_BUYER,
@@ -555,7 +552,7 @@ async def test_continue_sync_negotiation_uses_injected_seller_round_hook(db):
         )
 
     response = await continue_sync_negotiation(
-        domain=db.market_domain,
+        domain=db.domain_registry.resolve_mode("vm").contract,
         sqlite_client=db,
         neg_id=opened["negotiation_id"],
         buyer_action="counter",

@@ -11,7 +11,7 @@ from core_storefront.domain_registry import (
 
 import market_storefront.container as container
 import market_storefront.server as server
-from market_storefront.domain_runtime import build_vm_storefront_domain
+from market_storefront.domain_runtime import build_vm_storefront_domain, build_vm_storefront_registry
 
 def _registry(domain):
     return StorefrontDomainRegistry(
@@ -59,22 +59,25 @@ async def test_lifespan_publishes_and_clears_exact_contract_without_cross_app_le
 ) -> None:
     signer = SimpleNamespace(identity=object())
 
-    def fake_sqlite_client(*, domain):
-        return SimpleNamespace(db_path=f"/{id(domain)}.db", market_domain=domain)
+    def fake_sqlite_client(*, registry):
+        return SimpleNamespace(db_path=f"/{id(registry)}.db", domain_registry=registry)
 
-    def fake_listing_service(*, domain, **_kwargs):
-        return SimpleNamespace(market_domain=domain)
+    def fake_listing_service(*, registry, **_kwargs):
+        return SimpleNamespace(domain_registry=registry)
 
-    def fake_negotiation_service(*, domain, **_kwargs):
+    def fake_negotiation_service(*, registry, **_kwargs):
         return SimpleNamespace(
-            _continue_negotiation=partial(lambda: None, domain=domain)
+            _continue_negotiation=partial(lambda: None, registry=registry)
         )
 
-    def fake_settlement_composition(*, domain, **_kwargs):
-        return SimpleNamespace(domain=domain)
+    def fake_settlement_composition(*, registry, **_kwargs):
+        return SimpleNamespace(
+            domain=registry.resolve_mode("vm").contract,
+            registry=registry,
+        )
 
-    async def fake_startup_tasks(*, domain):
-        assert container.resolved_market_domain is domain
+    async def fake_startup_tasks(*, registry):
+        assert container.resolved_domain_registry is registry
 
     monkeypatch.setattr(server, "get_sqlite_client", fake_sqlite_client)
     monkeypatch.setattr(server, "resolve_marketplace_signer", lambda: signer)
@@ -108,14 +111,15 @@ async def test_lifespan_publishes_and_clears_exact_contract_without_cross_app_le
     first = build_vm_storefront_domain()
     second = build_vm_storefront_domain()
     for domain in (first, second):
-        application = server.build_vm_storefront_app(registry=_registry(domain))
+        registry = _registry(domain)
+        application = server.build_vm_storefront_app(registry=registry)
         async with application.router.lifespan_context(application):
             assert application.state.market_domains[0].domain_identity == "compute.v1"
-            assert container.resolved_market_domain is domain
-            assert container.resolved_sqlite_client.market_domain is domain
-            assert container.resolved_listing_service.market_domain is domain
+            assert container.resolved_domain_registry is registry
+            assert container.resolved_sqlite_client.domain_registry is registry
+            assert container.resolved_listing_service.domain_registry is registry
             assert container.resolved_settlement_composition.domain is domain
-        assert container.resolved_market_domain is None
+        assert container.resolved_domain_registry is None
         assert container.resolved_sqlite_client is None
         assert container.resolved_listing_service is None
         assert container.resolved_settlement_composition is None

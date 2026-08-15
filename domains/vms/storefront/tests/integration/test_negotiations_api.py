@@ -29,7 +29,7 @@ from market_storefront.controllers.negotiations_controller import router as nego
 from core_storefront.services.negotiation_service import NegotiationService
 from core_storefront.stage_log import stage_event
 
-from market_storefront.domain_runtime import build_vm_storefront_domain
+from market_storefront.domain_runtime import build_vm_storefront_domain, build_vm_storefront_registry
 from market_storefront.utils.sqlite_client import SQLiteClient
 from market_storefront.utils.sync_negotiation import continue_sync_negotiation
 from storefront_client.client import StorefrontClient, StorefrontClientError
@@ -49,7 +49,7 @@ _ADMIN_TRUST = TrustedIdentitySet(identities=(_ADMIN_SIGNER.identity,))
 
 @pytest_asyncio.fixture
 async def db(tmp_path) -> SQLiteClient:
-    return SQLiteClient(db_path=str(tmp_path / "neg_test.db"), domain=build_vm_storefront_domain())
+    return SQLiteClient(db_path=str(tmp_path / "neg_test.db"), registry=build_vm_storefront_registry(build_vm_storefront_domain()))
 
 
 async def _seed_order(db: SQLiteClient, order_id: str) -> None:
@@ -147,7 +147,7 @@ def _make_negotiation_service(db: SQLiteClient) -> NegotiationService:
         sqlite_client=db,
         continue_negotiation=partial(
             continue_sync_negotiation,
-            domain=db.market_domain,
+            domain=db.domain_registry.resolve_mode("vm").contract,
         ),
         stage_event=stage_event,
     )

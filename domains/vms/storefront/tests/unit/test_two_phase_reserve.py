@@ -12,7 +12,7 @@ from market_storefront.services.vm_fulfillment_service import (
     _commit_capacity_hold,
     _commit_fresh_reservation,
 )
-from market_storefront.domain_runtime import build_vm_storefront_domain
+from market_storefront.domain_runtime import build_vm_storefront_domain, build_vm_storefront_registry
 from market_storefront.utils.sqlite_client import SQLiteClient
 from market_storefront.utils.sync_negotiation import _place_capacity_hold
 
@@ -336,7 +336,7 @@ def test_claim_raises_when_neither_pool_id_nor_resource_id_present():
 
 @pytest.mark.asyncio
 async def test_acceptance_places_and_records_the_hold(tmp_path):
-    db = SQLiteClient(db_path=str(tmp_path / "hold.db"), domain=build_vm_storefront_domain())
+    db = SQLiteClient(db_path=str(tmp_path / "hold.db"), registry=build_vm_storefront_registry(build_vm_storefront_domain()))
     capacity = FakeCapacity(reserve_result=_hold())
 
     with patch(
@@ -367,7 +367,7 @@ async def test_acceptance_hold_pins_to_the_listings_mapped_site(tmp_path):
     that reserve() itself honors a site kwarg when given one."""
     from domains.vms.listings.reconciler import record_derived_listing
 
-    db = SQLiteClient(db_path=str(tmp_path / "hold.db"), domain=build_vm_storefront_domain())
+    db = SQLiteClient(db_path=str(tmp_path / "hold.db"), registry=build_vm_storefront_registry(build_vm_storefront_domain()))
     record_derived_listing(
         db.db_path, listing_id="lst-1", site_id="dc-mapped",
         resource_id="res-1", gpu_count=2,
@@ -389,7 +389,7 @@ async def test_acceptance_hold_pins_to_the_listings_mapped_site(tmp_path):
 
 @pytest.mark.asyncio
 async def test_acceptance_survives_hold_refusal_and_zero_ttl(tmp_path):
-    db = SQLiteClient(db_path=str(tmp_path / "hold.db"), domain=build_vm_storefront_domain())
+    db = SQLiteClient(db_path=str(tmp_path / "hold.db"), registry=build_vm_storefront_registry(build_vm_storefront_domain()))
 
     # No capacity: acceptance proceeds, nothing recorded.
     refused = FakeCapacity(reserve_result=None)
@@ -428,7 +428,7 @@ async def test_acceptance_hold_ttl_is_capped_by_the_listings_mapped_pool_prefere
     capped by a mapped pool's max_reservation_hold_seconds=30, must reach
     reserve() as 30, not 900.
     """
-    db = SQLiteClient(db_path=str(tmp_path / "hold.db"), domain=build_vm_storefront_domain())
+    db = SQLiteClient(db_path=str(tmp_path / "hold.db"), registry=build_vm_storefront_registry(build_vm_storefront_domain()))
     capacity = FakeCapacity(reserve_result=_hold())
 
     with patch(
@@ -453,7 +453,7 @@ async def test_acceptance_hold_ttl_unchanged_when_no_pool_preference(tmp_path):
     result (the ordinary case -- no mapped pool, or one with no hold
     preference) must leave the storefront's own configured TTL untouched,
     not silently zero it or something else unintended."""
-    db = SQLiteClient(db_path=str(tmp_path / "hold.db"), domain=build_vm_storefront_domain())
+    db = SQLiteClient(db_path=str(tmp_path / "hold.db"), registry=build_vm_storefront_registry(build_vm_storefront_domain()))
     capacity = FakeCapacity(reserve_result=_hold())
 
     with patch(

@@ -12,7 +12,7 @@ import pytest
 
 from market_identity import Ed25519Signer
 
-from market_storefront.domain_runtime import build_vm_storefront_domain
+from market_storefront.domain_runtime import build_vm_storefront_domain, build_vm_storefront_registry
 from market_storefront.utils.sqlite_client import SQLiteClient
 from market_storefront.utils import sqlite_client as sqlite_module
 
@@ -153,7 +153,7 @@ def test_restart_preserves_schema_and_all_persisted_identifiers(tmp_path) -> Non
     domain = build_vm_storefront_domain()
     seller = Ed25519Signer(b"\x31" * 32).identity
     buyer = Ed25519Signer(b"\x32" * 32).identity
-    client = SQLiteClient(db_path, domain=domain)
+    client = SQLiteClient(db_path, registry=build_vm_storefront_registry(domain))
     now = datetime.now().isoformat()
 
     asyncio.run(
@@ -253,9 +253,9 @@ def test_restart_preserves_schema_and_all_persisted_identifiers(tmp_path) -> Non
             "WHERE name NOT LIKE 'sqlite_%' ORDER BY type, name"
         ).fetchall()
 
-    reopened = SQLiteClient(db_path, domain=domain)
+    reopened = SQLiteClient(db_path, registry=build_vm_storefront_registry(domain))
 
-    assert reopened.market_domain is domain
+    assert reopened.domain_registry.resolve_mode("vm").contract is domain
     assert asyncio.run(
         reopened.load_listing(listing_id="listing-stable")
     )["listing_id"] == "listing-stable"
@@ -295,8 +295,8 @@ def test_settings_singleton_rejects_a_different_contract_object(
     monkeypatch.setattr(sqlite_module, "resolve_marketplace_signer", lambda: signer)
     monkeypatch.setattr(sqlite_module, "_sqlite_client", None)
 
-    resolved = sqlite_module.get_sqlite_client(domain=first)
+    resolved = sqlite_module.get_sqlite_client(registry=build_vm_storefront_registry(first))
 
-    assert resolved.market_domain is first
+    assert resolved.domain_registry.resolve_mode("vm").contract is first
     with pytest.raises(RuntimeError, match="different market-domain contract object"):
-        sqlite_module.get_sqlite_client(domain=second)
+        sqlite_module.get_sqlite_client(registry=build_vm_storefront_registry(second))
