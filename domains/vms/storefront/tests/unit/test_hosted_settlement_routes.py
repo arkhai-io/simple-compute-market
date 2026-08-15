@@ -6,7 +6,7 @@ from unittest.mock import AsyncMock
 import pytest
 from arkhai_vms import make_vm_provision_terms
 from fastapi import HTTPException
-from hosted_settlement_client import ConditionDescriptor
+from market_hosted_settlement import ConditionDescriptor
 from market_identity import Ed25519Signer
 from market_settlement_runtime import (
     SettlementObligationRecord,

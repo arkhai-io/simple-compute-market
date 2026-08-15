@@ -14,10 +14,14 @@ from typing import Any
 from arkhai_vms import VmProvisionTerms
 from core_storefront.stage_log import stage_event
 from domains.vms.listings import reconciler as listings_reconciler
-from hosted_settlement_client import ConditionDescriptor, FundingMode
 from market_alkahest import create_alkahest_registration
 from market_core.schemas import EscrowProposal, SettlementPlan, SettlementSelection
-from market_hosted_settlement import FundingProfile, create_stripe_registration
+from market_hosted_settlement import (
+    ConditionDescriptor,
+    FundingMode,
+    FundingProfile,
+    create_stripe_registration,
+)
 from market_identity import Identity, Signer
 from market_settlement_runtime import (
     FulfillmentOutcome,
