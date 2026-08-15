@@ -109,6 +109,8 @@ async def db(tmp_path):
             "openapi_url": "https://api.acme.example/openapi.json",
             "base_url": "https://api.acme.example",
             "resource_id": "svc-quota",
+            "capacity_site_id": "tokens",
+            "offering_mode": "api_credits",
         },
         accepted_escrows=[
             {

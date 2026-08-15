@@ -74,6 +74,10 @@ def wheels(tmp_path_factory: pytest.TempPathFactory) -> dict[str, Path]:
         "policy": (REPO / "kit" / "policy", "arkhai_kit_policy-*.whl"),
         "alkahest": (REPO / "kit" / "alkahest", "arkhai_kit_alkahest-*.whl"),
         "identity": (REPO / "kit" / "identity", "arkhai_kit_identity-*.whl"),
+        "capacity_publication": (
+            REPO / "kit" / "capacity-publication",
+            "arkhai_kit_capacity_publication-*.whl",
+        ),
         "config": (REPO / "kit" / "config", "arkhai_kit_config-*.whl"),
         "site": (REPO / "kit" / "site", "arkhai_kit_site-*.whl"),
         "site_client": (REPO / "kit" / "site-client", "arkhai_kit_site_client-*.whl"),

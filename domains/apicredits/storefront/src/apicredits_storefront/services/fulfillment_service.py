@@ -35,13 +35,22 @@ async def _release_capacity_handler(
     db: Any,
     context: dict[str, Any],
 ) -> dict[str, Any]:
-    from apicredits_storefront.services.capacity_client import build_capacity_client
+    from apicredits_storefront.services.capacity_client import (
+        build_capacity_runtime,
+        capacity_binding_from_offer,
+    )
     from apicredits_storefront.services.publication_service import (
         reopen_token_listings_after_capacity_change,
     )
 
-    capacity = build_capacity_client(lambda: db)
+    listing_id = str(context.get("listing_id") or "")
+    row = await db.load_listing(listing_id=listing_id)
+    if row is None:
+        raise RuntimeError("capacity recovery requires a durable listing binding")
+    binding = capacity_binding_from_offer(row.get("offer_resource") or {})
+    capacity = build_capacity_runtime(lambda: db)
     reservation = await capacity.release(
+        binding,
         capacity_reservation_id=context.get("capacity_reservation_id"),
         deal_ref=(
             {"escrow_uid": context["escrow_uid"]} if context.get("escrow_uid") else None
@@ -56,7 +65,7 @@ async def _release_capacity_handler(
         context["resource_id"] = reservation.get("resource_id")
         reopened_listing_ids = await reopen_token_listings_after_capacity_change(
             db,
-            capacity,
+            await capacity.availability(),
         )
         context["reopened_listing_ids"] = reopened_listing_ids
     return {

@@ -183,7 +183,8 @@ async def _place_quota_hold(
         return
     try:
         from apicredits_storefront.services.capacity_client import (
-            build_capacity_client,
+            build_capacity_runtime,
+            capacity_binding_from_offer,
         )
 
         offer = coerce_resource_dict((order_dict or {}).get("offer_resource"))
@@ -193,8 +194,10 @@ async def _place_quota_hold(
         }
         if offer.get("resource_id"):
             claim["resource_id"] = str(offer["resource_id"])
-        capacity = build_capacity_client(lambda: sqlite_client)
+        capacity = build_capacity_runtime(lambda: sqlite_client)
+        binding = capacity_binding_from_offer(offer)
         held = await capacity.reserve(
+            binding,
             claim=claim,
             deal_ref={
                 "listing_id": listing_id,

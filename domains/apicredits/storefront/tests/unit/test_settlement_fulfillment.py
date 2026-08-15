@@ -28,6 +28,8 @@ _OFFER = {
     "service_name": "Acme Inference",
     "base_url": "https://api.acme.example",
     "resource_id": "svc-quota",
+    "capacity_site_id": "tokens",
+    "offering_mode": "api_credits",
 }
 
 
