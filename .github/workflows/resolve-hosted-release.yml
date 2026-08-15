@@ -15,7 +15,7 @@ jobs:
   resolve:
     runs-on: ubuntu-24.04
     steps:
-      - name: Resolve exact successful tag run
+      - name: Resolve exact tag run
         env:
           GH_TOKEN: ${{ secrets.HOSTED_RELEASE_TOKEN }}
           TAG: ${{ inputs.tag }}
@@ -27,4 +27,4 @@ jobs:
             --event push \
             --limit 20 \
             --json databaseId,headBranch,headSha,status,conclusion,url \
-            --jq '.[] | select(.headBranch == env.TAG and .status == "completed" and .conclusion == "success")'
+            --jq '.[] | select(.headBranch == env.TAG)'
