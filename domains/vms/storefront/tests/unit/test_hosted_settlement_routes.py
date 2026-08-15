@@ -8,7 +8,9 @@ from arkhai_vms import make_vm_provision_terms
 from fastapi import HTTPException
 from market_core.schemas import (
     RateValue,
+    SettlementObligation,
     SettlementOption,
+    SettlementPlan,
     SettlementSelection,
     derive_settlement_option_id,
 )
@@ -81,18 +83,18 @@ def _accepted_state(*, legacy: bool = False):
         "payer_principal": BUYER.model_dump(mode="json"),
         "claimant_principal": SELLER.model_dump(mode="json"),
     }
-    obligation = {
-        "payer": "buyer",
-        "claimant": "seller",
-        "payer_principal": BUYER.model_dump(mode="json"),
-        "claimant_principal": SELLER.model_dump(mode="json"),
-        "amount": 125,
-        "asset": "usd",
-        "expiration_unix": 2_000_000_000,
-        "conditions": [CONDITION],
-        "mechanism": "fiat.stripe.v1",
-        "params": obligation_params,
-    }
+    obligation = SettlementObligation(
+        payer="buyer",
+        claimant="seller",
+        payer_principal=BUYER.model_dump(mode="json"),
+        claimant_principal=SELLER.model_dump(mode="json"),
+        amount=125,
+        asset="usd",
+        expiration_unix=2_000_000_000,
+        conditions=[CONDITION],
+        mechanism="fiat.stripe.v1",
+        params=obligation_params,
+    )
     rates = [RateValue(field="amount", value=125)]
     option = SettlementOption(
         option_id=derive_settlement_option_id(
@@ -120,19 +122,19 @@ def _accepted_state(*, legacy: bool = False):
         "offer_resource": {"gpu_model": "H100", "gpu_count": 1},
         "settlement_options": [option.model_dump(mode="json")],
     }
-    settlement_plan = {
-        "buyer_principal": BUYER.model_dump(mode="json"),
-        "seller_principal": SELLER.model_dump(mode="json"),
-        "obligations": [obligation],
-    }
+    service_terms = {}
     if not legacy:
-        settlement_plan["service_terms"] = {
-            "vm.v1": {
-                "listing_id": "listing-1",
-                "order": dict(listing),
-                "provision": provision,
-            }
+        service_terms["vm.v1"] = {
+            "listing_id": "listing-1",
+            "order": dict(listing),
+            "provision": provision,
         }
+    settlement_plan = SettlementPlan(
+        buyer_principal=BUYER.model_dump(mode="json"),
+        seller_principal=SELLER.model_dump(mode="json"),
+        obligations=[obligation],
+        service_terms=service_terms,
+    )
     thread = {
         "terminal_state": "success",
         "buyer_principal": BUYER.model_dump(mode="json"),
@@ -141,19 +143,15 @@ def _accepted_state(*, legacy: bool = False):
         "buyer_escrow_proposal": {
             "settlement_selection": selection.model_dump(mode="json")
         },
-        "settlement_plan": settlement_plan,
+        "settlement_plan": settlement_plan.model_dump(),
         "provision_terms": provision,
     }
     db = SimpleNamespace(
         load_negotiation_thread_row=AsyncMock(return_value=thread),
         load_listing=AsyncMock(return_value=listing),
     )
-    normalized = SettlementObligationRecord.from_obligation(
-        agreement_ref="negotiation-1",
-        obligation_index=0,
-        obligation=obligation,
-    ).obligation
-    return db, thread, listing, normalized
+    canonical_obligation = settlement_plan.obligations[0].model_dump()
+    return db, thread, listing, canonical_obligation
 
 
 def _controller(db) -> SettlementsController:
