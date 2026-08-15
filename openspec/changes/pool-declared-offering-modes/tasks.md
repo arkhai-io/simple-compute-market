@@ -49,12 +49,9 @@ Sections 1–3 are additive and inert; Section 4 is the behavioral boundary.
       kind, playbook, requirement delegate — not from reservation history.
 - [x] 3.2 Report the derived set at INFO, matching how the existing seeding steps report
       theirs, so an operator can see what was concluded on their behalf.
-- [ ] 3.3 Validate the migration per `TESTING.md`: fresh bootstrap, idempotent rerun,
-      drift detection.
-      > **Deferred executable validation:** Main must run
-      > `uv run --project provisioning/compute/service pytest tests/unit/test_pool_offering_mode_migration.py`
-      > after merge/rebase; this implementation lane was explicitly prohibited from
-      > running tests.
+- [x] 3.3 Validate the migration per `TESTING.md`: fresh bootstrap, idempotent rerun,
+      and drift detection. Focused migration and legacy-backfill suites passed
+      43 tests.
 - [x] 3.4 Focused tests: a pool serving VMs today derives the VM mode; the default pool
       is included; derivation never widens a pool beyond what it can deliver.
 
@@ -75,36 +72,29 @@ Sections 1–3 are additive and inert; Section 4 is the behavioral boundary.
 
 ## 5. Validation
 
-- [ ] 5.1 Run the `kit/site`, `kit/resource-pools`, and provisioning scheduling suites,
+- [x] 5.1 Run the `kit/site`, `kit/resource-pools`, and provisioning scheduling suites,
       plus an e2e path proving an undeliverable mode is refused at reservation rather
       than at provisioning. Disclose any suite not run.
-      > **Deferred executable validation:** Main must run
-      > `uv run --project kit/resource-pools pytest`,
-      > `uv run --project kit/site pytest`,
-      > `uv run --project kit/fulfillment pytest`,
-      > `uv run --project provisioning/compute/service pytest`, and the deployed
-      > `e2e_pool_declared_modes` marker after merge/rebase. The deployment-backed
-      > driver additionally requires a live provisioning stack with capacity inventory.
+      > **Validation evidence:** resource-pool kit: 94 passed; site kit: 149 passed;
+      > fulfillment kit: 154 passed; provisioning service: 655 passed. The deployed
+      > `e2e_pool_declared_modes` marker was not run because no live provisioning
+      > stack with capacity inventory was available.
 - [x] 5.2 Confirm no implicit executor-kind default survives anywhere — search rather
       than assume; there were two.
-- [ ] 5.3 Run `openspec validate --all --strict` against the baseline current at
-      implementation time.
-      > **Deferred executable validation:** Main must run
-      > `openspec validate --all --strict` after merge/rebase; OpenSpec validation was
-      > explicitly prohibited in this implementation lane.
+- [x] 5.3 Run `openspec validate --all --strict` against the baseline current at
+      implementation time. The pool change and every permanent spec passed; 62 of 67
+      items passed overall. Five unrelated pre-existing active changes have no delta:
+      `add-buyer-vm-connectivity-terms`, `fix-vm-fulfillment-capacity-boundary`,
+      `negotiation-driven-capacity-resize`, `refactor-e2e-fulfillment-lifecycle`, and
+      `structured-capacity-requirements`.
 
 ## 6. Closeout
 
 Per `openspec/README.md#plan-closeout-requirements`.
 
-- [ ] 6.1 **Comment hygiene.** Run `make check-comment-hygiene`. Read the ledger's
-      executor-kind lines and their surrounding comments directly; they describe
-      inference this change removes.
-      > **Deferred executable validation:** Main must run
-      > `make check-comment-hygiene` after merge/rebase; formatter/linter-style
-      > validation was explicitly prohibited in this implementation lane. The touched
-      > ledger comments were reviewed directly and no executor-kind inference prose
-      > remains.
+- [x] 6.1 **Comment hygiene.** `make check-comment-hygiene` passed. The ledger's
+      executor-kind comments describe current explicit-identity enforcement rather
+      than removed inference.
 - [x] 6.2 **Import placement.** Review imports this change adds or touches; kit must
       acquire no service or domain dependency.
 - [x] 6.3 **Documentation compliance.** Confirm the declaration rule landed in
