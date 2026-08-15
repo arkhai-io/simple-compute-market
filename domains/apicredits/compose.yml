@@ -122,7 +122,6 @@ services:
       - "8093:8000"
     environment:
       - XDG_CONFIG_HOME=/etc
-      - PYTHONPATH=/app
     volumes:
       # Chain-/seller-specific config is the one environment-supplied mount;
       # override $APICREDITS_STOREFRONT_CONFIG to point at a different chain's
