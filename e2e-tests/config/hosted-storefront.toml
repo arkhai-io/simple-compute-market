@@ -5,6 +5,13 @@ db_path = "/tmp/agent.db"
 log_file_path = "/tmp/bob.log"
 resources_csv_path = "/app/hosted-resources.csv"
 
+[[storefront_domains]]
+contribution = "vms"
+offering_mode = "vm"
+domain_identity = "compute.v1"
+contract_version = "1.0"
+
+
 [Identity.principal]
 scheme = "ed25519"
 identifier = "0EqyMnQrtKs6E2i9RhXk5tAiSrcaAWuvhSCjMsl3hzc"
