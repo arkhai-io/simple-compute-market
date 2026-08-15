@@ -14,8 +14,39 @@ from market_storefront.services.vm_fulfillment_service import (
 )
 from market_storefront.domain_runtime import build_vm_storefront_domain
 from market_storefront.utils.sqlite_client import SQLiteClient
-from market_storefront.utils.sync_negotiation import _place_capacity_hold
+from market_identity import Ed25519Signer
+from market_negotiation_runtime import Acceptance, AgreementTerms, NegotiationTerms
+from market_storefront.negotiation_runtime import _place_capacity_hold
 
+
+
+_BUYER = Ed25519Signer(b"\x61" * 32).identity
+_SELLER = Ed25519Signer(b"\x62" * 32).identity
+
+
+async def _place_hold(
+    repository,
+    *,
+    negotiation_id,
+    listing_id,
+    order_dict,
+):
+    await _place_capacity_hold(
+        repository,
+        Acceptance(
+            negotiation_id=negotiation_id,
+            listing_id=listing_id,
+            listing=order_dict,
+            listing_record=order_dict,
+            terms=NegotiationTerms(decoded=None, wire=None),
+            pinned_proposal=None,
+            agreed_amount=1,
+            agreement=AgreementTerms(3600),
+            uses_scalar_amount=True,
+            buyer_principal=_BUYER,
+            seller_principal=_SELLER,
+        ),
+    )
 
 class FakeCapacity:
     def __init__(self, *, reserve_result=None, commit_error=None) -> None:
@@ -340,14 +371,12 @@ async def test_acceptance_places_and_records_the_hold(tmp_path):
     capacity = FakeCapacity(reserve_result=_hold())
 
     with patch(
-        "market_storefront.utils.config.settings", _settings(900),
+        "market_storefront.negotiation_runtime.settings", _settings(900),
     ), patch(
-        "market_storefront.services.capacity_client.build_capacity_client",
+        "market_storefront.negotiation_runtime.build_capacity_client",
         return_value=capacity,
     ):
-        await _place_capacity_hold(
-            db, negotiation_id="neg-1", listing_id="lst-1", order_dict=ORDER,
-        )
+        await _place_hold(db, negotiation_id="neg-1", listing_id="lst-1", order_dict=ORDER,)
 
     reserve = capacity.reserve_calls[0]
     assert reserve["ttl_seconds"] == 900
@@ -375,14 +404,12 @@ async def test_acceptance_hold_pins_to_the_listings_mapped_site(tmp_path):
     capacity = FakeCapacity(reserve_result=_hold())
 
     with patch(
-        "market_storefront.utils.config.settings", _settings(900),
+        "market_storefront.negotiation_runtime.settings", _settings(900),
     ), patch(
-        "market_storefront.services.capacity_client.build_capacity_client",
+        "market_storefront.negotiation_runtime.build_capacity_client",
         return_value=capacity,
     ):
-        await _place_capacity_hold(
-            db, negotiation_id="neg-mapped", listing_id="lst-1", order_dict=ORDER,
-        )
+        await _place_hold(db, negotiation_id="neg-mapped", listing_id="lst-1", order_dict=ORDER,)
 
     assert capacity.reserve_calls[0]["site"] == "dc-mapped"
 
@@ -394,27 +421,23 @@ async def test_acceptance_survives_hold_refusal_and_zero_ttl(tmp_path):
     # No capacity: acceptance proceeds, nothing recorded.
     refused = FakeCapacity(reserve_result=None)
     with patch(
-        "market_storefront.utils.config.settings", _settings(900),
+        "market_storefront.negotiation_runtime.settings", _settings(900),
     ), patch(
-        "market_storefront.services.capacity_client.build_capacity_client",
+        "market_storefront.negotiation_runtime.build_capacity_client",
         return_value=refused,
     ):
-        await _place_capacity_hold(
-            db, negotiation_id="neg-2", listing_id="lst-1", order_dict=ORDER,
-        )
+        await _place_hold(db, negotiation_id="neg-2", listing_id="lst-1", order_dict=ORDER,)
     assert await db.load_capacity_hold(negotiation_id="neg-2") is None
 
     # ttl 0 disables the feature entirely.
     disabled = FakeCapacity(reserve_result=_hold())
     with patch(
-        "market_storefront.utils.config.settings", _settings(0),
+        "market_storefront.negotiation_runtime.settings", _settings(0),
     ), patch(
-        "market_storefront.services.capacity_client.build_capacity_client",
+        "market_storefront.negotiation_runtime.build_capacity_client",
         return_value=disabled,
     ):
-        await _place_capacity_hold(
-            db, negotiation_id="neg-3", listing_id="lst-1", order_dict=ORDER,
-        )
+        await _place_hold(db, negotiation_id="neg-3", listing_id="lst-1", order_dict=ORDER,)
     assert disabled.reserve_calls == []
 
 
@@ -432,17 +455,15 @@ async def test_acceptance_hold_ttl_is_capped_by_the_listings_mapped_pool_prefere
     capacity = FakeCapacity(reserve_result=_hold())
 
     with patch(
-        "market_storefront.utils.config.settings", _settings(900),
+        "market_storefront.negotiation_runtime.settings", _settings(900),
     ), patch(
-        "market_storefront.services.capacity_client.build_capacity_client",
+        "market_storefront.negotiation_runtime.build_capacity_client",
         return_value=capacity,
     ), patch(
-        "market_storefront.utils.sync_negotiation.lookup_pool_policy_tags",
+        "market_storefront.negotiation_runtime.lookup_pool_policy_tags",
         return_value={"max_reservation_hold_seconds": 30},
     ):
-        await _place_capacity_hold(
-            db, negotiation_id="neg-capped", listing_id="lst-1", order_dict=ORDER,
-        )
+        await _place_hold(db, negotiation_id="neg-capped", listing_id="lst-1", order_dict=ORDER,)
 
     assert capacity.reserve_calls[0]["ttl_seconds"] == 30.0
 
@@ -457,16 +478,14 @@ async def test_acceptance_hold_ttl_unchanged_when_no_pool_preference(tmp_path):
     capacity = FakeCapacity(reserve_result=_hold())
 
     with patch(
-        "market_storefront.utils.config.settings", _settings(900),
+        "market_storefront.negotiation_runtime.settings", _settings(900),
     ), patch(
-        "market_storefront.services.capacity_client.build_capacity_client",
+        "market_storefront.negotiation_runtime.build_capacity_client",
         return_value=capacity,
     ), patch(
-        "market_storefront.utils.sync_negotiation.lookup_pool_policy_tags",
+        "market_storefront.negotiation_runtime.lookup_pool_policy_tags",
         return_value={},
     ):
-        await _place_capacity_hold(
-            db, negotiation_id="neg-uncapped", listing_id="lst-1", order_dict=ORDER,
-        )
+        await _place_hold(db, negotiation_id="neg-uncapped", listing_id="lst-1", order_dict=ORDER,)
 
     assert capacity.reserve_calls[0]["ttl_seconds"] == 900

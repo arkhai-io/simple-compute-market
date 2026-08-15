@@ -26,12 +26,15 @@ from core_storefront.models.listing_models import (
 )
 from core_storefront.stage_log import stage_event
 from domains.vms.listings.resources import parse_resource_from_dict
+from domains.vms.listings.models import Listing
+from domains.vms.negotiation.policies import _amount_from_proposal
 from market_core import MarketDomainContract
 from market_identity import Signer
 from market_settlement_runtime import (
     SettlementPublicationClause,
     compile_settlement_publication_clause,
 )
+from market_storefront.negotiation_runtime import compute_round_zero_decision
 
 logger = logging.getLogger(__name__)
 
@@ -487,20 +490,12 @@ class ListingService:
     ) -> EvaluateNegotiateResponse:
         """Dry-run the round-0 negotiation decision without creating a thread.
 
-        Loads the listing from SQLite, then delegates to
-        ``_compute_round_zero_decision`` — the same pure-compute function
-        used by ``start_sync_negotiation`` — so the result is identical to
-        what round 0 of a real negotiation would produce.
+        Loads the listing from SQLite, then delegates to the same VM policy
+        adapter used by round zero of a real negotiation.
 
         Raises ``ValueError`` if the listing doesn't exist or has no usable
         negotiation strategy. The controller converts these to HTTP 404.
         """
-        from domains.vms.listings.models import Listing
-        from domains.vms.negotiation.policies import _amount_from_proposal
-
-        from market_storefront.utils.sync_negotiation import (
-            _compute_round_zero_decision,
-        )
 
         row = await self._db.load_listing(listing_id=listing_id)
         if not row:
@@ -518,11 +513,11 @@ class ListingService:
             direction,
             strategy_name,
             decision,
-        ) = await _compute_round_zero_decision(
-            sqlite_client=self._db,
+        ) = await compute_round_zero_decision(
+            repository=self._db,
             domain=self._domain,
             listing=listing,
-            their_proposal=proposal,
+            proposal=proposal,
             requested_duration_seconds=requested_duration_seconds,
         )
         decision_amount = _amount_from_proposal(decision.proposal)

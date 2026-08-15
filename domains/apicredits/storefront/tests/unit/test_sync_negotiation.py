@@ -12,12 +12,11 @@ from datetime import datetime
 
 import pytest
 from apicredits_storefront.domain_runtime import get_market_domain_contract
-from apicredits_storefront.utils.sync_negotiation import (
-    OfferUnfulfillableError,
-    _normalize_api_credits_message_terms,
-    continue_sync_negotiation,
-    start_sync_negotiation,
+from apicredits_storefront.negotiation_runtime import (
+    _decode_terms,
+    build_api_credit_negotiation_runtime,
 )
+from market_negotiation_runtime import OfferUnfulfillableError
 from market_core.schemas import EscrowProposal, ProvisionTerms
 from market_identity import Ed25519Signer
 from market_policy.identity import Identity
@@ -66,10 +65,10 @@ class FakeCapacity:
 @pytest.fixture
 def fake_capacity(monkeypatch):
     capacity = FakeCapacity()
-    from apicredits_storefront.services import capacity_client as cc_module
+    from apicredits_storefront import negotiation_runtime as runtime_module
 
     monkeypatch.setattr(
-        cc_module,
+        runtime_module,
         "build_capacity_client",
         lambda factory: capacity,
     )
@@ -83,9 +82,9 @@ def key_records(monkeypatch):
     async def _lookup(key_id: str):
         return records.get(key_id)
 
-    from apicredits_storefront.services import keys_lookup as kl_module
+    from apicredits_storefront import negotiation_runtime as runtime_module
 
-    monkeypatch.setattr(kl_module, "lookup_key_record", _lookup)
+    monkeypatch.setattr(runtime_module, "lookup_key_record", _lookup)
     return records
 
 
@@ -150,8 +149,9 @@ def _terms(quantity=3, key_mode="new", key_id=None) -> ProvisionTerms:
     )
 
 
-def test_normalize_api_credits_message_terms_uses_domain_runtime() -> None:
-    normalized = _normalize_api_credits_message_terms(
+def test_decode_api_credits_message_terms_uses_domain_runtime() -> None:
+    normalized = _decode_terms(
+        _DOMAIN,
         ProvisionTerms(
             kind="api_credits.v1",
             version=1,
@@ -159,13 +159,12 @@ def test_normalize_api_credits_message_terms_uses_domain_runtime() -> None:
                 "quantity": "5",
                 "key": {"mode": "existing", "key_id": "ak_existing"},
             },
-        )
+        ),
     )
 
-    assert normalized is not None
-    assert normalized.quantity == 5
-    assert normalized.key_mode == "existing"
-    assert normalized.key_id == "ak_existing"
+    assert normalized.decoded.quantity == 5
+    assert normalized.decoded.key_mode == "existing"
+    assert normalized.decoded.key_id == "ak_existing"
 
 
 def test_normalize_api_credits_message_terms_rejects_foreign_terms() -> None:
@@ -174,9 +173,8 @@ def test_normalize_api_credits_message_terms_rejects_foreign_terms() -> None:
         version=1,
         payload={"duration_seconds": 60},
     )
-
     with pytest.raises(ValueError, match=r"api_credits\.v1"):
-        _normalize_api_credits_message_terms(terms)
+        _decode_terms(_DOMAIN, terms)
 
 
 def test_normalize_api_credits_terms_rejects_unsupported_version() -> None:
@@ -185,22 +183,21 @@ def test_normalize_api_credits_terms_rejects_unsupported_version() -> None:
         version=2,
         payload={"quantity": 1, "key": {"mode": "new"}},
     )
-
     with pytest.raises(ValueError, match="version"):
-        _normalize_api_credits_message_terms(terms)
+        _decode_terms(_DOMAIN, terms)
 
 
 async def _start(db, *, amount=300, quantity=3, key_mode="new", key_id=None):
-    return await start_sync_negotiation(
-        sqlite_client=db,
-        domain=_DOMAIN,
-        our_listing_id="L-tok",
+    return await build_api_credit_negotiation_runtime(_DOMAIN).start(
+        repository=db,
+        listing_id="L-tok",
         buyer_principal=_BUYER_PRINCIPAL,
         seller_principal=_SELLER_PRINCIPAL,
         proposal=_proposal(amount),
-        provision_terms=_terms(quantity, key_mode, key_id),
-        our_base_url="http://seller:8002",
-        their_agent_url="http://buyer:9000",
+        terms=_terms(quantity, key_mode, key_id),
+        seller_agent_url="http://seller:8002",
+        buyer_agent_url="http://buyer:9000",
+        actor_principal=_BUYER_PRINCIPAL,
     )
 
 
@@ -309,15 +306,18 @@ async def test_bisection_counter_round_scales_by_quantity(
         countered = int(opening["proposal"]["fields"]["amount"])
         assert countered == 275  # midpoint of 250 and the 300 bound
 
-        response = await continue_sync_negotiation(
-            sqlite_client=db,
-            domain=_DOMAIN,
-            neg_id=neg_id,
+        response = await build_api_credit_negotiation_runtime(
+            _DOMAIN
+        ).continue_negotiation(
+            repository=db,
+            negotiation_id=neg_id,
             buyer_action="accept",
             buyer_proposal=None,
             buyer_reason=None,
             buyer_principal=_BUYER_PRINCIPAL,
             seller_principal=_SELLER_PRINCIPAL,
+            actor_principal=_BUYER_PRINCIPAL,
+            actor_role="buyer",
         )
     assert response["action"] == "accept"
     thread = await db.load_negotiation_thread_row(negotiation_id=neg_id)
@@ -331,7 +331,7 @@ def test_accepted_artifacts_stamp_the_seller_recipient(monkeypatch):
     funded escrow ("must carry ... a recipient fallback"). Regression
     guard: the assembly once passed seller_wallet_address=None.
     """
-    import apicredits_storefront.utils.sync_negotiation as sn
+    import apicredits_storefront.negotiation_runtime as sn
 
     captured: dict = {}
 
@@ -342,7 +342,7 @@ def test_accepted_artifacts_stamp_the_seller_recipient(monkeypatch):
     monkeypatch.setattr(sn, "accepted_escrow_artifacts_from_proposal", _fake_artifacts)
     monkeypatch.setattr(sn, "_seller_wallet_address", lambda: "0xSeLLeR0000")
 
-    sn._accepted_escrow_artifacts(
+    sn.build_api_credit_accepted_artifacts(
         buyer_principal=_BUYER_PRINCIPAL,
         seller_principal=_SELLER_PRINCIPAL,
         proposal={"chain_name": "anvil", "escrow_address": _ESCROW},

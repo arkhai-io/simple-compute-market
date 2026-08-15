@@ -302,10 +302,9 @@ async def settled_db(tmp_path, monkeypatch):
     """A DB with an accepted token negotiation, via the real sync flow."""
     import market_policy.negotiation_thread as thread_module
 
-    from apicredits_storefront.services import capacity_client as cc_module
-    from apicredits_storefront.utils.sqlite_client import SQLiteClient
+    from apicredits_storefront import negotiation_runtime as negotiation_module
     from apicredits_storefront.domain_runtime import get_market_domain_contract
-    from apicredits_storefront.utils.sync_negotiation import start_sync_negotiation
+    from apicredits_storefront.utils.sqlite_client import SQLiteClient
     from apicredits_storefront.utils import config as config_module
     from market_core.schemas import EscrowProposal, ProvisionTerms
     from market_policy.identity import Identity
@@ -319,7 +318,7 @@ async def settled_db(tmp_path, monkeypatch):
             return None  # no hold; issuance reserves fresh
 
     monkeypatch.setattr(
-        cc_module,
+        negotiation_module,
         "build_capacity_client",
         lambda factory: _Capacity(),
     )
@@ -374,10 +373,11 @@ async def settled_db(tmp_path, monkeypatch):
         storefront_url="http://seller:8002",
         seller_principal=_SELLER_PRINCIPAL,
     )
-    response = await start_sync_negotiation(
-        sqlite_client=client,
-        domain=get_market_domain_contract(),
-        our_listing_id="L-tok",
+    response = await negotiation_module.build_api_credit_negotiation_runtime(
+        get_market_domain_contract()
+    ).start(
+        repository=client,
+        listing_id="L-tok",
         buyer_principal=_BUYER_PRINCIPAL,
         seller_principal=_SELLER_PRINCIPAL,
         proposal=EscrowProposal(
@@ -388,13 +388,14 @@ async def settled_db(tmp_path, monkeypatch):
             rates=[{"field": "amount", "per": "token", "value": "100"}],
             expiration_unix=1_800_000_000,
         ),
-        provision_terms=ProvisionTerms(
+        terms=ProvisionTerms(
             kind="api_credits.v1",
             version=1,
             payload={"quantity": 3, "key": {"mode": "new"}},
         ),
-        our_base_url="http://seller:8002",
-        their_agent_url="http://buyer:9000",
+        seller_agent_url="http://seller:8002",
+        buyer_agent_url="http://buyer:9000",
+        actor_principal=_BUYER_PRINCIPAL,
     )
     assert response["action"] == "accept"
     assert response.get("settlement_plan"), response

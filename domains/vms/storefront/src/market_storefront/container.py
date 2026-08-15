@@ -17,6 +17,7 @@ if TYPE_CHECKING:
     from market_core import MarketDomainContract
     from core_storefront.services.negotiation_service import NegotiationService
     from market_identity import Signer
+    from market_negotiation_runtime import NegotiationRuntime
 
     from market_storefront.services.listing_service import ListingService
     from market_storefront.services.system_service import SystemService
@@ -30,6 +31,7 @@ if TYPE_CHECKING:
 resolved_market_domain: MarketDomainContract | None = None
 resolved_sqlite_client: SQLiteClient | None = None
 resolved_marketplace_signer: Signer | None = None
+resolved_negotiation_runtime: NegotiationRuntime | None = None
 
 # AlkahestClient instances keyed by chain name. Populated from
 # AlkahestService.build_clients(). May be empty if no chains are
@@ -48,6 +50,7 @@ def clear_lifespan_state(*, domain: MarketDomainContract) -> None:
     global resolved_market_domain
     global resolved_sqlite_client
     global resolved_marketplace_signer
+    global resolved_negotiation_runtime
     global resolved_alkahest_clients
     global resolved_listing_service
     global resolved_negotiation_service
@@ -64,6 +67,7 @@ def clear_lifespan_state(*, domain: MarketDomainContract) -> None:
     resolved_sqlite_client = None
     resolved_marketplace_signer = None
     resolved_alkahest_clients = {}
+    resolved_negotiation_runtime = None
     resolved_listing_service = None
     resolved_negotiation_service = None
     resolved_system_service = None

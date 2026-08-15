@@ -1,4 +1,4 @@
-"""Unit tests for market_storefront.utils.sync_negotiation.lookup_pool_policy_tags.
+"""Unit tests for VM pool-policy resolution used by the shared runtime hook.
 
 External boundary: a real sqlite file DB (derived_compute_listings), plus
 a fake in-memory projection cache satisfying the same duck-typed shape
@@ -15,7 +15,7 @@ import sqlite3
 import pytest
 
 from domains.vms.listings.reconciler import record_derived_listing
-from market_storefront.utils.sync_negotiation import lookup_pool_policy_tags
+from market_storefront.negotiation_runtime import lookup_pool_policy_tags
 
 
 @pytest.fixture

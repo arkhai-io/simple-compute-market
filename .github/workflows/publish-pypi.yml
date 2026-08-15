@@ -73,6 +73,7 @@ jobs:
             kit-identity: ['kit/identity/**', '.github/workflows/publish-pypi.yml']
             kit-policy: ['kit/policy/**', '.github/workflows/publish-pypi.yml']
             kit-settlement-runtime: ['kit/settlement-runtime/**', '.github/workflows/publish-pypi.yml']
+            kit-negotiation-runtime: ['kit/negotiation-runtime/**', '.github/workflows/publish-pypi.yml']
             kit-hosted-settlement: ['kit/hosted-settlement/**', 'manifests/hosted-settlement-v0.2.0-trust.json', '.github/workflows/publish-pypi.yml']
             core: ['core/src/**', 'core/pyproject.toml', 'core/README.md', '.github/workflows/publish-pypi.yml']
             core-buyer: ['core/buyer/**', '.github/workflows/publish-pypi.yml']
@@ -111,6 +112,7 @@ jobs:
             {"key": "kit-identity",           "path": "kit/identity",                     "dist": "arkhai-kit-identity"},
             {"key": "kit-policy",             "path": "kit/policy",                       "dist": "arkhai-kit-policy"},
             {"key": "kit-settlement-runtime", "path": "kit/settlement-runtime",               "dist": "arkhai-kit-settlement-runtime"},
+            {"key": "kit-negotiation-runtime", "path": "kit/negotiation-runtime",             "dist": "arkhai-kit-negotiation-runtime"},
             {"key": "kit-hosted-settlement",  "path": "kit/hosted-settlement",            "dist": "arkhai-kit-hosted-settlement"},
             {"key": "core",                   "path": "core",                             "dist": "arkhai-core"},
             {"key": "core-buyer",             "path": "core/buyer",                       "dist": "arkhai-core-buyer"},

@@ -20,6 +20,7 @@ dependencies = [
     "arkhai-kit-policy",
     "arkhai-kit-settlement-runtime>=0.1.0",
     "arkhai-kit-storefront==0.1.0",
+    "arkhai-kit-negotiation-runtime==0.1.0",
     "arkhai-kit-hosted-settlement==0.1.0",
     "arkhai-kit-site>=0.3.0",
     "arkhai-bare-metal>=0.2.0",

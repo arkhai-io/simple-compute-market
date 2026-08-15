@@ -19,8 +19,7 @@ from market_core import (
     validate_domain_contract,
 )
 
-from market_storefront.services.fulfillment_service import fulfill_compute_obligation
-from market_storefront.utils.sync_negotiation import _accepted_escrow_artifacts
+from market_storefront.negotiation_runtime import build_vm_accepted_artifacts
 
 VM_STOREFRONT_DOMAIN_IDENTITY = DomainIdentity("compute.v1")
 _REQUIRED_VM_STOREFRONT_CAPABILITIES = frozenset(
@@ -49,7 +48,7 @@ def build_vm_storefront_domain() -> MarketDomainContract:
             ),
             settlement=ImmutableSettlementCapability(
                 verify=verify_escrow_for_settlement,
-                build_plan=_accepted_escrow_artifacts,
+                build_plan=build_vm_accepted_artifacts,
             ),
             fulfillment=ImmutableFulfillmentCapability(
                 fulfill=fulfill_compute_obligation,

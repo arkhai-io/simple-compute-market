@@ -81,6 +81,39 @@ A domain MUST declare optional capabilities and supply the typed hook set requir
 - **WHEN** a domain declares a capability but omits a required hook
 - **THEN** composition rejects the plugin with an actionable capability validation error
 
+### Requirement: Kit-owned synchronous negotiation runtime
+The signed synchronous negotiation lifecycle MUST live in a foundation kit and MUST be
+composed by storefront domain roots. The kit MUST own round ordering, canonical-principal
+checks, transcript persistence, terminal-state transitions, exact continuation recovery,
+and the acceptance chokepoint. A domain MUST inject its listing resolver, schema codecs,
+seller policy, configuration-derived values, accepted-artifact builder, and domain
+persistence/effect hooks; neither the kit nor core may import a concrete domain or infer a
+domain by inspecting terms, proposals, listings, or persisted payloads.
+
+#### Scenario: A domain runs a negotiation round
+
+- **WHEN** a VM or API-credit storefront processes a signed negotiation request
+- **THEN** the shared kit state machine advances the round while the selected domain
+  contract alone decodes terms, evaluates policy, and constructs accepted artifacts
+
+#### Scenario: A continuation is resumed
+
+- **WHEN** an authenticated buyer or administrator continues a recorded negotiation
+- **THEN** the runtime loads its canonical buyer and seller principals, recorded listing
+  identity, transcript, terms, strategy, and pinned proposal before invoking domain policy
+
+#### Scenario: Recorded state does not match its domain binding
+
+- **WHEN** continuation resolution or a domain persistence hook detects a listing,
+  principal, transcript, or accepted-input mismatch
+- **THEN** the runtime fails before a round, hold, agreement, or settlement artifact is
+  recorded
+
+#### Scenario: A new storefront domain is composed
+
+- **WHEN** the domain supplies the negotiation resolver and complete domain hook set
+- **THEN** it obtains the same protocol guards without copying a VM or API-credit runtime
+
 ### Requirement: Kit-owned single settlement runtime
 The mechanism-neutral commercial-settlement lifecycle MUST live in a foundation kit and
 MUST be composed by role/domain roots. It MUST use one stable per-obligation identity and

@@ -19,6 +19,7 @@ import market_storefront.container as _container
 from market_storefront.settlement_composition import (
     build_storefront_publication_clause_compiler,
 )
+from market_storefront.negotiation_runtime import load_storefront_chain
 from market_storefront.utils.config import (
     AGENT_ID,
     CHAINS,
@@ -326,9 +327,7 @@ class SystemService:
                 run_negotiation_chain,
             )
 
-            from market_storefront.utils.sync_negotiation import _load_storefront_chain
-
-            chain = _load_storefront_chain()
+            chain = load_storefront_chain()
             label = f"chain[{len(chain)}]"
             history = [
                 NegotiationRound(

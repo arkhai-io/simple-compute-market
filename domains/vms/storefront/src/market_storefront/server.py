@@ -8,23 +8,21 @@ Mirrors provisioning/compute/service/src/compute_provisioning_service/main.py:
 * X-Admin-Key OpenAPI security scheme registered so Swagger renders the
   Authorize button.
 
-Global pause state
-------------------
-``_GLOBALLY_PAUSED`` is the module-level flag read by
-``sync_negotiation.start_sync_negotiation``.
+Global pause state is read through the VM hook set injected into the shared
+negotiation runtime.
 """
 
 from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
-from functools import partial
 from typing import Any
 
 from core_storefront.app_composition import default_storefront_app_config
 from core_storefront.services.negotiation_service import NegotiationService
 from core_storefront.stage_log import set_stage_event_db_path, stage_event
 from market_core import MarketDomainContract
+from market_negotiation_runtime import NegotiationRuntime
 from market_storefront_kit import (
     AlkahestChain,
     AlkahestClientPolicy,
@@ -58,7 +56,7 @@ from market_storefront.utils.config import (
     settings,
 )
 from market_storefront.utils.sqlite_client import get_sqlite_client
-from market_storefront.utils.sync_negotiation import continue_sync_negotiation
+from market_storefront.negotiation_runtime import build_vm_negotiation_runtime
 
 logger = logging.getLogger(__name__)
 
@@ -147,10 +145,12 @@ def _build_listing_service(
     )
 
 
-def _build_negotiation_service(*, domain: MarketDomainContract, **kwargs):
+def _build_negotiation_service(
+    *, runtime: NegotiationRuntime, **kwargs: Any
+) -> NegotiationService:
     return NegotiationService(
         **kwargs,
-        continue_negotiation=partial(continue_sync_negotiation, domain=domain),
+        continue_negotiation=runtime.continue_negotiation,
         stage_event=stage_event,
     )
 
@@ -187,6 +187,7 @@ class VmStorefrontServices:
     marketplace_signer: Any
     alkahest_clients: dict[str, Any]
     listing_service: Any
+    negotiation_runtime: NegotiationRuntime
     negotiation_service: Any
     system_service: Any
     settlement_composition: Any
@@ -203,6 +204,7 @@ def _build_vm_services(domain: MarketDomainContract) -> VmStorefrontServices:
         alkahest_clients=alkahest_clients,
         marketplace_signer=marketplace_signer,
     )
+    negotiation_runtime = build_vm_negotiation_runtime(domain)
     listing_service = _build_listing_service(
         domain=domain,
         sqlite_client=sqlite_client,
@@ -211,7 +213,7 @@ def _build_vm_services(domain: MarketDomainContract) -> VmStorefrontServices:
         settlement_composition=settlement_composition,
     )
     negotiation_service = _build_negotiation_service(
-        domain=domain,
+        runtime=negotiation_runtime,
         sqlite_client=sqlite_client,
     )
     system_service = _build_system_service(
@@ -224,6 +226,7 @@ def _build_vm_services(domain: MarketDomainContract) -> VmStorefrontServices:
         marketplace_signer=marketplace_signer,
         alkahest_clients=alkahest_clients,
         listing_service=listing_service,
+        negotiation_runtime=negotiation_runtime,
         negotiation_service=negotiation_service,
         system_service=system_service,
         settlement_composition=settlement_composition,
@@ -240,6 +243,7 @@ async def _start_vm_services(services: VmStorefrontServices) -> None:
     _container.resolved_marketplace_signer = services.marketplace_signer
     _container.resolved_alkahest_clients = services.alkahest_clients
     _container.resolved_listing_service = services.listing_service
+    _container.resolved_negotiation_runtime = services.negotiation_runtime
     _container.resolved_negotiation_service = services.negotiation_service
     _container.resolved_system_service = services.system_service
     _container.resolved_settlement_composition = services.settlement_composition

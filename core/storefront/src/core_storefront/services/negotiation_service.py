@@ -136,12 +136,13 @@ class NegotiationService:
 
         try:
             result = await self._continue_negotiation(
-                sqlite_client=self._db,
-                neg_id=neg_id,
+                repository=self._db,
+                negotiation_id=neg_id,
                 buyer_action=action,
                 buyer_proposal=proposal,
                 buyer_reason=reason,
                 actor_principal=actor_principal,
+                actor_role="admin",
                 buyer_principal=thread["buyer_principal"],
                 seller_principal=thread["seller_principal"],
             )

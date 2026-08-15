@@ -40,7 +40,9 @@ from apicredits_storefront.utils.config import (
     settings,
 )
 from apicredits_storefront.utils.sqlite_client import get_sqlite_client
-from apicredits_storefront.utils.sync_negotiation import continue_sync_negotiation
+from apicredits_storefront.negotiation_runtime import (
+    build_api_credit_negotiation_runtime,
+)
 from core_storefront.services.negotiation_service import NegotiationService
 from core_storefront.stage_log import set_stage_event_db_path, stage_event
 from market_core import MarketDomainContract
@@ -103,6 +105,7 @@ class ApiCreditsStorefrontServices:
     settlement_coordinator: Any
     failure_policy: Any
     listing_service: Any
+    negotiation_runtime: Any
     negotiation_service: Any
     system_service: Any
 
@@ -142,6 +145,7 @@ def _build_api_credit_services(
     )
     set_stage_event_db_path(sqlite_client.db_path)
     alkahest_clients = _build_alkahest_clients()
+    negotiation_runtime = build_api_credit_negotiation_runtime(domain)
     settlement_repository = SettlementSQLiteRepository(
         sqlite_client.db_path,
         apply_migrations=False,
@@ -202,12 +206,10 @@ def _build_api_credit_services(
             sqlite_client=sqlite_client,
             seller_principal=marketplace_signer.identity,
         ),
+        negotiation_runtime=negotiation_runtime,
         negotiation_service=NegotiationService(
             sqlite_client=sqlite_client,
-            continue_negotiation=partial(
-                continue_sync_negotiation,
-                domain=domain,
-            ),
+            continue_negotiation=negotiation_runtime.continue_negotiation,
             stage_event=stage_event,
         ),
         system_service=SystemService(
@@ -231,6 +233,7 @@ async def _start_api_credit_services(
     _container.resolved_marketplace_signer = services.marketplace_signer
     _container.resolved_failure_policy = services.failure_policy
     _container.resolved_listing_service = services.listing_service
+    _container.resolved_negotiation_runtime = services.negotiation_runtime
     _container.resolved_negotiation_service = services.negotiation_service
     _container.resolved_system_service = services.system_service
     logger.info("[STARTUP] Singletons initialized")
@@ -242,6 +245,7 @@ async def _stop_api_credit_services(
     services: ApiCreditsStorefrontServices,
 ) -> None:
     _container.clear_lifespan_state(domain=services.domain)
+    _container.resolved_negotiation_runtime = None
     logger.info("[SHUTDOWN] API-credits storefront shutting down")
 
 

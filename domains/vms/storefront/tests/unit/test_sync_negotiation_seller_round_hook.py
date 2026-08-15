@@ -3,23 +3,23 @@ from __future__ import annotations
 from dataclasses import replace
 from datetime import datetime
 from unittest.mock import AsyncMock, Mock
+from typing import Any
 
 import pytest
 from market_core.schemas import EscrowProposal, ProvisionTerms
-from core_storefront.negotiation_sync import OfferUnfulfillableError
+from market_negotiation_runtime import OfferUnfulfillableError
 from market_identity import Ed25519Signer, TrustedIdentitySet
 from market_policy.identity import Identity
 from market_policy.negotiation_middleware import NegotiationDecision
 from market_policy.negotiation_thread import get_thread_store
 
 from market_storefront.domain_runtime import build_vm_storefront_domain
-from market_storefront.utils.sync_negotiation import (
-    SellerRoundResult,
+from domains.vms.negotiation.storefront_round import SellerRoundResult
+from market_storefront.negotiation_runtime import (
     _accepted_hosted_artifacts,
+    _decode_vm_terms,
     _default_seller_round_hook,
-    _normalize_vm_message_terms,
-    continue_sync_negotiation,
-    start_sync_negotiation,
+    build_vm_negotiation_runtime,
 )
 
 _BUYER_SIGNER = Ed25519Signer(b"\x41" * 32)
@@ -106,6 +106,73 @@ def _proposal(amount: int) -> EscrowProposal:
     )
 
 
+async def _start(
+    *,
+    domain,
+    sqlite_client,
+    our_listing_id,
+    buyer_principal,
+    seller_principal,
+    proposal=None,
+    provision_terms=None,
+    our_base_url,
+    their_agent_url,
+    seller_round_hook=None,
+):
+    runtime = build_vm_negotiation_runtime(
+        domain,
+        seller_round_hook=seller_round_hook,
+    )
+    proposal_wire = (
+        proposal.model_dump(mode="json")
+        if hasattr(proposal, "model_dump")
+        else proposal
+    )
+    return await runtime.start(
+        repository=sqlite_client,
+        listing_id=our_listing_id,
+        buyer_principal=buyer_principal,
+        seller_principal=seller_principal,
+        actor_principal=buyer_principal,
+        proposal=proposal_wire,
+        terms=provision_terms,
+        seller_agent_url=our_base_url,
+        buyer_agent_url=their_agent_url,
+    )
+
+
+async def _continue(
+    *,
+    domain,
+    sqlite_client,
+    neg_id,
+    buyer_action,
+    buyer_proposal,
+    buyer_reason,
+    buyer_principal,
+    actor_principal,
+    seller_principal=None,
+    seller_round_hook=None,
+):
+    runtime = build_vm_negotiation_runtime(
+        domain,
+        seller_round_hook=seller_round_hook,
+    )
+    return await runtime.continue_negotiation(
+        repository=sqlite_client,
+        negotiation_id=neg_id,
+        buyer_action=buyer_action,
+        buyer_proposal=buyer_proposal,
+        buyer_reason=buyer_reason,
+        buyer_principal=buyer_principal,
+        actor_principal=actor_principal,
+        actor_role=(
+            "buyer" if actor_principal == buyer_principal else "admin"
+        ),
+        seller_principal=seller_principal,
+    )
+
+
 def test_normalize_vm_message_terms_uses_domain_runtime() -> None:
     terms = ProvisionTerms.model_validate(
         {
@@ -119,11 +186,10 @@ def test_normalize_vm_message_terms_uses_domain_runtime() -> None:
         }
     )
 
-    normalized = _normalize_vm_message_terms(_DOMAIN, terms)
+    normalized = _decode_vm_terms(_DOMAIN, terms)
 
-    assert normalized is not None
-    assert normalized.duration_seconds == 3600
-    assert normalized.start_utc == "2030-01-01T00:00:00Z"
+    assert normalized.decoded.duration_seconds == 3600
+    assert normalized.decoded.start_utc == "2030-01-01T00:00:00Z"
 
 
 def test_normalize_vm_message_terms_rejects_foreign_terms() -> None:
@@ -134,7 +200,7 @@ def test_normalize_vm_message_terms_rejects_foreign_terms() -> None:
     )
 
     with pytest.raises(ValueError, match=r"compute\.v1"):
-        _normalize_vm_message_terms(_DOMAIN, terms)
+        _decode_vm_terms(_DOMAIN, terms)
 
 
 def test_normalize_vm_message_terms_rejects_unsupported_version() -> None:
@@ -148,7 +214,7 @@ def test_normalize_vm_message_terms_rejects_unsupported_version() -> None:
     )
 
     with pytest.raises(ValueError, match="version"):
-        _normalize_vm_message_terms(_DOMAIN, terms)
+        _decode_vm_terms(_DOMAIN, terms)
 
 
 
@@ -184,17 +250,15 @@ async def test_foreign_envelope_rejects_before_policy_or_repository_state(db) ->
     }
 
     with pytest.raises(ValueError, match=r"compute\.v1"):
-        await start_sync_negotiation(
-            domain=db.market_domain,
-            sqlite_client=db,
-            our_listing_id="L-hook",
-            buyer_principal=_BUYER,
-            seller_principal=_SELLER,
-            provision_terms=terms,
-            our_base_url="http://seller",
-            their_agent_url="http://buyer",
-            seller_round_hook=seller_hook,
-        )
+        await _start(domain=db.market_domain,
+        sqlite_client=db,
+        our_listing_id="L-hook",
+        buyer_principal=_BUYER,
+        seller_principal=_SELLER,
+        provision_terms=terms,
+        our_base_url="http://seller",
+        their_agent_url="http://buyer",
+        seller_round_hook=seller_hook,)
 
     repository_probe.assert_not_awaited()
     seller_hook.assert_not_awaited()
@@ -218,25 +282,23 @@ async def test_start_sync_negotiation_uses_injected_seller_round_hook(db):
             ),
         )
 
-    response = await start_sync_negotiation(
-        domain=db.market_domain,
-        sqlite_client=db,
-        our_listing_id="L-hook",
-        buyer_principal=_BUYER,
-        seller_principal=_SELLER,
-        proposal=_proposal(50),
-        provision_terms=ProvisionTerms(
-            kind="compute.v1",
-            version=1,
-            payload={
-                "duration_seconds": 3600,
-                "ssh_public_key": "ssh-rsa AAAA",
-            },
-        ),
-        our_base_url="http://test-seller:8001",
-        their_agent_url="http://buyer:9000",
-        seller_round_hook=hook,
-    )
+    response = await _start(domain=db.market_domain,
+    sqlite_client=db,
+    our_listing_id="L-hook",
+    buyer_principal=_BUYER,
+    seller_principal=_SELLER,
+    proposal=_proposal(50),
+    provision_terms=ProvisionTerms(
+        kind="compute.v1",
+        version=1,
+        payload={
+            "duration_seconds": 3600,
+            "ssh_public_key": "ssh-rsa AAAA",
+        },
+    ),
+    our_base_url="http://test-seller:8001",
+    their_agent_url="http://buyer:9000",
+    seller_round_hook=hook,)
 
     assert response["action"] == "counter"
     assert response["proposal"]["fields"]["amount"] == "123"
@@ -356,25 +418,23 @@ async def test_hosted_selection_is_persisted_and_materialized_as_plan(db):
         )
 
     with site_capacity(site):
-        response = await start_sync_negotiation(
-            domain=db.market_domain,
-            sqlite_client=db,
-            our_listing_id="L-hosted",
-            buyer_principal=_BUYER,
-            seller_principal=_SELLER,
-            proposal={"settlement_selection": selection.model_dump()},
-            provision_terms=ProvisionTerms(
-                kind="compute.v1",
-                version=1,
-                payload={
-                    "duration_seconds": 3600,
-                    "ssh_public_key": "ssh-rsa AAAA",
-                },
-            ),
-            our_base_url="http://test-seller:8001",
-            their_agent_url="http://buyer:9000",
-            seller_round_hook=hook,
-        )
+        response = await _start(domain=db.market_domain,
+        sqlite_client=db,
+        our_listing_id="L-hosted",
+        buyer_principal=_BUYER,
+        seller_principal=_SELLER,
+        proposal={"settlement_selection": selection.model_dump()},
+        provision_terms=ProvisionTerms(
+            kind="compute.v1",
+            version=1,
+            payload={
+                "duration_seconds": 3600,
+                "ssh_public_key": "ssh-rsa AAAA",
+            },
+        ),
+        our_base_url="http://test-seller:8001",
+        their_agent_url="http://buyer:9000",
+        seller_round_hook=hook,)
 
     assert response["action"] == "accept"
     assert response["settlement_selection"] == selection.model_dump()
@@ -430,33 +490,30 @@ async def test_start_sync_negotiation_rejects_mismatched_resource_shape(db):
     advertised shape; this pins the loud-rejection behavior rather than
     silent admission or silent fallback to the listing's shape.
     """
-    from market_storefront.utils.sync_negotiation import OfferUnfulfillableError
 
     async def hook(**_kwargs):
         raise AssertionError("seller policy must not run for a rejected request")
 
     with pytest.raises(OfferUnfulfillableError) as exc_info:
-        await start_sync_negotiation(
-            domain=db.market_domain,
-            sqlite_client=db,
-            our_listing_id="L-hook",
-            buyer_principal=_BUYER,
-            seller_principal=_SELLER,
-            proposal=_proposal(50),
-            provision_terms=ProvisionTerms(
-                kind="compute.v1",
-                version=1,
-                payload={
-                    "duration_seconds": 3600,
-                    "ssh_public_key": "ssh-rsa AAAA",
-                    # Listing offers gpu_count=1; this asks for 2.
-                    "compute_resource": {"gpu_count": 2},
-                },
-            ),
-            our_base_url="http://test-seller:8001",
-            their_agent_url="http://buyer:9000",
-            seller_round_hook=hook,
-        )
+        await _start(domain=db.market_domain,
+        sqlite_client=db,
+        our_listing_id="L-hook",
+        buyer_principal=_BUYER,
+        seller_principal=_SELLER,
+        proposal=_proposal(50),
+        provision_terms=ProvisionTerms(
+            kind="compute.v1",
+            version=1,
+            payload={
+                "duration_seconds": 3600,
+                "ssh_public_key": "ssh-rsa AAAA",
+                # Listing offers gpu_count=1; this asks for 2.
+                "compute_resource": {"gpu_count": 2},
+            },
+        ),
+        our_base_url="http://test-seller:8001",
+        their_agent_url="http://buyer:9000",
+        seller_round_hook=hook,)
     assert "resource_shape_not_negotiable" in str(exc_info.value)
 
 
@@ -478,26 +535,24 @@ async def test_start_sync_negotiation_permits_resource_shape_matching_listing(db
             ),
         )
 
-    response = await start_sync_negotiation(
-        domain=db.market_domain,
-        sqlite_client=db,
-        our_listing_id="L-hook",
-        buyer_principal=_BUYER,
-        seller_principal=_SELLER,
-        proposal=_proposal(50),
-        provision_terms=ProvisionTerms(
-            kind="compute.v1",
-            version=1,
-            payload={
-                "duration_seconds": 3600,
-                "ssh_public_key": "ssh-rsa AAAA",
-                "compute_resource": {"gpu_count": 1},
-            },
-        ),
-        our_base_url="http://test-seller:8001",
-        their_agent_url="http://buyer:9000",
-        seller_round_hook=hook,
-    )
+    response = await _start(domain=db.market_domain,
+    sqlite_client=db,
+    our_listing_id="L-hook",
+    buyer_principal=_BUYER,
+    seller_principal=_SELLER,
+    proposal=_proposal(50),
+    provision_terms=ProvisionTerms(
+        kind="compute.v1",
+        version=1,
+        payload={
+            "duration_seconds": 3600,
+            "ssh_public_key": "ssh-rsa AAAA",
+            "compute_resource": {"gpu_count": 1},
+        },
+    ),
+    our_base_url="http://test-seller:8001",
+    their_agent_url="http://buyer:9000",
+    seller_round_hook=hook,)
     assert seen["ran"] is True
     assert response["action"] == "counter"
 
@@ -516,25 +571,23 @@ async def test_continue_sync_negotiation_uses_injected_seller_round_hook(db):
             ),
         )
 
-    opened = await start_sync_negotiation(
-        domain=db.market_domain,
-        sqlite_client=db,
-        our_listing_id="L-hook",
-        buyer_principal=_BUYER,
-        seller_principal=_SELLER,
-        proposal=_proposal(50),
-        provision_terms=ProvisionTerms(
-            kind="compute.v1",
-            version=1,
-            payload={
-                "duration_seconds": 3600,
-                "ssh_public_key": "ssh-rsa AAAA",
-            },
-        ),
-        our_base_url="http://test-seller:8001",
-        their_agent_url="http://buyer:9000",
-        seller_round_hook=opening_hook,
-    )
+    opened = await _start(domain=db.market_domain,
+    sqlite_client=db,
+    our_listing_id="L-hook",
+    buyer_principal=_BUYER,
+    seller_principal=_SELLER,
+    proposal=_proposal(50),
+    provision_terms=ProvisionTerms(
+        kind="compute.v1",
+        version=1,
+        payload={
+            "duration_seconds": 3600,
+            "ssh_public_key": "ssh-rsa AAAA",
+        },
+    ),
+    our_base_url="http://test-seller:8001",
+    their_agent_url="http://buyer:9000",
+    seller_round_hook=opening_hook,)
 
     seen = {}
 
@@ -554,17 +607,15 @@ async def test_continue_sync_negotiation_uses_injected_seller_round_hook(db):
             ),
         )
 
-    response = await continue_sync_negotiation(
-        domain=db.market_domain,
-        sqlite_client=db,
-        neg_id=opened["negotiation_id"],
-        buyer_action="counter",
-        buyer_proposal=_proposal(100).model_dump(),
-        buyer_reason=None,
-        buyer_principal=_BUYER,
-        actor_principal=_BUYER,
-        seller_round_hook=continue_hook,
-    )
+    response = await _continue(domain=db.market_domain,
+    sqlite_client=db,
+    neg_id=opened["negotiation_id"],
+    buyer_action="counter",
+    buyer_proposal=_proposal(100).model_dump(),
+    buyer_reason=None,
+    buyer_principal=_BUYER,
+    actor_principal=_BUYER,
+    seller_round_hook=continue_hook,)
 
     assert response["action"] == "accept"
     assert response["accepted_escrow_proposal"]["fields"]["amount"] == "100"
