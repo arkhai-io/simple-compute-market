@@ -14,6 +14,7 @@ from market_config.config_loader import get_dotted, load_user_config
 
 from market_identity import (
     PROFILE_ROTATION_AUTHORITY,
+    AuthorityPayerBinding,
     BuyerProfile,
     CredentialProviderError,
     CredentialProviderRegistry,
@@ -37,6 +38,7 @@ from market_identity import (
     rotate_profile,
     select_profile,
     sign_rotation,
+    set_authority_binding,
 )
 
 from core_buyer.run_log import migrate_run_logs, recoverable_run_ids, runs_dir
@@ -487,6 +489,26 @@ class BuyerProfileService:
                 "credential-derived principal does not match recorded run principal"
             )
         return profile, signer
+
+    def set_authority_payer_binding(
+        self,
+        profile_id: str | uuid.UUID,
+        binding: AuthorityPayerBinding,
+    ) -> BuyerProfile:
+        """Atomically replace one authority/environment opaque payer binding."""
+
+        current = self.repository.load()
+        profile = current.profile(profile_id)
+        candidate = set_authority_binding(
+            current,
+            profile.profile_id,
+            binding,
+        )
+        written = self.repository.replace(
+            candidate,
+            expected_revision=current.revision,
+        )
+        return written.profile(profile.profile_id)
 
     def _resolve_signer(
         self,

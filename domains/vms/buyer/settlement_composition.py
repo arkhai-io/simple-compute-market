@@ -2,15 +2,27 @@
 
 from __future__ import annotations
 
+import os
+import webbrowser
 from collections.abc import Mapping
 from dataclasses import replace
 from typing import Any
 
 import typer
+from core_buyer.action_policy import (
+    BuyerActionHandler,
+    resolve_buyer_action_policy,
+)
+from core_buyer.profile_service import BuyerProfileService
 from core_buyer.settlement import BuyerSettlementPolicy, SelectedSettlementOption
 from market_alkahest import create_alkahest_registration
 from market_config.config_loader import load_user_config
-from market_hosted_settlement import create_stripe_registration
+from market_hosted_settlement import (
+    PayerCommandContext,
+    create_stripe_command_group,
+    create_stripe_registration,
+    payer_command_context_from_config,
+)
 from market_settlement_runtime import (
     MechanismReadiness,
     SettlementConfig,
@@ -74,6 +86,31 @@ async def buyer_settlement_readiness() -> tuple[
     return config, statuses
 
 
+def _dispatch_payer_action(action: Any, requested: str | None) -> Any:
+    policy = resolve_buyer_action_policy(
+        requested,
+        interactive=os.isatty(0) and os.isatty(1),
+    )
+    handler = BuyerActionHandler(
+        policy,
+        open_url=webbrowser.open,
+        print_url=lambda value: typer.echo(value),
+    )
+    return handler.handle(action.model_dump(mode="json", exclude_none=True))
+
+
+def _payer_command_context() -> PayerCommandContext:
+    policy = resolve_buyer_settlement_policy()
+    section = policy.config.mechanism_config("stripe")
+    if section is None:
+        raise ValueError("hosted payer commands require Stripe settlement config")
+    return payer_command_context_from_config(
+        section,
+        profiles=BuyerProfileService(),
+        dispatch_action=_dispatch_payer_action,
+    )
+
+
 def buyer_settlement_registry() -> SettlementConfigurationRegistry:
     """Return the explicitly installed VM buyer mechanisms."""
 
@@ -83,7 +120,9 @@ def buyer_settlement_registry() -> SettlementConfigurationRegistry:
                 create_alkahest_registration(),
                 command_group=_alkahest_command_group(),
             ),
-            create_stripe_registration(),
+            create_stripe_registration(
+                command_group=create_stripe_command_group(_payer_command_context)
+            ),
         )
     )
 
