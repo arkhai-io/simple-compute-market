@@ -32,6 +32,7 @@ from market_core.schemas import (
     EscrowTerms,
     SettlementOption,
     SettlementSelection,
+    derive_settlement_option_id,
 )
 from arkhai_vms import VmProvisionTerms, make_vm_provision_terms
 from core_buyer.registry_config import RegistryAuthority
@@ -352,11 +353,38 @@ def test_matches_can_be_preseeded_skipping_registry_query():
 
 
 def test_exact_settlement_revalidation_runs_before_seller_network() -> None:
+    params = {
+        "account_ref": "seller-main",
+        "authority_id": "authority-main",
+        "country": "US",
+        "environment": "production",
+        "claimant_principal": seller_principals().identities[0].model_dump(
+            mode="json"
+        ),
+        "condition": {
+            "condition_id": "vm-fulfillment",
+            "evaluator": {
+                "kind": "builtin.v1",
+                "version": "trivial.v1",
+                "params": {"kind": "trivial"},
+            },
+            "demand": {"encoding": "application/jcs+json", "value": {}},
+        },
+        "funding_profile": "card.v1",
+        "interaction": "interactive",
+        "funds_flow": "separate_charges_transfers",
+        "contract_fingerprint": "sha256:" + "ab" * 32,
+    }
     option = SettlementOption(
-        option_id="a" * 64,
+        option_id=derive_settlement_option_id(
+            mechanism="fiat.stripe.v1",
+            asset="usd",
+            rates=[],
+            params=params,
+        ),
         mechanism="fiat.stripe.v1",
         asset="usd",
-        params={"funding_profile": "card.v1"},
+        params=params,
     )
     selection = SettlementSelection(
         mechanism=option.mechanism,

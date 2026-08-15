@@ -100,15 +100,39 @@ def _escrow_proposal() -> EscrowProposal:
     )
 
 
+def _hosted_config() -> StripeSettlementConfig:
+    return StripeSettlementConfig(
+        enabled=True,
+        authority_id="authority-main",
+        environment="production",
+    )
+
+
+def _buyer_hosted_section() -> dict[str, Any]:
+    return _hosted_config().model_dump(mode="json", exclude_defaults=True)
+
+
 def _hosted_option() -> SettlementOption:
     rates = [RateValue(field="amount", value=125)]
-    config = StripeSettlementConfig(enabled=True)
+    config = _hosted_config()
     params = {
         "account_ref": "acct-seller",
-        "authority_id": "authority-main",
+        "authority_id": config.authority_id,
         "funding_profile": "card.v1",
-        "country": "US",
-        "environment": "production",
+        "country": config.country,
+        "environment": config.environment,
+        "claimant_principal": seller_principals().identities[0].model_dump(
+            mode="json"
+        ),
+        "condition": {
+            "condition_id": "vm-fulfillment",
+            "evaluator": {
+                "kind": "builtin.v1",
+                "version": "trivial.v1",
+                "params": {"kind": "trivial"},
+            },
+            "demand": {"encoding": "application/jcs+json", "value": {}},
+        },
         "interaction": "interactive",
         "funds_flow": "separate_charges_transfers",
         "contract_fingerprint": stripe_contract_fingerprint(config),
@@ -138,8 +162,8 @@ def _with_hosted_readiness(policy):
             "countries": ("US",),
             "interactions": ("interactive",),
             "selected_payer_binding": {
-                "authority_id": None,
-                "environment": None,
+                "authority_id": section.authority_id,
+                "environment": section.environment,
                 "binding_ref": "payer-safe",
                 "bound_principal": BUYER_SIGNER.identity.model_dump(mode="json"),
                 "state": "active",
@@ -158,7 +182,7 @@ def test_select_hosted_option_pins_exact_listed_choice():
             {
                 "Settlement": {
                     "priority": ["fiat.stripe.v1"],
-                    "stripe": {"enabled": True},
+                    "stripe": _buyer_hosted_section(),
                 }
             }
         )
@@ -181,7 +205,7 @@ def test_select_hosted_option_rejects_unlisted_choice():
             {
                 "Settlement": {
                     "priority": ["fiat.stripe.v1"],
-                    "stripe": {"enabled": True},
+                    "stripe": _buyer_hosted_section(),
                 }
             }
         )
@@ -215,7 +239,7 @@ def test_standalone_pricing_uses_selected_option_rate_and_units():
                 "Settlement": {
                     "schema_version": 1,
                     "priority": ["fiat.stripe.v1"],
-                    "stripe": {"enabled": True},
+                    "stripe": _buyer_hosted_section(),
                 }
             }
         )

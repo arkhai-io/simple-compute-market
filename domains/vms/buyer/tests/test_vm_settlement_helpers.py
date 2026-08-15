@@ -649,15 +649,39 @@ def test_fiat_discovery_is_local_only_and_respects_action_capability(monkeypatch
         authority={"principals": [buyer.identity.model_dump(mode="json")]},
         expected_manifest_digest="sha256:" + "ab" * 32,
     )
+    buyer_stripe_config = stripe.model_dump(mode="json", exclude_defaults=True)
+    assert {
+        "account_ref",
+        "condition_profile",
+        "condition_profiles",
+        "currency",
+        "country",
+        "resolvers",
+    }.isdisjoint(buyer_stripe_config)
     config = {
         "Settlement": {
             "schema_version": 1,
             "priority": ["fiat.stripe.v1"],
-            "stripe": stripe.model_dump(mode="json"),
+            "stripe": buyer_stripe_config,
         }
     }
     params = {
         "account_ref": "seller-main",
+        "authority_id": stripe.authority_id,
+        "country": stripe.country,
+        "environment": stripe.environment,
+        "claimant_principal": Ed25519Signer(b"\x36" * 32).identity.model_dump(
+            mode="json"
+        ),
+        "condition": {
+            "condition_id": "vm-fulfillment",
+            "evaluator": {
+                "kind": "builtin.v1",
+                "version": "trivial.v1",
+                "params": {"kind": "trivial"},
+            },
+            "demand": {"encoding": "application/jcs+json", "value": {}},
+        },
         "funding_profile": FundingProfile.CARD.value,
         "interaction": FundingMode.INTERACTIVE.value,
         "funds_flow": "separate_charges_transfers",
