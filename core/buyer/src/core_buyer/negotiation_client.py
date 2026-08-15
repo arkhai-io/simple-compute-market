@@ -453,7 +453,11 @@ def _validate_settlement_acceptance(
         )
     condition = advertised_option.params.get("condition")
     expected_conditions = [dict(condition)] if isinstance(condition, Mapping) else []
-    if obligation.conditions != expected_conditions or plan.service_terms:
+    # service_terms are deliberately not compared against the advertised
+    # option: they carry seller service context established during the
+    # negotiation (listing/order/provision packages) that the option cannot
+    # predict. The funded obligation stays strictly validated above.
+    if obligation.conditions != expected_conditions:
         raise RuntimeError(
             "seller settlement_plan semantics differ from the advertised option"
         )
