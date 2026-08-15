@@ -180,11 +180,11 @@ ORDER = {
 
 
 def test_claim_survives_listing_model_validation():
-    """Listing.model_validate mutates the row it validates, replacing
-    offer_resource with a ComputeResource instance — the accept paths run
-    after such a validation, and an un-pinned claim makes the hold grab
-    whatever resource is first in line (the e2e caught this as a deal
-    provisioned on the wrong machine)."""
+    """Listing validation preserves the caller's wire mapping.
+
+    Accept paths derive the same pinned resource claim before and after model
+    validation rather than silently selecting whichever resource is first.
+    """
     from domains.vms.listings.models import Listing
     from market_storefront.services.vm_job_spec_service import (
         compute_capacity_claim_from_order,
@@ -206,7 +206,7 @@ def test_claim_survives_listing_model_validation():
     }
     pinned = compute_capacity_claim_from_order(row)
     Listing.model_validate(row)
-    assert not isinstance(row["offer_resource"], dict)  # the mutation
+    assert isinstance(row["offer_resource"], dict)
     assert compute_capacity_claim_from_order(row) == pinned
     assert pinned["resource_id"] == "res-pin"
 
