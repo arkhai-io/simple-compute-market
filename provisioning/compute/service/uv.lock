@@ -281,13 +281,12 @@ dev = [
 [[package]]
 name = "arkhai-core"
 version = "0.2.0"
-source = { registry = "https://pypi.org/simple" }
+source = { registry = "../../../.dist" }
 dependencies = [
     { name = "pydantic" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/aa/c6/f3272ba8e50b8c750f9ebd6eeb0ad5ed9d0016cb9799e0c5a9b750a729af/arkhai_core-0.2.0.tar.gz", hash = "sha256:32a83e4fd39e2922b59d3daa09dfa5ff26fd96c8fad7861dadeb9d1f6625b181", size = 678596, upload-time = "2026-07-23T19:38:05.621Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/66/44/c6c622d1c83e75a8dc2b754756c5a9fe04caedd161681c47188a69bf6183/arkhai_core-0.2.0-py3-none-any.whl", hash = "sha256:ad0aec5a3c0eac378f4472d97f43f2c7d6ee7023d049075d5bbcb1aebc2e9d1a", size = 15331, upload-time = "2026-07-23T19:38:04.316Z" },
+    { path = "arkhai_core-0.2.0-py3-none-any.whl" },
 ]
 
 [[package]]
