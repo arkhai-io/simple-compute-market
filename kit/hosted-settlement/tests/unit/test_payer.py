@@ -20,7 +20,9 @@ from market_hosted_settlement import (
     HostedPayerError,
     HostedPayerFacade,
     MarketplaceSignerAdapter,
+    StripeSettlementConfig,
     instrument_list_projection,
+    payer_command_context_from_config,
     payer_setup_projection,
 )
 from market_identity import Ed25519Signer
@@ -85,12 +87,51 @@ def _facade(seed: bytes = b"a" * 32) -> tuple[HostedPayerFacade, Client, Ed25519
     )
 
 
+def test_configured_payer_client_uses_authority_payer_role(monkeypatch) -> None:
+    captured = []
+
+    class CapturingClient:
+        def __init__(self, config) -> None:
+            captured.append(config)
+
+    monkeypatch.setattr(
+        "market_hosted_settlement.payer.HostedSettlementAsyncClient",
+        CapturingClient,
+    )
+    context = payer_command_context_from_config(
+        StripeSettlementConfig(
+            enabled=True,
+            base_url="https://settlement.example",
+            authority_id="authority-main",
+            environment="production",
+            authority={
+                "principals": [
+                    {
+                        "scheme": "ed25519",
+                        "identifier": MarketplaceSignerAdapter(
+                            Ed25519Signer(b"b" * 32)
+                        ).principal.identifier,
+                    }
+                ]
+            },
+        ),
+        profiles=object(),
+        dispatch_action=lambda _action, _binding: None,
+    )
+
+    context.facade(Ed25519Signer(b"a" * 32))
+
+    assert len(captured) == 1
+    assert captured[0].caller_role == "payer"
+
+
 @pytest.mark.asyncio
 async def test_profile_creation_uses_released_dual_scheme_signing_helper() -> None:
     facade, client, signer = _facade()
     first = await facade.create(country="US")
     second = await facade.create(country="US")
     assert first.payer_profile_ref == "payer_opaque_1234"
+    assert second == first
     assert client.requests[0] == client.requests[1]
     assert client.requests[0].principal == MarketplaceSignerAdapter(signer).principal
     verify_payer_profile_creation(

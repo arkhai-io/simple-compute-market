@@ -74,7 +74,6 @@ class PayerProfileAccess(Protocol):
         principal: Identity,
     ) -> None: ...
 
-
     def retire_principal(self, profile: str, principal: Identity) -> dict[str, Any]: ...
 
 
@@ -109,7 +108,6 @@ def payer_command_context_from_config(
 ) -> PayerCommandContext:
     """Build direct payer clients from one exact validated hosted config."""
 
-
     resolved = StripeSettlementConfig.model_validate(config)
     if (
         not resolved.enabled
@@ -125,7 +123,7 @@ def payer_command_context_from_config(
             ClientConfig(
                 base_url=resolved.base_url,
                 signer=MarketplaceSignerAdapter(signer),
-                caller_role="buyer",
+                caller_role="payer",
                 authority_id=resolved.authority_id,
                 environment=resolved.environment,
                 expected_authorities=adapt_expected_authorities(
@@ -186,13 +184,13 @@ class HostedPayerFacade:
             return await _await_if_needed(call())
         except Exception:
             raise HostedPayerError(f"hosted payer {operation} failed") from None
+
     async def aclose(self) -> None:
         """Close an owned released client when it exposes async cleanup."""
 
         close = getattr(self._client, "aclose", None)
         if callable(close):
             await _await_if_needed(close())
-
 
     async def create(self, *, country: Literal["US"] = "US") -> Any:
         if country != "US":
@@ -410,6 +408,8 @@ def instrument_projection(result: Any) -> dict[str, Any]:
         "is_default": result.is_default,
         "revoked": result.revoked,
     }
+
+
 async def payer_compatibility_context(
     *,
     config: StripeSettlementConfig,
@@ -486,9 +486,7 @@ async def payer_compatibility_context(
         )
         profile_readiness[funding_profile.value] = {
             FundingMode.INTERACTIVE.value: bool(
-                ready
-                and action_capable
-                and funding_mode is FundingMode.INTERACTIVE
+                ready and action_capable and funding_mode is FundingMode.INTERACTIVE
             ),
             FundingMode.SAVED_INSTRUMENT.value: saved_ready,
         }
@@ -497,11 +495,7 @@ async def payer_compatibility_context(
         "funding_profiles": tuple(ready_profiles),
         "currencies": (resolved.currency,),
         "countries": (resolved.country,),
-        "interactions": (
-            (funding_mode.value,)
-            if action_capable
-            else ()
-        ),
+        "interactions": ((funding_mode.value,) if action_capable else ()),
         "selected_payer_binding": binding.model_dump(mode="json"),
         "selected_principal": signer.identity.model_dump(mode="json"),
         "profile_readiness": profile_readiness,
