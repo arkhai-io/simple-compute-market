@@ -1,7 +1,9 @@
 """Schema-opaque HTTP routes owned by the bare-metal composition."""
 
 from __future__ import annotations
+import base64
 
+from collections.abc import Mapping
 import json
 from typing import Annotated, Any
 
@@ -20,6 +22,10 @@ from fastapi import APIRouter, HTTPException, Query, Request
 
 from market_identity import EMPTY_BODY, Identity
 from market_storefront_kit import get_storefront_container
+from market_settlement_runtime import (
+    HostedSettlementRouteError,
+    HostedSettlementStart,
+)
 from .models import (
     BareMetalFulfillRequest,
     BareMetalFulfillmentResponse,
@@ -33,6 +39,7 @@ from .fulfillment_service import BareMetalFulfillmentError
 from .negotiation_service import NegotiationRequestError
 from .runtime import BareMetalStorefrontRuntime
 from .settlement_service import SettlementRequestError
+from .hosted_routes import build_bare_metal_hosted_route_service
 from .response_auth import bind_response_auth
 
 router = APIRouter()
@@ -121,6 +128,86 @@ async def _admin(
         expected_role="admin",
         allowed_principals=runtime.admin_principals.identities,
     )
+
+
+async def _authorize_hosted_request(
+    request: Request,
+    operation: str,
+    resource: str,
+    expected_principal: Identity,
+    body: Mapping[str, Any] | None,
+) -> Any:
+    runtime = _runtime(request)
+    try:
+        authenticated = await authenticate_request(
+            headers=request.headers,
+            method=request.method,
+            operation=operation,
+            resource=resource,
+            body=body if body is not None else EMPTY_BODY,
+            expected_role="buyer",
+            replay_store=runtime.db,
+            expected_principal=expected_principal,
+        )
+    except AuthError as exc:
+        raise HostedSettlementRouteError(exc.status_code, exc.detail) from exc
+    bind_response_auth(
+        request,
+        authenticated,
+        operation=operation,
+        resource=resource,
+    )
+    return authenticated
+
+
+def _hosted_service(request: Request) -> Any:
+    runtime = _runtime(request)
+    if runtime.settlement_composition is None:
+        raise HTTPException(status_code=404, detail="hosted settlement is disabled")
+    if runtime.hosted_domain_callbacks is None:
+        raise HTTPException(
+            status_code=503,
+            detail="bare-metal hosted lifecycle is unavailable",
+        )
+    return build_bare_metal_hosted_route_service(
+        repository=runtime.settlement_repository,
+        runtime=runtime.settlement_runtime,
+        domain_callbacks=runtime.hosted_domain_callbacks,
+        authorize_request=_authorize_hosted_request,
+    )
+
+
+@router.post("/api/v1/settlements")
+async def start_hosted_settlement(
+    body: HostedSettlementStart,
+    request: Request,
+) -> Mapping[str, Any]:
+    try:
+        return await _hosted_service(request).start(request, body)
+    except HostedSettlementRouteError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
+
+
+@router.get("/api/v1/settlements/{settlement_ref}")
+async def hosted_settlement_status(
+    settlement_ref: str,
+    request: Request,
+) -> Mapping[str, Any]:
+    try:
+        return await _hosted_service(request).status(request, settlement_ref)
+    except HostedSettlementRouteError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
+
+
+@router.post("/api/v1/settlements/{settlement_ref}/reclaim")
+async def reclaim_hosted_settlement(
+    settlement_ref: str,
+    request: Request,
+) -> Mapping[str, Any]:
+    try:
+        return await _hosted_service(request).reclaim(request, settlement_ref)
+    except HostedSettlementRouteError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
 
 
 def _listing_response(
@@ -511,6 +598,37 @@ async def teardown_fulfillment(
             status_code=exc.status_code,
             detail=exc.detail,
         ) from exc
+
+
+@router.get("/api/v1/evidence/bare-metal/{evidence_digest}")
+async def hosted_lease_evidence(
+    evidence_digest: str,
+    request: Request,
+) -> dict[str, Any]:
+    """Resolve one content-addressed lease-ready document with seller proof."""
+
+    if len(evidence_digest) != 64 or any(
+        char not in "0123456789abcdef" for char in evidence_digest
+    ):
+        raise HTTPException(status_code=404, detail="evidence not found")
+    runtime = _runtime(request)
+    evidence = await runtime.db.load_bare_metal_hosted_evidence(
+        evidence_digest="sha256:" + evidence_digest
+    )
+    if evidence is None:
+        raise HTTPException(status_code=404, detail="evidence not found")
+    material = evidence.canonical_json().encode("utf-8")
+    proof = (
+        base64.urlsafe_b64encode(runtime.marketplace_signer.sign(material))
+        .rstrip(b"=")
+        .decode("ascii")
+    )
+    return {
+        "protocol": "arkhai.bare-metal-evidence-signature.v1",
+        "seller_principal": runtime.seller_principal.model_dump(mode="json"),
+        "evidence": evidence.model_dump(mode="json"),
+        "proof": proof,
+    }
 
 
 @router.get("/health", response_model=BareMetalHealthResponse)

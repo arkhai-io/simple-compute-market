@@ -11,6 +11,7 @@ dependencies = [
     "arkhai-kit-fulfillment>=0.2.0",
     "arkhai-kit-resource-pools>=0.2.0",
     "arkhai-vms-provisioning-operator-client>=0.3.0",
+    "arkhai-vms-provisioning-adapter>=0.2.0",
     "pydantic>=2.7",
 ]
 
@@ -22,7 +23,7 @@ build-backend = "hatchling.build"
 packages = ["src/bare_metal_provisioning_adapter"]
 
 [dependency-groups]
-dev = ["pytest>=9.0.2"]
+dev = ["pytest>=9.0.2", "pytest-asyncio>=0.23"]
 
 [tool.uv.sources]
 arkhai-bare-metal = { path = "../..", editable = true }
@@ -31,3 +32,4 @@ arkhai-kit-fulfillment = { path = "../../../../kit/fulfillment", editable = true
 arkhai-kit-resource-pools = { path = "../../../../kit/resource-pools", editable = true }
 arkhai-compute-provisioning-service = { path = "../../../../provisioning/compute/service", editable = true }
 arkhai-vms-provisioning-operator-client = { path = "../../../vms/provisioning/client", editable = true }
+arkhai-vms-provisioning-adapter = { path = "../../../vms/provisioning/adapter", editable = true }

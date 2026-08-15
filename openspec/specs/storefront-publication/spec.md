@@ -534,6 +534,34 @@ A listing with a durable site mapping MUST route all capacity claims to exactly 
 - **WHEN** the bound site refuses a listing claim while another configured site has compatible capacity
 - **THEN** the storefront reports the bound-site refusal and the other site receives zero calls
 
+### Requirement: Bare-metal hosted publication intersects all authorities
+
+A bare-metal listing MAY publish exact `fiat.stripe.v1` alternatives only from a complete non-stale trusted selected-site projection with exclusive allocation, SSH capability, hosted authority/account/profile readiness, condition resolver readiness, and compatible offer, funding, fulfillment, and capacity windows. Each ready `card.v1`, `us_bank_transfer.v1`, or `us_ach_debit.v1` profile is a separate deterministic option; one unavailable profile MUST NOT suppress ready alternatives or legacy Alkahest escrows.
+
+#### Scenario: Pending funding cannot extend capacity
+
+- **WHEN** a slow funding profile remains pending at the accepted offer or billable-hold boundary
+- **THEN** the old listing cannot be renewed or rebound
+- **AND** later availability requires a fresh signed listing and negotiation
+
+### Requirement: API-credit publication composes independent settlement alternatives
+
+A quota-backed `api_credits.v1` listing MUST publish `settlement_options` from
+each complete ready hosted clause and `accepted_escrows` from valid Alkahest
+entries as independent alternatives. Every hosted option MUST bind the exact
+service, quantity pricing basis, canonical seller/claimant, condition,
+currency, profile, interaction, account, expiry policy, and rate. One unready
+profile MUST suppress only its own option, and hosted-only publication MUST
+remain valid with an empty escrow list.
+
+#### Scenario: Quota and three hosted profiles are ready
+- **WHEN** card, US bank transfer, and ACH clauses pass readiness for one sellable API-credit resource
+- **THEN** the listing exposes three distinct deterministic hosted options alongside any Alkahest escrows
+
+#### Scenario: Hosted clause is incomplete
+- **WHEN** its profile, authority, account, condition, or currency readiness fails
+- **THEN** only that hosted alternative is omitted and publication emits a safe clause-scoped blocker
+
 ## Evidence
 
 - Canonical listing, negotiation, settlement, fulfillment, and stage-log principals: `core/storefront/tests/unit/test_identity_migrations.py`, `test_settle_identity_models.py`, `test_sqlite_client_escrow_fulfillment_identity.py`, and `test_stage_log_identity.py`.
@@ -556,3 +584,4 @@ A listing with a durable site mapping MUST route all capacity claims to exactly 
 - Common multi-domain listing bindings, collision-safe derivation, frozen publication sources, and exact public mode: `core/storefront/tests/unit/test_domain_binding_migrations.py`, `test_publication_runner.py`, `test_publication_plugins.py`, and `domains/vms/storefront/tests/unit/test_publication_wiring.py`.
 
 The installed bare-metal contribution supplies an independently runnable seller composition. Shared shells consume that contribution and the common immutable binding and lifecycle contexts; they do not replace the domain-owned codecs, seller policy, provisioning adapters, or fulfillment hook.
+

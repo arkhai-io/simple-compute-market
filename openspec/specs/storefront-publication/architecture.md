@@ -114,6 +114,23 @@ The buyer obtains its operation-scoped funding authorization only after accepted
 
 Historical card-only plans are classified from persisted state and decoded only for recovery. New config, publication, negotiation, and start accept the explicit `card.v1` profile; there is no public legacy alias that could generate a second identity for the same old plan.
 
+## Bare-metal hosted readiness
+
+Bare-metal publication begins with one complete fresh signed selected-site projection and the trusted domain listing derived from it. It then intersects access capability, authoritative availability, exact hosted profile/currency/country/account/condition readiness, offer and funding deadlines, and maximum fulfillment duration. Every ready profile becomes a deterministic independent option; an unready profile becomes a sanitized blocker without suppressing its ready peers. Stale or conflicting site/resource facts close or omit the option, never trigger site fallback or mutate an accepted binding.
+
+The common publication runner carries `settlement_options` independently from legacy `accepted_escrows`. The dedicated publication command authenticates registry mutation with the storefront signer and records the exact derived source only after success.
+
+## API-credit hosted publication
+
+Quota availability and settlement readiness are separate inputs. Publication
+first requires an authoritative sellable API-credit resource, then compiles
+each complete ready mechanism clause independently. Hosted clauses become
+distinct deterministic `SettlementOption` objects; Alkahest entries remain
+legacy `accepted_escrows`. The listing schema and registry projections allow an
+empty escrow list, so a hosted-only listing does not manufacture a chain
+carrier. Accepted negotiation persists the exact selected option and a
+quantity-scaled integer amount for later server-authoritative preparation.
+
 ## Related contracts
 
 - [Marketplace identity](../marketplace-identity/spec.md)

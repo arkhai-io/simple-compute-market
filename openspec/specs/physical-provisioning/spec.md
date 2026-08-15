@@ -446,6 +446,22 @@ For an Ansible-backed VM pool, provider configuration identifies both the playbo
 - **WHEN** a fulfillment provider prepares a create operation for a scheduled settlement resource
 - **THEN** it derives the provisioned shape from that resource's own committed dimensions, not from any shape fields the caller's fulfillment request happens to carry
 
+### Requirement: Hosted funding gates whole-host allocation
+
+For a hosted bare-metal obligation, no Capacity Reservation commit, scheduling, executor dispatch, lease, or access grant may begin before authoritative funding is ready. The fulfillment identity MUST be derived from the accepted agreement, obligation, seller-owned Physical Resource or pool selection, site, buyer, claimant, and executor kind. Replay and restart MUST converge on the same selected-site reservation and fulfillment; they MUST NOT substitute a different resource or site.
+
+#### Scenario: Access-ready evidence
+
+- **WHEN** the funded selected-site fulfillment becomes authoritatively access-ready
+- **THEN** the storefront persists a public result and content-addressed seller-signed lease-ready evidence before collection
+- **AND** the evidence binds agreement, obligation, accepted binding, fulfillment, buyer, seller, claimant, site, executor, resource/allocation, condition, access method, and expiry without exposing credentials
+
+#### Scenario: Teardown is independent
+
+- **WHEN** financial collection is complete and the lease later expires
+- **THEN** revocation, executor teardown, and capacity release converge under their physical operation identities
+- **AND** no financial reclaim is inferred from teardown
+
 ## Evidence
 
 - VM and bare-metal allocation executor metadata: `provisioning/compute/service/tests/integration/test_leases_api.py` and `test_bare_metal_leases_api.py`.

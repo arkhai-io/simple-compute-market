@@ -94,7 +94,6 @@ def _add_operator_state(conn: sqlite3.Connection) -> None:
     )
 
 
-
 def _add_selected_site_bindings(conn: sqlite3.Connection) -> None:
     conn.execute(
         """
@@ -149,6 +148,7 @@ def _add_fulfillment_lifecycle(conn: sqlite3.Connection) -> None:
         "ON bare_metal_fulfillment_lifecycle(state)",
     )
 
+
 def _add_selected_site_immutability(conn: sqlite3.Connection) -> None:
     conn.execute(
         """
@@ -167,6 +167,92 @@ def _add_selected_site_immutability(conn: sqlite3.Connection) -> None:
           SELECT RAISE(
             ABORT,
             'bare-metal selected-site authority binding is immutable'
+          );
+        END
+        """
+    )
+
+
+def _add_hosted_physical_lifecycle(conn: sqlite3.Connection) -> None:
+    conn.execute(
+        """
+        CREATE TABLE bare_metal_hosted_lifecycle (
+          obligation_ref TEXT PRIMARY KEY,
+          agreement_ref TEXT NOT NULL,
+          negotiation_id TEXT NOT NULL UNIQUE,
+          accepted_binding_json TEXT NOT NULL,
+          accepted_binding_digest TEXT NOT NULL,
+          fulfillment_identity TEXT NOT NULL UNIQUE,
+          physical_state TEXT NOT NULL DEFAULT 'accepted',
+          financial_state TEXT NOT NULL DEFAULT 'pending',
+          recovery_state TEXT NOT NULL DEFAULT 'none',
+          teardown_state TEXT NOT NULL DEFAULT 'not_started',
+          capacity_reservation_id TEXT UNIQUE,
+          settlement_resource_id TEXT,
+          fulfillment_id TEXT UNIQUE,
+          public_result_json TEXT,
+          public_result_digest TEXT,
+          portable_evidence_json TEXT,
+          portable_evidence_digest TEXT,
+          portable_evidence_ref TEXT,
+          failure_reason TEXT,
+          created_at TEXT NOT NULL
+            DEFAULT (STRFTIME('%Y-%m-%dT%H:%M:%fZ', 'now')),
+          updated_at TEXT NOT NULL
+            DEFAULT (STRFTIME('%Y-%m-%dT%H:%M:%fZ', 'now')),
+          CHECK (LENGTH(TRIM(obligation_ref)) > 0),
+          CHECK (LENGTH(TRIM(agreement_ref)) > 0),
+          CHECK (LENGTH(TRIM(negotiation_id)) > 0),
+          CHECK (accepted_binding_digest GLOB 'sha256:[0-9a-f]*'),
+          CHECK (fulfillment_identity GLOB 'sha256:[0-9a-f]*'),
+          CHECK (
+            (public_result_json IS NULL AND public_result_digest IS NULL)
+            OR
+            (public_result_json IS NOT NULL AND public_result_digest IS NOT NULL)
+          ),
+          CHECK (
+            (
+              portable_evidence_json IS NULL
+              AND portable_evidence_digest IS NULL
+              AND portable_evidence_ref IS NULL
+            )
+            OR
+            (
+              portable_evidence_json IS NOT NULL
+              AND portable_evidence_digest IS NOT NULL
+              AND portable_evidence_ref IS NOT NULL
+            )
+          )
+        )
+        """
+    )
+    conn.execute(
+        "CREATE INDEX idx_bare_metal_hosted_physical_state "
+        "ON bare_metal_hosted_lifecycle(physical_state)"
+    )
+    conn.execute(
+        "CREATE INDEX idx_bare_metal_hosted_recovery_state "
+        "ON bare_metal_hosted_lifecycle(recovery_state, teardown_state)"
+    )
+    conn.execute(
+        """
+        CREATE TRIGGER bare_metal_hosted_binding_immutable
+        BEFORE UPDATE OF
+          obligation_ref, agreement_ref, negotiation_id,
+          accepted_binding_json, accepted_binding_digest, fulfillment_identity
+        ON bare_metal_hosted_lifecycle
+        WHEN NOT (
+          OLD.obligation_ref IS NEW.obligation_ref
+          AND OLD.agreement_ref IS NEW.agreement_ref
+          AND OLD.negotiation_id IS NEW.negotiation_id
+          AND OLD.accepted_binding_json IS NEW.accepted_binding_json
+          AND OLD.accepted_binding_digest IS NEW.accepted_binding_digest
+          AND OLD.fulfillment_identity IS NEW.fulfillment_identity
+        )
+        BEGIN
+          SELECT RAISE(
+            ABORT,
+            'bare-metal hosted accepted binding is immutable'
           );
         END
         """
@@ -267,8 +353,7 @@ def _migrate_common_domain_bindings(conn: sqlite3.Connection) -> None:
     ).fetchone()
     if orphan is not None:
         raise RuntimeError(
-            "historical bare-metal artifact has no negotiation owner: "
-            f"{orphan[0]}"
+            f"historical bare-metal artifact has no negotiation owner: {orphan[0]}"
         )
     payload_rows = conn.execute(
         """
@@ -339,5 +424,9 @@ BARE_METAL_STOREFRONT_MIGRATIONS = (
     Migration(
         id="bare-metal-storefront-0007-selected-site-immutability",
         apply=_add_selected_site_immutability,
+    ),
+    Migration(
+        id="bare-metal-storefront-0008-hosted-physical-lifecycle",
+        apply=_add_hosted_physical_lifecycle,
     ),
 )

@@ -241,6 +241,35 @@ fulfillment result, private authority state, or teardown carrier.
 - **WHEN** a live seller, site/provisioning authority, chain, hosted authority, credential, or real access target required by the selected scenario is absent
 - **THEN** that exact live assertion remains blocked or unavailable and static composition is not reported as end-to-end success
 
+### Requirement: Bare-metal hosted evidence is attributed by layer
+
+Focused local suites MUST cover exact option/party/resource derivation, hosted-only composition, profile publication filtering, no provisioning before funding, selected-site exactly-once fulfillment, portable evidence, restart/collect/reclaim races, return/loss projection, teardown independence, and Alkahest non-regression. Protected Stripe qualification MUST use the ordinary signed hosted release. Whole-host release acceptance MUST observe real access and later revocation/teardown on a disposable host; mocks and local success flags do not satisfy that protected lane.
+
+#### Scenario: External lanes are unavailable
+
+- **WHEN** signed producer artifacts, protected Stripe inputs, or a disposable live host are unavailable
+- **THEN** local deterministic evidence may pass but the corresponding protected task remains explicitly blocked
+- **AND** no synthetic evidence is recorded as release acceptance
+
+### Requirement: Hosted API-credit evidence is attributed at its owning boundary
+
+Credential-free focused tests MUST cover mechanism-neutral listing/selection,
+hosted-only composition, accepted-state mismatch rejection, shared buyer and
+storefront transport, delayed funding gates, deterministic fulfillment/grant
+identity, canonical principal ownership, unknown-outcome retrieval, exact-once
+issuance, secret-safe credential delivery, signed portable evidence,
+collect/reclaim exclusion, restart, and Alkahest independence at the lowest
+owning package. They MUST use deterministic ports and MUST NOT claim Stripe,
+signed producer release, protected browser, or live external-resolver evidence.
+
+#### Scenario: Default API-credit checks run
+- **WHEN** no wallet, chain, hosted authority, Stripe credential, browser, or external resolver is configured
+- **THEN** domain, buyer, storefront, credits authority, migration, package, runtime, and redaction checks can exercise their local contracts without external calls
+
+#### Scenario: Protected API-credit lane is unavailable
+- **WHEN** the exact signed hosted release, protected Stripe account, or deployed portable resolver is unavailable
+- **THEN** only that external evidence remains blocked and deterministic local results are not substituted for it
+
 ## Evidence
 
 - Layer ownership: package unit/integration suites, role-level E2E scenarios, and the independently released hosted producer's financial-provider and webhook-inbox integration suites.
@@ -251,3 +280,4 @@ fulfillment result, private authority state, or teardown carrier.
 - VM contribution, immutable bindings, migration, publication, settlement, and selected-site recovery adapters: `domains/vms/storefront/tests/unit/test_domain_registry.py`, `test_domain_thread_bindings.py`, `test_domain_migration.py`, `test_publication_wiring.py`, `test_settlement_composition.py`, and `test_fulfillment_resume_runtime.py`.
 
 Additive/optional client coexistence during a staged rollout is not established as a general baseline contract; registry rollout work remains proposed in `migrate-registry-to-postgres`.
+

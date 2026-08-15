@@ -350,6 +350,38 @@ Settlement verification, plan construction, materialization, condition/effect se
 - **WHEN** a recoverable operation's exact domain/version is not installed or its site trust binding is missing
 - **THEN** the operation remains blocked under its original identities and no capacity, fulfillment, settlement, result, or teardown call occurs
 
+### Requirement: Bare-metal hosted servicing orders funding, access, and collection
+
+The accepted bare-metal hosted obligation MUST be persisted from the immutable seller thread, listing, exact option, plan, and parties. Servicing MUST materialize the exact operation-scoped funding authorization, wait for authoritative funding, fulfill exactly once at the selected site, publish authoritative lease-ready evidence, and only then collect. Unfunded or pre-evidence failures remain reclaimable after the accepted deadline; access-ready evidence, committed collection, or unknown physical authority blocks reclaim. Return/loss and physical teardown remain independently recoverable.
+
+#### Scenario: Restart after evidence
+
+- **WHEN** the storefront restarts after evidence persistence but before collection acknowledgement
+- **THEN** servicing reuses the same obligation, fulfillment identity, result digest, evidence reference, and collection operation
+- **AND** it does not reserve, provision, publish, or collect twice
+
+### Requirement: API-credit hosted servicing orders financial and domain effects
+
+One accepted hosted API-credit obligation MUST progress through immutable plan
+registration, exact authorization materialization, authoritative funded state,
+exact-once credits issuance, signed portable evidence publication, condition
+evaluation, and collection in that order. Shared operation journals MUST
+exclude concurrent duplicate issue, evidence, collect, and reclaim work.
+Restart MUST resume from authority and repository state rather than reissuing
+because a response or credential was not observed.
+
+#### Scenario: Funding is delayed
+- **WHEN** hosted status remains awaiting payment or profile availability
+- **THEN** no credits-authority issuance, credential, fulfillment evidence, condition success, or collection occurs
+
+#### Scenario: Issuance commits before storefront restart
+- **WHEN** the credits authority has the fulfillment-keyed grant but the storefront lacks its response
+- **THEN** servicing retrieves and persists that grant, publishes one evidence object, and proceeds to collection without double issuance
+
+#### Scenario: Reclaim races committed issuance
+- **WHEN** reclaim begins while exact issuance may have committed
+- **THEN** the API-credit before-reclaim callback retrieves by fulfillment identity; committed issuance becomes fulfillment and blocks reclaim, while unknown issuance permits ordinary financial reclaim
+
 ## Evidence
 
 - Plan envelopes and lifecycle-universal fields:
@@ -369,3 +401,4 @@ Settlement verification, plan construction, materialization, condition/effect se
   `kit/alkahest/tests/unit/test_claims.py` and `test_claim_hooks.py`.
 - Accepted-domain settlement/fulfillment carriers, exact-object dispatch, result codec routing, and mismatch rejection: `core/storefront/tests/unit/test_domain_lifecycle.py` and `domains/vms/storefront/tests/unit/test_settlement_composition.py`.
 - Selected-site restart and teardown routing: `domains/vms/storefront/tests/unit/test_fulfillment_resume_runtime.py`, `test_fulfillment_service.py`, and `test_lease_truncation.py`.
+

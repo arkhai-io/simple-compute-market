@@ -397,6 +397,28 @@ This protected target verifies one exact ordinary signed hosted production relea
 
 Credential-free marketplace checks own the behavior that does not require Stripe: exact profile config and deterministic option identity, independent readiness/publication, local persistent payer binding, direct released-client payer and authorization helpers, bounded automation policy, storefront mediation, action redaction, delayed funding gates, immutable runtime journals, legacy card recovery, fulfillment/reclaim exclusion, package contents, release verification, and evidence-schema canaries. Deterministic hosted ports describe provider-neutral outcomes and never establish Stripe behavior.
 
+API-credit hosted checks additionally divide ownership as follows:
+
+- API-credit domain/buyer tests own strict `settlement_options`, exact
+  quantity-scaled minor-unit pricing, selection and accepted-party/key-target
+  validation, wallet-free policy resolution, transient actions, and recorded
+  resume/reclaim identities;
+- credits-authority tests own canonical principal ownership, deterministic
+  fulfillment identity, immutable request-digest conflicts, exact-once quota,
+  grant and balance mutation, and safe credential retry behavior;
+- storefront tests own accepted-state preparation, no issuance before
+  authoritative funding, commit-then-fail retrieval, private credential
+  isolation, canonical signed portable evidence, condition-before-collection,
+  reclaim exclusion, restart, and independent Alkahest behavior; and
+- protected system evidence owns only the ordinary signed producer release,
+  Stripe interaction/funding, deployed resolver, new-key consumption to 402,
+  and same-profile existing-key top-up.
+
+If the signed producer, protected Stripe account/browser inputs, or deployed
+resolver is unavailable, those exact assertions remain blocked. A deterministic
+hosted port, local resolver double, or successful Alkahest deal cannot be
+reported as their substitute.
+
 Protected preflight completes before publication or financial mutation and requires:
 
 - the exact marketplace commit and signed hosted production manifest, client wheel hash/version, service image digest, API/schema/migrations, conformance and provenance identities, signed release repository/workflow reference, hosted source commit, and independently recorded protected workflow run;
@@ -420,6 +442,12 @@ make -C e2e-tests test-buyer-machine \
 ```
 
 Local EAS/allowlisted-arbiter behavior is condition-boundary conformance only, not hosted financial evidence. There is no standalone hosted local-EAS operator target; focused condition tests do not establish hosted financial behavior.
+
+### Bare-metal hosted lanes
+
+Credential-free bare-metal suites own exact trusted option/party/resource derivation, ready-profile publication, hosted-only registry composition, action redaction, immutable accepted binding persistence, no reservation before authoritative funding, selected-site reservation/fulfillment replay, access-ready evidence, restart and collect/reclaim exclusion, return/loss projection, teardown independence, buyer-wheel discovery, and Alkahest non-regression. These tests use provider-neutral ports and real local persistence; they do not claim Stripe or physical-host behavior.
+
+The protected marketplace lane must use the ordinary signed hosted release for all three profiles and a disposable selected-site whole host. Acceptance observes authenticated discovery through collection or eligible reclaim, real access using buyer-only SSH material, lease expiry/revocation, executor teardown, and capacity release. Missing signed artifacts, Stripe account/rail prerequisites, or a disposable host remain named external blockers. A fake fulfillment flag, local evidence fixture, or no-op teardown never satisfies the protected lane.
 
 ## Boundary-Change Validation
 

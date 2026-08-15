@@ -48,6 +48,7 @@ VERIFY_HOSTED_RELEASE = uv run --no-project --with 'eth-account>=0.13,<0.14' \
 .PHONY: test-release-tooling test-deployment-packaging prepare-hosted-compose hosted-preflight hosted-compose-up hosted-compose-restart hosted-compose-clean hosted-stripe-test hosted-stripe-test-stop
 .PHONY: dist-arkhai-core-registry
 .PHONY: build-bare-metal-storefront
+.PHONY: dist-bare-metal-buyer
 
 # ---------------------------------------------------------------------------
 # Dist — build pure-Python wheels for internal packages before image builds.
@@ -128,6 +129,9 @@ dist-arkhai-core-storefront: ## Build arkhai-core-storefront wheel into .dist/
 	cd core/storefront && uv build --wheel --out-dir $(DIST_DIR)
 	@ls $(DIST_DIR)/arkhai_core_storefront-*-none-any.whl > /dev/null 2>&1 || \
 		(echo "ERROR: arkhai-core-storefront produced a platform-specific wheel — must build inside Docker" && exit 1)
+
+dist-bare-metal-buyer: dist-core dist-arkhai-core-buyer dist-registry-client dist-kits dist-hosted-client ## Build the bare-metal buyer contribution wheel.
+	cd domains && $(MAKE) dist-bare-metal-buyer DIST_DIR=$(DIST_DIR)
 
 dist-bare-metal-storefront: dist-core dist-arkhai-core-storefront dist-kits ## Build the bare-metal storefront contribution wheel.
 	cd domains && $(MAKE) dist-bare-metal-storefront DIST_DIR=$(DIST_DIR)

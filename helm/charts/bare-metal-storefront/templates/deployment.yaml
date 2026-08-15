@@ -38,8 +38,15 @@ spec:
               value: {{ .Values.adminPrincipals | toJson | quote }}
             - name: BARE_METAL_STOREFRONT_PUBLIC_URL
               value: {{ required "bare-metal storefront publicUrl is required" .Values.publicUrl | quote }}
+            {{- if .Values.alkahestEnabled }}
             - name: BARE_METAL_STOREFRONT_EVM_ADDRESS
-              value: {{ required "bare-metal storefront sellerEvmAddress is required" .Values.sellerEvmAddress | quote }}
+              value: {{ required "sellerEvmAddress is required when Alkahest is enabled" .Values.sellerEvmAddress | quote }}
+            {{- end }}
+            - name: BARE_METAL_STOREFRONT_SETTLEMENT
+              valueFrom:
+                secretKeyRef:
+                  name: {{ required "bare-metal settlement config Secret name is required" .Values.settlementConfigSecret.name | quote }}
+                  key: {{ required "bare-metal settlement config Secret key is required" .Values.settlementConfigSecret.key | quote }}
             - name: BARE_METAL_STOREFRONT_SITE_PLACEMENT
               value: {{ .Values.sitePlacement | quote }}
             - name: BARE_METAL_STOREFRONT_DB_PATH

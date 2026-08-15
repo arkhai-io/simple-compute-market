@@ -67,6 +67,22 @@ After accepted terms are durable, the buyer constructs one authorization from th
 
 Off-session policy evaluation never grants blanket charging authority. A qualifying accepted obligation may be signed without another prompt, while a refusal or hosted `requires_action` continues the same exact obligation through the common transient action policy. Restart re-fetches provider-neutral status/reason/deadline/action metadata and reuses accepted identities rather than persisting a URL or selecting another profile.
 
+## Bare-metal accepted authority
+
+The installed bare-metal contribution performs authenticated discovery, selects one exact advertised option, validates the option against the trusted physical listing, signs domain terms from buyer-owned duration and SSH public-key input, and stores the accepted option, parties, plan, obligation, and storefront authority under the persistent run identity. Hosted start/status/reclaim then use the core schema-opaque transport with that recorded signer and trust. CLI projections redact transient URLs; physical reclaim never implies lease termination after collection.
+
+## API-credit hosted recovery
+
+Fresh API-credit buys use the shared settlement registry to choose one
+compatible listing option and preserve the accepted plan in the run log.
+Hosted authorization is prepared from that plan and the selected persistent
+profile; core transport sends only accepted negotiation/obligation identifiers
+and the safe authorization reference to the storefront. Status, transient
+actions, resume, and reclaim reuse the recorded signer and storefront trust.
+The domain CLI returns buyer-authenticated credentials separately from public
+settlement state and never treats absence of a returned secret as permission to
+reauthorize or reissue.
+
 ## Current limits
 
 The plugin boundary and shipped export contracts do not prove that every arbitrary third-party command composes without collision. Persisted recovery covers documented stages; it is not a universal exactly-once transaction spanning registries, storefronts, and settlement mechanisms.

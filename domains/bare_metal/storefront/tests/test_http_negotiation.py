@@ -1,18 +1,37 @@
 from __future__ import annotations
 
 import time
+import base64
+from datetime import datetime, timedelta, timezone
 import uuid
 
 from fastapi.testclient import TestClient
+from market_core.schemas import (
+    RateValue,
+    SettlementOption,
+    SettlementPlan,
+    SettlementSelection,
+    derive_settlement_option_id,
+)
+from market_settlement_runtime import derive_obligation_ref
 from market_identity import (
     Eip191Signer,
-    IdentityScheme,
     RequestEnvelope,
     TrustedIdentitySet,
     canonical_body_hash,
     sign_request,
 )
 
+from arkhai_bare_metal import (
+    BareMetalHostedOptionFacts,
+    decode_bare_metal_hosted_option_facts,
+    CanonicalPrincipal,
+    bind_bare_metal_hosted_option,
+)
+from arkhai_bare_metal_storefront.hosted_lifecycle import (
+    BareMetalHostedLifecycleCallbacks,
+)
+from arkhai_bare_metal_storefront.hosted_routes import lifecycle_domain_callbacks
 from arkhai_bare_metal_storefront.domain_runtime import get_market_domain_contract
 from arkhai_bare_metal_storefront.runtime import BareMetalStorefrontRuntime
 from arkhai_bare_metal_storefront.server import (
@@ -27,6 +46,7 @@ def _app(runtime: BareMetalStorefrontRuntime):
         registry=build_bare_metal_storefront_registry(domain=runtime.domain),
         runtime=runtime,
     )
+
 
 PRIVATE_KEY = bytes.fromhex(
     "5de4111afa1a4b94908f83103eb1f1706367c2e68ca870fc3fb9a804cdab365a"
@@ -125,6 +145,124 @@ async def _insert_listing(runtime: BareMetalStorefrontRuntime) -> None:
     )
 
 
+def _hosted_option() -> SettlementOption:
+    now = datetime.now(timezone.utc)
+    claimant = CanonicalPrincipal(
+        scheme=SELLER_SIGNER.identity.scheme.value,
+        identifier=SELLER_SIGNER.identity.identifier,
+    )
+    params = {
+        "account_ref": "seller-main",
+        "authority_id": "authority-main",
+        "country": "US",
+        "environment": "test",
+        "claimant_principal": claimant.model_dump(mode="json"),
+        "condition": {
+            "condition_id": "bare-metal-lease-ready",
+            "evaluator": {
+                "kind": "builtin.v1",
+                "version": "trivial.v1",
+                "params": {"kind": "trivial"},
+            },
+            "demand": {"encoding": "application/jcs+json", "value": {}},
+        },
+        "funding_profile": "card.v1",
+        "interaction": "interactive",
+        "funds_flow": "separate_charges_transfers",
+        "contract_fingerprint": "sha256:" + "ab" * 32,
+    }
+    rates = [RateValue(field="amount", per="hour", value=120)]
+    base = SettlementOption(
+        option_id=derive_settlement_option_id(
+            mechanism="fiat.stripe.v1",
+            asset="usd",
+            rates=rates,
+            params=params,
+        ),
+        mechanism="fiat.stripe.v1",
+        asset="usd",
+        rates=rates,
+        params=params,
+    )
+    facts = BareMetalHostedOptionFacts(
+        derivation_key="site-a:resource-1",
+        projection_digest="sha256:" + "cd" * 32,
+        site_id="site-a",
+        executor_kind="bare_metal",
+        resource_selection="specific",
+        physical_resource_id="resource-1",
+        physical_host_id="physical-host-1",
+        pool_id="pool-a",
+        offer_expires_at=now + timedelta(hours=2),
+        funding_deadline=now + timedelta(hours=1),
+        fulfillment_deadline=now + timedelta(hours=1, minutes=30),
+    )
+    return bind_bare_metal_hosted_option(base, facts=facts).option
+
+
+async def _insert_hosted_listing(
+    runtime: BareMetalStorefrontRuntime,
+    *,
+    options: list[SettlementOption] | None = None,
+) -> SettlementOption:
+    selected = _hosted_option()
+    advertised = options if options is not None else [selected]
+    await runtime.db.upsert_bare_metal_listing(
+        listing_id="hosted-listing",
+        status="open",
+        created_at="2026-01-01T00:00:00Z",
+        updated_at="2026-01-01T00:00:00Z",
+        seller_principal=runtime.seller_principal,
+        storefront_url=runtime.storefront_url,
+        site_id="site-a",
+        pool_id="pool-a",
+        physical_resource_id="resource-1",
+        listing={
+            "kind": "bare_metal.v1",
+            "machine_id": "machine-1",
+            "physical_host_id": "physical-host-1",
+            "access_methods": ["ssh"],
+            "min_duration_seconds": 60,
+            "max_duration_seconds": 7200,
+        },
+        accepted_escrows=[],
+        settlement_options=[option.model_dump(mode="json") for option in advertised],
+    )
+    return advertised[0]
+
+
+def _hosted_opening(
+    option: SettlementOption,
+    *,
+    selection: SettlementSelection | None = None,
+) -> dict:
+    facts = decode_bare_metal_hosted_option_facts(option.params.get("bare_metal"))
+    selected = selection or SettlementSelection(
+        mechanism=option.mechanism,
+        option_id=option.option_id,
+        expiration_unix=int(facts.funding_deadline.timestamp()),
+    )
+    ssh_key = "ssh-ed25519 " + base64.b64encode(b"x" * 32).decode()
+    return {
+        "listing_id": "hosted-listing",
+        "buyer_principal": BUYER_SIGNER.identity.model_dump(mode="json"),
+        "buyer_agent_url": "https://buyer.example",
+        "provision_terms": {
+            "kind": "bare_metal.v1",
+            "version": 1,
+            "payload": {
+                "duration_seconds": 5400,
+                "access_method": "ssh",
+                "ssh_public_key": ssh_key,
+            },
+        },
+        "proposal": {
+            "settlement_selection": selected.model_dump(mode="json"),
+            "fields": {"amount": "180"},
+        },
+    }
+
+
 def _opening(*, payload: dict | None = None) -> dict:
     return {
         "listing_id": "listing-1",
@@ -199,6 +337,101 @@ async def test_signed_opening_accepts_and_persists_domain_artifacts(tmp_path) ->
     assert binding.listing_id == "listing-1"
     assert binding.binding.offering_mode == "bare_metal"
     assert str(binding.binding.domain_identity) == "bare_metal.v1"
+
+
+async def test_hosted_only_opening_derives_exact_plan_and_first_binding(
+    tmp_path,
+) -> None:
+    runtime = _runtime(str(tmp_path / "storefront.db"))
+    option = await _insert_hosted_listing(runtime)
+    opening = _hosted_opening(option)
+
+    with TestClient(_app(runtime)) as client:
+        response = client.post(
+            "/api/v1/negotiate/new",
+            json=opening,
+            headers=_headers("negotiate_new", "hosted-listing", opening),
+        )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["action"] == "accept"
+    assert payload["accepted_escrow_proposal"] is None
+    assert (
+        payload["settlement_selection"] == opening["proposal"]["settlement_selection"]
+    )
+    plan = SettlementPlan.model_validate(payload["settlement_plan"])
+    obligation = plan.obligations[0]
+    assert obligation.amount == 180
+    assert obligation.params.get("funding_profile") == "card.v1"
+    assert "bare_metal" not in obligation.params
+    assert plan.service_terms["bare_metal.v1"]["listing_id"] == "hosted-listing"
+    assert plan.service_terms["bare_metal.v1"]["option_id"] == option.option_id
+    obligation_ref = derive_obligation_ref(
+        payload["negotiation_id"],
+        0,
+        obligation.model_dump(mode="json"),
+    )
+
+    lifecycle = BareMetalHostedLifecycleCallbacks(
+        db=runtime.db,
+        runtime=None,
+        local_principal=SELLER_SIGNER.identity,
+        capacity_client=None,
+        fulfillment_client=None,
+        publish_evidence=None,
+    )
+    accepted = await lifecycle_domain_callbacks(
+        db=runtime.db,
+        lifecycle=lifecycle,
+    ).prepare(payload["negotiation_id"], obligation_ref, None)
+    persisted = await runtime.db.load_bare_metal_hosted_lifecycle(
+        obligation_ref=obligation_ref
+    )
+
+    assert accepted.obligation.amount == 180
+    assert persisted is not None
+    assert persisted.accepted_binding.option.option.option_id == option.option_id
+    assert persisted.capacity_reservation_id is None
+
+
+async def test_hosted_opening_rejects_mutated_and_ambiguous_selection(
+    tmp_path,
+) -> None:
+    runtime = _runtime(str(tmp_path / "storefront.db"))
+    option = await _insert_hosted_listing(runtime)
+    facts = decode_bare_metal_hosted_option_facts(option.params.get("bare_metal"))
+    mutated = SettlementSelection(
+        mechanism=option.mechanism,
+        option_id=option.option_id,
+        expiration_unix=int(facts.funding_deadline.timestamp()) + 1,
+    )
+    mutated_opening = _hosted_opening(option, selection=mutated)
+    ambiguous_opening = _hosted_opening(option)
+    ambiguous_opening["settlement_selection"] = mutated.model_dump(mode="json")
+
+    with TestClient(_app(runtime)) as client:
+        mutated_response = client.post(
+            "/api/v1/negotiate/new",
+            json=mutated_opening,
+            headers=_headers(
+                "negotiate_new",
+                "hosted-listing",
+                mutated_opening,
+            ),
+        )
+        ambiguous_response = client.post(
+            "/api/v1/negotiate/new",
+            json=ambiguous_opening,
+            headers=_headers(
+                "negotiate_new",
+                "hosted-listing",
+                ambiguous_opening,
+            ),
+        )
+
+    assert mutated_response.status_code == 400
+    assert ambiguous_response.status_code == 400
 
 
 async def test_auth_and_domain_failures_write_no_thread(tmp_path) -> None:

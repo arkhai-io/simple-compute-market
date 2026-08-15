@@ -25,7 +25,11 @@ siteBindingsSecret:
 sitePlacement: round_robin
 
 publicUrl: https://bare-metal.example.com
-sellerEvmAddress: "0x2222222222222222222222222222222222222222"
+sellerEvmAddress: ""
+alkahestEnabled: false
+settlementConfigSecret:
+  name: bare-metal-storefront-settlement
+  key: settlement.json
 databasePath: /var/lib/arkhai/bare-metal-storefront.db
 
 persistence:

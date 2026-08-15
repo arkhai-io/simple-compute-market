@@ -437,6 +437,36 @@ described as deployable.
 - **WHEN** a domain contribution moves between a standalone storefront and a shared multi-domain storefront process
 - **THEN** only the stack's contribution/config binding changes while public domain identity, selected-site routing, and scenario endpoints remain exact
 
+### Requirement: Bare-metal hosted roles remain independently secret-scoped
+
+The bare-metal storefront and buyer wheels MUST be installed through the repository wheelhouse. Storefront settlement configuration MUST contain only released hosted authority trust/account references and public profile policy; hosted provider credentials remain solely in the independently deployed hosted authority. Hosted-only storefronts and Ed25519 buyers MUST start without EVM address, wallet, chain, or RPC configuration. Compose and Helm MUST require exact identity trust, selected-site authority bindings, shared settlement configuration, funding windows, and immutable hosted release pins.
+
+#### Scenario: Hosted-only rollout
+
+- **WHEN** Alkahest is disabled and a released hosted authority plus selected-site fulfillment are configured
+- **THEN** storefront startup does not resolve a wallet or chain client
+- **AND** missing hosted trust, signer, site, funding-window, or release input fails before publication
+
+### Requirement: API-credit hosted deployment is wallet-free and authority-separated
+
+An API-credit buyer/storefront deployment MAY enable `fiat.stripe.v1` with
+Ed25519 marketplace identities and no wallet or chain settings. It MUST package
+the shared hosted kit, settlement runtime, storefront kit, negotiation runtime,
+API-credit domain, credits-authority client, and storefront composition as
+ordinary wheels/images. Public config MAY contain hosted authority/release
+trust, exact profiles/currency, seller account/condition/evidence resolver, and
+safe buyer-profile bindings. Marketplace workloads MUST NOT receive provider
+credentials or IDs, hosted payer/instrument data, raw actions, bearer secrets,
+or hosted database/migrations.
+
+#### Scenario: Hosted-only API-credit stack starts
+- **WHEN** registry, credits authority, storefront, buyer, resolver, and hosted authority have exact public Ed25519/release configuration
+- **THEN** listing, negotiation, authorization, issuance, evidence, and API consumption initialize without wallet or chain configuration
+
+#### Scenario: Storefront restarts after issuance
+- **WHEN** credits grant and evidence committed before marketplace collection
+- **THEN** the restarted storefront reloads its durable servicing/grant/evidence references and collects once without rebuilding another authority
+
 ## Evidence
 
 - Configurable registry endpoints and independently composed role stacks: core buyer registry configuration plus domain Compose and Helm manifests.
@@ -456,3 +486,4 @@ Internal Python distributions MUST be built into the repository `.dist` director
 A touched project's `init` or `reinit` target MUST explicitly upgrade and reinstall changed internal distributions from `.dist`. Docker stages that resolve internal packages MUST copy `.dist` from the build context so wheel changes invalidate the relevant layer.
 
 The aggregate kit test target MUST build prerequisite kit wheels and invoke every kit subproject's default test suite. Standalone targets MAY remain for focused development, but aggregate coverage MUST not silently omit a kit.
+

@@ -186,6 +186,9 @@ dependencies = [
     { name = "arkhai-bare-metal" },
     { name = "arkhai-compute-provisioning" },
     { name = "arkhai-compute-provisioning-service" },
+    { name = "arkhai-kit-fulfillment" },
+    { name = "arkhai-kit-resource-pools" },
+    { name = "arkhai-vms-provisioning-adapter" },
     { name = "arkhai-vms-provisioning-operator-client" },
     { name = "pydantic" },
 ]
@@ -193,6 +196,7 @@ dependencies = [
 [package.dev-dependencies]
 dev = [
     { name = "pytest" },
+    { name = "pytest-asyncio" },
 ]
 
 [package.metadata]
@@ -200,12 +204,18 @@ requires-dist = [
     { name = "arkhai-bare-metal", editable = "../../" },
     { name = "arkhai-compute-provisioning", editable = "../../../../provisioning/compute" },
     { name = "arkhai-compute-provisioning-service", editable = "../../../../provisioning/compute/service" },
+    { name = "arkhai-kit-fulfillment", editable = "../../../../kit/fulfillment" },
+    { name = "arkhai-kit-resource-pools", editable = "../../../../kit/resource-pools" },
+    { name = "arkhai-vms-provisioning-adapter", editable = "../../../vms/provisioning/adapter" },
     { name = "arkhai-vms-provisioning-operator-client", editable = "../../../vms/provisioning/client" },
     { name = "pydantic", specifier = ">=2.7" },
 ]
 
 [package.metadata.requires-dev]
-dev = [{ name = "pytest", specifier = ">=9.0.2" }]
+dev = [
+    { name = "pytest", specifier = ">=9.0.2" },
+    { name = "pytest-asyncio", specifier = ">=0.23" },
+]
 
 [[package]]
 name = "arkhai-compute-provisioning"
@@ -328,7 +338,7 @@ wheels = [
 [[package]]
 name = "arkhai-kit-fulfillment"
 version = "0.2.0"
-source = { registry = "../../../../.dist" }
+source = { editable = "../../../../kit/fulfillment" }
 dependencies = [
     { name = "arkhai-kit-resource-pools" },
     { name = "arkhai-kit-site" },
@@ -336,8 +346,20 @@ dependencies = [
     { name = "sqlalchemy" },
     { name = "uuid6" },
 ]
-wheels = [
-    { path = "arkhai_kit_fulfillment-0.2.0-py3-none-any.whl" },
+
+[package.metadata]
+requires-dist = [
+    { name = "arkhai-kit-resource-pools", specifier = ">=0.2.0" },
+    { name = "arkhai-kit-site", specifier = ">=0.3.0" },
+    { name = "pydantic", specifier = ">=2.7" },
+    { name = "sqlalchemy", specifier = ">=2.0" },
+    { name = "uuid6", specifier = ">=2024.7.10" },
+]
+
+[package.metadata.requires-dev]
+dev = [
+    { name = "pytest", specifier = ">=8.3.4,<9.0.0" },
+    { name = "pytest-asyncio", specifier = ">=0.23" },
 ]
 
 [[package]]
@@ -358,15 +380,22 @@ wheels = [
 [[package]]
 name = "arkhai-kit-resource-pools"
 version = "0.2.0"
-source = { registry = "../../../../.dist" }
+source = { editable = "../../../../kit/resource-pools" }
 dependencies = [
     { name = "pydantic" },
     { name = "pyyaml" },
     { name = "sqlalchemy" },
 ]
-wheels = [
-    { path = "arkhai_kit_resource_pools-0.2.0-py3-none-any.whl" },
+
+[package.metadata]
+requires-dist = [
+    { name = "pydantic", specifier = ">=2.7" },
+    { name = "pyyaml", specifier = ">=6.0" },
+    { name = "sqlalchemy", specifier = ">=2.0" },
 ]
+
+[package.metadata.requires-dev]
+dev = [{ name = "pytest", specifier = ">=8.3.4,<9.0.0" }]
 
 [[package]]
 name = "arkhai-kit-site"
@@ -380,6 +409,57 @@ dependencies = [
 ]
 wheels = [
     { path = "arkhai_kit_site-0.3.0-py3-none-any.whl" },
+]
+
+[[package]]
+name = "arkhai-vms"
+version = "0.2.0"
+source = { registry = "../../../../.dist" }
+dependencies = [
+    { name = "arkhai-core" },
+    { name = "pydantic" },
+]
+wheels = [
+    { path = "arkhai_vms-0.2.0-py3-none-any.whl" },
+]
+
+[[package]]
+name = "arkhai-vms-provisioning-adapter"
+version = "0.2.0"
+source = { editable = "../../../vms/provisioning/adapter" }
+dependencies = [
+    { name = "arkhai-bare-metal" },
+    { name = "arkhai-compute-provisioning" },
+    { name = "arkhai-compute-provisioning-service" },
+    { name = "arkhai-kit-fulfillment" },
+    { name = "arkhai-kit-resource-pools" },
+    { name = "arkhai-vms" },
+    { name = "arkhai-vms-provisioning-operator-client" },
+    { name = "cryptography" },
+    { name = "dependency-injector" },
+    { name = "pydantic" },
+    { name = "sqlalchemy" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "arkhai-bare-metal", specifier = ">=0.2.0" },
+    { name = "arkhai-compute-provisioning", specifier = ">=0.6.0" },
+    { name = "arkhai-compute-provisioning-service", specifier = ">=0.2.0" },
+    { name = "arkhai-kit-fulfillment", specifier = ">=0.2.0" },
+    { name = "arkhai-kit-resource-pools", specifier = ">=0.2.0" },
+    { name = "arkhai-vms", specifier = ">=0.2.0" },
+    { name = "arkhai-vms-provisioning-operator-client", specifier = ">=0.3.0" },
+    { name = "cryptography", specifier = ">=42.0" },
+    { name = "dependency-injector", specifier = ">=4.41.0" },
+    { name = "pydantic", specifier = ">=2.7" },
+    { name = "sqlalchemy", specifier = ">=2.0" },
+]
+
+[package.metadata.requires-dev]
+dev = [
+    { name = "pytest", specifier = ">=9.0.2" },
+    { name = "pytest-asyncio", specifier = ">=0.23" },
 ]
 
 [[package]]
@@ -1737,6 +1817,19 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/e4/47/b9efed96c114afcfa3c9d3fe98a76a1d14c74a9e266d397cf6eb64be5e01/pytest-9.1.1.tar.gz", hash = "sha256:1088fbde8f2b49d95a549a195707afa7a76a3ce9bcadc26b6d71f0ffda5fe313", size = 1636369, upload-time = "2026-06-19T10:58:32.857Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/24/25/1de2678b631f5a49215c6c96fff41ba892b0a34df68d6d80292b1b48aa7f/pytest-9.1.1-py3-none-any.whl", hash = "sha256:37a86b45efb9a47a61a36449063e8e18d0cab3161329fc099eb21783169c4f0c", size = 386536, upload-time = "2026-06-19T10:58:31.347Z" },
+]
+
+[[package]]
+name = "pytest-asyncio"
+version = "1.4.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "pytest" },
+    { name = "typing-extensions", marker = "python_full_version < '3.13'" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/43/7c/d36d04db312ecf4298932ef77e6e4a9e8ad017906e24e34f0b0c361a2473/pytest_asyncio-1.4.0.tar.gz", hash = "sha256:c6c0d2259945122819f171a32ecea2c349ead889ee28176caaf492143424be42", size = 58514, upload-time = "2026-05-26T09:56:04.083Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/03/e2/08a497ef684b88559c9cc5f4ad53a37e7b99e727094a86d6ea32536d5d3c/pytest_asyncio-1.4.0-py3-none-any.whl", hash = "sha256:933ca923a23075a87fb7070c0ec272a6848489824d887c85c812670932835aa1", size = 16930, upload-time = "2026-05-26T09:56:02.576Z" },
 ]
 
 [[package]]

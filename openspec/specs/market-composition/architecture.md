@@ -157,6 +157,10 @@ The hosted kit has two provider-neutral entry surfaces over the same exact relea
 
 This split does not add a second settlement lifecycle. The direct lane manages payer ownership and yields only an opaque operation-scoped authorization reference; the mediated lane owns durable obligation state and financial convergence. Neither lane copies client models or signing bytes, imports hosted service source, or admits provider configuration. API-credit and bare-metal composition remain separate adopters and gain no hosted dependency from the VM cutover.
 
+## Bare-metal hosted composition
+
+The installed bare-metal buyer consumes the core `HostedSettlementTransport` and hosted settle hook; the dedicated storefront binds `BareMetalHostedDomainCallbacks` into `market_settlement_runtime.HostedSettlementRouteService`. The route service owns accepted-state authentication, mechanism-neutral prepare/reserve/fulfill/project/cleanup order, and runtime wake-up. Bare metal owns only immutable physical binding derivation, selected-site lifecycle calls, result normalization, evidence publication, and teardown. Neither package imports VM code, `hosted_settlement_client`, provider models, or a second signed-wire implementation.
+
 ## Current limits
 
 The composition contract covers the shipped role protocols and versioned domain contracts; it is not a claim that every possible market shape fits the current phases. Auctions, sealed-bid protocols, arbitrary settlement plans, and a universal storefront executable require explicit changes rather than inference from the extension points.
@@ -168,6 +172,19 @@ site authority, provider, and the selected-site POOLS-7 lifecycle. The shipped
 bare-metal contribution and its exact hooks do not by themselves prove live
 hardware access or revocation. A no-op hook, synthetic result, or common-shell
 success cannot stand in for that proof.
+
+## API-credit hosted composition
+
+The API-credit buyer owns only domain selection and authorization inputs; its
+hosted lifecycle hook is constructed by core over
+`HostedSettlementTransport`. The storefront instantiates
+`HostedSettlementRouteService` from the settlement-runtime kit and injects
+API-credit accepted-state, reservation, fulfillment, projection, cleanup, and
+before-reclaim callbacks. This preserves one auth/replay/operation-journal
+implementation while keeping credits-service calls and issuance evidence in
+the domain role. Lazy Alkahest client construction is conditional on the
+registered policy, so hosted-only Ed25519 composition has no wallet or chain
+dependency.
 
 ## Related contracts
 

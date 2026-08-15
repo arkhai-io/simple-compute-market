@@ -410,9 +410,38 @@ binding is recorded.
   offering mode or its listing codec projects another mode
 - **THEN** publication is rejected before registry or capacity effects
 
+### Requirement: Bare-metal adopts the shared hosted lifecycle
+
+The bare-metal buyer MUST be an installed `market.buyer_domains` contribution and the storefront MUST register Alkahest and hosted Stripe through `SettlementConfigurationRegistry`. Bare-metal composition MAY interpret trusted listings and physical lifecycle records, but MUST consume the core `HostedSettlementTransport` and shared `HostedSettlementRouteService`; it MUST NOT import `hosted_settlement_client` outside the hosted kit or copy VM transport/routes.
+
+#### Scenario: Domain callback injection
+
+- **WHEN** the shared route service prepares, reserves, fulfills, projects, or cleans a hosted obligation
+- **THEN** injected bare-metal callbacks derive accepted physical authority, perform selected-site fulfillment, and project lease evidence
+- **AND** the shared service retains signing, replay, mechanism runtime, collect, and reclaim mechanics
+
+### Requirement: API-credit hosted composition uses shared seams
+
+API-credit buyer and storefront roots MUST install Alkahest and
+`fiat.stripe.v1` through the shared settlement configuration registry and
+mechanism-neutral runtime. Buyer lifecycle calls MUST use
+`core_buyer.HostedSettlementTransport`; storefront lifecycle routes MUST use
+`HostedSettlementRouteService` with API-credit callbacks. Core and API-credit
+domain packages MUST remain provider opaque and MUST NOT import VM, bare-metal,
+or the released hosted client directly.
+
+#### Scenario: Hosted-only API-credit storefront starts
+- **WHEN** only a ready hosted clause and Ed25519 seller signer are configured
+- **THEN** publication, negotiation, start, issuance, evidence, status, and reclaim routes initialize without a wallet or Alkahest client
+
+#### Scenario: Both mechanisms are enabled
+- **WHEN** one API-credit listing has complete Alkahest and hosted configuration
+- **THEN** both alternatives share domain pricing/fulfillment semantics while retaining independent mechanism state and failure outcomes
+
 ## Evidence
 
 - Import boundaries: `core/tests/unit/test_carrier_purity.py` and `domains/vms/storefront/tests/unit/test_architecture_imports.py`.
 - Core CLI fallback and shipped plugin contracts: `core/buyer/tests/unit/test_cli.py`, `domains/vms/buyer/tests/test_plugin_export.py`, and `domains/apicredits/buyer/tests/test_plugin_export.py`.
 - Distribution entry points: `core/buyer/pyproject.toml`, `domains/vms/buyer/pyproject.toml`, and `domains/apicredits/buyer/pyproject.toml`.
 - Frozen storefront registry, startup discovery, record-bound lifecycle carriers, and exact-object resolution: `core/storefront/tests/unit/test_domain_registry.py`, `test_domain_plugins.py`, `test_app_composition.py`, and `test_domain_lifecycle.py`.
+

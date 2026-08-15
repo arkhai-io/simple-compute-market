@@ -114,15 +114,27 @@ Reports permit only public lifecycle stages, profile/currency, normalized outcom
 
 Core tests own contribution discovery, frozen registry invariants, exact-object
 resolution, schema-opaque carriers, publication source fan-out, immutable
-bindings, and cross-swap rejection. VM composition tests own adapters,
-selected-site calls, exact mode projection, migration, and restart. Bare-metal
-tests own only their codecs/publication and the concrete fulfillment hook.
-Deployment tests inspect staged wheels and rendered public/secret separation.
+bindings, and cross-swap rejection. VM composition tests own adapters, selected-site calls, exact mode projection, migration, and restart. Bare-metal domain/buyer/storefront tests own trusted option and accepted-binding codecs, hosted-only composition, schema-opaque buyer transport consumption, per-profile publication, funding gates, deterministic selected-site reservation/fulfillment, access-ready evidence, collect/reclaim exclusion, restart, loss/return recovery, and teardown convergence. Deployment tests inspect staged wheels and rendered public/secret separation.
 
-One system proof must run real VM and selected-site bare-metal deals through
-one process, observe result and teardown, and prove capacity restoration. Until
-the bare-metal producer and POOLS-7 lifecycle are real, this evidence is a
-named external blocker; test seams cannot claim acceptance in its place.
+Protected bare-metal proof consumes the exact signed hosted producer release and an isolated disposable whole host. It must observe each selected funding profile, no physical effect before authoritative funding, authenticated access with buyer-owned SSH material, collection after portable evidence, later access failure after revocation, executor teardown, Capacity Reservation release, and capacity republication. Signed producer inputs, Stripe test-mode prerequisites, and disposable hardware are external blockers; deterministic local ports cannot claim them.
+
+## API-credit hosted evidence ownership
+
+The shared transport/runtime suites prove request shape, signature delegation,
+replay, operation leases, delayed states, and collect/reclaim exclusion.
+API-credit domain and buyer suites prove strict carriers, selection, pricing,
+accepted identity, wallet-free policy, and recovery. Credits-authority suites
+prove canonical ownership and fulfillment-keyed exact-once grants.
+API-credit storefront suites prove funding-gated issuance, unknown-outcome
+lookup, private credentials, signed evidence, restart, and Alkahest
+independence.
+
+Only the protected system lane may attribute Stripe interaction and
+authoritative provider funding to the exact signed hosted release. It also owns
+deployed portable-resolution evidence and a real new-key/use-to-402/existing-key
+top-up path. Missing producer artifacts, Stripe capabilities, browser inputs,
+or deployed resolver remain named external blockers; deterministic ports prove
+only marketplace behavior.
 
 ## Current limits
 

@@ -1,15 +1,15 @@
-.PHONY: dist dist-vms dist-bare-metal dist-bare-metal-storefront dist-storefront \
-	dist-provisioning-operator-client dist-provisioning-adapters \
+.PHONY: dist dist-vms dist-bare-metal dist-bare-metal-buyer \
+	dist-bare-metal-storefront dist-storefront dist-provisioning-operator-client dist-provisioning-adapters \
 	dist-apicredits-domain dist-apicredits-service dist-apicredits-storefront \
 	dist-apicredits-middleware dist-apicredits-sample-app dist-apicredits-buyer \
 	dist-buyer test-provisioning-iac test-provisioning-adapter test-storefront \
 	test-vms-buyer test-apicredits test-apicredits-middleware
 
-DIST_DIR ?= ../.dist
+DIST_DIR ?= $(abspath ../.dist)
 
 
-dist: dist-vms dist-bare-metal dist-bare-metal-storefront dist-storefront \
-	dist-provisioning-operator-client dist-provisioning-adapters \
+dist: dist-vms dist-bare-metal dist-bare-metal-buyer dist-bare-metal-storefront \
+	dist-storefront dist-provisioning-operator-client dist-provisioning-adapters \
 	dist-apicredits-domain dist-apicredits-service dist-apicredits-storefront \
 	dist-apicredits-middleware dist-apicredits-sample-app dist-apicredits-buyer \
 	dist-buyer ## Build every domains-scoped wheel
@@ -36,6 +36,12 @@ dist-bare-metal: ## Build arkhai-bare-metal wheel into .dist/
 	cd bare_metal && uv build --wheel --out-dir $(DIST_DIR)
 	@ls $(DIST_DIR)/arkhai_bare_metal-*-none-any.whl > /dev/null 2>&1 || \
 		(echo "ERROR: arkhai-bare-metal produced a platform-specific wheel -- must build inside Docker" && exit 1)
+
+dist-bare-metal-buyer: dist-bare-metal ## Build the bare-metal buyer contribution wheel into .dist/
+	-mkdir -p $(DIST_DIR)
+	cd bare_metal/buyer && uv build --wheel --out-dir $(DIST_DIR)
+	@ls $(DIST_DIR)/arkhai_bare_metal_buyer-*-none-any.whl > /dev/null 2>&1 || \
+		(echo "ERROR: arkhai-bare-metal-buyer produced a platform-specific wheel -- must build inside Docker" && exit 1)
 
 dist-bare-metal-storefront: dist-bare-metal ## Build the bare-metal storefront contribution wheel into .dist/
 	-mkdir -p $(DIST_DIR)

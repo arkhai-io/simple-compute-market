@@ -30,7 +30,7 @@ from market_fulfillment import (
     SettlementResult,
     VersionedEnvelope,
 )
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from bare_metal_provisioning_adapter.services.bare_metal_operations_service import (
     BareMetalOperationsService,
@@ -67,10 +67,23 @@ class BareMetalFulfillmentMetadata(BaseModel):
     operation: Literal["create", "teardown"]
     machine_id: str = Field(min_length=1)
     physical_host_id: str = Field(min_length=1)
-    escrow_uid: str = Field(min_length=1)
+    escrow_uid: str | None = Field(default=None, min_length=1)
+    settlement_obligation_ref: str | None = Field(default=None, min_length=1)
     lease_start_utc: datetime | None = None
     lease_end_utc: datetime
     access_ref: dict[str, Any] | None = None
+
+    @model_validator(mode="after")
+    def _validate_settlement_identity(self) -> "BareMetalFulfillmentMetadata":
+        if (
+            sum(
+                value is not None
+                for value in (self.escrow_uid, self.settlement_obligation_ref)
+            )
+            != 1
+        ):
+            raise ValueError("fulfillment metadata requires one settlement identity")
+        return self
 
 
 class BareMetalFulfillmentProvider(FulfillmentProvider):
@@ -212,7 +225,7 @@ class BareMetalFulfillmentProvider(FulfillmentProvider):
             lease = operation.lease
             contract = ExecutorActionEnvelope(
                 capacity_reservation_id=operation.capacity_reservation_id,
-                deal_ref={"escrow_uid": lease.escrow_uid},
+                deal_ref={lease.settlement_identity_kind: lease.settlement_identity},
                 executor_kind=BARE_METAL_EXECUTOR_KIND,
                 action_kind=NODE_GRANT_ACCESS_ACTION,
                 idempotency_key=f"{operation.capacity_reservation_id}:grant-access",
@@ -227,6 +240,7 @@ class BareMetalFulfillmentProvider(FulfillmentProvider):
                     machine_id=lease.machine_id,
                     physical_host_id=lease.physical_host_id,
                     escrow_uid=lease.escrow_uid,
+                    settlement_obligation_ref=lease.settlement_obligation_ref,
                     access_ref=lease.access_ref,
                     lease_start_utc=lease.lease_start_utc,
                     lease_end_utc=lease.lease_end_utc,
@@ -254,13 +268,17 @@ class BareMetalFulfillmentProvider(FulfillmentProvider):
             raise ProviderConfigInvalidError(
                 "fulfillment metadata machine_id does not match the selected resource"
             )
-        if self._resource_value(resource, "physical_host_id") != metadata.physical_host_id:
+        if (
+            self._resource_value(resource, "physical_host_id")
+            != metadata.physical_host_id
+        ):
             raise ProviderConfigInvalidError(
                 "fulfillment metadata physical_host_id does not match the selected resource"
             )
         lease = BareMetalLeaseCreate(
             capacity_reservation_id=settlement_result.capacity_reservation_id,
             escrow_uid=metadata.escrow_uid,
+            settlement_obligation_ref=metadata.settlement_obligation_ref,
             machine_id=metadata.machine_id,
             physical_host_id=metadata.physical_host_id,
             lease_start_utc=metadata.lease_start_utc,
@@ -291,7 +309,7 @@ class BareMetalFulfillmentProvider(FulfillmentProvider):
             lease = operation.lease
             contract = ExecutorActionEnvelope(
                 capacity_reservation_id=operation.capacity_reservation_id,
-                deal_ref={"escrow_uid": lease.escrow_uid},
+                deal_ref={lease.settlement_identity_kind: lease.settlement_identity},
                 executor_kind=BARE_METAL_EXECUTOR_KIND,
                 action_kind=NODE_RECLAIM_ACCESS_ACTION,
                 idempotency_key=f"{operation.capacity_reservation_id}:reclaim-access",
@@ -300,7 +318,7 @@ class BareMetalFulfillmentProvider(FulfillmentProvider):
             response = await self._operations.reclaim_access(
                 {
                     "capacity_reservation_id": operation.capacity_reservation_id,
-                    "escrow_uid": lease.escrow_uid,
+                    lease.settlement_identity_kind: lease.settlement_identity,
                     "executor_target": lease.machine_id,
                     "executor_ref": {
                         "physical_host_id": lease.physical_host_id,
@@ -318,6 +336,7 @@ class BareMetalFulfillmentProvider(FulfillmentProvider):
                     machine_id=lease.machine_id,
                     physical_host_id=lease.physical_host_id,
                     escrow_uid=lease.escrow_uid,
+                    settlement_obligation_ref=lease.settlement_obligation_ref,
                     access_ref=lease.access_ref,
                     lease_start_utc=lease.lease_start_utc,
                     lease_end_utc=lease.lease_end_utc,
@@ -389,6 +408,9 @@ class BareMetalFulfillmentProvider(FulfillmentProvider):
                 else None
             ),
             escrow_uid=metadata.escrow_uid,
+            settlement_obligation_ref=metadata.settlement_obligation_ref,
+            access_grant_ref=metadata.create_job_id,
+            lease_expires_at=metadata.lease_end_utc,
             timestamp=(
                 result.get("timestamp")
                 if isinstance(result.get("timestamp"), str)

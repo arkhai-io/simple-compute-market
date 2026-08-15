@@ -4,9 +4,100 @@ from __future__ import annotations
 
 from typing import Literal
 
+from arkhai_bare_metal import (
+    BareMetalAcceptedHostedBinding,
+    BareMetalAccessResult,
+    BareMetalLeaseReadyEvidence,
+    BareMetalLeaseReadyResult,
+    BareMetalReceipt,
+)
 from market_identity import Identity
-from pydantic import BaseModel, ConfigDict, Field
-from arkhai_bare_metal import BareMetalAccessResult, BareMetalReceipt
+from pydantic import BaseModel, ConfigDict, Field, model_validator
+
+PhysicalState = Literal[
+    "accepted",
+    "funded",
+    "capacity_reserved",
+    "capacity_committed",
+    "scheduled",
+    "fulfillment_pending",
+    "access_ready",
+    "evidence_published",
+    "physical_failed",
+]
+FinancialState = Literal[
+    "pending",
+    "collection_unknown",
+    "collected",
+    "collection_blocked",
+    "reclaimed",
+    "manual_review",
+]
+RecoveryState = Literal[
+    "none",
+    "funding_returned",
+    "reclaim_pending",
+    "reclaimed",
+    "loss_manual",
+    "manual_review",
+]
+TeardownState = Literal[
+    "not_started",
+    "pending",
+    "tearing_down",
+    "failed",
+    "torn_down",
+    "released",
+]
+
+
+class BareMetalHostedLifecycle(BaseModel):
+    """Durable hosted-to-physical state under one accepted seller binding."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
+
+    accepted_binding: BareMetalAcceptedHostedBinding
+    accepted_binding_digest: str
+    fulfillment_identity: str
+    physical_state: PhysicalState = "accepted"
+    financial_state: FinancialState = "pending"
+    recovery_state: RecoveryState = "none"
+    teardown_state: TeardownState = "not_started"
+    capacity_reservation_id: str | None = None
+    settlement_resource_id: str | None = None
+    fulfillment_id: str | None = None
+    public_result: BareMetalLeaseReadyResult | None = None
+    public_result_digest: str | None = None
+    portable_evidence: BareMetalLeaseReadyEvidence | None = None
+    portable_evidence_digest: str | None = None
+    portable_evidence_ref: str | None = None
+    failure_reason: str | None = None
+
+    @model_validator(mode="after")
+    def _validate_lifecycle(self) -> "BareMetalHostedLifecycle":
+        if self.accepted_binding_digest != self.accepted_binding.binding_digest:
+            raise ValueError("accepted hosted binding digest does not match")
+        if self.public_result is None:
+            if self.public_result_digest is not None:
+                raise ValueError("public result digest requires its result")
+        elif self.public_result_digest != self.public_result.result_digest:
+            raise ValueError("public result digest does not match")
+        evidence_values = (
+            self.portable_evidence,
+            self.portable_evidence_digest,
+            self.portable_evidence_ref,
+        )
+        if any(value is not None for value in evidence_values):
+            if any(value is None for value in evidence_values):
+                raise ValueError(
+                    "portable evidence payload, digest, and ref are atomic"
+                )
+            assert self.portable_evidence is not None
+            if self.portable_evidence_digest != self.portable_evidence.evidence_digest:
+                raise ValueError("portable evidence digest does not match")
+            if self.portable_evidence.fulfillment_identity != self.fulfillment_identity:
+                raise ValueError("portable evidence changes fulfillment identity")
+        return self
 
 
 class BareMetalHealthResponse(BaseModel):

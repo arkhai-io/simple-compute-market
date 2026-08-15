@@ -28,15 +28,25 @@ from .negotiation_service import BareMetalNegotiationService
 from .settlement import build_bare_metal_settlement_plan
 from .settlement_service import BareMetalSettlementService
 from .fulfillment_service import BareMetalFulfillmentService
+from .hosted_lifecycle import BareMetalHostedLifecycleCallbacks
+from .hosted_routes import (
+    BareMetalHostedDomainCallbacks,
+    lifecycle_domain_callbacks,
+)
 from .sqlite_client import SQLiteClient
 from .site_clients import (
     BareMetalSiteBinding,
     build_trusted_site_clients,
     parse_site_bindings,
 )
+from .settlement_composition import (
+    ALKAHEST_MECHANISM,
+    BareMetalStorefrontSettlementComposition,
+)
 
 
 logger = logging.getLogger(__name__)
+
 
 @dataclass(frozen=True)
 class BareMetalStorefrontRuntime:
@@ -48,7 +58,15 @@ class BareMetalStorefrontRuntime:
     admin_principals: TrustedIdentitySet
     storefront_url: str
     marketplace_signer: Signer = field(repr=False)
-    seller_evm_address: str
+    seller_evm_address: str | None = None
+    settlement_composition: BareMetalStorefrontSettlementComposition | None = field(
+        default=None,
+        repr=False,
+    )
+    hosted_domain_callbacks: BareMetalHostedDomainCallbacks | None = field(
+        default=None,
+        repr=False,
+    )
     plan_builder: Callable[..., dict[str, Any]] = build_bare_metal_settlement_plan
     site_bindings: tuple[BareMetalSiteBinding, ...] = ()
     capacity_client: Any | None = field(default=None, repr=False)
@@ -64,11 +82,16 @@ class BareMetalStorefrontRuntime:
             self.db.db_path,
             apply_migrations=False,
         )
+        clients = (
+            self.settlement_composition.runtime_clients()
+            if self.settlement_composition is not None
+            else {}
+        )
         object.__setattr__(self, "settlement_repository", repository)
         object.__setattr__(
             self,
             "settlement_runtime",
-            SettlementRuntime(repository, {}),
+            SettlementRuntime(repository, clients),
         )
 
     def negotiation_service(self) -> BareMetalNegotiationService:
@@ -83,6 +106,8 @@ class BareMetalStorefrontRuntime:
 
     def settlement_service(self) -> BareMetalSettlementService:
         """Build commercial verification from explicitly configured chains."""
+        if not self.seller_evm_address:
+            raise RuntimeError("Alkahest settlement is not configured")
         return BareMetalSettlementService(
             db=self.db,
             seller_wallet=self.seller_evm_address,
@@ -116,7 +141,11 @@ class BareMetalStorefrontRuntime:
         checks = {
             "api": "ok",
             "database": "ok",
-            "commercial_settlement": "ok" if self.chain_clients else "unavailable",
+            "commercial_settlement": (
+                "ok"
+                if self.settlement_composition is not None or self.chain_clients
+                else "unavailable"
+            ),
             "site_projection": "unavailable",
             "fulfillment": "unavailable",
         }
@@ -141,9 +170,7 @@ class BareMetalStorefrontRuntime:
                 )
         return {
             "status": (
-                "ok"
-                if all(value == "ok" for value in checks.values())
-                else "degraded"
+                "ok" if all(value == "ok" for value in checks.values()) else "degraded"
             ),
             "checks": checks,
             "paused": paused,
@@ -192,10 +219,7 @@ def _build_chain_clients_from_environment() -> tuple[
         ),
         logger=logger,
     )
-    return clients, {
-        chain.name: chain.address_config_path
-        for chain in chains
-    }
+    return clients, {chain.name: chain.address_config_path for chain in chains}
 
 
 def build_runtime_from_environment(
@@ -243,15 +267,59 @@ def build_runtime_from_environment(
         raise RuntimeError(
             "BARE_METAL_STOREFRONT_PUBLIC_URL is required for listing ownership",
         )
+    raw_settlement = os.environ.get("BARE_METAL_STOREFRONT_SETTLEMENT")
+    settlement_config: dict[str, Any] | None = None
+    settlement_composition: BareMetalStorefrontSettlementComposition | None = None
+    if raw_settlement:
+        try:
+            parsed_settlement = json.loads(raw_settlement)
+            if not isinstance(parsed_settlement, dict):
+                raise TypeError("settlement config must be a JSON object")
+            settlement_config = parsed_settlement
+            settlement_composition = (
+                BareMetalStorefrontSettlementComposition.from_raw_config(
+                    settlement_config,
+                    resources={
+                        "marketplace_signer": signer,
+                        "claimant_principal": identity_config.principal,
+                    },
+                )
+            )
+        except (TypeError, ValueError, json.JSONDecodeError) as exc:
+            raise RuntimeError(
+                "BARE_METAL_STOREFRONT_SETTLEMENT must be strict shared settlement config"
+            ) from exc
+    alkahest_enabled = (
+        settlement_composition is None
+        or ALKAHEST_MECHANISM in settlement_composition.enabled_mechanisms
+    )
     seller_evm_address = os.environ.get(
         "BARE_METAL_STOREFRONT_EVM_ADDRESS",
         "",
-    )
-    if not seller_evm_address:
+    ).strip()
+    if alkahest_enabled and not seller_evm_address:
         raise RuntimeError(
-            "BARE_METAL_STOREFRONT_EVM_ADDRESS is required for Alkahest settlement",
+            "BARE_METAL_STOREFRONT_EVM_ADDRESS is required when Alkahest is enabled",
         )
-    chain_clients, chain_config_paths = _build_chain_clients_from_environment()
+    if alkahest_enabled:
+        chain_clients, chain_config_paths = _build_chain_clients_from_environment()
+    else:
+        chain_clients, chain_config_paths = {}, {}
+    if settlement_config is not None:
+        raw_chains = json.loads(os.environ.get("BARE_METAL_STOREFRONT_CHAINS", "{}"))
+        settlement_composition = (
+            BareMetalStorefrontSettlementComposition.from_raw_config(
+                settlement_config,
+                resources={
+                    "marketplace_signer": signer,
+                    "claimant_principal": identity_config.principal,
+                    "wallet": seller_evm_address or None,
+                    "wallet_ready": bool(seller_evm_address),
+                    "clients": chain_clients,
+                    "chains": raw_chains,
+                },
+            )
+        )
     try:
         site_bindings = parse_site_bindings(
             os.environ["BARE_METAL_STOREFRONT_SITES"],
@@ -284,7 +352,7 @@ def build_runtime_from_environment(
         raise RuntimeError(
             "bare-metal storefront trusted site composition is invalid",
         ) from exc
-    return BareMetalStorefrontRuntime(
+    runtime = BareMetalStorefrontRuntime(
         db=db,
         domain=selected_domain,
         seller_principal=identity_config.principal,
@@ -292,9 +360,35 @@ def build_runtime_from_environment(
         admin_principals=admin_principals,
         marketplace_signer=signer,
         seller_evm_address=seller_evm_address,
+        settlement_composition=settlement_composition,
         chain_clients=chain_clients,
         chain_config_paths=chain_config_paths,
         site_bindings=site_bindings,
         capacity_client=capacity_client,
         fulfillment_client=fulfillment_client,
     )
+    if settlement_composition is not None and "fiat.stripe.v1" in (
+        settlement_composition.enabled_mechanisms
+    ):
+
+        async def publish_evidence(evidence: Any) -> str:
+            return (
+                storefront_url
+                + "/api/v1/evidence/bare-metal/"
+                + str(evidence.evidence_digest).removeprefix("sha256:")
+            )
+
+        lifecycle = BareMetalHostedLifecycleCallbacks(
+            db=db,
+            runtime=runtime.settlement_runtime,
+            local_principal=identity_config.principal,
+            capacity_client=capacity_client,
+            fulfillment_client=fulfillment_client,
+            publish_evidence=publish_evidence,
+        )
+        object.__setattr__(
+            runtime,
+            "hosted_domain_callbacks",
+            lifecycle_domain_callbacks(db=db, lifecycle=lifecycle),
+        )
+    return runtime

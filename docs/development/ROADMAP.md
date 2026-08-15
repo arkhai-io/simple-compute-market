@@ -151,7 +151,7 @@ collection. Their connection details, credentials, capacity repair, refund,
 and issuance rollback remain at their real domain boundaries rather than
 becoming generic settlement state.
 
-Neither new domain is deployable or testable end to end. Bare metal has no stack definition, and no end-to-end scenario references either domain: every deal path the repository proves is a VM deal path.
+API credits now composes hosted Stripe and Alkahest over the shared buyer transport, storefront route service, settlement runtime, credits authority, and portable evidence boundary. Its hosted-only Ed25519 path is locally implementable and packageable without a wallet or chain; provider-authentic acceptance remains external until the exact signed hosted release, protected Stripe inputs, and deployed resolver are available. Bare-metal release evidence remains separately dependent on its live selected-site provisioning prerequisites.
 
 The domain layer's own structure is better than the duplication suggests. All three domains follow one pattern — a base contract with a storefront-side extension — and all three pass the shared conformance suite, which works without assuming a repository layout. Only the directory conventions differ, and a composed domain is small enough that relocating them buys nothing.
 
@@ -159,7 +159,7 @@ The domain layer's own structure is better than the duplication suggests. All th
 
 | Open gap | Owned by |
 |---|---|
-| Bare metal still lacks a deployable stack, and neither bare metal nor API credits has an end-to-end deal path proved alongside VM | [`bare-metal-and-credits-domain-stacks`](../../openspec/changes/bare-metal-and-credits-domain-stacks/) |
+| Provider-authentic API-credit hosted evidence still requires the exact signed producer release, protected Stripe inputs, and deployed resolver; bare-metal still requires live selected-site provisioning and access/teardown proof | [`add-api-credits-hosted-settlement`](../../openspec/changes/add-api-credits-hosted-settlement/), [`add-bare-metal-hosted-settlement`](../../openspec/changes/add-bare-metal-hosted-settlement/) |
 
 **Design promotion (2026-08-15).** `kit-storefront-composition-seam`,
 `kit-owned-negotiation-runtime`, and `kit-owned-capacity-and-publication` are now
@@ -172,6 +172,20 @@ negotiation lifecycle, and use the shared durable capacity/publication binding;
 bare metal composes the previously missing watchdog and chain factory and the
 same capacity seams. The remaining multi-domain, domain-stack, and hosted
 settlement adoption gaps build on these seams rather than reopening them.
+
+**Design promotion (2026-08-15, API-credit hosted adoption).** API credits now
+publishes independent mechanism-neutral options, uses the core hosted buyer
+transport and shared callback-driven storefront route service, derives one
+canonical principal-bound fulfillment/grant identity, and orders authoritative
+funding before exact-once issuance, signed portable evidence, condition
+evaluation, and collection. Credits-service request-digest grants and
+storefront private-result/evidence migrations make acknowledgement loss,
+restart, collection/reclaim races, and secret separation durable. These
+decisions are promoted to the API credits, buyer orchestration, storefront
+publication, market composition, settlement servicing, deployment state, and
+test compatibility specifications and repository architecture/deployment/test
+guides. Remaining signed-producer, protected Stripe, and live resolver evidence
+is recorded as external rather than replaced with local simulation.
 
 A compute-dimension name leaking into every domain's capacity declaration is a real defect but too small to own a gap row here; it rides with [`capacity-resource-administration`](../../openspec/changes/capacity-resource-administration/), which already rewrites the code that causes it.
 
@@ -239,11 +253,7 @@ and each selected Stripe test-mode rail/account/instrument/mandate/browser
 prerequisite. Local client/service wheels and unsigned contract artifacts do
 not satisfy those external release checks.
 
-API-credit and bare-metal hosted settlement composition remain separate
-adopters. API credits must reuse the common payer/authorization and settlement
-runtime seams without VM imports. Bare metal additionally remains gated on its
-runnable buyer, seller/composition, real fulfillment/teardown, and selected-site
-capacity contracts; neither gap is filled by the VM consumer.
+API-credit and bare-metal are now separate adopters of the shared hosted transport, route service, configuration registry, and settlement runtime; neither imports VM lifecycle code. Bare metal ships an installed buyer contribution, a dedicated seller composition, trusted selected-site publication, funding-gated Capacity Reservation and fulfillment, portable lease-ready evidence, and independent teardown/recovery. Local deterministic delivery is complete under the permanent capability contracts. Production activation remains blocked only on the exact signed hosted release, protected Stripe rail prerequisites, and disposable live-host access/revocation/teardown evidence described above.
 
 ---
 

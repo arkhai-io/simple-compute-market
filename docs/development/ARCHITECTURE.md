@@ -257,6 +257,33 @@ Preflight remains mechanism-owned but projects one sanitized readiness contract.
 
 Typed metadata generates role-appropriate templates, edit validation, environment and Helm schema fragments, clause descriptors, and reference output. Marketplace schemas admit public consumer trust and policy but reject hosted provider, administrator, webhook, database, and service-migration state. See the [CLI query language](../../openspec/specs/cli-query-language/spec.md), [settlement configuration contract](../../openspec/specs/settlement-configuration/spec.md), and its [architecture](../../openspec/specs/settlement-configuration/architecture.md).
 
+### API-credit hosted settlement
+
+API credits composes the same registered hosted mechanism and shared operation
+journal as VM settlement, without importing VM routes or hosted-client models.
+Its listing publishes mechanism-neutral `settlement_options` independently of
+legacy Alkahest `accepted_escrows`. The seller reloads accepted negotiation
+artifacts to derive one obligation that pins service, quantity, key target,
+canonical buyer and claimant, amount, expiry, profile, and evidence condition;
+buyer input cannot override those fields at settlement start.
+
+The common hosted route service injects API-credit callbacks around
+authorization/replay and the mechanism runtime. Authoritative `funded` is the
+only transition that enters issuance. The credits authority keys its immutable
+grant by a deterministic fulfillment identity derived from the obligation and
+binds a canonical request digest, so retry or acknowledgement loss cannot
+double-reserve quota, create a second key, or increase balance twice. Buyer-only
+credentials live in the private result repository.
+
+The storefront signs a canonical secret-free issuance evidence body and
+publishes it through the configured portable resolver. Condition success and
+collection follow only after that evidence is authoritative. Reclaim first
+queries the credits authority under the same fulfillment identity: committed
+issuance becomes durable fulfillment and excludes reclaim; an unknown grant
+leaves eligible financial reclaim to the hosted mechanism. This keeps grant,
+evidence, collection, and reclaim races attributable without treating an API
+credential as settlement evidence.
+
 ## Runtime service map
 
 ```text
@@ -602,4 +629,11 @@ Buyer-local off-session automation is an opt-in policy bounded by exact authorit
 Hosted system evidence preserves the production ownership boundary. Credential-free marketplace tests cover profile configuration/identity, independent readiness, direct payer and authorization helpers, action redaction, delayed funding gates, runtime journals, legacy recovery, reclaim races, and packaging using released provider-neutral contracts. The protected marketplace scenario alone attributes supported Stripe test-mode behavior for each profile and off-session action fallback. Its report identifies marketplace source separately from the hosted signed manifest, client, service image, API/schema/migrations, provenance, repository/workflow/source, and protected run, and marks unavailable external prerequisites rather than substituting local evidence.
 
 Alkahest remains an independent mechanism lane. API-credit and bare-metal hosted adoption are separate composition changes; the VM consumer does not install hosted dependencies or lifecycle code into those domains.
+
+### Bare-metal hosted adoption
+
+Bare metal composes the same provider-neutral hosted mechanism without importing VM packages or the released client directly. The installed buyer plugin uses the core `HostedSettlementTransport`; the seller binds bare-owned callbacks into the shared `HostedSettlementRouteService`. On first start, the seller rebuilds the accepted physical binding only from the durable negotiation thread, trusted listing, exact option, settlement plan, and canonical parties, then persists it under the obligation identity.
+
+Authoritative funding is the gate into the existing selected-site capacity and fulfillment clients. A deterministic fulfillment identity survives retries and restart. Access-ready state produces a credential-free public result and content-addressed lease-ready evidence; the resolver returns the canonical evidence with a marketplace-signer proof. Collection follows evidence. Reclaim is blocked after evidence, committed collection, or unknown physical authority. Financial return/loss recovery and post-collection lease teardown remain separate convergent lifecycles.
+
 

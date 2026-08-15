@@ -237,6 +237,25 @@ The expanded cutover coordinates buyer and storefront config, the exact hosted c
 
 Marketplace schemas reject provider credentials and IDs, Customer/PaymentMethod/mandate/bank/card data, stable instruments in storefront state, action URLs, webhooks, hosted databases/migrations, provider reconciliation, and recovery controls. The hosted authority remains the only process that receives those inputs.
 
+For an API-credit hosted-only role, set settlement priority to
+`fiat.stripe.v1`, provide an Ed25519 marketplace identity through the normal
+role credential Secret, and leave wallet/chains absent. The storefront requires
+the public hosted authority/release pins, seller account, exact funding-profile
+clauses, credits-service URL plus admin-key file, and portable issuance-evidence
+resolver trust. The buyer requires its selected durable profile and matching
+opaque authority binding. API bearer secrets are returned only through the
+authenticated buyer result route; they do not belong in TOML, environment
+variables, listings, settlement evidence, logs, images, or ConfigMaps.
+
+The API-credit storefront distribution and image install
+`arkhai-kit-hosted-settlement` and the released hosted client from the staged
+wheelhouse. The storefront owns the settlement operation journal, private
+buyer-result table, and signed issuance-evidence table; the credits service
+independently owns keys, request-digested grants, balances, quota, credentials,
+and its migration history. Restart either authority against its own volume.
+Never source-share a sibling package or mount one service's database into the
+other.
+
 For each buyer and storefront configuration overlay, use this production
 sequence:
 
@@ -301,6 +320,15 @@ Stripe credentials, or provider state. Those belong to the hosted service's
 independent release and chart. Marketplace packages consume the exact hosted
 client wheel and identity interface bound by that signed release manifest;
 editable sibling sources and compatible-major substitution are rejected.
+
+### Bare-metal hosted role configuration
+
+`arkhai-bare-metal-buyer` is an installed core buyer-domain wheel. Its TOML contains a registry URL, registry authority/trust pins, and bounded public defaults only; the XDG buyer profile service resolves the fresh or run-recorded signer. The `bare-metal` commands use authenticated discovery and the shared schema-opaque hosted storefront transport. Raw payer/instrument/provider values and action material are not domain configuration or durable CLI output.
+
+The bare-metal storefront accepts one strict shared settlement JSON root through `BARE_METAL_STOREFRONT_SETTLEMENT`. Hosted-only configuration leaves `BARE_METAL_STOREFRONT_EVM_ADDRESS` empty and constructs no Alkahest wallet, chain, or RPC client. Publication additionally requires authenticated registry trust, exact typed clauses, per-profile funding deadlines, offer/fulfillment bounds, fresh signed selected-site projections, and a maximum lease duration. The Compose wrapper exposes those as public/config inputs; the Helm chart mounts the settlement JSON from an existing Secret. Neither deployment surface carries Stripe credentials or hosted provider state.
+
+The hosted authority remains a separately verified deployment. The storefront needs its public URL, authority/environment trust, seller account reference, contract fingerprint, supported profile/currency/country policy, and exact manifest/client/API capability pins through the shared settlement config. The selected-site authority keeps inventory, executor routing, provisioning SSH credentials, and teardown ownership. The buyer, storefront, site authority, and hosted authority each retain independent signer credentials and databases.
+
 
 Local cross-repository Compose uses the same verified supply-chain path.
 `make prepare-hosted-compose` verifies the configured trust policy, signed

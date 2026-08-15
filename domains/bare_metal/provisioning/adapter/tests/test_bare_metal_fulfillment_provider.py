@@ -132,6 +132,8 @@ async def test_selected_resource_drives_idempotent_grant_result_and_teardown():
         "physical_host_id": "physical-host-1",
         "ssh_user": "buyer",
         "escrow_uid": "escrow-1",
+        "access_grant_ref": "job-create",
+        "lease_expires_at": "2030-01-02T00:00:00Z",
         "timestamp": "2030-01-01T00:00:01Z",
         "status": "success",
         "details": {"result_message": "access granted"},

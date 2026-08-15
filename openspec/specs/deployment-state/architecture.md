@@ -142,6 +142,30 @@ replacement. Only rows with exact site and pool/resource provenance migrate.
 Once common bindings have participated in effects, rollback is forward
 recovery using those immutable bindings.
 
+## Bare-metal hosted topology
+
+The bare-metal buyer and storefront remain separate released wheels and role processes. The buyer contribution reads only strict public registry/trust/default configuration and resolves its signer from the core profile service. The storefront mounts one shared settlement JSON Secret containing public authority/account/trust/release settings. Hosted-only startup leaves the EVM address empty and creates no wallet, RPC, chain, or Alkahest client. Compose and Helm carry selected-site bindings and provisioning trust separately from financial trust; neither surface mounts Stripe, payer-profile, provider, or buyer SSH private material.
+
+The storefront database owns accepted hosted-binding and bare lifecycle migrations in the role's ordered migration set. Activation may disable hosted before effects; after an accepted hosted mutation, recovery keeps the compatible artifact/config set pinned until financial and physical operation journals are safe. Protected activation additionally verifies the independently signed hosted release and disposable target before publication.
+
+## API-credit hosted topology
+
+The deployable API-credit path consists of independent registry, credits
+authority, gated application, storefront, buyer/driver, portable evidence
+resolver, and hosted authority roles. Hosted-only buyer/storefront composition
+uses Ed25519 marketplace signer Secrets and has no wallet/chain volume. The
+marketplace images install the hosted consumer and shared runtime wheels but do
+not receive Stripe/provider credentials or hosted persistence.
+
+The credits authority owns canonical owner, immutable fulfillment/grant
+digests, key hashes, balance, quota, credential, and consumption migrations.
+The storefront owns accepted negotiation, settlement operation, private
+buyer-result, and signed issuance-evidence migrations. Public configuration
+pins authority/manifest/client/API/schema/capabilities, exact funding profiles,
+seller account and evidence resolver. Rollback is safe before accepted hosted
+effects; afterward both authorities recover forward under their immutable
+identities.
+
 ## Current limits
 
 The repository does not yet have one universal configuration-delivery mechanism or migration phase for every service. Publication authority between private artifact registries and public package releases, removal of all local source overrides, and a repository-wide typed-client versioning policy remain separate decisions.

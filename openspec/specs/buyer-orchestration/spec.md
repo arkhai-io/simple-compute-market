@@ -307,6 +307,33 @@ Generated buyer configuration MUST reference the XDG profile store and credentia
 - **WHEN** strict file or explicit environment credential storage is selected
 - **THEN** output contains only the provider kind, bounded locator guidance, and profile commands, never the resolved signing value
 
+### Requirement: Bare-metal buyers preserve accepted hosted authority
+
+The installed `bare-metal` buyer plugin MUST use the selected persistent profile signer, authenticated registry results, and one exact advertised settlement option. Hosted start, status, resume, and reclaim MUST use the core schema-opaque storefront transport. Buyer inputs MAY choose an advertised funding profile, bounded off-session behavior, lease duration, and an SSH public key; they MUST NOT supply seller, site, Physical Resource, executor, condition, or provider identities.
+
+#### Scenario: Hosted-only buyer has no wallet
+
+- **WHEN** an Ed25519 buyer selects a ready `fiat.stripe.v1` bare-metal option
+- **THEN** discovery and settlement start without wallet, chain, RPC, Stripe model, or provider credential configuration
+- **AND** persisted run output contains only accepted marketplace identities, operation-scoped references, safe action metadata, and physical public results
+
+### Requirement: API-credit hosted buys share accepted-state transport
+
+The API-credit buyer MUST select one exact advertised settlement option, verify
+mechanism, profile, currency, interaction, service, quantity, key mode/key ID,
+buyer and claimant against accepted seller state, and use the core hosted
+start/status/reclaim/resume transport. A hosted-only Ed25519 buyer MUST NOT
+resolve wallet, chain, RPC, or Alkahest state. Resume MUST reuse the recorded
+principal, obligation, authorization, and settlement references.
+
+#### Scenario: Hosted API-credit buyer resumes after restart
+- **WHEN** the run log contains an accepted hosted plan and safe authorization reference
+- **THEN** the buyer polls the same storefront settlement, handles current action metadata transiently, and neither renegotiates nor creates a second grant
+
+#### Scenario: Hosted-only API-credit buyer starts
+- **WHEN** policy enables only `fiat.stripe.v1`
+- **THEN** selection and settlement run with the persistent Ed25519 signer and no wallet or chain resolution
+
 ## Evidence
 
 - Core/domain import purity and entry-point composition: `core/buyer/tests/unit/test_carrier_purity.py`, `domains/vms/buyer/tests/test_plugin_export.py`, and `domains/apicredits/buyer/tests/test_plugin_export.py`.
@@ -317,3 +344,4 @@ Generated buyer configuration MUST reference the XDG profile store and credentia
   `core/buyer/tests/unit/test_escrow_selection.py`.
 
 Simultaneous command registration for every installed domain plugin is not independently covered by the cited tests; the baseline claim is limited to the plugin boundary and each shipped plugin's export contract.
+

@@ -22,13 +22,9 @@ declare the relevant `deliverable_modes`.
   provisioning SSH private-key file.
 - A Resource Pool document that explicitly declares `bare_metal`; absence is
   not a permissive default.
-- A chain/settlement deployment accepted by the storefront and a funded public
-  seller address. Never put a wallet private key in Compose or this document.
+- One strict shared settlement configuration. Hosted-only roles require the signed released hosted manifest/client/API capability pins, public authority trust and environment scope, seller account binding, exact profiles/currency/country/condition policy, and no wallet/RPC secret. Alkahest roles require the ordinary chain configuration and funded public seller address. Never put a wallet private key, Stripe credential, payer binding, or provider object in Compose or this document.
 
-The marketplace buyer contribution is a separate prerequisite. A running
-seller stack is not end-to-end evidence until the installed `market
-bare-metal` plugin completes discovery, negotiation, settlement, access,
-teardown, and access revocation.
+The installed `arkhai-bare-metal-buyer` contribution supplies the `market bare-metal` discovery, negotiation, hosted start/status/reclaim, and recovery commands. A running seller stack is not end-to-end evidence until that public path also observes authenticated access, teardown, and access revocation against a disposable host.
 
 ## Build the images
 
@@ -108,6 +104,7 @@ export BARE_METAL_STOREFRONT_IDENTITY_IDENTIFIER=<canonical-identifier>
 export BARE_METAL_STOREFRONT_ADMIN_IDENTITIES_JSON='[{"scheme":"<scheme>","identifier":"<canonical-admin-identifier>"}]'
 export BARE_METAL_STOREFRONT_PUBLIC_URL=https://seller.example/
 export BARE_METAL_STOREFRONT_EVM_ADDRESS=<public-settlement-address>
+export BARE_METAL_STOREFRONT_SETTLEMENT=/run/secrets/settlement.json
 
 export BARE_METAL_PROVISIONING_IDENTITY_SCHEME=<scheme>
 export BARE_METAL_PROVISIONING_IDENTITY_IDENTIFIER=<canonical-site-authority-identifier>
@@ -139,18 +136,9 @@ separate named volumes. Do not treat an HTTP 200 alone as deal readiness:
 inspect the storefront health projection and stop if database, selected-site
 capacity, fulfillment, or the configured settlement mechanism is unavailable.
 
-The dedicated image exposes the installed bare-metal publication selection and
-command seam but does not yet run an autonomous registry publication daemon.
-Until the accepted storefront contribution lifecycle invokes that seam, an
-operator must drive the ordinary signed publication command externally. A
-healthy but undiscoverable storefront is therefore an explicit blocker, not a
-successful seller deployment.
+The dedicated image includes the bare-metal publication command. Run one authenticated publication round with `bare-metal-storefront publish` after all configured sites report a fresh complete signed projection. It publishes independent typed settlement options and closes stale open listings through the common publication runner; it does not manufacture availability or substitute a different site/resource.
 
-Likewise, `BARE_METAL_STOREFRONT_EVM_ADDRESS` is only a public party binding;
-it does not create a chain client or prove Alkahest readiness. The current
-dedicated runtime reports commercial settlement unavailable unless an accepted
-settlement adapter is composed. Do not replace that missing authority with a
-test provider or mark the stack ready from the address alone.
+`BARE_METAL_STOREFRONT_EVM_ADDRESS` is required only when Alkahest is enabled. Hosted-only startup leaves it empty and constructs no wallet, RPC, chain, or Alkahest client. The shared settlement JSON is mounted read-only and contains public authority/account/trust/release settings only. The runtime registers the ready mechanisms, the shared hosted route service, and bare-owned lifecycle callbacks; a disabled or unready mechanism is omitted rather than represented by a fake adapter.
 
 ## Release-qualified deal evidence
 
