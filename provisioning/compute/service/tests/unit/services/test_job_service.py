@@ -67,6 +67,7 @@ class TestBuildParams:
         svc = _make_service()
         params = svc._build_params({
             "vm_host": "ww2",
+            "executor_kind": "vm",
             "vm_target": "my-vm",
             "vm_action": "shutdown",
         })
@@ -76,14 +77,18 @@ class TestBuildParams:
 
     def test_defaults_applied_for_missing_keys(self):
         svc = _make_service()
-        params = svc._build_params({})
+        params = svc._build_params({"executor_kind": "vm"})
         assert params.vm_host == "kvm1"  # from settings.default_vm_host
         assert params.vm_action == "create"
         assert params.image_setup_type == "scratch"
 
     def test_optional_fields_are_none_when_absent(self):
         svc = _make_service()
-        params = svc._build_params({"vm_host": "kvm1", "vm_action": "list"})
+        params = svc._build_params({
+            "executor_kind": "vm",
+            "vm_host": "kvm1",
+            "vm_action": "list",
+        })
         assert params.vm_ram is None
         assert params.vm_vcpus is None
         assert params.ssh_pubkey is None
@@ -95,6 +100,7 @@ class TestBuildParams:
             "vm_host": "kvm1",
             "vm_target": "test-vm",
             "vm_action": "create",
+            "executor_kind": "vm",
             "image_setup_type": "golden",
             "vm_ram": 8192,
             "vm_vcpus": 8,
@@ -134,7 +140,11 @@ class TestBuildParams:
 
     def test_frp_falls_back_to_settings_when_not_in_params(self):
         svc = _make_service(frp_server_addr="9.9.9.9", frp_domain="fallback.com")
-        params = svc._build_params({"vm_host": "kvm1", "vm_action": "create"})
+        params = svc._build_params({
+            "executor_kind": "vm",
+            "vm_host": "kvm1",
+            "vm_action": "create",
+        })
         assert params.frp_server_addr == "9.9.9.9"
         assert params.frp_domain == "fallback.com"
 
@@ -142,6 +152,7 @@ class TestBuildParams:
         svc = _make_service(frp_server_addr="9.9.9.9")
         params = svc._build_params({
             "vm_host": "kvm1",
+            "executor_kind": "vm",
             "vm_action": "create",
             "frp_server_addr": "1.1.1.1",
         })
@@ -149,7 +160,7 @@ class TestBuildParams:
 
     def test_returns_ansible_job_params_instance(self):
         svc = _make_service()
-        params = svc._build_params({})
+        params = svc._build_params({"executor_kind": "vm"})
         assert isinstance(params, AnsibleJobParams)
 
     def test_bare_metal_fields_mapped(self):
@@ -187,9 +198,10 @@ class TestBuildParams:
         assert params.access_ref == {"ssh_user": "tenant-a"}
         assert params.bare_metal_reclaim_policy == "delete_user"
 
-    def test_executor_fields_fall_back_to_legacy_vm_fields(self):
+    def test_explicit_vm_identity_maps_legacy_vm_action_fields(self):
         svc = _make_service()
         params = svc._build_params({
+            "executor_kind": "vm",
             "vm_host": "kvm1",
             "vm_target": "test-vm",
             "vm_action": "shutdown",
@@ -198,6 +210,16 @@ class TestBuildParams:
         assert params.executor_kind == "vm"
         assert params.executor_action == "shutdown"
         assert params.executor_target == "test-vm"
+
+    def test_missing_executor_kind_fails_closed(self):
+        svc = _make_service()
+
+        with pytest.raises(KeyError, match="executor_kind"):
+            svc._build_params({
+                "vm_host": "kvm1",
+                "vm_target": "test-vm",
+                "vm_action": "shutdown",
+            })
 
     def test_executor_target_does_not_force_vm_target(self):
         svc = _make_service()
