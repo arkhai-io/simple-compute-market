@@ -536,7 +536,7 @@ A listing with a durable site mapping MUST route all capacity claims to exactly 
 
 ### Requirement: Bare-metal hosted publication intersects all authorities
 
-A bare-metal listing MAY publish exact `fiat.stripe.v1` alternatives only from a complete non-stale trusted selected-site projection with exclusive allocation, SSH capability, hosted authority/account/profile readiness, condition resolver readiness, and compatible offer, funding, fulfillment, and capacity windows. Each ready `card.v1`, `us_bank_transfer.v1`, or `us_ach_debit.v1` profile is a separate deterministic option; one unavailable profile MUST NOT suppress ready alternatives or legacy Alkahest escrows.
+A bare-metal listing MAY publish exact `fiat.stripe.v1` alternatives only from a complete non-stale trusted selected-site projection with exclusive allocation, SSH capability, hosted authority/account/profile readiness, condition resolver readiness, and compatible offer, funding, fulfillment, and capacity windows. Each ready `card.v1`, `us_bank_transfer.v1`, or `us_ach_debit.v1` profile is a separate deterministic option; one unavailable profile MUST NOT suppress ready alternatives or legacy Alkahest escrows. The option's interaction value MUST be exactly `interactive` or `saved_instrument`; `off_session` is policy behavior, not a wire value, and push bank transfer MUST remain interactive.
 
 #### Scenario: Pending funding cannot extend capacity
 

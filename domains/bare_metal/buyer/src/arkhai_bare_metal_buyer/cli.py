@@ -208,7 +208,7 @@ def buy_bare_metal(
         duration_seconds=duration_seconds,
         ssh_public_key=ssh_public_key,
         settlement=selection,
-        allow_off_session=selected.params.get("interaction") == "off_session",
+        allow_off_session=selected.params.get("interaction") == "saved_instrument",
     )
     validate_buyer_selection(demand=demand, advertised_options=options)
     trusted_listing = BareMetalListing.model_validate(listing.offer)

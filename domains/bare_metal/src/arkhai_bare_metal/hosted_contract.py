@@ -21,7 +21,7 @@ FundingProfileId = Literal[
     "us_bank_transfer.v1",
     "us_ach_debit.v1",
 ]
-InteractionMode = Literal["interactive", "off_session"]
+InteractionMode = Literal["interactive", "saved_instrument"]
 ResourceSelection = Literal["specific", "fungible"]
 
 BARE_METAL_HOSTED_OPTION_KIND = "bare_metal.hosted-option.v1"
@@ -204,9 +204,9 @@ class BareMetalHostedOption(BaseModel):
             raise ValueError("hosted option does not preserve trusted bare-metal facts")
         if (
             self.funding_profile == "us_bank_transfer.v1"
-            and self.interaction == "off_session"
+            and self.interaction == "saved_instrument"
         ):
-            raise ValueError("push bank transfer does not support off-session use")
+            raise ValueError("push bank transfer does not support saved instruments")
         return self
 
 
@@ -402,7 +402,7 @@ def validate_buyer_selection(
         raise ValueError(
             "buyer settlement expiry must equal the advertised funding deadline"
         )
-    if parsed.allow_off_session != (hosted.interaction == "off_session"):
+    if parsed.allow_off_session != (hosted.interaction == "saved_instrument"):
         raise ValueError("buyer off-session opt-in does not match the selected option")
     return hosted
 

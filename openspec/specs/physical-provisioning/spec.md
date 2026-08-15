@@ -446,6 +446,28 @@ For an Ansible-backed VM pool, provider configuration identifies both the playbo
 - **WHEN** a fulfillment provider prepares a create operation for a scheduled settlement resource
 - **THEN** it derives the provisioned shape from that resource's own committed dimensions, not from any shape fields the caller's fulfillment request happens to carry
 
+### Requirement: Bare-metal inventory binds an existing provider pool
+
+The compute provisioner MUST import configured Resource Pool definitions before
+seeding inventory. A bare-metal inventory host MAY name its exact pool through
+`pool_id`; the seed MUST reject an unknown pool and MUST preserve that binding
+on create and update. The `bare_metal.ansible` provider accepts no pool-local
+playbook, inventory-group, credential, or executor-target configuration:
+execution uses service-owned configuration and the scheduler-selected Physical
+Resource. The operator MUST register that Physical Resource and its explicit
+`bare_metal_publication` view through the authenticated capacity administration
+surface before the host is publishable.
+
+#### Scenario: Fresh selected-site inventory binds to a bare-metal pool
+
+- **WHEN** startup imports a `bare_metal.ansible` pool and then seeds a host whose inventory row names that pool
+- **THEN** the durable host row retains the exact pool id and unknown pool ids fail instead of falling back to `default`
+
+#### Scenario: Pool-local executor configuration is supplied
+
+- **WHEN** a `bare_metal.ansible` pool contains a non-empty `provider_config`
+- **THEN** validation rejects the pool before it can authorize or dispatch fulfillment
+
 ### Requirement: Hosted funding gates whole-host allocation
 
 For a hosted bare-metal obligation, no Capacity Reservation commit, scheduling, executor dispatch, lease, or access grant may begin before authoritative funding is ready. The fulfillment identity MUST be derived from the accepted agreement, obligation, seller-owned Physical Resource or pool selection, site, buyer, claimant, and executor kind. Replay and restart MUST converge on the same selected-site reservation and fulfillment; they MUST NOT substitute a different resource or site.

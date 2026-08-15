@@ -187,10 +187,10 @@ def startup_steps() -> tuple[ComputeProvisioningStartupStep, ...]:
             "resolve-request-path-services",
             resolve_request_path_services,
         ),
-        ComputeProvisioningStartupStep("seed-inventory", seed_inventory_if_empty),
         ComputeProvisioningStartupStep(
             "import-pool-definitions", import_pool_definitions_if_configured
         ),
+        ComputeProvisioningStartupStep("seed-inventory", seed_inventory_if_empty),
         ComputeProvisioningStartupStep("create-job-queue", create_job_queue),
     )
 

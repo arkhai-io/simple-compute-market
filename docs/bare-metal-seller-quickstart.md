@@ -42,25 +42,28 @@ Create an operator-owned inventory file outside the repository:
 
 ```ini
 [bare_metal_nodes]
-host-ca-h200-01 ansible_host=10.0.0.25 public_host=203.0.113.25 ansible_user=ubuntu
+host-ca-h200-01 ansible_host=10.0.0.25 public_host=203.0.113.25 ansible_user=ubuntu pool_id=whole-host-california
 ```
 
-Create a Resource Pool document outside the repository. The executor target
-and inventory group must name real operator-controlled resources:
+Create a Resource Pool document outside the repository. The pool id must match
+the inventory host's `pool_id`; executor connectivity remains service-owned:
 
 ```yaml
 pools:
   - id: whole-host-california
     label: Whole Host California
-    provider: ansible
+    provider: bare_metal.ansible
     enabled: true
     policy_tags:
       deliverable_modes: [bare_metal]
       region: California, US
-    provider_config:
-      playbook_path: /opt/domains/vms/provisioning/iac/ansible/playbooks/bare-metal/node-access.yaml
-      inventory_group: bare_metal_nodes
+    provider_config: {}
 ```
+
+The bare-metal provider rejects pool-local playbook paths, inventory groups,
+credentials, and executor targets. The service-owned
+`bare_metal_playbook_path`, mounted inventory, and selected Physical Resource
+determine execution.
 
 The pool declaration is authoritative. Do not add `vm` merely to make a
 request pass; add it only if the same pool and executor can actually deliver
@@ -104,7 +107,12 @@ export BARE_METAL_STOREFRONT_IDENTITY_IDENTIFIER=<canonical-identifier>
 export BARE_METAL_STOREFRONT_ADMIN_IDENTITIES_JSON='[{"scheme":"<scheme>","identifier":"<canonical-admin-identifier>"}]'
 export BARE_METAL_STOREFRONT_PUBLIC_URL=https://seller.example/
 export BARE_METAL_STOREFRONT_EVM_ADDRESS=<public-settlement-address>
-export BARE_METAL_STOREFRONT_SETTLEMENT=/run/secrets/settlement.json
+export BARE_METAL_STOREFRONT_SETTLEMENT_JSON="$(cat /run/operator/settlement.json)"
+export BARE_METAL_PUBLICATION_CLAUSES_JSON='<exact versioned settlement clauses>'
+export BARE_METAL_FUNDING_DEADLINES_JSON='{"card.v1":900,"us_bank_transfer.v1":86400,"us_ach_debit.v1":432000}'
+export BARE_METAL_OFFER_EXPIRES_AT=<UTC-timestamp>
+export BARE_METAL_FULFILLMENT_DEADLINE=<UTC-timestamp>
+export BARE_METAL_MAX_DURATION_SECONDS=7200
 
 export BARE_METAL_PROVISIONING_IDENTITY_SCHEME=<scheme>
 export BARE_METAL_PROVISIONING_IDENTITY_IDENTIFIER=<canonical-site-authority-identifier>
@@ -130,6 +138,38 @@ curl -fsS http://localhost:8000/health
 curl -fsS http://localhost:8081/health
 curl -fsS http://localhost:8080/health
 ```
+
+Register the same host as one exclusive Physical Resource through
+`SiteCapacityAdminClient.register_resource` using the configured provisioning
+administrator signer and exact provisioning-authority trust. The authenticated
+`PUT /api/v1/capacity/resources/<physical-resource-id>` body is:
+
+```json
+{
+  "total_units": 1,
+  "resource_type": "compute.bare-metal",
+  "pool_id": "whole-host-california",
+  "capacity": {"units": 1},
+  "attributes": {
+    "vm_host": "host-ca-h200-01",
+    "bare_metal_publication": {
+      "enabled": true,
+      "physical_host_id": "<provider-stable-host-id>",
+      "machine_id": "host-ca-h200-01",
+      "allocation_mode": "exclusive",
+      "access_methods": ["ssh"],
+      "capabilities": {}
+    }
+  },
+  "enabled": true
+}
+```
+
+The URL path's Physical Resource id, `vm_host`, publication `machine_id`, and
+inventory alias are separate authority fields with the exact values shown by
+their roles; do not substitute the provider id or public IP for the inventory
+alias. Registration is independently idempotent and must complete before
+publication.
 
 The stack persists registry, Redis, provisioning, and storefront state in
 separate named volumes. Do not treat an HTTP 200 alone as deal readiness:

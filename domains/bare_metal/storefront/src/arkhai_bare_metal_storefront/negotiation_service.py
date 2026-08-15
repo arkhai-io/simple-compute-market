@@ -345,7 +345,7 @@ class BareMetalNegotiationService:
                 settlement=selection,
                 allow_off_session=next(
                     (
-                        option.params.get("interaction") == "off_session"
+                        option.params.get("interaction") == "saved_instrument"
                         for option in options
                         if option.option_id == selection.option_id
                     ),

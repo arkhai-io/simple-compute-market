@@ -27,7 +27,11 @@ FUNDING_DEADLINE = datetime(2099, 1, 1, 1, tzinfo=timezone.utc)
 FULFILLMENT_DEADLINE = datetime(2099, 1, 1, 3, tzinfo=timezone.utc)
 
 
-def _base_option(profile: str = "card.v1") -> SettlementOption:
+def _base_option(
+    profile: str = "card.v1",
+    *,
+    interaction: str = "interactive",
+) -> SettlementOption:
     rates = [RateValue(field="amount", per="hour", value=1200)]
     params = {
         "authority_id": "authority",
@@ -37,7 +41,7 @@ def _base_option(profile: str = "card.v1") -> SettlementOption:
         "claimant_principal": SELLER.model_dump(mode="json"),
         "funds_flow": "separate_charges_transfers",
         "funding_profile": profile,
-        "interaction": "interactive",
+        "interaction": interaction,
         "contract_fingerprint": "sha256:" + "1" * 64,
         "condition": {"kind": "portable-remote.v1", "identifier": "lease-ready"},
     }
@@ -106,6 +110,29 @@ def test_exact_selection_rejects_nonadvertised_profile() -> None:
         validate_buyer_selection(
             demand=_demand(ach.option),
             advertised_options=[card.option],
+        )
+
+
+def test_saved_instrument_interaction_requires_buyer_opt_in() -> None:
+    bound = bind_bare_metal_hosted_option(
+        _base_option(interaction="saved_instrument"),
+        facts=_facts(),
+    )
+    demand = _demand(bound.option).model_copy(update={"allow_off_session": True})
+
+    selected = validate_buyer_selection(
+        demand=demand,
+        advertised_options=[bound.option],
+    )
+
+    assert selected.interaction == "saved_instrument"
+
+
+def test_off_session_is_not_an_interaction_wire_value() -> None:
+    with pytest.raises(ValueError, match="interaction"):
+        bind_bare_metal_hosted_option(
+            _base_option(interaction="off_session"),
+            facts=_facts(),
         )
 
 
