@@ -6,6 +6,12 @@ from unittest.mock import AsyncMock
 import pytest
 from arkhai_vms import make_vm_provision_terms
 from fastapi import HTTPException
+from market_core.schemas import (
+    RateValue,
+    SettlementOption,
+    SettlementSelection,
+    derive_settlement_option_id,
+)
 from market_hosted_settlement import ConditionDescriptor
 from market_identity import Ed25519Signer
 from market_settlement_runtime import (
@@ -87,13 +93,24 @@ def _accepted_state(*, legacy: bool = False):
         "mechanism": "fiat.stripe.v1",
         "params": obligation_params,
     }
-    option = {
-        "option_id": "accepted-option",
-        "mechanism": "fiat.stripe.v1",
-        "asset": "usd",
-        "rates": [{"field": "amount", "value": "125"}],
-        "params": option_params,
-    }
+    rates = [RateValue(field="amount", value=125)]
+    option = SettlementOption(
+        option_id=derive_settlement_option_id(
+            mechanism="fiat.stripe.v1",
+            asset="usd",
+            rates=rates,
+            params=option_params,
+        ),
+        mechanism="fiat.stripe.v1",
+        asset="usd",
+        rates=rates,
+        params=option_params,
+    )
+    selection = SettlementSelection(
+        option_id=option.option_id,
+        mechanism=option.mechanism,
+        expiration_unix=2_000_000_000,
+    )
     provision = make_vm_provision_terms(
         duration_seconds=3600,
         ssh_public_key="ssh-ed25519 AAAAaccepted buyer@test",
@@ -101,7 +118,7 @@ def _accepted_state(*, legacy: bool = False):
     listing = {
         "listing_id": "listing-1",
         "offer_resource": {"gpu_model": "H100", "gpu_count": 1},
-        "settlement_options": [option],
+        "settlement_options": [option.model_dump(mode="json")],
     }
     settlement_plan = {
         "buyer_principal": BUYER.model_dump(mode="json"),
@@ -122,11 +139,7 @@ def _accepted_state(*, legacy: bool = False):
         "our_listing_id": "listing-1",
         "agreed_price": 125,
         "buyer_escrow_proposal": {
-            "settlement_selection": {
-                "option_id": "accepted-option",
-                "mechanism": "fiat.stripe.v1",
-                "expiration_unix": 2_000_000_000,
-            }
+            "settlement_selection": selection.model_dump(mode="json")
         },
         "settlement_plan": settlement_plan,
         "provision_terms": provision,
@@ -306,6 +319,20 @@ async def test_accepted_plan_survives_current_publication_profile_removal() -> N
 
     assert recovered.obligation == obligation
     assert recovered.funding_profile.value == "us_ach_debit.v1"
+
+
+@pytest.mark.asyncio
+async def test_accepted_selection_must_match_immutable_option() -> None:
+    db, thread, _listing, _obligation = _accepted_state()
+    thread["buyer_escrow_proposal"]["settlement_selection"]["option_id"] = "0" * 64
+
+    with pytest.raises(ValueError, match="immutable hosted option"):
+        await load_hosted_agreement(
+            sqlite_client=db,
+            negotiation_id="negotiation-1",
+            expected_claimant=SELLER,
+        )
+    db.load_listing.assert_not_awaited()
 
 
 @pytest.mark.asyncio

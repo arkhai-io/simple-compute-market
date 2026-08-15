@@ -75,6 +75,7 @@ from domains.vms.settlement.proposals import accepted_escrow_artifacts_from_prop
 from market_core.schemas import (
     EscrowProposal,
     SettlementObligation,
+    SettlementOption,
     SettlementPlan,
     SettlementSelection,
 )
@@ -340,15 +341,20 @@ def _accepted_hosted_artifacts(
     if agreed_amount < 1:
         raise OfferUnfulfillableError("hosted_amount_below_one_minor_unit")
     accepted = SettlementSelection.model_validate(selection)
-    if accepted.option_id != option.get(
-        "option_id"
-    ) or accepted.mechanism != option.get("mechanism"):
+    try:
+        advertised_option = SettlementOption.model_validate(option)
+    except (TypeError, ValueError) as exc:
+        raise OfferUnfulfillableError("hosted_settlement_option_not_exact") from exc
+    if (
+        accepted.option_id != advertised_option.option_id
+        or accepted.mechanism != advertised_option.mechanism
+    ):
         raise OfferUnfulfillableError("settlement_selection_not_exact")
     if accepted.mechanism != "fiat.stripe.v1":
         raise OfferUnfulfillableError("hosted_mechanism_not_exact")
-    params = dict(option.get("params") or {})
+    params = dict(advertised_option.params)
     condition = params.get("condition")
-    currency = option.get("asset")
+    currency = advertised_option.asset
     if (
         not isinstance(currency, str)
         or len(currency) != 3
@@ -393,7 +399,7 @@ def _accepted_hosted_artifacts(
                 payer_principal=buyer_principal.model_dump(mode="json"),
                 claimant_principal=seller_principal.model_dump(mode="json"),
                 amount=agreed_amount,
-                asset=str(option.get("asset") or ""),
+                asset=advertised_option.asset,
                 expiration_unix=accepted.expiration_unix,
                 conditions=[condition],
                 mechanism=accepted.mechanism,

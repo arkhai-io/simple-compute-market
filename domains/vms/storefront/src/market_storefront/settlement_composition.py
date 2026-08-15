@@ -15,7 +15,12 @@ from arkhai_vms import VmProvisionTerms
 from core_storefront.stage_log import stage_event
 from domains.vms.listings import reconciler as listings_reconciler
 from market_alkahest import create_alkahest_registration
-from market_core.schemas import EscrowProposal, SettlementPlan, SettlementSelection
+from market_core.schemas import (
+    EscrowProposal,
+    SettlementOption,
+    SettlementPlan,
+    SettlementSelection,
+)
 from market_hosted_settlement import (
     ConditionDescriptor,
     FundingMode,
@@ -313,6 +318,7 @@ async def prepare_vm_settlement(
         )
 
     provision = VmProvisionTerms.model_validate(thread.get("provision_terms"))
+    proposal_raw = thread.get("buyer_escrow_proposal")
 
     if (
         isinstance(proposal_raw, dict)
@@ -758,6 +764,78 @@ def _accepted_hosted_profile(
         ) from exc
 
 
+def _validate_accepted_hosted_option(
+    *,
+    order: Mapping[str, Any],
+    selection: SettlementSelection,
+    obligation: Mapping[str, Any],
+    buyer_principal: Identity,
+    seller_principal: Identity,
+) -> None:
+    """Bind the accepted selection to its canonical, immutable listing option."""
+
+    raw_options = order.get("settlement_options")
+    if isinstance(raw_options, str):
+        try:
+            raw_options = json.loads(raw_options)
+        except json.JSONDecodeError as exc:
+            raise ValueError(
+                "accepted VM input has no exact immutable hosted option"
+            ) from exc
+    if not isinstance(raw_options, list):
+        raise ValueError("accepted VM input has no exact immutable hosted option")
+
+    selected_option: dict[str, Any] | None = None
+    for item in raw_options:
+        candidate = _plain_mapping(item)
+        if (
+            candidate.get("option_id") == selection.option_id
+            and candidate.get("mechanism") == selection.mechanism
+        ):
+            selected_option = candidate
+            break
+    if selected_option is None:
+        raise ValueError(
+            "accepted settlement selection does not match the immutable hosted option"
+        )
+    try:
+        option = SettlementOption.model_validate(selected_option)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(
+            "accepted settlement selection does not match the immutable hosted option"
+        ) from exc
+
+    expected_params = dict(option.params)
+    if "payer_principal" in expected_params:
+        raise ValueError(
+            "accepted settlement selection does not match the immutable hosted option"
+        )
+    try:
+        advertised_claimant = Identity.model_validate(
+            expected_params.get("claimant_principal")
+        )
+    except (TypeError, ValueError) as exc:
+        raise ValueError(
+            "accepted settlement selection does not match the immutable hosted option"
+        ) from exc
+    if advertised_claimant != seller_principal:
+        raise ValueError(
+            "accepted settlement selection does not match the immutable hosted option"
+        )
+    expected_params["payer_principal"] = buyer_principal.model_dump(mode="json")
+    expected_params["claimant_principal"] = seller_principal.model_dump(mode="json")
+    if (
+        option.mechanism != obligation.get("mechanism")
+        or option.asset != obligation.get("asset")
+        or expected_params != _plain_mapping(obligation.get("params"))
+    ):
+        raise ValueError(
+            "accepted settlement selection does not match the immutable hosted option"
+        )
+
+
+
+
 async def load_hosted_agreement(
     *,
     sqlite_client: Any,
@@ -835,6 +913,14 @@ async def load_hosted_agreement(
             raise ValueError("accepted VM listing identity is inconsistent")
         if provision != thread_provision:
             raise ValueError("accepted VM input does not match the marketplace thread")
+        if not legacy_recovery:
+            _validate_accepted_hosted_option(
+                order=order,
+                selection=selection,
+                obligation=obligation,
+                buyer_principal=buyer_principal,
+                seller_principal=expected_claimant,
+            )
     elif legacy_recovery:
         order = await sqlite_client.load_listing(listing_id=listing_id)
         if not order:

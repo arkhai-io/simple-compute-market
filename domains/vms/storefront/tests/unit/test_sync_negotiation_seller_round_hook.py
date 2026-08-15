@@ -191,7 +191,7 @@ async def test_hosted_selection_is_persisted_and_materialized_as_plan(db):
             "protocol": "arkhai.condition.v1",
             "condition_id": "condition-1",
             "evaluator": {
-                "kind": "builtin",
+                "kind": "builtin.v1",
                 "version": "trivial.v1",
                 "params": {"kind": "trivial"},
             },
