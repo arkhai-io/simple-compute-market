@@ -166,9 +166,13 @@ def compile_legacy_vm_fulfillment_backfill(
             identity_scope=f"legacy-reservation:{candidate.capacity_reservation_id}",
             provider_output_key=target,
         )
+        # This compiler's input is the migration's validated historical VM
+        # lease join, so "vm" is bounded migration evidence, not runtime
+        # inference from the matched host or provider.
         resource = SettlementResource(
             settlement_resource_id=candidate.vm_host,
             pool_id=candidate.pool_id,
+            executor_kind="vm",
             resource_kind="vm",
             provider="ansible",
             attributes={"vm_host": candidate.vm_host},
