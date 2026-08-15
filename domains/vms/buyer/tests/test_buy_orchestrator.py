@@ -415,9 +415,7 @@ def test_exact_settlement_revalidation_runs_before_seller_network() -> None:
     )
     assert result.status == "exited"
     assert observed == [("seller-1", option.option_id)]
-    assert result.attempts[0]["outcome"]["reason"] == (
-        "settlement_revalidation_failed"
-    )
+    assert result.attempts[0]["error"] == "settlement_revalidation_failed"
 
 
 def test_run_buy_composes_high_level_negotiate_and_settle_hooks():

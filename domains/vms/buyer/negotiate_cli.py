@@ -609,7 +609,7 @@ def register(app: typer.Typer) -> None:
         try:
             outcome = negotiate_with_seller(
                 seller_url=seller_url,
-                principal=identity_config.principal,
+                principal=identity.principal,
                 signer=signer,
                 listing_id=listing_id,
                 initial_price=initial_price or 0,

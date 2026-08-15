@@ -142,4 +142,4 @@ def test_listing_rejects_clause_with_generated_fields_before_registry(
     assert "Accepted settlement fields:" in result.output
     assert "asset" in result.output
     assert "alkahest.chain" in result.output
-    assert "stripe.method" in result.output
+    assert "stripe.funding_profile" in result.output
