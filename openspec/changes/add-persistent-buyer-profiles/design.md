@@ -110,7 +110,7 @@ Legacy import reads `[Identity]` only inside the explicit import command. The co
 `core_buyer.cli.build_app` registers one core-owned `profile` group before plugin assembly:
 
 - `create`, `import`, `list`, `show`, `select`;
-- `rotate`, `retire`, `delete`.
+- `rotate`, `retire`, `delete`. `retire` without a principal retires the profile and atomically clears its selected pointer after all blockers pass; `retire --principal <scheme:id>` retires one non-primary predecessor after its narrower blockers pass.
 
 Commands accept public names, schemes, provider kinds, and locators, with secret input entering only through provider-owned secure prompts or preconfigured backends. JSON and human output use the same redacted projection. Domain entry points receive no authority to replace these commands.
 
@@ -151,15 +151,15 @@ The rotate command resolves both current and replacement signers and uses the ex
 - marks the predecessor retained/overlap;
 - records nonce, intent digest, overlap, and required authority-binding state.
 
-Fresh runs immediately use the replacement. The predecessor credential reference remains loadable for exact old-run recovery. `core/buyer` builds retirement blockers by scanning validated recoverable run summaries for the principal. The profile store also blocks retirement while any authority payer binding remains bound to the predecessor or records incomplete rotation.
+Fresh runs immediately use the replacement. The predecessor credential reference remains loadable for exact old-run recovery. `core/buyer` builds retirement blockers by scanning validated recoverable run summaries for the principal. The profile store also blocks principal retirement while any authority payer binding remains bound to that principal or records incomplete rotation.
 
-Retirement changes the principal state and disallows new resolution except where the run was already authorized under a still-retained recovery state. Credential deletion is a separate explicit action after no profile, run, or binding references it.
+Principal retirement changes one non-primary history entry's state and disallows new resolution except where an already-authorized run remains in a retained recovery state. Whole-profile retirement is separate: it requires every principal and binding to be retirement-eligible, marks the profile retired, and clears `selected_profile_id` in the same store replacement. Credential deletion remains a separate explicit action after no profile, run, or binding references it.
 
 **Alternative considered:** rewrite old run logs to the replacement principal. Rejected because accepted counterparties and operation identities were signed by the original principal; rewriting history does not authorize recovery.
 
 ### 9. Profile deletion is conservative and does not imply secret deletion
 
-Deleting a profile requires it to be unselected, retired, free of recoverable runs, free of active/incomplete authority bindings, and free of required principal audit state. The metadata removal and optional provider deletion are separate confirmations. Provider deletion revalidates that no other profile history references the same credential reference and only then invokes the exact provider.
+Deleting a profile requires it to be retired, unselected, free of recoverable runs, free of active/incomplete authority bindings, and free of required principal audit state. A selected active profile therefore follows `profile retire` first; retirement clears selection atomically, including for a one-profile store. The metadata removal and optional provider deletion are separate confirmations. Provider deletion revalidates that no other profile history references the same credential reference and only then invokes the exact provider.
 
 **Alternative considered:** delete metadata and credentials together by default. Rejected because keyring/file entries may be shared intentionally outside this store and silent deletion would be irreversible.
 
@@ -186,7 +186,7 @@ The cutover generator removes direct buyer `[Identity]` from role templates. Ser
 - **[Concurrent profile commands can lose updates]** → Serialize with one adjacent lock and revision comparison, then atomic replace and directory fsync.
 - **[Generated secret cleanup can fail after metadata failure]** → Return only a bounded orphan reference and explicit cleanup command; never select the failed profile or expose the secret.
 - **[Rotation may retain old credentials for a long time]** → Show concrete run and authority-binding blockers; require explicit retirement once blockers clear rather than guessing safe deletion.
-- **[Run-log migration depends on profile import ordering]** → Stage explicit profile import first, preview unique run bindings, and fail atomically when a principal has zero or multiple profile matches.
+- **[Run-log migration depends on profile import ordering]** → Stage the complete profile store and every run-log candidate first, then use a durable migration manifest plus retained originals to commit or restore the whole candidate; runtime stays unavailable while a manifest is incomplete, and zero/multiple principal matches mutate nothing.
 - **[Clean cutover temporarily breaks old automation]** → Ship preview/import tooling before runtime removal, update every role fixture and deployment reference in one coordinated release, and reject old/new mixed inputs with actionable paths.
 - **[Opaque hosted bindings could become a dumping ground]** → Use a strict bounded model with only authority/environment, opaque ref, owner principal, and lifecycle; reject unknown/provider-shaped fields.
 
@@ -195,7 +195,7 @@ The cutover generator removes direct buyer `[Identity]` from role templates. Ser
 1. Ship profile-store/provider libraries and read-only `profile import --check`/migration preview while existing buyer runtime remains quiesced for the selected operator migration window.
 2. Inventory every local/headless buyer configuration and existing recoverable run log. Choose one explicit provider and XDG destination per profile; fix secret-file ownership/mode before import.
 3. Run import preview. It derives each principal, detects duplicates/conflicts, and previews unique run-log bindings without writing or displaying secrets.
-4. Run explicit import. Create the profile store atomically, validate it after replacement, then migrate each run log to version 3 atomically while preserving all operation identities. Keep legacy configuration backups until the whole candidate validates.
+4. Run explicit import as one coordinated migration candidate. Stage and validate the complete profile store plus every version-3 run-log replacement before publishing any file; retain all originals and a durable migration manifest while replacements commit. If any replacement or final validation fails before activation, restore every profile/run-log original and fsync their directories; startup rejects an incomplete manifest until restoration or the exact commit completes.
 5. Update generated role files, Compose/Helm mounts, Secret references, and automation callers to use profile selection/provider references. Remove direct buyer `[Identity]` and raw credential inputs.
 6. Activate the clean-cutover runtime only after every required profile, run log, plugin, and deployment render validates. Fresh runs use the selected primary; recovery resolves recorded history.
 7. Before any profile-based run starts, rollback may restore the prior runtime and matching legacy config/run logs together. After version-3 events or profile rotation/binding updates exist, preserve the profile store and recover forward; do not downgrade logs or reconstruct raw identity precedence.

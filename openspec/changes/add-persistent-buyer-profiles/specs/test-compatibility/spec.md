@@ -21,6 +21,11 @@ Tests MUST assert public metadata and behavior without reading secrets through a
 - **WHEN** rotation promotes a replacement while a recoverable fixture run records the prior principal
 - **THEN** fresh-run resolution uses the replacement and exact recovery continues to resolve the predecessor until retirement becomes eligible
 
+#### Scenario: Profile metadata changes
+
+- **WHEN** a profile is renamed, selected, migrated, or reloaded after restart
+- **THEN** its random opaque UUID remains unchanged and is never recomputed from name, principal, credential reference, or provider state
+
 ### Requirement: Multi-domain buyer injection uses one conformance matrix
 
 The shared buyer-domain conformance suite MUST exercise every shipped buyer plugin with the same persistent-profile cases: fresh selected primary, missing selection, principal/credential mismatch, retained-principal resume, selected-profile change after run creation, legacy direct identity rejection, and secret-free carrier output. Domain-specific suites MUST add only schema-owned behavior and MUST NOT duplicate or bypass identity resolution.

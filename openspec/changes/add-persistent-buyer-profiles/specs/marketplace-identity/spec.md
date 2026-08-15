@@ -2,7 +2,7 @@
 
 ### Requirement: Versioned local buyer profile store
 
-The marketplace identity capability MUST provide a versioned local buyer-profile metadata store under the platform's XDG data boundary. Each profile MUST have a stable opaque local profile ID, unique user-visible name, lifecycle state, selected-state projection, one primary canonical principal, complete principal history, credential references, and per-authority opaque payer bindings. The local profile ID, hosted payer binding, credential reference, and provider resource MUST NOT be interpreted as a marketplace principal or credential.
+The marketplace identity capability MUST provide a versioned local buyer-profile metadata store under the platform's XDG data boundary. Each profile MUST receive a random opaque UUID at creation and preserve that stable local profile ID across rename, selection, migration, and restart; it also has a unique user-visible name, lifecycle state, selected-state projection, one primary canonical principal, complete principal history, credential references, and per-authority opaque payer bindings. The local profile ID, hosted payer binding, credential reference, and provider resource MUST NOT be interpreted as a marketplace principal or credential.
 
 Profile metadata updates MUST validate the complete candidate and replace it atomically with restrictive owner-only permissions. A malformed, unsupported-version, duplicate-name, duplicate active principal, or interrupted write MUST leave the last valid store unchanged. One canonical principal MUST NOT be primary in more than one active local profile.
 
@@ -65,9 +65,9 @@ Legacy `[Identity]` import MUST be explicit. It MUST resolve the declared creden
 
 ### Requirement: Buyer profile lifecycle preserves signer history
 
-Profile selection MUST affect only fresh buyer runs. Rotation MUST use the shared canonical dual-proof intent and prove possession of both the current primary and replacement signers before making the replacement primary. The prior principal and credential reference MUST remain retained while any recoverable run, authority payer binding, bounded overlap, or incomplete authority rotation requires it. Retirement MUST prevent new runs from selecting that principal and MUST fail while a required run or binding still depends on it.
+Profile selection MUST affect only fresh buyer runs. Rotation MUST use the shared canonical dual-proof intent and prove possession of both the current primary and replacement signers before making the replacement primary. The prior principal and credential reference MUST remain retained while any recoverable run, authority payer binding, bounded overlap, or incomplete authority rotation requires it. Retirement of one named non-primary predecessor MUST prevent new resolution and MUST fail while a required run or binding still depends on it.
 
-Profile deletion MUST fail when the profile is selected, has recoverable runs, retains an active or incompletely rotated authority binding, or owns principal history required for audit or recovery. Deletion MAY remove only metadata and credential entries the user explicitly authorizes and the provider confirms are not shared; it MUST never silently export or erase a credential.
+Whole-profile retirement is a distinct transition. It MUST fail until every principal and binding is retirement-eligible; on success it MUST mark the profile retired and atomically clear its selected pointer, including in a one-profile store. Profile deletion MUST require this retired, unselected state and MUST also fail when the profile has recoverable runs, retains an active or incompletely rotated authority binding, or owns principal history required for audit or recovery. Deletion MAY remove only metadata and credential entries the user explicitly authorizes and the provider confirms are not shared; it MUST never silently export or erase a credential.
 
 #### Scenario: New run follows rotation
 
@@ -83,6 +83,11 @@ Profile deletion MUST fail when the profile is selected, has recoverable runs, r
 
 - **WHEN** a profile has an authority payer binding still owned by the predecessor
 - **THEN** local retirement fails rather than stranding hosted payer control
+
+#### Scenario: Selected one-profile store is retired
+
+- **WHEN** the selected profile is the store's only profile and all principal, run, and authority-binding retirement blockers have cleared
+- **THEN** whole-profile retirement marks it retired and clears selection in one atomic store replacement so a later confirmed metadata deletion is reachable
 
 ### Requirement: Hosted payer bindings remain opaque profile metadata
 
