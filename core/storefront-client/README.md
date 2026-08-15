@@ -6,7 +6,7 @@ The immutable public package is `arkhai-core-storefront-client==0.17.0`.
 ## Identity configuration
 
 Authenticated calls use the marketplace identity v2 contract from
-`arkhai-kit-identity==0.2.0`. Inject a scheme-neutral `market_identity.Signer`,
+`arkhai-kit-identity==0.3.0`. Inject a scheme-neutral `market_identity.Signer`,
 the one caller role used by that client, and the exact storefront publisher
 principal trusted to sign responses.
 

@@ -8,7 +8,7 @@ dependencies = [
     "arkhai-kit-site>=0.2.0",
     "arkhai-kit-resource-pools>=0.1.0",
     "arkhai-kit-fulfillment>=0.1.0",
-    "arkhai-kit-identity==0.2.0",
+    "arkhai-kit-identity==0.3.0",
     "httpx>=0.27",
     "pydantic>=2",
 ]

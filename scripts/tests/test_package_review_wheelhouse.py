@@ -87,8 +87,8 @@ def _stage_root(
     (root / "project").mkdir()
     shutil.copy2(SCRIPT, root / "scripts" / SCRIPT.name)
 
-    (root / ".dist" / "arkhai_kit_identity-0.2.0-py3-none-any.whl").write_bytes(
-        b"identity-0.2.0"
+    (root / ".dist" / "arkhai_kit_identity-0.3.0-py3-none-any.whl").write_bytes(
+        b"identity-0.3.0"
     )
     hosted_client_wheel = _hosted_client_wheel(entry_points=hosted_entry_points)
     (
@@ -153,13 +153,13 @@ def _run(root: Path, env: dict[str, str]) -> subprocess.CompletedProcess[str]:
 
 def test_wheelhouse_requires_exact_identity_release_filename(tmp_path: Path) -> None:
     root, env = _stage_root(tmp_path)
-    exact = root / ".dist" / "arkhai_kit_identity-0.2.0-py3-none-any.whl"
+    exact = root / ".dist" / "arkhai_kit_identity-0.3.0-py3-none-any.whl"
     exact.rename(root / ".dist" / "arkhai_kit_identity-0.1.0-py3-none-any.whl")
 
     result = _run(root, env)
 
     assert result.returncode == 2
-    assert "arkhai_kit_identity-0.2.0-py3-none-any.whl" in result.stderr
+    assert "arkhai_kit_identity-0.3.0-py3-none-any.whl" in result.stderr
 
 
 def test_wheelhouse_rejects_hosted_fixture_distribution(tmp_path: Path) -> None:
@@ -256,10 +256,10 @@ def test_wheelhouse_checks_identity_package_record_not_dependency_reference(
 
 [[package]]
 name = "arkhai-kit-identity"
-version = "0.2.0"
+version = "0.3.0"
 source = { registry = "../.dist" }
 wheels = [
-    { path = "../.dist/arkhai_kit_identity-0.2.0-py3-none-any.whl" },
+    { path = "../.dist/arkhai_kit_identity-0.3.0-py3-none-any.whl" },
 ]
 """,
     )
@@ -295,8 +295,8 @@ def test_wheelhouse_packages_external_release_inputs_and_portable_lock(
     assert pins["schema_version"] == 1
     assert pins["settlement_config_schema_version"] == 1
     assert pins["identity_wheel"] == {
-        "filename": "arkhai_kit_identity-0.2.0-py3-none-any.whl",
-        "sha256": hashlib.sha256(b"identity-0.2.0").hexdigest(),
+        "filename": "arkhai_kit_identity-0.3.0-py3-none-any.whl",
+        "sha256": hashlib.sha256(b"identity-0.3.0").hexdigest(),
     }
     assert pins["hosted_client_wheel"] == {
         "filename": "arkhai_hosted_settlement_client-0.1.0-py3-none-any.whl",

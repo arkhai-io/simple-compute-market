@@ -18,6 +18,7 @@ reinit: ## Upgrade and reinstall changed internal wheel dependencies
 		--upgrade-package arkhai-core          --reinstall-package arkhai-core \
 		--upgrade-package arkhai-core-storefront --reinstall-package arkhai-core-storefront \
 		--upgrade-package arkhai-kit-alkahest   --reinstall-package arkhai-kit-alkahest \
+		--upgrade-package arkhai-kit-identity  --reinstall-package arkhai-kit-identity \
 		--upgrade-package arkhai-kit-policy     --reinstall-package arkhai-kit-policy \
 		--upgrade-package arkhai-kit-settlement-runtime --reinstall-package arkhai-kit-settlement-runtime
 

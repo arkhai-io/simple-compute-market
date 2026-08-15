@@ -5,7 +5,7 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 OUTFILE="${1:-${ROOT_DIR}/.snapshot/review-wheelhouse.tar.gz}"
 PROJECTS="${REVIEW_PROJECTS:-}"
 REVIEW_PYTHON="${REVIEW_PYTHON:-3.13}"
-IDENTITY_WHEEL="arkhai_kit_identity-0.2.0-py3-none-any.whl"
+IDENTITY_WHEEL="arkhai_kit_identity-0.3.0-py3-none-any.whl"
 HOSTED_CLIENT_WHEEL="arkhai_hosted_settlement_client-0.1.0-py3-none-any.whl"
 HOSTED_MANIFEST="release-manifest.json"
 HOSTED_TRUST="${ROOT_DIR}/manifests/hosted-settlement-v0.1.0-trust.json"
@@ -247,7 +247,7 @@ project_text = pyproject.read_text()
 project_name_match = re.search(r'(?m)^name = "([^"]+)"$', project_text)
 project_name = project_name_match.group(1) if project_name_match else None
 for name, version in (
-    ("arkhai-kit-identity", "0.2.0"),
+    ("arkhai-kit-identity", "0.3.0"),
     ("arkhai-hosted-settlement-client", "0.1.0"),
 ):
     mentions = re.findall(rf'(?m)^\s*"{re.escape(name)}([^"]*)"', project_text)
@@ -255,7 +255,7 @@ for name, version in (
         raise SystemExit(f"{name} must be pinned exactly to {version}")
 
 for required_name, required_version in (
-    ("arkhai-kit-identity", "0.2.0"),
+    ("arkhai-kit-identity", "0.3.0"),
     ("arkhai-hosted-settlement-client", "0.1.0"),
 ):
     if required_name == project_name:
@@ -313,7 +313,7 @@ import tomllib
 project = tomllib.loads(Path(sys.argv[1]).read_text())
 requirements = tuple(project.get("project", {}).get("dependencies", ()))
 for distribution, version, module in (
-    ("arkhai-kit-identity", "0.2.0", "market_identity"),
+    ("arkhai-kit-identity", "0.3.0", "market_identity"),
     ("arkhai-hosted-settlement-client", "0.1.0", "hosted_settlement_client"),
 ):
     if not any(value.startswith(distribution) for value in requirements):

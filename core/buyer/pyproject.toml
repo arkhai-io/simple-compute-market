@@ -21,7 +21,7 @@ dependencies = [
   # Installed mechanism registration, canonical priority, and recovery dispatch.
   "arkhai-kit-settlement-runtime==0.1.0",
   # Canonical principals, signer injection, and v2 request/response proofs.
-  "arkhai-kit-identity==0.2.0",
+  "arkhai-kit-identity==0.3.0",
   # Signed registry discovery with pinned authority responses.
   "arkhai-core-registry-client==0.11.0",
 ]

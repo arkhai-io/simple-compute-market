@@ -10,7 +10,7 @@ dependencies = [
     "arkhai-core-storefront>=0.3.0",
     "arkhai-kit-alkahest",
     "arkhai-kit-policy",
-    "arkhai-kit-identity==0.2.0",
+    "arkhai-kit-identity==0.3.0",
     "arkhai-kit-settlement-runtime>=0.1.0",
     "fastapi~=0.115.8",
     "typer>=0.12.0",

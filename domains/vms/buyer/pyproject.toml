@@ -19,7 +19,7 @@ dependencies = [
   "arkhai-core>=0.2.0",
   "arkhai-kit-alkahest",
   "arkhai-kit-hosted-settlement==0.1.0",
-  "arkhai-kit-identity==0.2.0",
+  "arkhai-kit-identity==0.3.0",
   "arkhai-kit-config",
   "arkhai-kit-policy",
   "arkhai-kit-settlement-runtime==0.1.0",
