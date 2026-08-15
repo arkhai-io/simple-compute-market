@@ -173,6 +173,8 @@ At the expiry edge, the existing runtime status retrieval and compare-and-set ar
 
 Marketplace storage migrations classify already accepted card-only obligations by their persisted historical shape and preserve every option ID, obligation ref/hash, hosted settlement ref, operation ID, state, receipt, and request fingerprint. The adapter selects a legacy decoder only when reading such persisted records. It invokes the producer's recovery-compatible historical operation without requiring a payer profile or a newly signed authorization.
 
+The buyer profile store requires no consumer schema migration: its schema-1 `AuthorityPayerBinding` already contains exactly authority, environment, opaque binding reference, bound principal, and lifecycle state. Expanded funding writes that existing owner-only field and deliberately adds no instrument, provider, action, or commercial data to profile metadata.
+
 New config, publication, query parsing, compatibility, plan creation, and materialization reject `payment_method_types`, `method="card"`, and the producer's internal recovery-only classification. Config migration maps a valid seller card publication clause to `card.v1`; that changes future option IDs intentionally and does not rewrite accepted options.
 
 Ambiguous rows fail migration atomically and are reported for operator repair. No code infers a new authorization or relabels an historical operation as satisfying the expanded contract.
