@@ -7,6 +7,12 @@ import logging
 
 from apicredits_storefront.utils import config
 from apicredits_storefront.utils.config import BASE_URL_OVERRIDE, settings
+from core_storefront.stage_log import stage_event
+from market_core import MarketDomainContract
+from market_storefront_kit import (
+    NegotiationWatchdogPolicy,
+    run_negotiation_watchdog,
+)
 
 logging.basicConfig(
     level=getattr(logging, str(settings.get("log_level", "INFO")).upper(), logging.INFO)
@@ -58,11 +64,26 @@ async def _preflight_credits_service() -> None:
     logger.error(msg + " Continuing because fail_on_unreachable=false.")
 
 
-async def _startup_tasks() -> None:
-    """Initialize background tasks. Called from server.py lifespan."""
+def _negotiation_watchdog_policy() -> NegotiationWatchdogPolicy:
+    return NegotiationWatchdogPolicy(
+        timeout_seconds=float(settings.negotiation_timeout_seconds),
+        interval_seconds=float(settings.negotiation_watchdog_interval),
+        log_loop_start=False,
+        log_cutoff=False,
+    )
+
+
+async def _startup_tasks(*, domain: MarketDomainContract) -> None:
+    """Initialize background tasks for the exact app-selected domain."""
     import apicredits_storefront.container as _container
     from market_policy.identity import Identity
     from market_policy.negotiation_thread import get_thread_store
+
+    if _container.resolved_market_domain is not domain:
+        raise RuntimeError(
+            "API-credit startup is not bound to the app-selected "
+            "market-domain contract object"
+        )
 
     storefront_url = BASE_URL_OVERRIDE or f"http://localhost:{settings.port}"
     get_thread_store(
@@ -74,13 +95,19 @@ async def _startup_tasks() -> None:
         storefront_url,
     )
 
-    from apicredits_storefront.negotiation_watchdog import watchdog_loop
-
-    asyncio.create_task(watchdog_loop())
+    watchdog_policy = _negotiation_watchdog_policy()
+    asyncio.create_task(
+        run_negotiation_watchdog(
+            _container.resolved_sqlite_client,
+            watchdog_policy,
+            emit_stage_event=stage_event,
+            logger=logger,
+        )
+    )
     logger.info(
         "[STARTUP] Negotiation watchdog started (interval=%ds, timeout=%ds)",
-        settings.negotiation_watchdog_interval,
-        settings.negotiation_timeout_seconds,
+        watchdog_policy.interval_seconds,
+        watchdog_policy.timeout_seconds,
     )
 
     settlement_worker = _container.resolved_settlement_worker

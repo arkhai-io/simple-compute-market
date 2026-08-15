@@ -19,6 +19,7 @@ from core_storefront.models.system_models import AdminPauseResponse, HealthRespo
 from fastapi import APIRouter, HTTPException, Query, Request
 
 from market_identity import EMPTY_BODY, Identity
+from market_storefront_kit import get_storefront_container
 from .models import (
     BareMetalSettleRequest,
     BareMetalSettleResponse,
@@ -33,7 +34,13 @@ router = APIRouter()
 
 
 def _runtime(request: Request) -> BareMetalStorefrontRuntime:
-    runtime = getattr(request.app.state, "runtime", None)
+    try:
+        runtime = get_storefront_container(request)
+    except RuntimeError as exc:
+        raise HTTPException(
+            status_code=503,
+            detail="storefront runtime unavailable",
+        ) from exc
     if not isinstance(runtime, BareMetalStorefrontRuntime):
         raise HTTPException(status_code=503, detail="storefront runtime unavailable")
     return runtime

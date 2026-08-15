@@ -12,6 +12,7 @@ dependencies = [
     "arkhai-kit-policy",
     "arkhai-kit-identity==0.3.0",
     "arkhai-kit-settlement-runtime>=0.1.0",
+    "arkhai-kit-storefront==0.1.0",
     "fastapi~=0.115.8",
     "typer>=0.12.0",
     "uvicorn~=0.34.0",

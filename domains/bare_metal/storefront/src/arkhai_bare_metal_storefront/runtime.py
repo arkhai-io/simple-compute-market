@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import os
 import sqlite3
 from collections.abc import Awaitable, Callable, Mapping
@@ -15,6 +16,11 @@ from market_identity import Identity, IdentityScheme, Signer, TrustedIdentitySet
 from core_storefront.escrow_verification import verify_escrow_for_settlement
 from market_core import MarketDomainContract, validate_domain_contract
 from market_settlement_runtime import SettlementRuntime, SettlementSQLiteRepository
+from market_storefront_kit import (
+    AlkahestChain,
+    AlkahestClientPolicy,
+    build_alkahest_clients,
+)
 
 from .domain_runtime import get_market_domain_contract
 from .negotiation import default_seller_round_hook
@@ -23,6 +29,8 @@ from .settlement import build_bare_metal_settlement_plan
 from .settlement_service import BareMetalSettlementService
 from .sqlite_client import SQLiteClient
 
+
+logger = logging.getLogger(__name__)
 
 @dataclass(frozen=True)
 class BareMetalStorefrontRuntime:
@@ -110,6 +118,51 @@ class BareMetalStorefrontRuntime:
         }
 
 
+def _build_chain_clients_from_environment() -> tuple[
+    dict[str, Any],
+    dict[str, str | None],
+]:
+    raw = os.environ.get("BARE_METAL_STOREFRONT_CHAINS", "{}")
+    try:
+        values = json.loads(raw)
+        if not isinstance(values, dict):
+            raise TypeError("chain configuration must be a JSON object")
+        chains = tuple(
+            AlkahestChain(
+                name=str(name),
+                rpc_url=str(value["rpc_url"]),
+                address_config_path=(
+                    str(value["alkahest_address_config_path"])
+                    if value.get("alkahest_address_config_path")
+                    else None
+                ),
+            )
+            for name, value in values.items()
+            if isinstance(value, dict)
+        )
+        if len(chains) != len(values):
+            raise TypeError("every chain configuration must be a JSON object")
+    except (KeyError, TypeError, ValueError, json.JSONDecodeError) as exc:
+        raise RuntimeError(
+            "BARE_METAL_STOREFRONT_CHAINS must map chain names to rpc_url "
+            "and optional alkahest_address_config_path"
+        ) from exc
+    private_key = os.environ.get("BARE_METAL_STOREFRONT_EVM_PRIVATE_KEY", "").strip()
+    missing = ("wallet.private_key",) if chains and not private_key else ()
+    clients = build_alkahest_clients(
+        AlkahestClientPolicy(
+            private_key=private_key,
+            chains=chains,
+            missing_requirements=missing,
+        ),
+        logger=logger,
+    )
+    return clients, {
+        chain.name: chain.address_config_path
+        for chain in chains
+    }
+
+
 def build_runtime_from_environment(
     *,
     domain: MarketDomainContract | None = None,
@@ -163,6 +216,7 @@ def build_runtime_from_environment(
         raise RuntimeError(
             "BARE_METAL_STOREFRONT_EVM_ADDRESS is required for Alkahest settlement",
         )
+    chain_clients, chain_config_paths = _build_chain_clients_from_environment()
     return BareMetalStorefrontRuntime(
         db=SQLiteClient(
             os.environ.get(
@@ -179,4 +233,6 @@ def build_runtime_from_environment(
         admin_principals=admin_principals,
         marketplace_signer=signer,
         seller_evm_address=seller_evm_address,
+        chain_clients=chain_clients,
+        chain_config_paths=chain_config_paths,
     )

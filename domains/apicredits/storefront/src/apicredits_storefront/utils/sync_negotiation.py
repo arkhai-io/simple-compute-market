@@ -45,6 +45,7 @@ from market_policy.scalar_policies import _amount_from_proposal
 from market_alkahest.proposals import accepted_escrow_artifacts_from_proposal
 from market_core.schemas import EscrowProposal
 from market_policy.negotiation_middleware import NegotiationRound
+from market_core import MarketDomainContract
 from market_identity import Identity
 
 logger = logging.getLogger(__name__)
@@ -74,13 +75,16 @@ def _default_min_price() -> Any:
     return settings.get("pricing.default_min_price")
 
 
-def _default_seller_round_hook(sqlite_client: Any) -> ApiCreditsSellerRoundHook:
+def _default_seller_round_hook(
+    sqlite_client: Any,
+    domain: MarketDomainContract,
+) -> ApiCreditsSellerRoundHook:
     from apicredits_storefront.services.capacity_client import build_capacity_client
     from apicredits_storefront.services.keys_lookup import lookup_key_record
-    from apicredits_storefront.domain_runtime import get_market_domain_contract
 
-    policy = get_market_domain_contract().storefront
-    assert policy is not None
+    policy = domain.storefront
+    if policy is None:
+        raise RuntimeError("API-credit domain has no storefront policy capability")
     return policy.run_negotiation_policy(
         build_capacity_client(lambda: sqlite_client),
         lookup_key_record,
@@ -239,6 +243,7 @@ async def _place_quota_hold(
 async def start_sync_negotiation(
     *,
     sqlite_client: Any,
+    domain: MarketDomainContract,
     our_listing_id: str,
     buyer_principal: Identity,
     seller_principal: Identity,
@@ -289,7 +294,10 @@ async def start_sync_negotiation(
         )
     ]
     try:
-        round_hook = seller_round_hook or _default_seller_round_hook(sqlite_client)
+        round_hook = seller_round_hook or _default_seller_round_hook(
+            sqlite_client,
+            domain,
+        )
         round_result = await round_hook(
             listing=our_order_dict,
             history=history,
@@ -420,6 +428,7 @@ async def start_sync_negotiation(
 async def continue_sync_negotiation(
     *,
     sqlite_client: Any,
+    domain: MarketDomainContract,
     neg_id: str,
     buyer_action: str,
     buyer_proposal: dict[str, Any] | None,
@@ -553,7 +562,10 @@ async def continue_sync_negotiation(
             proposal=buyer_proposal or buyer_pinned_proposal,
         )
     )
-    round_hook = seller_round_hook or _default_seller_round_hook(sqlite_client)
+    round_hook = seller_round_hook or _default_seller_round_hook(
+        sqlite_client,
+        domain,
+    )
     round_result = await round_hook(
         listing=our_order_dict,
         history=history,

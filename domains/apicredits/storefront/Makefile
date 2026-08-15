@@ -23,6 +23,7 @@ reinit: ## Force-reinstall all internal wheel dependencies. Run make dist-* from
 		--upgrade-package arkhai-kit-identity         --reinstall-package arkhai-kit-identity \
 		--upgrade-package arkhai-kit-policy           --reinstall-package arkhai-kit-policy \
 		--upgrade-package arkhai-kit-settlement-runtime --reinstall-package arkhai-kit-settlement-runtime \
+		--upgrade-package arkhai-kit-storefront      --reinstall-package arkhai-kit-storefront \
 		--upgrade-package arkhai-kit-site-client      --reinstall-package arkhai-kit-site-client
 
 test: reinit ## Run the test suite

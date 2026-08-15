@@ -14,6 +14,7 @@ dependencies = [
     "arkhai-kit-identity==0.3.0",
     "arkhai-kit-policy",
     "arkhai-kit-settlement-runtime>=0.1.0",
+    "arkhai-kit-storefront==0.1.0",
     "arkhai-kit-site-client>=0.2.0",
     "alkahest-py==1.1.2",
     "fastapi~=0.115.8",

@@ -2,13 +2,23 @@
 
 from __future__ import annotations
 
+import asyncio
+import os
 from collections.abc import Callable, Iterable
-from contextlib import asynccontextmanager
 from importlib import import_module
 from typing import Any
 
-from core_storefront.app_composition import StorefrontAppConfig, build_storefront_app
+from core_storefront.app_composition import StorefrontAppConfig
+from core_storefront.stage_log import set_stage_event_db_path, stage_event
 from market_core import MarketDomainContract
+from market_storefront_kit import (
+    NegotiationWatchdogPolicy,
+    StorefrontComposition,
+    StorefrontRouteHooks,
+    StorefrontServiceHooks,
+    build_composed_storefront_app,
+    run_negotiation_watchdog,
+)
 
 from .api import router as http_router
 from .domain_runtime import get_market_domain_contract
@@ -23,15 +33,27 @@ DESCRIPTION = (
 )
 
 
-def _runtime_lifespan(
-    factory: Callable[[], BareMetalStorefrontRuntime],
-):
-    @asynccontextmanager
-    async def lifespan(app: Any):
-        app.state.runtime = factory()
-        yield
+def _negotiation_watchdog_policy() -> NegotiationWatchdogPolicy:
+    return NegotiationWatchdogPolicy(
+        timeout_seconds=float(
+            os.environ.get("BARE_METAL_NEGOTIATION_TIMEOUT_SECONDS", "1800")
+        ),
+        interval_seconds=float(
+            os.environ.get("BARE_METAL_NEGOTIATION_WATCHDOG_INTERVAL", "60")
+        ),
+    )
 
-    return lifespan
+
+async def _start_runtime(runtime: BareMetalStorefrontRuntime) -> None:
+    set_stage_event_db_path(runtime.db.db_path)
+    policy = _negotiation_watchdog_policy()
+    asyncio.create_task(
+        run_negotiation_watchdog(
+            runtime.db,
+            policy,
+            emit_stage_event=stage_event,
+        )
+    )
 
 
 def build_bare_metal_storefront_app(
@@ -39,32 +61,39 @@ def build_bare_metal_storefront_app(
     domain: MarketDomainContract | None = None,
     runtime: BareMetalStorefrontRuntime | None = None,
     runtime_factory: Callable[[], BareMetalStorefrontRuntime] | None = None,
-    lifespan: Any | None = None,
     routers: Iterable[Any] = (),
     root_path: str = "",
 ) -> Any:
     """Build the shared storefront shell around one bare-metal contract."""
     selected_domain = domain or get_market_domain_contract()
-    if lifespan is None:
-        factory = runtime_factory or (
-            (lambda: runtime)
-            if runtime is not None
-            else lambda: build_runtime_from_environment(domain=selected_domain)
+    if runtime_factory is not None:
+        build_services = lambda selected: runtime_factory()
+    elif runtime is not None:
+        build_services = lambda selected: runtime
+    else:
+        build_services = lambda selected: build_runtime_from_environment(
+            domain=selected
         )
-        lifespan = _runtime_lifespan(factory)
-    app = build_storefront_app(
-        config=StorefrontAppConfig(
-            title="Arkhai Bare-Metal Storefront",
-            description=DESCRIPTION,
-            root_path=root_path,
-            swagger_ui_parameters={"persistAuthorization": True},
-        ),
-        domain=selected_domain,
-        lifespan=lifespan,
-        routers=(http_router, *tuple(routers)),
+    service_hooks = StorefrontServiceHooks(
+        build=build_services,
+        start=_start_runtime,
     )
-    app.middleware("http")(authenticate_response)
-    return app
+    return build_composed_storefront_app(
+        StorefrontComposition(
+            domain=selected_domain,
+            app=StorefrontAppConfig(
+                title="Arkhai Bare-Metal Storefront",
+                description=DESCRIPTION,
+                root_path=root_path,
+                swagger_ui_parameters={"persistAuthorization": True},
+            ),
+            services=service_hooks,
+            routes=StorefrontRouteHooks(
+                routers=(http_router, *tuple(routers)),
+                middleware=(authenticate_response,),
+            ),
+        )
+    )
 
 
 app = build_bare_metal_storefront_app()

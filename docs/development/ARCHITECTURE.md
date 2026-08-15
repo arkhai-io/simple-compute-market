@@ -52,11 +52,22 @@ plan    = settle(terms)
 receipt = service(plan)
 ```
 
-Core owns schema-opaque carriers and role structure around these phases: signed transport, round sequencing, persistence mechanics, and deterministic handoffs. Domain packages own listing vocabulary, message content, validation, deterministic interpretation of terms, fulfillment requirements, and result vocabulary. Kit packages own reusable mechanisms and authorities, including the single commercial-settlement obligation lifecycle. Composition roots wire concrete domain and kit implementations into role packages.
+Core owns schema-opaque carriers and role structure around these phases: signed transport, round sequencing, persistence mechanics, and deterministic handoffs. Domain packages own listing vocabulary, message content, validation, deterministic interpretation of terms, fulfillment requirements, and result vocabulary. Kit packages own reusable mechanisms and authorities, including the single commercial-settlement obligation lifecycle and the shared storefront application/lifecycle shell. Composition roots wire concrete domain and kit implementations into role packages.
 
 Each domain-owned storefront executable selects and validates one immutable `MarketDomainContract` at its outermost composition root before constructing persistence, services, workers, or the HTTP application. The validated object is then injected unchanged through application state, the lifespan-owned container, repositories, publication, negotiation, settlement, and fulfillment. A service must not recover domain behavior from module state, construct a replacement contract, or branch on a domain identity below that root.
 
 The VM storefront currently selects `compute.v1` once per process. This parameterization is deliberately behavior-preserving: existing single-domain rows have no domain discriminator and continue to be interpreted by the startup-selected contract, so restart requires no database migration. Per-record domain selection and dispatch belong to the multi-domain storefront composition layer.
+
+The `arkhai-kit-storefront` distribution (`market_storefront_kit`) owns the
+shared FastAPI app, lifespan, container, ordered-route, middleware, Alkahest
+client-construction, and negotiation-watchdog composition seams. A
+domain-owned executable supplies one exact validated contract, immutable
+service lifecycle callbacks, its route contribution, and configuration. The
+VM, API-credit, and bare-metal roots all use this shell. Domain codecs, policy,
+settlement, fulfillment, and publication hooks stay in their injected
+contract; neither the kit nor a route recovers them from a global domain
+resolver. Extracted kit mechanisms have one implementation: domains retain
+only the values and hooks that instantiate them.
 
 Two hooks remain separate when core-owned machinery or a typed invariant sits between them. They may be merged when the core does nothing between them and the split would expose only implementation detail.
 
@@ -87,6 +98,7 @@ Kit is not a flat peer group. It has an explicit one-way hierarchy:
 1. **Foundation capabilities** — identity, configuration, generic policy, settlement-mechanism primitives, and `kit/settlement-runtime`'s domain-neutral obligation/operation lifecycle.
 2. **Authority capabilities** — `kit/site` and `kit/resource-pools`, which own capacity and pool administration and depend only on foundation capabilities.
 3. **Fulfillment lifecycle** — `kit/fulfillment`, which owns provider-neutral scheduling and provider execution contracts and may depend on authority capabilities.
+4. **Storefront role composition** — `kit/storefront`, which composes the core storefront shell with injected domain service and route hooks and may depend only on core storefront contracts and foundation capabilities.
 
 ```text
 kit/fulfillment
@@ -95,6 +107,10 @@ kit/fulfillment
 
 kit/site ───────────────> foundation only
 kit/resource-pools ─────> foundation only
+
+kit/storefront
+    ├──> core/storefront
+    └──> foundation only
 ```
 
 Dependencies never point upward. Imports guarded by `TYPE_CHECKING` still count as architectural dependencies. Kit packages never import deployed services or domain adapters.
