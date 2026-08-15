@@ -18,6 +18,26 @@ _RUN_IDENTITY = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{7,127}$")
 _WORKFLOW_REF = re.compile(r"^[A-Za-z0-9.][A-Za-z0-9._/@:-]{7,255}$")
 _AUTHORITY_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{1,127}$")
 _EIP191_ADDRESS = re.compile(r"^0x[0-9a-f]{40}$")
+_FUNDING_PROFILES = ("card.v1", "us_bank_transfer.v1", "us_ach_debit.v1")
+_CAPABILITIES = (
+    "scheme-tagged-identities.v1",
+    "account-owner-admission.v1",
+    "account-owner-rotation.v1",
+    "account-owner-retirement.v1",
+    "signer-injected-client.v1",
+    "provider-neutral-seller-onboarding.v1",
+    "conditional-escrow.v2",
+    "stripe-connect-separate-charges-transfers.v2",
+    "portable-attestation.v1",
+    "eas-arbiter.v1",
+    "payer-profile.v1",
+    "funding-authorization.v1",
+    "funding-profile.card.v1",
+    "funding-profile.us_bank_transfer.v1",
+    "funding-profile.us_ach_debit.v1",
+    "normalized-funding-reversal.v1",
+    "operator-recovery-redaction.v1",
+)
 
 
 class AuthorizationUnavailable(RuntimeError):
@@ -29,7 +49,7 @@ class AuthorizationRejected(RuntimeError):
 
 
 class ReleaseIdentityRejected(RuntimeError):
-    """The ordinary hosted release is not pinned to immutable identities."""
+    """The consumer or hosted release is not pinned to immutable identities."""
 
 
 class WebhookRouteUnavailable(RuntimeError):
@@ -39,6 +59,14 @@ class WebhookRouteUnavailable(RuntimeError):
 @dataclass(frozen=True)
 class ReleaseIdentity:
     marketplace_commit: str
+    marketplace_workflow_run_id: str
+    marketplace_workflow_ref: str
+    marketplace_manifest_sha256: str
+    marketplace_image_digest: str
+    marketplace_image: str
+    marketplace_wheelhouse_sha256: str
+    marketplace_schema_sha256: str
+    marketplace_provenance_sha256: str
     hosted_source_commit: str
     hosted_workflow_run_id: str
     hosted_workflow_ref: str
@@ -80,6 +108,10 @@ def require_release_identity(
     *,
     marketplace_commit: str,
     observed_marketplace_commit: str,
+    marketplace_workflow_run_id: str,
+    marketplace_workflow_ref: str,
+    marketplace_manifest_sha256: str,
+    marketplace_image_digest: str,
     hosted_source_commit: str,
     hosted_workflow_run_id: str,
     hosted_workflow_ref: str,
@@ -91,8 +123,10 @@ def require_release_identity(
     if (
         not _COMMIT.fullmatch(marketplace_commit)
         or observed_marketplace_commit != marketplace_commit
+        or not marketplace_workflow_run_id.isdigit()
+        or not _WORKFLOW_REF.fullmatch(marketplace_workflow_ref)
     ):
-        raise ReleaseIdentityRejected("marketplace source must match the exact trusted commit")
+        raise ReleaseIdentityRejected("marketplace release identity must match the trusted commit")
     if (
         not _COMMIT.fullmatch(hosted_source_commit)
         or not hosted_workflow_run_id.isdigit()
@@ -100,13 +134,44 @@ def require_release_identity(
     ):
         raise ReleaseIdentityRejected("hosted producer source, workflow, and run must be exact")
     for value in (
+        marketplace_manifest_sha256,
+        marketplace_image_digest,
         hosted_manifest_sha256,
         hosted_client_wheel_sha256,
         hosted_image_digest,
     ):
         if not _DIGEST.fullmatch(value):
-            raise ReleaseIdentityRejected("hosted release digests must be exact sha256 identities")
+            raise ReleaseIdentityRejected(
+                "consumer and hosted release digests must be exact sha256 identities"
+            )
     values = _read_generated_compose_env(compose_env_path)
+    marketplace_image = values.get("HOSTED_MARKETPLACE_VERIFIED_IMAGE", "")
+    marketplace_image_match = _IMAGE.fullmatch(marketplace_image)
+    if (
+        marketplace_image_match is None
+        or marketplace_image_match.group("digest") != marketplace_image_digest
+        or values.get("HOSTED_MARKETPLACE_VERIFIED_MANIFEST_SHA256")
+        != marketplace_manifest_sha256
+        or values.get("HOSTED_MARKETPLACE_VERIFIED_REPOSITORY")
+        != "arkhai/simple-market-service"
+        or values.get("HOSTED_MARKETPLACE_VERIFIED_SOURCE_COMMIT") != marketplace_commit
+        or values.get("HOSTED_MARKETPLACE_VERIFIED_WORKFLOW_REF")
+        != marketplace_workflow_ref
+        or values.get("HOSTED_MARKETPLACE_VERIFIED_WORKFLOW_RUN_ID")
+        != marketplace_workflow_run_id
+    ):
+        raise ReleaseIdentityRejected(
+            "activated marketplace image does not match the attested consumer release"
+        )
+    marketplace_artifact_digests = (
+        values.get("HOSTED_MARKETPLACE_VERIFIED_ARTIFACT_WHEELHOUSE_SHA256", ""),
+        values.get("HOSTED_MARKETPLACE_VERIFIED_ARTIFACT_SCHEMA_SHA256", ""),
+        values.get("HOSTED_MARKETPLACE_VERIFIED_ARTIFACT_PROVENANCE_SHA256", ""),
+    )
+    if not all(_DIGEST.fullmatch(value) for value in marketplace_artifact_digests):
+        raise ReleaseIdentityRejected(
+            "attested marketplace wheelhouse, schema, and provenance must be exact"
+        )
     image = values.get("HOSTED_SETTLEMENT_VERIFIED_IMAGE", "")
     match = _IMAGE.fullmatch(image)
     if match is None or match.group("digest") != hosted_image_digest:
@@ -123,6 +188,24 @@ def require_release_identity(
         raise ReleaseIdentityRejected("signed release repository is not the hosted producer")
     if values.get("HOSTED_SETTLEMENT_VERIFIED_WORKFLOW_REF") != hosted_workflow_ref:
         raise ReleaseIdentityRejected("signed release workflow does not match the trusted workflow")
+    hosted_artifact_digests = (
+        values.get("HOSTED_SETTLEMENT_VERIFIED_CONFORMANCE_SHA256", ""),
+        values.get("HOSTED_SETTLEMENT_VERIFIED_MIGRATIONS_SHA256", ""),
+        values.get("HOSTED_SETTLEMENT_VERIFIED_OPENAPI_SHA256", ""),
+        values.get("HOSTED_SETTLEMENT_VERIFIED_PROVENANCE_SHA256", ""),
+        values.get("HOSTED_SETTLEMENT_VERIFIED_SERVICE_WHEEL_SHA256", ""),
+    )
+    if (
+        values.get("HOSTED_SETTLEMENT_VERIFIED_RELEASE_VERSION") != "0.2.0"
+        or values.get("HOSTED_SETTLEMENT_VERIFIED_API_VERSION") != "0.2.0"
+        or values.get("HOSTED_SETTLEMENT_VERIFIED_SCHEMA_VERSION") != "5"
+        or tuple(values.get("HOSTED_SETTLEMENT_VERIFIED_FUNDING_PROFILES", "").split(","))
+        != _FUNDING_PROFILES
+        or tuple(values.get("HOSTED_SETTLEMENT_VERIFIED_CAPABILITIES", "").split(","))
+        != _CAPABILITIES
+        or not all(_DIGEST.fullmatch(value) for value in hosted_artifact_digests)
+    ):
+        raise ReleaseIdentityRejected("generated Compose input is not the exact expanded contract")
     manifest_digest = values["HOSTED_SETTLEMENT_VERIFIED_MANIFEST_DIGEST"]
     authority_id = values["HOSTED_SETTLEMENT_VERIFIED_AUTHORITY_ID"]
     authority_scheme = values["HOSTED_SETTLEMENT_VERIFIED_AUTHORITY_SCHEME"]
@@ -136,6 +219,14 @@ def require_release_identity(
         raise ReleaseIdentityRejected("signed hosted authority coordinates are invalid")
     return ReleaseIdentity(
         marketplace_commit=marketplace_commit,
+        marketplace_workflow_run_id=marketplace_workflow_run_id,
+        marketplace_workflow_ref=marketplace_workflow_ref,
+        marketplace_manifest_sha256=marketplace_manifest_sha256,
+        marketplace_image_digest=marketplace_image_digest,
+        marketplace_image=marketplace_image,
+        marketplace_wheelhouse_sha256=marketplace_artifact_digests[0],
+        marketplace_schema_sha256=marketplace_artifact_digests[1],
+        marketplace_provenance_sha256=marketplace_artifact_digests[2],
         hosted_source_commit=hosted_source_commit,
         hosted_workflow_run_id=hosted_workflow_run_id,
         hosted_workflow_ref=hosted_workflow_ref,
@@ -247,6 +338,15 @@ def _read_generated_compose_env(path: Path) -> dict[str, str]:
         raise ReleaseIdentityRejected("verified Compose environment is unavailable") from exc
     values: dict[str, str] = {}
     allowed = {
+        "HOSTED_MARKETPLACE_VERIFIED_ARTIFACT_PROVENANCE_SHA256",
+        "HOSTED_MARKETPLACE_VERIFIED_ARTIFACT_SCHEMA_SHA256",
+        "HOSTED_MARKETPLACE_VERIFIED_ARTIFACT_WHEELHOUSE_SHA256",
+        "HOSTED_MARKETPLACE_VERIFIED_IMAGE",
+        "HOSTED_MARKETPLACE_VERIFIED_MANIFEST_SHA256",
+        "HOSTED_MARKETPLACE_VERIFIED_REPOSITORY",
+        "HOSTED_MARKETPLACE_VERIFIED_SOURCE_COMMIT",
+        "HOSTED_MARKETPLACE_VERIFIED_WORKFLOW_REF",
+        "HOSTED_MARKETPLACE_VERIFIED_WORKFLOW_RUN_ID",
         "HOSTED_SETTLEMENT_VERIFIED_IMAGE",
         "HOSTED_SETTLEMENT_VERIFIED_MANIFEST_SHA256",
         "HOSTED_SETTLEMENT_VERIFIED_CLIENT_WHEEL_SHA256",
@@ -258,6 +358,16 @@ def _read_generated_compose_env(path: Path) -> dict[str, str]:
         "HOSTED_SETTLEMENT_VERIFIED_AUTHORITY_ID",
         "HOSTED_SETTLEMENT_VERIFIED_AUTHORITY_SCHEME",
         "HOSTED_SETTLEMENT_VERIFIED_AUTHORITY_ADDRESS",
+        "HOSTED_SETTLEMENT_VERIFIED_API_VERSION",
+        "HOSTED_SETTLEMENT_VERIFIED_SCHEMA_VERSION",
+        "HOSTED_SETTLEMENT_VERIFIED_FUNDING_PROFILES",
+        "HOSTED_SETTLEMENT_VERIFIED_CAPABILITIES",
+        "HOSTED_SETTLEMENT_VERIFIED_CONFORMANCE_SHA256",
+        "HOSTED_SETTLEMENT_VERIFIED_MIGRATIONS_SHA256",
+        "HOSTED_SETTLEMENT_VERIFIED_OPENAPI_SHA256",
+        "HOSTED_SETTLEMENT_VERIFIED_PROVENANCE_SHA256",
+        "HOSTED_SETTLEMENT_VERIFIED_RELEASE_VERSION",
+        "HOSTED_SETTLEMENT_VERIFIED_SERVICE_WHEEL_SHA256",
     }
     for line in text.splitlines():
         stripped = line.strip()

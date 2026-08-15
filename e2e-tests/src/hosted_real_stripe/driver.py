@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+from dataclasses import replace
 import json
 import os
 import time
@@ -26,8 +27,12 @@ from .browser import (
 from .evidence import (
     DiagnosticCode,
     DiagnosticEvidence,
+    FundingEvidence,
+    FundingProfile,
     HostedReleaseIdentityEvidence,
     IdentityEvidence,
+    Interaction,
+    LossEvidence,
     MarketplaceIdentityEvidence,
     ProviderEvidence,
     RecoveryEvidence,
@@ -53,6 +58,7 @@ from .gates import (
 )
 from .runtime import (
     ComposeStack,
+    EphemeralBuyerConfig,
     EphemeralMarketplaceConfig,
     EphemeralServiceEnv,
     LifecycleContractError,
@@ -77,10 +83,18 @@ _SCENARIOS = (
     "missed_webhook",
     "api_restart",
     "worker_restart",
+    "funding_restart",
+    "delayed_funding",
+    "off_session_success",
+    "requires_action",
+    "ach_return",
+    "post_collection_loss",
     "decline",
     "insufficient_funds",
     "authentication",
 )
+_FUNDING_PROFILES = ("card.v1", "us_bank_transfer.v1", "us_ach_debit.v1")
+_INTERACTIONS = ("interactive", "saved_instrument")
 _REFUND_SERVICING_INTERVAL_SECONDS = 7200.0
 
 
@@ -93,16 +107,21 @@ class _ExecutionState:
 @dataclass(frozen=True)
 class _ScenarioResult:
     operation_ref: str
+    funding: FundingEvidence
     collection: object | None = None
     refund: object | None = None
     payment_outcome: object | None = None
     recovery: RecoveryEvidence | None = None
-
+    loss: LossEvidence | None = None
 
 def run(args: argparse.Namespace) -> tuple[StripeTestEvidence, int]:
     release = require_release_identity(
         marketplace_commit=args.marketplace_commit,
         observed_marketplace_commit=args.observed_marketplace_commit,
+        marketplace_workflow_run_id=args.marketplace_workflow_run_id,
+        marketplace_workflow_ref=args.marketplace_workflow_ref,
+        marketplace_manifest_sha256=args.marketplace_manifest_sha256,
+        marketplace_image_digest=args.marketplace_image_digest,
         hosted_source_commit=args.hosted_source_commit,
         hosted_workflow_run_id=args.hosted_workflow_run_id,
         hosted_workflow_ref=args.hosted_workflow_ref,
@@ -116,6 +135,14 @@ def run(args: argparse.Namespace) -> tuple[StripeTestEvidence, int]:
         marketplace=MarketplaceIdentityEvidence(
             repository="arkhai/simple-market-service",
             commit=release.marketplace_commit,
+            workflow_run_id=release.marketplace_workflow_run_id,
+            workflow_ref=release.marketplace_workflow_ref,
+            manifest_sha256=release.marketplace_manifest_sha256,
+            image_digest=release.marketplace_image_digest,
+            image=release.marketplace_image,
+            wheelhouse_sha256=release.marketplace_wheelhouse_sha256,
+            settlement_config_schema_sha256=release.marketplace_schema_sha256,
+            provenance_sha256=release.marketplace_provenance_sha256,
         ),
         hosted_release=HostedReleaseIdentityEvidence(
             repository="arkhai/hosted-settlement-service",
@@ -129,12 +156,31 @@ def run(args: argparse.Namespace) -> tuple[StripeTestEvidence, int]:
         run_ref=opaque_ref("run", run_identity),
     )
     scenario = cast(Scenario, args.scenario)
+    funding_profile = cast(FundingProfile, args.funding_profile)
+    interaction = cast(Interaction, args.interaction)
     provider = ProviderEvidence()
     execution = _ExecutionState()
+    funding = FundingEvidence(
+        profile=funding_profile,
+        interaction=interaction,
+        payer_profile_bound=False,  # type: ignore[arg-type]
+        authorization_obligation_bound=False,  # type: ignore[arg-type]
+        authorization_operation_scoped=False,  # type: ignore[arg-type]
+        accepted_profile_preserved=False,  # type: ignore[arg-type]
+        authoritative_funding_observed=False,
+        transient_action_observed=False,
+        delayed_state_observed=False,
+    )
     try:
+        _require_profile_scenario(funding_profile, interaction, scenario)
         secret = require_test_secret(os.environ.get("STRIPE_SECRET_KEY"))
         account_id = require_connected_account(os.environ.get("STRIPE_CONNECTED_ACCOUNT_ID"))
         webhook_url = require_loopback_webhook(args.webhook_url)
+        buyer_identity_scheme = os.environ.get(
+            "HOSTED_SETTLEMENT_E2E_BUYER_IDENTITY_SCHEME", ""
+        )
+        if buyer_identity_scheme not in {"eip191", "ed25519"}:
+            raise AuthorizationUnavailable("protected buyer identity scheme is unavailable")
         stripe = StripeApi(secret, timeout=args.stripe_request_timeout)
 
         execution.stage = "account_readiness"
@@ -157,16 +203,30 @@ def run(args: argparse.Namespace) -> tuple[StripeTestEvidence, int]:
         forwarder = StripeWebhookForwarder(api_key=secret, forward_to=webhook_url)
         webhook_secret = forwarder.start(timeout=args.webhook_ready_timeout)
         try:
-            with EphemeralMarketplaceConfig(
-                template=args.storefront_config,
-                account_ref=args.account_ref,
-                authority_id=release.hosted_authority_id,
-                authority_scheme=release.hosted_authority_scheme,
-                authority_address=release.hosted_authority_address,
-                authority_environment=args.authority_environment,
-                manifest_digest=release.hosted_manifest_digest,
-                shared_directory=args.compose_env.parent,
-            ) as marketplace_config:
+            with (
+                EphemeralMarketplaceConfig(
+                    template=args.storefront_config,
+                    account_ref=args.account_ref,
+                    authority_id=release.hosted_authority_id,
+                    authority_scheme=release.hosted_authority_scheme,
+                    authority_address=release.hosted_authority_address,
+                    authority_environment=args.authority_environment,
+                    manifest_digest=release.hosted_manifest_digest,
+                    funding_profile=funding_profile,
+                    shared_directory=args.compose_env.parent,
+                ) as marketplace_config,
+                EphemeralBuyerConfig(
+                    template=args.buyer_config,
+                    authority_id=release.hosted_authority_id,
+                    authority_scheme=release.hosted_authority_scheme,
+                    authority_address=release.hosted_authority_address,
+                    authority_environment=args.authority_environment,
+                    manifest_digest=release.hosted_manifest_digest,
+                    buyer_identity_scheme=buyer_identity_scheme,
+                    funding_profile=funding_profile,
+                    shared_directory=args.compose_env.parent,
+                ) as buyer_config,
+            ):
                 with EphemeralServiceEnv(
                     api_key=secret,
                     webhook_secret=webhook_secret,
@@ -218,12 +278,15 @@ def run(args: argparse.Namespace) -> tuple[StripeTestEvidence, int]:
                             cwd=args.repo_root,
                             environment=_lifecycle_environment(
                                 args,
+                                buyer_config=buyer_config,
                                 marketplace_config=marketplace_config,
                                 manifest_digest=release.hosted_manifest_digest,
                             ),
                             request_timeout=args.lifecycle_timeout,
                         ) as lifecycle:
                             result = _execute_scenario(
+                                funding_profile=funding_profile,
+                                interaction=interaction,
                                 scenario=scenario,
                                 lifecycle=lifecycle,
                                 stripe=stripe,
@@ -234,6 +297,7 @@ def run(args: argparse.Namespace) -> tuple[StripeTestEvidence, int]:
                                 provider_timeout=args.provider_timeout,
                                 poll_interval=args.poll_interval,
                                 execution=execution,
+                                account_ref=args.account_ref,
                             )
         finally:
             forwarder.stop()
@@ -244,11 +308,13 @@ def run(args: argparse.Namespace) -> tuple[StripeTestEvidence, int]:
                 scenario=scenario,
                 result="passed",
                 stage="complete",
+                funding=result.funding,
                 operation_ref=result.operation_ref,
                 collection=result.collection,  # type: ignore[arg-type]
                 refund=result.refund,  # type: ignore[arg-type]
                 payment_outcome=result.payment_outcome,  # type: ignore[arg-type]
                 recovery=result.recovery,
+                loss=result.loss,
             ),
             0,
         )
@@ -278,6 +344,12 @@ def run(args: argparse.Namespace) -> tuple[StripeTestEvidence, int]:
                 code = "stripe_cli_unavailable"
             elif execution.stage == "hosted_release":
                 code = "hosted_release_unavailable"
+            elif execution.stage == "payer_profile":
+                code = "payer_profile_unavailable"
+            elif execution.stage == "payer_setup":
+                code = "setup_action_unavailable"
+            elif execution.stage in {"funding_authorization", "funding"}:
+                code = "profile_prerequisite_unavailable"
             else:
                 code = "marketplace_unavailable"
     except (LifecycleConvergenceTimeout, ProviderConvergenceTimeout):
@@ -296,11 +368,43 @@ def run(args: argparse.Namespace) -> tuple[StripeTestEvidence, int]:
             scenario=scenario,
             result=classification,
             stage=execution.stage,
+            funding=funding,
             operation_ref=execution.operation_ref,
             diagnostic=DiagnosticEvidence(stage=execution.stage, code=code),
         ),
         1,
     )
+
+
+def _require_profile_scenario(
+    funding_profile: FundingProfile,
+    interaction: Interaction,
+    scenario: Scenario,
+) -> None:
+    if funding_profile == "us_bank_transfer.v1" and interaction != "interactive":
+        raise AuthorizationRejected("push bank transfer must use interactive funding")
+    if interaction == "saved_instrument" and funding_profile not in {
+        "card.v1",
+        "us_ach_debit.v1",
+    }:
+        raise AuthorizationRejected("saved funding requires a card or ACH profile")
+    if scenario == "off_session_success" and (
+        funding_profile not in {"card.v1", "us_ach_debit.v1"}
+        or interaction != "saved_instrument"
+    ):
+        raise AuthorizationRejected("off-session scenarios require saved card or ACH funding")
+    if scenario == "requires_action" and (
+        funding_profile != "card.v1" or interaction != "saved_instrument"
+    ):
+        raise AuthorizationRejected("requires-action fallback requires saved card funding")
+    if scenario in {"ach_return", "post_collection_loss"} and funding_profile != "us_ach_debit.v1":
+        raise AuthorizationRejected("ACH loss scenarios require the ACH funding profile")
+    if scenario in {"delayed_funding", "funding_restart"} and funding_profile == "card.v1":
+        raise AuthorizationRejected("delayed funding scenarios require an asynchronous bank profile")
+    if scenario in {"decline", "insufficient_funds", "authentication"} and (
+        funding_profile != "card.v1" or interaction != "interactive"
+    ):
+        raise AuthorizationRejected("card outcome scenarios require interactive card funding")
 
 
 def _maintained_account_binding(
@@ -349,10 +453,15 @@ def _pay_with_forwarding_paused(
     checkout_url: str,
     *,
     outcome: CheckoutOutcome,
+    funding_profile: FundingProfile = "card.v1",
 ) -> BrowserPaymentResult:
     forwarder.pause()
     try:
-        return browser.pay(checkout_url, outcome=outcome)
+        return browser.pay(
+            checkout_url,
+            outcome=outcome,
+            funding_profile=funding_profile,
+        )
     finally:
         forwarder.resume()
 
@@ -360,60 +469,172 @@ def _pay_with_forwarding_paused(
 def _execute_scenario(
     *,
     scenario: Scenario,
+    funding_profile: FundingProfile,
+    interaction: Interaction,
     lifecycle: MarketplaceLifecycleSession,
     stripe: StripeApi,
     browser: ChromiumCheckout,
     forwarder: StripeWebhookForwarder,
+    account_ref: str,
     stack: ComposeStack,
     connected_account_id: str,
     provider_timeout: float,
     poll_interval: float,
     execution: _ExecutionState,
 ) -> _ScenarioResult:
-    case = "refund" if scenario in {"reclaim", "worker_restart"} else "collection"
-    prepared = lifecycle.request(f"prepare_{case}")
-    expected, checkout_url = _prepared_effect(
-        prepared,
-        connected_account_id=connected_account_id,
+    execution.stage = "payer_profile"
+    payer_fixture = lifecycle.request(
+        "ensure_payer_profile_fixture",
+        funding_profile=funding_profile,
+        interaction=interaction,
     )
-    operation_ref = opaque_ref("op", expected.operation_ref)
+    setup_action = _validate_payer_fixture(
+        payer_fixture,
+        interaction=interaction,
+    )
+    if setup_action is not None:
+        execution.stage = "browser_checkout"
+        browser.complete_setup(
+            setup_action["url"],
+            funding_profile=funding_profile,
+        )
+        refreshed = lifecycle.request("complete_payer_setup")
+        if _validate_payer_fixture(refreshed, interaction=interaction) is not None:
+            raise LifecycleContractError("payer setup remained incomplete after browser consent")
+    case = "refund" if scenario in {"reclaim", "worker_restart"} else "collection"
+    execution.stage = "funding_authorization"
+    prepared = lifecycle.request(
+        f"prepare_{case}",
+        funding_profile=funding_profile,
+        interaction=interaction,
+    )
+    expected, action_kind, action_url = _prepared_effect(
+        prepared,
+        account_ref=account_ref,
+        connected_account_id=connected_account_id,
+        funding_profile=funding_profile,
+    )
+    operation_ref = opaque_ref("op", expected.marketplace_operation_id)
     execution.operation_ref = operation_ref
-
     if scenario == "api_restart":
         execution.stage = "recovery"
         stack.restart("api")
-    browser_outcome = _browser_outcome(scenario)
-    execution.stage = "browser_checkout"
-    if scenario == "missed_webhook":
-        payment = _pay_with_forwarding_paused(
-            forwarder,
-            browser,
-            checkout_url,
-            outcome=browser_outcome,
-        )
-        execution.stage = "recovery"
-        stack.restart("worker")
-    else:
-        payment = browser.pay(checkout_url, outcome=browser_outcome)
-    checkout_url = ""
-    if payment.checkout_session_id != expected.checkout_session_id:
-        raise LifecycleContractError("browser completed a different Checkout session")
 
-    if scenario in {"decline", "insufficient_funds", "authentication"}:
+    delayed_observed = False
+    if scenario in {"delayed_funding", "funding_restart", "ach_return", "post_collection_loss"}:
+        execution.stage = "funding"
+        pending = lifecycle.request(
+            "observe_pending_funding",
+            operation_ref=expected.marketplace_operation_id,
+        )
+        if (
+            pending.get("funding_state") not in {"awaiting_payment", "pending"}
+            or pending.get("fulfillment_started") is not False
+            or pending.get("funding_profile") != funding_profile
+        ):
+            raise LifecycleContractError("delayed funding did not remain pending before fulfillment")
+        delayed_observed = True
+        if scenario == "funding_restart":
+            execution.stage = "recovery"
+            stack.restart("worker")
+
+    payment: BrowserPaymentResult | None = None
+    if action_url is not None:
+        execution.stage = "browser_checkout"
+        if scenario == "missed_webhook":
+            payment = _pay_with_forwarding_paused(
+                forwarder,
+                browser,
+                action_url,
+                outcome=browser_outcome,
+                funding_profile=funding_profile,
+            )
+            execution.stage = "recovery"
+            stack.restart("worker")
+        else:
+            payment = (
+                browser.confirm(action_url)
+                if action_kind == "confirmation"
+                else browser.pay(
+                    action_url,
+                    outcome=browser_outcome,
+                    funding_profile=funding_profile,
+                )
+            )
+        if payment.checkout_session_id is not None:
+            expected = replace(expected, checkout_session_id=payment.checkout_session_id)
+    elif action_kind == "bank_instructions":
+        execution.stage = "funding"
+        stripe.fund_test_cash_balance(expected)
+    elif interaction == "interactive":
+        raise LifecycleContractError("interactive funding omitted its transient payer action")
+
+    if scenario in {"decline", "insufficient_funds"}:
         execution.stage = "provider_inspection"
         payment_outcome = stripe.wait_for_payment_outcome(
             expected,
-            cast(Literal["decline", "insufficient_funds", "authentication"], scenario),
+            cast(Literal["decline", "insufficient_funds"], scenario),
             timeout=provider_timeout,
             poll_interval=poll_interval,
         )
         return _ScenarioResult(
             operation_ref=operation_ref,
+            funding=_funding_evidence(
+                funding_profile,
+                interaction,
+                authoritative=False,
+                action_observed=action_kind is not None,
+                delayed=delayed_observed,
+            ),
             payment_outcome=payment_outcome,
         )
 
-    execution.stage = "marketplace_lifecycle"
-    lifecycle.request("wait_authoritative_funding", operation_ref=expected.operation_ref)
+    execution.stage = "funding"
+    funded = lifecycle.request(
+        "wait_authoritative_funding",
+        operation_ref=expected.marketplace_operation_id,
+    )
+    _validate_authoritative_funding(funded, funding_profile=funding_profile)
+    funding = _funding_evidence(
+        funding_profile,
+        interaction,
+        authoritative=True,
+        action_observed=action_kind is not None,
+        delayed=delayed_observed,
+    )
+    if scenario == "authentication":
+        execution.stage = "provider_inspection"
+        return _ScenarioResult(
+            operation_ref=operation_ref,
+            funding=funding,
+            payment_outcome=stripe.wait_for_payment_outcome(
+                expected,
+                "authentication",
+                timeout=provider_timeout,
+                poll_interval=poll_interval,
+            ),
+        )
+    if scenario == "ach_return":
+        execution.stage = "loss_boundary"
+        induced = lifecycle.request(
+            "induce_test_ach_return",
+            operation_ref=expected.marketplace_operation_id,
+        )
+        if induced.get("available") is False:
+            raise ProcessUnavailable(
+                "protected producer exposes no exact ACH return test-mode helper"
+            )
+        observed_loss = lifecycle.request(
+            "wait_authoritative_loss",
+            operation_ref=expected.marketplace_operation_id,
+        )
+        if observed_loss.get("available") is False:
+            raise ProcessUnavailable(
+                "protected producer exposes no authoritative ACH loss projection"
+            )
+        loss = _loss_evidence(observed_loss, scenario)
+        return _ScenarioResult(operation_ref=operation_ref, funding=funding, loss=loss)
+
     if scenario in {"reclaim", "worker_restart"}:
         if scenario == "worker_restart":
             execution.stage = "recovery"
@@ -422,41 +643,33 @@ def _execute_scenario(
         _wait_until_reclaim_eligible(prepared)
         lifecycle.request(
             "request_eligible_pretransfer_refund",
-            operation_ref=expected.operation_ref,
+            operation_ref=expected.marketplace_operation_id,
         )
         terminal = _terminal_projection(
             lifecycle.request(
                 "wait_authoritative_refund",
-                operation_ref=expected.operation_ref,
+                operation_ref=expected.marketplace_operation_id,
             ),
             collection=False,
         )
         execution.stage = "provider_inspection"
         refund = stripe.wait_for_refund(
-            expected,
-            terminal,
-            timeout=provider_timeout,
-            poll_interval=poll_interval,
+            expected, terminal, timeout=provider_timeout, poll_interval=poll_interval
         )
-        execution.stage = "recovery"
         lifecycle.request(
             "recover_eligible_pretransfer_refund",
-            operation_ref=expected.operation_ref,
+            operation_ref=expected.marketplace_operation_id,
         )
-        repeated = stripe.wait_for_refund(
-            expected,
-            terminal,
-            timeout=provider_timeout,
-            poll_interval=poll_interval,
-        )
-        if repeated != refund:
+        if stripe.wait_for_refund(
+            expected, terminal, timeout=provider_timeout, poll_interval=poll_interval
+        ) != refund:
             raise ProviderInvariantError("repeated refund recovery changed the original effect")
         recovery = (
             RecoveryEvidence(
                 kind="worker_restart",
                 process="worker",
                 original_operation_preserved=True,
-                checkout_count=1,
+                checkout_count=int(expected.checkout_session_id is not None),
                 terminal_effect_count=1,
             )
             if scenario == "worker_restart"
@@ -464,6 +677,7 @@ def _execute_scenario(
         )
         return _ScenarioResult(
             operation_ref=operation_ref,
+            funding=funding,
             refund=refund,
             recovery=recovery,
         )
@@ -471,43 +685,57 @@ def _execute_scenario(
     execution.stage = "marketplace_lifecycle"
     lifecycle.request(
         "complete_portable_vm_fulfillment",
-        operation_ref=expected.operation_ref,
+        operation_ref=expected.marketplace_operation_id,
     )
     terminal = _terminal_projection(
         lifecycle.request(
             "wait_authoritative_collection",
-            operation_ref=expected.operation_ref,
+            operation_ref=expected.marketplace_operation_id,
         ),
         collection=True,
     )
     execution.stage = "provider_inspection"
     collection = stripe.wait_for_collection(
-        expected,
-        terminal,
-        timeout=provider_timeout,
-        poll_interval=poll_interval,
+        expected, terminal, timeout=provider_timeout, poll_interval=poll_interval
     )
     recovery = None
-    if scenario == "missed_webhook":
+    if scenario in {"missed_webhook", "api_restart", "funding_restart"}:
+        process = "webhook_forwarder" if scenario == "missed_webhook" else (
+            "api" if scenario == "api_restart" else "worker"
+        )
         recovery = RecoveryEvidence(
-            kind="missed_webhook",
-            process="webhook_forwarder",
+            kind=scenario,
+            process=process,
             original_operation_preserved=True,
-            checkout_count=1,
+            checkout_count=int(expected.checkout_session_id is not None),
             terminal_effect_count=1,
         )
-    elif scenario == "api_restart":
-        recovery = RecoveryEvidence(
-            kind="api_restart",
-            process="api",
-            original_operation_preserved=True,
-            checkout_count=1,
-            terminal_effect_count=1,
+    loss = None
+    if scenario == "post_collection_loss":
+        execution.stage = "loss_boundary"
+        induced = lifecycle.request(
+            "induce_test_post_collection_loss",
+            operation_ref=expected.marketplace_operation_id,
         )
+        if induced.get("available") is False:
+            raise ProcessUnavailable(
+                "protected producer exposes no exact post-collection loss test helper"
+            )
+        observed_loss = lifecycle.request(
+            "wait_authoritative_loss",
+            operation_ref=expected.marketplace_operation_id,
+        )
+        if observed_loss.get("available") is False:
+            raise ProcessUnavailable(
+                "protected producer exposes no authoritative post-collection loss projection"
+            )
+        loss = _loss_evidence(observed_loss, scenario)
     return _ScenarioResult(
         operation_ref=operation_ref,
+        funding=funding,
         collection=collection,
         recovery=recovery,
+        loss=loss,
     )
 
 
@@ -521,62 +749,243 @@ def _wait_until_reclaim_eligible(prepared: dict[str, Any]) -> None:
 
 
 def _prepared_effect(
-    value: dict[str, Any], *, connected_account_id: str
-) -> tuple[ExpectedEffect, str]:
-    if any(value.get(field) is not True for field in ("discovered", "negotiated", "materialized")):
+    value: dict[str, Any],
+    *,
+    connected_account_id: str,
+    account_ref: str,
+    funding_profile: FundingProfile,
+) -> tuple[ExpectedEffect, str | None, str | None]:
+    if value.get("available") is False:
+        raise ProcessUnavailable("selected hosted funding profile is unavailable")
+    public_value = dict(value)
+    action = public_value.pop("payer_action", None)
+    _reject_private_fields(public_value)
+    if any(
+        value.get(field) is not True
+        for field in ("discovered", "negotiated", "materialized")
+    ):
         raise LifecycleContractError("marketplace lifecycle milestones are incomplete")
-    if value.get("accepted_mechanism") != "fiat.stripe.v1":
-        raise LifecycleContractError("marketplace accepted the wrong settlement mechanism")
-    if value.get("condition_profile") != "portable":
-        raise LifecycleContractError("Stripe test lane requires a portable condition")
+    if (
+        value.get("accepted_mechanism") != "fiat.stripe.v1"
+        or value.get("accepted_funding_profile") != funding_profile
+        or value.get("destination_account_ref") != account_ref
+        or value.get("condition_profile") != "portable"
+        or value.get("parties_authoritative") is not True
+        or value.get("funding_authorization_bound") is not True
+        or value.get("funding_authorization_operation_scoped") is not True
+    ):
+        raise LifecycleContractError("materialization drifted from immutable accepted terms")
     operation_ref = value.get("operation_ref")
-    checkout_url = value.get("checkout_url")
+    marketplace_operation_id = value.get("marketplace_operation_id")
     amount = value.get("amount")
     currency = value.get("currency")
     transfer_group = value.get("transfer_group")
+    accepted_negotiation_id = value.get("accepted_negotiation_id")
+    obligation_id = value.get("obligation_id")
+    condition_hash = value.get("accepted_condition_hash")
+    # The action is transient and was removed before scanning persistable fields.
     if (
-        not isinstance(operation_ref, str)
-        or not isinstance(checkout_url, str)
+        not all(
+            isinstance(item, str) and item
+            for item in (
+                operation_ref,
+                marketplace_operation_id,
+                transfer_group,
+                accepted_negotiation_id,
+                obligation_id,
+                condition_hash,
+            )
+        )
         or not isinstance(amount, int)
         or isinstance(amount, bool)
         or amount <= 0
         or not isinstance(currency, str)
         or len(currency) != 3
         or currency != currency.lower()
-        or not isinstance(transfer_group, str)
-        or not transfer_group
     ):
         raise LifecycleContractError("marketplace materialization response is incomplete")
+    action_kind: str | None = None
+    action_url: str | None = None
+    if action is not None:
+        if not isinstance(action, dict):
+            raise LifecycleContractError("payer action projection is malformed")
+        action_kind = action.get("kind")
+        action_url = action.get("url")
+        if action_kind not in {"payment", "confirmation", "bank_instructions"}:
+            raise LifecycleContractError("payer action kind is unsupported")
+        if action_url is not None and not isinstance(action_url, str):
+            raise LifecycleContractError("payer action URL is malformed")
+        if action_kind == "bank_instructions" and action_url is not None:
+            raise LifecycleContractError("bank instructions must not be represented as an action URL")
+    assert isinstance(operation_ref, str)
+    assert isinstance(marketplace_operation_id, str)
+    assert isinstance(transfer_group, str)
+    assert isinstance(amount, int)
+    assert isinstance(currency, str)
     return (
         ExpectedEffect(
             operation_ref=operation_ref,
-            checkout_session_id=checkout_session_id(checkout_url),
+            marketplace_operation_id=marketplace_operation_id,
+            funding_profile=funding_profile,
+            checkout_session_id=None,
             amount=amount,
             currency=currency,
             destination_account=connected_account_id,
             transfer_group=transfer_group,
         ),
-        checkout_url,
+        action_kind,
+        action_url,
+    )
+
+
+def _validate_payer_fixture(
+    value: dict[str, Any],
+    *,
+    interaction: Interaction,
+) -> dict[str, Any] | None:
+    if value.get("available") is False:
+        raise ProcessUnavailable("hosted payer profile fixture is unavailable")
+    public = dict(value)
+    setup_action = public.pop("setup_action", None)
+    _reject_private_fields(public)
+    if (
+        value.get("selected_owner_bound") is not True
+        or value.get("historical_owner_recoverable") is not True
+        or value.get("opaque_binding_persisted") is not True
+        or value.get("action_persisted") is not False
+    ):
+        raise LifecycleContractError(
+            "payer fixture is not bound to the selected marketplace owner"
+        )
+    if interaction != "saved_instrument" or value.get("saved_instrument_ready") is True:
+        if setup_action is not None:
+            raise LifecycleContractError("ready payer fixture returned a stale setup action")
+        return None
+    if (
+        not isinstance(setup_action, dict)
+        or setup_action.get("kind") != "setup"
+        or not isinstance(setup_action.get("url"), str)
+        or not setup_action["url"].startswith("https://")
+        or not isinstance(setup_action.get("expires_at_unix"), int)
+        or setup_action["expires_at_unix"] <= int(time.time())
+    ):
+        raise ProcessUnavailable(
+            "saved instrument setup requires a current Stripe test-mode browser action"
+        )
+    return setup_action
+
+
+def _validate_authoritative_funding(
+    value: dict[str, Any], *, funding_profile: FundingProfile
+) -> None:
+    _reject_private_fields(value)
+    if (
+        value.get("funding_state") != "funded"
+        or value.get("funding_profile") != funding_profile
+        or value.get("authoritative_retrieval") is not True
+        or value.get("accepted_identity_preserved") is not True
+        or value.get("fulfillment_started") is not False
+    ):
+        raise LifecycleContractError("funding gate was not authoritative or fulfillment-safe")
+
+
+def _funding_evidence(
+    profile: FundingProfile,
+    interaction: Interaction,
+    *,
+    authoritative: bool,
+    action_observed: bool,
+    delayed: bool,
+) -> FundingEvidence:
+    return FundingEvidence(
+        profile=profile,
+        interaction=interaction,
+        payer_profile_bound=True,
+        authorization_obligation_bound=True,
+        authorization_operation_scoped=True,
+        accepted_profile_preserved=True,
+        authoritative_funding_observed=authoritative,
+        transient_action_observed=action_observed,
+        delayed_state_observed=delayed,
+    )
+
+
+def _loss_evidence(value: dict[str, Any], scenario: Scenario) -> LossEvidence:
+    _reject_private_fields(value)
+    if (
+        scenario not in {"ach_return", "post_collection_loss"}
+        or value.get("accepted_operation_preserved") is not True
+        or value.get("loss_kind") != scenario
+    ):
+        raise LifecycleContractError("funding loss did not preserve the accepted operation")
+    fulfillment_blocked = value.get("fulfillment_blocked")
+    operator_incident = value.get("operator_incident_observed")
+    if not isinstance(fulfillment_blocked, bool) or not isinstance(operator_incident, bool):
+        raise LifecycleContractError("funding loss projection is incomplete")
+    if scenario == "ach_return" and not fulfillment_blocked:
+        raise LifecycleContractError("pre-collection ACH return did not block fulfillment")
+    if scenario == "post_collection_loss" and not operator_incident:
+        raise LifecycleContractError("post-collection loss did not open an operator incident")
+    return LossEvidence(
+        kind=scenario,
+        accepted_operation_preserved=True,
+        fulfillment_blocked=fulfillment_blocked,
+        operator_incident_observed=operator_incident,
     )
 
 
 def _terminal_projection(value: dict[str, Any], *, collection: bool) -> TerminalProjection:
+    _reject_private_fields(value)
     marketplace_state = value.get("marketplace_state")
     authority_state = value.get("authority_state")
     fulfillment_state = value.get("fulfillment_state")
+    effect_operation_ref = value.get("effect_operation_ref")
     if not all(
         isinstance(item, str) and item
-        for item in (marketplace_state, authority_state, fulfillment_state)
+        for item in (
+            marketplace_state,
+            authority_state,
+            fulfillment_state,
+            effect_operation_ref,
+        )
     ):
         raise LifecycleContractError("authoritative terminal state is incomplete")
-    assert isinstance(marketplace_state, str)
-    assert isinstance(authority_state, str)
-    assert isinstance(fulfillment_state, str)
     expected_marketplace = "collected" if collection else "reclaimed"
     expected_authority = "collected" if collection else "refunded"
     if marketplace_state != expected_marketplace or authority_state != expected_authority:
         raise LifecycleContractError("authority did not reach the expected terminal state")
-    return TerminalProjection(marketplace_state, authority_state, fulfillment_state)
+    assert isinstance(marketplace_state, str)
+    assert isinstance(authority_state, str)
+    assert isinstance(fulfillment_state, str)
+    assert isinstance(effect_operation_ref, str)
+    return TerminalProjection(
+        marketplace_state,
+        authority_state,
+        fulfillment_state,
+        effect_operation_ref,
+    )
+
+
+def _reject_private_fields(value: object) -> None:
+    forbidden = {
+        "payer_profile_ref",
+        "instrument_ref",
+        "customer_id",
+        "payment_method_id",
+        "client_secret",
+        "provider_payload",
+        "mandate",
+        "bank_instructions",
+        "card_details",
+    }
+    if isinstance(value, dict):
+        if forbidden.intersection(value):
+            raise LifecycleContractError("private hosted/provider material crossed the marketplace")
+        for child in value.values():
+            _reject_private_fields(child)
+    elif isinstance(value, list):
+        for child in value:
+            _reject_private_fields(child)
 
 
 def _browser_outcome(scenario: Scenario) -> CheckoutOutcome:
@@ -584,16 +993,16 @@ def _browser_outcome(scenario: Scenario) -> CheckoutOutcome:
         return cast(CheckoutOutcome, scenario)
     return "success"
 
-
 def _lifecycle_environment(
     args: argparse.Namespace,
     *,
+    buyer_config: Path,
     marketplace_config: Path,
     manifest_digest: str,
 ) -> dict[str, str]:
     return {
         "HOSTED_SETTLEMENT_E2E_MARKETPLACE_FACTORY": args.marketplace_factory,
-        "HOSTED_SETTLEMENT_E2E_BUYER_CONFIG": str(args.buyer_config),
+        "HOSTED_SETTLEMENT_E2E_BUYER_CONFIG": str(buyer_config),
         "HOSTED_SETTLEMENT_E2E_STOREFRONT_CONFIG": str(marketplace_config),
         "HOSTED_STOREFRONT_URL": args.storefront_url,
         "HOSTED_REGISTRY_URL": args.registry_url,
@@ -601,6 +1010,9 @@ def _lifecycle_environment(
         "HOSTED_SETTLEMENT_AUTHORITY_URL": args.authority_url,
         "HOSTED_SETTLEMENT_E2E_ACCOUNT_REF": args.account_ref,
         "HOSTED_SETTLEMENT_E2E_PRODUCTION_MANIFEST_DIGEST": manifest_digest,
+        "HOSTED_SETTLEMENT_E2E_FUNDING_PROFILE": args.funding_profile,
+        "HOSTED_SETTLEMENT_E2E_INTERACTION": args.interaction,
+        "HOSTED_SETTLEMENT_E2E_SCENARIO": args.scenario,
         "HOSTED_SETTLEMENT_E2E_LIFECYCLE_TIMEOUT": str(args.lifecycle_timeout),
     }
 
@@ -617,8 +1029,14 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--hosted-workflow-ref", required=True)
     parser.add_argument("--marketplace-commit", required=True)
     parser.add_argument("--observed-marketplace-commit", required=True)
+    parser.add_argument("--marketplace-workflow-run-id", required=True)
+    parser.add_argument("--marketplace-workflow-ref", required=True)
+    parser.add_argument("--marketplace-manifest-sha256", required=True)
+    parser.add_argument("--marketplace-image-digest", required=True)
     parser.add_argument("--run-identity", required=True)
     parser.add_argument("--scenario", choices=_SCENARIOS, required=True)
+    parser.add_argument("--funding-profile", choices=_FUNDING_PROFILES, required=True)
+    parser.add_argument("--interaction", choices=_INTERACTIONS, required=True)
     parser.add_argument("--evidence", type=Path, required=True)
     parser.add_argument("--hosted-service-env-base", type=Path)
     parser.add_argument("--container-cli", default="docker")

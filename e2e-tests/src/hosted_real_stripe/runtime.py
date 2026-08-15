@@ -14,6 +14,13 @@ import tempfile
 import sys
 import threading
 from pathlib import Path
+from core_buyer.profile_service import BuyerProfileService
+from market_identity import (
+    CredentialProviderKind,
+    CredentialReference,
+    IdentityScheme,
+    ProfileRepository,
+)
 from typing import Any, Mapping, Sequence
 
 _WEBHOOK_SECRET = re.compile(r"\b(whsec_[A-Za-z0-9]+)\b")
@@ -263,6 +270,7 @@ class EphemeralMarketplaceConfig:
         authority_address: str,
         authority_environment: str,
         manifest_digest: str,
+        funding_profile: str,
         shared_directory: Path,
     ) -> None:
         self._template = template
@@ -273,6 +281,7 @@ class EphemeralMarketplaceConfig:
             "authority_address": authority_address,
             "authority_environment": authority_environment,
             "manifest_digest": manifest_digest,
+            "funding_profile": funding_profile,
         }
         self._shared_directory = shared_directory
         self._directory: Path | None = None
@@ -304,6 +313,14 @@ class EphemeralMarketplaceConfig:
             stripe_header + f'account_ref = "{self._values["account_ref"]}"\n',
             1,
         )
+        text, profile_count = re.subn(
+            r'funding_profile\s*=\s*"[^"]+"',
+            f'funding_profile = "{self._values["funding_profile"]}"',
+            text,
+            count=1,
+        )
+        if profile_count != 1:
+            raise ProcessUnavailable("marketplace config has no exact hosted funding profile")
         authority_pattern = re.compile(
             r"(\[Settlement\.stripe\.authority\]\n)principals = \[[^\n]+\]"
         )
@@ -349,6 +366,124 @@ class EphemeralMarketplaceConfig:
                 self._directory.rmdir()
             except OSError:
                 pass
+        self.path = None
+        self._directory = None
+
+class EphemeralBuyerConfig:
+    """Render role-correct buyer trust from the same staged producer identity."""
+
+    def __init__(
+        self,
+        *,
+        template: Path,
+        authority_id: str,
+        authority_scheme: str,
+        authority_address: str,
+        authority_environment: str,
+        manifest_digest: str,
+        funding_profile: str,
+        buyer_identity_scheme: str,
+        shared_directory: Path,
+    ) -> None:
+        self._template = template
+        self._values = {
+            "authority_id": authority_id,
+            "authority_scheme": authority_scheme,
+            "authority_address": authority_address,
+            "authority_environment": authority_environment,
+            "manifest_digest": manifest_digest,
+            "funding_profile": funding_profile,
+            "buyer_identity_scheme": buyer_identity_scheme,
+        }
+        self._buyer_identity_scheme = buyer_identity_scheme
+        self._shared_directory = shared_directory
+        self._directory: Path | None = None
+        self.path: Path | None = None
+
+    def __enter__(self) -> Path:
+        if any(not _SAFE_CONFIG_VALUE.fullmatch(value) for value in self._values.values()):
+            raise ProcessUnavailable("buyer release configuration is invalid")
+        try:
+            text = self._template.read_text(encoding="utf-8")
+        except OSError as exc:
+            raise ProcessUnavailable("buyer configuration template is unavailable") from exc
+        for key, value in (
+            ("authority_id", self._values["authority_id"]),
+            ("environment", self._values["authority_environment"]),
+        ):
+            pattern = re.compile(rf"^{re.escape(key)} = \"[^\n]*\"$", re.MULTILINE)
+            text, count = pattern.subn(f'{key} = "{value}"', text)
+            if count != 2:
+                raise ProcessUnavailable(f"buyer configuration has no exact {key} bindings")
+        text = _replace_toml_setting(
+            text,
+            "expected_manifest_digest",
+            self._values["manifest_digest"],
+        )
+        text = _replace_toml_setting(
+            text,
+            "funding_profile",
+            self._values["funding_profile"],
+        )
+        authority_pattern = re.compile(
+            r"(\[Settlement\.stripe\.authority\]\n)principals = \[[^\n]+\]"
+        )
+        text, count = authority_pattern.subn(
+            lambda match: (
+                match.group(1)
+                + 'principals = [{ scheme = "'
+                + self._values["authority_scheme"]
+                + '", identifier = "'
+                + self._values["authority_address"]
+                + '" }]'
+            ),
+            text,
+            count=1,
+        )
+        if count != 1:
+            raise ProcessUnavailable("buyer authority trust section is invalid")
+        directory = Path(
+            tempfile.mkdtemp(
+                prefix="arkhai-hosted-stripe-test-buyer-",
+                dir=self._shared_directory,
+            )
+        )
+        directory.chmod(stat.S_IRWXU)
+        try:
+            store_path = directory / "profiles.json"
+            BuyerProfileService(
+                repository=ProfileRepository(store_path),
+                run_logs_directory=directory / "runs",
+            ).create(
+                name="protected-hosted-stripe",
+                credential_reference=CredentialReference(
+                    provider=CredentialProviderKind.ENVIRONMENT,
+                    locator="HOSTED_SETTLEMENT_E2E_BUYER_IDENTITY_CREDENTIAL",
+                ),
+                scheme=IdentityScheme(self._buyer_identity_scheme),
+                generate=False,
+                select=True,
+            )
+            text = _replace_toml_setting(text, "store_path", str(store_path))
+            text = _replace_toml_setting(
+                text,
+                "authorization_journal_path",
+                str(directory / "funding-authorizations.jsonl"),
+            )
+            path = directory / "buyer.toml"
+            descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o644)
+            with os.fdopen(descriptor, "w", encoding="utf-8") as stream:
+                stream.write(text)
+        except BaseException:
+            shutil.rmtree(directory, ignore_errors=True)
+            raise
+        self._directory = directory
+        self.path = path
+        return path
+
+    def __exit__(self, *_exc: object) -> None:
+        if self._directory is not None:
+            shutil.rmtree(self._directory, ignore_errors=True)
         self.path = None
         self._directory = None
 

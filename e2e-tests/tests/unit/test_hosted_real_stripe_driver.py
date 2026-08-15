@@ -29,14 +29,24 @@ def _prepared() -> dict[str, object]:
         "negotiated": True,
         "materialized": True,
         "accepted_mechanism": "fiat.stripe.v1",
+        "accepted_funding_profile": "card.v1",
         "condition_profile": "portable",
-        "operation_ref": "market-operation-001",
-        "checkout_url": "https://checkout.stripe.com/c/pay/cs_test_private",
+        "parties_authoritative": True,
+        "funding_authorization_bound": True,
+        "funding_authorization_operation_scoped": True,
+        "accepted_negotiation_id": "negotiation-001",
+        "obligation_id": "obligation-001",
+        "accepted_condition_hash": "condition-hash-001",
+        "operation_ref": "hosted-operation-001",
+        "marketplace_operation_id": "market-operation-001",
+        "payer_action": {
+            "kind": "payment",
+            "url": "https://checkout.stripe.com/c/pay/cs_test_private",
+        },
         "amount": 1250,
         "currency": "usd",
-        "destination_account_ref": "acct_protected",
+        "destination_account_ref": "seller-account",
         "transfer_group": "escrow-protected-001",
-        "source_relation": "checkout-charge",
         "reclaim_eligible_at_unix": 2_000_000_000,
     }
 
@@ -86,8 +96,14 @@ class _Browser:
     def __init__(self, events: list[str]) -> None:
         self._events = events
 
-    def pay(self, _checkout_url: str, *, outcome: str) -> SimpleNamespace:
-        self._events.append(f"pay:{outcome}")
+    def pay(
+        self,
+        _checkout_url: str,
+        *,
+        outcome: str,
+        funding_profile: str = "card.v1",
+    ) -> SimpleNamespace:
+        self._events.append(f"pay:{funding_profile}:{outcome}")
         return SimpleNamespace(checkout_session_id="cs_test_private", outcome=outcome)
 
 
@@ -102,15 +118,22 @@ def test_missed_webhook_resumes_forwarding_after_checkout() -> None:
     )
 
     assert result.checkout_session_id == "cs_test_private"
-    assert events == ["pause", "pay:success", "resume"]
+    assert events == ["pause", "pay:card.v1:success", "resume"]
 
 
-def test_prepared_effect_binds_public_lifecycle_to_exact_checkout_terms() -> None:
-    expected, checkout_url = _prepared_effect(_prepared(), connected_account_id="acct_protected")
-    assert expected.checkout_session_id == "cs_test_private"
+def test_prepared_effect_binds_public_lifecycle_to_exact_profile_terms() -> None:
+    expected, action_kind, action_url = _prepared_effect(
+        _prepared(),
+        connected_account_id="acct_protected",
+        account_ref="seller-account",
+        funding_profile="card.v1",
+    )
+    assert expected.checkout_session_id is None
+    assert expected.marketplace_operation_id == "market-operation-001"
     assert expected.transfer_group == "escrow-protected-001"
     assert expected.destination_account == "acct_protected"
-    assert checkout_url.startswith("https://checkout.stripe.com/")
+    assert action_kind == "payment"
+    assert action_url is not None and action_url.startswith("https://checkout.stripe.com/")
 
 
 def test_refund_eligibility_wait_happens_outside_lifecycle_request(monkeypatch) -> None:
@@ -133,6 +156,15 @@ def test_prepared_effect_rejects_incomplete_lifecycle_milestones() -> None:
         _prepared_effect(
             {**_prepared(), "materialized": False},
             connected_account_id="acct_protected",
+            account_ref="seller-account",
+            funding_profile="card.v1",
+        )
+    with pytest.raises(LifecycleContractError):
+        _prepared_effect(
+            {**_prepared(), "instrument_ref": "must-not-cross"},
+            connected_account_id="acct_protected",
+            account_ref="seller-account",
+            funding_profile="card.v1",
         )
 
 
@@ -150,6 +182,7 @@ def test_terminal_projection_requires_exact_public_terminal_states() -> None:
             "marketplace_state": "collected",
             "authority_state": "collected",
             "fulfillment_state": "fulfilled",
+            "effect_operation_ref": "collect-operation-001",
         },
         collection=True,
     )
@@ -161,6 +194,7 @@ def test_terminal_projection_requires_exact_public_terminal_states() -> None:
                 "marketplace_state": "pending",
                 "authority_state": "collected",
                 "fulfillment_state": "fulfilled",
+                "effect_operation_ref": "collect-operation-001",
             },
             collection=True,
         )

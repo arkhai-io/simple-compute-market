@@ -1,4 +1,4 @@
-"""Exact, read-only Stripe test-mode retrieval for protected evidence."""
+"""Exact Stripe test-mode retrieval and allowlisted test funding."""
 
 from __future__ import annotations
 
@@ -20,6 +20,7 @@ from .evidence import (
 
 JsonObject = dict[str, Any]
 Transport = Callable[[str, Mapping[str, str]], JsonObject]
+MutationTransport = Callable[[str, Mapping[str, str]], JsonObject]
 T = TypeVar("T")
 
 
@@ -42,7 +43,9 @@ class ProviderConvergenceTimeout(TimeoutError):
 @dataclass(frozen=True)
 class ExpectedEffect:
     operation_ref: str
-    checkout_session_id: str
+    marketplace_operation_id: str
+    funding_profile: str
+    checkout_session_id: str | None
     amount: int
     currency: str
     destination_account: str
@@ -54,10 +57,11 @@ class TerminalProjection:
     marketplace_state: str
     authority_state: str
     fulfillment_state: str
+    effect_operation_ref: str
 
 
 class StripeApi:
-    """Read-only client whose secret and returned provider IDs never leave memory."""
+    """Constrained test-mode client whose provider IDs never leave memory."""
 
     def __init__(
         self,
@@ -65,15 +69,43 @@ class StripeApi:
         *,
         base_url: str = "https://api.stripe.com",
         transport: Transport | None = None,
+        mutation_transport: MutationTransport | None = None,
         timeout: float = 30.0,
     ) -> None:
         self._secret = secret
         self._base_url = base_url.rstrip("/")
         self._timeout = timeout
         self._transport = transport or self._request
+        self._mutation_transport = mutation_transport or self._post
 
     def retrieve_account(self, account_id: str) -> JsonObject:
         return self._transport(f"/v1/accounts/{account_id}", {})
+
+
+    def fund_test_cash_balance(self, expected: ExpectedEffect) -> None:
+        """Fund one exact push-transfer intent through Stripe's test helper."""
+
+        if expected.funding_profile != "us_bank_transfer.v1":
+            raise ProviderInvariantError(
+                "cash-balance test funding requires the push-transfer profile"
+            )
+        _session, payment_intent = self._exact_funding(expected)
+        customer = _object_id(payment_intent.get("customer"), "customer")
+        result = self._mutation_transport(
+            f"/v1/test_helpers/customers/{customer}/fund_cash_balance",
+            {
+                "amount": str(expected.amount),
+                "currency": expected.currency,
+            },
+        )
+        if (
+            result.get("livemode") is not False
+            or result.get("amount") != expected.amount
+            or result.get("currency") != expected.currency
+        ):
+            raise ProviderInvariantError(
+                "Stripe cash-balance test helper did not fund the exact accepted amount"
+            )
 
     def wait_for_collection(
         self,
@@ -92,47 +124,41 @@ class StripeApi:
     def inspect_collection(
         self, expected: ExpectedEffect, terminal: TerminalProjection
     ) -> CollectionEvidence:
-        session = self._exact_checkout(expected)
-        payment_intent = self._payment_intent(session)
+        session, payment_intent = self._exact_funding(expected)
         charge = self._charge(payment_intent)
-        transfers = self._related_transfers(expected)
+        transfers = self._related_transfers(expected, terminal.effect_operation_ref)
         if not transfers:
             raise ProviderNotConverged("related transfer is not visible")
         if len(transfers) != 1:
             raise ProviderInvariantError("expected exactly one related transfer")
         transfer = transfers[0]
 
+        provider_objects = (payment_intent, charge, transfer)
         amount_ok = (
-            session.get("amount_total") == expected.amount
-            and payment_intent.get("amount_received") == expected.amount
+            payment_intent.get("amount_received") == expected.amount
             and charge.get("amount_captured") == expected.amount
             and transfer.get("amount") == expected.amount
+            and (session is None or session.get("amount_total") == expected.amount)
         )
         currency_ok = all(
-            item.get("currency") == expected.currency
-            for item in (session, payment_intent, charge, transfer)
-        )
+            item.get("currency") == expected.currency for item in provider_objects
+        ) and (session is None or session.get("currency") == expected.currency)
         destination_matches = (
             _object_id(transfer.get("destination"), "destination") == expected.destination_account
         )
         group_matches = transfer.get("transfer_group") == expected.transfer_group
-        charge_id = _object_id(charge, "charge")
-        source_matches = (
-            _object_id(transfer.get("source_transaction"), "source transaction") == charge_id
+        source = transfer.get("source_transaction")
+        source_matches = source is None or _object_id(source, "source transaction") == _object_id(
+            charge, "charge"
         )
-        checkout_ref = _provider_ref("checkout", expected.transfer_group)
-        metadata_matches = all(
-            _escrow_metadata_matches(item, expected.transfer_group)
-            and _metadata_matches(item, checkout_ref)
-            for item in (session, payment_intent)
-        ) and _metadata_matches(transfer, _provider_ref("collect", expected.transfer_group))
+        metadata_matches = _funding_metadata_matches(
+            payment_intent, expected
+        ) and _has_operation_metadata(transfer)
+        if session is not None:
+            metadata_matches = metadata_matches and _funding_metadata_matches(session, expected)
         if (
-            session.get("livemode") is not False
-            or payment_intent.get("livemode") is not False
+            payment_intent.get("livemode") is not False
             or transfer.get("livemode") is not False
-            or session.get("mode") != "payment"
-            or session.get("status") != "complete"
-            or session.get("payment_status") != "paid"
             or payment_intent.get("status") != "succeeded"
             or charge.get("paid") is not True
             or not amount_ok
@@ -142,13 +168,10 @@ class StripeApi:
             or not source_matches
             or not metadata_matches
         ):
-            raise ProviderInvariantError(
-                "Checkout or destination transfer did not match accepted terms"
-            )
-        operation_ref = opaque_ref("op", expected.operation_ref)
+            raise ProviderInvariantError("funding or destination transfer did not match accepted terms")
         return CollectionEvidence(
-            operation_ref=operation_ref,
-            checkout_count=1,
+            operation_ref=opaque_ref("op", expected.marketplace_operation_id),
+            checkout_count=int(session is not None),
             payment_intent_count=1,
             charge_count=1,
             transfer_count=1,
@@ -156,7 +179,7 @@ class StripeApi:
             currency=expected.currency,
             destination_matches=True,
             transfer_group_matches=True,
-            source_transaction_matches=True,
+            source_transaction_matches=source_matches,
             operation_metadata_matches=True,
             marketplace_state=_collected_state(terminal.marketplace_state),
             authority_state=_collected_state(terminal.authority_state),
@@ -180,46 +203,35 @@ class StripeApi:
     def inspect_refund(
         self, expected: ExpectedEffect, terminal: TerminalProjection
     ) -> RefundEvidence:
-        session = self._exact_checkout(expected)
-        payment_intent = self._payment_intent(session)
+        session, payment_intent = self._exact_funding(expected)
         charge = self._charge(payment_intent)
         charge_id = _object_id(charge, "charge")
         refunds = self._list_all("/v1/refunds", {"charge": charge_id, "limit": "100"})
         refunds = [
             item
             for item in refunds
-            if _metadata_matches(
-                item,
-                _provider_ref("refund", expected.transfer_group, _hash_text(charge_id)),
-            )
+            if _has_operation_metadata(item)
+            and _profile_metadata_matches(item, expected.funding_profile)
         ]
-        transfers = self._related_transfers(expected)
+        transfers = self._related_transfers(expected, terminal.effect_operation_ref)
         if not refunds:
             raise ProviderNotConverged("related refund is not visible")
         if (len(refunds), len(transfers)) != (1, 0):
             raise ProviderInvariantError("expected one related refund and no transfer")
         refund = refunds[0]
         if (
-            session.get("livemode") is not False
-            or session.get("amount_total") != expected.amount
-            or session.get("currency") != expected.currency
+            payment_intent.get("livemode") is not False
+            or payment_intent.get("amount_received") != expected.amount
+            or payment_intent.get("currency") != expected.currency
             or refund.get("amount") != expected.amount
             or refund.get("currency") != expected.currency
             or refund.get("status") != "succeeded"
-            or not all(
-                _escrow_metadata_matches(item, expected.transfer_group)
-                and _metadata_matches(item, _provider_ref("checkout", expected.transfer_group))
-                for item in (session, payment_intent)
-            )
-            or not _metadata_matches(
-                refund, _provider_ref("refund", expected.transfer_group, _hash_text(charge_id))
-            )
+            or not _funding_metadata_matches(payment_intent, expected)
         ):
             raise ProviderInvariantError("refund did not match the accepted pre-transfer operation")
-        operation_ref = opaque_ref("op", expected.operation_ref)
         return RefundEvidence(
-            operation_ref=operation_ref,
-            checkout_count=1,
+            operation_ref=opaque_ref("op", expected.marketplace_operation_id),
+            checkout_count=int(session is not None),
             payment_intent_count=1,
             charge_count=1,
             refund_count=1,
@@ -250,17 +262,11 @@ class StripeApi:
         expected: ExpectedEffect,
         outcome: Literal["decline", "insufficient_funds", "authentication"],
     ) -> PaymentOutcomeEvidence:
-        session = self._exact_checkout(expected)
-        payment_intent = self._payment_intent(session)
+        session, payment_intent = self._exact_funding(expected)
         charge = self._optional_charge(payment_intent)
-        checkout_ref = _provider_ref("checkout", expected.transfer_group)
-        if not all(
-            _escrow_metadata_matches(item, expected.transfer_group)
-            and _metadata_matches(item, checkout_ref)
-            for item in (session, payment_intent)
-        ):
+        if not _funding_metadata_matches(payment_intent, expected):
             raise ProviderInvariantError("payment outcome metadata did not match the operation")
-        if self._related_transfers(expected):
+        if self._related_transfers(expected, ""):
             raise ProviderInvariantError("payment-outcome-only scenario created a transfer")
         refunds = (
             self._list_all(
@@ -283,8 +289,7 @@ class StripeApi:
                 raise ProviderNotConverged("authenticated charge is not visible")
             three_d_secure = _nested(charge, "payment_method_details", "card", "three_d_secure")
             if (
-                session.get("payment_status") != "paid"
-                or payment_intent.get("status") != "succeeded"
+                payment_intent.get("status") != "succeeded"
                 or not isinstance(three_d_secure, dict)
                 or three_d_secure.get("result") not in {"authenticated", "attempt_acknowledged"}
             ):
@@ -294,23 +299,22 @@ class StripeApi:
             error = payment_intent.get("last_payment_error")
             if not isinstance(error, dict):
                 raise ProviderNotConverged("documented decline is not visible")
-            decline_code = error.get("decline_code")
             expected_code = (
                 "insufficient_funds" if outcome == "insufficient_funds" else "generic_decline"
             )
             if (
-                session.get("payment_status") == "paid"
+                payment_intent.get("status") == "succeeded"
                 or error.get("code") != "card_declined"
-                or decline_code != expected_code
+                or error.get("decline_code") != expected_code
             ):
                 raise ProviderInvariantError(
                     "Stripe decline outcome did not match the selected test card"
                 )
             normalized = "insufficient_funds" if outcome == "insufficient_funds" else "declined"
         return PaymentOutcomeEvidence(
-            operation_ref=opaque_ref("op", expected.operation_ref),
+            operation_ref=opaque_ref("op", expected.marketplace_operation_id),
             outcome=normalized,
-            checkout_count=1,
+            checkout_count=int(session is not None),
             payment_intent_count=1,
             charge_count=int(charge is not None),
             transfer_count=0,
@@ -318,32 +322,44 @@ class StripeApi:
             operation_metadata_matches=True,
         )
 
-    def _exact_checkout(self, expected: ExpectedEffect) -> JsonObject:
-        session = self._transport(
-            f"/v1/checkout/sessions/{expected.checkout_session_id}",
-            {"expand[]": "payment_intent.latest_charge"},
-        )
-        checkout_ref = _provider_ref("checkout", expected.transfer_group)
+    def _exact_funding(self, expected: ExpectedEffect) -> tuple[JsonObject | None, JsonObject]:
+        session: JsonObject | None = None
+        if expected.checkout_session_id is not None:
+            session = self._transport(
+                f"/v1/checkout/sessions/{expected.checkout_session_id}",
+                {"expand[]": "payment_intent.latest_charge"},
+            )
+            metadata = session.get("metadata")
+            if (
+                _object_id(session, "Checkout session") != expected.checkout_session_id
+                or not isinstance(metadata, dict)
+                or session.get("client_reference_id") != metadata.get("operation_ref")
+                or not _funding_metadata_matches(session, expected)
+            ):
+                raise ProviderInvariantError("exact Checkout session did not match the operation")
+            payment_intent = self._payment_intent(session)
+        else:
+            matches = [
+                item
+                for item in self._list_all(
+                    "/v1/payment_intents",
+                    {"limit": "100", "expand[]": "data.latest_charge"},
+                )
+                if _funding_metadata_matches(item, expected)
+            ]
+            if not matches:
+                raise ProviderNotConverged("operation funding is not visible")
+            if len(matches) != 1:
+                raise ProviderInvariantError("operation metadata identifies multiple funding intents")
+            payment_intent = matches[0]
         if (
-            _object_id(session, "Checkout session") != expected.checkout_session_id
-            or not _escrow_metadata_matches(session, expected.transfer_group)
-            or not _metadata_matches(session, checkout_ref)
-            or session.get("client_reference_id") != expected.transfer_group
+            payment_intent.get("amount") != expected.amount
+            or payment_intent.get("currency") != expected.currency
+            or payment_intent.get("transfer_group") != expected.transfer_group
+            or not _funding_metadata_matches(payment_intent, expected)
         ):
-            raise ProviderInvariantError("exact Checkout session did not match the operation")
-        matches = self._list_all("/v1/checkout/sessions", {"limit": "100"})
-        matching_ids = {
-            _object_id(item, "Checkout search result")
-            for item in matches
-            if _metadata_matches(item, checkout_ref)
-            and _escrow_metadata_matches(item, expected.transfer_group)
-            and item.get("client_reference_id") == expected.transfer_group
-        }
-        if expected.checkout_session_id not in matching_ids:
-            raise ProviderNotConverged("exact Checkout metadata search is not visible")
-        if matching_ids != {expected.checkout_session_id}:
-            raise ProviderInvariantError("operation metadata identifies multiple Checkout sessions")
-        return session
+            raise ProviderInvariantError("funding intent does not match immutable accepted terms")
+        return session, payment_intent
 
     def _payment_intent(self, session: JsonObject) -> JsonObject:
         value = session.get("payment_intent")
@@ -370,13 +386,19 @@ class StripeApi:
         charge_id = _object_id(value, "latest charge")
         return self._transport(f"/v1/charges/{charge_id}", {})
 
-    def _related_transfers(self, expected: ExpectedEffect) -> list[JsonObject]:
+    def _related_transfers(
+        self, expected: ExpectedEffect, _effect_operation_ref: str
+    ) -> list[JsonObject]:
         transfers = self._list_all(
             "/v1/transfers",
             {"transfer_group": expected.transfer_group, "limit": "100"},
         )
-        operation_ref = _provider_ref("collect", expected.transfer_group)
-        return [item for item in transfers if _metadata_matches(item, operation_ref)]
+        return [
+            item
+            for item in transfers
+            if _has_operation_metadata(item)
+            and _profile_metadata_matches(item, expected.funding_profile)
+        ]
 
     def _wait(
         self,
@@ -435,10 +457,56 @@ class StripeApi:
             raise StripeUnavailable("Stripe API response was malformed")
         return value
 
+    def _post(self, path: str, params: Mapping[str, str]) -> JsonObject:
+        encoded = urlencode(params).encode()
+        request = Request(
+            f"{self._base_url}{path}",
+            data=encoded,
+            method="POST",
+            headers={
+                "Authorization": f"Bearer {self._secret}",
+                "Content-Type": "application/x-www-form-urlencoded",
+                "Stripe-Version": "2025-08-27.basil",
+                "User-Agent": "arkhai-protected-hosted-stripe-test/2",
+            },
+        )
+        try:
+            with urlopen(request, timeout=self._timeout) as response:
+                value = json.load(response)
+        except (HTTPError, URLError, TimeoutError, json.JSONDecodeError, OSError) as exc:
+            raise StripeUnavailable("Stripe API mutation was unavailable") from exc
+        if not isinstance(value, dict):
+            raise StripeUnavailable("Stripe API mutation response was malformed")
+        return value
+
 
 def _metadata_matches(obj: JsonObject, operation_ref: str) -> bool:
     metadata = obj.get("metadata")
     return isinstance(metadata, dict) and metadata.get("operation_ref") == operation_ref
+
+def _has_operation_metadata(obj: JsonObject) -> bool:
+    metadata = obj.get("metadata")
+    return (
+        isinstance(metadata, dict)
+        and isinstance(metadata.get("operation_ref"), str)
+        and bool(metadata["operation_ref"])
+    )
+
+def _profile_metadata_matches(obj: JsonObject, funding_profile: str) -> bool:
+    metadata = obj.get("metadata")
+    return isinstance(metadata, dict) and metadata.get("funding_profile") == funding_profile
+
+
+def _funding_metadata_matches(obj: JsonObject, expected: ExpectedEffect) -> bool:
+    metadata = obj.get("metadata")
+    return (
+        _has_operation_metadata(obj)
+        and isinstance(metadata, dict)
+        and metadata.get("marketplace_operation_id") == expected.marketplace_operation_id
+        and metadata.get("funding_profile") == expected.funding_profile
+        and isinstance(metadata.get("funding_authorization_ref"), str)
+        and bool(metadata["funding_authorization_ref"])
+    )
 
 
 def _hash_text(value: str) -> str:

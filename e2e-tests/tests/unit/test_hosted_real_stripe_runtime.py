@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 import json
 from pathlib import Path
 import tomllib
@@ -8,6 +9,7 @@ from typing import Any
 
 from src.hosted_real_stripe.runtime import (
     ComposeStack,
+    EphemeralBuyerConfig,
     EphemeralMarketplaceConfig,
     EphemeralServiceEnv,
 )
@@ -125,7 +127,10 @@ def test_compose_stack_streams_existing_account_contract_without_provider_argume
     assert captured["input_text"] == contract
 
 
-def test_ephemeral_container_inputs_use_shared_directory(tmp_path: Path) -> None:
+def test_ephemeral_container_inputs_use_shared_directory(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
     template = Path(__file__).resolve().parents[2] / "config" / "hosted-storefront.toml"
 
     with EphemeralMarketplaceConfig(
@@ -136,6 +141,7 @@ def test_ephemeral_container_inputs_use_shared_directory(tmp_path: Path) -> None
         authority_address="0x1fe2aa7fbaf5720f79a22a4ada4b8b37d4e0c008",
         authority_environment="test",
         manifest_digest="sha256:" + ("1" * 64),
+        funding_profile="us_bank_transfer.v1",
         shared_directory=tmp_path,
     ) as marketplace_config:
         assert marketplace_config.parent.parent == tmp_path
@@ -146,6 +152,34 @@ def test_ephemeral_container_inputs_use_shared_directory(tmp_path: Path) -> None
                 "identifier": "0x1fe2aa7fbaf5720f79a22a4ada4b8b37d4e0c008",
             }
         ]
+        assert (
+            parsed["Resources"]["settlement"][0]["mechanism_input"]["funding_profile"]
+            == "us_bank_transfer.v1"
+        )
+    buyer_template = Path(__file__).resolve().parents[2] / "config" / "hosted-buyer.toml"
+    credential = base64.urlsafe_b64encode(b"a" * 32).decode().rstrip("=")
+    monkeypatch.setenv("HOSTED_SETTLEMENT_E2E_BUYER_IDENTITY_CREDENTIAL", credential)
+    with EphemeralBuyerConfig(
+        template=buyer_template,
+        authority_id="authority-1",
+        authority_scheme="eip191",
+        authority_address="0x1fe2aa7fbaf5720f79a22a4ada4b8b37d4e0c008",
+        authority_environment="test",
+        manifest_digest="sha256:" + ("1" * 64),
+        funding_profile="us_bank_transfer.v1",
+        buyer_identity_scheme="ed25519",
+        shared_directory=tmp_path,
+    ) as buyer_config:
+        parsed = tomllib.loads(buyer_config.read_text(encoding="utf-8"))
+        stripe = parsed["Settlement"]["stripe"]
+        assert stripe["expected_manifest_digest"] == "sha256:" + ("1" * 64)
+        assert stripe["authority_id"] == stripe["off_session_policy"]["authority_id"]
+        assert stripe["environment"] == stripe["off_session_policy"]["environment"]
+        assert stripe["off_session_policy"]["funding_profile"] == "us_bank_transfer.v1"
+        profile_store = Path(parsed["BuyerProfile"]["store_path"])
+        assert profile_store.is_file()
+        assert credential not in profile_store.read_text(encoding="utf-8")
+        assert Path(stripe["authorization_journal_path"]).parent == buyer_config.parent
 
     with EphemeralServiceEnv(
         api_key="sk_test_example",

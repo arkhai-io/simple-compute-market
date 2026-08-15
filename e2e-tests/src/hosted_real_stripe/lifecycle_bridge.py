@@ -24,6 +24,10 @@ class _Deal:
     amount: int
     currency: str
     transfer_group: str
+    funding_profile: str
+    accepted_negotiation_id: str
+    obligation_id: str
+    condition_hash: str
     fulfillment_state: str = "pending"
     terminal: Any | None = None
 
@@ -37,6 +41,13 @@ class LifecycleBridge:
 
     def request(self, body: dict[str, Any]) -> dict[str, Any]:
         action = body.get("action")
+        if action == "ensure_payer_profile_fixture":
+            return self._marketplace.ensure_payer_profile_fixture(
+                str(body.get("funding_profile", "")),
+                str(body.get("interaction", "")),
+            )
+        if action == "complete_payer_setup":
+            return self._marketplace.complete_payer_setup()
         if action == "prepare_collection":
             return self._prepare(case="collection")
         if action == "prepare_refund":
@@ -44,12 +55,30 @@ class LifecycleBridge:
             if capability is None or capability() is not True:
                 return {"ok": True, "available": False}
             return self._prepare(case="refund")
+        if action == "observe_pending_funding":
+            deal = self._deal(body)
+            observed = self._marketplace.observe_pending_funding(deal.settlement_ref)
+            if observed.get("funding_state") not in {"awaiting_payment", "pending"}:
+                raise RuntimeError("authoritative funding was not pending")
+            return {
+                "ok": True,
+                "funding_state": observed["funding_state"],
+                "funding_profile": deal.funding_profile,
+                "fulfillment_started": observed.get("fulfillment_started") is True,
+            }
         if action == "wait_authoritative_funding":
             deal = self._deal(body)
             wait_funded = getattr(self._marketplace, "wait_funded", None)
             if wait_funded is None or wait_funded(deal.settlement_ref) is not True:
                 raise ExternalUnavailable("authoritative funding did not converge")
-            return {"ok": True}
+            return {
+                "ok": True,
+                "funding_state": "funded",
+                "funding_profile": deal.funding_profile,
+                "authoritative_retrieval": True,
+                "accepted_identity_preserved": True,
+                "fulfillment_started": False,
+            }
         if action == "complete_portable_vm_fulfillment":
             deal = self._deal(body)
             snapshot = self._marketplace.complete_vm_fulfillment(deal.settlement_ref)
@@ -90,6 +119,21 @@ class LifecycleBridge:
             )
             self._require_terminal(terminal, deal, kind="refund", state="reclaimed")
             return self._terminal_response(deal, authority_state="refunded")
+        if action in {
+            "induce_test_ach_return",
+            "induce_test_post_collection_loss",
+        }:
+            capability = getattr(self._marketplace, action, None)
+            if capability is None:
+                return {"ok": True, "available": False}
+            deal = self._deal(body)
+            return capability(deal.settlement_ref)
+        if action == "wait_authoritative_loss":
+            capability = getattr(self._marketplace, "wait_authoritative_loss", None)
+            if capability is None:
+                return {"ok": True, "available": False}
+            deal = self._deal(body)
+            return capability(deal.settlement_ref)
         if action == "shutdown":
             return {"ok": True, "shutdown": True}
         raise RuntimeError("unsupported marketplace lifecycle action")
@@ -112,14 +156,25 @@ class LifecycleBridge:
         if negotiation.accepted_mechanism != MECHANISM:
             raise RuntimeError("negotiation did not pin the hosted mechanism")
         materialized = self._marketplace.materialize(negotiation.negotiation_id)
-        if materialized.action.kind != "redirect":
-            raise RuntimeError("materialization did not return a Checkout redirect")
+        payer_action = (
+            None
+            if materialized.action is None
+            else {
+                "kind": materialized.action.kind,
+                "expires_at_unix": materialized.action.expires_at_unix,
+                "url": materialized.action.url,
+            }
+        )
         deal = _Deal(
             settlement_ref=materialized.settlement_ref,
             operation_ref=materialized.operation_ref,
             amount=materialized.amount,
             currency=materialized.currency,
             transfer_group=materialized.transfer_group,
+            funding_profile=materialized.accepted_funding_profile,
+            accepted_negotiation_id=materialized.accepted_negotiation_id,
+            obligation_id=materialized.obligation_ref,
+            condition_hash=materialized.accepted_condition_hash,
         )
         self._deals[deal.operation_ref] = deal
         return {
@@ -129,9 +184,18 @@ class LifecycleBridge:
             "negotiated": True,
             "materialized": True,
             "accepted_mechanism": negotiation.accepted_mechanism,
+            "accepted_funding_profile": deal.funding_profile,
+            "destination_account_ref": materialized.destination_account_ref,
             "condition_profile": "portable",
+            "parties_authoritative": True,
+            "funding_authorization_bound": materialized.funding_authorization_bound,
+            "funding_authorization_operation_scoped": True,
             "operation_ref": deal.operation_ref,
-            "checkout_url": materialized.action.url,
+            "marketplace_operation_id": deal.operation_ref,
+            "accepted_negotiation_id": deal.accepted_negotiation_id,
+            "obligation_id": deal.obligation_id,
+            "accepted_condition_hash": deal.condition_hash,
+            "payer_action": payer_action,
             "amount": deal.amount,
             "currency": deal.currency,
             "transfer_group": deal.transfer_group,
@@ -162,6 +226,7 @@ class LifecycleBridge:
             "ok": True,
             "marketplace_state": terminal.marketplace_status,
             "authority_state": authority_state or terminal.authority_status,
+            "effect_operation_ref": deal.operation_ref,
             "fulfillment_state": deal.fulfillment_state,
         }
 
