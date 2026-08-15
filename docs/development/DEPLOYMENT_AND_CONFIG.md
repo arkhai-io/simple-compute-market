@@ -112,8 +112,8 @@ resolved signing value.
 
 ## Per-domain stack composition
 
-Each release-qualified domain stack owns its public topology while consuming
-shared core/kit authorities:
+Each domain stack owns its public topology while consuming shared core/kit
+authorities:
 
 - `compose.vms.yml` composes the VM storefront and compute authorities.
 - `compose.apicredits.yml` composes the API-credit registry, credits authority,
@@ -132,6 +132,12 @@ role-scoped file references with no committed fallback. Missing identity,
 inventory, pool declaration, site authority, or credential blocks startup or
 scenario preflight; it never selects a test signer, default site, payload-
 guessed domain, direct executor, or provider simulator.
+
+The bare-metal image currently exposes the signed publication command seam but
+does not autonomously publish to the registry. Its stack may be brought up for
+operator integration, but it is not release-qualified or discoverable-deal
+evidence until the accepted contribution lifecycle drives that seam and the
+installed buyer completes real access and revocation.
 
 ## Stateful service persistence
 

@@ -1,10 +1,11 @@
 # Bare-metal seller quickstart
 
-This stack publishes exclusive whole-host capacity, schedules fulfillment
-through one explicitly trusted site authority, grants SSH access after
-settlement, and revokes that access at teardown. It uses the dedicated
-wheel-only `arkhai:bare-metal-storefront` image and the ordinary compute
-provisioning service; it does not use a direct executor or mock provisioning.
+This stack composes the services required to publish exclusive whole-host
+capacity, schedule fulfillment through one explicitly trusted site authority,
+grant SSH access after settlement, and revoke that access at teardown. It uses
+the dedicated wheel-only `arkhai:bare-metal-storefront` image and the ordinary
+compute provisioning service; it does not use a direct executor or mock
+provisioning.
 
 For VM slices, see [`seller-quickstart.md`](./seller-quickstart.md). A single
 Physical Resource may back VM and bare-metal offers only when both listings
@@ -138,10 +139,18 @@ separate named volumes. Do not treat an HTTP 200 alone as deal readiness:
 inspect the storefront health projection and stop if database, selected-site
 capacity, fulfillment, or the configured settlement mechanism is unavailable.
 
+The dedicated image exposes the installed bare-metal publication selection and
+command seam but does not yet run an autonomous registry publication daemon.
+Until the accepted storefront contribution lifecycle invokes that seam, an
+operator must drive the ordinary signed publication command externally. A
+healthy but undiscoverable storefront is therefore an explicit blocker, not a
+successful seller deployment.
+
 ## Release-qualified deal evidence
 
-Once the buyer contribution, selected-site authority, settlement authority,
-and real host are available, inject the E2E role inputs and run:
+Once signed registry publication, the buyer contribution, selected-site
+authority, settlement authority, and real host are available, inject the E2E
+role inputs and run:
 
 ```bash
 uv run pytest -m e2e_bare_metal_deal -v
