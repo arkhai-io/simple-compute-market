@@ -20,6 +20,7 @@ from hosted_settlement_client import (
     FundingProfile,
     FundingMode,
     HostedSettlementAsyncClient,
+    HostedSettlementError,
     NormalizedFundingState,
     OperationRequest,
     Principal,
@@ -34,7 +35,9 @@ from market_settlement_runtime import (
     ConditionOutcome,
     EffectOutcome,
     MaterializationOutcome,
+    SettlementManualRequired,
     StatusOutcome,
+    obligation_payload_hash,
 )
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, field_validator
 
@@ -54,12 +57,55 @@ REQUIRED_HOSTED_CAPABILITIES = frozenset(
 _CURRENCY = re.compile(r"^[a-z]{3}$")
 _FULFILLMENT: TypeAdapter[FulfillmentRef] = TypeAdapter(FulfillmentRef)
 _CONTRACT_FINGERPRINT = re.compile(r"^sha256:[0-9a-f]{64}$")
+_UNCERTAIN_RESPONSE_CODES = frozenset(
+    {
+        "invalid_response",
+        "invalid_error_response",
+        "response_request_mismatch",
+        "response_too_large",
+        "redirect_refused",
+    }
+)
+
+
+class HostedSettlementTemporaryError(RuntimeError):
+    """A provider-redacted failure that is safe to retry under the same identity."""
+
+
+async def _released_call(operation: str, call: Any) -> Any:
+    """Map released-client errors to stable, persistence-safe runtime failures."""
+
+    try:
+        return await call()
+    except HostedSettlementError as exc:
+        if exc.retryable or exc.code in _UNCERTAIN_RESPONSE_CODES:
+            raise HostedSettlementTemporaryError(
+                f"hosted settlement {operation} temporarily unavailable"
+            ) from None
+        raise SettlementManualRequired(
+            f"hosted settlement {operation} rejected"
+        ) from None
+    except Exception:
+        raise HostedSettlementTemporaryError(
+            f"hosted settlement {operation} temporarily unavailable"
+        ) from None
 
 
 class HostedObligationParams(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     account_ref: str = Field(min_length=1, max_length=256)
+    authority_id: str = Field(
+        min_length=1,
+        max_length=256,
+        pattern=r"^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+    )
+    country: Literal["US"]
+    environment: str = Field(
+        min_length=1,
+        max_length=256,
+        pattern=r"^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+    )
     payer_principal: Principal
     claimant_principal: Principal
     funds_flow: Literal["separate_charges_transfers"]
@@ -156,12 +202,15 @@ class HostedConditionalEscrowClient:
         operation_digest = hashlib.sha256(
             f"{condition_anchor}\0{evidence_digest}".encode()
         ).hexdigest()
-        result = await self._client.publish_fulfillment(
-            FulfillmentPublicationRequest(
-                request_id=f"fulfillment:{operation_digest}",
-                condition_anchor=condition_anchor,
-                evidence_digest=evidence_digest,
-            )
+        result = await _released_call(
+            "fulfillment publication",
+            lambda: self._client.publish_fulfillment(
+                FulfillmentPublicationRequest(
+                    request_id=f"fulfillment:{operation_digest}",
+                    condition_anchor=condition_anchor,
+                    evidence_digest=evidence_digest,
+                )
+            ),
         )
         return result.attestation_uid
 
@@ -175,7 +224,10 @@ class HostedConditionalEscrowClient:
         operation_ref: str,
     ) -> None:
         """Verify the exact released authority contract without account state."""
-        health = await self._client.health(request_id=f"{operation_ref}:health")
+        health = await _released_call(
+            "readiness",
+            lambda: self._client.health(request_id=f"{operation_ref}:health"),
+        )
         if not health.ready:
             raise ValueError("hosted settlement authority is not ready")
         if health.manifest_digest != expected_manifest_digest:
@@ -213,9 +265,12 @@ class HostedConditionalEscrowClient:
             expected_schema_version=expected_schema_version,
             operation_ref=operation_ref,
         )
-        account = await self._client.account_readiness(
-            account_ref,
-            request_id=f"{operation_ref}:account",
+        account = await _released_call(
+            "account readiness",
+            lambda: self._client.account_readiness(
+                account_ref,
+                request_id=f"{operation_ref}:account",
+            ),
         )
         if account.account_ref != account_ref or not account.ready:
             raise ValueError("hosted settlement account is not ready")
@@ -232,25 +287,26 @@ class HostedConditionalEscrowClient:
         if legacy or not isinstance(params, HostedObligationParams):
             raise ValueError("legacy hosted card obligations are recovery-only")
         obligation_ref = _obligation_ref_from_operation(operation_ref)
-        result = await self._client.materialize(
-            CreateEscrowRequest(
-                request_id=operation_ref,
-                obligation_ref=obligation_ref,
-                obligation_hash="0x"
-                + hashlib.sha256(
-                    canonical_json(_accepted_obligation(obligation))
-                ).hexdigest(),
-                payer=params.payer_principal,
-                claimant=params.claimant_principal,
-                account_ref=params.account_ref,
-                amount=amount,
-                currency=currency,
-                expiration_unix=expiration,
-                funding_profile=params.funding_profile,
-                funding_authorization_ref=params.funding_authorization_ref,
-                marketplace_operation_id=obligation_ref,
-                condition=params.condition,
-            )
+        result = await _released_call(
+            "materialization",
+            lambda: self._client.materialize(
+                CreateEscrowRequest(
+                    request_id=operation_ref,
+                    obligation_ref=obligation_ref,
+                    obligation_hash="0x"
+                    + obligation_payload_hash(_accepted_obligation(obligation)),
+                    payer=params.payer_principal,
+                    claimant=params.claimant_principal,
+                    account_ref=params.account_ref,
+                    amount=amount,
+                    currency=currency,
+                    expiration_unix=expiration,
+                    funding_profile=params.funding_profile,
+                    funding_authorization_ref=params.funding_authorization_ref,
+                    marketplace_operation_id=obligation_ref,
+                    condition=params.condition,
+                )
+            ),
         )
         _require_result_profile(result, params.funding_profile)
         return MaterializationOutcome(
@@ -274,7 +330,13 @@ class HostedConditionalEscrowClient:
             obligation,
             allow_legacy=True,
         )
-        result = await self._client.get_status(mechanism_ref, request_id=operation_ref)
+        result = await _released_call(
+            "status",
+            lambda: self._client.get_status(
+                mechanism_ref,
+                request_id=operation_ref,
+            ),
+        )
         if isinstance(params, HostedObligationParams):
             _require_result_profile(result, params.funding_profile)
         return StatusOutcome(
@@ -302,9 +364,12 @@ class HostedConditionalEscrowClient:
         _validate_obligation(obligation, allow_legacy=True)
         del mechanism_state
         fulfillment = _decode_fulfillment(fulfillment_ref)
-        result = await self._client.check(
-            mechanism_ref,
-            CheckEscrowRequest(request_id=operation_ref, fulfillment=fulfillment),
+        result = await _released_call(
+            "condition check",
+            lambda: self._client.check(
+                mechanism_ref,
+                CheckEscrowRequest(request_id=operation_ref, fulfillment=fulfillment),
+            ),
         )
         decision = _condition_decision(result.condition_state)
         return ConditionOutcome(
@@ -331,8 +396,12 @@ class HostedConditionalEscrowClient:
             allow_legacy=True,
         )
         del fulfillment_ref, mechanism_state
-        result = await self._client.collect(
-            mechanism_ref, OperationRequest(request_id=operation_ref)
+        result = await _released_call(
+            "collection",
+            lambda: self._client.collect(
+                mechanism_ref,
+                OperationRequest(request_id=operation_ref),
+            ),
         )
         receipt = result.model_dump(mode="json")
         receipt.update(_operation_identity(params, legacy=legacy))
@@ -357,8 +426,12 @@ class HostedConditionalEscrowClient:
             allow_legacy=True,
         )
         del mechanism_state
-        result = await self._client.reclaim(
-            mechanism_ref, OperationRequest(request_id=operation_ref)
+        result = await _released_call(
+            "reclaim",
+            lambda: self._client.reclaim(
+                mechanism_ref,
+                OperationRequest(request_id=operation_ref),
+            ),
         )
         receipt = result.model_dump(mode="json")
         receipt.update(_operation_identity(params, legacy=legacy))
@@ -374,7 +447,13 @@ class HostedConditionalEscrowClient:
         self, mechanism_ref: str, *, operation_ref: str
     ) -> dict[str, Any] | None:
         """Fetch a redirect for immediate return; callers must not persist it."""
-        result = await self._client.get_status(mechanism_ref, request_id=operation_ref)
+        result = await _released_call(
+            "buyer action",
+            lambda: self._client.get_status(
+                mechanism_ref,
+                request_id=operation_ref,
+            ),
+        )
         if result.action is None:
             return None
         return result.action.model_dump(mode="json")
@@ -543,10 +622,29 @@ def _escrow_status(
     "failed",
     "manual_required",
 ]:
+    previous_financial = previous.get("financial_state")
+    previous_funding = previous.get("funding_state")
+    post_collection_risk = (
+        previous_financial == FinancialState.COLLECTED.value
+        and (
+            result.financial_state == FinancialState.OPERATOR_REVIEW
+            or result.incident
+            or result.funding_state
+            in {
+                NormalizedFundingState.RETURNED,
+                NormalizedFundingState.FAILED,
+                NormalizedFundingState.AMBIGUOUS,
+            }
+        )
+    )
+    if post_collection_risk:
+        return "manual_required"
     if result.financial_state == FinancialState.OPERATOR_REVIEW or result.incident:
         return "manual_required"
     if result.funding_state == NormalizedFundingState.AMBIGUOUS:
         return "manual_required"
+    if previous_financial == FinancialState.COLLECTED.value:
+        return "collected"
     if result.funding_state in {
         NormalizedFundingState.RETURNED,
         NormalizedFundingState.FAILED,
@@ -557,10 +655,6 @@ def _escrow_status(
         or result.financial_state == FinancialState.EXPIRED
     ):
         return "expired"
-    previous_financial = previous.get("financial_state")
-    previous_funding = previous.get("funding_state")
-    if previous_financial == FinancialState.COLLECTED.value:
-        return "collected"
     if previous_financial == FinancialState.RECLAIMED.value:
         return "reclaimed"
     if result.financial_state == FinancialState.COLLECTED:
@@ -586,13 +680,11 @@ def _escrow_status(
 
 
 def _safe_action(result: EscrowResult) -> dict[str, Any] | None:
+    """Return the current action to the caller; persistence sanitizes it later."""
+
     if result.action is None:
         return None
-    return {
-        "kind": result.action.kind.value,
-        "expires_at_unix": result.action.expires_at_unix,
-    }
-
+    return result.action.model_dump(mode="json")
 
 def _status_receipt(
     result: EscrowResult,

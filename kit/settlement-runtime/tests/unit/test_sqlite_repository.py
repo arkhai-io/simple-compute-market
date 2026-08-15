@@ -480,8 +480,44 @@ async def test_hosted_materialization_params_are_immutable_and_identity_preservi
     assert bound["mechanism_params"] == retried["mechanism_params"] == params
 
 
+@pytest.mark.parametrize(
+    "lifecycle",
+    [
+        {"mechanism_status": "creating"},
+        {"mechanism_status": "awaiting_payment"},
+        {"mechanism_status": "pending"},
+        {"mechanism_status": "requires_action"},
+        {
+            "mechanism_status": "ready",
+            "materialization_state": "materialized",
+        },
+        {
+            "mechanism_status": "collected",
+            "materialization_state": "materialized",
+            "collection_state": "succeeded",
+        },
+        {
+            "mechanism_status": "reclaimed",
+            "materialization_state": "materialized",
+            "reclaim_state": "succeeded",
+        },
+        {
+            "mechanism_status": "expired",
+            "materialization_state": "materialized",
+        },
+        {
+            "mechanism_status": "failed",
+            "materialization_state": "materialized",
+        },
+        {
+            "mechanism_status": "manual_required",
+            "materialization_state": "manual_required",
+        },
+    ],
+)
 async def test_legacy_hosted_card_migration_classifies_without_rewriting_identity(
     tmp_path,
+    lifecycle,
 ) -> None:
     path = tmp_path / "legacy-hosted-card.db"
     repository = SettlementSQLiteRepository(str(path))
@@ -492,9 +528,8 @@ async def test_legacy_hosted_card_migration_classifies_without_rewriting_identit
     ).model_copy(
         update={
             "mechanism_ref": "hosted-settlement-1",
-            "mechanism_status": "ready",
-            "materialization_state": "materialized",
             "materialization_receipt": {"historical": True},
+            **lifecycle,
         }
     )
     before = await repository.upsert_settlement_obligation(record.model_dump())
@@ -570,7 +605,7 @@ async def test_legacy_hosted_card_migration_rolls_back_ambiguous_rows(
     finally:
         conn.close()
 
-    with pytest.raises(ValueError, match="ambiguous legacy funding"):
+    with pytest.raises(ValueError, match="legacy hosted settlement|ambiguous legacy"):
         SettlementSQLiteRepository(str(path))
 
     conn = sqlite3.connect(path)

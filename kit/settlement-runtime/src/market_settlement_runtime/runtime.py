@@ -229,6 +229,63 @@ class SettlementRuntime:
             uncertain=True,
         )
 
+    async def reserve_cleanup(
+        self,
+        obligation_ref: str,
+        *,
+        local_principal: Identity,
+        worker_id: str,
+    ) -> SettlementOperationOutcome:
+        """Reserve durable domain cleanup after a pre-collection terminal result."""
+
+        record = await self._load(obligation_ref)
+        self._require_principal(record, local_principal, "claimant")
+        self._require_fulfillment(record)
+        reserved = await self._reserve(record, "cleanup", worker_id, local_principal)
+        if reserved is None:
+            return self._outcome(record, "cleanup", "busy")
+        terminal = self._terminal_outcome(record, "cleanup", reserved)
+        if terminal is not None:
+            return terminal
+        return self._outcome(record, "cleanup", "pending")
+
+    async def complete_cleanup(
+        self,
+        obligation_ref: str,
+        *,
+        local_principal: Identity,
+        worker_id: str,
+    ) -> SettlementOperationOutcome:
+        record = await self._load(obligation_ref)
+        self._require_principal(record, local_principal, "claimant")
+        receipt = {"cleanup": "complete"}
+        await self._finish(
+            record,
+            "cleanup",
+            worker_id,
+            state="succeeded",
+            receipt=receipt,
+        )
+        return self._outcome(record, "cleanup", "succeeded", receipt)
+
+    async def retry_cleanup(
+        self,
+        obligation_ref: str,
+        error: Exception,
+        *,
+        local_principal: Identity,
+        worker_id: str,
+    ) -> None:
+        record = await self._load(obligation_ref)
+        self._require_principal(record, local_principal, "claimant")
+        await self._finish_retry(
+            record,
+            "cleanup",
+            worker_id,
+            error,
+            uncertain=False,
+        )
+
     async def materialize(
         self,
         *,
@@ -475,6 +532,15 @@ class SettlementRuntime:
         mechanism_ref = self._require_materialized(record)
         if self._clock() < float(record.obligation["expiration_unix"]):
             raise ValueError("obligation has not expired")
+        if (
+            record.mechanism_status == "failed"
+            and record.fulfillment_ref is not None
+            and record.collection_state != "succeeded"
+            and record.cleanup_state != "succeeded"
+        ):
+            raise ValueError(
+                "domain cleanup must complete before reclaiming returned funding"
+            )
         client = self._client(record)
         reserved = await self._reserve(record, "reclaim", worker_id, local_principal)
         if reserved is None:

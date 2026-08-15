@@ -470,6 +470,163 @@ async def test_collect_and_reclaim_share_atomic_winner(repository) -> None:
     assert client.collect_calls + client.reclaim_calls == 1
 
 
+async def test_returned_funding_reclaim_waits_for_vm_cleanup(repository) -> None:
+    client = Client()
+    runtime = SettlementRuntime(repository, {"test.v1": client}, clock=lambda: 200)
+    record = await register(runtime, obligation())
+    materialized = await runtime.materialize(
+        obligation_ref=record.obligation_ref,
+        local_principal=BUYER,
+        worker_id="payer",
+    )
+    assert materialized.status == "succeeded"
+    fulfilled = await runtime.bind_fulfillment(
+        record.obligation_ref,
+        "portable-fulfillment-ref",
+        local_principal=SELLER,
+    )
+    returned = fulfilled.model_copy(update={"mechanism_status": "failed"})
+    await repository.upsert_settlement_obligation(returned.model_dump())
+
+    with pytest.raises(ValueError, match="cleanup must complete"):
+        await runtime.reclaim(
+            obligation_ref=record.obligation_ref,
+            local_principal=BUYER,
+            worker_id="payer-before-cleanup",
+        )
+    assert client.reclaim_calls == 0
+
+    reserved = await runtime.reserve_cleanup(
+        record.obligation_ref,
+        local_principal=SELLER,
+        worker_id="seller-cleanup",
+    )
+    assert reserved.status == "pending"
+    await runtime.complete_cleanup(
+        record.obligation_ref,
+        local_principal=SELLER,
+        worker_id="seller-cleanup",
+    )
+    reclaimed = await runtime.reclaim(
+        obligation_ref=record.obligation_ref,
+        local_principal=BUYER,
+        worker_id="payer-after-cleanup",
+    )
+
+    assert reclaimed.status == "succeeded"
+    assert client.reclaim_calls == 1
+
+
+async def test_completed_collection_replay_does_not_repeat_transfer(repository) -> None:
+    client = Client()
+    runtime = SettlementRuntime(repository, {"test.v1": client}, clock=lambda: 200)
+    record = await register(runtime, obligation())
+    await runtime.materialize(
+        obligation_ref=record.obligation_ref,
+        local_principal=BUYER,
+        worker_id="payer",
+    )
+    await runtime.bind_fulfillment(
+        record.obligation_ref,
+        "fulfillment",
+        local_principal=SELLER,
+    )
+    await runtime.check(
+        obligation_ref=record.obligation_ref,
+        local_principal=SELLER,
+        worker_id="claimant",
+    )
+
+    first = await runtime.collect(
+        obligation_ref=record.obligation_ref,
+        local_principal=SELLER,
+        worker_id="collector-a",
+    )
+    replayed = await runtime.collect(
+        obligation_ref=record.obligation_ref,
+        local_principal=SELLER,
+        worker_id="collector-b",
+    )
+
+    assert first.status == replayed.status == "succeeded"
+    assert client.collect_calls == 1
+
+
+async def test_fulfillment_lease_excludes_duplicate_vm_provisioning(repository) -> None:
+    runtime = SettlementRuntime(repository, {}, clock=lambda: 50)
+    record = await register(runtime, obligation())
+
+    first = await runtime.reserve_fulfillment(
+        record.obligation_ref,
+        local_principal=SELLER,
+        worker_id="vm-a",
+    )
+    duplicate = await runtime.reserve_fulfillment(
+        record.obligation_ref,
+        local_principal=SELLER,
+        worker_id="vm-b",
+    )
+    assert first.status == "pending"
+    assert duplicate.status == "busy"
+
+    completed = await runtime.complete_fulfillment(
+        record.obligation_ref,
+        "portable-fulfillment-ref",
+        local_principal=SELLER,
+        worker_id="vm-a",
+    )
+    replayed = await runtime.reserve_fulfillment(
+        record.obligation_ref,
+        local_principal=SELLER,
+        worker_id="vm-c",
+    )
+
+    assert completed.fulfillment_ref == "portable-fulfillment-ref"
+    assert replayed.status == "succeeded"
+
+
+async def test_fulfillment_restart_repairs_commit_before_acknowledgement(
+    repository,
+) -> None:
+    now = [50.0]
+    runtime = SettlementRuntime(
+        repository,
+        {},
+        clock=lambda: now[0],
+        lease_seconds=10,
+    )
+    record = await register(runtime, obligation())
+    reserved = await runtime.reserve_fulfillment(
+        record.obligation_ref,
+        local_principal=SELLER,
+        worker_id="vm-crashed",
+    )
+    assert reserved.status == "pending"
+    await runtime.bind_fulfillment(
+        record.obligation_ref,
+        "portable-fulfillment-ref",
+        local_principal=SELLER,
+    )
+
+    now[0] = 61.0
+    recovered = await runtime.reserve_fulfillment(
+        record.obligation_ref,
+        local_principal=SELLER,
+        worker_id="vm-recovery",
+    )
+    operation = await repository.load_settlement_operation(
+        record.obligation_ref,
+        "fulfill",
+    )
+
+    assert recovered.status == "succeeded"
+    assert operation is not None
+    assert operation["state"] == "succeeded"
+    assert operation["receipt"] == {
+        "fulfillment_ref": "portable-fulfillment-ref"
+    }
+
+
 async def test_mechanism_params_bind_after_acceptance_without_changing_identity(
     repository,
 ) -> None:

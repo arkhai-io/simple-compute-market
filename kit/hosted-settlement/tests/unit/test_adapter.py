@@ -20,13 +20,13 @@ from hosted_settlement_client import (
     FundingProfile,
     FundingProfileReadiness,
     HostedSettlementAsyncClient,
+    HostedSettlementError,
     ManifestHealth,
     NormalizedFundingState,
     OperationReceipt,
     OperationRequest,
     PayerActionKind,
     Principal,
-    canonical_json,
 )
 from market_hosted_settlement import (
     REQUIRED_HOSTED_CAPABILITIES,
@@ -37,6 +37,7 @@ from market_identity import Identity, IdentityScheme
 from market_settlement_runtime import (
     SettlementRuntime,
     SettlementSQLiteRepository,
+    obligation_payload_hash,
 )
 
 BUYER = Identity(
@@ -163,6 +164,48 @@ class FakeClient:
         )
 
 
+class FailingMaterializeClient(FakeClient):
+    def __init__(self, error: Exception) -> None:
+        super().__init__()
+        self.error = error
+
+    async def materialize(self, request: Any) -> EscrowResult:
+        self.materialize_request = request
+        raise self.error
+
+    async def get_status(self, escrow_ref: str, *, request_id: str) -> EscrowResult:
+        raise self.error
+
+    async def collect(
+        self, escrow_ref: str, request: OperationRequest
+    ) -> OperationReceipt:
+        raise self.error
+
+    async def reclaim(
+        self, escrow_ref: str, request: OperationRequest
+    ) -> OperationReceipt:
+        raise self.error
+
+
+class CommitThenInvalidResponseClient(FakeClient):
+    def __init__(self) -> None:
+        super().__init__()
+        self.materialize_requests: list[Any] = []
+        self.provider_effects = 0
+
+    async def materialize(self, request: Any) -> EscrowResult:
+        self.materialize_requests.append(request)
+        if self.provider_effects == 0:
+            self.provider_effects = 1
+            raise HostedSettlementError(
+                code="response_request_mismatch",
+                message="client_secret=must-never-persist",
+                retryable=False,
+                status_code=200,
+            )
+        return self.escrow_result
+
+
 def _obligation(
     *,
     funding_profile: FundingProfile = FundingProfile.CARD,
@@ -197,6 +240,9 @@ def _obligation(
         params.update(
             {
                 "funding_profile": funding_profile.value,
+                "authority_id": "hosted-authority-1",
+                "environment": "test",
+                "country": "US",
                 "interaction": "interactive",
                 "contract_fingerprint": "sha256:" + "11" * 32,
             }
@@ -314,13 +360,15 @@ async def test_adapter_produces_exact_released_client_requests(
     assert result.mechanism_ref == "escrow-public"
     assert result.buyer_action == {
         "kind": "payment",
+        "operation_ref": "action-1",
         "expires_at_unix": 2_000_000_100,
+        "url": "https://checkout.example/secret-session",
+        "bank_instructions": None,
     }
     assert client.materialize_request == CreateEscrowRequest(
         request_id="arkhai:settlement:obligation-1:materialize",
         obligation_ref="obligation-1",
-        obligation_hash="0x"
-        + hashlib.sha256(canonical_json(accepted_obligation)).hexdigest(),
+        obligation_hash="0x" + obligation_payload_hash(accepted_obligation),
         payer=Principal.model_validate(BUYER.model_dump(mode="json")),
         claimant=Principal.model_validate(SELLER.model_dump(mode="json")),
         account_ref="account-1",
@@ -412,6 +460,189 @@ async def test_runtime_never_persists_transient_action_material(tmp_path) -> Non
     )["url"] == "https://checkout.example/secret-session"
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize("retryable", [False, True])
+async def test_hosted_errors_are_redacted_and_retry_classified_in_sqlite(
+    tmp_path,
+    retryable: bool,
+) -> None:
+    canary = "sk_live_secret provider_payload customer_private"
+    client = FailingMaterializeClient(
+        HostedSettlementError(
+            code="provider_failure",
+            message=canary,
+            retryable=retryable,
+            status_code=503 if retryable else 409,
+        )
+    )
+    adapter = HostedConditionalEscrowClient(client)  # type: ignore[arg-type]
+    repository = SettlementSQLiteRepository(str(tmp_path / f"redacted-{retryable}.db"))
+    runtime = SettlementRuntime(
+        repository,
+        {"fiat.stripe.v1": adapter},
+        clock=lambda: 2_000_000_000,
+    )
+    record = (
+        await runtime.register_plan(
+            agreement_ref="agreement-redacted",
+            obligations=[_obligation(include_authorization=False)],
+        )
+    )[0]
+    await runtime.bind_mechanism_params(
+        record.obligation_ref,
+        {
+            "funding_profile": "card.v1",
+            "funding_authorization_ref": "funding-authorization-1",
+        },
+        local_principal=BUYER,
+    )
+
+    if retryable:
+        with pytest.raises(
+            RuntimeError,
+            match="hosted settlement materialization temporarily unavailable",
+        ):
+            await runtime.materialize(
+                obligation_ref=record.obligation_ref,
+                local_principal=BUYER,
+                worker_id="buyer",
+            )
+    else:
+        outcome = await runtime.materialize(
+            obligation_ref=record.obligation_ref,
+            local_principal=BUYER,
+            worker_id="buyer",
+        )
+        assert outcome.status == "manual_required"
+
+    operation = await repository.load_settlement_operation(
+        record.obligation_ref,
+        "materialize",
+    )
+    assert operation is not None
+    assert operation["state"] == ("pending" if retryable else "manual_required")
+    assert operation["uncertain_acknowledgement"] is retryable
+    serialized = json.dumps(operation, sort_keys=True)
+    assert canary not in serialized
+    assert "customer_private" not in serialized
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("operation", "safe_name"),
+    [
+        ("status", "status"),
+        ("collect", "collection"),
+        ("reclaim", "reclaim"),
+    ],
+)
+async def test_every_hosted_lifecycle_error_discards_provider_detail(
+    operation: str,
+    safe_name: str,
+) -> None:
+    canary = "client_secret=secret provider_object=private"
+    client = FailingMaterializeClient(
+        HostedSettlementError(
+            code="temporarily_unavailable",
+            message=canary,
+            retryable=True,
+            status_code=503,
+        )
+    )
+    adapter = HostedConditionalEscrowClient(client)  # type: ignore[arg-type]
+    obligation = _obligation()
+
+    with pytest.raises(
+        RuntimeError,
+        match=f"hosted settlement {safe_name} temporarily unavailable",
+    ) as caught:
+        if operation == "status":
+            await adapter.get_status(
+                obligation,
+                mechanism_ref="escrow-public",
+                operation_ref="status-1",
+                mechanism_state={},
+            )
+        elif operation == "collect":
+            await adapter.collect(
+                obligation,
+                mechanism_ref="escrow-public",
+                fulfillment_ref="fulfillment-public",
+                operation_ref="collect-1",
+                mechanism_state={},
+            )
+        else:
+            await adapter.reclaim_expired(
+                obligation,
+                mechanism_ref="escrow-public",
+                operation_ref="reclaim-1",
+                mechanism_state={},
+            )
+
+    assert canary not in str(caught.value)
+    assert "client_secret" not in str(caught.value)
+
+
+
+
+@pytest.mark.asyncio
+async def test_commit_then_invalid_response_retries_exact_identity_once(tmp_path) -> None:
+    client = CommitThenInvalidResponseClient()
+    adapter = HostedConditionalEscrowClient(client)  # type: ignore[arg-type]
+    repository = SettlementSQLiteRepository(str(tmp_path / "commit-then-invalid.db"))
+    runtime = SettlementRuntime(
+        repository,
+        {"fiat.stripe.v1": adapter},
+        clock=lambda: 2_000_000_000,
+    )
+    record = (
+        await runtime.register_plan(
+            agreement_ref="agreement-unknown-ack",
+            obligations=[_obligation(include_authorization=False)],
+        )
+    )[0]
+    await runtime.bind_mechanism_params(
+        record.obligation_ref,
+        {
+            "funding_profile": "card.v1",
+            "funding_authorization_ref": "funding-authorization-1",
+        },
+        local_principal=BUYER,
+    )
+
+    with pytest.raises(
+        RuntimeError,
+        match="hosted settlement materialization temporarily unavailable",
+    ):
+        await runtime.materialize(
+            obligation_ref=record.obligation_ref,
+            local_principal=BUYER,
+            worker_id="buyer-first",
+        )
+    first_operation = await repository.load_settlement_operation(
+        record.obligation_ref,
+        "materialize",
+    )
+    assert first_operation is not None
+    assert first_operation["uncertain_acknowledgement"] is True
+
+    recovered = await runtime.materialize(
+        obligation_ref=record.obligation_ref,
+        local_principal=BUYER,
+        worker_id="buyer-recovery",
+    )
+
+    assert recovered.status == "pending"
+    assert client.provider_effects == 1
+    assert len(client.materialize_requests) == 2
+    assert client.materialize_requests[0] == client.materialize_requests[1]
+    stored = await repository.load_settlement_operation(
+        record.obligation_ref,
+        "materialize",
+    )
+    assert stored is not None
+    assert stored["uncertain_acknowledgement"] is False
+    assert "client_secret" not in json.dumps(stored, sort_keys=True)
 @pytest.mark.asyncio
 async def test_readiness_fails_on_identity_capability_drift() -> None:
     client = FakeClient()
@@ -523,6 +754,54 @@ async def test_adapter_maps_authoritative_funding_states(
     assert status.mechanism_state["funding_state"] == funding_state.value
     assert status.receipt is not None
     assert status.receipt["funding_reason"] == "payer_action_required"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("funding_state", "financial_state", "expected"),
+    [
+        (
+            NormalizedFundingState.RETURNED,
+            FinancialState.FUNDED,
+            "manual_required",
+        ),
+        (
+            NormalizedFundingState.FAILED,
+            FinancialState.FUNDED,
+            "manual_required",
+        ),
+        (
+            NormalizedFundingState.EXPIRED,
+            FinancialState.EXPIRED,
+            "collected",
+        ),
+    ],
+)
+async def test_post_collection_regression_fails_safe_without_rewriting_completion(
+    funding_state,
+    financial_state,
+    expected,
+) -> None:
+    client = FakeClient()
+    client.escrow_result = client.escrow(
+        funding_state=funding_state,
+        financial_state=financial_state,
+        action=None,
+    )
+    adapter = HostedConditionalEscrowClient(client)  # type: ignore[arg-type]
+
+    status = await adapter.get_status(
+        _obligation(),
+        mechanism_ref="escrow-public",
+        operation_ref="status",
+        mechanism_state={
+            "financial_state": FinancialState.COLLECTED.value,
+            "funding_state": NormalizedFundingState.TRANSFERRED.value,
+        },
+    )
+
+    assert status.status == expected
+    assert status.mechanism_state["financial_state"] == financial_state.value
 
 
 @pytest.mark.asyncio

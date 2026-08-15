@@ -273,11 +273,16 @@ def _extend_mechanism_params_schema(conn: sqlite3.Connection) -> None:
             "TEXT NOT NULL DEFAULT '{}'"
         )
     rows = conn.execute(
-        "SELECT obligation_ref, obligation, mechanism_params "
+        "SELECT obligation_ref, obligation, mechanism_params, mechanism_ref "
         "FROM settlement_obligations ORDER BY obligation_ref"
     ).fetchall()
     classified: list[tuple[str, str]] = []
-    for obligation_ref, raw_obligation, raw_mechanism_params in rows:
+    for (
+        obligation_ref,
+        raw_obligation,
+        raw_mechanism_params,
+        mechanism_ref,
+    ) in rows:
         try:
             obligation = json.loads(raw_obligation)
             mechanism_params = json.loads(raw_mechanism_params or "{}")
@@ -303,6 +308,10 @@ def _extend_mechanism_params_schema(conn: sqlite3.Connection) -> None:
                 f"hosted settlement obligation {obligation_ref!r} mixes legacy and current funding fields"
             )
         if legacy_methods is not None:
+            if not isinstance(mechanism_ref, str) or not mechanism_ref:
+                raise ValueError(
+                    f"legacy hosted settlement {obligation_ref!r} has no immutable mechanism reference"
+                )
             if (
                 legacy_methods != ["card"]
                 or "funding_authorization_ref" in params
@@ -1493,6 +1502,9 @@ class SettlementSQLiteRepository:
                     LEFT JOIN settlement_operations op
                       ON op.obligation_ref=o.obligation_ref
                      AND op.operation=CASE
+                       WHEN o.mechanism_status='failed'
+                         AND o.collection_state!='succeeded'
+                         THEN 'cleanup'
                        WHEN o.collection_state='succeeded' THEN 'status'
                        WHEN o.condition_state='ready' THEN 'collect'
                        WHEN o.mechanism_status='ready' THEN 'check'
@@ -1510,8 +1522,14 @@ class SettlementSQLiteRepository:
                       )
                       AND o.reclaim_state
                         NOT IN ('succeeded','manual_required')
-                      AND o.condition_state
-                        NOT IN ('failed','manual_required')
+                      AND (
+                        o.condition_state NOT IN ('failed','manual_required')
+                        OR (
+                          o.condition_state='failed'
+                          AND o.mechanism_status='failed'
+                          AND o.collection_state!='succeeded'
+                        )
+                      )
                       AND (
                         COALESCE(o.mechanism_status, '') NOT IN (
                           'collected','reclaimed','expired','failed',
@@ -1523,6 +1541,10 @@ class SettlementSQLiteRepository:
                             o.mechanism_state,
                             '$.terminal_risk_monitoring'
                           )=1
+                        )
+                        OR (
+                          o.mechanism_status='failed'
+                          AND o.collection_state!='succeeded'
                         )
                       )
                       AND (

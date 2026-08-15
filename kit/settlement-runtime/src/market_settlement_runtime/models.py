@@ -12,7 +12,7 @@ from pydantic import BaseModel, Field, model_validator
 
 Party = Literal["buyer", "seller"]
 OperationKind = Literal[
-    "materialize", "status", "fulfill", "check", "collect", "reclaim"
+    "materialize", "status", "fulfill", "cleanup", "check", "collect", "reclaim"
 ]
 OperationState = Literal["pending", "in_progress", "succeeded", "manual_required"]
 MaterializationState = Literal[
