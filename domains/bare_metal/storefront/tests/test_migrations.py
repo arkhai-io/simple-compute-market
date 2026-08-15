@@ -15,6 +15,10 @@ BARE_METAL_MIGRATION_IDS = (
     "bare-metal-storefront-0001-agreement-payloads",
     "bare-metal-storefront-0002-derived-publications",
     "bare-metal-storefront-0003-operator-state",
+    "bare-metal-storefront-0004-selected-site-bindings",
+    "bare-metal-storefront-0005-fulfillment-lifecycle",
+    "bare-metal-storefront-0006-common-domain-bindings",
+    "bare-metal-storefront-0007-selected-site-immutability",
 )
 MIGRATION_IDS = (*SETTLEMENT_MIGRATION_IDS, *BARE_METAL_MIGRATION_IDS)
 
@@ -67,7 +71,8 @@ async def test_bare_metal_migration_upgrades_existing_core_database(tmp_path) ->
     finally:
         conn.close()
 
-    assert "bare_metal_agreement_payloads" in tables
+    assert "bare_metal_agreement_payloads" not in tables
+    assert "storefront_domain_artifacts" in tables
     assert {"settlement_obligations", "settlement_operations"} <= tables
     assert applied == [(migration_id,) for migration_id in sorted(MIGRATION_IDS)]
     assert {

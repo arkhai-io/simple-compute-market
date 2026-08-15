@@ -21,6 +21,8 @@ from market_identity import Ed25519Signer
 
 NOW = datetime(2030, 1, 1, tzinfo=timezone.utc)
 LATER = NOW + timedelta(hours=1)
+SELLER = Ed25519Signer(bytes.fromhex("22" * 32)).identity
+BUYER = Ed25519Signer(bytes.fromhex("11" * 32)).identity
 
 
 def _artifacts():
@@ -64,10 +66,7 @@ def _artifacts():
     }
 
 
-@pytest.mark.asyncio
-async def test_all_domain_payloads_round_trip_after_restart(tmp_path) -> None:
-    path = tmp_path / "storefront.db"
-    client = SQLiteClient(str(path))
+async def _seed_listing(client: SQLiteClient) -> BareMetalListing:
     listing = BareMetalListing(
         machine_id="machine-1",
         physical_host_id="host-1",
@@ -79,12 +78,54 @@ async def test_all_domain_payloads_round_trip_after_restart(tmp_path) -> None:
         status="open",
         created_at=NOW.isoformat(),
         updated_at=NOW.isoformat(),
-        seller_principal=Ed25519Signer(bytes.fromhex("22" * 32)).identity,
+        seller_principal=SELLER,
         storefront_url="http://seller:8000",
+        site_id="site-a",
+        pool_id="pool-a",
+        physical_resource_id="resource-1",
         listing=listing,
         accepted_escrows=[],
     )
+    return listing
+
+
+async def _seed_opening(
+    client: SQLiteClient,
+    *,
+    negotiation_id: str,
+    message: BareMetalMessage,
+    terms: BareMetalTerms | None,
+) -> None:
+    await client.persist_bare_metal_opening(
+        negotiation_id=negotiation_id,
+        listing_id="listing-1",
+        seller_principal=SELLER,
+        buyer_agent_id="https://buyer.example",
+        buyer_principal=BUYER,
+        seller_reference_amount=100,
+        strategy="listed",
+        message=message,
+        proposal={"fields": {"amount": "100"}},
+        buyer_amount=100,
+        seller_action="accept" if terms is not None else "counter",
+        seller_amount=100,
+        terms=terms,
+        agreed_amount=100 if terms is not None else None,
+    )
+
+
+@pytest.mark.asyncio
+async def test_all_domain_payloads_round_trip_after_restart(tmp_path) -> None:
+    path = tmp_path / "storefront.db"
+    client = SQLiteClient(str(path))
+    listing = await _seed_listing(client)
     artifacts = _artifacts()
+    await _seed_opening(
+        client,
+        negotiation_id="neg-1",
+        message=artifacts["message"],
+        terms=artifacts["terms"],
+    )
     await client.save_bare_metal_message(
         negotiation_id="neg-1",
         message=artifacts["message"],
@@ -151,7 +192,14 @@ async def test_artifact_updates_are_isolated_by_column_and_negotiation(
     tmp_path,
 ) -> None:
     client = SQLiteClient(str(tmp_path / "storefront.db"))
+    await _seed_listing(client)
     artifacts = _artifacts()
+    await _seed_opening(
+        client,
+        negotiation_id="neg-1",
+        message=artifacts["message"],
+        terms=artifacts["terms"],
+    )
     await client.save_bare_metal_message(
         negotiation_id="neg-1",
         message=artifacts["message"],
@@ -163,6 +211,12 @@ async def test_artifact_updates_are_isolated_by_column_and_negotiation(
     other = BareMetalMessage(
         duration_seconds=1800,
         ssh_public_key="ssh-ed25519 other",
+    )
+    await _seed_opening(
+        client,
+        negotiation_id="neg-2",
+        message=other,
+        terms=None,
     )
     await client.save_bare_metal_message(
         negotiation_id="neg-2",
@@ -198,7 +252,7 @@ async def test_invalid_payload_is_rejected_before_write(tmp_path) -> None:
     conn = sqlite3.connect(path)
     try:
         count = conn.execute(
-            "SELECT COUNT(*) FROM bare_metal_agreement_payloads",
+            "SELECT COUNT(*) FROM storefront_domain_artifacts",
         ).fetchone()[0]
     finally:
         conn.close()
@@ -209,12 +263,21 @@ async def test_invalid_payload_is_rejected_before_write(tmp_path) -> None:
 async def test_corrupt_stored_json_fails_closed(tmp_path) -> None:
     path = tmp_path / "storefront.db"
     client = SQLiteClient(str(path))
+    await _seed_listing(client)
+    artifacts = _artifacts()
+    await _seed_opening(
+        client,
+        negotiation_id="neg-corrupt",
+        message=artifacts["message"],
+        terms=artifacts["terms"],
+    )
     conn = sqlite3.connect(path)
     try:
+        conn.execute("DROP TRIGGER storefront_domain_artifact_immutable")
         conn.execute(
-            "INSERT INTO bare_metal_agreement_payloads"
-            "(negotiation_id, message_json) VALUES (?, ?)",
-            ("neg-corrupt", "{not-json"),
+            "UPDATE storefront_domain_artifacts SET artifact_json=? "
+            "WHERE negotiation_id=? AND artifact_slot='message'",
+            ("{not-json", "neg-corrupt"),
         )
         conn.commit()
     finally:
@@ -224,7 +287,7 @@ async def test_corrupt_stored_json_fails_closed(tmp_path) -> None:
         await client.load_bare_metal_message(negotiation_id="neg-corrupt")
 
 
-def test_agreement_table_contains_only_opaque_artifact_columns(tmp_path) -> None:
+def test_common_artifact_table_contains_only_opaque_artifact_columns(tmp_path) -> None:
     path = tmp_path / "storefront.db"
     SQLiteClient(str(path))
     conn = sqlite3.connect(path)
@@ -232,7 +295,7 @@ def test_agreement_table_contains_only_opaque_artifact_columns(tmp_path) -> None
         columns = {
             row[1]
             for row in conn.execute(
-                "PRAGMA table_info(bare_metal_agreement_payloads)",
+                "PRAGMA table_info(storefront_domain_artifacts)",
             )
         }
     finally:
@@ -240,13 +303,13 @@ def test_agreement_table_contains_only_opaque_artifact_columns(tmp_path) -> None
 
     assert columns == {
         "negotiation_id",
-        "message_json",
-        "terms_json",
-        "materialization_json",
-        "receipt_json",
-        "result_json",
+        "artifact_slot",
+        "offering_mode",
+        "domain_identity",
+        "contract_major",
+        "contract_minor",
+        "artifact_json",
         "created_at",
-        "updated_at",
     }
     forbidden = {"vm_host", "vm_target", "ssh_public_key", "machine_id"}
     assert columns.isdisjoint(forbidden)

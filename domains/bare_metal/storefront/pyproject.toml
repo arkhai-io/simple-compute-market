@@ -22,6 +22,9 @@ dependencies = [
 [project.scripts]
 bare-metal-storefront = "arkhai_bare_metal_storefront.cli:app"
 
+[project.entry-points."market.storefront_contributions"]
+bare_metal = "arkhai_bare_metal_storefront.contribution:BARE_METAL_STOREFRONT_CONTRIBUTION"
+
 [dependency-groups]
 dev = [
     "pytest>=8.3.4,<10.0.0",

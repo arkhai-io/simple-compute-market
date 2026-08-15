@@ -69,11 +69,11 @@ Registration controls construction, not lifecycle ownership. A composition injec
 
 A domain-owned storefront validates its contract once at the executable boundary, before constructing any stateful collaborator. That exact immutable object is carried through application state, lifespan/container state, repositories, services, routes, and workers. Identity comparison at composition seams catches accidentally reconstructed contracts even when two objects carry equal values.
 
-Single-domain persistence intentionally does not duplicate the process-selected domain identity on every row. The VM executable therefore reopens existing rows under its validated `compute.v1` contract without migration. A future multi-domain root must add explicit record ownership and dispatch rather than infer a domain from payload shape or restore a module-global resolver.
+The common storefront registry freezes a domain identity, contract version, and pool offering mode for each installed contribution. Listing bindings add the trusted site and Physical Resource; negotiation bindings copy that immutable selection before any domain artifact is stored. One-domain storefronts use the same carriers, so adding a shared shell changes composition rather than persistence or routing semantics.
 
 ## Executable ownership
 
-The buyer CLI and registry executable are core-owned because their control flow is schema-opaque and extended through domain entry points or configuration. Storefront executables remain domain-owned composition roots where domain adapters and seller policy are wired into shared storefront machinery. A package move does not alter these authority boundaries.
+The buyer CLI and registry executable are core-owned because their control flow is schema-opaque and extended through domain entry points or configuration. Storefront implementations remain domain-owned contributions: each exports one validated `StorefrontDomainContribution` through `market.storefront_contributions`, while a one-domain executable or shared shell owns process configuration. The bare-metal contribution depends on shared core lifecycle contexts and its own site/capacity/fulfillment adapters; it does not import VM services.
 
 ## Identity composition
 

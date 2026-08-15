@@ -86,6 +86,7 @@ def test_core_runner_publishes_exact_opaque_bare_metal_payload(tmp_path):
         (
             {
                 "kind": "bare_metal.v1",
+                "virtualization_type": "bare_metal",
                 "machine_id": "machine-1",
                 "physical_host_id": "physical-host-1",
                 "access_methods": ["ssh"],

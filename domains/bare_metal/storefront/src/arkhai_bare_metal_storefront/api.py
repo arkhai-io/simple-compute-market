@@ -21,11 +21,15 @@ from fastapi import APIRouter, HTTPException, Query, Request
 from market_identity import EMPTY_BODY, Identity
 
 from .models import (
+    BareMetalFulfillRequest,
+    BareMetalFulfillmentResponse,
+    BareMetalFulfillmentResultResponse,
     BareMetalHealthResponse,
     BareMetalSettleRequest,
     BareMetalSettleResponse,
     BareMetalSettleStatusResponse,
 )
+from .fulfillment_service import BareMetalFulfillmentError
 from .negotiation_service import NegotiationRequestError
 from .runtime import BareMetalStorefrontRuntime
 from .settlement_service import SettlementRequestError
@@ -337,6 +341,170 @@ async def settle_status(
         )
     except (AuthError, SettlementRequestError) as exc:
         raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
+
+
+async def _fulfillment_identity(
+    *,
+    request: Request,
+    runtime: BareMetalStorefrontRuntime,
+    negotiation_id: str,
+    operation: str,
+) -> Identity:
+    thread = await runtime.db.load_negotiation_thread_row(
+        negotiation_id=negotiation_id,
+    )
+    if thread is None:
+        raise BareMetalFulfillmentError(
+            "negotiation not found",
+            status_code=404,
+        )
+    return await _buyer(
+        request=request,
+        runtime=runtime,
+        operation=operation,
+        resource=negotiation_id,
+        expected_principal=Identity.model_validate(thread["buyer_principal"]),
+    )
+
+
+@router.post(
+    "/api/v1/fulfillments/begin",
+    response_model=BareMetalFulfillmentResponse,
+)
+async def begin_fulfillment(
+    body: BareMetalFulfillRequest,
+    request: Request,
+) -> BareMetalFulfillmentResponse:
+    runtime = _runtime(request)
+    try:
+        identity = await _buyer(
+            request=request,
+            runtime=runtime,
+            operation="bare_metal_fulfillment_begin",
+            resource=body.negotiation_id,
+            expected_principal=body.buyer_principal,
+            body=body.model_dump(mode="json"),
+        )
+        lifecycle = await runtime.fulfillment_service().begin(
+            negotiation_id=body.negotiation_id,
+            escrow_uid=body.escrow_uid,
+            buyer_principal=identity,
+        )
+        return BareMetalFulfillmentResponse.model_validate(lifecycle)
+    except BareMetalFulfillmentError as exc:
+        raise HTTPException(
+            status_code=exc.status_code,
+            detail=exc.detail,
+        ) from exc
+
+
+@router.get(
+    "/api/v1/fulfillments/{negotiation_id}/status",
+    response_model=BareMetalFulfillmentResponse,
+)
+async def fulfillment_status(
+    negotiation_id: str,
+    request: Request,
+) -> BareMetalFulfillmentResponse:
+    runtime = _runtime(request)
+    try:
+        identity = await _fulfillment_identity(
+            request=request,
+            runtime=runtime,
+            negotiation_id=negotiation_id,
+            operation="bare_metal_fulfillment_status",
+        )
+        lifecycle = await runtime.fulfillment_service().status(
+            negotiation_id=negotiation_id,
+            buyer_principal=identity,
+        )
+        return BareMetalFulfillmentResponse.model_validate(lifecycle)
+    except BareMetalFulfillmentError as exc:
+        raise HTTPException(
+            status_code=exc.status_code,
+            detail=exc.detail,
+        ) from exc
+
+
+@router.get(
+    "/api/v1/fulfillments/{negotiation_id}/result",
+    response_model=BareMetalFulfillmentResultResponse,
+)
+async def fulfillment_result(
+    negotiation_id: str,
+    request: Request,
+) -> BareMetalFulfillmentResultResponse:
+    runtime = _runtime(request)
+    try:
+        identity = await _fulfillment_identity(
+            request=request,
+            runtime=runtime,
+            negotiation_id=negotiation_id,
+            operation="bare_metal_fulfillment_result",
+        )
+        lifecycle = await runtime.fulfillment_service().status(
+            negotiation_id=negotiation_id,
+            buyer_principal=identity,
+        )
+        if lifecycle["state"] not in {
+            "active",
+            "teardown_dispatch_pending",
+            "tearing_down",
+            "teardown_failed",
+            "torn_down",
+            "released",
+        }:
+            raise BareMetalFulfillmentError(
+                "bare-metal fulfillment result is not ready"
+            )
+        receipt = await runtime.db.load_bare_metal_receipt(
+            negotiation_id=negotiation_id,
+        )
+        result = await runtime.db.load_bare_metal_result(
+            negotiation_id=negotiation_id,
+        )
+        if receipt is None or result is None:
+            raise BareMetalFulfillmentError(
+                "bare-metal fulfillment result is not ready"
+            )
+        return BareMetalFulfillmentResultResponse(
+            negotiation_id=negotiation_id,
+            receipt=receipt,
+            result=result,
+        )
+    except BareMetalFulfillmentError as exc:
+        raise HTTPException(
+            status_code=exc.status_code,
+            detail=exc.detail,
+        ) from exc
+
+
+@router.post(
+    "/api/v1/fulfillments/{negotiation_id}/teardown",
+    response_model=BareMetalFulfillmentResponse,
+)
+async def teardown_fulfillment(
+    negotiation_id: str,
+    request: Request,
+) -> BareMetalFulfillmentResponse:
+    runtime = _runtime(request)
+    try:
+        identity = await _fulfillment_identity(
+            request=request,
+            runtime=runtime,
+            negotiation_id=negotiation_id,
+            operation="bare_metal_fulfillment_teardown",
+        )
+        lifecycle = await runtime.fulfillment_service().teardown(
+            negotiation_id=negotiation_id,
+            buyer_principal=identity,
+        )
+        return BareMetalFulfillmentResponse.model_validate(lifecycle)
+    except BareMetalFulfillmentError as exc:
+        raise HTTPException(
+            status_code=exc.status_code,
+            detail=exc.detail,
+        ) from exc
 
 
 @router.get("/health", response_model=BareMetalHealthResponse)

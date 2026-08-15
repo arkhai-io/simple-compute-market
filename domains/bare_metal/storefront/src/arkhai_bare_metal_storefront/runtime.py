@@ -21,6 +21,7 @@ from .negotiation import default_seller_round_hook
 from .negotiation_service import BareMetalNegotiationService
 from .settlement import build_bare_metal_settlement_plan
 from .settlement_service import BareMetalSettlementService
+from .fulfillment_service import BareMetalFulfillmentService
 from .sqlite_client import SQLiteClient
 from .site_clients import (
     BareMetalSiteBinding,
@@ -43,10 +44,7 @@ class BareMetalStorefrontRuntime:
     plan_builder: Callable[..., dict[str, Any]] = build_bare_metal_settlement_plan
     site_bindings: tuple[BareMetalSiteBinding, ...] = ()
     capacity_client: Any | None = field(default=None, repr=False)
-    fulfillment_site_clients: Mapping[str, Any] = field(
-        default_factory=dict,
-        repr=False,
-    )
+    fulfillment_client: Any | None = field(default=None, repr=False)
     chain_clients: Mapping[str, Any] = field(default_factory=dict)
     chain_config_paths: Mapping[str, str | None] = field(default_factory=dict)
     escrow_verifier: Callable[..., Awaitable[int]] = verify_escrow_for_settlement
@@ -87,6 +85,16 @@ class BareMetalStorefrontRuntime:
             settlement_runtime=self.settlement_runtime,
         )
 
+    def fulfillment_service(self) -> BareMetalFulfillmentService:
+        """Build durable fulfillment over exact selected-site clients."""
+        if self.capacity_client is None or self.fulfillment_client is None:
+            raise RuntimeError("bare-metal fulfillment authorities are unavailable")
+        return BareMetalFulfillmentService(
+            db=self.db,
+            capacity_client=self.capacity_client,
+            fulfillment_client=self.fulfillment_client,
+        )
+
     async def health(self) -> dict[str, object]:
         """Report composed authorities without implying fulfillment readiness."""
 
@@ -121,7 +129,7 @@ class BareMetalStorefrontRuntime:
             else:
                 checks["site_projection"] = "ok"
                 checks["fulfillment"] = (
-                    "ok" if self.fulfillment_site_clients else "unavailable"
+                    "ok" if self.fulfillment_client is not None else "unavailable"
                 )
         return {
             "status": (
@@ -212,7 +220,7 @@ def build_runtime_from_environment(
         expected_legacy_sellers=(storefront_url,),
     )
     try:
-        capacity_client, fulfillment_site_clients = build_trusted_site_clients(
+        capacity_client, fulfillment_client = build_trusted_site_clients(
             bindings=site_bindings,
             signer=signer,
             db_path=db.db_path,
@@ -232,5 +240,5 @@ def build_runtime_from_environment(
         seller_evm_address=seller_evm_address,
         site_bindings=site_bindings,
         capacity_client=capacity_client,
-        fulfillment_site_clients=fulfillment_site_clients,
+        fulfillment_client=fulfillment_client,
     )

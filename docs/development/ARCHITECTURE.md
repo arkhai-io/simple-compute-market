@@ -54,9 +54,9 @@ receipt = service(plan)
 
 Core owns schema-opaque carriers and role structure around these phases: signed transport, round sequencing, persistence mechanics, and deterministic handoffs. Domain packages own listing vocabulary, message content, validation, deterministic interpretation of terms, fulfillment requirements, and result vocabulary. Kit packages own reusable mechanisms and authorities, including the single commercial-settlement obligation lifecycle. Composition roots wire concrete domain and kit implementations into role packages.
 
-Each domain-owned storefront executable selects and validates one immutable `MarketDomainContract` at its outermost composition root before constructing persistence, services, workers, or the HTTP application. The validated object is then injected unchanged through application state, the lifespan-owned container, repositories, publication, negotiation, settlement, and fulfillment. A service must not recover domain behavior from module state, construct a replacement contract, or branch on a domain identity below that root.
+Each domain-owned storefront validates one immutable `MarketDomainContract` at its composition boundary before constructing persistence, services, workers, or the HTTP application. The validated object is carried through common listing/negotiation/artifact bindings and lifecycle contexts. Domain contributions expose that contract through `market.storefront_contributions`; shared core dispatch resolves only the frozen domain identity/version and never guesses from a payload or imports the domain.
 
-The VM storefront currently selects `compute.v1` once per process. This parameterization is deliberately behavior-preserving: existing single-domain rows have no domain discriminator and continue to be interpreted by the startup-selected contract, so restart requires no database migration. Per-record domain selection and dispatch belong to the multi-domain storefront composition layer.
+The VM and bare-metal storefronts can run as separate one-domain processes or as installed contributions selected by a shared shell. Bare metal owns its seller policy, site bindings, and provisioning adapters and imports no VM services. The common binding schema freezes offering mode, domain identity/version, site, and Physical Resource for both shapes, so restart and composition changes do not change the authority selected by an accepted agreement.
 
 Two hooks remain separate when core-owned machinery or a typed invariant sits between them. They may be merged when the core does nothing between them and the split would expose only implementation detail.
 
@@ -420,11 +420,11 @@ A kind-routed `ReleaseJobPort` connects the two: for VM-backed reservations it r
 
 ### Local development
 
-Compose is organized by market domain and includes the shared development chain. There is no required long-running buyer service. Domain stacks contain their registry schema, storefront, and supporting services. The root compose file combines the domain stacks for full e2e work.
+Compose is organized by market domain and includes the shared development chain. There is no required long-running buyer service. The bare-metal seller uses its dedicated image, role-owned writable storefront database, durable reservation-to-site route map, and separately injected seller signer and trusted site-binding configuration. VM and bare-metal storefront services are independently selectable and may share a provisioning authority without sharing writable storefront databases. The root compose file combines domain stacks for full end-to-end work.
 
 ### Production and staging
 
-The Helm umbrella chart composes registry, storefront, compute provisioning, and optional development/test components.
+The deployment surfaces support registry, independently selectable VM and bare-metal storefront roles, compute provisioning, and optional development/test components. `helm/charts/bare-metal-storefront` installs the dedicated one-domain role with its own service, persistence boundary, health probes, public URL, external signer Secret, and external site-binding Secret; the umbrella/shared-shell chart may instead select installed domain contributions. Disabling one role creates no wait or reference from another.
 
 Configuration resolution, ConfigMap/Secret mounting, stateful-service persistence strategy, and migration-at-startup conventions are covered in [`docs/development/DEPLOYMENT_AND_CONFIG.md`](DEPLOYMENT_AND_CONFIG.md) and [the deployment and state specification](../../openspec/specs/deployment-state/spec.md).
 

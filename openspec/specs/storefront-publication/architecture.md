@@ -8,11 +8,11 @@ A storefront is the seller's market-facing authority. It composes domain codecs,
 
 The storefront may publish to multiple registries, but each publication remains derived from seller state and signed under the complete canonical publisher principal expected by that registry. The listing ID and storefront URL remain stable commercial subjects; changing an authorized credential does not manufacture a new listing or transfer ownership implicitly.
 
-## One selected domain per storefront process
+## Explicit domain ownership
 
-The VM storefront validates one immutable `compute.v1` contract at its application root and passes that exact object into persistence, publication, negotiation, settlement, fulfillment, routes, and workers. Repository rehydration uses the same codec authority that validated the original write; a lower layer cannot replace it through a singleton, optional default, payload-shape guess, or domain-name branch.
+A one-domain storefront validates one immutable domain contract at its application root and freezes that selection into the same listing, negotiation, and artifact bindings used by a shared storefront shell. Repository rehydration resolves the recorded domain identity and contract version through the installed contribution registry; a lower layer cannot replace it through a singleton, optional default, payload-shape guess, or domain-name branch.
 
-This process-wide selection preserves existing single-domain state and does not add a domain column. Accepted Alkahest and hosted terms remain pinned by their existing settlement carriers and identifiers. Per-record domain ownership is a separate multi-domain composition responsibility.
+Bare metal exports one `market.storefront_contributions` entry point containing its validated contract builder. Its standalone executable composes the same contract with bare-metal seller policy and provisioning adapters. This lets a shared shell select the contribution without importing VM services or changing the authority that owns bare-metal codecs and lifecycle semantics.
 
 ## Advisory publication, authoritative admission
 
@@ -47,7 +47,11 @@ This separation prevents address-shaped data from silently becoming authorizatio
 
 ## Trusted site routing
 
-`site_id` is storefront-owned configuration bound to a provisioning connection. It is not accepted as an untrusted routing assertion from a counterparty or remote projection. This keeps market-visible location choice separate from authority selection and prevents opaque identifiers from encoding credentials or endpoints.
+`site_id` is storefront-owned configuration bound to one exact provisioning authority URL and canonical principal. Authority URLs are excluded from reprs, health, status, logs, and public results; credentials enter only through signer injection. Listing reconciliation freezes the trusted site and Physical Resource in an immutable common binding, and accepted negotiations copy it before agreement artifacts are stored.
+
+Bare-metal fulfillment reloads this binding for every step. Site-targeted capacity reservation, scheduling, fulfillment begin/status/result, teardown, and capacity release use the configured client selected by the recorded site or the durable reservation-to-site map. A buyer assertion, provider response, or opaque artifact cannot replace the site, URL, principal, Physical Resource, machine, or physical-host identity. Restart therefore changes neither authority nor executor, and capacity is released exactly once only after authoritative teardown succeeds.
+
+The result channel is pull-based: the storefront polls the recorded fulfillment and converts its versioned bare-metal envelope to a buyer-safe receipt and access result. Provider payloads, private SSH material, authority URLs, and credentials are not copied into market state or responses.
 
 ## Role and service-peer identity
 

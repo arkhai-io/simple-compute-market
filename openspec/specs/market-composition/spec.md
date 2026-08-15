@@ -49,15 +49,19 @@ Kit and domain concept modules MUST NOT depend on core composition packages; rol
 - **THEN** core has no domain imports and from-below modules have no upward composition imports
 
 ### Requirement: Role-owned executable composition
-The buyer executable MUST be core-owned and load domain plugins, and registry behavior MUST be core-owned and schema-configured. The current VM and API-credit storefront executables and the VM provisioning executable are domain-owned composition roots; making those executables generic is proposed work, not current baseline behavior.
+The buyer executable MUST be core-owned and load domain plugins, and registry behavior MUST be core-owned and schema-configured. VM, bare-metal, and API-credit storefront executables and the VM provisioning executable are domain-owned composition roots. Each storefront contribution MUST provide one validated `MarketDomainContract` plus its domain-owned runtime builder without importing another domain implementation.
 
 #### Scenario: A buyer domain plugin is installed
 - **WHEN** the core `market` executable starts
 - **THEN** that plugin registers its domain verbs through entry-point composition
 
-#### Scenario: Seller starts a current storefront
-- **WHEN** a VM or API-credit storefront is launched
+#### Scenario: Seller starts a domain storefront
+- **WHEN** a VM, bare-metal, or API-credit storefront is launched
 - **THEN** the domain-owned composition root assembles the shared storefront role with that domain's runtime and infrastructure adapters
+
+#### Scenario: Seller loads the bare-metal contribution in a shared shell
+- **WHEN** a composition shell discovers the bare-metal storefront entry point
+- **THEN** it receives the validated bare-metal contract and runtime builder without importing VM services or duplicating registry selection
 
 ### Requirement: Versioned market-domain contract
 Core role packages MUST expose one versioned market-domain contract for deterministic codecs and role integration hooks, and concrete domain packages MUST implement that contract without core importing their implementations.

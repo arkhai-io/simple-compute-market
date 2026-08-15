@@ -89,6 +89,9 @@ async def _insert_listing(runtime: BareMetalStorefrontRuntime) -> None:
         updated_at="2026-01-01T00:00:00Z",
         seller_principal=runtime.seller_principal,
         storefront_url=runtime.storefront_url,
+        site_id="site-a",
+        pool_id="pool-a",
+        physical_resource_id="resource-1",
         listing={
             "kind": "bare_metal.v1",
             "machine_id": "machine-1",
@@ -173,6 +176,13 @@ async def test_signed_opening_accepts_and_persists_domain_artifacts(tmp_path) ->
             negotiation_id=negotiation_id,
         )
     ).machine_id == "machine-1"
+    binding = await runtime.db.load_thread_binding(
+        negotiation_id=negotiation_id,
+    )
+    assert binding.site_id == "site-a"
+    assert binding.listing_id == "listing-1"
+    assert binding.binding.offering_mode == "bare_metal"
+    assert str(binding.binding.domain_identity) == "bare_metal.v1"
 
 
 async def test_auth_and_domain_failures_write_no_thread(tmp_path) -> None:

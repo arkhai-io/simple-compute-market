@@ -173,13 +173,40 @@ A domain that supports seller publication MUST provide its publication source an
 ### Requirement: Domain runtime composition
 The shared storefront role MUST consume the selected market-domain contract for listing, message, agreed-terms, materialization, receipt, and result codecs plus the lifecycle hooks declared by that domain. A concrete storefront composition MUST supply its implementations explicitly, and generic storefront services MUST NOT import or branch on concrete domains.
 
-#### Scenario: Current storefront composition selects a domain
-- **WHEN** a VM or API-credit storefront is assembled
+#### Scenario: Storefront composition selects a domain
+- **WHEN** a VM, bare-metal, or API-credit storefront is assembled
 - **THEN** its composition root supplies a validated domain contract used by every shared storefront service that interprets domain behavior
 
 #### Scenario: Domain validation fails
 - **WHEN** a domain codec or hook rejects a payload
 - **THEN** the storefront surfaces the domain validation failure without coercing it through a different domain or a generic fallback
+
+### Requirement: Complete bare-metal seller lifecycle
+A bare-metal storefront MUST validate listing, negotiation-message, agreed-terms, settlement materialization, receipt, and access-result artifacts through its installed domain contract. The listing binding MUST freeze the trusted `site_id`, Physical Resource identity, `bare_metal` offering mode, and contract identity/version; the accepted negotiation MUST copy that binding before persisting domain artifacts. Settlement and fulfillment MUST reload that binding and MUST NOT infer a site, executor, URL, credential, or domain from buyer payload data.
+
+#### Scenario: Buyer accepts a bare-metal listing
+- **WHEN** authenticated negotiation accepts valid terms for a trusted listing
+- **THEN** the thread persists the canonical buyer and seller principals, exact listing/site/domain binding, agreement payloads, and settlement plan atomically
+
+#### Scenario: Accepted bare-metal agreement is fulfilled
+- **WHEN** settlement is verified and the buyer starts fulfillment
+- **THEN** the storefront reserves at the recorded site, schedules the accepted Physical Resource, invokes the recorded bare-metal executor, and persists its reservation, settlement-resource, fulfillment, receipt, and result correlations
+
+#### Scenario: Buyer supplies conflicting routing material
+- **WHEN** a request or domain artifact asserts a provisioning URL, credential, different site, Physical Resource, machine, or physical-host identity
+- **THEN** the storefront rejects the conflict before a state-changing authority call
+
+#### Scenario: Storefront restarts during fulfillment
+- **WHEN** a process restarts after reservation, scheduling, begin, result, or teardown acknowledgement
+- **THEN** it reloads the same immutable binding and durable lifecycle references rather than reserving, provisioning, or releasing through another site
+
+#### Scenario: Bare-metal result is returned
+- **WHEN** the recorded fulfillment succeeds
+- **THEN** the storefront normalizes one buyer-safe `BareMetalReceipt` and `BareMetalAccessResult` without returning a private key, provider payload, authority URL, or credential
+
+#### Scenario: Bare-metal lease is torn down
+- **WHEN** the buyer requests teardown for the completed fulfillment
+- **THEN** the storefront converges teardown through the recorded fulfillment and releases the recorded capacity reservation exactly once only after authoritative teardown success
 
 ### Requirement: Storefronts hold an exact principal per site authority
 A storefront MUST resolve each site authority's site identifier, URL, and scheme-tagged principal through a registry interface. It MUST verify authority-originated version 2 requests and responses against the exact principal selected by site and route context. The registry MUST NOT use an address-only field, derive a principal from private material, or accept a caller-selected expected principal. Routing and ownership MUST come from the trusted registry binding rather than a counterparty-provided site identity.
@@ -515,5 +542,6 @@ For a single-domain storefront process, the contract selected and validated at s
 - Domain-owned listing-mode resolution, bucket-sourced fungible candidates, multi-member specific-resource derivation, the resource-keyed derivation-key collision fix, and the live (never persisted) hold-preference cap: `domains/vms/storefront/tests/unit/test_reconciler.py`, `domains/vms/storefront/tests/unit/test_listing_mode.py`, `domains/vms/storefront/tests/unit/test_sync_negotiation_hold_cap.py`, and `domains/vms/storefront/tests/unit/test_remote_capacity_client.py`. VM is currently the only domain with a `listing_mode` resolver wired to a real publication consumer; another domain adds its own resolver and evidence line here once it gains a concrete consumer.
 - Region/SLA hint resolution (including SLA's storefront-wide trust gate) and negotiation-floor pricing-policy precedence: `domains/vms/storefront/tests/unit/test_pool_descriptors.py`, `domains/vms/storefront/tests/unit/test_pricing_resolution.py`, `domains/vms/storefront/tests/unit/test_reconciler.py`, and `domains/vms/storefront/tests/unit/test_cli_publish_helpers.py::TestPoolHintResolutionSettings`.
 - Structured publication defaults/imports and preview-first, typed, backed-up atomic migration with ambiguity refusal: `domains/vms/storefront/tests/unit/test_config_loader.py`, `test_resource_csv_importer.py`, and `test_publication_migration.py`.
+- Complete bare-metal seller composition, immutable listing/thread binding, selected-site lifecycle, result redaction, restart, and contribution wiring: `domains/bare_metal/storefront/tests/test_http_negotiation.py`, `test_persistence.py`, `test_fulfillment_service.py`, `test_site_clients.py`, `test_domain_runtime.py`, and `test_app_composition.py`.
 
-Replacing the domain-owned storefront executables remains proposed work rather than baseline behavior. Bare metal currently supplies domain codecs and publication semantics but not a complete runnable storefront composition.
+Bare-metal now supplies an independently runnable seller composition and an installed domain contribution. Shared shells consume that contribution and the common immutable binding/lifecycle contexts; they do not replace the domain-owned codecs, seller policy, or provisioning adapters.
