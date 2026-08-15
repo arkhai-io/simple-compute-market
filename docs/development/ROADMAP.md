@@ -217,6 +217,21 @@ Restoring a non-zero hold default is `billable-capacity-reservations`' own work:
 
 ---
 
+## Goal 6 — Make the settlement mechanism a composed choice
+
+**Value.** Escrow is one way to close a deal, not the definition of one. The hosted-fiat work proved a second mechanism can compose from kit; the next mechanism class is introduction-only settlement — a large share of real capacity trade is arranged person-to-person, with commercial terms too exotic to parametrize, where the marketplace's value is discovery, negotiation, and a trustworthy introduction rather than payment custody or provisioning. Finishing mechanism neutrality also changes the marginal cost of every future mechanism: a registration and a config section instead of a conditional arm in every domain.
+
+**Current state.** Settlement mechanisms are composed registrations: `kit/settlement-runtime` owns the registration surface, configuration hierarchy, readiness, publication options, buyer compatibility, and the obligation servicing lifecycle; `alkahest.v1` and `fiat.stripe.v1` both plug in through kit-side factories named only in domain composition roots. The registry accepts option-only listings, a mechanism-neutral durable identity (`obligation_ref`) exists with its own signed route family, and buyer and seller can complete a deal with no wallet or chain resources at all.
+
+Mechanism awareness still leaks at the edges. Every pre-terms decision point — proposal interpretation, accepted-artifact construction, settle-route selection — re-implements the same selection-versus-Alkahest conditional per domain, so a third mechanism needs a third arm in each. The scalar-amount negotiation path is mandatory for every mechanism, so take-it-or-leave-it terms are not expressible. Deal identity is dual rather than neutral: Alkahest deals still live only in the `escrows` table behind the escrow-uid route family. The Alkahest-shaped carriers remain core-owned with a handful of residual consumers, discovery filters project only `accepted_escrows`, and a few mechanism literals are hard-coded outside composition roots. Separately, no mechanism completes a deal by introduction: the accepted plan's `service_terms` are durably persisted, but per-round free text is not, and the only reveal-shaped surface — the hosted transient action — is deliberately not re-readable, while an introduction must be.
+
+| Open gap | Owned by |
+|---|---|
+| Pre-terms mechanism dispatch, scalar participation, deal-identity convergence, Alkahest vocabulary ownership, option-aware discovery filters, and residual mechanism literals | [`finish-settlement-mechanism-neutrality`](../../openspec/changes/finish-settlement-mechanism-neutrality/) |
+| No mechanism completes a deal by introduction; no durable, authenticated contact-reveal surface; no loose-listing discovery profile | [`contact-exchange-settlement-mechanism`](../../openspec/changes/contact-exchange-settlement-mechanism/) |
+
+---
+
 ## Buyer identity lifecycle status
 
 Buyer marketplace identity is now a core-owned durable profile rather than
