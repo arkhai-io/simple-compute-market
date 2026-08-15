@@ -293,8 +293,10 @@ async def _reserve_capacity_for_obligation(
         stage_event=stage_event,
     )
     if reserved is None:
+        claim = dict(required_attributes or {})
+        claim["executor_kind"] = "vm"
         reserved = await capacity.reserve(
-            claim=required_attributes or None,
+            claim=claim,
             deal_ref={"listing_id": listing_id or order_id, "escrow_uid": escrow_uid},
             lease_start_utc=start_utc,
             lease_duration_seconds=duration_seconds,

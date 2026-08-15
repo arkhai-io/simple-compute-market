@@ -165,6 +165,7 @@ async def _reserved_capacity(pool_id: str, *, claim: dict[str, Any] | None = Non
             id=pool_id,
             label=pool_id,
             provider="ansible",
+            policy_tags={"deliverable_modes": ["vm"]},
             provider_config=_PROVIDER_CONFIG,
         )
     )
@@ -176,8 +177,9 @@ async def _reserved_capacity(pool_id: str, *, claim: dict[str, Any] | None = Non
         attributes={"vm_host": "kvm-fulfillment-1"},
         capacity={"gpu_count": 4, "vcpu_count": 32, "ram_gb": 256, "disk_gb": 2000},
     )
+    reservation_claim = {"executor_kind": "vm", **(claim or {"gpu_count": 1})}
     reserved = capacity_ledger_service.reserve(
-        claim=claim or {"gpu_count": 1},
+        claim=reservation_claim,
         deal_ref={"agreement_id": f"agreement-{pool_id}", "market": "vms"},
     )
     assert reserved is not None

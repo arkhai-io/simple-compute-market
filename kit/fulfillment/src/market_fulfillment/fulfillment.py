@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass
 from typing import Any
+
 from market_resource_pools import pool_delivers_offering_mode
 
 from .db import SettlementRecord, SettlementRecordState
@@ -110,6 +111,23 @@ class FulfillmentOrchestrator:
             state=record.state,
         )
 
+    @staticmethod
+    def _require_pool_delivers_mode(tx: FulfillmentTransaction, record: Any) -> Any:
+        pool = tx.get_pool(record.pool_id)
+        if pool is None:
+            raise LookupError(f"pool {record.pool_id!r} not found")
+        executor_kind = (record.scheduling_requirements or {}).get("executor_kind")
+        if not executor_kind:
+            raise FulfillmentConflictError(
+                "scheduled settlement has no explicit executor_kind"
+            )
+        if not pool_delivers_offering_mode(pool.policy_tags, executor_kind):
+            raise FulfillmentConflictError(
+                f"pool {record.pool_id!r} does not declare offering mode "
+                f"{executor_kind!r}"
+            )
+        return pool
+
     def _prepare_fulfillment(
         self,
         tx: FulfillmentTransaction,
@@ -127,20 +145,7 @@ class FulfillmentOrchestrator:
                 f"settlement was scheduled for market={record.market!r}"
             )
 
-        pool = tx.get_pool(record.pool_id)
-        if pool is None:
-            raise LookupError(f"pool {record.pool_id!r} not found")
-        executor_kind = (record.scheduling_requirements or {}).get("executor_kind")
-        if not executor_kind:
-            raise FulfillmentConflictError(
-                "scheduled settlement has no explicit executor_kind"
-            )
-        if not pool_delivers_offering_mode(pool.policy_tags, executor_kind):
-            raise FulfillmentConflictError(
-                f"pool {record.pool_id!r} does not declare offering mode "
-                f"{executor_kind!r}"
-            )
-
+        pool = self._require_pool_delivers_mode(tx, record)
         provider = self._providers.require(record.provider)
         prepared = provider.prepare_create(
             capacity_reservation_id=capacity_reservation_id,
@@ -192,6 +197,11 @@ class FulfillmentOrchestrator:
                 return self._view(record)
 
             provider = self._providers.require(record.provider)
+            if record.prepared_create_operation:
+                # A snapshotted provider request preserves accepted inputs, but
+                # it cannot preserve permission to deliver a mode the operator
+                # has since withdrawn from the pool.
+                self._require_pool_delivers_mode(tx, record)
             if record.prepared_create_operation:
                 prepared = VersionedEnvelope.model_validate(
                     record.prepared_create_operation

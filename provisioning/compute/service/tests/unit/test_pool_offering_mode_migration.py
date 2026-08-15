@@ -1,11 +1,16 @@
 from __future__ import annotations
 
+import logging
+
+import pytest
+
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import Session
 from sqlalchemy.pool import StaticPool
 
 from compute_provisioning_service.db.database import run_migrations
 from compute_provisioning_service.db.migrations import (
+    SchemaDriftError,
     _migrate_executor_identities_and_pool_modes,
 )
 from compute_provisioning_service.db.models import AnsibleJob, AnsiblePoolConfig
@@ -32,7 +37,7 @@ def _engine():
     return engine
 
 
-def test_pool_mode_derivation_is_exact_includes_default_and_is_idempotent():
+def test_pool_mode_derivation_is_exact_includes_default_and_is_idempotent(caplog):
     engine = _engine()
     with Session(engine) as db, db.begin():
         db.add(
@@ -63,6 +68,7 @@ def test_pool_mode_derivation_is_exact_includes_default_and_is_idempotent():
             )
         )
 
+    caplog.set_level(logging.INFO)
     _migrate_executor_identities_and_pool_modes(engine)
     with Session(engine) as db:
         default = db.get(ResourcePool, DEFAULT_POOL_ID)
@@ -78,6 +84,7 @@ def test_pool_mode_derivation_is_exact_includes_default_and_is_idempotent():
             "region": "test",
         }
         assert unconfigured.policy_tags["deliverable_modes"] == []
+    assert "Derived deliverable modes for pool default: vm" in caplog.text
 
     _migrate_executor_identities_and_pool_modes(engine)
     with Session(engine) as db:
@@ -161,6 +168,23 @@ def test_legacy_executor_identity_backfills_proof_and_quarantines_unknown_rows()
                 state="assigned",
             )
         )
+        db.add(
+            SettlementRecord(
+                capacity_reservation_id="reservation-unknown",
+                market="unknown",
+                scheduling_requirements={
+                    "resource_kind": "opaque",
+                    "dimensions": {"units": "1"},
+                    "attributes": {},
+                },
+                settlement_resource_id="resource-unknown",
+                pool_id=DEFAULT_POOL_ID,
+                provider="ansible",
+                resource_attributes={},
+                provider_metadata={},
+                state="dispatch_pending",
+            )
+        )
         db.add_all(
             (
                 AnsibleJob(
@@ -183,6 +207,7 @@ def test_legacy_executor_identity_backfills_proof_and_quarantines_unknown_rows()
         proved = db.get(CapacityReservation, "reservation-proved")
         unknown = db.get(CapacityReservation, "reservation-unknown")
         settlement = db.get(SettlementRecord, "reservation-proved")
+        unknown_settlement = db.get(SettlementRecord, "reservation-unknown")
         proved_job = db.get(AnsibleJob, "job-proved")
         unknown_job = db.get(AnsibleJob, "job-unknown")
 
@@ -194,6 +219,11 @@ def test_legacy_executor_identity_backfills_proof_and_quarantines_unknown_rows()
         assert unknown.executor_kind is None
         assert unknown.state == "unmanaged"
         assert unknown.failure_reason == "legacy_executor_identity_quarantined"
+        assert unknown_settlement.state == "failed"
+        assert (
+            unknown_settlement.failure_reason
+            == "legacy_executor_identity_quarantined"
+        )
         assert unknown_job.executor_kind is None
         assert unknown_job.status == "failed"
         assert "quarantined" in unknown_job.error
@@ -207,3 +237,139 @@ def test_legacy_executor_identity_backfills_proof_and_quarantines_unknown_rows()
                 "WHERE executor_kind='vm'"
             )
         ).scalar_one() == 1
+
+
+def test_conflicting_and_unproved_legacy_reservations_are_quarantined_by_state():
+    engine = _engine()
+    with Session(engine) as db, db.begin():
+        bucket = CapacityBucket(
+            capacity_bucket_id="bucket-conflict",
+            backing_resource_id="resource-conflict",
+            pool_id=DEFAULT_POOL_ID,
+            resource_type="compute.gpu",
+            total_units=1,
+            capacity={"gpu_count": 1},
+            attributes={"vm_host": "kvm1"},
+            enabled=True,
+        )
+        db.add(bucket)
+        db.add_all(
+            (
+                CapacityReservation(
+                    capacity_reservation_id="reservation-conflict",
+                    units=1,
+                    dimensions={"gpu_count": 1},
+                    state="reserved",
+                    deal_ref={"market": "bare_metal"},
+                ),
+                CapacityReservation(
+                    capacity_reservation_id="reservation-terminal",
+                    units=1,
+                    dimensions={"units": 1},
+                    state="released",
+                    deal_ref={},
+                ),
+            )
+        )
+        db.add(
+            CapacityReservationDebit(
+                capacity_reservation_id="reservation-conflict",
+                capacity_bucket_id=bucket.capacity_bucket_id,
+                dimensions={"gpu_count": 1},
+            )
+        )
+
+    _migrate_executor_identities_and_pool_modes(engine)
+
+    with Session(engine) as db:
+        conflict = db.get(CapacityReservation, "reservation-conflict")
+        terminal = db.get(CapacityReservation, "reservation-terminal")
+        assert conflict.executor_kind is None
+        assert conflict.state == "unmanaged"
+        assert conflict.failure_reason == "legacy_executor_identity_quarantined"
+        assert "conflicting evidence: bare_metal, vm" in conflict.failure_message
+        assert terminal.executor_kind is None
+        assert terminal.state == "released"
+        assert terminal.failure_reason == "legacy_executor_identity_quarantined"
+
+
+def test_all_debit_evidence_is_combined_before_executor_backfill():
+    engine = _engine()
+    with Session(engine) as db, db.begin():
+        db.add_all(
+            (
+                CapacityBucket(
+                    capacity_bucket_id="bucket-vm",
+                    backing_resource_id="resource-vm",
+                    pool_id=DEFAULT_POOL_ID,
+                    resource_type="compute.gpu",
+                    total_units=1,
+                    capacity={"gpu_count": 1},
+                    attributes={"vm_host": "kvm1"},
+                    enabled=True,
+                ),
+                CapacityBucket(
+                    capacity_bucket_id="bucket-bare-metal",
+                    backing_resource_id="resource-bare-metal",
+                    pool_id=DEFAULT_POOL_ID,
+                    resource_type="compute.host",
+                    total_units=1,
+                    capacity={"units": 1},
+                    attributes={
+                        "physical_host_id": "physical-1",
+                        "allocation_mode": "exclusive",
+                    },
+                    enabled=True,
+                ),
+                CapacityReservation(
+                    capacity_reservation_id="reservation-multidebit",
+                    units=1,
+                    dimensions={"units": 1},
+                    state="reserved",
+                    deal_ref={},
+                ),
+            )
+        )
+        db.add_all(
+            (
+                CapacityReservationDebit(
+                    capacity_reservation_id="reservation-multidebit",
+                    capacity_bucket_id="bucket-vm",
+                    dimensions={"gpu_count": 1},
+                ),
+                CapacityReservationDebit(
+                    capacity_reservation_id="reservation-multidebit",
+                    capacity_bucket_id="bucket-bare-metal",
+                    dimensions={"units": 1},
+                ),
+            )
+        )
+
+    _migrate_executor_identities_and_pool_modes(engine)
+
+    with Session(engine) as db:
+        reservation = db.get(
+            CapacityReservation,
+            "reservation-multidebit",
+        )
+        assert reservation.executor_kind is None
+        assert reservation.state == "unmanaged"
+        assert (
+            "conflicting evidence: bare_metal, vm"
+            in reservation.failure_message
+        )
+
+
+def test_pool_mode_derivation_rejects_malformed_legacy_policy_tags():
+    engine = _engine()
+    with engine.begin() as connection:
+        connection.execute(
+            text(
+                "UPDATE resource_pools SET policy_tags='[]' "
+                "WHERE id=:pool_id"
+            ),
+            {"pool_id": DEFAULT_POOL_ID},
+        )
+
+    with pytest.raises(SchemaDriftError, match="policy_tags must be a JSON object"):
+        _migrate_executor_identities_and_pool_modes(engine)

@@ -38,7 +38,7 @@ from market_fulfillment import (
     SettlementRepository,
     SqlAlchemyFulfillmentUnitOfWork,
 )
-from market_resource_pools import ResourcePoolService
+from market_resource_pools import DEFAULT_POOL_ID, ResourcePool, ResourcePoolService
 from market_resource_pools.db import Base as PoolsBase
 from vm_provisioning_adapter.release import (
     FulfillmentServiceTeardownPort,
@@ -79,6 +79,16 @@ def session_factory():
     # which now begins durable fulfillment teardown rather than submitting
     # an Ansible job directly.
     FulfillmentBase.metadata.create_all(bind=engine)
+    with sessionmaker(bind=engine)() as db, db.begin():
+        db.add(
+            ResourcePool(
+                id=DEFAULT_POOL_ID,
+                label="Default Pool",
+                provider="ansible",
+                enabled=True,
+                policy_tags={"deliverable_modes": ["bare_metal", "vm"]},
+            )
+        )
     return sessionmaker(bind=engine)
 
 
@@ -239,7 +249,7 @@ def _lifecycle(
 
 def _expired_reservation(ledger: CapacityLedgerService, escrow: str = "0xe") -> dict:
     reserved = ledger.reserve(
-        claim={"gpu_count": 2, "vm_host": "kvm1"},
+        claim={"executor_kind": "vm", "gpu_count": 2, "vm_host": "kvm1"},
         deal_ref={"escrow_uid": escrow},
     )
     ledger.commit(
@@ -256,9 +266,18 @@ def _expired_reservation(ledger: CapacityLedgerService, escrow: str = "0xe") -> 
     return reserved
 
 
-def _just_expired_reservation(ledger: CapacityLedgerService, escrow: str = "0xe") -> dict:
+def _just_expired_reservation(
+    ledger: CapacityLedgerService,
+    escrow: str = "0xe",
+    *,
+    executor_kind: str = "vm",
+) -> dict:
     reserved = ledger.reserve(
-        claim={"gpu_count": 2, "vm_host": "kvm1"},
+        claim={
+            "executor_kind": executor_kind,
+            "gpu_count": 2,
+            "vm_host": "kvm1",
+        },
         deal_ref={"escrow_uid": escrow},
     )
     just_expired_dt = datetime.now(timezone.utc) - timedelta(seconds=1)
@@ -403,7 +422,7 @@ async def test_releasing_reservation_past_grace_marks_release_failed(
 
 @pytest.mark.asyncio
 async def test_releasing_reservation_within_grace_skips(session_factory, ledger):
-    reserved = ledger.reserve(claim={}, deal_ref={})
+    reserved = ledger.reserve(claim={"executor_kind": "vm"}, deal_ref={})
     capacity_reservation_id = reserved["capacity_reservation_id"]
     soon_dt = datetime.now(timezone.utc) - timedelta(seconds=1)
     soon = soon_dt.isoformat()
@@ -690,7 +709,10 @@ async def test_unexpected_repository_failure_propagates_as_release_submit_error(
 
 @pytest.mark.asyncio
 async def test_bare_metal_executor_releases_locally_and_notifies(session_factory, ledger):
-    reservation = _just_expired_reservation(ledger)
+    reservation = _just_expired_reservation(
+        ledger,
+        executor_kind=BARE_METAL_EXECUTOR_KIND,
+    )
     ledger.update_lease_fields(
         reservation["capacity_reservation_id"],
         executor_kind=BARE_METAL_EXECUTOR_KIND,
@@ -730,7 +752,10 @@ async def test_bare_metal_executor_releases_locally_and_notifies(session_factory
 async def test_bare_metal_executor_submits_reclaim_job_when_delegate_configured(
     session_factory, ledger,
 ):
-    reservation = _just_expired_reservation(ledger)
+    reservation = _just_expired_reservation(
+        ledger,
+        executor_kind=BARE_METAL_EXECUTOR_KIND,
+    )
     ledger.update_lease_fields(
         reservation["capacity_reservation_id"],
         executor_kind=BARE_METAL_EXECUTOR_KIND,
@@ -759,7 +784,10 @@ async def test_bare_metal_executor_submits_reclaim_job_when_delegate_configured(
 
 @pytest.mark.asyncio
 async def test_bare_metal_release_submission_failure_stays_held(session_factory, ledger):
-    reservation = _just_expired_reservation(ledger)
+    reservation = _just_expired_reservation(
+        ledger,
+        executor_kind=BARE_METAL_EXECUTOR_KIND,
+    )
     ledger.update_lease_fields(
         reservation["capacity_reservation_id"],
         executor_kind=BARE_METAL_EXECUTOR_KIND,

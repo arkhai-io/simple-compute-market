@@ -165,7 +165,9 @@ def test_unowned_key_accepts_open_top_up(service):
 
 def test_issue_commits_negotiation_hold_instead_of_reserving(service, ledger):
     hold = ledger.reserve(
-        claim={"units": 200}, deal_ref={"escrow_uid": "0xheld"}, ttl_seconds=900,
+        claim={"executor_kind": "api_credits", "units": 200},
+        deal_ref={"escrow_uid": "0xheld"},
+        ttl_seconds=900,
     )
     result = service.issue(
         escrow_uid="0xheld", quantity=200, key_mode="new",

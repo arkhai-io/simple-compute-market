@@ -37,6 +37,7 @@ def _leased_vm_reservation() -> dict:
         attributes={"vm_host": "kvm1"},
     )
     reserved = ledger.reserve(
+        claim={"executor_kind": "vm"},
         deal_ref={"escrow_uid": "escrow-contract", "listing_id": "listing-1"},
         lease_duration_seconds=3600,
     )
@@ -60,6 +61,7 @@ def _leased_bare_metal_reservation() -> dict:
     )
     reserved = ledger.reserve(
         claim={
+            "executor_kind": "bare_metal",
             "physical_host_id": "physical-contract-1",
             "allocation_mode": ALLOCATION_MODE_EXCLUSIVE,
         },

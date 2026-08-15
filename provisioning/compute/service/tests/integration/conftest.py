@@ -342,8 +342,10 @@ def db_engine():
     from compute_provisioning_service.db.models import DEFAULT_POOL_ID, ResourcePool
     with Session(engine) as session:
         session.add(ResourcePool(
-            id=DEFAULT_POOL_ID, label="Default Pool", provider="ansible",
-            enabled=True, policy_tags={},
+            id=DEFAULT_POOL_ID,
+            label="Default Pool",
+            provider="ansible",
+            policy_tags={"deliverable_modes": ["bare_metal", "vm"]},
         ))
         session.commit()
     return engine

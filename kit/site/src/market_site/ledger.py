@@ -699,6 +699,7 @@ class CapacityLedgerService:
         lease_duration_seconds: int | None = None,
     ) -> dict[str, Any] | None:
         """Dry-run match for ``claim`` — consumes nothing."""
+        _requested_executor_kind(claim, required=True)
         requested = _requested_dimensions(claim, unit_claim_keys=self._unit_claim_keys)
         window_start, window_end = _lease_window(
             lease_start_utc=lease_start_utc,
@@ -1806,6 +1807,7 @@ class CapacityLedgerService:
         )
         requested_mode = _requested_executor_kind(claim, required=False)
         undeclared_pools: set[str] = set()
+        pool_mode_decisions: dict[str, bool] = {}
         for resource in rows:
             attrs = resource.attributes or {}
             if any(
@@ -1814,6 +1816,24 @@ class CapacityLedgerService:
             ):
                 continue
             capacity = _resource_capacity(resource)
+            if not resource_satisfies_requirement(
+                resource=_resource_feasibility_view(resource, capacity),
+                required_resource_kind=required_resource_kind,
+                required_dimensions=requested,
+                required_attributes=required_attributes,
+            ):
+                continue
+            pool_id = resource.pool_id or DEFAULT_POOL_ID
+            if requested_mode is not None:
+                if pool_id not in pool_mode_decisions:
+                    pool_mode_decisions[pool_id] = self._pool_declares_mode(
+                        db,
+                        resource,
+                        requested_mode,
+                    )
+                if not pool_mode_decisions[pool_id]:
+                    undeclared_pools.add(pool_id)
+                    continue
             held = self._held_dimensions(
                 db, resource.backing_resource_id, lease_start, lease_end
             )
@@ -1827,13 +1847,6 @@ class CapacityLedgerService:
                 required_dimensions=requested,
                 required_attributes=required_attributes,
             ):
-                continue
-            if requested_mode is not None and not self._pool_declares_mode(
-                db,
-                resource,
-                requested_mode,
-            ):
-                undeclared_pools.add(resource.pool_id or DEFAULT_POOL_ID)
                 continue
             if self._has_physical_host_conflict(
                 db,
@@ -2119,17 +2132,18 @@ class CapacityLedgerService:
         executor_target: str | None = None,
         executor_ref: Mapping[str, Any] | None = None,
     ) -> None:
+        if reservation.executor_kind is None:
+            raise CapacityConflictError(
+                "reservation has no explicit requested executor identity"
+            )
         if (
             executor_kind is not None
-            and reservation.executor_kind is not None
             and reservation.executor_kind != executor_kind
         ):
             raise CapacityConflictError(
                 f"reservation executor_kind is {reservation.executor_kind!r}, "
                 f"not {executor_kind!r}"
             )
-        if executor_kind is not None:
-            reservation.executor_kind = executor_kind
         if executor_target is not None:
             reservation.executor_target = executor_target
         if executor_ref is not None:

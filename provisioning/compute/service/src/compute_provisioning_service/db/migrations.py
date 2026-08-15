@@ -1195,7 +1195,6 @@ def _legacy_executor_evidence(
     if (
         backing.get("physical_host_id")
         and backing.get("allocation_mode") == "exclusive"
-        and not backing.get("vm_host")
     ):
         evidence.add("bare_metal")
     return evidence
@@ -1255,6 +1254,32 @@ def _migrate_executor_identities_and_pool_modes(engine: Engine) -> None:
     """Backfill proved executor identities and quarantine every unresolved row."""
     with engine.begin() as connection:
         _derive_pool_deliverable_modes(connection)
+
+        job_rows: list[dict] = []
+        job_evidence_by_reservation: dict[str, set[str]] = {}
+        if _table_exists(engine, "ansible_jobs"):
+            job_rows = list(
+                connection.execute(
+                    text(
+                        "SELECT id, status, params, executor_kind, "
+                        "capacity_reservation_id, error FROM ansible_jobs"
+                    )
+                ).mappings()
+            )
+            for job in job_rows:
+                reservation_id = job["capacity_reservation_id"]
+                if reservation_id is None:
+                    continue
+                existing_kind = job["executor_kind"]
+                evidence = (
+                    {existing_kind.strip()}
+                    if isinstance(existing_kind, str) and existing_kind.strip()
+                    else _legacy_executor_evidence(params=job["params"])
+                )
+                job_evidence_by_reservation.setdefault(
+                    str(reservation_id), set()
+                ).update(evidence)
+
         reservation_kinds: dict[str, str | None] = {}
         if _table_exists(engine, "capacity_reservations"):
             has_settlements = _table_exists(engine, "settlement_records")
@@ -1267,37 +1292,76 @@ def _migrate_executor_identities_and_pool_modes(engine: Engine) -> None:
             settlement_column = (
                 "sr.scheduling_requirements" if has_settlements else "NULL"
             )
-            rows = connection.execute(
-                text(
-                    "SELECT cr.capacity_reservation_id, cr.executor_kind, cr.executor_ref, "
-                    "cr.deal_ref, cr.state, cr.failure_reason, cb.attributes "
-                    f"AS backing_attributes, {settlement_column} "
-                    "AS scheduling_requirements "
-                    "FROM capacity_reservations cr "
-                    "LEFT JOIN capacity_reservation_debits d "
-                    "ON d.capacity_reservation_id=cr.capacity_reservation_id "
-                    "LEFT JOIN capacity_buckets cb "
-                    "ON cb.capacity_bucket_id=d.capacity_bucket_id "
-                    f"{settlement_join}"
-                )
-            ).mappings()
+            rows = list(
+                connection.execute(
+                    text(
+                        "SELECT cr.capacity_reservation_id, cr.executor_kind, "
+                        "cr.executor_ref, cr.deal_ref, cr.state, "
+                        "cr.failure_reason, cb.attributes AS backing_attributes, "
+                        f"{settlement_column} AS scheduling_requirements "
+                        "FROM capacity_reservations cr "
+                        "LEFT JOIN capacity_reservation_debits d "
+                        "ON d.capacity_reservation_id=cr.capacity_reservation_id "
+                        "LEFT JOIN capacity_buckets cb "
+                        "ON cb.capacity_bucket_id=d.capacity_bucket_id "
+                        f"{settlement_join}"
+                    )
+                ).mappings()
+            )
+            grouped: dict[str, dict] = {}
             for row in rows:
                 reservation_id = str(row["capacity_reservation_id"])
+                group = grouped.setdefault(
+                    reservation_id,
+                    {
+                        "row": row,
+                        "backing_evidence": set(),
+                        "requirements": [],
+                    },
+                )
+                group["backing_evidence"].update(
+                    _legacy_executor_evidence(
+                        backing_attributes=row["backing_attributes"]
+                    )
+                )
+                if row["scheduling_requirements"] is not None:
+                    group["requirements"].append(
+                        _json_mapping(
+                            row["scheduling_requirements"],
+                            label=(
+                                f"settlement {reservation_id!r} "
+                                "scheduling_requirements"
+                            ),
+                        )
+                    )
+
+            for reservation_id, group in grouped.items():
+                row = group["row"]
                 existing_kind = row["executor_kind"]
-                executor_kind = (
+                existing_kind = (
                     existing_kind.strip()
                     if isinstance(existing_kind, str) and existing_kind.strip()
                     else None
                 )
-                if executor_kind is None:
-                    evidence = _legacy_executor_evidence(
-                        executor_ref=row["executor_ref"],
-                        backing_attributes=row["backing_attributes"],
-                        deal_ref=row["deal_ref"],
-                        scheduling_requirements=row["scheduling_requirements"],
-                    )
-                    if len(evidence) == 1:
-                        executor_kind = next(iter(evidence))
+                evidence = _legacy_executor_evidence(
+                    executor_ref=row["executor_ref"],
+                    deal_ref=row["deal_ref"],
+                )
+                for requirements in group["requirements"]:
+                    recorded = requirements.get("executor_kind")
+                    if isinstance(recorded, str) and recorded.strip():
+                        evidence.add(recorded.strip())
+                evidence.update(
+                    job_evidence_by_reservation.get(reservation_id, set())
+                )
+                if existing_kind is None:
+                    evidence.update(group["backing_evidence"])
+                else:
+                    evidence.add(existing_kind)
+
+                executor_kind = next(iter(evidence)) if len(evidence) == 1 else None
+                if executor_kind is not None:
+                    if existing_kind is None:
                         connection.execute(
                             text(
                                 "UPDATE capacity_reservations "
@@ -1309,60 +1373,9 @@ def _migrate_executor_identities_and_pool_modes(engine: Engine) -> None:
                                 "reservation_id": reservation_id,
                             },
                         )
-                    else:
-                        state = (
-                            "unmanaged"
-                            if row["state"] in _HELD_RESERVATION_STATES
-                            else row["state"]
-                        )
-                        detail = (
-                            "conflicting evidence: " + ", ".join(sorted(evidence))
-                            if evidence
-                            else "no durable executor evidence"
-                        )
-                        connection.execute(
-                            text(
-                                "UPDATE capacity_reservations SET state=:state, "
-                                "failure_reason=COALESCE(failure_reason, :reason), "
-                                "failure_message=COALESCE(failure_message, :message) "
-                                "WHERE capacity_reservation_id=:reservation_id"
-                            ),
-                            {
-                                "state": state,
-                                "reason": _EXECUTOR_IDENTITY_QUARANTINE_REASON,
-                                "message": (
-                                    "Legacy executor identity is quarantined: "
-                                    f"{detail}"
-                                ),
-                                "reservation_id": reservation_id,
-                            },
-                        )
-                        logger.warning(
-                            "[MIGRATION] Quarantined reservation %s: %s",
-                            reservation_id,
-                            detail,
-                        )
-                reservation_kinds[reservation_id] = executor_kind
-
-                if has_settlements and row["scheduling_requirements"] is not None:
-                    requirements = _json_mapping(
-                        row["scheduling_requirements"],
-                        label=(
-                            f"settlement {reservation_id!r} "
-                            "scheduling_requirements"
-                        ),
-                    )
-                    recorded_kind = requirements.get("executor_kind")
-                    if (
-                        executor_kind is not None
-                        and recorded_kind is not None
-                        and recorded_kind != executor_kind
-                    ):
-                        raise SchemaDriftError(
-                            f"settlement {reservation_id!r} executor identity "
-                            "conflicts with its reservation"
-                        )
-                    if executor_kind is not None and recorded_kind is None:
+                    for requirements in group["requirements"]:
+                        if requirements.get("executor_kind") == executor_kind:
+                            continue
                         requirements["executor_kind"] = executor_kind
                         connection.execute(
                             text(
@@ -1377,76 +1390,156 @@ def _migrate_executor_identities_and_pool_modes(engine: Engine) -> None:
                                 "reservation_id": reservation_id,
                             },
                         )
+                    reservation_kinds[reservation_id] = executor_kind
+                    continue
 
-        if _table_exists(engine, "ansible_jobs"):
-            jobs = connection.execute(
-                text(
-                    "SELECT id, status, params, executor_kind, "
-                    "capacity_reservation_id, error FROM ansible_jobs"
+                state = (
+                    "unmanaged"
+                    if row["state"] in _HELD_RESERVATION_STATES
+                    else row["state"]
                 )
-            ).mappings()
-            for job in jobs:
-                params = _json_mapping(
-                    job["params"], label=f"ansible job {job['id']!r} params"
+                detail = (
+                    "conflicting evidence: " + ", ".join(sorted(evidence))
+                    if evidence
+                    else "no durable executor evidence"
                 )
-                existing_kind = job["executor_kind"]
-                executor_kind = (
-                    existing_kind.strip()
-                    if isinstance(existing_kind, str) and existing_kind.strip()
-                    else None
+                message = f"Legacy executor identity is quarantined: {detail}"
+                connection.execute(
+                    text(
+                        "UPDATE capacity_reservations SET state=:state, "
+                        "failure_reason=CASE WHEN :quarantine_active "
+                        "THEN :reason ELSE COALESCE(failure_reason, :reason) END, "
+                        "failure_message=CASE WHEN :quarantine_active "
+                        "THEN :message ELSE COALESCE(failure_message, :message) END "
+                        "WHERE capacity_reservation_id=:reservation_id"
+                    ),
+                    {
+                        "state": state,
+                        "quarantine_active": (
+                            row["state"] in _HELD_RESERVATION_STATES
+                        ),
+                        "reason": _EXECUTOR_IDENTITY_QUARANTINE_REASON,
+                        "message": message,
+                        "reservation_id": reservation_id,
+                    },
                 )
-                if executor_kind is None:
-                    reservation_kind = reservation_kinds.get(
-                        str(job["capacity_reservation_id"])
-                    )
-                    evidence = _legacy_executor_evidence(params=params)
-                    if reservation_kind is not None:
-                        evidence.add(reservation_kind)
-                    if len(evidence) == 1:
-                        executor_kind = next(iter(evidence))
-                    else:
-                        detail = (
-                            "conflicting evidence: " + ", ".join(sorted(evidence))
-                            if evidence
-                            else "no durable executor evidence"
-                        )
-                        status_value = (
-                            "failed"
-                            if job["status"] in _ACTIVE_JOB_STATES
-                            else job["status"]
-                        )
-                        connection.execute(
-                            text(
-                                "UPDATE ansible_jobs SET status=:status, "
-                                "error=COALESCE(error, :error) WHERE id=:job_id"
-                            ),
-                            {
-                                "status": status_value,
-                                "error": (
-                                    "Legacy executor identity is quarantined: "
-                                    f"{detail}"
-                                ),
-                                "job_id": job["id"],
-                            },
-                        )
-                        logger.warning(
-                            "[MIGRATION] Quarantined Ansible job %s: %s",
-                            job["id"],
-                            detail,
-                        )
-                if executor_kind is not None:
-                    params["executor_kind"] = executor_kind
+                if has_settlements:
                     connection.execute(
                         text(
-                            "UPDATE ansible_jobs SET executor_kind=:executor_kind, "
-                            "params=:params WHERE id=:job_id"
+                            "UPDATE settlement_records SET "
+                            "state=CASE WHEN state IN "
+                            "('assigned', 'dispatch_pending', 'dispatching', "
+                            "'active', 'teardown_dispatch_pending', "
+                            "'tearing_down', 'teardown_failed') "
+                            "THEN 'failed' ELSE state END, "
+                            "failure_reason=CASE WHEN state IN "
+                            "('assigned', 'dispatch_pending', 'dispatching', "
+                            "'active', 'teardown_dispatch_pending', "
+                            "'tearing_down', 'teardown_failed') "
+                            "THEN :reason ELSE COALESCE(failure_reason, :reason) END, "
+                            "failure_message=CASE WHEN state IN "
+                            "('assigned', 'dispatch_pending', 'dispatching', "
+                            "'active', 'teardown_dispatch_pending', "
+                            "'tearing_down', 'teardown_failed') "
+                            "THEN :message ELSE COALESCE(failure_message, :message) END "
+                            "WHERE capacity_reservation_id=:reservation_id"
                         ),
                         {
-                            "executor_kind": executor_kind,
-                            "params": json.dumps(params, sort_keys=True),
-                            "job_id": job["id"],
+                            "reason": _EXECUTOR_IDENTITY_QUARANTINE_REASON,
+                            "message": message,
+                            "reservation_id": reservation_id,
                         },
                     )
+                logger.warning(
+                    "[MIGRATION] Quarantined reservation %s: %s",
+                    reservation_id,
+                    detail,
+                )
+                reservation_kinds[reservation_id] = None
+
+        for job in job_rows:
+            params = _json_mapping(
+                job["params"], label=f"ansible job {job['id']!r} params"
+            )
+            existing_kind = job["executor_kind"]
+            existing_kind = (
+                existing_kind.strip()
+                if isinstance(existing_kind, str) and existing_kind.strip()
+                else None
+            )
+            reservation_id = job["capacity_reservation_id"]
+            linked_kind = (
+                reservation_kinds.get(str(reservation_id))
+                if reservation_id is not None
+                else None
+            )
+            linked_quarantined = (
+                reservation_id is not None
+                and str(reservation_id) in reservation_kinds
+                and linked_kind is None
+            )
+            evidence = (
+                {existing_kind}
+                if existing_kind is not None
+                else _legacy_executor_evidence(params=params)
+            )
+            if linked_kind is not None:
+                evidence.add(linked_kind)
+            executor_kind = (
+                next(iter(evidence))
+                if len(evidence) == 1 and not linked_quarantined
+                else None
+            )
+            if executor_kind is not None:
+                params["executor_kind"] = executor_kind
+                connection.execute(
+                    text(
+                        "UPDATE ansible_jobs SET executor_kind=:executor_kind, "
+                        "params=:params WHERE id=:job_id"
+                    ),
+                    {
+                        "executor_kind": executor_kind,
+                        "params": json.dumps(params, sort_keys=True),
+                        "job_id": job["id"],
+                    },
+                )
+                continue
+
+            detail = (
+                "linked reservation is quarantined"
+                if linked_quarantined
+                else (
+                    "conflicting evidence: " + ", ".join(sorted(evidence))
+                    if evidence
+                    else "no durable executor evidence"
+                )
+            )
+            status_value = (
+                "failed"
+                if job["status"] in _ACTIVE_JOB_STATES
+                else job["status"]
+            )
+            connection.execute(
+                text(
+                    "UPDATE ansible_jobs SET status=:status, error=:error "
+                    "WHERE id=:job_id"
+                ),
+                {
+                    "status": status_value,
+                    "error": (
+                        "Legacy executor identity is quarantined: "
+                        f"{detail}"
+                        if job["status"] in _ACTIVE_JOB_STATES or not job["error"]
+                        else job["error"]
+                    ),
+                    "job_id": job["id"],
+                },
+            )
+            logger.warning(
+                "[MIGRATION] Quarantined Ansible job %s: %s",
+                job["id"],
+                detail,
+            )
 
 
 MIGRATIONS: tuple[Migration, ...] = (

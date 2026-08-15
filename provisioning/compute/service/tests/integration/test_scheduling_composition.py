@@ -67,6 +67,7 @@ def test_real_container_resolves_scheduling_dependencies_to_one_boundary():
     pool_service.create_pool(
         PoolCreate(
             id="pool-a", label="Pool A", provider="ansible",
+            policy_tags={"deliverable_modes": ["vm"]},
             provider_config={"playbook_path": "p.yaml"},
         )
     )
@@ -75,7 +76,7 @@ def test_real_container_resolves_scheduling_dependencies_to_one_boundary():
         total_units=10, enabled=True, pool_id="pool-a",
     )
     reservation = ledger.reserve(
-        claim={"gpu_count": 1},
+        claim={"executor_kind": "vm", "gpu_count": 1},
         deal_ref={"agreement_id": "composition-1", "market": "vms"},
     )
     assert reservation is not None
@@ -112,12 +113,14 @@ def test_real_container_composed_schedule_rolls_back_all_participating_tables():
     pool_service.create_pool(
         PoolCreate(
             id="pool-a", label="Pool A", provider="ansible",
+            policy_tags={"deliverable_modes": ["vm"]},
             provider_config={"playbook_path": "p.yaml"},
         )
     )
     pool_service.create_pool(
         PoolCreate(
             id="pool-b", label="Pool B", provider="ansible",
+            policy_tags={"deliverable_modes": ["vm"]},
             provider_config={"playbook_path": "p.yaml"},
         )
     )
@@ -139,7 +142,7 @@ def test_real_container_composed_schedule_rolls_back_all_participating_tables():
     # real write, not a same-resource no-op, so its rollback is actually
     # exercised.
     first_reservation = ledger.reserve(
-        claim={"gpu_count": 1},
+        claim={"executor_kind": "vm", "gpu_count": 1},
         deal_ref={"agreement_id": "composition-rollback-warmup", "market": "vms"},
     )
     assert first_reservation is not None
@@ -150,7 +153,7 @@ def test_real_container_composed_schedule_rolls_back_all_participating_tables():
     )
 
     reservation = ledger.reserve(
-        claim={"gpu_count": 1},
+        claim={"executor_kind": "vm", "gpu_count": 1},
         deal_ref={"agreement_id": "composition-rollback-1", "market": "vms"},
     )
     assert reservation is not None

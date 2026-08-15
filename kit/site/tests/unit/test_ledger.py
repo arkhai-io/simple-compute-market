@@ -179,6 +179,31 @@ def test_vm_slice_reservation_blocks_bare_metal_on_same_physical_host(
     assert second_vm is not None
     assert second_vm["resource_id"] == "compute-host-1"
 
+def test_pool_mode_permission_does_not_replace_cross_mode_physical_conflict(
+    ledger: CapacityLedgerService,
+):
+    _register_dual_mode_host(ledger)
+    assert ledger.reserve(
+        claim={"executor_kind": "vm", "gpu_count": 1, "vm_host": "kvm1"},
+        deal_ref={"escrow_uid": "0xvm-independent"},
+    ) is not None
+    bare_metal_claim = {
+        "executor_kind": "bare_metal",
+        "physical_host_id": "physical-host-1",
+        "allocation_mode": ALLOCATION_MODE_EXCLUSIVE,
+    }
+
+    with ledger._session_factory() as db, db.begin():
+        pool = db.get(ResourcePool, DEFAULT_POOL_ID)
+        pool.policy_tags = {"deliverable_modes": ["vm"]}
+    with pytest.raises(UndeclaredOfferingModeError, match="'bare_metal'"):
+        ledger.reserve(claim=bare_metal_claim, deal_ref={})
+
+    with ledger._session_factory() as db, db.begin():
+        pool = db.get(ResourcePool, DEFAULT_POOL_ID)
+        pool.policy_tags = {"deliverable_modes": ["bare_metal", "vm"]}
+    assert ledger.reserve(claim=bare_metal_claim, deal_ref={}) is None
+
 
 def test_bare_metal_reservation_blocks_vm_slices_on_same_physical_host(
     ledger: CapacityLedgerService,
@@ -279,6 +304,8 @@ def test_missing_executor_kind_is_never_inferred_from_vm_resource(
 ):
     with pytest.raises(ValueError, match="executor_kind"):
         seeded.reserve(claim={"gpu_count": 1}, deal_ref={})
+    with pytest.raises(ValueError, match="executor_kind"):
+        seeded.probe(claim={"gpu_count": 1})
 
 
 def test_absent_or_mismatched_pool_declaration_delivers_nothing(
@@ -306,16 +333,37 @@ def test_absent_or_mismatched_pool_declaration_delivers_nothing(
         )
     assert seeded.snapshot()[0]["available_units"] == 8
 
-def test_reserve_derives_executor_ref_from_resource_vm_host(seeded: CapacityLedgerService):
-    """reserve() writes executor_ref (not a dedicated vm_host column) from
-    the matched resource's vm_host attribute, and derives executor_kind
-    alongside it.
 
-    reserve()'s own return payload is assembled from _match_payload (the
-    resource's live attributes at match time), not _reservation_payload,
-    so it never includes executor_ref/executor_kind directly. The durable
-    row itself, read back via get_reservation (which does use
-    _reservation_payload), is where the write actually lands.
+def test_undeclared_mode_refusal_is_independent_of_live_availability(
+    seeded: CapacityLedgerService,
+):
+    reserved = seeded.reserve(
+        claim={"executor_kind": "vm", "gpu_count": 8},
+        deal_ref={"escrow_uid": "0xfull"},
+    )
+    assert reserved is not None
+    assert seeded.snapshot()[0]["available_units"] == 0
+
+    with seeded._session_factory() as db, db.begin():
+        pool = db.get(ResourcePool, DEFAULT_POOL_ID)
+        pool.policy_tags = {"deliverable_modes": ["bare_metal"]}
+
+    with pytest.raises(UndeclaredOfferingModeError, match="'vm'"):
+        seeded.reserve(
+            claim={"executor_kind": "vm", "gpu_count": 1},
+            deal_ref={"escrow_uid": "0xpolicy-before-availability"},
+        )
+
+
+def test_reserve_derives_executor_ref_but_records_the_requested_mode(
+    seeded: CapacityLedgerService,
+):
+    """The matched resource supplies executor placement, never its mode.
+
+    ``reserve()`` writes ``executor_ref`` from the resource's ``vm_host``
+    attribute while persisting the claim's explicit ``executor_kind``. Its
+    immediate return is the opaque match view; the durable reservation view
+    exposes the recorded executor identity.
     """
     reserved = seeded.reserve(claim={"executor_kind": "vm", **{"gpu_count": 1}}, deal_ref={"escrow_uid": "0xn"})
     assert reserved is not None

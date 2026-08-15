@@ -40,7 +40,7 @@ def _record(**overrides):
         "provider": "ansible",
         "settlement_resource_id": "resource-1",
         "resource_attributes": {"vm_host": "host-1"},
-        "scheduling_requirements": {"resource_kind": "vm"},
+        "scheduling_requirements": {"executor_kind": "vm", "resource_kind": "vm"},
         "prepared_create_operation": None,
         "prepared_teardown_operation": None,
         "provider_metadata": {},
@@ -56,7 +56,10 @@ class FakeTransaction:
         self.record = record
         self.db = MagicMock()
         self.db.get.return_value = record
-        self.pool = SimpleNamespace(provider_config={"playbook_path": "playbook.yml"})
+        self.pool = SimpleNamespace(
+            provider_config={"playbook_path": "playbook.yml"},
+            policy_tags={"deliverable_modes": ["vm"]},
+        )
         self.dispatch_required = dispatch_required
         self.persisted = []
         self.acknowledged = []
@@ -177,6 +180,30 @@ def test_validate_uses_read_transaction_and_shared_preparation_path():
     assert uow.write_entries == 0
     provider.prepare_create.assert_called_once()
     assert provider.prepare_create.call_args.kwargs["capacity_reservation_id"] == "reservation-1"
+
+@pytest.mark.asyncio
+async def test_withdrawn_pool_mode_blocks_prepared_dispatch_before_provider_io():
+    prepared = VersionedEnvelope(
+        kind="vm.ansible.create.v1",
+        schema_version=1,
+        payload={"prepared": True},
+    )
+    record = _record(prepared_create_operation=prepared.model_dump(mode="json"))
+    tx = FakeTransaction(record)
+    tx.pool.policy_tags = {"deliverable_modes": []}
+    provider = _provider()
+
+    with pytest.raises(
+        FulfillmentConflictError,
+        match="does not declare offering mode 'vm'",
+    ):
+        await _orchestrator(FakeUnitOfWork(tx), provider).begin_fulfillment(
+            "reservation-1",
+            "compute",
+            _request(),
+        )
+
+    provider.dispatch_create.assert_not_called()
 
 
 def _provisioned_resource(**overrides):
