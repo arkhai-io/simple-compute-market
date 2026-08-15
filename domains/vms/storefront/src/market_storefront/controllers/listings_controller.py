@@ -177,7 +177,10 @@ class ListingsController:
             publish_order_to_registry,
         )
 
-        publish_result = await publish_order_to_registry(listing)
+        publish_result = await publish_order_to_registry(
+            listing,
+            sqlite_client=self._db,
+        )
         registry_status = publish_result.get("status", "unknown")
         return PauseListingResponse(
             listing_id=listing_id,

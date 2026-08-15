@@ -424,10 +424,6 @@ async def test_poller_positions_at_head_then_emits_new_deltas(site: FakeSite):
             _settings(),
         ),
         patch(
-            "market_storefront.utils.sqlite_client.get_sqlite_client",
-            return_value=SimpleNamespace(db_path="/tmp/x.db"),
-        ),
-        patch(
             "market_storefront.services.publication_service."
             "close_stale_compute_listings_after_capacity_change",
             fake_reconcile,
@@ -438,7 +434,9 @@ async def test_poller_positions_at_head_then_emits_new_deltas(site: FakeSite):
             fake_reconcile,
         ),
     ):
-        task = asyncio.create_task(cc.capacity_events_poller_loop())
+        task = asyncio.create_task(
+            cc.capacity_events_poller_loop(SimpleNamespace(db_path="/tmp/x.db"))
+        )
         try:
             for _ in range(200):
                 if len(reconciles) >= 2:  # startup close+reopen ran

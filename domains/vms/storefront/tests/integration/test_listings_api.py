@@ -27,6 +27,7 @@ import market_storefront.container as _container
 from market_storefront.controllers.listings_controller import router as listings_router
 from market_storefront.middleware import admin_identity as _admin_identity
 from market_storefront.middleware.seller_auth import listing_lifecycle_middleware
+from market_storefront.domain_runtime import build_vm_storefront_domain
 from market_storefront.utils.sqlite_client import SQLiteClient
 
 _TEST_MARKETPLACE_SIGNER = Ed25519Signer(b"\x31" * 32)
@@ -62,7 +63,7 @@ def _configure_administrator_auth(
 
 @pytest_asyncio.fixture
 async def db(tmp_path) -> SQLiteClient:
-    return SQLiteClient(db_path=str(tmp_path / "listings_test.db"))
+    return SQLiteClient(db_path=str(tmp_path / "listings_test.db"), domain=build_vm_storefront_domain())
 
 
 async def _seed_listing(
@@ -343,6 +344,7 @@ async def admin_client(
     from market_storefront.services.listing_service import ListingService
 
     listing_svc = ListingService(
+        domain=db.market_domain,
         sqlite_client=db,
         alkahest_clients=None,
         marketplace_signer=_TEST_MARKETPLACE_SIGNER,
@@ -386,6 +388,7 @@ async def unsigned_admin_client(
     from market_storefront.services.listing_service import ListingService
 
     listing_svc = ListingService(
+        domain=db.market_domain,
         sqlite_client=db,
         alkahest_clients=None,
         marketplace_signer=_TEST_MARKETPLACE_SIGNER,
@@ -620,6 +623,7 @@ async def seller_auth_full_client(db):
             return list(resources["accepted_escrows"]), [], ()
 
     listing_svc = ListingService(
+        domain=db.market_domain,
         sqlite_client=db,
         alkahest_clients=None,
         marketplace_signer=_TEST_MARKETPLACE_SIGNER,

@@ -201,6 +201,7 @@ def _make_listing_reconcile_subscriber(
         ):
             closed = await close_stale_compute_listings_after_capacity_change(
                 db_path,
+                sqlite_client=sqlite_client_factory(),
                 home_site=home_site,
                 configured_site_count=len(sites),
                 member_availability=availability,
@@ -219,6 +220,7 @@ def _make_listing_reconcile_subscriber(
         if delta.kind == "released" or delta.kind in _MIXED_DIRECTION_DELTA_KINDS:
             reopened = await reopen_available_compute_listings_after_capacity_change(
                 db_path,
+                sqlite_client=sqlite_client_factory(),
                 home_site=home_site,
                 member_availability=availability,
                 site_pool_projection=projection,
@@ -594,7 +596,7 @@ def site_capacity_buckets() -> dict[str, list[dict[str, Any]]]:
     return result
 
 
-async def capacity_events_poller_loop() -> None:
+async def capacity_events_poller_loop(sqlite_client: Any) -> None:
     """Tail every site authority's capacity-event feed into the local bus.
 
     The delivery half of capacity-scoped events: one poller per
@@ -606,7 +608,6 @@ async def capacity_events_poller_loop() -> None:
     replaying.
     """
     from market_storefront.utils import config
-    from market_storefront.utils.sqlite_client import get_sqlite_client
 
     interval = float(
         getattr(
@@ -616,7 +617,7 @@ async def capacity_events_poller_loop() -> None:
         )
         or 5
     )
-    aggregate = build_capacity_client(lambda: get_sqlite_client())
+    aggregate = build_capacity_client(lambda: sqlite_client)
     site_clients = remote_site_clients(aggregate)
     home_site = next(iter(site_clients))
     configured_site_count = len(site_clients)
@@ -627,7 +628,7 @@ async def capacity_events_poller_loop() -> None:
             reopen_available_compute_listings_after_capacity_change,
         )
 
-        db_path = get_sqlite_client().db_path
+        db_path = sqlite_client.db_path
         availability = await member_availability_view(aggregate, db_path)
         projection = (
             site_pool_projection()
@@ -643,6 +644,7 @@ async def capacity_events_poller_loop() -> None:
         buckets = site_capacity_buckets() if projection is not None else None
         await close_stale_compute_listings_after_capacity_change(
             db_path,
+            sqlite_client=sqlite_client,
             home_site=home_site,
             configured_site_count=configured_site_count,
             member_availability=availability,
@@ -651,6 +653,7 @@ async def capacity_events_poller_loop() -> None:
         )
         await reopen_available_compute_listings_after_capacity_change(
             db_path,
+            sqlite_client=sqlite_client,
             home_site=home_site,
             member_availability=availability,
             site_pool_projection=projection,

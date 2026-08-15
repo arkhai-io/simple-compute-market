@@ -31,7 +31,7 @@ from market_storefront.services.vm_fulfillment_service import (
     _lease_window_strings,
     persist_escrow_fields_with_retry,
 )
-from market_storefront.utils.sqlite_client import SQLiteClient, get_sqlite_client
+from market_storefront.utils.sqlite_client import SQLiteClient
 
 logger = logging.getLogger(__name__)
 
@@ -571,7 +571,7 @@ async def converge_escrow_once(
 
 async def resume_incomplete_fulfillments_once(
     *,
-    sqlite_client: SQLiteClient | None = None,
+    sqlite_client: SQLiteClient,
     fulfillment_client: Any | None = None,
     capacity_client: Any | None = None,
     limit: int = 50,
@@ -583,7 +583,7 @@ async def resume_incomplete_fulfillments_once(
     alkahest_client: Any | None = None,
 ) -> int:
     """Run one bounded recovery sweep and return the number progressed."""
-    db = sqlite_client or get_sqlite_client()
+    db = sqlite_client
     capacity = capacity_client or build_capacity_client(lambda: db)
     remote = fulfillment_client or build_fulfillment_client(capacity)
     worker = owner or f"fulfillment-resume:{uuid.uuid4()}"
@@ -667,12 +667,12 @@ async def resume_incomplete_fulfillments_once(
     return progressed
 
 
-async def fulfillment_resume_loop() -> None:
+async def fulfillment_resume_loop(sqlite_client: SQLiteClient) -> None:
     """Periodically sweep unfinished accepted VM escrows."""
     from market_storefront.utils.config import settings
 
     interval = float(getattr(settings, "fulfillment_resume_sweep_interval", 30))
-    db = SQLiteClient(get_sqlite_client().db_path)
+    db = sqlite_client
     while True:
         await resume_incomplete_fulfillments_once(sqlite_client=db)
         await asyncio.sleep(interval)

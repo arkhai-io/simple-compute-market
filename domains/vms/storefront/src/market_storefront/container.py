@@ -14,6 +14,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
+    from market_core import MarketDomainContract
     from core_storefront.services.negotiation_service import NegotiationService
     from market_identity import Signer
 
@@ -26,6 +27,7 @@ if TYPE_CHECKING:
 # Resolved service instances — populated during FastAPI lifespan startup.
 # ---------------------------------------------------------------------------
 
+resolved_market_domain: MarketDomainContract | None = None
 resolved_sqlite_client: SQLiteClient | None = None
 resolved_marketplace_signer: Signer | None = None
 
@@ -40,6 +42,34 @@ resolved_system_service: SystemService | None = None
 resolved_settlement_composition: VmSettlementComposition | None = None
 
 resolved_storefront_service = None
+
+def clear_lifespan_state(*, domain: MarketDomainContract) -> None:
+    """Clear state owned by the lifespan bound to ``domain``."""
+    global resolved_market_domain
+    global resolved_sqlite_client
+    global resolved_marketplace_signer
+    global resolved_alkahest_clients
+    global resolved_listing_service
+    global resolved_negotiation_service
+    global resolved_system_service
+    global resolved_settlement_composition
+    global resolved_storefront_service
+
+    if resolved_market_domain is not None and resolved_market_domain is not domain:
+        raise RuntimeError(
+            "cannot clear a dependency container owned by a different "
+            "market-domain contract"
+        )
+    resolved_market_domain = None
+    resolved_sqlite_client = None
+    resolved_marketplace_signer = None
+    resolved_alkahest_clients = {}
+    resolved_listing_service = None
+    resolved_negotiation_service = None
+    resolved_system_service = None
+    resolved_settlement_composition = None
+    resolved_storefront_service = None
+
 
 
 def get_alkahest_client(chain_name: str) -> Any | None:

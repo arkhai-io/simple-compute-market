@@ -16,7 +16,6 @@ from market_storefront.services.capacity_client import (
     build_capacity_client,
     remote_site_clients,
 )
-from market_storefront.utils.sqlite_client import get_sqlite_client
 
 logger = logging.getLogger(__name__)
 
@@ -138,8 +137,8 @@ def listing_mode_explanations() -> dict[str, dict[str, str]]:
     return result
 
 
-async def load_site_projections() -> None:
-    aggregate = build_capacity_client(lambda: get_sqlite_client())
+async def load_site_projections(sqlite_client: Any) -> None:
+    aggregate = build_capacity_client(lambda: sqlite_client)
     remotes = remote_site_clients(aggregate)
     replacements: dict[str, SiteProjectionCaches] = {}
     for site, remote in remotes.items():
@@ -166,7 +165,7 @@ async def load_site_projections() -> None:
     _caches.update(replacements)
 
 
-async def site_projection_poller_loop() -> None:
+async def site_projection_poller_loop(sqlite_client: Any) -> None:
     from market_storefront.utils import config
 
     interval = float(
@@ -175,7 +174,7 @@ async def site_projection_poller_loop() -> None:
     while True:
         try:
             if not _caches:
-                await load_site_projections()
+                await load_site_projections(sqlite_client)
             else:
                 await asyncio.gather(
                     *(
@@ -189,10 +188,15 @@ async def site_projection_poller_loop() -> None:
         await asyncio.sleep(interval)
 
 
-async def refresh_after_topology_error(site: str, *, capacity: bool) -> bool:
+async def refresh_after_topology_error(
+    site: str,
+    *,
+    capacity: bool,
+    sqlite_client: Any,
+) -> bool:
     caches = _caches.get(site)
     if caches is None:
-        await load_site_projections()
+        await load_site_projections(sqlite_client)
         caches = _caches.get(site)
         if caches is None:
             return False

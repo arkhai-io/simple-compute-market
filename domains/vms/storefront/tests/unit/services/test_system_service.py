@@ -14,6 +14,7 @@ import pytest
 from market_identity import Ed25519Signer
 
 from market_storefront.services.system_service import SystemService
+from market_storefront.domain_runtime import build_vm_storefront_domain
 from market_storefront.utils.sqlite_client import SQLiteClient
 
 MARKETPLACE_SIGNER = Ed25519Signer(b"\x41" * 32)
@@ -25,7 +26,7 @@ MARKETPLACE_SIGNER = Ed25519Signer(b"\x41" * 32)
 
 @pytest.fixture
 def db(tmp_path) -> SQLiteClient:
-    return SQLiteClient(db_path=str(tmp_path / "system_service_test.db"))
+    return SQLiteClient(db_path=str(tmp_path / "system_service_test.db"), domain=build_vm_storefront_domain())
 
 
 def _make_service(
@@ -86,7 +87,7 @@ class TestSeedResourcesIfEmpty:
         """When the resources table is empty, the CSV is imported."""
         from market_storefront.utils.sqlite_client import SQLiteClient
 
-        db = SQLiteClient(db_path=str(tmp_path / "seed_test.db"))
+        db = SQLiteClient(db_path=str(tmp_path / "seed_test.db"), domain=build_vm_storefront_domain())
 
         # Minimal valid kvm1-style CSV row.
         csv_file = tmp_path / "resources.csv"

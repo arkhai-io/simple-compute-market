@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import datetime
+from unittest.mock import AsyncMock, Mock
 
 import pytest
 from market_core.schemas import EscrowProposal, ProvisionTerms
@@ -9,8 +11,10 @@ from market_policy.identity import Identity
 from market_policy.negotiation_middleware import NegotiationDecision
 from market_policy.negotiation_thread import get_thread_store
 
+from market_storefront.domain_runtime import build_vm_storefront_domain
 from market_storefront.utils.sync_negotiation import (
     SellerRoundResult,
+    _default_seller_round_hook,
     _normalize_vm_message_terms,
     continue_sync_negotiation,
     start_sync_negotiation,
@@ -22,6 +26,8 @@ _BUYER = _BUYER_SIGNER.identity
 _SELLER = _SELLER_SIGNER.identity
 _TOKEN = "0x0000000000000000000000000000000000000001"
 _ESCROW = "0x" + "11" * 20
+_DOMAIN = build_vm_storefront_domain()
+
 
 
 @pytest.fixture
@@ -30,7 +36,10 @@ async def db(tmp_path):
 
     from market_storefront.utils.sqlite_client import SQLiteClient
 
-    client = SQLiteClient(db_path=str(tmp_path / "seller_round_hook.db"))
+    client = SQLiteClient(
+        db_path=str(tmp_path / "seller_round_hook.db"),
+        domain=_DOMAIN,
+    )
     thread_module._thread_store = None
     get_thread_store(
         sqlite_client=client,
@@ -88,7 +97,7 @@ def test_normalize_vm_message_terms_uses_domain_runtime() -> None:
         }
     )
 
-    normalized = _normalize_vm_message_terms(terms)
+    normalized = _normalize_vm_message_terms(_DOMAIN, terms)
 
     assert normalized is not None
     assert normalized.duration_seconds == 3600
@@ -103,7 +112,7 @@ def test_normalize_vm_message_terms_rejects_foreign_terms() -> None:
     )
 
     with pytest.raises(ValueError, match=r"compute\.v1"):
-        _normalize_vm_message_terms(terms)
+        _normalize_vm_message_terms(_DOMAIN, terms)
 
 
 def test_normalize_vm_message_terms_rejects_unsupported_version() -> None:
@@ -117,8 +126,54 @@ def test_normalize_vm_message_terms_rejects_unsupported_version() -> None:
     )
 
     with pytest.raises(ValueError, match="version"):
-        _normalize_vm_message_terms(terms)
+        _normalize_vm_message_terms(_DOMAIN, terms)
 
+
+
+def test_default_policy_is_resolved_from_the_injected_contract() -> None:
+    domain = build_vm_storefront_domain()
+    seller_hook = AsyncMock()
+    policy = Mock(return_value=seller_hook)
+    domain = replace(
+        domain,
+        storefront=replace(
+            domain.storefront,
+            run_negotiation_policy=policy,
+        ),
+    )
+    repository = object()
+
+    assert _default_seller_round_hook(domain, repository) is seller_hook
+    assert policy.call_args.args
+
+
+@pytest.mark.asyncio
+async def test_foreign_envelope_rejects_before_policy_or_repository_state(db) -> None:
+    repository_probe = AsyncMock()
+    db.is_listing_paused = repository_probe
+    seller_hook = AsyncMock()
+    terms = {
+        "kind": "bare_metal.v1",
+        "version": 1,
+        "duration_seconds": 3600,
+        "ssh_public_key": "ssh-ed25519 AAAA",
+    }
+
+    with pytest.raises(ValueError, match=r"compute\.v1"):
+        await start_sync_negotiation(
+            domain=db.market_domain,
+            sqlite_client=db,
+            our_listing_id="L-hook",
+            buyer_principal=_BUYER,
+            seller_principal=_SELLER,
+            provision_terms=terms,
+            our_base_url="http://seller",
+            their_agent_url="http://buyer",
+            seller_round_hook=seller_hook,
+        )
+
+    repository_probe.assert_not_awaited()
+    seller_hook.assert_not_awaited()
 
 @pytest.mark.asyncio
 async def test_start_sync_negotiation_uses_injected_seller_round_hook(db):
@@ -140,6 +195,7 @@ async def test_start_sync_negotiation_uses_injected_seller_round_hook(db):
         )
 
     response = await start_sync_negotiation(
+        domain=db.market_domain,
         sqlite_client=db,
         our_listing_id="L-hook",
         buyer_principal=_BUYER,
@@ -234,6 +290,7 @@ async def test_hosted_selection_is_persisted_and_materialized_as_plan(db):
         )
 
     response = await start_sync_negotiation(
+        domain=db.market_domain,
         sqlite_client=db,
         our_listing_id="L-hosted",
         buyer_principal=_BUYER,
@@ -292,6 +349,7 @@ async def test_start_sync_negotiation_rejects_mismatched_resource_shape(db):
 
     with pytest.raises(OfferUnfulfillableError) as exc_info:
         await start_sync_negotiation(
+            domain=db.market_domain,
             sqlite_client=db,
             our_listing_id="L-hook",
             buyer_principal=_BUYER,
@@ -333,6 +391,7 @@ async def test_start_sync_negotiation_permits_resource_shape_matching_listing(db
         )
 
     response = await start_sync_negotiation(
+        domain=db.market_domain,
         sqlite_client=db,
         our_listing_id="L-hook",
         buyer_principal=_BUYER,
@@ -370,6 +429,7 @@ async def test_continue_sync_negotiation_uses_injected_seller_round_hook(db):
         )
 
     opened = await start_sync_negotiation(
+        domain=db.market_domain,
         sqlite_client=db,
         our_listing_id="L-hook",
         buyer_principal=_BUYER,
@@ -407,6 +467,7 @@ async def test_continue_sync_negotiation_uses_injected_seller_round_hook(db):
         )
 
     response = await continue_sync_negotiation(
+        domain=db.market_domain,
         sqlite_client=db,
         neg_id=opened["negotiation_id"],
         buyer_action="counter",

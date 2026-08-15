@@ -942,9 +942,10 @@ class TestSchema:
         must produce a derived_compute_listings table with every column
         this module's own schema defines, proving it delegates here
         rather than maintaining a second, driftable copy."""
+        from market_storefront.domain_runtime import build_vm_storefront_domain
         from market_storefront.utils.sqlite_client import SQLiteClient
 
-        client = SQLiteClient(db_path=db_path)
+        client = SQLiteClient(db_path=db_path, domain=build_vm_storefront_domain())
         conn = sqlite3.connect(client.db_path)
         try:
             client_cols = {

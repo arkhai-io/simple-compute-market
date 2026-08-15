@@ -69,9 +69,10 @@ def test_proposal_payload_preserves_settlement_selection() -> None:
 
 @pytest_asyncio.fixture
 async def db(tmp_path):
+    from market_storefront.domain_runtime import build_vm_storefront_domain
     from market_storefront.utils.sqlite_client import SQLiteClient
 
-    return SQLiteClient(db_path=str(tmp_path / "negotiate_test.db"))
+    return SQLiteClient(db_path=str(tmp_path / "negotiate_test.db"), domain=build_vm_storefront_domain())
 
 
 async def _seed_listing(
@@ -144,6 +145,7 @@ async def client(db):
     )
 
     _container.resolved_sqlite_client = db
+    _container.resolved_market_domain = db.market_domain
 
     _container.resolved_marketplace_signer = _SELLER_SIGNER
     app = FastAPI()
@@ -177,6 +179,7 @@ async def client(db):
         ) as c:
             yield c, db
     _container.resolved_sqlite_client = None
+    _container.resolved_market_domain = None
     _container.resolved_marketplace_signer = None
 
 

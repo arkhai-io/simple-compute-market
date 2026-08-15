@@ -17,6 +17,8 @@ Global pause state
 from __future__ import annotations
 
 import logging
+from contextlib import asynccontextmanager
+from functools import partial
 
 from core_storefront.app_composition import (
     build_storefront_app,
@@ -28,9 +30,13 @@ from core_storefront.app_lifecycle import (
 )
 from core_storefront.services.negotiation_service import NegotiationService
 from core_storefront.stage_log import set_stage_event_db_path, stage_event
+from market_core import MarketDomainContract
 
 import market_storefront.container as _container
-from market_storefront.domain_runtime import get_market_domain_contract
+from market_storefront.domain_runtime import (
+    build_vm_storefront_domain,
+    validate_vm_storefront_domain,
+)
 from market_storefront.middleware.admin_identity import (
     administrator_identity_middleware,
     initialize_administrator_identities,
@@ -99,10 +105,11 @@ def _build_alkahest_clients() -> dict:
     return alkahest_service.build_clients()
 
 
-def _build_listing_service(**kwargs):
+def _build_listing_service(*, domain: MarketDomainContract, **kwargs):
     from market_storefront.services.listing_service import ListingService
 
     return ListingService(
+        domain=domain,
         **kwargs,
         settlement_composition_provider=lambda: (
             _container.resolved_settlement_composition
@@ -110,10 +117,10 @@ def _build_listing_service(**kwargs):
     )
 
 
-def _build_negotiation_service(**kwargs):
+def _build_negotiation_service(*, domain: MarketDomainContract, **kwargs):
     return NegotiationService(
         **kwargs,
-        continue_negotiation=continue_sync_negotiation,
+        continue_negotiation=partial(continue_sync_negotiation, domain=domain),
         stage_event=stage_event,
     )
 
@@ -126,6 +133,7 @@ def _build_system_service(**kwargs):
 
 def _build_settlement_composition(
     *,
+    domain: MarketDomainContract,
     sqlite_client,
     alkahest_clients,
     marketplace_signer,
@@ -133,6 +141,7 @@ def _build_settlement_composition(
     from market_storefront.domain_runtime import build_settlement_runtime
 
     return build_settlement_runtime(
+        domain=domain,
         sqlite_client=sqlite_client,
         alkahest_clients=alkahest_clients,
         marketplace_signer=marketplace_signer,
@@ -140,6 +149,7 @@ def _build_settlement_composition(
 
 
 def _populate_container(
+    domain: MarketDomainContract,
     *,
     sqlite_client,
     alkahest_clients,
@@ -148,6 +158,39 @@ def _populate_container(
     system_service,
     marketplace_signer,
 ) -> None:
+    if (
+        _container.resolved_market_domain is not None
+        and _container.resolved_market_domain is not domain
+    ):
+        raise RuntimeError(
+            "dependency container is already owned by a different "
+            "market-domain contract"
+        )
+    collaborators = (
+        ("SQLite repository", getattr(sqlite_client, "market_domain", None)),
+        ("listing service", getattr(listing_service, "market_domain", None)),
+        (
+            "negotiation callback",
+            getattr(
+                getattr(negotiation_service, "_continue_negotiation", None),
+                "keywords",
+                {},
+            ).get("domain"),
+        ),
+    )
+    for label, collaborator_domain in collaborators:
+        if collaborator_domain is not domain:
+            raise RuntimeError(
+                f"{label} is not bound to the app-selected market-domain "
+                "contract object"
+            )
+    settlement_composition = _build_settlement_composition(
+        domain=domain,
+        sqlite_client=sqlite_client,
+        alkahest_clients=alkahest_clients,
+        marketplace_signer=marketplace_signer,
+    )
+    _container.resolved_market_domain = domain
     _container.resolved_sqlite_client = sqlite_client
     _container.resolved_marketplace_signer = marketplace_signer
     if settings.enable_registry_discovery:
@@ -158,33 +201,49 @@ def _populate_container(
     _container.resolved_listing_service = listing_service
     _container.resolved_negotiation_service = negotiation_service
     _container.resolved_system_service = system_service
-    _container.resolved_settlement_composition = _build_settlement_composition(
-        sqlite_client=sqlite_client,
-        alkahest_clients=alkahest_clients,
-        marketplace_signer=marketplace_signer,
-    )
+    _container.resolved_settlement_composition = settlement_composition
 
 
-async def _run_startup_tasks() -> None:
+async def _run_startup_tasks(*, domain: MarketDomainContract) -> None:
     from market_storefront.startup import _startup_tasks
 
-    await _startup_tasks()
+    await _startup_tasks(domain=domain)
 
 
-lifespan = build_storefront_lifespan(
-    StorefrontLifecycleCallbacks(
-        get_sqlite_client=get_sqlite_client,
-        resolve_identity_signer=resolve_marketplace_signer,
-        set_stage_event_db_path=set_stage_event_db_path,
-        build_alkahest_clients=_build_alkahest_clients,
-        build_listing_service=_build_listing_service,
-        build_negotiation_service=_build_negotiation_service,
-        build_system_service=_build_system_service,
-        populate_container=_populate_container,
-        startup_tasks=_run_startup_tasks,
-        logger=logger,
+def build_vm_storefront_lifespan(*, domain: MarketDomainContract):
+    """Bind every VM lifespan callback to one selected contract object."""
+    shared_lifespan = build_storefront_lifespan(
+        StorefrontLifecycleCallbacks(
+            get_sqlite_client=partial(get_sqlite_client, domain=domain),
+            resolve_identity_signer=resolve_marketplace_signer,
+            set_stage_event_db_path=set_stage_event_db_path,
+            build_alkahest_clients=_build_alkahest_clients,
+            build_listing_service=partial(_build_listing_service, domain=domain),
+            build_negotiation_service=partial(
+                _build_negotiation_service,
+                domain=domain,
+            ),
+            build_system_service=_build_system_service,
+            populate_container=partial(_populate_container, domain=domain),
+            startup_tasks=partial(_run_startup_tasks, domain=domain),
+            logger=logger,
+        )
     )
-)
+
+    @asynccontextmanager
+    async def lifespan(application):
+        if getattr(application.state, "market_domain", None) is not domain:
+            raise RuntimeError(
+                "FastAPI app is not bound to its lifespan market-domain "
+                "contract object"
+            )
+        try:
+            async with shared_lifespan(application):
+                yield
+        finally:
+            _container.clear_lifespan_state(domain=domain)
+
+    return lifespan
 
 
 # ---------------------------------------------------------------------------
@@ -221,25 +280,30 @@ from market_storefront.controllers.system_controller import (  # noqa: E402
     router as system_router,
 )
 
-app = build_storefront_app(
-    config=default_storefront_app_config(root_path=settings.gateway.root_path),
-    domain=get_market_domain_contract(),
-    lifespan=lifespan,
-    routers=(
-        system_router,
-        admin_router,
-        listings_router,
-        admin_listings_router,
-        negotiations_router,
-        negotiate_router,
-        settle_router,
-        settlements_router,
-        deals_router,
-        admin_settle_router,
-    ),
-)
+def build_vm_storefront_app(*, domain: MarketDomainContract):
+    """Build the VM HTTP application around one validated contract."""
+    selected_domain = validate_vm_storefront_domain(domain)
+    application = build_storefront_app(
+        config=default_storefront_app_config(root_path=settings.gateway.root_path),
+        domain=selected_domain,
+        lifespan=build_vm_storefront_lifespan(domain=selected_domain),
+        routers=(
+            system_router,
+            admin_router,
+            listings_router,
+            admin_listings_router,
+            negotiations_router,
+            negotiate_router,
+            settle_router,
+            settlements_router,
+            deals_router,
+            admin_settle_router,
+        ),
+    )
+    application.middleware("http")(listing_lifecycle_middleware)
+    application.middleware("http")(service_peer_callback_middleware)
+    application.middleware("http")(administrator_identity_middleware)
+    return application
 
 
-app.middleware("http")(listing_lifecycle_middleware)
-app.middleware("http")(service_peer_callback_middleware)
-app.middleware("http")(administrator_identity_middleware)
+app = build_vm_storefront_app(domain=build_vm_storefront_domain())

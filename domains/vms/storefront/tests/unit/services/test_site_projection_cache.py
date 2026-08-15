@@ -73,7 +73,7 @@ class TestLoadSiteProjectionsPartialFailure:
         failing = _FakeRemote(fails=True)
 
         with _patched_remotes({"site-healthy": healthy, "site-failing": failing}):
-            await spc.load_site_projections()
+            await spc.load_site_projections(object())
 
         caches = spc.projection_caches()
         assert set(caches) == {"site-healthy", "site-failing"}
@@ -92,7 +92,7 @@ class TestLoadSiteProjectionsPartialFailure:
         failing = _FakeRemote(fails=True)
 
         with _patched_remotes({"site-failing": failing}):
-            await spc.load_site_projections()
+            await spc.load_site_projections(object())
             assert failing.snapshot_calls == 2  # resource_pools + capacity_buckets
 
             caches = spc.projection_caches()
@@ -110,7 +110,7 @@ class TestProjectionStatusSummary:
         failing = _FakeRemote(fails=True)
 
         with _patched_remotes({"site-healthy": healthy, "site-failing": failing}):
-            await spc.load_site_projections()
+            await spc.load_site_projections(object())
 
         summary = spc.projection_status_summary()
 
@@ -169,7 +169,7 @@ class TestListingModeExplanations:
             },
         ])
         with _patched_remotes({"site-a": remote}):
-            await spc.load_site_projections()
+            await spc.load_site_projections(object())
         assert spc.listing_mode_explanations() == {}
 
     async def test_explanation_for_an_unrecognized_listing_mode(self):
@@ -181,7 +181,7 @@ class TestListingModeExplanations:
             },
         ])
         with _patched_remotes({"site-a": remote}):
-            await spc.load_site_projections()
+            await spc.load_site_projections(object())
         explanations = spc.listing_mode_explanations()
         assert set(explanations) == {"site-a"}
         assert "gpu-pool" in explanations["site-a"]
@@ -196,6 +196,6 @@ class TestListingModeExplanations:
             },
         ])
         with _patched_remotes({"site-clean": clean, "site-bad": bad}):
-            await spc.load_site_projections()
+            await spc.load_site_projections(object())
         explanations = spc.listing_mode_explanations()
         assert set(explanations) == {"site-bad"}
