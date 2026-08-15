@@ -28,6 +28,7 @@ REGION_POLICY_TAG = "region"
 SLA_POLICY_TAG = "sla"
 PRICING_POLICY_TAG = "pricing"
 
+
 def declared_deliverable_modes(policy_tags: Mapping[str, Any]) -> frozenset[str]:
     """Return the pool's authoritative deliverable-mode declaration.
 

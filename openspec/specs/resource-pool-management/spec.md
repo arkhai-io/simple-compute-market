@@ -140,6 +140,49 @@ Resource Pool policy metadata MUST support stable domain-neutral keys for `listi
 - **WHEN** a storefront version does not recognize one projected policy tag
 - **THEN** it ignores that tag without rejecting the Resource Pool or changing authoritative admission
 
+### Requirement: Pool-declared offering modes
+
+Each Resource Pool MUST declare the set of offering modes its configured
+provider can deliver under the domain-neutral `deliverable_modes` policy tag.
+The shared resource-pool package MUST validate this declaration as a
+JSON-compatible set of unique, non-empty strings and expose a typed reader and
+membership predicate without defining which names are meaningful to a domain.
+An absent or empty declaration authorizes no mode; readers and admission paths
+MUST NOT widen it with a default.
+
+Create, replace, patch, bulk import, projection, and canonical export MUST use
+the existing policy-tag channel and precedence. An existing pool's initial set
+MUST be derived only from durable provider, playbook, and registered
+requirement-delegate configuration that proves the pool can deliver that mode.
+The derivation MUST include the system-owned `default` pool, MUST NOT use
+reservation history as capability evidence, MUST replace an unproved legacy
+declaration with the exact proved set, and MUST report each derived set at INFO.
+
+#### Scenario: Pool declares two modes
+
+- **WHEN** an operator stores `deliverable_modes: [bare_metal, vm]`
+- **THEN** the typed reader resolves exactly those two opaque mode names through the ordinary pool projection and administration paths
+
+#### Scenario: Declaration is absent
+
+- **WHEN** a pool has no `deliverable_modes` tag
+- **THEN** the typed reader resolves an empty set and the pool delivers no offering mode
+
+#### Scenario: Existing default pool is migrated
+
+- **WHEN** the default pool has an Ansible playbook and the registered VM requirement delegate
+- **THEN** migration declares exactly `vm`, reports that conclusion, and does not infer any additional mode from historical reservations
+
+#### Scenario: Legacy declaration is wider than its configuration
+
+- **WHEN** a pool's provider configuration proves no deliverable mode but its legacy policy metadata names one or more modes
+- **THEN** migration narrows the declaration to empty rather than retaining an unproved capability
+
+#### Scenario: Declaration is malformed
+
+- **WHEN** any pool write supplies a non-list, duplicate, empty, or non-string deliverable mode
+- **THEN** shared policy validation rejects the write without changing the pool
+
 ### Requirement: Reservation hold and SLA preference validation
 
 A Resource Pool management surface that accepts `max_reservation_hold_seconds` MUST require a nonnegative integer, or `sla` MUST require a nonnegative number (integer or fractional), and MUST expose the normalized value as advisory metadata rather than an admission rule. This applies identically to every surface capable of persisting a Resource Pool's `policy_tags` — the bulk pool-document import path and the individual pool admin API (`create`/`replace`/`update`) both validate through the same shared check.
@@ -156,8 +199,8 @@ A Resource Pool management surface that accepts `max_reservation_hold_seconds` M
 
 ## Evidence
 
-- Domain-neutral hint keys, generic read-side resolution, and write-side hold-preference and SLA-preference validation (both the bulk YAML import path and the individual pool admin API): `kit/resource-pools/tests/unit/test_hints.py`, `kit/resource-pools/tests/unit/test_resource_pool_service.py::TestHoldPreferenceValidationOnIndividualPoolWrites`.
-
+- Domain-neutral hint keys, typed deliverable-mode resolution and membership, and write-side policy validation on bulk and individual administration paths: `kit/resource-pools/tests/unit/test_hints.py`, `kit/resource-pools/tests/unit/test_resource_pool_service.py`.
+- Existing-pool derivation, default-pool inclusion, idempotency, narrowing, drift rejection, and INFO evidence: `provisioning/compute/service/tests/unit/test_pool_offering_mode_migration.py`.
 - Pool persistence, registered requirement-delegate validation, strict import, dry-run, idempotency, lifecycle, and provider replacement: `domains/vms/provisioning/service/src/tests/unit/services/test_resource_pool_service.py`.
 - Typed administrative API, default-pool invariant, canonical round trip, and host assignment: `domains/vms/provisioning/service/src/tests/integration/test_pools_api.py`.
 - Migration ordering, legacy host backfill, and schema-drift rejection: `domains/vms/provisioning/service/src/tests/unit/test_database.py`.
