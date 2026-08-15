@@ -101,26 +101,32 @@ default_max_duration_seconds = 86400
 ```
 
 For hosted-only publication, set priority to `["fiat.stripe.v1"]`, configure
-the generated `[Settlement.stripe]` trust/account/condition fields, omit wallet
-and chains, and use a clause such as:
+the generated `[Settlement.stripe]` public authority/release/account/condition
+fields, omit wallet and chains, and publish one complete clause for each exact
+funding profile and rate you offer:
 
 ```toml
 [pricing]
 settlements = [
-  { mechanism = "fiat.stripe.v1", asset = "usd", rate = "2", per = "hour", mechanism_input = { method = "card", funds_flow = "separate_charges_transfers" } },
+  { mechanism = "fiat.stripe.v1", asset = "usd", rate = "2", per = "hour", mechanism_input = { funding_profile = "card.v1", interaction = "interactive" } },
+  { mechanism = "fiat.stripe.v1", asset = "usd", rate = "1.90", per = "hour", mechanism_input = { funding_profile = "us_bank_transfer.v1", interaction = "interactive" } },
+  { mechanism = "fiat.stripe.v1", asset = "usd", rate = "1.95", per = "hour", mechanism_input = { funding_profile = "us_ach_debit.v1", interaction = "interactive" } },
 ]
 ```
 
-The equivalent command-level override combines the decimal rate and unit in
-`rate=<decimal>/<unit>` and accepts only the registered public Stripe fields:
+The equivalent command-level override combines decimal rate and unit in
+`rate=<decimal>/<unit>` and accepts only registered public Stripe fields:
 
 ```bash
 market-storefront publish --inventory /app/resources.csv \
-  --settlement 'mechanism=fiat.stripe.v1 asset=usd rate=2/hour stripe.method=card stripe.funds_flow=separate_charges_transfers'
+  --settlement 'mechanism=fiat.stripe.v1 asset=usd rate=2/hour stripe.funding_profile=card.v1 stripe.interaction=interactive'
 ```
 
-Hosted account, condition-profile, authority trust, and provider configuration
-remain in `[Settlement.stripe]`; they are not publication-clause fields.
+`funds_flow="separate_charges_transfers"` is fixed by the hosted registration;
+callers cannot override it. Hosted authority trust, account, condition,
+currency/country policy, and exact client/API/schema/capability pins remain in
+`[Settlement.stripe]`. Provider credentials, IDs, webhooks, and persistence are
+rejected by marketplace configuration.
 
 The full schema is at
 [`domains/vms/storefront/src/market_storefront/settings.toml`](../domains/vms/storefront/src/market_storefront/settings.toml).
@@ -284,24 +290,29 @@ touching libvirt. To create real VMs:
 ## Optional hosted fiat publication
 
 Hosted settlement is disabled by default. Add `fiat.stripe.v1` to
-`[Settlement].priority`, configure the public client/trust/account/condition
-fields under `[Settlement.stripe]`, and publish a complete clause such as
-`mechanism=fiat.stripe.v1 asset=usd rate=20/hour stripe.method=card
-stripe.funds_flow=separate_charges_transfers`. Account, condition-profile,
-authority-trust, currency, and provider settings remain configuration-owned
-under `[Settlement.stripe]` and are rejected as clause fields. Use
-`market-storefront config init-user` and
-`market-storefront settlement stripe onboard|status` for the exact installed
-schema and account workflow. Publication preflights account and condition
-readiness; a failed Stripe preflight suppresses only that option while valid
-Alkahest options remain publishable.
+`[Settlement].priority`, configure the public authority/release/account/
+condition and currency/country policy fields under `[Settlement.stripe]`, and
+publish complete clauses such as `mechanism=fiat.stripe.v1 asset=usd
+rate=20/hour stripe.funding_profile=card.v1
+stripe.interaction=interactive`. Repeat the clause for
+`us_bank_transfer.v1` or `us_ach_debit.v1`; the profile participates in option
+identity even if rate and condition are equal.
 
-The storefront never receives Stripe credentials or provider IDs and never
-stores Checkout or account-link URLs. It persists one opaque settlement
-reference and drives funded VM fulfillment, condition check/collect, and
-eligible reclaim through the shared settlement worker. Stripe funds remain
-platform-custodied by the separately operated authority; an EAS condition
-anchor is audit/predicate evidence, not custody.
+Use `market-storefront config init-user` and
+`market-storefront settlement stripe onboard|status` for the exact installed
+schema and account workflow. Publication preflights the signed release,
+account, condition, currency/country policy, and each configured profile
+independently. An unready profile suppresses only its clauses; ready hosted
+profiles and valid Alkahest alternatives remain publishable.
+
+The storefront never receives payer profiles, saved instruments, Stripe
+credentials, or provider IDs and never stores setup, Checkout, confirmation,
+bank-instruction, or account-link URLs. After exact buyer authorization it
+persists only the safe authorization/settlement references and drives
+authoritatively funded VM fulfillment, condition check/collect, and eligible
+reclaim through the shared settlement worker. Provider-custodied funds remain
+owned by the separately operated authority; an EAS condition anchor is
+audit/predicate evidence, not custody.
 
 ## Common pitfalls
 
