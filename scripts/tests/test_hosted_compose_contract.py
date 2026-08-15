@@ -236,7 +236,7 @@ def test_wallet_free_fixtures_have_only_public_portable_configuration() -> None:
         assert document["Settlement"]["stripe"]["base_url"] == expected_url
         assert field_paths(document).isdisjoint(forbidden)
         stripe = document["Settlement"]["stripe"]
-        assert stripe["expected_api_version"] == "0.2.0"
+        assert stripe["expected_api_version"] == "0.2.1"
         assert stripe["expected_schema_version"] == 5
         assert set(stripe["required_capabilities"]) == {
             "scheme-tagged-identities.v1",

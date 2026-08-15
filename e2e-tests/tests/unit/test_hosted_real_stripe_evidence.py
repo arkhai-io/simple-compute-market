@@ -68,6 +68,7 @@ def _identities() -> IdentityEvidence:
         run_ref=opaque_ref("run", "trusted-run-identity"),
     )
 
+
 def _funding() -> FundingEvidence:
     return FundingEvidence(
         profile="card.v1",
@@ -172,9 +173,7 @@ def test_release_gate_binds_all_signed_and_observed_identities(tmp_path: Path) -
         compose_env_path=compose_env,
     )
     assert identity.hosted_image_digest == IMAGE
-    assert identity.marketplace_image == (
-        "registry.example/marketplace@" + MARKET_IMAGE
-    )
+    assert identity.marketplace_image == ("registry.example/marketplace@" + MARKET_IMAGE)
     with pytest.raises(ReleaseIdentityRejected):
         require_release_identity(
             marketplace_commit=COMMIT,

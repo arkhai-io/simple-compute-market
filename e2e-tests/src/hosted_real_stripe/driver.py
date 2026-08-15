@@ -224,6 +224,7 @@ def run(args: argparse.Namespace) -> tuple[StripeTestEvidence, int]:
                     authority_scheme=runtime_authority.scheme,
                     authority_address=runtime_authority.identifier,
                     authority_environment=args.authority_environment,
+                    authority_base_url=args.authority_url,
                     manifest_digest=release.hosted_manifest_digest,
                     buyer_identity_scheme=buyer_identity_scheme,
                     funding_profile=funding_profile,

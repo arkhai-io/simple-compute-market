@@ -208,6 +208,7 @@ def test_ephemeral_container_inputs_use_shared_directory(
         authority_scheme="eip191",
         authority_address="0x1fe2aa7fbaf5720f79a22a4ada4b8b37d4e0c008",
         authority_environment="test",
+        authority_base_url="http://127.0.0.1:18080",
         manifest_digest="sha256:" + ("1" * 64),
         funding_profile="us_bank_transfer.v1",
         buyer_identity_scheme="ed25519",
@@ -216,6 +217,8 @@ def test_ephemeral_container_inputs_use_shared_directory(
         parsed = tomllib.loads(buyer_config.read_text(encoding="utf-8"))
         stripe = parsed["Settlement"]["stripe"]
         assert stripe["expected_manifest_digest"] == "sha256:" + ("1" * 64)
+        assert stripe["base_url"] == "http://127.0.0.1:18080"
+        assert stripe["expected_api_version"] == "0.2.1"
         assert stripe["authority_id"] == stripe["off_session_policy"]["authority_id"]
         assert stripe["environment"] == stripe["off_session_policy"]["environment"]
         assert stripe["off_session_policy"]["funding_profile"] == "us_bank_transfer.v1"

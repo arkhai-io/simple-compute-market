@@ -405,6 +405,7 @@ class EphemeralBuyerConfig:
         authority_scheme: str,
         authority_address: str,
         authority_environment: str,
+        authority_base_url: str,
         manifest_digest: str,
         funding_profile: str,
         buyer_identity_scheme: str,
@@ -416,6 +417,7 @@ class EphemeralBuyerConfig:
             "authority_scheme": authority_scheme,
             "authority_address": authority_address,
             "authority_environment": authority_environment,
+            "authority_base_url": authority_base_url,
             "manifest_digest": manifest_digest,
             "funding_profile": funding_profile,
             "buyer_identity_scheme": buyer_identity_scheme,
@@ -440,6 +442,11 @@ class EphemeralBuyerConfig:
             text, count = pattern.subn(f'{key} = "{value}"', text)
             if count != 2:
                 raise ProcessUnavailable(f"buyer configuration has no exact {key} bindings")
+        text = _replace_toml_setting(
+            text,
+            "base_url",
+            self._values["authority_base_url"],
+        )
         text = _replace_toml_setting(
             text,
             "expected_manifest_digest",

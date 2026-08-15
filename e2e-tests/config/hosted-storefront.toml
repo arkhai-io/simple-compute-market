@@ -68,7 +68,7 @@ base_url = "http://127.0.0.1:8080"
 authority_id = "local-e2e-hosted-authority"
 environment = "local-e2e"
 expected_manifest_digest = "sha256:09d242232db26cc345d3805d0a49bfb5c7ce940959a6b878d296a2551dc21558"
-expected_api_version = "0.2.0"
+expected_api_version = "0.2.1"
 expected_schema_version = 5
 required_capabilities = [
   "scheme-tagged-identities.v1",

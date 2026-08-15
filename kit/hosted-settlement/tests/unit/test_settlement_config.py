@@ -81,7 +81,7 @@ class ObservationalClient:
         return SimpleNamespace(
             ready=True,
             manifest_digest="sha256:" + "ab" * 32,
-            api_version="0.2.0",
+            api_version="0.2.1",
             schema_version=5,
             payer_profile_protocol="arkhai.payer-profile.v1",
             funding_authorization_protocol="arkhai.funding-authorization.v1",
@@ -184,7 +184,7 @@ def _readiness(
         configured=True,
         enabled=True,
         ready=any(states.values()),
-        contract_version="0.2.0",
+        contract_version="0.2.1",
         schema_version="5",
         public_details={
             "contract_fingerprint": stripe_contract_fingerprint(config),
@@ -247,7 +247,7 @@ def test_registry_validation_does_not_echo_rejected_config_values() -> None:
         ({"currency": "eur"}, "usd"),
         ({"currency": "USD"}, "usd"),
         ({"country": "DE"}, "US"),
-        ({"expected_api_version": "0.2"}, "0.2.0"),
+        ({"expected_api_version": "0.2"}, "0.2.1"),
         ({"expected_schema_version": 4}, "5"),
         ({"required_capabilities": ("payer-profile.v1",)}, "exactly match"),
     ],
@@ -365,7 +365,7 @@ async def test_buyer_preflight_checks_exact_contract_without_mutation() -> None:
         "buyer",
     )
     assert status.ready is True
-    assert status.contract_version == "0.2.0"
+    assert status.contract_version == "0.2.1"
     assert status.schema_version == "5"
     assert tuple(status.public_details["profiles"]) == tuple(
         profile.value for profile in FundingProfile

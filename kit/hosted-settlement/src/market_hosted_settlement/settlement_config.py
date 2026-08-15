@@ -184,7 +184,7 @@ class StripeSettlementConfig(BaseModel):
     environment: str | None = None
     authority: StripeAuthorityTrust | None = None
     expected_manifest_digest: str | None = None
-    expected_api_version: Literal["0.2.0"] = "0.2.0"
+    expected_api_version: Literal["0.2.1"] = "0.2.1"
     expected_schema_version: Literal[5] = 5
     required_capabilities: tuple[str, ...] = REQUIRED_STRIPE_CAPABILITIES
     account_ref: str | None = Field(

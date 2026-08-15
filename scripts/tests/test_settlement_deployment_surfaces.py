@@ -29,7 +29,7 @@ def test_fiat_compose_uses_canonical_public_config_without_evm_resources() -> No
     assert settlement["priority"] == ["fiat.stripe.v1"]
     assert set(settlement) == {"schema_version", "priority", "stripe"}
     stripe = settlement["stripe"]
-    assert stripe["expected_api_version"] == "0.2.0"
+    assert stripe["expected_api_version"] == "0.2.1"
     assert stripe["expected_schema_version"] == 5
     assert stripe["currency"] == "usd"
     assert stripe["country"] == "US"

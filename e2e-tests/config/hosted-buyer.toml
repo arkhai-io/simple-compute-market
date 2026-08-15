@@ -28,7 +28,7 @@ authority_id = "local-e2e-hosted-authority"
 environment = "local-e2e"
 # Protected runtime replaces this non-activating placeholder from the verified manifest.
 expected_manifest_digest = "sha256:0000000000000000000000000000000000000000000000000000000000000000"
-expected_api_version = "0.2.0"
+expected_api_version = "0.2.1"
 expected_schema_version = 5
 required_capabilities = [
   "scheme-tagged-identities.v1",

@@ -164,7 +164,7 @@ storefront:
                 - scheme: ed25519
                   identifier: 6yzxO_euOl9hQWih-wknLTl3HsS4UjcngV5GbK-O4WM
             expected_manifest_digest: sha256:4859b12cb8703a3c1db85c9636be903f493ae9a9ad1795ffb18a8f801a843a7e
-            expected_api_version: 0.2.0
+            expected_api_version: 0.2.1
             expected_schema_version: 5
             required_capabilities:
               - scheme-tagged-identities.v1

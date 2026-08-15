@@ -275,7 +275,7 @@ enabled = false
 # authority_id = "hosted-authority"
 # environment = "production"
 # expected_manifest_digest = "sha256:<released-manifest-digest>"
-# expected_api_version = "0.2.0"
+# expected_api_version = "0.2.1"
 # expected_schema_version = 5
 # required_capabilities = [
 #   "scheme-tagged-identities.v1",

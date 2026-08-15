@@ -46,7 +46,7 @@
         "environment": {"type": "string", "minLength": 1},
         "authority": {"$ref": "#/definitions/trustedIdentitySet"},
         "expected_manifest_digest": {"pattern": "^sha256:[0-9a-f]{64}$"},
-        "expected_api_version": {"const": "0.2.0"},
+        "expected_api_version": {"const": "0.2.1"},
         "expected_schema_version": {"const": 5},
         "required_capabilities": {
           "const": [
