@@ -14,9 +14,14 @@ from typing import Any
 from arkhai_vms import VmProvisionTerms
 from core_storefront.stage_log import stage_event
 from core_storefront.domain_lifecycle import (
+    StorefrontFulfillmentContext,
+    StorefrontFulfillmentPorts,
     StorefrontSettlementBuildContext,
     build_domain_settlement_artifacts,
+    StorefrontSettlementFulfillmentInput,
+    fulfill_domain,
 )
+from core_storefront.domain_registry import StorefrontThreadBinding
 from market_alkahest import create_alkahest_registration
 from market_core import MarketDomainContract
 from market_core.schemas import (
@@ -55,18 +60,6 @@ from market_storefront.utils import escrow_verification
 logger = logging.getLogger(__name__)
 
 
-@dataclass(frozen=True)
-class VmFulfillmentInput:
-    provision: VmProvisionTerms
-    listing_id: str
-    order: dict[str, Any]
-    negotiation_id: str
-    site_id: str | None
-
-    fulfillment_anchor: str | None = None
-    evidence_mode: str | None = None
-    evidence_resolver_id: str | None = None
-    evidence_client: Any = None
 
 
 @dataclass(frozen=True)
@@ -357,6 +350,7 @@ async def prepare_vm_settlement(
     if not isinstance(obligation_index, int):
         raise ValueError("escrow verification did not identify an exact obligation")
 
+    buyer_principal = Identity.model_validate(thread.get("buyer_principal"))
     obligations = _settlement_plan_obligations(
         domain=domain,
         context=StorefrontSettlementBuildContext(
@@ -367,7 +361,7 @@ async def prepare_vm_settlement(
             proposal=proposal,
             agreed_amount=int(thread["agreed_price"]),
             duration_seconds=provision.duration_seconds,
-            buyer_principal=Identity.model_validate(thread.get("buyer_principal")),
+            buyer_principal=buyer_principal,
             seller_principal=local_principal,
             seller_wallet_address=storefront_config.get_evm_wallet_address(),
             chain_config_paths={
@@ -393,12 +387,14 @@ async def prepare_vm_settlement(
         mechanism_ref=escrow_uid,
         local_principal=local_principal,
         mechanism_receipt={"verified": True},
-        fulfillment_input=VmFulfillmentInput(
-            provision=provision,
-            listing_id=str(listing_id),
-            order=dict(order),
-            negotiation_id=negotiation_id,
-            site_id=thread_binding.site_id,
+        fulfillment_input=StorefrontSettlementFulfillmentInput(
+            buyer_principal=buyer_principal,
+            thread_binding=thread_binding,
+            domain_input={
+                "provision": provision,
+                "listing_id": str(listing_id),
+                "order": dict(order),
+            },
         ),
         projection_context=VmProjectionContext(
             sqlite_client=sqlite_client,
@@ -451,13 +447,18 @@ async def fulfill_vm_settlement(
     mechanism_client: Any,
 ) -> FulfillmentOutcome:
     fulfillment_input = prepared.fulfillment_input
-    if not isinstance(fulfillment_input, VmFulfillmentInput):
-        raise TypeError("VM settlement fulfillment input is missing")
-    fulfillment = domain.fulfillment
-    if fulfillment is None:
-        raise RuntimeError(
-            f"domain {domain.identity!s} has no fulfillment capability"
-        )
+    if not isinstance(
+        fulfillment_input, StorefrontSettlementFulfillmentInput
+    ):
+        raise TypeError("storefront settlement fulfillment input is missing")
+    domain_input = fulfillment_input.domain_input
+    provision = domain_input.get("provision")
+    listing_id = domain_input.get("listing_id")
+    order = domain_input.get("order")
+    if not isinstance(provision, VmProvisionTerms):
+        raise TypeError("VM settlement provision input is missing")
+    if not isinstance(listing_id, str) or not isinstance(order, dict):
+        raise TypeError("VM settlement listing input is missing")
     selected_obligation = prepared.obligations[prepared.selected_obligation_index]
     hosted = selected_obligation.get("mechanism") == "fiat.stripe.v1"
     delivery_client = fulfillment_input.evidence_client if hosted else mechanism_client
@@ -466,21 +467,35 @@ async def fulfill_vm_settlement(
     )
     if not delivery_anchor:
         raise ValueError("settlement fulfillment anchor is unavailable")
-    result = await fulfillment.fulfill(
-        sqlite_client=sqlite_client,
-        client=delivery_client,
-        escrow_uid=delivery_anchor,
-        ssh_public_key=fulfillment_input.provision.ssh_public_key,
-        order=fulfillment_input.order,
-        duration_seconds=fulfillment_input.provision.duration_seconds,
-        start_utc=fulfillment_input.provision.start_utc,
-        listing_id=fulfillment_input.listing_id,
-        negotiation_id=fulfillment_input.negotiation_id,
-        site_id=fulfillment_input.site_id,
-        settlement_mechanism=str(selected_obligation.get("mechanism") or ""),
+    lifecycle = await fulfill_domain(
+        domain,
+        StorefrontFulfillmentContext(
+            thread_binding=fulfillment_input.thread_binding,
+            escrow_uid=delivery_anchor,
+            buyer_principal=fulfillment_input.buyer_principal,
+            ports=StorefrontFulfillmentPorts(
+                repository=sqlite_client,
+                capacity_client=None,
+                fulfillment_client=delivery_client,
+            ),
+            domain_input={
+                "ssh_public_key": provision.ssh_public_key,
+                "order": order,
+                "duration_seconds": provision.duration_seconds,
+                "start_utc": provision.start_utc,
+                "listing_id": listing_id,
+                "settlement_mechanism": str(
+                    selected_obligation.get("mechanism") or ""
+                ),
+            },
+        ),
     )
-    result = dict(result or {})
-    if result.get("status") != "fulfilled":
+    result = (
+        dict(lifecycle.domain_result)
+        if isinstance(lifecycle.domain_result, Mapping)
+        else {}
+    )
+    if lifecycle.state != "fulfilled":
         return FulfillmentOutcome(
             status="failed",
             public_result={
@@ -490,7 +505,7 @@ async def fulfill_vm_settlement(
             private_result=result,
             reason=result.get("message") or f"status={result.get('status')!r}",
         )
-    fulfillment_uid = result.get("fulfillment_uid")
+    fulfillment_uid = lifecycle.fulfillment_id or result.get("fulfillment_uid")
     if not isinstance(fulfillment_uid, str) or not fulfillment_uid.strip():
         return FulfillmentOutcome(
             status="failed",
@@ -502,8 +517,8 @@ async def fulfill_vm_settlement(
     if hosted:
         raw_condition = selected_obligation.get("params", {}).get("condition")
         condition = ConditionDescriptor.model_validate(raw_condition)
-        evidence_mode = fulfillment_input.evidence_mode
-        resolver_id = fulfillment_input.evidence_resolver_id
+        evidence_mode = domain_input.get("evidence_mode")
+        resolver_id = domain_input.get("evidence_resolver_id")
         if evidence_mode not in {"eas.v1", "portable-remote.v1"} or not resolver_id:
             raise ValueError("hosted evidence resolver configuration is unavailable")
         fulfillment_ref = encode_hosted_fulfillment_ref(
@@ -538,6 +553,14 @@ async def persist_vm_settlement_outcome(
     context = prepared.projection_context
     if not isinstance(context, VmProjectionContext):
         raise TypeError("VM settlement projection context is missing")
+    fulfillment_input = prepared.fulfillment_input
+    if not isinstance(
+        fulfillment_input, StorefrontSettlementFulfillmentInput
+    ):
+        raise TypeError("storefront settlement fulfillment input is missing")
+    listing_id = fulfillment_input.domain_input.get("listing_id")
+    if not isinstance(listing_id, str):
+        raise TypeError("VM settlement listing input is missing")
     private = outcome.private_result if isinstance(outcome.private_result, dict) else {}
     if outcome.status == "fulfilled":
         await context.sqlite_client.update_escrow(
@@ -559,7 +582,7 @@ async def persist_vm_settlement_outcome(
             escrow_uid=context.escrow_uid,
             mechanism=prepared.obligations[context.obligation_index].get("mechanism"),
             negotiation_id=context.negotiation_id,
-            listing_id=prepared.fulfillment_input.listing_id,
+            listing_id=listing_id,
             obligation_index=context.obligation_index,
         )
         logger.info("[SETTLE_JOB] Escrow %s provisioning complete", context.escrow_uid)
@@ -1035,6 +1058,9 @@ async def ensure_hosted_fulfillment(
             worker_id=worker_id,
         )
         raise error
+    thread_binding = await sqlite_client.load_thread_binding(
+        negotiation_id=agreement.negotiation_id
+    )
     prepared = PreparedSettlement(
         agreement_ref=agreement.negotiation_id,
         obligations=(agreement.obligation,),
@@ -1042,16 +1068,18 @@ async def ensure_hosted_fulfillment(
         local_principal=composition.local_principal,
         mechanism_ref=str(record.mechanism_ref),
         mechanism_receipt=record.status_receipt,
-        fulfillment_input=VmFulfillmentInput(
-            provision=agreement.provision,
-            listing_id=agreement.listing_id,
-            order=agreement.order,
-            negotiation_id=agreement.negotiation_id,
-            site_id=None,
+        fulfillment_input=StorefrontSettlementFulfillmentInput(
+            buyer_principal=agreement.buyer_principal,
+            thread_binding=thread_binding,
             fulfillment_anchor=record.condition_anchor,
-            evidence_mode=evidence_mode,
-            evidence_resolver_id=resolver_id,
             evidence_client=evidence_client,
+            domain_input={
+                "provision": agreement.provision,
+                "listing_id": agreement.listing_id,
+                "order": agreement.order,
+                "evidence_mode": evidence_mode,
+                "evidence_resolver_id": resolver_id,
+            },
         ),
     )
     try:

@@ -16,6 +16,7 @@ from core_storefront.domain_lifecycle import (
     StorefrontFulfillmentContext,
     StorefrontFulfillmentPorts,
     StorefrontSettlementBuildContext,
+    StorefrontSettlementFulfillmentInput,
     build_domain_settlement_artifacts,
     fulfill_domain,
 )
@@ -92,6 +93,24 @@ def _fulfillment_context(identity: str = "bare_metal.v1") -> StorefrontFulfillme
             fulfillment_client=object(),
         ),
     )
+
+
+def test_prepared_fulfillment_input_freezes_domain_payload_and_redacts_ports():
+    raw = {"listing_id": "listing-1"}
+    evidence_client = object()
+    prepared = StorefrontSettlementFulfillmentInput(
+        thread_binding=_fulfillment_context().thread_binding,
+        buyer_principal=_principal("buyer"),
+        domain_input=raw,
+        fulfillment_anchor="condition-1",
+        evidence_client=evidence_client,
+    )
+    raw["listing_id"] = "changed"
+
+    assert prepared.domain_input == {"listing_id": "listing-1"}
+    assert prepared.site_id == "site-a"
+    assert prepared.evidence_client is evidence_client
+    assert "evidence_client" not in repr(prepared)
 
 
 def test_settlement_builder_receives_one_exact_immutable_context():

@@ -14,6 +14,7 @@ from .domain_lifecycle import (
     StorefrontFulfillmentPorts,
     StorefrontSettlementArtifacts,
     StorefrontSettlementBuildContext,
+    StorefrontSettlementFulfillmentInput,
     build_domain_settlement_artifacts,
     fulfill_domain,
 )
@@ -37,6 +38,7 @@ __all__ = [
     "StorefrontFulfillmentPorts",
     "StorefrontSettlementArtifacts",
     "StorefrontSettlementBuildContext",
+    "StorefrontSettlementFulfillmentInput",
     "PreparedStorefrontDomainArtifact",
     "STOREFRONT_CONTRIBUTION_GROUP",
     "StorefrontContributionSelection",

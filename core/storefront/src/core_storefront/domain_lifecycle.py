@@ -100,6 +100,34 @@ class StorefrontFulfillmentPorts:
     fulfillment_client: Any = field(repr=False)
 
 
+
+
+@dataclass(frozen=True)
+class StorefrontSettlementFulfillmentInput:
+    """Domain-neutral transient input retained by one prepared settlement."""
+
+    thread_binding: StorefrontThreadBinding
+    buyer_principal: Identity
+    domain_input: Mapping[str, Any] = field(repr=False)
+    fulfillment_anchor: str | None = None
+    evidence_client: Any = field(default=None, repr=False)
+
+    def __post_init__(self) -> None:
+        object.__setattr__(
+            self,
+            "domain_input",
+            MappingProxyType(dict(self.domain_input)),
+        )
+
+    @property
+    def negotiation_id(self) -> str:
+        return self.thread_binding.negotiation_id
+
+    @property
+    def site_id(self) -> str:
+        return self.thread_binding.site_id
+
+
 @dataclass(frozen=True)
 class StorefrontFulfillmentContext:
     """Exact accepted binding and public operation identities for fulfillment."""
@@ -108,6 +136,7 @@ class StorefrontFulfillmentContext:
     escrow_uid: str
     buyer_principal: Identity
     ports: StorefrontFulfillmentPorts = field(repr=False)
+    domain_input: Any = field(default=None, repr=False)
 
     def __post_init__(self) -> None:
         if not self.escrow_uid:
@@ -129,12 +158,15 @@ class StorefrontFulfillmentLifecycle:
     negotiation_id: str
     escrow_uid: str
     site_id: str
-    physical_resource_id: str
     state: str
+    physical_resource_id: str | None = None
     capacity_reservation_id: str | None = None
     settlement_resource_id: str | None = None
     fulfillment_id: str | None = None
     failure_reason: str | None = None
+    domain_result: Any = field(default=None, repr=False)
+    fulfillment_ref: str | None = None
+    public_result: Mapping[str, Any] = field(default_factory=dict)
 
     @classmethod
     def from_hook_result(cls, result: Any) -> "StorefrontFulfillmentLifecycle":
@@ -142,13 +174,7 @@ class StorefrontFulfillmentLifecycle:
             raise StorefrontDomainLifecycleError(
                 "selected domain fulfillment hook must return a mapping"
             )
-        required = (
-            "negotiation_id",
-            "escrow_uid",
-            "site_id",
-            "physical_resource_id",
-            "state",
-        )
+        required = ("negotiation_id", "escrow_uid", "site_id", "state")
         missing = tuple(key for key in required if not result.get(key))
         if missing:
             raise StorefrontDomainLifecycleError(
@@ -158,12 +184,15 @@ class StorefrontFulfillmentLifecycle:
             negotiation_id=str(result["negotiation_id"]),
             escrow_uid=str(result["escrow_uid"]),
             site_id=str(result["site_id"]),
-            physical_resource_id=str(result["physical_resource_id"]),
             state=str(result["state"]),
+            physical_resource_id=_optional_text(result.get("physical_resource_id")),
             capacity_reservation_id=_optional_text(result.get("capacity_reservation_id")),
             settlement_resource_id=_optional_text(result.get("settlement_resource_id")),
             fulfillment_id=_optional_text(result.get("fulfillment_id")),
+            fulfillment_ref=_optional_text(result.get("fulfillment_ref")),
+            public_result=MappingProxyType(dict(result.get("public_result") or {})),
             failure_reason=_optional_text(result.get("failure_reason")),
+            domain_result=result.get("domain_result"),
         )
 
 
