@@ -124,6 +124,102 @@ def test_config_write_backups_and_reruns_as_byte_identical_noop(
     assert first.backup_path.read_bytes() == original
 
 
+def test_existing_card_clause_cutover_preserves_order_and_is_idempotent(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "storefront.toml"
+    original = (
+        b"[Pricing]\n"
+        b"settlements = [\n"
+        b'  { mechanism = "alkahest.v1", asset = "0x1111111111111111111111111111111111111111", rate = "1", per = "hour", mechanism_input = { chain = "anvil" } },\n'
+        b'  { mechanism = "fiat.stripe.v1", asset = "usd", rate = "2", per = "hour", mechanism_input = { payment_method_types = ["card"] } },\n'
+        b'  { mechanism = "fiat.stripe.v1", asset = "usd", rate = "3", per = "hour", mechanism_input = { method = "card" } },\n'
+        b"]\n"
+    )
+    path.write_bytes(original)
+
+    checked = migrate_publication_config(path, check=True)
+    assert checked.changed is True
+    assert checked.actions == (
+        "Pricing.settlements[1].mechanism_input <- card.v1",
+        "Pricing.settlements[2].mechanism_input <- card.v1",
+    )
+    assert path.read_bytes() == original
+
+    first = migrate_publication_config(
+        path,
+        write=True,
+        backup=True,
+        validator=lambda _document, role: role == "seller",
+    )
+    migrated = path.read_bytes()
+    clauses = tomllib.loads(migrated.decode())["Pricing"]["settlements"]
+    assert [clause["mechanism"] for clause in clauses] == [
+        "alkahest.v1",
+        "fiat.stripe.v1",
+        "fiat.stripe.v1",
+    ]
+    assert clauses[1]["mechanism_input"] == {
+        "funding_profile": "card.v1",
+        "interaction": "interactive",
+        "funds_flow": "separate_charges_transfers",
+    }
+    assert clauses[2]["mechanism_input"] == clauses[1]["mechanism_input"]
+    assert first.backup_path is not None
+    assert first.backup_path.read_bytes() == original
+
+    second = migrate_publication_config(
+        path,
+        write=True,
+        backup=True,
+        validator=lambda *_args: pytest.fail("idempotent rerun must not validate"),
+    )
+    assert second.changed is False
+    assert second.written is False
+    assert path.read_bytes() == migrated
+
+
+@pytest.mark.parametrize(
+    "mechanism_input",
+    (
+        'method = "card", funding_profile = "card.v1"',
+        'method = "card", payment_method_types = ["card"]',
+        'payment_method_types = ["card", "us_bank_account"]',
+        'method = "ach"',
+        'method = "card", provider = "stripe"',
+        'funding_profile = "card.v1"',
+        'funding_profile = "card.v1", interaction = "interactive", funds_flow = "separate_charges_transfers", provider = "stripe"',
+    ),
+)
+def test_existing_card_clause_ambiguous_or_unsupported_input_is_atomic(
+    tmp_path: Path,
+    mechanism_input: str,
+) -> None:
+    path = tmp_path / "storefront.toml"
+    original = (
+        "[Pricing]\n"
+        "settlements = [\n"
+        '  { mechanism = "fiat.stripe.v1", asset = "usd", rate = "2", per = "hour", '
+        f"mechanism_input = {{ {mechanism_input} }} }},\n"
+        "]\n"
+    ).encode()
+    path.write_bytes(original)
+
+    checked = migrate_publication_config(path, check=True)
+    assert checked.changed is False
+    assert checked.conflicts
+    assert path.read_bytes() == original
+    with pytest.raises(SettlementMigrationValidationError):
+        migrate_publication_config(
+            path,
+            write=True,
+            backup=True,
+            validator=lambda *_args: None,
+        )
+    assert path.read_bytes() == original
+    assert not path.with_name("storefront.toml.bak").exists()
+
+
 def test_config_dual_mechanism_conflict_never_mutates(tmp_path: Path) -> None:
     path = tmp_path / "storefront.toml"
     original = (

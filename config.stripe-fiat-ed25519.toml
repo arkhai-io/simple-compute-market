@@ -65,7 +65,10 @@ enabled = true
 base_url = "http://127.0.0.1:8080"
 authority_id = "local-hosted-authority"
 environment = "e2e"
-expected_manifest_digest = "sha256:4859b12cb8703a3c1db85c9636be903f493ae9a9ad1795ffb18a8f801a843a7e"
+account_ref = "replace-with-hosted-account-ref"
+# Operator-required placeholder: generate the deployed file from the independently
+# verified producer manifest; this value intentionally cannot activate a release.
+expected_manifest_digest = "sha256:0000000000000000000000000000000000000000000000000000000000000000"
 expected_api_version = "0.2.0"
 expected_schema_version = 5
 required_capabilities = [
@@ -89,9 +92,19 @@ required_capabilities = [
 ]
 currency = "usd"
 country = "US"
+condition_profile = "vm-fulfillment"
 request_timeout_seconds = 10.0
 preflight_timeout_seconds = 5.0
 allow_insecure_loopback = true
 
 [Settlement.stripe.authority]
 principals = [{ scheme = "ed25519", identifier = "6yzxO_euOl9hQWih-wknLTl3HsS4UjcngV5GbK-O4WM" }]
+
+[Settlement.stripe.condition_profiles.vm-fulfillment]
+condition_id = "vm-fulfillment"
+evaluator = { kind = "builtin.v1", version = "trivial.v1", resolver_id = "vm-portable", params = { kind = "trivial" } }
+demand = { encoding = "application/jcs+json", value = {} }
+
+[Settlement.stripe.resolvers.vm-portable]
+chain_name = "fiat.stripe.v1"
+evidence_mode = "portable-remote.v1"

@@ -33,6 +33,13 @@ def test_fiat_compose_uses_canonical_public_config_without_evm_resources() -> No
     assert stripe["expected_schema_version"] == 5
     assert stripe["currency"] == "usd"
     assert stripe["country"] == "US"
+    assert stripe["account_ref"] == "replace-with-hosted-account-ref"
+    assert stripe["expected_manifest_digest"] == "sha256:" + ("0" * 64)
+    assert stripe["condition_profile"] in stripe["condition_profiles"]
+    resolver_id = stripe["condition_profiles"][stripe["condition_profile"]]["evaluator"][
+        "resolver_id"
+    ]
+    assert resolver_id in stripe["resolvers"]
     clauses = config["pricing"]["settlements"]
     assert [clause["mechanism_input"]["funding_profile"] for clause in clauses] == [
         "card.v1",
@@ -69,7 +76,8 @@ def test_fiat_compose_uses_canonical_public_config_without_evm_resources() -> No
         encoding="utf-8"
     )
     assert "VMS_BOB_STRIPE_STOREFRONT_CONFIG" in compose
-    assert "config.stripe-fiat-ed25519.toml" in compose
+    assert "set generated release-pinned storefront config" in compose
+    assert "config.stripe-fiat-ed25519.toml" not in compose
     assert "VMS_BOB_HOSTED_STOREFRONT_CONFIG" not in compose
     for forbidden in (
         "checkout.stripe.com",
@@ -78,6 +86,37 @@ def test_fiat_compose_uses_canonical_public_config_without_evm_resources() -> No
         "bank_instructions",
     ):
         assert forbidden not in compose
+
+def test_protected_buyer_policy_is_disabled_bounded_and_buyer_only() -> None:
+    buyer = _toml("e2e-tests/config/hosted-buyer.toml")
+    policy = buyer["Settlement"]["stripe"]["off_session_policy"]
+    assert policy == {
+        "enabled": False,
+        "mode": "saved_instrument",
+        "authority_id": "local-e2e-hosted-authority",
+        "environment": "local-e2e",
+        "funding_profile": "card.v1",
+        "currency": "usd",
+        "max_purchase_minor_units": 10000,
+        "max_aggregate_minor_units": 50000,
+        "window_kind": "rolling",
+        "window_seconds": 86400,
+        "seller_principals": [],
+    }
+    assert buyer["Settlement"]["stripe"]["authorization_journal_path"].startswith("/")
+    storefront = _toml("e2e-tests/config/hosted-storefront.toml")
+    assert "off_session_policy" not in storefront["Settlement"]["stripe"]
+    assert "authorization_journal_path" not in storefront["Settlement"]["stripe"]
+    serialized = str(buyer).lower()
+    for forbidden in (
+        "payer_profile_ref",
+        "instrument_ref",
+        "payment_method",
+        "client_secret",
+        "action_url",
+        "bank_instructions",
+    ):
+        assert forbidden not in serialized
 
 
 def test_alkahest_profiles_keep_policy_outside_chains() -> None:

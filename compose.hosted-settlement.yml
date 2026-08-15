@@ -90,7 +90,7 @@ services:
       - path: ${VMS_BOB_IDENTITY_ENV_FILE:?set signer credential environment file}
         required: true
     volumes:
-      - ${VMS_BOB_STRIPE_STOREFRONT_CONFIG:-./config.stripe-fiat-ed25519.toml}:/etc/arkhai/storefront.toml:ro
+      - ${VMS_BOB_STRIPE_STOREFRONT_CONFIG:?set generated release-pinned storefront config}:/etc/arkhai/storefront.toml:ro
       - ${PWD}/e2e-tests/config/hosted-resources.csv:/app/hosted-resources.csv:ro
 
 volumes:

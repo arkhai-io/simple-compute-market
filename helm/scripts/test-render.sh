@@ -29,6 +29,15 @@ helm template "$RELEASE-dual" "$CHART_DIR" \
     --set-json 'storefront.agents[0].config.settlement.priority=["fiat.stripe.v1","alkahest.v1"]' \
     --set 'storefront.agents[0].config.settlement.stripe.enabled=true' \
     --set-string 'storefront.agents[0].config.settlement.stripe.base_url=https://hosted-settlement.example.test' \
+    --set-string 'storefront.agents[0].config.settlement.stripe.authority_id=hosted-authority' \
+    --set-string 'storefront.agents[0].config.settlement.stripe.environment=test' \
+    --set-string 'storefront.agents[0].config.settlement.stripe.account_ref=account-protected' \
+    --set-string 'storefront.agents[0].config.settlement.stripe.currency=usd' \
+    --set-string 'storefront.agents[0].config.settlement.stripe.country=US' \
+    --set-string 'storefront.agents[0].config.settlement.stripe.condition_profile=vm-fulfillment' \
+    --set-json 'storefront.agents[0].config.settlement.stripe.condition_profiles={"vm-fulfillment":{"condition_id":"vm-fulfillment","evaluator":{"kind":"builtin.v1","version":"trivial.v1","resolver_id":"vm-portable","params":{"kind":"trivial"}},"demand":{"encoding":"application/jcs+json","value":{}}}}' \
+    --set-json 'storefront.agents[0].config.settlement.stripe.resolvers={"vm-portable":{"chain_name":"fiat.stripe.v1","evidence_mode":"portable-remote.v1"}}' \
+    --set-json 'storefront.agents[0].config.pricing={"default_min_price":"1","default_token_address":"","default_max_duration_seconds":0,"settlements":[{"mechanism":"alkahest.v1","asset":"0x0000000000000000000000000000000000000001","rate":"1","per":"hour","mechanism_input":{"chain":"anvil"}},{"mechanism":"fiat.stripe.v1","asset":"usd","rate":"100","per":"hour","mechanism_input":{"funding_profile":"card.v1","interaction":"interactive","funds_flow":"separate_charges_transfers"}}]}' \
     --set-string 'storefront.agents[0].config.settlement.stripe.expected_manifest_digest=sha256:4859b12cb8703a3c1db85c9636be903f493ae9a9ad1795ffb18a8f801a843a7e' \
     --set-string 'storefront.agents[0].config.settlement.stripe.expected_api_version=0.2.0' \
     --set 'storefront.agents[0].config.settlement.stripe.expected_schema_version=5' \
@@ -155,6 +164,12 @@ expect_present "$FIAT_CONFIGMAP" 'funding-profile\.card\.v1' "fiat profile pins 
 expect_present "$FIAT_CONFIGMAP" 'funding-profile\.us_bank_transfer\.v1' "fiat profile pins push-transfer funding capability"
 expect_present "$FIAT_CONFIGMAP" 'funding-profile\.us_ach_debit\.v1' "fiat profile pins ACH funding capability"
 expect_present "$FIAT_CONFIGMAP" 'country = "US"' "fiat profile pins US country policy"
+expect_present "$FIAT_CONFIGMAP" '\[pricing\]' "fiat profile renders ordered public pricing"
+expect_present "$FIAT_CONFIGMAP" '"funding_profile" = "card\.v1".*"funding_profile" = "us_bank_transfer\.v1".*"funding_profile" = "us_ach_debit\.v1"' "fiat profile preserves three distinct funding clauses"
+expect_present "$FIAT_CONFIGMAP" 'account_ref = "account-protected"' "fiat profile renders the authority account reference"
+expect_present "$FIAT_CONFIGMAP" 'condition_profile = "vm-fulfillment"' "fiat profile selects an explicit condition profile"
+expect_present "$FIAT_CONFIGMAP" '\[Settlement\.stripe\.condition_profiles\."vm-fulfillment"\]' "fiat profile renders condition details"
+expect_present "$FIAT_CONFIGMAP" '\[Settlement\.stripe\.resolvers\."vm-portable"\]' "fiat profile renders resolver mapping"
 expect_present "$FIAT_DEPLOYMENT" 'name: +\"?fiat-bob-marketplace-identity\"?' "fiat signer comes from a Secret reference"
 expect_absent "$FIAT_CONFIGMAP" '\[Wallet\]|\[Chains\.|rpc_url|(^|[[:space:]])(provider|webhook|database|migration)[[:space:]]*=' "fiat storefront config omits EVM and authority-provider configuration"
 expect_absent "$FIAT_CONFIGMAP" 'hostedSettlement|hosted_settlement|settlement\.hosted' "fiat storefront config rejects legacy hierarchy"
@@ -228,6 +243,10 @@ expect_override_failure \
     --set-string 'storefront.agents[0].config.settlement.stripe.webhook_secret=forbidden'
 expect_override_failure \
     "$CHART_DIR/fixtures/fiat-ed25519-values.yaml" \
+    "buyer off-session policy fails storefront role schema/render" \
+    --set 'storefront.agents[0].config.settlement.stripe.off_session_policy.enabled=false'
+expect_override_failure \
+    "$CHART_DIR/fixtures/fiat-ed25519-values.yaml" \
     "image and config schema mismatch fails render" \
     --set 'storefront.image.settlementConfigSchemaVersion=2'
 expect_override_failure \
@@ -235,6 +254,22 @@ expect_override_failure \
     "Alkahest without wallet Secret fails schema/render" \
     --set-string 'storefront.agents[0].secret.secretName='
 
+expect_override_failure \
+    "$CHART_DIR/fixtures/fiat-ed25519-values.yaml" \
+    "missing seller account binding fails schema/render" \
+    --set-string 'storefront.agents[0].config.settlement.stripe.account_ref='
+expect_override_failure \
+    "$CHART_DIR/fixtures/fiat-ed25519-values.yaml" \
+    "condition resolver mismatch fails schema/render" \
+    --set-string 'storefront.agents[0].config.settlement.stripe.condition_profile=missing'
+expect_override_failure \
+    "$CHART_DIR/fixtures/fiat-ed25519-values.yaml" \
+    "invalid funding profile fails schema/render" \
+    --set-string 'storefront.agents[0].config.pricing.settlements[0].mechanism_input.funding_profile=card'
+expect_override_failure \
+    "$CHART_DIR/fixtures/fiat-ed25519-values.yaml" \
+    "enabled Stripe without publication pricing fails schema/render" \
+    --set-json 'storefront.agents[0].config.pricing=null'
 if [[ $errors -gt 0 ]]; then
     echo "$errors assertion(s) failed" >&2
     exit 1

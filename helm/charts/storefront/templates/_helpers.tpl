@@ -195,6 +195,7 @@ principals = [{{ range $i, $principal := $principals }}{{ if $i }}, {{ end }}{ s
 {{- $provIdentity := $prov.identity | default dict -}}
 {{- $neg := $seller.negotiation | default dict -}}
 {{- $settlement := $cfg.settlement | default dict -}}
+{{- $pricing := $cfg.pricing | default dict -}}
 {{- $stripe := $settlement.stripe | default dict -}}
 {{- $alkahest := $settlement.alkahest | default dict -}}
 {{- $registryAuthority := $cfg.registryAuthority | default dict -}}
@@ -244,6 +245,18 @@ principals = [{{ range $i, $principal := $principals }}{{ if $i }}, {{ end }}{ s
   {{- end -}}
 {{- end -}}
 {{- $expectedAuthority := $stripe.authority | default dict -}}
+{{- if $stripe.enabled -}}
+  {{- $conditionProfile := required "enabled Stripe settlement requires condition_profile" $stripe.condition_profile -}}
+  {{- if not (hasKey ($stripe.condition_profiles | default dict) $conditionProfile) -}}
+    {{- fail "enabled Stripe settlement condition_profile must name a configured condition profile" -}}
+  {{- end -}}
+  {{- $condition := index $stripe.condition_profiles $conditionProfile -}}
+  {{- $evaluator := $condition.evaluator | default dict -}}
+  {{- $resolverID := required "enabled Stripe condition profile evaluator requires resolver_id" $evaluator.resolver_id -}}
+  {{- if not (hasKey ($stripe.resolvers | default dict) $resolverID) -}}
+    {{- fail "enabled Stripe condition profile resolver_id must name a configured resolver" -}}
+  {{- end -}}
+{{- end -}}
 # Rendered by the storefront helm chart (ConfigMap layer — non-sensitive).
 # Source of truth lives in helm/charts/storefront/values.yaml under agents:.
 # Sensitive values come from the Secret overlay (storefront.secrets.toml).
@@ -318,6 +331,20 @@ poll_interval = {{ $prov.pollInterval | int }}
 
 [provisioning.identity]
 {{ include "storefront.principalsToml" (dict "label" "provisioning identity" "principals" $provIdentity.principals) }}
+
+{{- if $pricing }}
+[pricing]
+{{- if hasKey $pricing "default_min_price" }}
+default_min_price = {{ include "storefront.tomlLiteral" $pricing.default_min_price }}
+{{- end }}
+{{- if hasKey $pricing "default_token_address" }}
+default_token_address = {{ include "storefront.tomlLiteral" $pricing.default_token_address }}
+{{- end }}
+{{- if hasKey $pricing "default_max_duration_seconds" }}
+default_max_duration_seconds = {{ $pricing.default_max_duration_seconds | int }}
+{{- end }}
+settlements = {{ include "storefront.tomlLiteral" $pricing.settlements }}
+{{- end }}
 
 [Settlement]
 schema_version = {{ $settlement.schema_version | default 1 }}

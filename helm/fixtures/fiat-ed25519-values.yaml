@@ -112,6 +112,35 @@ storefront:
               - escrow_shape_guard
               - bisection
           integrations: {}
+        pricing:
+          default_min_price: "100"
+          default_token_address: ""
+          default_max_duration_seconds: 0
+          settlements:
+            - mechanism: fiat.stripe.v1
+              asset: usd
+              rate: "100"
+              per: hour
+              mechanism_input:
+                funding_profile: card.v1
+                interaction: interactive
+                funds_flow: separate_charges_transfers
+            - mechanism: fiat.stripe.v1
+              asset: usd
+              rate: "100"
+              per: hour
+              mechanism_input:
+                funding_profile: us_bank_transfer.v1
+                interaction: interactive
+                funds_flow: separate_charges_transfers
+            - mechanism: fiat.stripe.v1
+              asset: usd
+              rate: "100"
+              per: hour
+              mechanism_input:
+                funding_profile: us_ach_debit.v1
+                interaction: interactive
+                funds_flow: separate_charges_transfers
         settlement:
           schema_version: 1
           priority: ["fiat.stripe.v1"]
@@ -120,6 +149,7 @@ storefront:
             base_url: https://hosted-settlement.example.test
             authority_id: hosted-authority
             environment: test
+            account_ref: account-protected
             authority:
               principals:
                 - scheme: ed25519
@@ -147,8 +177,23 @@ storefront:
               - operator-recovery-redaction.v1
             currency: usd
             country: US
+            condition_profile: vm-fulfillment
             request_timeout_seconds: 10.0
             preflight_timeout_seconds: 5.0
             allow_insecure_loopback: false
-            condition_profiles: {}
-            resolvers: {}
+            condition_profiles:
+              vm-fulfillment:
+                condition_id: vm-fulfillment
+                evaluator:
+                  kind: builtin.v1
+                  version: trivial.v1
+                  resolver_id: vm-portable
+                  params:
+                    kind: trivial
+                demand:
+                  encoding: application/jcs+json
+                  value: {}
+            resolvers:
+              vm-portable:
+                chain_name: fiat.stripe.v1
+                evidence_mode: portable-remote.v1
