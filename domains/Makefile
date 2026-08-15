@@ -37,13 +37,13 @@ dist-bare-metal: ## Build arkhai-bare-metal wheel into .dist/
 	@ls $(DIST_DIR)/arkhai_bare_metal-*-none-any.whl > /dev/null 2>&1 || \
 		(echo "ERROR: arkhai-bare-metal produced a platform-specific wheel -- must build inside Docker" && exit 1)
 
-dist-bare-metal-storefront: dist-bare-metal ## Build the independent bare-metal storefront wheel
+dist-bare-metal-storefront: dist-bare-metal ## Build the bare-metal storefront contribution wheel into .dist/
 	-mkdir -p $(DIST_DIR)
 	cd bare_metal/storefront && uv build --wheel --out-dir $(DIST_DIR)
 	@ls $(DIST_DIR)/arkhai_bare_metal_storefront-*-none-any.whl > /dev/null 2>&1 || \
 		(echo "ERROR: arkhai-bare-metal-storefront produced a platform-specific wheel -- must build inside Docker" && exit 1)
 
-dist-storefront: ## Build arkhai-vms-storefront wheel into .dist/ (needs kit wheels -- see root Makefile)
+dist-storefront: dist-vms dist-bare-metal-storefront ## Build the combined compute-family storefront wheel into .dist/
 	-mkdir -p $(DIST_DIR)
 	cd vms/storefront && uv build --wheel --out-dir $(DIST_DIR)
 	@ls $(DIST_DIR)/arkhai_vms_storefront-*-none-any.whl > /dev/null 2>&1 || \

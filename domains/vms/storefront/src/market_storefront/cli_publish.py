@@ -776,26 +776,24 @@ def _bare_metal_publication_source_kwargs() -> dict[str, Any]:
 
 
 def _publication_source_selection(
-    source_names: tuple[str, ...] = ("vms",),
     command_settlements: tuple[SettlementPublicationClause, ...] | None = None,
 ) -> PublicationSourceSelection:
-    """Storefront publication source selection.
+    """Build all sources from the configured frozen contribution registry."""
+    from market_storefront.utils.config import storefront_domain_registry
 
-    The legacy VM CLI still defaults to VM slice publication only. Passing
-    selected source names lets the core composition helper build bare-metal or
-    combined source selections without making the VM adapter own bare-metal
-    semantics.
-    """
     return build_storefront_publication_selection(
-        source_names=source_names,
+        registry=storefront_domain_registry(),
         vm_callbacks=_vm_publication_source_callbacks(command_settlements),
         bare_metal_callbacks=_bare_metal_publication_source_callbacks(),
     )
 
 
 def _bare_metal_publication_source_selection() -> PublicationSourceSelection:
-    """Bare-metal-only publication selection for future composition roots."""
+    """Build the explicitly configured bare-metal-only registry selection."""
+    from market_storefront.utils.config import storefront_domain_registry
+
     return build_bare_metal_storefront_publication_selection(
+        storefront_domain_registry(),
         _bare_metal_publication_source_callbacks(),
     )
 

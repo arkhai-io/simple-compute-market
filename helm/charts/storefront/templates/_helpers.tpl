@@ -199,6 +199,10 @@ principals = [{{ range $i, $principal := $principals }}{{ if $i }}, {{ end }}{ s
 {{- $stripe := $settlement.stripe | default dict -}}
 {{- $alkahest := $settlement.alkahest | default dict -}}
 {{- $registryAuthority := $cfg.registryAuthority | default dict -}}
+{{- $domains := required "storefront config.storefrontDomains requires at least one explicit registration" $cfg.storefrontDomains -}}
+{{- if lt (len $domains) 1 -}}
+  {{- fail "storefront config.storefrontDomains requires at least one explicit registration" -}}
+{{- end -}}
 {{- if ne (int ($root.Values.image.settlementConfigSchemaVersion | default 0)) (int ($settlement.schema_version | default 0)) -}}
   {{- fail "storefront image and Settlement config schema versions must match" -}}
 {{- end -}}
@@ -271,6 +275,14 @@ log_file_path       = {{ $seller.logFilePath | quote }}
 resources_csv_path  = {{ $seller.resourcesCsvPath | quote }}
 {{- end }}
 auto_register       = {{ $agent.autoRegister | default true }}
+{{- range $index, $domain := $domains }}
+
+[[storefront_domains]]
+contribution = {{ required (printf "storefrontDomains[%d].contribution is required" $index) $domain.contribution | quote }}
+offering_mode = {{ required (printf "storefrontDomains[%d].offeringMode is required" $index) $domain.offeringMode | quote }}
+domain_identity = {{ required (printf "storefrontDomains[%d].domainIdentity is required" $index) $domain.domainIdentity | quote }}
+contract_version = {{ required (printf "storefrontDomains[%d].contractVersion is required" $index) $domain.contractVersion | quote }}
+{{- end }}
 
 [Identity.principal]
 scheme = {{ required "storefront agent identity.principal.scheme is required" $identity.principal.scheme | quote }}

@@ -568,7 +568,7 @@ class ListingService:
         ) = await compute_round_zero_decision(
             repository=self._db,
             registry=self._registry,
-            binding=self._binding,
+            binding=listing_binding.binding,
             domain=domain,
             capacity_runtime=self._capacity_runtime,
             listing=listing,

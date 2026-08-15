@@ -23,7 +23,7 @@ import tempfile
 import pytest
 from market_identity import Identity
 
-from market_storefront.domain_runtime import build_vm_storefront_domain
+from market_storefront.domain_runtime import build_vm_storefront_domain, build_vm_storefront_registry
 from market_storefront.utils.sqlite_client import (
     SQLiteClient,
     synthesize_accepted_escrows_from_demand,
@@ -177,7 +177,7 @@ def test_synthesize_returns_none_when_alkahest_unavailable(monkeypatch):
 
 def test_upsert_listing_stores_explicit_accepted_escrows(tmp_db_path):
     """Caller-supplied accepted_escrows is round-tripped."""
-    db = SQLiteClient(tmp_db_path, domain=build_vm_storefront_domain())
+    db = SQLiteClient(tmp_db_path, registry=build_vm_storefront_registry(build_vm_storefront_domain()))
     explicit = [{
         "chain_name": "base_sepolia",
         "escrow_address": "0x" + "11" * 20,

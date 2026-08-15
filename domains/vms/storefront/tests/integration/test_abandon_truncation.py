@@ -14,14 +14,14 @@ import pytest
 from market_storefront.settlement_composition import (
     truncate_lease_for_terminal_settlement,
 )
-from market_storefront.domain_runtime import build_vm_storefront_domain
+from market_storefront.domain_runtime import build_vm_storefront_domain, build_vm_storefront_registry
 from market_storefront.utils.sqlite_client import SQLiteClient
 from tests.fake_site import FakeSite, site_capacity
 
 
 @pytest.fixture
 def db(tmp_path):
-    return SQLiteClient(db_path=str(tmp_path / "abandon-test.db"), domain=build_vm_storefront_domain())
+    return SQLiteClient(db_path=str(tmp_path / "abandon-test.db"), registry=build_vm_storefront_registry(build_vm_storefront_domain()))
 
 
 @pytest.mark.asyncio

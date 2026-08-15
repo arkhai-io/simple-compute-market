@@ -449,6 +449,16 @@ class StorefrontDomainRegistry:
     def by_offering_mode(self) -> Mapping[str, StorefrontDomainRegistration]:
         return self._by_mode
 
+    def resolve_mode(self, offering_mode: str) -> StorefrontDomainRegistration:
+        """Resolve an explicit new-work mode to its pre-registered contract."""
+
+        try:
+            return self._by_mode[offering_mode]
+        except KeyError as exc:
+            raise StorefrontDomainBindingError(
+                f"unknown storefront offering mode {offering_mode!r}"
+            ) from exc
+
     def projection(self) -> tuple[StorefrontDomainProjection, ...]:
         return tuple(
             StorefrontDomainProjection(
@@ -503,6 +513,11 @@ class StorefrontDomainRegistry:
         contract: MarketDomainContract,
     ) -> StorefrontDomainRegistration:
         """Return the exact pre-registered object; reconstructed peers fail."""
+        if not isinstance(contract, MarketDomainContract):
+            raise StorefrontDomainBindingError(
+                "contract resolution requires the exact startup-owned "
+                "MarketDomainContract object"
+            )
 
         key = DomainContractKey(
             contract.identity,

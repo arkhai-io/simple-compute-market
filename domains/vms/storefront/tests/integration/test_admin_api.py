@@ -38,7 +38,7 @@ from domains.vms.listings.reconciler import (
     mark_derived_listings_closed,
     record_derived_listing,
 )
-from market_storefront.domain_runtime import build_vm_storefront_domain
+from market_storefront.domain_runtime import build_vm_storefront_domain, build_vm_storefront_registry
 from market_storefront.utils.sqlite_client import SQLiteClient
 
 from market_storefront.services.system_service import SystemService
@@ -67,7 +67,7 @@ _SERVICE_PRINCIPALS = TrustedIdentitySet(identities=(_SERVICE_SIGNER.identity,))
 
 @pytest_asyncio.fixture
 async def db(tmp_path) -> SQLiteClient:
-    return SQLiteClient(db_path=str(tmp_path / "admin_test.db"), domain=build_vm_storefront_domain())
+    return SQLiteClient(db_path=str(tmp_path / "admin_test.db"), registry=build_vm_storefront_registry(build_vm_storefront_domain()))
 
 
 @pytest_asyncio.fixture(autouse=True)

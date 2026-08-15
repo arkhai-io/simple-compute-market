@@ -26,7 +26,7 @@ from market_storefront.settlement_composition import (
     reserve_vm_settlement_start,
     serialize_settlement_job,
 )
-from market_storefront.domain_runtime import build_vm_storefront_domain
+from market_storefront.domain_runtime import build_vm_storefront_domain, build_vm_storefront_registry
 from market_storefront.utils.sqlite_client import SQLiteClient
 
 _BUYER_SIGNER = Ed25519Signer(b"\x31" * 32)
@@ -90,10 +90,7 @@ def _prepared(db: SQLiteClient, *, escrow_uid: str = "0xescrow") -> PreparedSett
 
 @pytest.fixture
 def db(tmp_path):
-    return SQLiteClient(
-        db_path=str(tmp_path / "vm-settlement.db"),
-        domain=build_vm_storefront_domain(),
-    )
+    return SQLiteClient(db_path=str(tmp_path / "vm-settlement.db"), registry=build_vm_storefront_registry(build_vm_storefront_domain()))
 
 
 def test_storefront_installs_both_mechanism_registrations():
@@ -216,10 +213,7 @@ async def test_prepare_pins_the_exact_verified_obligation(tmp_path, monkeypatch)
             },
         ),
     )
-    db = SQLiteClient(
-        db_path=str(tmp_path / "injected-plan.db"),
-        domain=domain,
-    )
+    db = SQLiteClient(db_path=str(tmp_path / "injected-plan.db"), registry=build_vm_storefront_registry(domain))
     db.load_negotiation_thread_row = AsyncMock(
         return_value={
             "negotiation_id": "neg-1",
@@ -302,7 +296,7 @@ async def test_prepare_hosted_rejects_the_removed_legacy_start_route(db, monkeyp
         match="accepted settlement endpoint",
     ):
         await prepare_vm_settlement(
-            domain=db.market_domain,
+            domain=db.domain_registry.resolve_mode("vm").contract,
             escrow_uid="settlement-1",
             negotiation_id="neg-hosted",
             local_principal=_SELLER,
@@ -343,7 +337,7 @@ async def test_prepare_rejects_missing_accepted_proposal_without_fallback(
 
     with pytest.raises(ValueError, match="no persisted accepted escrow proposal"):
         await prepare_vm_settlement(
-            domain=db.market_domain,
+            domain=db.domain_registry.resolve_mode("vm").contract,
             escrow_uid="0xverified",
             negotiation_id="neg-1",
             local_principal=_SELLER,
@@ -401,10 +395,7 @@ async def test_fulfillment_keeps_private_delivery_out_of_public_runtime_result(
         domain,
         fulfillment=replace(domain.fulfillment, fulfill=fulfill),
     )
-    db = SQLiteClient(
-        db_path=str(tmp_path / "injected-fulfillment.db"),
-        domain=domain,
-    )
+    db = SQLiteClient(db_path=str(tmp_path / "injected-fulfillment.db"), registry=build_vm_storefront_registry(domain))
     prepared = _prepared(db)
 
     outcome = await fulfill_vm_settlement(

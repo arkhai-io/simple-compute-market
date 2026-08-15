@@ -13,9 +13,9 @@ import pytest
 
 @pytest.fixture
 def client(tmp_path):
-    from market_storefront.domain_runtime import build_vm_storefront_domain
+    from market_storefront.domain_runtime import build_vm_storefront_domain, build_vm_storefront_registry
     from market_storefront.utils.sqlite_client import SQLiteClient
-    return SQLiteClient(db_path=str(tmp_path / "pubs.db"), domain=build_vm_storefront_domain())
+    return SQLiteClient(db_path=str(tmp_path / "pubs.db"), registry=build_vm_storefront_registry(build_vm_storefront_domain()))
 
 
 class TestUpsertPublication:

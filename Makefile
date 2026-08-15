@@ -44,7 +44,7 @@ VERIFY_HOSTED_RELEASE = uv run --no-project --with 'eth-account>=0.13,<0.14' \
 	--manifest $(HOSTED_RELEASE_MANIFEST) \
 	--wheel $(HOSTED_CLIENT_WHEEL)
 
-.PHONY: review-wheelhouse review-wheelhouse-scope build build-dev build-seller build-apicredits-service build-apicredits-storefront build-apicredits-sample-app test test-core test-provisioning test-provisioning-iac test-registry test-storefront test-vms-buyer test-apicredits test-apicredits-middleware test-kits dist dist-storefront-client dist-policy dist-compute-provisioning dist-compute-provisioning-service dist-kits dist-hosted-client verify-hosted-release dist-registry-client dist-registry dist-identity dist-core dist-arkhai-core-buyer dist-arkhai-core-storefront dist-alkahest dist-config dist-clean init init-prerequisites init-submodules init-zero-tier init-buyer init-storefront init-arkhai-core-registry push-runtime-artifacts push-images push-dev-images push-helm push-wheelhouse
+.PHONY: review-wheelhouse review-wheelhouse-scope build build-dev build-seller build-apicredits-service build-apicredits-storefront build-apicredits-sample-app test test-core test-provisioning test-provisioning-iac test-registry test-storefront test-vms-buyer test-apicredits test-apicredits-middleware test-kits dist dist-storefront-client dist-policy dist-compute-provisioning dist-compute-provisioning-service dist-kits dist-hosted-client verify-hosted-release dist-registry-client dist-registry dist-identity dist-core dist-arkhai-core-buyer dist-arkhai-core-storefront dist-bare-metal-storefront dist-alkahest dist-config dist-clean init init-prerequisites init-submodules init-zero-tier init-buyer init-storefront init-arkhai-core-registry push-runtime-artifacts push-images push-dev-image
 .PHONY: test-release-tooling test-deployment-packaging prepare-hosted-compose hosted-preflight hosted-compose-up hosted-compose-restart hosted-compose-clean hosted-stripe-test hosted-stripe-test-stop
 .PHONY: dist-arkhai-core-registry
 .PHONY: build-bare-metal-storefront
@@ -128,6 +128,9 @@ dist-arkhai-core-storefront: ## Build arkhai-core-storefront wheel into .dist/
 	cd core/storefront && uv build --wheel --out-dir $(DIST_DIR)
 	@ls $(DIST_DIR)/arkhai_core_storefront-*-none-any.whl > /dev/null 2>&1 || \
 		(echo "ERROR: arkhai-core-storefront produced a platform-specific wheel — must build inside Docker" && exit 1)
+
+dist-bare-metal-storefront: dist-core dist-arkhai-core-storefront dist-kits ## Build the bare-metal storefront contribution wheel.
+	cd domains && $(MAKE) dist-bare-metal-storefront DIST_DIR=$(DIST_DIR)
 
 verify-hosted-release: ## Verify the staged signed production release and exact client wheel.
 	$(VERIFY_HOSTED_RELEASE)

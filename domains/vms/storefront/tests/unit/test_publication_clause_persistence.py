@@ -4,14 +4,14 @@ from datetime import datetime
 
 import pytest
 
-from market_storefront.domain_runtime import build_vm_storefront_domain
+from market_storefront.domain_runtime import build_vm_storefront_domain, build_vm_storefront_registry
 from market_storefront.utils.sqlite_client import SQLiteClient
 from tests.fake_site import TEST_MARKETPLACE_SIGNER
 
 
 @pytest.mark.asyncio
 async def test_listing_round_trips_canonical_publication_clauses(tmp_path) -> None:
-    db = SQLiteClient(db_path=str(tmp_path / "storefront.db"), domain=build_vm_storefront_domain())
+    db = SQLiteClient(db_path=str(tmp_path / "storefront.db"), registry=build_vm_storefront_registry(build_vm_storefront_domain()))
     now = datetime.now().isoformat()
     clauses = [
         {

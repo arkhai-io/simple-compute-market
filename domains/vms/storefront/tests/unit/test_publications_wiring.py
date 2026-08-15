@@ -19,7 +19,7 @@ from core_storefront.models.listing_models import CreateListingRequest
 from market_storefront.services import publication_service
 from core_storefront.multi_registry_client import PublishResult
 from market_storefront.utils.config import BASE_URL_OVERRIDE
-from market_storefront.domain_runtime import build_vm_storefront_domain
+from market_storefront.domain_runtime import build_vm_storefront_domain, build_vm_storefront_registry
 from market_storefront.services.listing_service import ListingService
 from market_storefront.utils.sqlite_client import SQLiteClient
 from tests._settings_overrides import settings_overrides
@@ -57,7 +57,7 @@ def _mock_multi_registry(urls: list[str], results: list[PublishResult]):
 
 @pytest.fixture
 def db(tmp_path):
-    return SQLiteClient(db_path=str(tmp_path / "pubs_wiring.db"), domain=build_vm_storefront_domain())
+    return SQLiteClient(db_path=str(tmp_path / "pubs_wiring.db"), registry=build_vm_storefront_registry(build_vm_storefront_domain()))
 
 
 @pytest.fixture
@@ -72,10 +72,7 @@ def test_listing_validation_uses_the_exact_injected_codec(tmp_path) -> None:
         domain,
         codecs=replace(domain.codecs, normalize_listing=listing_codec),
     )
-    db = SQLiteClient(
-        db_path=str(tmp_path / "injected-codec.db"),
-        domain=domain,
-    )
+    db = SQLiteClient(db_path=str(tmp_path / "injected-codec.db"), registry=build_vm_storefront_registry(domain))
     service = ListingService(
         domain=domain,
         sqlite_client=db,

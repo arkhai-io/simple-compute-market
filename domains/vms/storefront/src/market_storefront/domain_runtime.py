@@ -6,6 +6,7 @@ from dataclasses import replace
 
 from arkhai_vms.domain_runtime import market_domain
 from core_storefront.domain_plugins import StorefrontDomainContribution
+
 from core_storefront.domain_registry import (
     StorefrontDomainRegistration,
     StorefrontDomainRegistry,

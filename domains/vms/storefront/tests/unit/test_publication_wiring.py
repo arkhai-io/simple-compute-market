@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any
+from types import SimpleNamespace
 
 from market_storefront.publication_wiring import (
     BareMetalPublicationSourceCallbacks,
@@ -63,15 +63,27 @@ def test_build_bare_metal_publication_source_kwargs_normalizes_missing_snapshot(
     assert kwargs["publish_existing_listing"](listing_id="listing-1")["status"] == "published"
 
 
-def test_selection_helpers_preserve_source_names() -> None:
-    assert build_vm_storefront_publication_selection(_vm_callbacks()).source_names == (
-        "vms",
-    )
+def test_selection_helpers_pass_the_exact_registry(monkeypatch) -> None:
+    import market_storefront.publication_wiring as wiring
+
+    registry = object()
+    calls = []
+
+    def build(candidate, **kwargs):
+        calls.append((candidate, kwargs))
+        return SimpleNamespace(source_names=tuple(kwargs["source_kwargs_by_contribution"]))
+
+    monkeypatch.setattr(wiring, "_build_core_publication_selection", build)
+
+    assert build_vm_storefront_publication_selection(
+        registry, _vm_callbacks()
+    ).source_names == ("vms",)
     assert build_bare_metal_storefront_publication_selection(
-        _bare_metal_callbacks([]),
+        registry, _bare_metal_callbacks([])
     ).source_names == ("bare_metal",)
     assert build_storefront_publication_selection(
-        source_names=("vms", "bare_metal"),
+        registry=registry,
         vm_callbacks=_vm_callbacks(),
         bare_metal_callbacks=_bare_metal_callbacks([]),
     ).source_names == ("vms", "bare_metal")
+    assert all(candidate is registry for candidate, _ in calls)

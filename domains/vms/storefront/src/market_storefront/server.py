@@ -271,7 +271,6 @@ def _build_vm_services(
         settlement_composition=settlement_composition,
     )
 
-
 async def _start_vm_services(services: VmStorefrontServices) -> None:
     if (
         _container.resolved_domain_registry is not None

@@ -7,7 +7,7 @@ import os
 import sqlite3
 
 from market_identity import create_signer
-from market_storefront.domain_runtime import build_vm_storefront_domain
+from market_storefront.domain_runtime import build_vm_storefront_domain, build_vm_storefront_registry
 from market_storefront.utils.sqlite_client import SQLiteClient
 from market_policy.identity import Identity
 from market_policy.negotiation_thread import get_thread_store, NegotiationThreadStore
@@ -68,7 +68,7 @@ def temp_db():
 @pytest.fixture
 def sqlite_client(temp_db):
     """Create a SQLiteClient with canonically owned negotiation fixtures."""
-    client = SQLiteClient(db_path=temp_db, domain=build_vm_storefront_domain())
+    client = SQLiteClient(db_path=temp_db, registry=build_vm_storefront_registry(build_vm_storefront_domain()))
     asyncio.run(_seed_owned_threads(client))
     return client
 
@@ -254,7 +254,7 @@ class TestNegotiationThreadStore:
         )
         
         # Create second store with same database
-        client2 = SQLiteClient(db_path=temp_db, domain=build_vm_storefront_domain())
+        client2 = SQLiteClient(db_path=temp_db, registry=build_vm_storefront_registry(build_vm_storefront_domain()))
         store2 = NegotiationThreadStore(sqlite_client=client2, identity=_TEST_IDENTITY)
         
         # Load thread from second store
@@ -565,7 +565,7 @@ class TestSQLiteClientNegotiationMethods:
             conn.close()
 
         with pytest.raises(ValueError, match="has no seller ownership"):
-            SQLiteClient(db_path=str(db_path), domain=build_vm_storefront_domain())
+            SQLiteClient(db_path=str(db_path), registry=build_vm_storefront_registry(build_vm_storefront_domain()))
 
         conn = sqlite3.connect(db_path)
         try:

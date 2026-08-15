@@ -28,7 +28,7 @@ from market_storefront.middleware.admin_identity import (
     administrator_identity_middleware,
     initialize_administrator_identities,
 )
-from market_storefront.domain_runtime import build_vm_storefront_domain
+from market_storefront.domain_runtime import build_vm_storefront_domain, build_vm_storefront_registry
 from market_storefront.utils.sqlite_client import SQLiteClient
 from storefront_client.client import StorefrontClient, StorefrontClientError
 
@@ -52,7 +52,7 @@ PROVISIONING_AUTHORITIES = TrustedIdentitySet(
 @pytest_asyncio.fixture
 async def db(tmp_path):
     db_path = tmp_path / "settle_test.db"
-    return SQLiteClient(db_path=str(db_path), domain=build_vm_storefront_domain())
+    return SQLiteClient(db_path=str(db_path), registry=build_vm_storefront_registry(build_vm_storefront_domain()))
 
 
 async def _seed_listing(

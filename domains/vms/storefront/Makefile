@@ -36,6 +36,7 @@ reinit: verify-hosted-release ## Force-reinstall verified internal wheels.
 	--upgrade-package arkhai-kit-capacity-publication --reinstall-package arkhai-kit-capacity-publication \
 	--upgrade-package arkhai-vms-storefront       --reinstall-package arkhai-vms-storefront \
 	--upgrade-package arkhai-bare-metal             --reinstall-package arkhai-bare-metal \
+	--upgrade-package arkhai-bare-metal-storefront  --reinstall-package arkhai-bare-metal-storefront \
 	--upgrade-package arkhai-kit-identity            --reinstall-package arkhai-kit-identity \
 	--upgrade-package arkhai-kit-alkahest            --reinstall-package arkhai-kit-alkahest \
 	--upgrade-package arkhai-kit-config              --reinstall-package arkhai-kit-config \

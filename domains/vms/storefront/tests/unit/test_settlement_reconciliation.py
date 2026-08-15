@@ -5,7 +5,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from market_storefront.domain_runtime import build_vm_storefront_domain
+from market_storefront.domain_runtime import build_vm_storefront_domain, build_vm_storefront_registry
 from market_storefront.services.listing_service import ListingService
 from tests.fake_site import TEST_MARKETPLACE_SIGNER
 
