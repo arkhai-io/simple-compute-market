@@ -7,6 +7,14 @@ on:
         description: Exact hosted release tag
         required: true
         type: string
+      run_id:
+        description: Exact successful hosted release run ID
+        required: true
+        type: string
+      artifact:
+        description: Exact hosted release artifact name
+        required: true
+        type: string
 
 permissions:
   contents: read
@@ -27,3 +35,17 @@ jobs:
             --event push \
             --limit 20 \
             --json databaseId,headBranch,headSha,status,conclusion,url
+      - name: Relay exact hosted release artifact
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: ${{ inputs.artifact }}
+          path: hosted-release
+          repository: arkhai-io/stripe-settlement-service
+          run-id: ${{ inputs.run_id }}
+          github-token: ${{ secrets.HOSTED_RELEASE_TOKEN }}
+      - name: Upload retrievable hosted release
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: relayed-${{ inputs.artifact }}
+          path: hosted-release/*
+          retention-days: 1
