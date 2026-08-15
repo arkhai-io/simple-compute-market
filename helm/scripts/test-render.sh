@@ -268,6 +268,10 @@ expect_override_failure \
     --set-string 'storefront.agents[0].config.pricing.settlements[0].mechanism_input.funding_profile=card'
 expect_override_failure \
     "$CHART_DIR/fixtures/fiat-ed25519-values.yaml" \
+    "push bank transfer saved-instrument clause fails schema/render" \
+    --set-string 'storefront.agents[0].config.pricing.settlements[1].mechanism_input.interaction=saved_instrument'
+expect_override_failure \
+    "$CHART_DIR/fixtures/fiat-ed25519-values.yaml" \
     "enabled Stripe without publication pricing fails schema/render" \
     --set-json 'storefront.agents[0].config.pricing=null'
 if [[ $errors -gt 0 ]]; then

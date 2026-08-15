@@ -207,7 +207,19 @@
                       "funding_profile": {"enum": ["card.v1", "us_bank_transfer.v1", "us_ach_debit.v1"]},
                       "interaction": {"enum": ["interactive", "saved_instrument"]},
                       "funds_flow": {"const": "separate_charges_transfers"}
-                    }
+                    },
+                    "allOf": [
+                      {
+                        "if": {
+                          "properties": {"funding_profile": {"const": "us_bank_transfer.v1"}},
+                          "required": ["funding_profile"]
+                        },
+                        "then": {
+                          "properties": {"interaction": {"const": "interactive"}},
+                          "required": ["interaction"]
+                        }
+                      }
+                    ]
                   }
                 }
               },
