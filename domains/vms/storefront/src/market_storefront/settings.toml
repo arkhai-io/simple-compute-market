@@ -29,6 +29,16 @@ db_path         = "./src/market_storefront/data/storefront/agent.db"
 log_file_path   = ""
 log_level       = "INFO"
 
+# Installed storefront contributions are public, version-pinned assertions.
+# Deployment overlays may replace this array with VM + bare-metal or one exact
+# registration; private keys, provider settings, and authority credentials do
+# not belong here.
+[[storefront_domains]]
+contribution = "vms"
+offering_mode = "vm"
+domain_identity = "compute.v1"
+contract_version = "1.0"
+
 # Resource auto-seeding — inline content wins over path
 resources_csv_inline = ""
 resources_csv_path   = ""

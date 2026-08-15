@@ -4,10 +4,25 @@ from functools import partial
 from types import SimpleNamespace
 
 import pytest
+from core_storefront.domain_registry import (
+    StorefrontDomainRegistration,
+    StorefrontDomainRegistry,
+)
 
 import market_storefront.container as container
 import market_storefront.server as server
 from market_storefront.domain_runtime import build_vm_storefront_domain
+
+def _registry(domain):
+    return StorefrontDomainRegistry(
+        (
+            StorefrontDomainRegistration(
+                offering_mode="vm",
+                contract=domain,
+                contribution_id="vms",
+            ),
+        )
+    )
 
 
 def test_server_uses_shared_storefront_app_shell() -> None:
@@ -17,7 +32,7 @@ def test_server_uses_shared_storefront_app_shell() -> None:
     assert app.version == "1.0.0"
     assert app.swagger_ui_parameters == {"persistAuthorization": True}
     assert app.openapi.__name__ == "_custom_openapi"
-    assert app.state.market_domain.identity == "compute.v1"
+    assert app.state.market_domains[0].domain_identity == "compute.v1"
 
     paths = {route.path for route in app.routes}
     assert "/health" in paths
@@ -30,12 +45,12 @@ def test_app_factory_retains_each_distinct_compatible_contract() -> None:
     first = build_vm_storefront_domain()
     second = build_vm_storefront_domain()
 
-    first_app = server.build_vm_storefront_app(domain=first)
-    second_app = server.build_vm_storefront_app(domain=second)
+    first_app = server.build_vm_storefront_app(registry=_registry(first))
+    second_app = server.build_vm_storefront_app(registry=_registry(second))
 
     assert first is not second
-    assert first_app.state.market_domain is first
-    assert second_app.state.market_domain is second
+    assert first_app.state.market_domains[0].domain_identity == "compute.v1"
+    assert second_app.state.market_domains[0].domain_identity == "compute.v1"
 
 
 @pytest.mark.asyncio
@@ -93,9 +108,9 @@ async def test_lifespan_publishes_and_clears_exact_contract_without_cross_app_le
     first = build_vm_storefront_domain()
     second = build_vm_storefront_domain()
     for domain in (first, second):
-        application = server.build_vm_storefront_app(domain=domain)
+        application = server.build_vm_storefront_app(registry=_registry(domain))
         async with application.router.lifespan_context(application):
-            assert application.state.market_domain is domain
+            assert application.state.market_domains[0].domain_identity == "compute.v1"
             assert container.resolved_market_domain is domain
             assert container.resolved_sqlite_client.market_domain is domain
             assert container.resolved_listing_service.market_domain is domain

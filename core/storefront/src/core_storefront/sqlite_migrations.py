@@ -1525,7 +1525,7 @@ def _migrate_marketplace_principals(
                 f"{table_name}.{old_column} could not be removed during identity cutover"
             )
 
-def _migrate_storefront_domain_bindings(conn: sqlite3.Connection) -> None:
+def migrate_storefront_domain_bindings_schema(conn: sqlite3.Connection) -> None:
     """Create immutable listing, negotiation, and domain-artifact bindings."""
 
     conn.execute(
@@ -1821,6 +1821,6 @@ _MIGRATIONS: tuple[Migration, ...] = (
     ),
     Migration(
         "20260815_001_storefront_domain_bindings",
-        _migrate_storefront_domain_bindings,
+        migrate_storefront_domain_bindings_schema,
     ),
 )
