@@ -17,6 +17,7 @@ from market_core.schemas import (
 from market_hosted_settlement import ConditionDescriptor
 from market_identity import Ed25519Signer
 from market_settlement_runtime import (
+    HostedSettlementStart,
     SettlementObligationRecord,
     SettlementOperationOutcome,
     derive_obligation_ref,
@@ -28,7 +29,6 @@ import market_storefront.container as container
 from market_storefront.controllers.settle_controller import SettlementsController
 from market_storefront.middleware import buyer_auth
 from market_storefront.middleware.seller_auth import _safe_replay_body
-from market_storefront.models.hosted_settlement_models import SettlementStartRequest
 from market_storefront.settlement_composition import load_hosted_agreement
 
 BUYER = Ed25519Signer(b"\x61" * 32).identity
@@ -162,7 +162,7 @@ def _controller(db) -> SettlementsController:
 
 def test_start_request_accepts_only_three_safe_references() -> None:
     with pytest.raises(ValidationError, match="payer_principal"):
-        SettlementStartRequest.model_validate(
+        HostedSettlementStart.model_validate(
             {
                 "negotiation_id": "negotiation-1",
                 "obligation_ref": "a" * 64,
@@ -199,9 +199,7 @@ async def test_start_binds_authorization_after_registering_accepted_obligation(
                 "funding_reason": "payer_action_required",
             },
             "buyer_action": {"kind": "confirmation", "expires_at_unix": 999},
-            "materialization_receipt": {
-                "funding_reason": "payer_action_required"
-            },
+            "materialization_receipt": {"funding_reason": "payer_action_required"},
         }
     )
     runtime = SimpleNamespace(
@@ -229,16 +227,22 @@ async def test_start_binds_authorization_after_registering_accepted_obligation(
         ),
         mechanism_clients={"fiat.stripe.v1": object()},
         local_principal=SELLER,
+        worker=SimpleNamespace(wake=AsyncMock()),
     )
     monkeypatch.setattr(container, "resolved_settlement_composition", composition)
     monkeypatch.setattr(
         buyer_auth,
         "_verify",
-        AsyncMock(return_value=SimpleNamespace(exact_retry=False)),
+        AsyncMock(
+            return_value=SimpleNamespace(
+                exact_retry=False,
+                recorded_outcome=None,
+            )
+        ),
     )
 
     response = await _controller(db).start(
-        SettlementStartRequest(
+        HostedSettlementStart(
             negotiation_id="negotiation-1",
             obligation_ref=obligation_ref,
             funding_authorization_ref="authorization-1",
@@ -259,7 +263,9 @@ async def test_start_binds_authorization_after_registering_accepted_obligation(
 
 
 @pytest.mark.asyncio
-async def test_changed_authorization_retry_fails_before_materialization(monkeypatch) -> None:
+async def test_changed_authorization_retry_fails_before_materialization(
+    monkeypatch,
+) -> None:
     db, _thread, _listing, obligation = _accepted_state()
     obligation_ref = derive_obligation_ref("negotiation-1", 0, obligation)
     accepted = SettlementObligationRecord.from_obligation(
@@ -279,17 +285,23 @@ async def test_changed_authorization_retry_fails_before_materialization(monkeypa
         repository=object(),
         mechanism_clients={"fiat.stripe.v1": object()},
         local_principal=SELLER,
+        worker=SimpleNamespace(wake=AsyncMock()),
     )
     monkeypatch.setattr(container, "resolved_settlement_composition", composition)
     monkeypatch.setattr(
         buyer_auth,
         "_verify",
-        AsyncMock(return_value=SimpleNamespace(exact_retry=False)),
+        AsyncMock(
+            return_value=SimpleNamespace(
+                exact_retry=False,
+                recorded_outcome=None,
+            )
+        ),
     )
 
     with pytest.raises(HTTPException) as exc_info:
         await _controller(db).start(
-            SettlementStartRequest(
+            HostedSettlementStart(
                 negotiation_id="negotiation-1",
                 obligation_ref=obligation_ref,
                 funding_authorization_ref="changed-authorization",
@@ -353,8 +365,6 @@ async def test_legacy_card_plan_is_recovery_only() -> None:
     assert recovered.legacy_recovery is True
 
 
-
-
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     ("collection_state", "expected_status", "wake_count"),
@@ -411,18 +421,27 @@ async def test_return_preserves_evidence_and_only_queues_precollection_cleanup(
     composition = SimpleNamespace(
         runtime=runtime,
         repository=SimpleNamespace(
-            load_settlement_obligation=AsyncMock(return_value=failed.model_dump())
+            load_settlement_obligation_by_mechanism_ref=AsyncMock(
+                return_value=accepted.model_dump()
+            ),
+            load_settlement_obligation=AsyncMock(return_value=failed.model_dump()),
         ),
         worker=worker,
         mechanism_clients={"fiat.stripe.v1": object()},
         local_principal=SELLER,
     )
     controller = _controller(db)
-    controller._record = AsyncMock(return_value=accepted)
-    controller._authorize = AsyncMock(
-        return_value=SimpleNamespace(exact_retry=False)
-    )
     monkeypatch.setattr(container, "resolved_settlement_composition", composition)
+    monkeypatch.setattr(
+        buyer_auth,
+        "_verify",
+        AsyncMock(
+            return_value=SimpleNamespace(
+                exact_retry=False,
+                recorded_outcome=None,
+            )
+        ),
+    )
 
     response = await controller.status("settlement-1", _request("GET"))
 
@@ -430,6 +449,8 @@ async def test_return_preserves_evidence_and_only_queues_precollection_cleanup(
     assert response.receipt == {"funding_reason": "returned"}
     assert failed.fulfillment_ref == "portable-evidence-ref"
     assert worker.wake.await_count == wake_count
+
+
 def test_replay_journal_strips_transient_action_details() -> None:
     body = {
         "settlement_ref": "settlement-1",

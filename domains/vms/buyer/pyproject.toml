@@ -89,7 +89,6 @@ dev-mode-dirs = ["../../.."]
 "buyer_client.py" = "domains/vms/buyer/buyer_client.py"
 "escrow_client.py" = "domains/vms/buyer/escrow_client.py"
 "escrow_selection.py" = "domains/vms/buyer/escrow_selection.py"
-"hosted_settlement.py" = "domains/vms/buyer/hosted_settlement.py"
 "chain_cli.py" = "domains/vms/buyer/chain_cli.py"
 "cli.py" = "domains/vms/buyer/cli.py"
 "cli_helpers.py" = "domains/vms/buyer/cli_helpers.py"

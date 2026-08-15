@@ -282,6 +282,32 @@ fulfillment. The run log keeps only safe public reason/deadline/action
 kind/expiry metadata and never an action URL, client secret, bank detail, or
 provider payload. Resume the accepted run to retrieve current state and action.
 
+## Buy API credits with hosted funding
+
+The API-credit buyer uses the same selected durable profile and hosted policy.
+It filters exact listing options before negotiation, then revalidates service,
+quantity, key mode/key ID, parties, currency, profile, and condition from the
+accepted seller state before authorization:
+
+```bash
+market credits buy \
+  --service-name vllm-chat \
+  --quantity 10 \
+  --new-key \
+  --funding-profile card.v1 \
+  --action open \
+  --yes
+```
+
+The returned API credential is buyer-only output, not hosted settlement
+evidence. Resume a recorded pending purchase with
+`market credits settle-status RUN_ID`; use
+`market credits settle-reclaim RUN_ID --reason expired` only when issuance did
+not commit. For an existing-key top-up, replace `--new-key` with
+`--existing-key KEY_ID`; another marketplace principal is rejected by the
+credits authority. Hosted-only API-credit commands do not require wallet,
+chain, RPC, or gas configuration.
+
 ## Common pitfalls
 
 - **Resource and settlement constraints are different layers.** A successful

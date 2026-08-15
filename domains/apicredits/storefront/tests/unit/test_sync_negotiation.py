@@ -16,11 +16,20 @@ from apicredits_storefront.negotiation_runtime import (
     _decode_terms,
     build_api_credit_negotiation_runtime,
 )
-from market_negotiation_runtime import OfferUnfulfillableError
-from market_core.schemas import EscrowProposal, ProvisionTerms
+from market_core.schemas import (
+    EscrowProposal,
+    ProvisionTerms,
+    RateValue,
+    SettlementOption,
+    SettlementSelection,
+    derive_settlement_option_id,
+)
+from market_negotiation_runtime import NegotiationStateError, OfferUnfulfillableError
 from market_identity import Ed25519Signer
 from market_policy.identity import Identity
+from market_policy.negotiation_middleware import NegotiationDecision
 from market_policy.negotiation_thread import get_thread_store
+from market_policy.seller_round import SellerRoundResult
 
 _BUYER_PRINCIPAL = Ed25519Signer(bytes.fromhex("11" * 32)).identity
 _SELLER_PRINCIPAL = Ed25519Signer(bytes.fromhex("22" * 32)).identity
@@ -28,6 +37,56 @@ _STRANGER_PRINCIPAL = Ed25519Signer(bytes.fromhex("33" * 32)).identity
 _TOKEN = "0x" + "01" * 20
 _ESCROW = "0x" + "11" * 20
 _DOMAIN = get_market_domain_contract()
+
+
+def _hosted_option() -> SettlementOption:
+    rates = [RateValue(field="amount", per="credit", value=100)]
+    params = {
+        "account_ref": "acct-api-credits",
+        "authority_id": "hosted-authority-1",
+        "environment": "test",
+        "country": "US",
+        "claimant_principal": _SELLER_PRINCIPAL.model_dump(mode="json"),
+        "funds_flow": "separate_charges_transfers",
+        "funding_profile": "card.v1",
+        "interaction": "interactive",
+        "contract_fingerprint": "sha256:" + "11" * 32,
+        "condition": {
+            "protocol": "arkhai.condition.v1",
+            "condition_id": "api-credits-issued",
+            "evaluator": {
+                "kind": "builtin.v1",
+                "version": "trivial.v1",
+                "resolver_id": "api-credits",
+                "params": {"kind": "trivial"},
+            },
+            "demand": {
+                "encoding": "application/jcs+json",
+                "value": {"kind": "api_credits.v1"},
+            },
+        },
+    }
+    return SettlementOption(
+        option_id=derive_settlement_option_id(
+            mechanism="fiat.stripe.v1",
+            asset="usd",
+            rates=rates,
+            params=params,
+        ),
+        mechanism="fiat.stripe.v1",
+        asset="usd",
+        rates=rates,
+        params=params,
+    )
+
+
+def _hosted_selection(*, expiration_unix: int = 1_900_000_000):
+    option = _hosted_option()
+    return SettlementSelection(
+        mechanism=option.mechanism,
+        option_id=option.option_id,
+        expiration_unix=expiration_unix,
+    )
 
 
 class FakeCapacity:
@@ -121,6 +180,7 @@ async def db(tmp_path):
                 "rates": [{"field": "amount", "per": "token", "value": "100"}],
             }
         ],
+        settlement_options=[_hosted_option().model_dump(mode="json")],
         fulfillment_resource=None,
         max_duration_seconds=None,
         storefront_url="http://test-seller:8002",
@@ -197,6 +257,47 @@ async def _start(db, *, amount=300, quantity=3, key_mode="new", key_id=None):
         seller_principal=_SELLER_PRINCIPAL,
         proposal=_proposal(amount),
         terms=_terms(quantity, key_mode, key_id),
+        seller_agent_url="http://seller:8002",
+        buyer_agent_url="http://buyer:9000",
+        actor_principal=_BUYER_PRINCIPAL,
+    )
+
+
+async def _start_hosted(db, *, amount=300, quantity=3):
+    selection = _hosted_selection()
+
+    async def counter_at_listed_price(**_kwargs):
+        return SellerRoundResult(
+            our_amount=300,
+            strategy_label="listed_price",
+            direction="maximize",
+            chain_label="hosted-review",
+            decision=NegotiationDecision(
+                action="counter",
+                proposal={
+                    "fields": {"amount": 300},
+                    "settlement_selection": selection.model_dump(mode="json"),
+                },
+            ),
+            intermediate={
+                "buyer_amount": amount,
+                "uses_scalar_amount": True,
+            },
+        )
+
+    return await build_api_credit_negotiation_runtime(
+        _DOMAIN,
+        seller_round_hook=counter_at_listed_price,
+    ).start(
+        repository=db,
+        listing_id="L-tok",
+        buyer_principal=_BUYER_PRINCIPAL,
+        seller_principal=_SELLER_PRINCIPAL,
+        proposal={
+            "fields": {"amount": amount},
+            "settlement_selection": selection.model_dump(mode="json"),
+        },
+        terms=_terms(quantity),
         seller_agent_url="http://seller:8002",
         buyer_agent_url="http://buyer:9000",
         actor_principal=_BUYER_PRINCIPAL,
@@ -325,6 +426,118 @@ async def test_bisection_counter_round_scales_by_quantity(
     thread = await db.load_negotiation_thread_row(negotiation_id=neg_id)
     assert thread["terminal_state"] == "success"
     assert int(thread["agreed_price"]) == 275
+
+
+async def test_hosted_selection_survives_counter_accept_and_skips_quota_hold(
+    db,
+    fake_capacity,
+    key_records,
+):
+    opening = await _start_hosted(db, amount=250)
+    assert opening["action"] == "counter"
+    assert opening["settlement_selection"] == _hosted_selection().model_dump(
+        mode="json"
+    )
+
+    negotiation_id = opening["negotiation_id"]
+    response = await build_api_credit_negotiation_runtime(_DOMAIN).continue_negotiation(
+        repository=db,
+        negotiation_id=negotiation_id,
+        buyer_action="accept",
+        buyer_proposal=None,
+        buyer_reason=None,
+        buyer_principal=_BUYER_PRINCIPAL,
+        seller_principal=_SELLER_PRINCIPAL,
+        actor_principal=_BUYER_PRINCIPAL,
+        actor_role="buyer",
+    )
+
+    assert response["action"] == "accept"
+    assert response["settlement_selection"] == opening["settlement_selection"]
+    assert response["settlement_plan"]["obligations"][0]["mechanism"] == (
+        "fiat.stripe.v1"
+    )
+    thread = await db.load_negotiation_thread_row(negotiation_id=negotiation_id)
+    assert (
+        thread["buyer_escrow_proposal"]["settlement_selection"]
+        == opening["settlement_selection"]
+    )
+    assert thread["settlement_plan"] == response["settlement_plan"]
+    assert fake_capacity.reserved == []
+    assert await db.load_capacity_hold(negotiation_id=negotiation_id) is None
+
+
+@pytest.mark.parametrize(
+    "changed_selection",
+    [
+        {
+            **_hosted_selection().model_dump(mode="json"),
+            "mechanism": "alkahest.v1",
+        },
+        {
+            **_hosted_selection().model_dump(mode="json"),
+            "option_id": "f" * 64,
+        },
+        {
+            **_hosted_selection().model_dump(mode="json"),
+            "expiration_unix": 1_900_000_001,
+        },
+    ],
+)
+async def test_hosted_counter_rejects_opening_selection_switch(
+    db,
+    fake_capacity,
+    key_records,
+    changed_selection,
+):
+    opening = await _start_hosted(db, amount=250)
+
+    with pytest.raises(
+        NegotiationStateError,
+        match="opening settlement selection cannot change",
+    ):
+        await build_api_credit_negotiation_runtime(_DOMAIN).continue_negotiation(
+            repository=db,
+            negotiation_id=opening["negotiation_id"],
+            buyer_action="counter",
+            buyer_proposal={
+                "fields": {"amount": 300},
+                "settlement_selection": changed_selection,
+            },
+            buyer_reason=None,
+            buyer_principal=_BUYER_PRINCIPAL,
+            seller_principal=_SELLER_PRINCIPAL,
+            actor_principal=_BUYER_PRINCIPAL,
+            actor_role="buyer",
+        )
+
+
+async def test_hosted_accept_revalidates_current_trusted_listing_option(
+    db,
+    fake_capacity,
+    key_records,
+):
+    opening = await _start_hosted(db, amount=250)
+    await db.update_listing(
+        listing_id="L-tok",
+        settlement_options=[],
+    )
+
+    with pytest.raises(
+        NegotiationStateError,
+        match="no longer exact-matches the trusted listing",
+    ):
+        await build_api_credit_negotiation_runtime(_DOMAIN).continue_negotiation(
+            repository=db,
+            negotiation_id=opening["negotiation_id"],
+            buyer_action="accept",
+            buyer_proposal=None,
+            buyer_reason=None,
+            buyer_principal=_BUYER_PRINCIPAL,
+            seller_principal=_SELLER_PRINCIPAL,
+            actor_principal=_BUYER_PRINCIPAL,
+            actor_role="buyer",
+        )
 
 
 def test_accepted_artifacts_stamp_the_seller_recipient(monkeypatch):

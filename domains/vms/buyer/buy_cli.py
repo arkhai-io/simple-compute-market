@@ -25,22 +25,17 @@ from typing import Any
 from core_buyer import build_buyer_explanation, explain_registry_query
 from core_buyer.action_policy import (
     ACTION_REQUIRED_EXIT_CODE,
-    BuyerActionHandler,
     BuyerActionPolicy,
     BuyerActionRequired,
     resolve_buyer_action_policy,
 )
-from core_buyer.orchestration import (
-    make_publisher_trust_resolver as make_core_publisher_trust_resolver,
-)
+from core_buyer.hosted_settlement import make_hosted_settle_hook
 
 import typer
 from arkhai_vms import make_vm_provision_terms
 from market_alkahest.schemas import EscrowProposal
 from market_alkahest.token import TokenResolutionError, resolve_token
-from market_identity import Identity
 from market_core.schemas import SettlementSelection
-from market_settlement_runtime import derive_obligation_ref
 from market_hosted_settlement import (
     FundingMode,
     FundingSelection,
@@ -55,7 +50,6 @@ from domains.vms.settlement import escrow_proposal_from_accepted_entry
 from .buy_orchestrator import (
     BuyConfig,
     BuyConstraints,
-    BuyResult,
     make_legacy_negotiate_hook,
     make_legacy_settle_hook,
     query_registry_for_matches_multi,
@@ -78,10 +72,6 @@ from .deal_helpers import (
     open_run_log,
 )
 from .listing_cli import settlement_clause_error_message
-from .hosted_settlement import (
-    start_hosted_settlement,
-    wait_for_hosted_settlement,
-)
 from .hosted_authorization import prepare_hosted_funding_authorization
 from .run_log import RunLog
 from .settle_cli import run_settle_from_log
@@ -111,146 +101,30 @@ def _make_hosted_settle_hook(
     automatic_funding: bool,
     confirm: Callable[[int, dict[str, Any]], bool] | None = None,
 ):
+    """Bind VM funding authorization to the core hosted settle lifecycle."""
     del provision
-
-    def _hook(negotiation, on_event):
-        outcome = negotiation.outcome
-        match = negotiation.match
-        if outcome is None or match is None or outcome.settlement_plan is None:
-            raise ValueError("hosted settlement requires an accepted settlement plan")
-        obligations = outcome.settlement_plan.obligations
-        if len(obligations) != 1 or obligations[0].mechanism != "fiat.stripe.v1":
-            raise ValueError("hosted settlement requires one fiat.stripe.v1 obligation")
-
-        resolve_seller_principals = make_core_publisher_trust_resolver(
-            config=config,
-            listing=match,
-            on_update=lambda stage, payload: on_event(stage, payload),
-        )
-        obligation = obligations[0].model_dump(mode="json")
-        if confirm is not None and not confirm(int(obligation["amount"]), match):
-            return BuyResult(
-                status="exited",
-                negotiation_id=outcome.negotiation_id,
-                seller_url=str(match.get("storefront_url") or ""),
-                agreed_amount=outcome.agreed_amount,
-                reason="user_declined",
-                rounds=outcome.rounds,
-                attempts=negotiation.attempts,
-            )
-        negotiation_id = outcome.negotiation_id or ""
-        obligation_ref = derive_obligation_ref(negotiation_id, 0, obligation)
-        authorization = prepare_hosted_funding_authorization(
-            buyer_profile_id=str(config.buyer_profile_id),
-            principal=config.principal,
-            signer=config.signer,
-            stripe_config=stripe_config,
-            obligation_ref=obligation_ref,
-            obligation=obligation,
-            selection=funding_selection,
-            automatic=automatic_funding,
-        )
-        on_event(
-            "funding_authorized",
-            {
-                "obligation_ref": obligation_ref,
-                "funding_profile": authorization.funding_profile.value,
-                "funding_authorization_ref": authorization.funding_authorization_ref,
-                "expires_at_unix": authorization.expires_at_unix,
-            },
-        )
-        seller_url = str(match.get("storefront_url") or "")
-        if not seller_url:
-            raise ValueError("listing is missing required storefront_url")
-        started = start_hosted_settlement(
-            seller_url=seller_url,
-            negotiation_id=negotiation_id,
-            obligation_ref=obligation_ref,
-            funding_authorization_ref=authorization.funding_authorization_ref,
-            principal=config.principal,
-            signer=config.signer,
-            resolve_seller_principals=resolve_seller_principals,
-        )
-        settlement_ref = started.get("settlement_ref")
-        if not isinstance(settlement_ref, str) or not settlement_ref:
-            raise RuntimeError(
-                "storefront returned no opaque hosted settlement reference"
-            )
-        action_handler = BuyerActionHandler(
-            action_policy,
-            open_url=open_url,
-            print_url=print_url,
-            on_required=lambda metadata: on_event(
-                "hosted_checkout_required",
-                {
-                    "settlement_ref": settlement_ref,
-                    "action_policy": action_policy.value,
-                    **metadata.as_event(),
-                },
-            ),
-        )
-
-        initial_action = started.get("action")
-        public_action = initial_action if isinstance(initial_action, dict) else {}
-        on_event(
-            "settlement_started",
-            {
-                "settlement_ref": settlement_ref,
-                "status": started.get("status"),
-                "action_kind": public_action.get("kind"),
-                "action_expires_at_unix": public_action.get("expires_at_unix"),
-            },
-        )
-        if public_action:
-            action_handler.handle(public_action)
-        try:
-            final = wait_for_hosted_settlement(
-                seller_url=seller_url,
-                settlement_ref=settlement_ref,
+    return make_hosted_settle_hook(
+        config=config,
+        prepare_authorization=lambda obligation_ref, obligation: (
+            prepare_hosted_funding_authorization(
+                buyer_profile_id=str(config.buyer_profile_id),
                 principal=config.principal,
                 signer=config.signer,
-                resolve_seller_principals=resolve_seller_principals,
-                poll_interval=poll_interval,
-                total_timeout=total_timeout,
-                on_action=action_handler.handle,
-                on_poll=lambda attempt, body: on_event(
-                    "hosted_settlement_poll",
-                    {
-                        "attempt": attempt,
-                        "settlement_ref": settlement_ref,
-                        "status": body.get("status"),
-                        "action_kind": (body.get("action") or {}).get("kind"),
-                        "action_expires_at_unix": (body.get("action") or {}).get(
-                            "expires_at_unix"
-                        ),
-                    },
-                ),
-                sleep=sleep,
+                stripe_config=stripe_config,
+                obligation_ref=obligation_ref,
+                obligation=dict(obligation),
+                selection=funding_selection,
+                automatic=automatic_funding,
             )
-        except TimeoutError as exc:
-            return BuyResult(
-                status="timeout",
-                negotiation_id=negotiation_id,
-                seller_url=seller_url,
-                agreed_amount=outcome.agreed_amount,
-                escrow_uid=settlement_ref,
-                reason=str(exc),
-                rounds=outcome.rounds,
-                attempts=negotiation.attempts,
-            )
-        succeeded = final.get("status") in {"ready", "collected"}
-        return BuyResult(
-            status="ready" if succeeded else "failed",
-            negotiation_id=negotiation_id,
-            seller_url=seller_url,
-            agreed_amount=outcome.agreed_amount,
-            escrow_uid=settlement_ref,
-            reason=None if succeeded else "hosted_settlement_not_completed",
-            rounds=outcome.rounds,
-            attempts=negotiation.attempts,
-        )
-
-    return _hook
+        ),
+        poll_interval=poll_interval,
+        total_timeout=total_timeout,
+        sleep=sleep,
+        action_policy=action_policy,
+        open_url=open_url,
+        print_url=print_url,
+        confirm=confirm,
+    )
 
 
 def _confirm_settlement_interactive(*, terms, listing: dict, console: Console) -> bool:
@@ -1027,8 +901,7 @@ def register(app: typer.Typer) -> None:
         header.add_row("Registries", ", ".join(reg_urls))
         header.add_row(
             "Buyer principal",
-            f"{identity.principal.scheme.value}:"
-            f"{identity.principal.identifier}",
+            f"{identity.principal.scheme.value}:{identity.principal.identifier}",
         )
         if not hosted_mode:
             header.add_row("EVM wallet", addr)
@@ -1138,7 +1011,6 @@ def register(app: typer.Typer) -> None:
                 funding_selection=funding_selection,
                 action_capable=action_policy is not BuyerActionPolicy.FAIL,
             )
-
 
         negotiate_hook = make_legacy_negotiate_hook(
             config=config,

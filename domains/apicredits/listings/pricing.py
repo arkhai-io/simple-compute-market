@@ -14,6 +14,60 @@ import json
 from typing import Any
 
 from domains.apicredits.listings.models import resource_is_api_credits
+from market_core.schemas import SettlementOption, SettlementSelection
+
+_MAX_BASE_UNIT_AMOUNT = 2**256 - 1
+
+
+def _settlement_options(order: dict[str, Any]) -> list[SettlementOption]:
+    raw = order.get("settlement_options")
+    if isinstance(raw, str):
+        try:
+            raw = json.loads(raw)
+        except (ValueError, TypeError):
+            return []
+    return [SettlementOption.model_validate(entry) for entry in (raw or [])]
+
+
+def checked_credit_total(unit_rate: Any, quantity: Any) -> int:
+    """Multiply exact integer base units and reject fractions or overflow."""
+    if isinstance(unit_rate, bool) or isinstance(quantity, bool):
+        raise ValueError("API-credit rate and quantity must be integers")
+    try:
+        rate = int(unit_rate)
+        count = int(quantity)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("API-credit rate and quantity must be integers") from exc
+    if rate != unit_rate or count != quantity:
+        raise ValueError("API-credit pricing does not admit fractional base units")
+    if rate < 0 or count < 1:
+        raise ValueError("API-credit rate must be non-negative and quantity positive")
+    total = rate * count
+    if total > _MAX_BASE_UNIT_AMOUNT:
+        raise ValueError("API-credit quantity-scaled amount exceeds uint256")
+    return total
+
+
+def selected_unit_price(
+    order: dict[str, Any],
+    selection: SettlementSelection,
+) -> int:
+    """Return the exact selected option's per-credit base-unit amount."""
+    matches = [
+        option
+        for option in _settlement_options(order)
+        if option.option_id == selection.option_id
+        and option.mechanism == selection.mechanism
+    ]
+    if len(matches) != 1:
+        raise ValueError("settlement selection does not exact-match one listing option")
+    amount_rates = [rate for rate in matches[0].rates if rate.field == "amount"]
+    if len(amount_rates) != 1:
+        raise ValueError("selected API-credit option requires one amount rate")
+    rate = amount_rates[0]
+    if rate.per not in {"credit", "token", "request"}:
+        raise ValueError("selected API-credit option rate is not per credit")
+    return checked_credit_total(rate.value, 1)
 
 
 def _accepted_escrows(order: dict[str, Any]) -> list[dict[str, Any]]:
@@ -26,10 +80,26 @@ def _accepted_escrows(order: dict[str, Any]) -> list[dict[str, Any]]:
     return [entry for entry in (raw or []) if isinstance(entry, dict)]
 
 
+def _primary_rate_value(entry: dict[str, Any]) -> int | None:
+    rates = entry.get("rates")
+    if not isinstance(rates, list) or not rates:
+        return None
+    first = rates[0]
+    if not isinstance(first, dict):
+        return None
+    value = first.get("value")
+    if isinstance(value, str) and value.strip().isdigit():
+        return int(value.strip())
+    if isinstance(value, int) and not isinstance(value, bool):
+        return value
+    return None
+
+
 def extract_unit_price_from_order(
     order: dict[str, Any],
     *,
     default_min_price: Any = None,
+    settlement_selection: SettlementSelection | dict[str, Any] | None = None,
 ) -> int | float:
     """The seller's per-token floor from an API-credits listing.
 
@@ -38,12 +108,21 @@ def extract_unit_price_from_order(
     ``[seller.pricing].default_min_price``; with neither there is no
     floor to negotiate against and the negotiation is refused.
     """
-    from market_alkahest.schemas import primary_rate_value
+    if settlement_selection is not None:
+        return selected_unit_price(
+            order,
+            SettlementSelection.model_validate(settlement_selection),
+        )
 
     accepted = _accepted_escrows(order)
-    advertised = primary_rate_value(accepted[0]) if accepted else None
+    advertised = _primary_rate_value(accepted[0]) if accepted else None
     if advertised is not None:
         return advertised
+    options = _settlement_options(order)
+    if options:
+        amount_rates = [rate for rate in options[0].rates if rate.field == "amount"]
+        if len(amount_rates) == 1:
+            return checked_credit_total(amount_rates[0].value, 1)
 
     if default_min_price is not None and str(default_min_price).strip():
         try:

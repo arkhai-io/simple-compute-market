@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import json
 import logging
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
+from dataclasses import replace
 from decimal import Decimal
 from typing import Any
 
@@ -16,8 +18,10 @@ from apicredits_storefront.services.keys_lookup import lookup_key_record
 from apicredits_storefront.utils.config import CHAINS, settings
 from domains.apicredits.listings.models import coerce_resource_dict
 from domains.apicredits.listings.pricing import (
+    checked_credit_total,
     determine_strategy_from_order,
     extract_unit_price_from_order,
+    selected_unit_price,
 )
 from domains.apicredits.negotiation.storefront_round import ApiCreditsSellerRoundHook
 from domains.apicredits.negotiation.terms import (
@@ -27,6 +31,13 @@ from domains.apicredits.negotiation.terms import (
 )
 from market_alkahest.proposals import accepted_escrow_artifacts_from_proposal
 from market_core import MarketDomainContract
+from market_core.schemas import (
+    SettlementObligation,
+    SettlementOption,
+    SettlementPlan,
+    SettlementSelection,
+)
+from market_hosted_settlement import HostedObligationParams
 from market_identity import Identity
 from market_negotiation_runtime import (
     Acceptance,
@@ -38,6 +49,7 @@ from market_negotiation_runtime import (
     OpeningRecord,
     ResolvedNegotiation,
     RoundEvaluation,
+    OfferUnfulfillableError,
     RoundRequest,
 )
 from market_policy.scalar_policies import _amount_from_proposal
@@ -58,9 +70,7 @@ def _default_min_price() -> Any:
 
 
 def _chain_config_paths() -> dict[str, str | None]:
-    return {
-        name: chain.alkahest_address_config_path for name, chain in CHAINS.items()
-    }
+    return {name: chain.alkahest_address_config_path for name, chain in CHAINS.items()}
 
 
 def _seller_wallet_address() -> str | None:
@@ -95,9 +105,7 @@ def _decode_terms(domain: MarketDomainContract, raw_terms: Any) -> NegotiationTe
     )
     decoded = domain.codecs.message(raw)
     wire = (
-        decoded.model_dump(mode="json")
-        if hasattr(decoded, "model_dump")
-        else dict(raw)
+        decoded.model_dump(mode="json") if hasattr(decoded, "model_dump") else dict(raw)
     )
     return NegotiationTerms(decoded=decoded, wire=wire)
 
@@ -139,6 +147,130 @@ def _proposal_from_amount(
         merged["amount"] = int(amount)
     base["fields"] = merged
     return base
+
+
+def _hosted_policy_state(
+    listing: Mapping[str, Any],
+    proposal: Mapping[str, Any] | None,
+) -> dict[str, Any] | None:
+    if not isinstance(proposal, Mapping):
+        return None
+    raw_selection = proposal.get("settlement_selection")
+    if raw_selection is None:
+        return None
+    if not isinstance(raw_selection, Mapping) or set(raw_selection) != {
+        "mechanism",
+        "option_id",
+        "expiration_unix",
+    }:
+        raise NegotiationStateError("hosted settlement selection is not exact")
+    try:
+        selection = SettlementSelection.model_validate(raw_selection)
+    except (TypeError, ValueError) as exc:
+        raise NegotiationStateError("hosted settlement selection is invalid") from exc
+    if selection.mechanism != "fiat.stripe.v1":
+        raise NegotiationStateError(
+            "opening settlement mechanism cannot change during negotiation"
+        )
+    raw_options = listing.get("settlement_options", ())
+    if isinstance(raw_options, str):
+        try:
+            raw_options = json.loads(raw_options)
+        except (TypeError, ValueError) as exc:
+            raise NegotiationStateError(
+                "trusted listing settlement options are invalid"
+            ) from exc
+    if not isinstance(raw_options, Sequence) or isinstance(
+        raw_options, (str, bytes, bytearray)
+    ):
+        raise NegotiationStateError("trusted listing settlement options are invalid")
+    matches: list[SettlementOption] = []
+    for raw_option in raw_options:
+        if not isinstance(raw_option, Mapping):
+            continue
+        if (
+            raw_option.get("option_id") == selection.option_id
+            and raw_option.get("mechanism") == selection.mechanism
+        ):
+            try:
+                matches.append(SettlementOption.model_validate(raw_option))
+            except (TypeError, ValueError) as exc:
+                raise NegotiationStateError(
+                    "selected trusted settlement option is invalid"
+                ) from exc
+    if len(matches) != 1:
+        raise NegotiationStateError(
+            "hosted settlement selection no longer exact-matches the trusted listing"
+        )
+    return {
+        "accepted_settlement_selection": selection.model_dump(mode="json"),
+        "accepted_settlement_option": matches[0].model_dump(mode="json"),
+    }
+
+
+def _preserve_hosted_round_selection(
+    listing: Mapping[str, Any],
+    history: Sequence[Any],
+) -> tuple[tuple[Any, ...], dict[str, Any] | None]:
+    opening_proposal = (
+        history[0].proposal
+        if history and isinstance(history[0].proposal, Mapping)
+        else None
+    )
+    state = _hosted_policy_state(listing, opening_proposal)
+    pinned = state["accepted_settlement_selection"] if state is not None else None
+    buyer_rounds = [
+        (index, item)
+        for index, item in enumerate(history)
+        if item.sender == "them" and isinstance(item.proposal, Mapping)
+    ]
+    for _index, item in buyer_rounds:
+        candidate = item.proposal.get("settlement_selection")
+        if candidate is None:
+            continue
+        if pinned is None or dict(candidate) != pinned:
+            raise NegotiationStateError(
+                "opening settlement selection cannot change during negotiation"
+            )
+    if pinned is None or not buyer_rounds:
+        return tuple(history), state
+    last_index, last_buyer = buyer_rounds[-1]
+    if last_buyer.proposal.get("settlement_selection") is not None:
+        return tuple(history), state
+    if {
+        "chain_name",
+        "escrow_address",
+    } & set(last_buyer.proposal):
+        raise NegotiationStateError(
+            "opening settlement mechanism cannot change during negotiation"
+        )
+    proposal = dict(last_buyer.proposal)
+    proposal["settlement_selection"] = dict(pinned)
+    preserved = list(history)
+    preserved[last_index] = replace(last_buyer, proposal=proposal)
+    return tuple(preserved), state
+
+
+def _acceptance_policy_state(acceptance: Acceptance) -> Mapping[str, Any]:
+    pinned = _hosted_policy_state(
+        acceptance.listing_record,
+        acceptance.pinned_proposal,
+    )
+    if pinned is None:
+        return (
+            acceptance.policy_state
+            if isinstance(acceptance.policy_state, Mapping)
+            else {}
+        )
+    for candidate in (acceptance.policy_state, acceptance.binding):
+        if not isinstance(candidate, Mapping):
+            continue
+        selected = candidate.get("accepted_settlement_selection")
+        if selected is not None and selected != pinned["accepted_settlement_selection"]:
+            raise NegotiationStateError(
+                "hosted settlement policy state changed after opening"
+            )
+    return pinned
 
 
 def _reference_amount(
@@ -198,10 +330,111 @@ def build_api_credit_accepted_artifacts(
     return artifacts
 
 
+def _accepted_hosted_artifacts(
+    *,
+    selection: Mapping[str, Any],
+    option: Mapping[str, Any],
+    agreed_amount: int,
+    buyer_principal: Identity,
+    seller_principal: Identity,
+    listing: Mapping[str, Any],
+    provision_terms: Any,
+) -> dict[str, Any]:
+    accepted = SettlementSelection.model_validate(selection)
+    advertised = SettlementOption.model_validate(option)
+    if (
+        accepted.option_id != advertised.option_id
+        or accepted.mechanism != advertised.mechanism
+        or accepted.mechanism != "fiat.stripe.v1"
+    ):
+        raise OfferUnfulfillableError("settlement_selection_not_exact")
+    quantity = provision_quantity(provision_terms)
+    if quantity is None:
+        raise OfferUnfulfillableError("api_credit_quantity_unavailable")
+    expected_amount = checked_credit_total(
+        selected_unit_price(dict(listing), accepted),
+        quantity,
+    )
+    if agreed_amount != expected_amount:
+        raise OfferUnfulfillableError("hosted_amount_not_quantity_scaled")
+    params = dict(advertised.params)
+    condition = params.get("condition")
+    if not isinstance(condition, dict):
+        raise OfferUnfulfillableError("hosted_condition_unavailable")
+    advertised_claimant = Identity.model_validate(params.get("claimant_principal"))
+    if advertised_claimant != seller_principal:
+        raise OfferUnfulfillableError("hosted_claimant_principal_mismatch")
+    if "funding_authorization_ref" in params:
+        raise OfferUnfulfillableError(
+            "hosted_authorization_not_allowed_before_acceptance"
+        )
+    params["payer_principal"] = buyer_principal.model_dump(mode="json")
+    params["claimant_principal"] = seller_principal.model_dump(mode="json")
+    try:
+        params = HostedObligationParams.model_validate(
+            {**params, "funding_authorization_ref": "accepted-plan-validation"}
+        ).model_dump(mode="json", exclude={"funding_authorization_ref"})
+    except (TypeError, ValueError) as exc:
+        raise OfferUnfulfillableError("hosted_settlement_option_not_exact") from exc
+    listing_id = listing.get("listing_id")
+    if not isinstance(listing_id, str) or not listing_id:
+        raise OfferUnfulfillableError("hosted_listing_identity_unavailable")
+    service_terms = {
+        "api_credits.v1": {
+            "listing_id": listing_id,
+            "order": dict(listing),
+            "quantity": quantity,
+            "key_mode": provision_key_mode(provision_terms),
+            "key_id": provision_key_id(provision_terms),
+        }
+    }
+    plan = SettlementPlan(
+        buyer_principal=buyer_principal.model_dump(mode="json"),
+        seller_principal=seller_principal.model_dump(mode="json"),
+        service_terms=service_terms,
+        obligations=[
+            SettlementObligation(
+                payer="buyer",
+                claimant="seller",
+                payer_principal=buyer_principal.model_dump(mode="json"),
+                claimant_principal=seller_principal.model_dump(mode="json"),
+                amount=agreed_amount,
+                asset=advertised.asset,
+                expiration_unix=accepted.expiration_unix,
+                conditions=[condition],
+                mechanism=accepted.mechanism,
+                params=params,
+            )
+        ],
+    )
+    return {
+        "settlement_selection": accepted.model_dump(mode="json"),
+        "settlement_plan": plan.model_dump(mode="json"),
+    }
+
+
 def _build_response_artifacts(
     acceptance: Acceptance,
     accepted: bool,
 ) -> Mapping[str, Any]:
+    state = _acceptance_policy_state(acceptance)
+    selection = state.get("accepted_settlement_selection")
+    option = state.get("accepted_settlement_option")
+    if isinstance(selection, Mapping) and isinstance(option, Mapping):
+        artifacts = _accepted_hosted_artifacts(
+            selection=selection,
+            option=option,
+            agreed_amount=acceptance.agreed_amount,
+            buyer_principal=acceptance.buyer_principal,
+            seller_principal=acceptance.seller_principal,
+            listing=acceptance.listing_record,
+            provision_terms=acceptance.terms.decoded,
+        )
+        return (
+            artifacts
+            if accepted
+            else {"settlement_selection": artifacts["settlement_selection"]}
+        )
     artifacts = build_api_credit_accepted_artifacts(
         buyer_principal=acceptance.buyer_principal,
         seller_principal=acceptance.seller_principal,
@@ -266,6 +499,9 @@ async def _place_quota_hold(
     acceptance: Acceptance,
 ) -> None:
     """Place the API-credit domain's best-effort quota hold after acceptance."""
+    state = _acceptance_policy_state(acceptance)
+    if state.get("accepted_settlement_selection") is not None:
+        return
 
     from core_storefront.stage_log import stage_event
 
@@ -378,14 +614,27 @@ def build_api_credit_negotiation_runtime(
             raise NegotiationStateError(
                 f"Seller's order {listing_id} is gone from local DB"
             )
+        binding = _hosted_policy_state(
+            record,
+            (
+                thread.get("buyer_escrow_proposal")
+                if isinstance(thread.get("buyer_escrow_proposal"), Mapping)
+                else None
+            ),
+        )
         return ResolvedNegotiation(
             listing_id=listing_id,
             listing=record,
             listing_record=record,
             hooks=hooks,
+            binding=binding,
         )
 
     async def evaluate(request: RoundRequest) -> RoundEvaluation:
+        history, hosted_state = _preserve_hosted_round_selection(
+            request.listing_record,
+            request.history,
+        )
         policy = seller_round_hook or _default_seller_round_hook(
             domain,
             request.repository,
@@ -393,7 +642,7 @@ def build_api_credit_negotiation_runtime(
         decoded = request.terms.decoded
         result = await policy(
             listing=request.listing,
-            history=list(request.history),
+            history=list(history),
             requested_quantity=provision_quantity(decoded),
             key_mode=provision_key_mode(decoded),
             key_id=provision_key_id(decoded),
@@ -404,7 +653,9 @@ def build_api_credit_negotiation_runtime(
                 else {}
             ),
         )
-        state = result.intermediate or {}
+        state = dict(result.intermediate or {})
+        if hosted_state is not None:
+            state.update(hosted_state)
         pinned = state.get("accepted_escrow_proposal")
         return RoundEvaluation(
             our_amount=int(result.our_amount),
@@ -444,8 +695,9 @@ def build_api_credit_negotiation_runtime(
         agreement_terms=_agreement,
         build_artifacts=_build_response_artifacts,
         decision_wire=lambda decision: decision.to_dict(),
-        listing_is_live=lambda record: str(record.get("status") or "").strip()
-        == "open",
+        listing_is_live=lambda record: (
+            str(record.get("status") or "").strip() == "open"
+        ),
         listing_is_paused=listing_is_paused,
         storefront_is_paused=storefront_is_paused,
         stage_event=stage_event,

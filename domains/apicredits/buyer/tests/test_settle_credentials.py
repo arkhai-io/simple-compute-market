@@ -91,6 +91,11 @@ def agreed_run(tmp_path, monkeypatch):
             negotiation_id="neg-1",
             agreed_amount=300,
             accepted_escrow_proposal=_PROPOSAL,
+            settlement_selection={
+                "mechanism": "alkahest.v1",
+                "option_id": "legacy-alkahest",
+                "expiration_unix": 1_800_000_000,
+            },
         ),
         _run_event(
             "run-tok-1",
@@ -224,6 +229,11 @@ def test_settle_without_agreed_proposal_refuses(
             publisher_principals=TrustedIdentitySet(
                 identities=(_SELLER_SIGNER.identity,),
             ).model_dump(mode="json"),
+            settlement_selection={
+                "mechanism": "alkahest.v1",
+                "option_id": "legacy-alkahest",
+                "expiration_unix": 1_800_000_000,
+            },
         ),
     ]
     (runs / "run-tok-2.jsonl").write_text(

@@ -6,6 +6,7 @@ import pytest
 
 from core_storefront.publication_runner import (
     PublicationSourceSelection,
+    PublicationPayload,
     close_stale_publication_listings,
     open_publication_keys,
     publish_round,
@@ -31,7 +32,7 @@ def _source(
         record_published=lambda _db, value, listing_id: value.__setitem__(
             "listing_id", listing_id
         ),
-        reopen_existing=lambda *_args: None,
+        reopen_existing=lambda *_args, **_kwargs: None,
         reopen_error_label=f"reopen {name}",
     )
 
@@ -128,18 +129,20 @@ def test_two_domains_publish_in_registry_order_and_isolate_skips() -> None:
 
 def test_selection_rejects_duplicate_source_names() -> None:
     with pytest.raises(ValueError, match="unique"):
-        PublicationSourceSelection(
-            sources=(_source(name="same"), _source(name="same"))
-        )
+        PublicationSourceSelection(sources=(_source(name="same"), _source(name="same")))
 
 
 def test_empty_prebuilt_selection_has_no_new_listings() -> None:
-    result = PublicationSourceSelection(sources=()).command(
-        db_path="db.sqlite",
-        base_url="http://seller",
-        build_payload=_payload,
-        publish_offer=_publish,
-    ).run()
+    result = (
+        PublicationSourceSelection(sources=())
+        .command(
+            db_path="db.sqlite",
+            base_url="http://seller",
+            build_payload=_payload,
+            publish_offer=_publish,
+        )
+        .run()
+    )
 
     assert result.published_count == 0
     assert result.failed_count == 0
@@ -160,3 +163,38 @@ def test_run_publication_cycle_closes_stale_and_skips_open_keys() -> None:
     assert result.published == []
     assert result.failed == []
     assert result.skipped == [{"resource_id": "test", "price": "1"}]
+
+
+def test_typed_payload_keeps_settlement_options_independent() -> None:
+    captured: dict[str, Any] = {}
+
+    def publish(offer, accepted_escrows, demands, maximum, **kwargs):
+        captured.update(
+            offer=offer,
+            accepted_escrows=accepted_escrows,
+            demands=demands,
+            maximum=maximum,
+            **kwargs,
+        )
+        return {"status": "published", "listing_id": "listing-test"}
+
+    published, failed, skipped = publish_round(
+        (_source(),),
+        db_path="db.sqlite",
+        base_url="http://seller",
+        build_payload=lambda *_args: PublicationPayload(
+            accepted_escrows=({"escrow": "alkahest"},),
+            settlement_options=({"option_id": "hosted"},),
+            publication_clauses=({"mechanism": "fiat.stripe.v1"},),
+            demands=({"demand": "compute"},),
+            max_duration_seconds=60,
+        ),
+        publish_offer=publish,
+    )
+
+    assert failed == []
+    assert skipped == []
+    assert published[0]["settlement_options"] == [{"option_id": "hosted"}]
+    assert captured["accepted_escrows"] == [{"escrow": "alkahest"}]
+    assert captured["settlement_options"] == [{"option_id": "hosted"}]
+    assert captured["publication_clauses"] == [{"mechanism": "fiat.stripe.v1"}]

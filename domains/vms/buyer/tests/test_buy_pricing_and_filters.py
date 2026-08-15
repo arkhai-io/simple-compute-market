@@ -121,9 +121,7 @@ def _hosted_option() -> SettlementOption:
         "funding_profile": "card.v1",
         "country": config.country,
         "environment": config.environment,
-        "claimant_principal": seller_principals().identities[0].model_dump(
-            mode="json"
-        ),
+        "claimant_principal": seller_principals().identities[0].model_dump(mode="json"),
         "condition": {
             "condition_id": "vm-fulfillment",
             "evaluator": {
@@ -262,14 +260,14 @@ def test_hosted_settle_uses_storefront_and_never_calls_authority_directly(
 ):
 
     monkeypatch.setattr(
-        "domains.vms.buyer.buy_cli.make_core_publisher_trust_resolver",
+        "core_buyer.hosted_settlement.make_publisher_trust_resolver",
         lambda **_kwargs: seller_principals,
     )
 
     starts: list[dict[str, Any]] = []
     monkeypatch.setattr(
-        "domains.vms.buyer.buy_cli.start_hosted_settlement",
-        lambda **kwargs: (
+        "core_buyer.hosted_settlement.HostedSettlementTransport.start",
+        lambda _transport, **kwargs: (
             starts.append(kwargs)
             or {
                 "settlement_ref": "settlement-1",
@@ -285,8 +283,8 @@ def test_hosted_settle_uses_storefront_and_never_calls_authority_directly(
         ),
     )
     monkeypatch.setattr(
-        "domains.vms.buyer.buy_cli.wait_for_hosted_settlement",
-        lambda **_kwargs: {"status": "ready"},
+        "core_buyer.hosted_settlement.HostedSettlementTransport.wait",
+        lambda _transport, **_kwargs: {"status": "ready"},
     )
     monkeypatch.setattr(
         "domains.vms.buyer.buy_cli.prepare_hosted_funding_authorization",
@@ -357,6 +355,7 @@ def test_hosted_settle_uses_storefront_and_never_calls_authority_directly(
     assert result.escrow_uid == "settlement-1"
     assert all("url" not in body for _, body in events)
 
+
 def test_hosted_settle_never_authorizes_or_starts_before_accepted_terms(
     monkeypatch,
 ) -> None:
@@ -366,8 +365,10 @@ def test_hosted_settle_never_authorizes_or_starts_before_accepted_terms(
         lambda **_kwargs: pytest.fail("funding authorization preceded accepted terms"),
     )
     monkeypatch.setattr(
-        "domains.vms.buyer.buy_cli.start_hosted_settlement",
-        lambda **_kwargs: pytest.fail("settlement start preceded accepted terms"),
+        "core_buyer.hosted_settlement.HostedSettlementTransport.start",
+        lambda _transport, **_kwargs: pytest.fail(
+            "settlement start preceded accepted terms"
+        ),
     )
     hook = _make_hosted_settle_hook(
         config=_config("http://registry"),
@@ -400,7 +401,6 @@ def test_hosted_settle_never_authorizes_or_starts_before_accepted_terms(
             ),
             lambda _stage, _body: None,
         )
-
 
 
 def _build_escrow_proposal():
@@ -667,7 +667,7 @@ class TestRunBuyDerivePrices:
 
         def fake_negotiate(**kwargs):
             seen_prices.append((kwargs["initial_price"], kwargs["max_price"]))
-        
+
             return NegotiationOutcome(
                 status="exited",
                 agreed_amount=None,
@@ -737,7 +737,7 @@ class TestRunBuyDerivePrices:
 
         def fake_negotiate(**kwargs):
             called["negotiate"] = True
-        
+
             return NegotiationOutcome(status="exited", rounds=0)
 
         monkeypatch.setattr(
@@ -779,7 +779,7 @@ def _agree_negotiate_factory(price: int = 100):
     """Build a fake negotiate_with_seller that always agrees at the given price."""
 
     def fake(**kwargs):
-    
+
         provision_terms = kwargs.get("provision_terms")
         escrow_proposal = kwargs.get("escrow_proposal")
         return NegotiationOutcome(

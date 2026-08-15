@@ -18,9 +18,12 @@ from types import SimpleNamespace
 import typer
 from arkhai_vms.provision_terms import VmProvisionPayload, VmProvisionTerms
 from market_core.schemas import SettlementPlan
-from market_identity import Identity
 from market_settlement_runtime import derive_obligation_ref
-from market_hosted_settlement import FundingMode, FundingSelection, StripeSettlementConfig
+from market_hosted_settlement import (
+    FundingMode,
+    FundingSelection,
+    StripeSettlementConfig,
+)
 from core_buyer.buyer_config import ResolvedBuyerIdentity
 from core_buyer.action_policy import (
     ACTION_REQUIRED_EXIT_CODE,
@@ -29,6 +32,7 @@ from core_buyer.action_policy import (
     BuyerActionRequired,
     resolve_buyer_action_policy,
 )
+from core_buyer.hosted_settlement import HostedSettlementTransport
 from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
@@ -48,10 +52,6 @@ from .deal_helpers import (
     resolve_chain_settings,
 )
 from .escrow_client import looks_like_propagation_lag
-from .hosted_settlement import (
-    start_hosted_settlement,
-    wait_for_hosted_settlement,
-)
 from .hosted_authorization import prepare_hosted_funding_authorization
 from .settlement_composition import resolve_buyer_settlement_policy
 from .run_log import read_run
@@ -191,7 +191,6 @@ def run_settle_from_log(
     identity = identity or resolve_recovery_buyer_identity(run_id)
     signer = identity.signer
     deal = load_deal_context(run_id, signer=signer)
-    resolve_seller_principals = make_deal_publisher_trust_resolver(run_id, deal, signer)
     log = open_run_log(
         run_id,
         signer=signer,
@@ -203,9 +202,16 @@ def run_settle_from_log(
         accepted_mechanism = accepted_settlement_mechanism(deal)
     except ValueError as exc:
         raise typer.BadParameter(str(exc)) from exc
+    resolve_seller_principals = make_deal_publisher_trust_resolver(run_id, deal, signer)
 
     hosted_obligation = _hosted_obligation(deal)
     if accepted_mechanism == "fiat.stripe.v1":
+        hosted_transport = HostedSettlementTransport(
+            seller_url=deal.seller_url,
+            principal=deal.buyer_principal,
+            signer=signer,
+            resolve_seller_principals=resolve_seller_principals,
+        )
         if hosted_obligation is None:
             raise typer.BadParameter(
                 "accepted hosted selection has no matching settlement obligation"
@@ -240,8 +246,7 @@ def run_settle_from_log(
                     instrument_ref=instrument_ref,
                 )
                 stripe_config = StripeSettlementConfig.model_validate(
-                    resolve_buyer_settlement_policy()
-                    .config.mechanism_config("stripe")
+                    resolve_buyer_settlement_policy().config.mechanism_config("stripe")
                 )
                 authorization = prepare_hosted_funding_authorization(
                     buyer_profile_id=str(identity.profile_id),
@@ -268,14 +273,10 @@ def run_settle_from_log(
             )
         started: dict | None = None
         if settlement_ref is None:
-            started = start_hosted_settlement(
-                seller_url=deal.seller_url,
+            started = hosted_transport.start(
                 negotiation_id=deal.negotiation_id,
                 obligation_ref=obligation_ref,
                 funding_authorization_ref=funding_authorization_ref,
-                principal=deal.buyer_principal,
-                signer=signer,
-                resolve_seller_principals=resolve_seller_principals,
             )
             settlement_ref = started.get("settlement_ref")
             if not isinstance(settlement_ref, str) or not settlement_ref:
@@ -330,16 +331,12 @@ def run_settle_from_log(
             )
 
         try:
-            final = wait_for_hosted_settlement(
-                seller_url=deal.seller_url,
+            final = hosted_transport.resume(
                 settlement_ref=settlement_ref,
-                principal=deal.buyer_principal,
-                signer=signer,
                 poll_interval=poll_interval,
                 total_timeout=settlement_timeout,
                 on_poll=_hosted_poll,
                 on_action=action_handler.handle,
-                resolve_seller_principals=resolve_seller_principals,
             )
         except BuyerActionRequired as exc:
             typer.secho(str(exc), err=True, fg=typer.colors.YELLOW)

@@ -51,6 +51,7 @@ def _build_settings() -> Dynaconf:
     )
     return s
 
+
 def resolve_evm_wallet() -> tuple[str, str]:
     """Resolve explicit, matching Alkahest mechanism credentials."""
     address = str(settings.get("wallet.address", "") or "")
@@ -80,6 +81,54 @@ def _coerce_chains_table(raw: Any) -> dict[str, dict[str, Any]]:
     return out
 
 
+def _plain_config_value(value: Any) -> Any:
+    """Recursively detach Dynaconf containers from typed configuration."""
+    if hasattr(value, "items"):
+        return {str(key): _plain_config_value(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_plain_config_value(item) for item in value]
+    return value
+
+
+def settlement_config_mapping(source: Dynaconf | None = None) -> dict[str, Any]:
+    """Return the one canonical settlement table for registry resolution."""
+    raw = (source or settings).get("settlement")
+    if raw is None:
+        return {}
+    value = _plain_config_value(raw)
+    if not isinstance(value, dict):
+        raise ValueError("Settlement must be a table")
+    return value
+
+
+def settlement_publication_defaults(
+    source: Dynaconf | None = None,
+) -> tuple[Any, ...]:
+    """Validate configured API-credit settlement publication clauses."""
+    active = source or settings
+    raw = _plain_config_value(active.get("pricing.settlements", []) or [])
+    if not isinstance(raw, list) or any(not isinstance(item, dict) for item in raw):
+        raise ValueError("pricing.settlements must be a list of complete clauses")
+    if not raw:
+        return ()
+    from apicredits_storefront.settlement_composition import (
+        build_storefront_settlement_registry,
+    )
+    from market_settlement_runtime import compile_settlement_publication_clause
+
+    registry = build_storefront_settlement_registry()
+    config = registry.resolve(settlement_config_mapping(active), role="seller")
+    return tuple(
+        compile_settlement_publication_clause(
+            item,
+            registry=registry,
+            config=config,
+            role="seller",
+        )
+        for item in raw
+    )
+
+
 settings: Dynaconf = _build_settings()
 CHAINS: dict[str, ChainConfig] = chains_from_config(
     {"chains": _coerce_chains_table(settings.get("chains"))},
@@ -90,6 +139,7 @@ if not CHAINS:
         "[CONFIG] no [chains.<name>] tables configured — the storefront "
         "will fail when it needs to dispatch any on-chain call."
     )
+
 
 def resolve_identity_config() -> IdentityConfig:
     """Load the public marketplace principal without reading its credential."""
@@ -108,6 +158,7 @@ def resolve_identity_config() -> IdentityConfig:
     except (TypeError, ValueError) as exc:
         raise RuntimeError("invalid storefront marketplace identity") from exc
     return config
+
 
 def resolve_admin_identities() -> TrustedIdentitySet:
     """Load the ordered public principals trusted for admin requests."""

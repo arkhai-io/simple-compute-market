@@ -16,6 +16,7 @@ _SELLER_SIGNER = Ed25519Signer(bytes.fromhex("22" * 32))
 _AUTHORITY_SIGNER = Ed25519Signer(bytes.fromhex("33" * 32))
 SELLER_PRINCIPAL = _SELLER_SIGNER.identity
 
+
 def _quota_remote(available_by_resource: dict[str, int]) -> SiteCapacityClient:
     """A SiteCapacityClient whose snapshot is served from a dict."""
 
@@ -54,12 +55,28 @@ def _quota_remote(available_by_resource: dict[str, int]) -> SiteCapacityClient:
         transport=httpx.MockTransport(handler),
     )
 
+
 class _QuotaRuntime:
     def __init__(self, values: dict[str, int]) -> None:
         self._values = values
 
     async def availability(self) -> dict[tuple[str, str], int]:
-        return {("tokens", resource_id): units for resource_id, units in self._values.items()}
+        return {
+            ("tokens", resource_id): units
+            for resource_id, units in self._values.items()
+        }
+
+
+class _SettlementComposition:
+    async def readiness(self) -> tuple[()]:
+        return ()
+
+    async def publication_artifacts(
+        self,
+        _facts,
+        _clauses,
+    ) -> tuple[list[dict], list[dict], tuple[()]]:
+        return [], [], ()
 
 
 @pytest.fixture
@@ -82,12 +99,14 @@ async def _insert_listing(db, listing_id: str, resource_id: str, status: str):
             "capacity_site_id": "tokens",
             "offering_mode": "api_credits",
         },
-        accepted_escrows=[{
-            "chain_name": "anvil",
-            "escrow_address": "0x" + "11" * 20,
-            "literal_fields": {"token": "0x" + "01" * 20},
-            "rates": [{"field": "amount", "per": "token", "value": "100"}],
-        }],
+        accepted_escrows=[
+            {
+                "chain_name": "anvil",
+                "escrow_address": "0x" + "11" * 20,
+                "literal_fields": {"token": "0x" + "01" * 20},
+                "rates": [{"field": "amount", "per": "token", "value": "100"}],
+            }
+        ],
         fulfillment_resource=None,
         max_duration_seconds=None,
         storefront_url="http://seller:8002",
@@ -96,7 +115,8 @@ async def _insert_listing(db, listing_id: str, resource_id: str, status: str):
 
 
 async def test_publish_from_quota_requires_registered_sellable_resource(
-    db, monkeypatch,
+    db,
+    monkeypatch,
 ):
     from apicredits_storefront.services import capacity_client as cc_module
     from apicredits_storefront.services.listing_service import ListingService
@@ -105,19 +125,27 @@ async def test_publish_from_quota_requires_registered_sellable_resource(
     monkeypatch.setattr(sqlite_module, "_sqlite_client", db)
     runtime = _QuotaRuntime({"svc-quota": 42, "svc-empty": 0})
     monkeypatch.setattr(
-        cc_module, "build_capacity_runtime", lambda factory: runtime,
+        cc_module,
+        "build_capacity_runtime",
+        lambda factory: runtime,
     )
 
-    svc = ListingService(sqlite_client=db, seller_principal=SELLER_PRINCIPAL)
+    svc = ListingService(
+        sqlite_client=db,
+        seller_principal=SELLER_PRINCIPAL,
+        settlement_composition=_SettlementComposition(),
+    )
     result = await svc.publish_from_quota(
         resource_id="svc-quota",
         service_name="Acme Inference",
-        accepted_escrows=[{
-            "chain_name": "anvil",
-            "escrow_address": "0x" + "11" * 20,
-            "literal_fields": {"token": "0x" + "01" * 20},
-            "rates": [{"field": "amount", "per": "token", "value": "100"}],
-        }],
+        accepted_escrows=[
+            {
+                "chain_name": "anvil",
+                "escrow_address": "0x" + "11" * 20,
+                "literal_fields": {"token": "0x" + "01" * 20},
+                "rates": [{"field": "amount", "per": "token", "value": "100"}],
+            }
+        ],
         openapi_url="https://api.acme.example/openapi.json",
         base_url="https://api.acme.example",
     )
@@ -146,32 +174,43 @@ async def test_publish_from_quota_requires_registered_sellable_resource(
         await svc.publish_from_quota(
             resource_id="svc-unknown",
             service_name="Ghost",
-            accepted_escrows=[{"chain_name": "anvil", "escrow_address": "0x" + "11" * 20}],
+            accepted_escrows=[
+                {"chain_name": "anvil", "escrow_address": "0x" + "11" * 20}
+            ],
         )
 
 
 async def test_publish_from_quota_validates_listing_through_domain_runtime(
-    db, monkeypatch,
+    db,
+    monkeypatch,
 ):
     from apicredits_storefront.services import capacity_client as cc_module
     from apicredits_storefront.services.listing_service import ListingService
 
     runtime = _QuotaRuntime({"svc-quota": 42})
     monkeypatch.setattr(
-        cc_module, "build_capacity_runtime", lambda factory: runtime,
+        cc_module,
+        "build_capacity_runtime",
+        lambda factory: runtime,
     )
 
-    svc = ListingService(sqlite_client=db, seller_principal=SELLER_PRINCIPAL)
+    svc = ListingService(
+        sqlite_client=db,
+        seller_principal=SELLER_PRINCIPAL,
+        settlement_composition=_SettlementComposition(),
+    )
     with pytest.raises(ValueError, match="service_name"):
         await svc.publish_from_quota(
             resource_id="svc-quota",
             service_name=" ",
-            accepted_escrows=[{
-                "chain_name": "anvil",
-                "escrow_address": "0x" + "11" * 20,
-                "literal_fields": {"token": "0x" + "01" * 20},
-                "rates": [{"field": "amount", "per": "token", "value": "100"}],
-            }],
+            accepted_escrows=[
+                {
+                    "chain_name": "anvil",
+                    "escrow_address": "0x" + "11" * 20,
+                    "literal_fields": {"token": "0x" + "01" * 20},
+                    "rates": [{"field": "amount", "per": "token", "value": "100"}],
+                }
+            ],
         )
 
 

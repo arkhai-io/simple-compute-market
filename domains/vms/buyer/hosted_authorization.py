@@ -7,12 +7,10 @@ import time
 from collections.abc import Mapping
 from typing import Any
 
-from core_buyer.action_policy import BuyerActionMetadata, BuyerActionRequired
-from core_buyer.profile_service import BuyerProfileService
 from market_hosted_settlement import (
     AuthorizationReservationJournal,
-    FundingAuthorizationReceipt,
     AutomationPolicyRefused,
+    FundingAuthorizationReceipt,
     FundingSelection,
     HostedFundingAuthorizer,
     StripeSettlementConfig,
@@ -21,6 +19,9 @@ from market_hosted_settlement import (
     payer_command_context_from_config,
 )
 from market_identity import Identity, Signer
+
+from core_buyer.action_policy import BuyerActionMetadata, BuyerActionRequired
+from core_buyer.profile_service import BuyerProfileService
 
 
 async def prepare_hosted_funding_authorization_async(
@@ -38,7 +39,6 @@ async def prepare_hosted_funding_authorization_async(
     now_unix: int | None = None,
 ) -> FundingAuthorizationReceipt:
     """Authorize one already accepted VM obligation immediately before start."""
-
     service = profiles or BuyerProfileService()
     resolved = StripeSettlementConfig.model_validate(stripe_config)
     if resolved.authority_id is None or resolved.environment is None:
@@ -98,8 +98,7 @@ async def prepare_hosted_funding_authorization_async(
 
 
 def prepare_hosted_funding_authorization(**kwargs: Any) -> FundingAuthorizationReceipt:
-    """Synchronous buyer-command wrapper for the exact async client call."""
-
+    """Synchronous VM buyer-command wrapper for the exact async client call."""
     return asyncio.run(prepare_hosted_funding_authorization_async(**kwargs))
 
 

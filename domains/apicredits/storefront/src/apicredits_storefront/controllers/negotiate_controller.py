@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Mapping
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Request
@@ -27,6 +28,7 @@ from market_negotiation_runtime import (
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/v1/negotiate", tags=["negotiate"])
+
 
 def _seller_principal():
     signer = _container.resolved_marketplace_signer
@@ -192,15 +194,42 @@ class NegotiateController:
                 detail="'proposal' required for counter",
             )
 
+        proposal_payload = _proposal_payload(
+            body.proposal,
+            body.settlement_selection,
+        )
+        candidate_selection = (
+            proposal_payload.get("settlement_selection")
+            if isinstance(proposal_payload, Mapping)
+            else None
+        )
+        if body.action == "accept" and candidate_selection is not None:
+            thread = await self._db.load_negotiation_thread_row(negotiation_id=neg_id)
+            carrier = (
+                thread.get("buyer_escrow_proposal")
+                if isinstance(thread, Mapping)
+                and isinstance(thread.get("buyer_escrow_proposal"), Mapping)
+                else {}
+            )
+            pinned_selection = carrier.get("settlement_selection")
+            if (
+                not isinstance(candidate_selection, Mapping)
+                or not isinstance(pinned_selection, Mapping)
+                or dict(candidate_selection) != dict(pinned_selection)
+            ):
+                raise HTTPException(
+                    status_code=409,
+                    detail=(
+                        "opening settlement selection cannot change during negotiation"
+                    ),
+                )
+
         try:
             result = await self._runtime.continue_negotiation(
                 repository=self._db,
                 negotiation_id=neg_id,
                 buyer_action=body.action,
-                buyer_proposal=_proposal_payload(
-                    body.proposal,
-                    body.settlement_selection,
-                ),
+                buyer_proposal=proposal_payload,
                 buyer_reason=body.reason,
                 buyer_principal=body.buyer_principal,
                 actor_principal=auth.principal,

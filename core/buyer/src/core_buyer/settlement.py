@@ -110,7 +110,18 @@ class BuyerSettlementPolicy:
         self.registry.validate(self.config, role="buyer")
 
     def ordered_registrations(self) -> tuple[MechanismRegistration, ...]:
-        return tuple(self.registry.ordered_registrations(self.config, role="buyer"))
+        return tuple(
+            registration
+            for registration in self.registry.ordered_registrations(
+                self.config,
+                role="buyer",
+            )
+            if (
+                (section := self.config.mechanisms.get(registration.config_key))
+                is not None
+                and bool(getattr(section, "enabled", False))
+            )
+        )
 
     def compile_clauses(
         self,

@@ -33,12 +33,17 @@ from apicredits_storefront.services.fulfillment_service import (
 from apicredits_storefront.services.listing_service import ListingService
 from apicredits_storefront.services.system_service import SystemService
 from apicredits_storefront.startup import _startup_tasks
+from apicredits_storefront.settlement_composition import (
+    ApiCreditsSettlementComposition,
+    build_api_credit_settlement_composition,
+    build_storefront_settlement_registry,
+)
 from apicredits_storefront.utils.config import (
     AGENT_ID,
     BASE_URL_OVERRIDE,
     CHAINS,
     resolve_admin_identities,
-    resolve_evm_wallet,
+    settlement_config_mapping,
     resolve_identity_signer,
     resolve_registry_authorities,
     settings,
@@ -59,13 +64,7 @@ from market_storefront_kit import (
     build_alkahest_clients,
     build_composed_storefront_app,
 )
-from market_alkahest import AlkahestConditionalEscrowClient
-from market_settlement_runtime import (
-    SettlementJobCoordinator,
-    SettlementRuntime,
-    SettlementServicingWorker,
-    SettlementSQLiteRepository,
-)
+from market_settlement_runtime import SettlementJobCoordinator
 from apicredits_storefront.middleware.response_auth import authenticate_response
 
 logger = logging.getLogger(__name__)
@@ -107,6 +106,9 @@ class ApiCreditsStorefrontServices:
     settlement_runtime: Any
     settlement_worker: Any
     settlement_coordinator: Any
+    settlement_composition: ApiCreditsSettlementComposition
+    issuance_evidence_service: Any
+    private_result_repository: Any
     failure_policy: Any
     listing_service: Any
     negotiation_runtime: Any
@@ -142,40 +144,36 @@ def _build_api_credit_services(
     resolve_admin_identities()
     if settings.enable_registry_discovery:
         resolve_registry_authorities()
-    resolve_evm_wallet()
+    settlement_registry = build_storefront_settlement_registry()
+    settlement_config = settlement_registry.resolve(
+        settlement_config_mapping(),
+        role="seller",
+    )
+    alkahest_section = settlement_config.mechanism_config("alkahest")
+    alkahest_enabled = bool(
+        alkahest_section is not None and getattr(alkahest_section, "enabled", False)
+    )
+    if alkahest_enabled:
+        alkahest_clients = _build_alkahest_clients()
+    else:
+        alkahest_clients = {}
     sqlite_client = get_sqlite_client(
         local_listing_principal=marketplace_signer.identity,
         expected_legacy_sellers=(BASE_URL_OVERRIDE,),
     )
     set_stage_event_db_path(sqlite_client.db_path)
-    alkahest_clients = _build_alkahest_clients()
     negotiation_runtime = build_api_credit_negotiation_runtime(domain)
-    settlement_repository = SettlementSQLiteRepository(
-        sqlite_client.db_path,
-        apply_migrations=False,
+    failure_policy = build_api_credit_failure_policy()
+    settlement_composition = build_api_credit_settlement_composition(
+        domain=domain,
+        sqlite_client=sqlite_client,
+        alkahest_clients=alkahest_clients,
+        marketplace_signer=marketplace_signer,
+        failure_policy=failure_policy,
     )
-    escrow_client = AlkahestConditionalEscrowClient(
-        get_client=lambda chain: alkahest_clients.get(chain or ""),
-        chain_config_paths={
-            name: chain.alkahest_address_config_path for name, chain in CHAINS.items()
-        },
-        default_chain=next(iter(CHAINS), None),
-    )
-    settlement_runtime = SettlementRuntime(
-        settlement_repository,
-        {"alkahest.v1": escrow_client},
-    )
-    settlement_worker = SettlementServicingWorker(
-        settlement_runtime,
-        settlement_repository,
-        worker_id=f"{AGENT_ID}:api-credit-settlement",
-        interval_seconds=float(settings.get("claims_sweep_interval", 30)),
-        on_event=lambda event, fields: stage_event(
-            "settlement",
-            event,
-            **fields,
-        ),
-    )
+    settlement_runtime = settlement_composition.runtime
+    settlement_worker = settlement_composition.worker
+    settlement_repository = settlement_composition.repository
     settlement_coordinator = SettlementJobCoordinator(
         settlement_runtime,
         prepare=partial(
@@ -205,10 +203,14 @@ def _build_api_credit_services(
         settlement_runtime=settlement_runtime,
         settlement_worker=settlement_worker,
         settlement_coordinator=settlement_coordinator,
-        failure_policy=build_api_credit_failure_policy(),
+        settlement_composition=settlement_composition,
+        issuance_evidence_service=settlement_composition.evidence_service,
+        private_result_repository=settlement_composition.private_results,
+        failure_policy=failure_policy,
         listing_service=ListingService(
             sqlite_client=sqlite_client,
             seller_principal=marketplace_signer.identity,
+            settlement_composition=settlement_composition,
         ),
         negotiation_runtime=negotiation_runtime,
         negotiation_service=NegotiationService(
@@ -234,6 +236,9 @@ async def _start_api_credit_services(
     _container.resolved_settlement_runtime = services.settlement_runtime
     _container.resolved_settlement_worker = services.settlement_worker
     _container.resolved_settlement_coordinator = services.settlement_coordinator
+    _container.resolved_settlement_composition = services.settlement_composition
+    _container.resolved_issuance_evidence_service = services.issuance_evidence_service
+    _container.resolved_private_result_repository = services.private_result_repository
     _container.resolved_marketplace_signer = services.marketplace_signer
     _container.resolved_failure_policy = services.failure_policy
     _container.resolved_listing_service = services.listing_service
@@ -253,9 +258,10 @@ async def _stop_api_credit_services(
     logger.info("[SHUTDOWN] API-credits storefront shutting down")
 
 
-
-
-
+from apicredits_storefront.controllers.hosted_settlement_controller import (  # noqa: E402
+    evidence_router,
+    router as hosted_settlement_router,
+)
 from apicredits_storefront.controllers.listings_controller import (  # noqa: E402
     router as listings_router,
 )
@@ -272,6 +278,7 @@ from apicredits_storefront.controllers.settle_controller import (  # noqa: E402
 from apicredits_storefront.controllers.system_controller import (  # noqa: E402
     router as system_router,
 )
+
 
 def build_api_credits_storefront_registry(
     *,
@@ -332,6 +339,8 @@ def build_api_credits_storefront_app(
                 routers=(
                     system_router,
                     listings_router,
+                    hosted_settlement_router,
+                    evidence_router,
                     negotiate_router,
                     negotiations_router,
                     settle_router,

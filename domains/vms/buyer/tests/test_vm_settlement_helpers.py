@@ -6,10 +6,10 @@ import typer
 from arkhai_vms import make_vm_provision_terms
 from domains.vms.buyer import (
     common,
-    hosted_settlement,
     settle_cli,
     settlement_composition,
 )
+import core_buyer.hosted_settlement as hosted_settlement
 from domains.vms.buyer.escrow_selection import select_escrow_entry
 from domains.vms.buyer.settlement_composition import resolve_buyer_settlement_policy
 from domains.vms.settlement import escrow_proposal_from_accepted_entry
@@ -34,6 +34,7 @@ _TOKEN = "0x" + "22" * 20
 _OTHER = "0x" + "33" * 20
 _ARBITER = "0x" + "44" * 20
 
+
 def _resolved(signer: Ed25519Signer) -> ResolvedBuyerIdentity:
     return ResolvedBuyerIdentity(
         profile_id=uuid.UUID("11111111-1111-4111-8111-111111111111"),
@@ -41,7 +42,6 @@ def _resolved(signer: Ed25519Signer) -> ResolvedBuyerIdentity:
         signer=signer,
         source="recovery",
     )
-
 
 
 def test_hosted_start_carries_only_accepted_and_authorization_refs(monkeypatch):
@@ -56,14 +56,15 @@ def test_hosted_start_carries_only_accepted_and_authorization_refs(monkeypatch):
         ),
     )
 
-    result = hosted_settlement.start_hosted_settlement(
+    result = hosted_settlement.HostedSettlementTransport(
         seller_url="http://seller/",
-        negotiation_id="neg-1",
-        obligation_ref="a" * 64,
-        funding_authorization_ref="funding-auth-safe-1",
         principal=buyer.identity,
         signer=buyer,
         resolve_seller_principals=lambda: None,
+    ).start(
+        negotiation_id="neg-1",
+        obligation_ref="a" * 64,
+        funding_authorization_ref="funding-auth-safe-1",
     )
 
     assert result["settlement_ref"] == "settlement-1"
@@ -88,14 +89,15 @@ def test_hosted_wait_returns_expired_for_explicit_reclaim(monkeypatch):
         },
     )
 
-    result = hosted_settlement.wait_for_hosted_settlement(
+    result = hosted_settlement.HostedSettlementTransport(
         seller_url="http://seller/",
-        settlement_ref="settlement-1",
         principal=buyer.identity,
         signer=buyer,
+        resolve_seller_principals=lambda: None,
+    ).wait(
+        settlement_ref="settlement-1",
         total_timeout=1,
         sleep=lambda _seconds: None,
-        resolve_seller_principals=lambda: None,
     )
 
     assert result["status"] == "expired"
@@ -416,9 +418,9 @@ def test_hosted_recovery_is_pinned_and_never_touches_chain_config(monkeypatch, c
     )
     monkeypatch.setattr(settle_cli, "open_run_log", lambda *_args, **_kwargs: _Log())
     monkeypatch.setattr(
-        settle_cli,
-        "start_hosted_settlement",
-        lambda **_kwargs: {
+        settle_cli.HostedSettlementTransport,
+        "start",
+        lambda _transport, **_kwargs: {
             "settlement_ref": "stripe-operation",
             "status": "funding",
             "action": {
@@ -429,9 +431,9 @@ def test_hosted_recovery_is_pinned_and_never_touches_chain_config(monkeypatch, c
         },
     )
     monkeypatch.setattr(
-        settle_cli,
-        "wait_for_hosted_settlement",
-        lambda **_kwargs: {"status": "ready"},
+        settle_cli.HostedSettlementTransport,
+        "resume",
+        lambda _transport, **_kwargs: {"status": "ready"},
     )
 
     result = settle_cli.run_settle_from_log(
@@ -511,17 +513,17 @@ def test_inflight_legacy_hosted_recovery_skips_new_authorization(monkeypatch):
         ),
     )
     monkeypatch.setattr(
-        settle_cli,
-        "start_hosted_settlement",
-        lambda **_kwargs: (_ for _ in ()).throw(
+        settle_cli.HostedSettlementTransport,
+        "start",
+        lambda _transport, **_kwargs: (_ for _ in ()).throw(
             AssertionError("in-flight legacy recovery started a new settlement")
         ),
     )
     waited = []
     monkeypatch.setattr(
-        settle_cli,
-        "wait_for_hosted_settlement",
-        lambda **kwargs: waited.append(kwargs) or {"status": "ready"},
+        settle_cli.HostedSettlementTransport,
+        "resume",
+        lambda _transport, **kwargs: waited.append(kwargs) or {"status": "ready"},
     )
 
     result = settle_cli.run_settle_from_log(
@@ -597,9 +599,9 @@ def test_legacy_without_settlement_ref_requires_operator_before_payer_call(
         ),
     )
     monkeypatch.setattr(
-        settle_cli,
-        "start_hosted_settlement",
-        lambda **_kwargs: (_ for _ in ()).throw(
+        settle_cli.HostedSettlementTransport,
+        "start",
+        lambda _transport, **_kwargs: (_ for _ in ()).throw(
             AssertionError("legacy recovery started a new settlement")
         ),
     )
@@ -715,7 +717,4 @@ def test_fiat_discovery_is_local_only_and_respects_action_capability(monkeypatch
         funding_selection=FundingSelection(mode=FundingMode.INTERACTIVE),
         action_capable=False,
     )
-    assert (
-        no_action_policy.select(listing, expiration_unix=2_000_000_000)
-        is None
-    )
+    assert no_action_policy.select(listing, expiration_unix=2_000_000_000) is None

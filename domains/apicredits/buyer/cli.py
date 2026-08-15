@@ -1,6 +1,8 @@
 """API-credit market-domain contribution for the core ``market`` buyer CLI."""
 
 from __future__ import annotations
+import asyncio
+import json
 
 from dataclasses import replace
 
@@ -21,6 +23,42 @@ from . import buy_cli as buy_module
 from . import negotiate_cli as negotiate_module
 from . import settle_cli as settle_module
 from .listing_cli import listing_app
+from .settlement_composition import (
+    buyer_settlement_readiness,
+    buyer_settlement_registry,
+)
+
+
+def _settlement_status(
+    as_json: bool = typer.Option(False, "--json", help="Emit sanitized JSON."),
+) -> None:
+    config, statuses = asyncio.run(buyer_settlement_readiness())
+    if as_json:
+        typer.echo(
+            json.dumps(
+                {
+                    "schema_version": config.schema_version,
+                    "priority": list(config.priority),
+                    "mechanisms": [status.safe_projection() for status in statuses],
+                },
+                separators=(",", ":"),
+                sort_keys=True,
+            )
+        )
+    else:
+        for status in statuses:
+            state = (
+                "ready"
+                if status.ready
+                else "disabled"
+                if not status.enabled
+                else "unready"
+            )
+            typer.echo(f"{status.mechanism}: {state}")
+            for blocker in status.blockers:
+                typer.echo(f"  {blocker.code}: {blocker.message}")
+    if not any(status.ready for status in statuses):
+        raise typer.Exit(1)
 
 
 credits_app = typer.Typer(no_args_is_help=True)
@@ -32,6 +70,18 @@ credits_app.add_typer(
 buy_module.register(credits_app)
 negotiate_module.register(credits_app)
 settle_module.register(credits_app)
+settlement_app = typer.Typer(
+    no_args_is_help=True,
+    help="Shared settlement profile and readiness commands.",
+)
+settlement_app.command("status")(_settlement_status)
+for registration in buyer_settlement_registry().registrations:
+    if registration.command_group is not None:
+        settlement_app.add_typer(
+            registration.command_group,
+            name=registration.config_key,
+        )
+credits_app.add_typer(settlement_app, name="settlement")
 
 
 def register(app: typer.Typer) -> None:

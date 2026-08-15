@@ -89,6 +89,10 @@ def wheels(tmp_path_factory: pytest.TempPathFactory) -> dict[str, Path]:
             REPO / "kit" / "settlement-runtime",
             "arkhai_kit_settlement_runtime-*.whl",
         ),
+        "hosted_settlement": (
+            REPO / "kit" / "hosted-settlement",
+            "arkhai_kit_hosted_settlement-*.whl",
+        ),
         "resource_pools": (
             REPO / "kit" / "resource-pools",
             "arkhai_kit_resource_pools-*.whl",
@@ -110,6 +114,11 @@ def wheels(tmp_path_factory: pytest.TempPathFactory) -> dict[str, Path]:
         matches = sorted(output.glob(pattern))
         assert len(matches) == 1
         built[name] = matches[0]
+    hosted_clients = sorted(
+        (REPO / ".dist").glob("arkhai_hosted_settlement_client-0.2.0-py3-none-any.whl")
+    )
+    assert len(hosted_clients) == 1
+    shutil.copy2(hosted_clients[0], output / hosted_clients[0].name)
     return built
 
 
@@ -184,9 +193,7 @@ def test_migrated_storefront_wheels_require_negotiation_runtime(
 ) -> None:
     for name in ("storefront", "vms_storefront"):
         metadata = _metadata(wheels[name])
-        assert (
-            "Requires-Dist: arkhai-kit-negotiation-runtime==0.1.0" in metadata
-        ), name
+        assert "Requires-Dist: arkhai-kit-negotiation-runtime==0.1.0" in metadata, name
 
 
 def test_storefront_wheel_exports_contract_constant(

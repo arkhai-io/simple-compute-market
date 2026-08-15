@@ -21,10 +21,15 @@ def load_deal_context(run_id: str, **kwargs):
         if token:
             deal.token_contract = token
     if deal.settlement_plan is not None and not deal.accepted_escrow_terms:
-        from market_alkahest.plans import escrow_terms_from_settlement_plan
+        obligations = deal.settlement_plan.get("obligations") or []
+        if obligations and all(
+            isinstance(item, dict) and item.get("mechanism") == "alkahest.v1"
+            for item in obligations
+        ):
+            from market_alkahest.plans import escrow_terms_from_settlement_plan
 
-        deal.accepted_escrow_terms = [
-            terms.model_dump()
-            for terms in escrow_terms_from_settlement_plan(deal.settlement_plan)
-        ]
+            deal.accepted_escrow_terms = [
+                terms.model_dump()
+                for terms in escrow_terms_from_settlement_plan(deal.settlement_plan)
+            ]
     return deal

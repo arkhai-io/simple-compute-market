@@ -18,6 +18,8 @@ from typing import Any, Awaitable, Callable
 from market_identity import Identity
 
 from domains.apicredits.settlement.credits_client import (
+    CreditIssuanceRequest,
+    CreditKeyTarget,
     CreditsServiceClient,
     CreditsServiceError,
 )
@@ -28,6 +30,41 @@ StageEventFn = Callable[..., Any]
 ApplyFailurePolicyFn = Callable[..., Awaitable[None]]
 
 
+def prepare_credit_issuance_request(
+    *,
+    obligation_ref: str,
+    mechanism: str,
+    authoritative_gate: str,
+    owner: Identity,
+    service: str,
+    resource_id: str,
+    quantity: int,
+    key_mode: str,
+    key_id: str | None = None,
+    capacity_reservation_id: str | None = None,
+) -> CreditIssuanceRequest:
+    """Build one deterministic command only from an authoritative settlement gate."""
+
+    admitted_gate = {
+        "alkahest.v1": "alkahest_verified",
+        "fiat.stripe.v1": "hosted_funded",
+    }.get(mechanism)
+    if admitted_gate is None or authoritative_gate != admitted_gate:
+        raise ValueError(
+            "credit issuance requires the exact mechanism's authoritative funding gate"
+        )
+    return CreditIssuanceRequest.create(
+        obligation_ref=obligation_ref,
+        mechanism=mechanism,
+        owner=owner,
+        service=service,
+        resource_id=resource_id,
+        quantity=quantity,
+        key=CreditKeyTarget(mode=key_mode, key_id=key_id),
+        capacity_reservation_id=capacity_reservation_id,
+    )
+
+
 def encode_credit_fulfillment(
     *,
     offer_resource: dict[str, Any],
@@ -35,13 +72,15 @@ def encode_credit_fulfillment(
     quantity: int,
 ) -> str:
     """The seller's fulfillment obligation payload (public — no secret)."""
-    return json.dumps({
-        "kind": "api_credits.v1",
-        "service_name": offer_resource.get("service_name"),
-        "base_url": offer_resource.get("base_url"),
-        "key_id": key_id,
-        "quantity": int(quantity),
-    })
+    return json.dumps(
+        {
+            "kind": "api_credits.v1",
+            "service_name": offer_resource.get("service_name"),
+            "base_url": offer_resource.get("base_url"),
+            "key_id": key_id,
+            "quantity": int(quantity),
+        }
+    )
 
 
 async def _submit_token_fulfillment(
@@ -58,8 +97,7 @@ async def _submit_token_fulfillment(
     if not client:
         fulfillment_uid = f"fulfill_{uuid.uuid4()}"
         logger.info(
-            "[ALKAHEST] (Simulated) Fulfilled token obligation without "
-            "on-chain client."
+            "[ALKAHEST] (Simulated) Fulfilled token obligation without on-chain client."
         )
         return fulfillment_uid
 
@@ -108,9 +146,7 @@ async def fulfill_api_credits_obligation(
     resource_id = offer_resource.get("resource_id")
     if credits_client is None:
         if service_url is None or admin_key is None:
-            raise ValueError(
-                "credits_client or service_url/admin_key is required"
-            )
+            raise ValueError("credits_client or service_url/admin_key is required")
         credits_client = CreditsServiceClient(service_url, admin_key)
 
     async def _fail(reason: str, message: str) -> dict[str, Any]:
@@ -128,10 +164,13 @@ async def fulfill_api_credits_obligation(
             except Exception as policy_err:
                 logger.warning(
                     "[FULFILLMENT_POLICY] Failed to apply issuance failure "
-                    "policy for escrow %s: %s", escrow_uid, policy_err,
+                    "policy for escrow %s: %s",
+                    escrow_uid,
+                    policy_err,
                 )
         stage_event(
-            "provision", "failed",
+            "provision",
+            "failed",
             escrow_uid=escrow_uid,
             listing_id=listing_id,
             resource_id=resource_id,
@@ -143,32 +182,45 @@ async def fulfill_api_credits_obligation(
             "escrow_uid": escrow_uid,
         }
 
-    try:
-        issuance = await credits_client.submit_credit_issuance(
-            escrow_uid=escrow_uid,
-            quantity=quantity,
-            key_mode=key_mode,
-            key_id=key_id,
-            buyer_principal=buyer_principal,
-            capacity_reservation_id=capacity_reservation_id,
-            resource_id=str(resource_id) if resource_id else None,
+    service_name = str(offer_resource.get("service_name") or "")
+    if not service_name or not resource_id:
+        return await _fail(
+            "issuance_input_invalid",
+            "Issuance requires trusted service_name and resource_id",
         )
+    request = prepare_credit_issuance_request(
+        obligation_ref=escrow_uid,
+        mechanism="alkahest.v1",
+        authoritative_gate="alkahest_verified",
+        owner=buyer_principal,
+        service=service_name,
+        resource_id=str(resource_id),
+        quantity=quantity,
+        key_mode=key_mode,
+        key_id=key_id,
+        capacity_reservation_id=capacity_reservation_id,
+    )
+    try:
+        issuance = await credits_client.submit_credit_issuance(request)
     except CreditsServiceError as error:
         return await _fail(error.reason, f"Issuance refused: {error}")
     except Exception as error:
         return await _fail("issuance_unreachable", f"Issuance failed: {error}")
 
-    issued_key_id = str(issuance.get("key_id"))
+    issued_key_id = issuance.key_id
     stage_event(
-        "provision", "credits_issued",
+        "provision",
+        "credits_issued",
         escrow_uid=escrow_uid,
         listing_id=listing_id,
         resource_id=resource_id,
         key_id=issued_key_id,
-        quantity=int(issuance.get("quantity") or quantity),
-        balance=issuance.get("balance"),
-        capacity_reservation_id=issuance.get("capacity_reservation_id") or capacity_reservation_id,
-        already_issued=bool(issuance.get("already_issued")),
+        quantity=issuance.quantity,
+        balance=issuance.balance,
+        capacity_reservation_id=(
+            issuance.capacity_reservation_id or capacity_reservation_id
+        ),
+        already_issued=issuance.already_issued,
     )
 
     payload = encode_credit_fulfillment(
@@ -185,11 +237,15 @@ async def fulfill_api_credits_obligation(
     except Exception as error:
         rollback = await credits_client.rollback_issuance(
             escrow_uid=escrow_uid,
-            issuance=issuance,
+            issuance={
+                "key_id": issuance.key_id,
+                "quantity": issuance.quantity,
+            },
             key_mode=key_mode,
         )
         stage_event(
-            "settlement", "failed_after_issuance",
+            "settlement",
+            "failed_after_issuance",
             escrow_uid=escrow_uid,
             listing_id=listing_id,
             key_id=issued_key_id,
@@ -203,7 +259,8 @@ async def fulfill_api_credits_obligation(
         }
 
     stage_event(
-        "provision", "fulfilled",
+        "provision",
+        "fulfilled",
         listing_id=listing_id,
         escrow_uid=escrow_uid,
         fulfillment_uid=fulfillment_uid,
@@ -214,10 +271,10 @@ async def fulfill_api_credits_obligation(
     credentials: dict[str, Any] = {
         "key_id": issued_key_id,
         "base_url": offer_resource.get("base_url"),
-        "balance": issuance.get("balance"),
+        "balance": issuance.balance,
     }
-    if issuance.get("secret"):
-        credentials["secret"] = issuance["secret"]
+    if issuance.secret:
+        credentials["secret"] = issuance.secret
     return {
         "status": "fulfilled",
         "message": "API-token obligation fulfilled",

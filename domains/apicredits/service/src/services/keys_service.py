@@ -1,32 +1,9 @@
-"""Keys, credit grants, and consumption — the credits service's core.
+"""Keys, immutable credit grants, and consumption.
 
-Issuance is the settlement-side fulfillment job
-(ARCHITECTURE.md, "API-credits market domain — Market shape"): it re-checks the
-ownership claim authoritatively (the negotiation guard is advisory —
-it works off a snapshot, and force-accept bypasses the chain), commits
-the quota hold in the site ledger, creates or locates the key, and
-writes the credit grant. ``escrow_uid`` uniqueness on grants makes the
-whole job idempotent under storefront retry:
-
-- the new-mode key id derives from the escrow uid, so a retry after a
-  partial failure finds the half-issued key instead of minting another;
-- the quota commit is idempotent at the ledger;
-- a retry that finds the grant already written returns the prior
-  issuance — and if the (new-mode) key has never consumed, it rotates
-  the bearer secret so a lost response doesn't strand the buyer
-  without credentials (rotation can't break a working integration:
-  zero consumption means nothing is using the old secret; once the key
-  has consumed, the buyer evidently holds it and no secret is
-  returned).
-
-Consume/verify are the middleware-facing surface: bearer secrets are
-hashed at rest, balances are maintained transactionally on the key row
-(O(1) checks), and per-key idempotency keys make batched middleware
-flushes safe to replay.
-
-Mutations serialize on a process-level lock for the same reason the
-site ledger's do: SQLite is single-writer, and in-memory test engines
-share one connection.
+The credits authority owns quota, key ownership, bearer hashes, balances, and
+grant idempotency. Issuance compares the complete canonical command before any
+new mutation; an exact retry converges on the committed grant while changed
+reuse conflicts.
 """
 
 from __future__ import annotations
@@ -34,21 +11,32 @@ from __future__ import annotations
 import hashlib
 import secrets as _secrets
 import threading
+from datetime import timezone
 from typing import Any, Mapping, Optional
 
 from market_identity import Identity, IdentityScheme
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
 
 from market_site.ledger import CapacityConflictError, CapacityLedgerService
 from db.models import ApiKey, ConsumptionEvent, CreditGrant
+from models.keys_model import (
+    LEGACY_ISSUANCE_RESOURCE_ID,
+    LEGACY_ISSUANCE_SERVICE,
+    KeyDisposition,
+    derive_credit_fulfillment_id,
+    issuance_request_digest,
+    legacy_issuance_request_digest,
+)
 
-#: Reject vocabulary shared with the negotiation guards
-#: (ARCHITECTURE.md, "API-credits market domain — Key ownership").
 KEY_NOT_FOUND = "key_not_found"
 KEY_NOT_OWNED = "key_not_owned"
 KEY_REVOKED = "key_revoked"
 QUOTA_EXHAUSTED = "quota_exhausted"
+FULFILLMENT_CONFLICT = "fulfillment_conflict"
 INSUFFICIENT_CREDITS = "insufficient_credits"
+
+_GLOBAL_MUTATION_LOCK = threading.RLock()
 
 
 class IssuanceError(Exception):
@@ -70,10 +58,10 @@ def _new_secret(key_id: str) -> str:
     return f"{key_id}.{_secrets.token_urlsafe(32)}"
 
 
-def derive_key_id(escrow_uid: str) -> str:
-    """Deterministic new-mode key id, so issuance retries reuse the key
-    a partial earlier attempt created instead of minting another."""
-    digest = hashlib.sha256(f"key:{escrow_uid}".encode("utf-8")).hexdigest()
+def derive_key_id(fulfillment_id: str) -> str:
+    """Derive one stable new-key identifier from the immutable grant key."""
+
+    digest = hashlib.sha256(f"key:{fulfillment_id}".encode("utf-8")).hexdigest()
     return f"ak_{digest[:16]}"
 
 
@@ -113,7 +101,7 @@ class KeysService:
     ) -> None:
         self._session_factory = session_factory
         self._ledger = capacity_ledger
-        self._lock = threading.RLock()
+        self._lock = _GLOBAL_MUTATION_LOCK
 
     # ------------------------------------------------------------------
     # Issuance (settlement fulfillment)
@@ -122,109 +110,270 @@ class KeysService:
     def issue(
         self,
         *,
-        escrow_uid: str,
+        fulfillment_id: str,
+        obligation_ref: str,
+        mechanism: str,
+        owner_scheme: str,
+        owner_id: str,
+        service: str,
+        resource_id: str,
         quantity: int,
         key_mode: str,
+        request_digest: str,
         key_id: str | None = None,
-        buyer_scheme: str | None = None,
-        buyer_id: str | None = None,
-        owner_scheme: str | None = None,
-        owner_id: str | None = None,
         capacity_reservation_id: str | None = None,
-        resource_id: str | None = None,
     ) -> dict[str, Any]:
-        """Fulfill one deal: quota commit + key + grant, idempotently.
+        """Atomically commit one immutable grant under ``fulfillment_id``."""
 
-        ``owner_scheme``/``owner_id`` override the principal bound to a
-        new key. Existing-mode issuance re-checks the exact buyer principal
-        and refuses identifier-only or cross-scheme matches.
-        """
-        if quantity < 1:
-            raise ValueError(f"quantity must be >= 1, got {quantity}")
-        if key_mode not in ("new", "existing"):
-            raise ValueError(f"key.mode must be 'new' or 'existing', got {key_mode!r}")
-        if key_mode == "existing" and not key_id:
-            raise ValueError("key.mode 'existing' requires key.key_id")
-        buyer = _principal(buyer_scheme, buyer_id, field="buyer")
-        explicit_owner = _principal(owner_scheme, owner_id, field="owner")
+        owner = _principal(owner_scheme, owner_id, field="owner")
+        if owner is None:
+            raise ValueError("owner is required")
+        key_target = KeyDisposition(mode=key_mode, key_id=key_id)
+        if mechanism not in {"alkahest.v1", "fiat.stripe.v1"}:
+            raise ValueError(f"unsupported settlement mechanism {mechanism!r}")
+        if fulfillment_id != derive_credit_fulfillment_id(obligation_ref):
+            raise ValueError("fulfillment_id does not match obligation_ref")
+        expected_digest = issuance_request_digest(
+            fulfillment_id=fulfillment_id,
+            obligation_ref=obligation_ref,
+            mechanism=mechanism,
+            owner=owner,
+            service=service,
+            resource_id=resource_id,
+            quantity=quantity,
+            key=key_target,
+        )
+        if request_digest != expected_digest:
+            raise ValueError("request_digest does not match issuance request")
 
         with self._lock, self._session_factory() as db:
             prior = (
-                db.query(CreditGrant).filter(CreditGrant.escrow_uid == escrow_uid).first()
+                db.query(CreditGrant)
+                .filter(CreditGrant.fulfillment_id == fulfillment_id)
+                .first()
             )
             if prior is not None:
+                self._assert_or_adopt_legacy_replay(
+                    db,
+                    prior,
+                    obligation_ref=obligation_ref,
+                    mechanism=mechanism,
+                    owner=owner,
+                    service=service,
+                    resource_id=resource_id,
+                    quantity=quantity,
+                    key=key_target,
+                    request_digest=request_digest,
+                )
                 return self._reissue(db, prior)
 
-            # 1. Resolve the key and re-check ownership authoritatively.
             secret: str | None = None
-            if key_mode == "existing":
-                key = db.get(ApiKey, key_id)
+            if key_target.mode == "existing":
+                key = db.get(ApiKey, key_target.key_id)
                 if key is None:
-                    raise IssuanceError(KEY_NOT_FOUND, f"key {key_id!r} not found")
+                    raise IssuanceError(
+                        KEY_NOT_FOUND,
+                        f"key {key_target.key_id!r} not found",
+                    )
                 if key.status != "active":
-                    raise IssuanceError(KEY_REVOKED, f"key {key_id!r} is {key.status}")
-                admitted, why = _owner_admits(key, buyer)
+                    raise IssuanceError(
+                        KEY_REVOKED,
+                        f"key {key_target.key_id!r} is {key.status}",
+                    )
+                admitted, why = _owner_admits(key, owner)
                 if not admitted:
                     raise IssuanceError(KEY_NOT_OWNED, why)
             else:
-                new_id = derive_key_id(escrow_uid)
+                new_id = derive_key_id(fulfillment_id)
                 key = db.get(ApiKey, new_id)
                 if key is None:
                     secret = _new_secret(new_id)
-                    bound = explicit_owner or buyer
-                    bind_scheme = bound.scheme.value if bound else None
-                    bind_id = bound.identifier if bound else None
                     key = ApiKey(
                         key_id=new_id,
                         secret_hash=_hash_secret(secret),
-                        owner_scheme=bind_scheme,
-                        owner_id=bind_id,
+                        owner_scheme=owner.scheme.value,
+                        owner_id=owner.identifier,
                         status="active",
                         balance=0,
                     )
                     db.add(key)
                 else:
-                    # A prior attempt created the key but failed before
-                    # the grant: rotate so this response carries a
-                    # usable secret (nothing consumed = nothing breaks).
+                    stored_owner = _principal(
+                        key.owner_scheme,
+                        key.owner_id,
+                        field="stored owner",
+                    )
+                    if stored_owner != owner:
+                        raise IssuanceError(
+                            FULFILLMENT_CONFLICT,
+                            "derived key is bound to another canonical owner",
+                        )
+                    if key.status != "active":
+                        raise IssuanceError(
+                            KEY_REVOKED,
+                            f"key {new_id!r} is {key.status}",
+                        )
                     secret = _new_secret(key.key_id)
                     key.secret_hash = _hash_secret(secret)
 
-            # 2. Commit the quota hold (idempotent at the ledger); fall
-            #    back to a plain atomic reserve when the hold lapsed.
             committed_reservation = self._commit_quota(
-                escrow_uid=escrow_uid,
+                fulfillment_id=fulfillment_id,
                 quantity=quantity,
                 capacity_reservation_id=capacity_reservation_id,
                 resource_id=resource_id,
             )
-
-            # 3. The grant. escrow_uid UNIQUE is the idempotency anchor.
-            db.add(CreditGrant(
+            new_balance = int(key.balance or 0) + int(quantity)
+            grant = CreditGrant(
                 key_id=key.key_id,
-                escrow_uid=escrow_uid,
+                fulfillment_id=fulfillment_id,
+                obligation_ref=obligation_ref,
+                mechanism=mechanism,
+                service=service,
+                resource_id=resource_id,
+                key_mode=key_target.mode,
+                key_target_id=key_target.key_id,
+                owner_scheme=owner.scheme.value,
+                owner_id=owner.identifier,
+                request_digest=request_digest,
+                capacity_reservation_id=committed_reservation,
+                result_balance=new_balance,
+                escrow_uid=obligation_ref if mechanism == "alkahest.v1" else None,
                 quantity=int(quantity),
                 reason="issuance",
-            ))
-            key.balance = int(key.balance or 0) + int(quantity)
-            db.commit()
-            return {
-                "key_id": key.key_id,
-                "secret": secret,
-                "quantity": int(quantity),
-                "balance": int(key.balance),
-                "capacity_reservation_id": committed_reservation,
-                "already_issued": False,
-            }
+            )
+            db.add(grant)
+            key.balance = new_balance
+            try:
+                db.commit()
+            except IntegrityError:
+                db.rollback()
+                prior = (
+                    db.query(CreditGrant)
+                    .filter(CreditGrant.fulfillment_id == fulfillment_id)
+                    .first()
+                )
+                if prior is None:
+                    raise
+                self._assert_or_adopt_legacy_replay(
+                    db,
+                    prior,
+                    obligation_ref=obligation_ref,
+                    mechanism=mechanism,
+                    owner=owner,
+                    service=service,
+                    resource_id=resource_id,
+                    quantity=quantity,
+                    key=key_target,
+                    request_digest=request_digest,
+                )
+                return self._reissue(db, prior)
+            db.refresh(grant)
+            return self._grant_result(
+                grant,
+                key,
+                secret=secret,
+                already_issued=False,
+            )
+
+    def _assert_or_adopt_legacy_replay(
+        self,
+        db: Session,
+        prior: CreditGrant,
+        *,
+        obligation_ref: str,
+        mechanism: str,
+        owner: Identity,
+        service: str,
+        resource_id: str,
+        quantity: int,
+        key: KeyDisposition,
+        request_digest: str,
+    ) -> None:
+        expected = (
+            obligation_ref,
+            mechanism,
+            owner.scheme.value,
+            owner.identifier,
+            service,
+            resource_id,
+            int(quantity),
+            key.mode,
+            key.key_id,
+            request_digest,
+        )
+        stored = (
+            prior.obligation_ref,
+            prior.mechanism,
+            prior.owner_scheme,
+            prior.owner_id,
+            prior.service,
+            prior.resource_id,
+            int(prior.quantity),
+            prior.key_mode,
+            prior.key_target_id,
+            prior.request_digest,
+        )
+        if stored == expected:
+            return
+        stored_owner = _principal(
+            prior.owner_scheme,
+            prior.owner_id,
+            field="legacy grant owner",
+        )
+        legacy_digest = (
+            legacy_issuance_request_digest(
+                fulfillment_id=str(prior.fulfillment_id),
+                obligation_ref=str(prior.obligation_ref),
+                key_id=prior.key_id,
+                key_mode=str(prior.key_mode),
+                owner=stored_owner,
+                quantity=int(prior.quantity),
+            )
+            if prior.fulfillment_id is not None
+            and prior.obligation_ref is not None
+            and prior.key_mode in {"new", "existing"}
+            else None
+        )
+        reconstructable = (
+            prior.obligation_ref,
+            prior.mechanism,
+            stored_owner,
+            int(prior.quantity),
+            prior.key_mode,
+            prior.key_target_id,
+        )
+        requested = (
+            obligation_ref,
+            mechanism,
+            owner,
+            int(quantity),
+            key.mode,
+            key.key_id,
+        )
+        if not (
+            mechanism == "alkahest.v1"
+            and reconstructable == requested
+            and prior.service == LEGACY_ISSUANCE_SERVICE
+            and prior.resource_id == LEGACY_ISSUANCE_RESOURCE_ID
+            and prior.request_digest == legacy_digest
+        ):
+            raise IssuanceError(
+                FULFILLMENT_CONFLICT,
+                "fulfillment_id is already bound to a different issuance request",
+            )
+        prior.service = service
+        prior.resource_id = resource_id
+        prior.request_digest = request_digest
+        db.commit()
 
     def _reissue(self, db: Session, prior: CreditGrant) -> dict[str, Any]:
-        """A retry found the grant already written: return the prior
-        issuance. New-mode keys that have never consumed get a rotated
-        secret so a lost first response doesn't strand the buyer."""
+        """Return the committed grant and rotate only an unused new-key secret."""
+
         key = db.get(ApiKey, prior.key_id)
+        if key is None:
+            raise RuntimeError("committed grant references a missing API key")
         secret: str | None = None
-        was_new_mode = prior.escrow_uid and key.key_id == derive_key_id(prior.escrow_uid)
-        if was_new_mode and key.status == "active":
+        if prior.key_mode == "new" and key.status == "active":
             consumed = (
                 db.query(ConsumptionEvent)
                 .filter(ConsumptionEvent.key_id == key.key_id)
@@ -234,48 +383,84 @@ class KeysService:
                 secret = _new_secret(key.key_id)
                 key.secret_hash = _hash_secret(secret)
                 db.commit()
+        return self._grant_result(
+            prior,
+            key,
+            secret=secret,
+            already_issued=True,
+        )
+
+    @staticmethod
+    def _grant_result(
+        grant: CreditGrant,
+        key: ApiKey,
+        *,
+        secret: str | None,
+        already_issued: bool,
+    ) -> dict[str, Any]:
+        owner = _principal(grant.owner_scheme, grant.owner_id, field="grant owner")
+        committed_at = grant.granted_at
+        if committed_at.tzinfo is None:
+            committed_at = committed_at.replace(tzinfo=timezone.utc)
         return {
+            "schema": "arkhai.api-credits.issuance-result.v1",
+            "fulfillment_id": grant.fulfillment_id,
+            "grant_id": grant.fulfillment_id,
+            "obligation_ref": grant.obligation_ref,
+            "mechanism": grant.mechanism,
+            "owner": owner.model_dump(mode="json") if owner else None,
+            "service": grant.service,
+            "resource_id": grant.resource_id,
+            "quantity": int(grant.quantity),
+            "key_mode": grant.key_mode,
             "key_id": key.key_id,
+            "balance": int(
+                grant.result_balance
+                if grant.result_balance is not None
+                else key.balance or 0
+            ),
+            "request_digest": grant.request_digest,
+            "committed_at_unix": int(committed_at.timestamp()),
+            "capacity_reservation_id": grant.capacity_reservation_id,
+            "already_issued": already_issued,
             "secret": secret,
-            "quantity": int(prior.quantity),
-            "balance": int(key.balance or 0),
-            "capacity_reservation_id": None,
-            "already_issued": True,
         }
 
     def _commit_quota(
         self,
         *,
-        escrow_uid: str,
+        fulfillment_id: str,
         quantity: int,
         capacity_reservation_id: str | None,
-        resource_id: str | None,
+        resource_id: str,
     ) -> str | None:
-        """Commit the negotiation-time hold, or atomically reserve when
-        no live hold exists (it lapsed, or holds are disabled)."""
         reservation = None
         if capacity_reservation_id:
             reservation = self._ledger.get_reservation(capacity_reservation_id)
         if reservation is None:
-            reservation = self._ledger.get_reservation_by_escrow(escrow_uid)
+            reservation = self._ledger.get_reservation_by_escrow(fulfillment_id)
         if reservation is not None:
             try:
                 committed = self._ledger.commit(
                     resource_id=None,
                     capacity_reservation_id=reservation["capacity_reservation_id"],
-                    lease_end_utc=None,  # credits don't expire: no lease tail
-                    idempotency_ref=escrow_uid,
+                    lease_end_utc=None,
+                    idempotency_ref=fulfillment_id,
                 )
             except CapacityConflictError:
-                committed = None  # hold lapsed/released; fall through to reserve
+                committed = None
             if committed is not None:
                 return str(committed["capacity_reservation_id"])
 
-        claim: dict[str, Any] = {"units": int(quantity)}
-        if resource_id:
-            claim["resource_id"] = resource_id
-        claim["executor_kind"] = "api_credits"
-        reserved = self._ledger.reserve(claim=claim, deal_ref={"escrow_uid": escrow_uid})
+        claim: dict[str, Any] = {
+            "executor_kind": "api_credits",
+            "resource_id": resource_id,
+            "units": int(quantity),
+        }
+        reserved = self._ledger.reserve(
+            claim=claim,
+            deal_ref={"escrow_uid": fulfillment_id},
+        )
         if reserved is None:
             raise IssuanceError(
                 QUOTA_EXHAUSTED,
@@ -285,9 +470,30 @@ class KeysService:
             resource_id=None,
             capacity_reservation_id=reserved["capacity_reservation_id"],
             lease_end_utc=None,
-            idempotency_ref=escrow_uid,
+            idempotency_ref=fulfillment_id,
         )
         return str(committed["capacity_reservation_id"]) if committed else None
+
+    def get_credit_issuance(self, fulfillment_id: str) -> dict[str, Any] | None:
+        """Return a committed grant projection without bearer material."""
+
+        with self._lock, self._session_factory() as db:
+            grant = (
+                db.query(CreditGrant)
+                .filter(CreditGrant.fulfillment_id == fulfillment_id)
+                .first()
+            )
+            if grant is None:
+                return None
+            key = db.get(ApiKey, grant.key_id)
+            if key is None:
+                raise RuntimeError("committed grant references a missing API key")
+            return self._grant_result(
+                grant,
+                key,
+                secret=None,
+                already_issued=True,
+            )
 
     # ------------------------------------------------------------------
     # Middleware-facing: consume / verify
@@ -317,7 +523,8 @@ class KeysService:
                 return {"ok": False, "reason": KEY_NOT_FOUND, "balance": 0}
             if key.status != "active":
                 return {
-                    "ok": False, "reason": KEY_REVOKED,
+                    "ok": False,
+                    "reason": KEY_REVOKED,
                     "balance": int(key.balance or 0),
                 }
             if idempotency_key is not None:
@@ -331,17 +538,25 @@ class KeysService:
                 )
                 if seen is not None:
                     return {
-                        "ok": True, "consumed": 0, "duplicate": True,
+                        "ok": True,
+                        "consumed": 0,
+                        "duplicate": True,
                         "balance": int(key.balance or 0),
                     }
             balance = int(key.balance or 0)
             if balance < amount:
                 return {
-                    "ok": False, "reason": INSUFFICIENT_CREDITS, "balance": balance,
+                    "ok": False,
+                    "reason": INSUFFICIENT_CREDITS,
+                    "balance": balance,
                 }
-            db.add(ConsumptionEvent(
-                key_id=key_id, amount=int(amount), idempotency_key=idempotency_key,
-            ))
+            db.add(
+                ConsumptionEvent(
+                    key_id=key_id,
+                    amount=int(amount),
+                    idempotency_key=idempotency_key,
+                )
+            )
             key.balance = balance - int(amount)
             db.commit()
             return {"ok": True, "consumed": int(amount), "balance": int(key.balance)}
@@ -365,7 +580,8 @@ class KeysService:
             if key is None:
                 return {"valid": False, "status": None, "balance": 0}
             matches = _secrets.compare_digest(
-                _hash_secret(secret), str(key.secret_hash),
+                _hash_secret(secret),
+                str(key.secret_hash),
             )
             return {
                 "valid": bool(matches and key.status == "active"),
@@ -383,7 +599,10 @@ class KeysService:
             return self._key_payload(key) if key else None
 
     def list_keys(
-        self, *, status: str | None = None, owner_id: str | None = None,
+        self,
+        *,
+        status: str | None = None,
+        owner_id: str | None = None,
     ) -> list[dict[str, Any]]:
         with self._lock, self._session_factory() as db:
             q = db.query(ApiKey)
@@ -404,7 +623,11 @@ class KeysService:
             return self._key_payload(key)
 
     def adjust(
-        self, *, key_id: str, delta: int, reason: str | None = None,
+        self,
+        *,
+        key_id: str,
+        delta: int,
+        reason: str | None = None,
     ) -> Optional[dict[str, Any]]:
         """Operator credit adjustment, recorded as a grant row (no
         escrow). Refuses to take the balance below zero."""
@@ -419,10 +642,14 @@ class KeysService:
                 raise ValueError(
                     f"adjustment {delta} would take balance {balance} below zero"
                 )
-            db.add(CreditGrant(
-                key_id=key_id, escrow_uid=None, quantity=int(delta),
-                reason=reason or "admin_adjustment",
-            ))
+            db.add(
+                CreditGrant(
+                    key_id=key_id,
+                    escrow_uid=None,
+                    quantity=int(delta),
+                    reason=reason or "admin_adjustment",
+                )
+            )
             key.balance = balance + int(delta)
             db.commit()
             return self._key_payload(key)
@@ -440,15 +667,31 @@ class KeysService:
                     "id": row.id,
                     "key_id": row.key_id,
                     "escrow_uid": row.escrow_uid,
+                    "fulfillment_id": row.fulfillment_id,
+                    "obligation_ref": row.obligation_ref,
+                    "mechanism": row.mechanism,
+                    "service": row.service,
+                    "resource_id": row.resource_id,
+                    "key_mode": row.key_mode,
+                    "key_target_id": row.key_target_id,
+                    "owner_scheme": row.owner_scheme,
+                    "owner_id": row.owner_id,
+                    "request_digest": row.request_digest,
                     "quantity": int(row.quantity),
                     "reason": row.reason,
-                    "granted_at": row.granted_at.isoformat() if row.granted_at else None,
+                    "granted_at": row.granted_at.isoformat()
+                    if row.granted_at
+                    else None,
                 }
                 for row in rows
             ]
 
     def list_usage(
-        self, key_id: str, *, after_id: int = 0, limit: int = 500,
+        self,
+        key_id: str,
+        *,
+        after_id: int = 0,
+        limit: int = 500,
     ) -> list[dict[str, Any]]:
         with self._lock, self._session_factory() as db:
             rows = (
@@ -467,7 +710,9 @@ class KeysService:
                     "key_id": row.key_id,
                     "amount": int(row.amount),
                     "idempotency_key": row.idempotency_key,
-                    "occurred_at": row.occurred_at.isoformat() if row.occurred_at else None,
+                    "occurred_at": row.occurred_at.isoformat()
+                    if row.occurred_at
+                    else None,
                 }
                 for row in rows
             ]

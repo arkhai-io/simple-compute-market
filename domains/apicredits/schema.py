@@ -5,7 +5,9 @@ from __future__ import annotations
 import json
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field, model_validator
+from market_core.schemas import SettlementOption, SettlementSelection
+from market_identity import Identity
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from domains.apicredits.listings.models import (
     API_CREDITS_KIND,
@@ -22,11 +24,14 @@ API_CREDITS_SCHEMA_KIND = API_CREDITS_KIND
 class ApiCreditsListing(BaseModel):
     """API-credits domain payload carried by a registry listing."""
 
+    model_config = ConfigDict(extra="forbid")
+
     kind: Literal["api_credits.v1"] = API_CREDITS_SCHEMA_KIND
     offer_resource: ApiCreditsResource = Field(
         description="Quota-backed API service offered by the seller.",
     )
     accepted_escrows: list[dict[str, Any]] = Field(default_factory=list)
+    settlement_options: list[SettlementOption] = Field(default_factory=list)
     demands: list[dict[str, Any]] = Field(default_factory=list)
 
     @model_validator(mode="before")
@@ -61,11 +66,20 @@ class ApiCreditsListing(BaseModel):
             and not self.offer_resource.resource_id.strip()
         ):
             raise ValueError("offer_resource.resource_id must be non-empty")
+        option_ids = [option.option_id for option in self.settlement_options]
+        if len(option_ids) != len(set(option_ids)):
+            raise ValueError("settlement_options contains duplicate option identities")
         return self
 
 
 class ApiCreditsMessage(ApiCreditsProvisionTerms):
     """API-credits negotiation message payload."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    settlement_selection: SettlementSelection | None = None
+    buyer_principal: Identity | None = None
+    seller_principal: Identity | None = None
 
     kind: Literal["api_credits.v1"] = API_CREDITS_PROVISION_KIND
 
@@ -77,6 +91,18 @@ class ApiCreditsMessage(ApiCreditsProvisionTerms):
             raise ValueError("payload.key.mode must be 'new' or 'existing'")
         if self.key_mode == "existing" and not self.key_id:
             raise ValueError("payload.key.key_id is required for existing keys")
+        selected_fields = (
+            self.settlement_selection,
+            self.buyer_principal,
+            self.seller_principal,
+        )
+        if any(value is not None for value in selected_fields) and any(
+            value is None for value in selected_fields
+        ):
+            raise ValueError(
+                "settlement selection and canonical buyer/seller principals "
+                "must be recorded together"
+            )
         return self
 
 
@@ -89,18 +115,31 @@ class ApiCreditsTerms(ApiCreditsMessage):
 class ApiCreditsMaterialization(BaseModel):
     """Settlement-to-fulfillment handoff for an API-credits agreement."""
 
+    model_config = ConfigDict(extra="forbid")
+
     kind: Literal["api_credits.v1"] = API_CREDITS_SCHEMA_KIND
-    escrow_uid: str
+    escrow_uid: str | None = None
     quantity: int = Field(ge=1)
     key_mode: Literal["new", "existing"] = "new"
     key_id: str | None = None
     offer_resource: ApiCreditsResource | None = None
     settlement_ref: dict[str, Any] | None = None
+    obligation_ref: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
+    fulfillment_id: str | None = Field(default=None, min_length=1)
+    mechanism: str | None = Field(default=None, min_length=1)
 
     @model_validator(mode="after")
     def _validate_materialization(self) -> "ApiCreditsMaterialization":
-        if not self.escrow_uid.strip():
+        if self.escrow_uid is not None and not self.escrow_uid.strip():
             raise ValueError("escrow_uid must be non-empty")
+        if self.escrow_uid is None and self.obligation_ref is None:
+            raise ValueError("materialization requires escrow_uid or obligation_ref")
+        if self.obligation_ref is not None and (
+            self.mechanism is None or self.fulfillment_id is None
+        ):
+            raise ValueError(
+                "mechanism-neutral materialization requires mechanism and fulfillment_id"
+            )
         if self.key_mode == "existing" and not self.key_id:
             raise ValueError("key_id is required for existing keys")
         return self
@@ -109,17 +148,24 @@ class ApiCreditsMaterialization(BaseModel):
 class ApiCreditsReceipt(BaseModel):
     """Domain receipt for API-credit issuance/fulfillment state."""
 
+    model_config = ConfigDict(extra="forbid")
+
     kind: Literal["api_credits.v1"] = API_CREDITS_SCHEMA_KIND
     status: str
     escrow_uid: str | None = None
+    obligation_ref: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
+    mechanism: str | None = None
     capacity_reservation_id: str | None = None
     key_id: str | None = None
     fulfillment_uid: str | None = None
+    fulfillment_id: str | None = None
     credentials_ref: dict[str, Any] | None = None
     result_ref: dict[str, Any] | None = None
 
     @model_validator(mode="after")
     def _validate_receipt(self) -> "ApiCreditsReceipt":
+        if self.escrow_uid is None and self.obligation_ref is None:
+            raise ValueError("receipt requires escrow_uid or obligation_ref")
         if not self.status.strip():
             raise ValueError("status must be non-empty")
         return self
@@ -128,10 +174,15 @@ class ApiCreditsReceipt(BaseModel):
 class ApiCreditsResult(BaseModel):
     """Result shape for API-credit issuance/fulfillment slots."""
 
+    model_config = ConfigDict(extra="forbid")
+
     kind: Literal["api_credits.v1"] = API_CREDITS_SCHEMA_KIND
     action: str
     status: str = "success"
     fulfillment_uid: str | None = None
+    obligation_ref: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
+    mechanism: str | None = None
+    fulfillment_id: str | None = None
     credentials_ref: dict[str, Any] | None = None
     details: dict[str, Any] | None = None
 

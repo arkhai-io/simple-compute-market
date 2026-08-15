@@ -205,7 +205,6 @@ async def _seed_demo_listing() -> None:
     resource_id = str(seed["resource_id"])
     try:
         import apicredits_storefront.container as _container
-        from apicredits_storefront.services.listing_service import ListingService
         from apicredits_storefront.utils.config import CHAINS
 
         db = _container.resolved_sqlite_client
@@ -257,12 +256,10 @@ async def _seed_demo_listing() -> None:
             }
         ]
 
-        from apicredits_storefront.utils.config import resolve_identity_config
-
-        result = await ListingService(
-            sqlite_client=db,
-            seller_principal=resolve_identity_config().principal,
-        ).publish_from_quota(
+        listing_service = _container.resolved_listing_service
+        if listing_service is None:
+            raise RuntimeError("listing service is not initialized")
+        result = await listing_service.publish_from_quota(
             resource_id=resource_id,
             service_name=str(seed.get("service_name", "service")),
             accepted_escrows=accepted_escrows,

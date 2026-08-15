@@ -44,6 +44,15 @@ negotiation_watchdog_interval = 60
 # Shared settlement-servicing worker cadence (seconds).
 claims_sweep_interval = 30
 
+[Settlement]
+schema_version = 1
+priority = []
+
+# Add [Settlement.stripe] and/or [Settlement.alkahest] explicitly. Hosted-only
+# deployments leave [wallet] and [chains] empty; all hosted fields are public
+# release/trust/profile/resolver configuration and provider credentials are
+# rejected by the strict hosted configuration model.
+
 [wallet]
 # Sensitive — populated by Secret overlay in k8s, by local file otherwise.
 address     = ""

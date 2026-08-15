@@ -19,6 +19,7 @@ from typing import Any, Awaitable, Callable, Mapping, Protocol
 from market_identity import Identity
 import domains.apicredits.negotiation.policies  # noqa: F401 — registers the guards
 from domains.apicredits.listings.pricing import (
+    checked_credit_total,
     determine_strategy_from_order,
     extract_unit_price_from_order,
 )
@@ -64,8 +65,7 @@ class ApiCreditsSellerRoundHook(Protocol):
         key_mode: str | None = None,
         key_id: str | None = None,
         strategy_label: str | None = None,
-    ) -> SellerRoundResult:
-        ...
+    ) -> SellerRoundResult: ...
 
 
 def _load_chain(
@@ -97,9 +97,8 @@ def _load_chain(
     policy_names = list(raw_policies or [])
     if not policy_names:
         policy_mode = (
-            (getattr(negotiation_config, "policy_mode", "") or "").strip()
-            or _DEFAULT_TERMINAL
-        )
+            getattr(negotiation_config, "policy_mode", "") or ""
+        ).strip() or _DEFAULT_TERMINAL
         policy_names = [policy_mode]
     for guard in reversed(_DEFAULT_GUARDS):
         if guard not in policy_names:
@@ -112,16 +111,20 @@ def _seller_reference_amount(
     quantity: int | None,
     *,
     default_min_price: Any = None,
+    settlement_selection: Mapping[str, Any] | None = None,
 ) -> int:
-    """quantity × per-token rate, in base units."""
-    unit = Decimal(str(
-        extract_unit_price_from_order(
-            dict(listing),
-            default_min_price=default_min_price,
-        )
-    ))
+    """quantity × exact selected per-credit rate, in base units."""
+    unit = extract_unit_price_from_order(
+        dict(listing),
+        default_min_price=default_min_price,
+        settlement_selection=(
+            dict(settlement_selection) if settlement_selection is not None else None
+        ),
+    )
     count = int(quantity) if quantity is not None else 1
-    return int(unit * count)
+    if settlement_selection is not None:
+        return checked_credit_total(unit, count)
+    return int(Decimal(str(unit)) * count)
 
 
 async def _run_seller_round(
@@ -152,14 +155,22 @@ async def _run_seller_round(
         if item.sender == "them":
             their_proposal = item.proposal
             break
+    settlement_selection = (
+        their_proposal.get("settlement_selection")
+        if isinstance(their_proposal, Mapping)
+        and isinstance(their_proposal.get("settlement_selection"), Mapping)
+        else None
+    )
     uses_scalar_amount = proposal_uses_scalar_amount(listing_dict, their_proposal)
     reference_amount = (
         _seller_reference_amount(
             listing_dict,
             requested_quantity,
             default_min_price=default_min_price,
+            settlement_selection=settlement_selection,
         )
-        if uses_scalar_amount else 0
+        if uses_scalar_amount
+        else 0
     )
 
     chain = _load_chain(negotiation_config=negotiation_config, chains=chains)
@@ -236,7 +247,9 @@ class _DefaultSellerRoundHook:
                 # claims — the guard sees no record and rejects early;
                 # issuance would have re-checked (and failed) anyway.
                 logger.warning(
-                    "[NEGOTIATION] key lookup failed for %r: %s", key_id, exc,
+                    "[NEGOTIATION] key lookup failed for %r: %s",
+                    key_id,
+                    exc,
                 )
                 policy_inputs["key_record"] = None
         return await _run_seller_round(

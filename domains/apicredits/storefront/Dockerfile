@@ -35,6 +35,8 @@ RUN --mount=type=cache,target=/root/.cache/uv \
         --refresh-package arkhai-core-registry-client \
         --refresh-package arkhai-kit-policy \
         --refresh-package arkhai-kit-settlement-runtime \
+        --refresh-package arkhai-kit-hosted-settlement \
+        --refresh-package arkhai-hosted-settlement-client \
         --refresh-package arkhai-kit-storefront \
         --refresh-package arkhai-kit-negotiation-runtime \
         --refresh-package arkhai-kit-alkahest \

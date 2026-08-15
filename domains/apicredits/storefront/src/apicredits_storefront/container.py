@@ -21,6 +21,13 @@ if TYPE_CHECKING:
         SettlementServicingWorker,
         SettlementSQLiteRepository,
     )
+    from apicredits_storefront.services.issuance_evidence import (
+        ApiCreditPrivateResultRepository,
+        ApiCreditsIssuanceEvidenceService,
+    )
+    from apicredits_storefront.settlement_composition import (
+        ApiCreditsSettlementComposition,
+    )
     from market_identity import Signer
 
     from apicredits_storefront.services.listing_service import ListingService
@@ -34,6 +41,9 @@ resolved_settlement_runtime: "SettlementRuntime | None" = None
 resolved_settlement_worker: "SettlementServicingWorker | None" = None
 resolved_settlement_coordinator: "SettlementJobCoordinator | None" = None
 resolved_failure_policy: "FailurePolicy | None" = None
+resolved_settlement_composition: "ApiCreditsSettlementComposition | None" = None
+resolved_issuance_evidence_service: "ApiCreditsIssuanceEvidenceService | None" = None
+resolved_private_result_repository: "ApiCreditPrivateResultRepository | None" = None
 resolved_alkahest_clients: dict[str, Any] = {}
 resolved_listing_service: "ListingService | None" = None
 resolved_negotiation_service: "NegotiationService | None" = None
@@ -52,6 +62,9 @@ def clear_lifespan_state(*, domain: "MarketDomainContract") -> None:
     global resolved_settlement_worker
     global resolved_settlement_coordinator
     global resolved_failure_policy
+    global resolved_settlement_composition
+    global resolved_issuance_evidence_service
+    global resolved_private_result_repository
     global resolved_alkahest_clients
     global resolved_listing_service
     global resolved_negotiation_service
@@ -70,6 +83,9 @@ def clear_lifespan_state(*, domain: "MarketDomainContract") -> None:
     resolved_settlement_worker = None
     resolved_settlement_coordinator = None
     resolved_failure_policy = None
+    resolved_settlement_composition = None
+    resolved_issuance_evidence_service = None
+    resolved_private_result_repository = None
     resolved_alkahest_clients = {}
     resolved_listing_service = None
     resolved_negotiation_service = None
