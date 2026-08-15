@@ -105,13 +105,11 @@ def _build_alkahest_clients() -> dict:
     from market_storefront.services import alkahest_service
 
     return alkahest_service.build_clients()
-
-
-def _build_listing_service(*, domain: MarketDomainContract, **kwargs):
+def _build_listing_service(*, registry: StorefrontDomainRegistry, **kwargs):
     from market_storefront.services.listing_service import ListingService
 
     return ListingService(
-        domain=domain,
+        registry=registry,
         **kwargs,
         settlement_composition_provider=lambda: (
             _container.resolved_settlement_composition
@@ -119,10 +117,14 @@ def _build_listing_service(*, domain: MarketDomainContract, **kwargs):
     )
 
 
-def _build_negotiation_service(*, domain: MarketDomainContract, **kwargs):
+def _build_negotiation_service(
+    *,
+    registry: StorefrontDomainRegistry,
+    **kwargs,
+):
     return NegotiationService(
         **kwargs,
-        continue_negotiation=partial(continue_sync_negotiation, domain=domain),
+        continue_negotiation=partial(continue_sync_negotiation, registry=registry),
         stage_event=stage_event,
     )
 
@@ -151,8 +153,9 @@ def _build_settlement_composition(
 
 
 def _populate_container(
-    domain: MarketDomainContract,
+    registry: StorefrontDomainRegistry,
     *,
+    domain: MarketDomainContract,
     sqlite_client,
     alkahest_clients,
     listing_service,
@@ -161,38 +164,40 @@ def _populate_container(
     marketplace_signer,
 ) -> None:
     if (
-        _container.resolved_market_domain is not None
-        and _container.resolved_market_domain is not domain
+        _container.resolved_domain_registry is not None
+        and _container.resolved_domain_registry is not registry
     ):
         raise RuntimeError(
             "dependency container is already owned by a different "
-            "market-domain contract"
+            "storefront domain registry"
         )
     collaborators = (
-        ("SQLite repository", getattr(sqlite_client, "market_domain", None)),
-        ("listing service", getattr(listing_service, "market_domain", None)),
-        (
-            "negotiation callback",
-            getattr(
-                getattr(negotiation_service, "_continue_negotiation", None),
-                "keywords",
-                {},
-            ).get("domain"),
-        ),
+        ("SQLite repository", getattr(sqlite_client, "domain_registry", None)),
+        ("listing service", getattr(listing_service, "domain_registry", None)),
     )
-    for label, collaborator_domain in collaborators:
-        if collaborator_domain is not domain:
+    for label, collaborator_registry in collaborators:
+        if collaborator_registry is not registry:
             raise RuntimeError(
-                f"{label} is not bound to the app-selected market-domain "
-                "contract object"
+                f"{label} is not bound to the app-selected storefront "
+                "domain registry object"
             )
+    callback_registry = getattr(
+        getattr(negotiation_service, "_continue_negotiation", None),
+        "keywords",
+        {},
+    ).get("registry")
+    if callback_registry is not registry:
+        raise RuntimeError(
+            "negotiation callback is not bound to the app-selected storefront "
+            "domain registry object"
+        )
     settlement_composition = _build_settlement_composition(
         domain=domain,
         sqlite_client=sqlite_client,
         alkahest_clients=alkahest_clients,
         marketplace_signer=marketplace_signer,
     )
-    _container.resolved_market_domain = domain
+    _container.resolved_domain_registry = registry
     _container.resolved_sqlite_client = sqlite_client
     _container.resolved_marketplace_signer = marketplace_signer
     if settings.enable_registry_discovery:
@@ -206,28 +211,42 @@ def _populate_container(
     _container.resolved_settlement_composition = settlement_composition
 
 
-async def _run_startup_tasks(*, domain: MarketDomainContract) -> None:
+async def _run_startup_tasks(
+    *,
+    registry: StorefrontDomainRegistry,
+    domain: MarketDomainContract,
+) -> None:
     from market_storefront.startup import _startup_tasks
 
-    await _startup_tasks(domain=domain)
+    await _startup_tasks(registry=registry, domain=domain)
 
 
-def build_vm_storefront_lifespan(*, domain: MarketDomainContract):
-    """Bind every VM lifespan callback to one selected contract object."""
+def build_vm_storefront_lifespan(*, registry: StorefrontDomainRegistry):
+    """Bind every lifespan callback to one frozen contribution registry."""
+
+    domain = validate_vm_storefront_domain(registry.resolve_mode("vm").contract)
     shared_lifespan = build_storefront_lifespan(
         StorefrontLifecycleCallbacks(
-            get_sqlite_client=partial(get_sqlite_client, domain=domain),
+            get_sqlite_client=partial(get_sqlite_client, registry=registry),
             resolve_identity_signer=resolve_marketplace_signer,
             set_stage_event_db_path=set_stage_event_db_path,
             build_alkahest_clients=_build_alkahest_clients,
-            build_listing_service=partial(_build_listing_service, domain=domain),
+            build_listing_service=partial(_build_listing_service, registry=registry),
             build_negotiation_service=partial(
                 _build_negotiation_service,
-                domain=domain,
+                registry=registry,
             ),
             build_system_service=_build_system_service,
-            populate_container=partial(_populate_container, domain=domain),
-            startup_tasks=partial(_run_startup_tasks, domain=domain),
+            populate_container=partial(
+                _populate_container,
+                registry,
+                domain=domain,
+            ),
+            startup_tasks=partial(
+                _run_startup_tasks,
+                registry=registry,
+                domain=domain,
+            ),
             logger=logger,
         )
     )
@@ -248,7 +267,7 @@ def build_vm_storefront_lifespan(*, domain: MarketDomainContract):
             async with shared_lifespan(application):
                 yield
         finally:
-            _container.clear_lifespan_state(domain=domain)
+            _container.clear_lifespan_state(registry=registry)
 
     return lifespan
 
@@ -296,7 +315,7 @@ def build_vm_storefront_app(*, registry: StorefrontDomainRegistry):
         config=default_storefront_app_config(root_path=settings.gateway.root_path),
         registry=registry,
         runtime_resolver=registry.resolve_registration,
-        lifespan=build_vm_storefront_lifespan(domain=selected_domain),
+        lifespan=build_vm_storefront_lifespan(registry=registry),
         routers=(
             system_router,
             admin_router,

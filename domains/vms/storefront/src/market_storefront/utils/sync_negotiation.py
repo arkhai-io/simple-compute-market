@@ -35,6 +35,7 @@ import json
 import logging
 import uuid
 from decimal import Decimal
+from datetime import UTC, datetime
 from typing import Any, Literal
 
 from arkhai_vms import DIMENSION_KEYS as _DIMENSION_COMPUTE_KEYS
@@ -42,6 +43,10 @@ from core_storefront.negotiation_sync import (
     LIVE_LISTING_STATUSES,
     OfferUnfulfillableError,
     StorefrontPausedError,
+)
+from core_storefront.domain_registry import (
+    PreparedStorefrontDomainArtifact,
+    StorefrontThreadBinding,
 )
 from core_storefront.negotiation_sync import (
     coerce_pinned_proposal as _coerce_pinned_proposal,
@@ -506,40 +511,36 @@ def lookup_pool_policy_tags(
     sqlite_client: Any,
     listing_id: str | None,
 ) -> dict[str, Any]:
-    """A listing's mapped pool's currently cached ``policy_tags``, or ``{}``.
+    """Read live pool hints through the common trusted listing mapping."""
 
-    Two steps, not one opaque call: (1) resolve the listing's mapped
-    ``pool_id`` from the existing ``derived_compute_listings`` table (the
-    same table a mapped listing's ``site_id`` is already resolved from,
-    no new column or table needed); (2) read that pool's ``policy_tags``
-    live from the in-memory projection cache. ``policy_tags`` has no
-    durable local persistence, so it can only ever be read fresh from the
-    cache, never from a table -- see
-    openspec/specs/storefront-publication/spec.md#domain-owned-publication-and-hold-hints.
-
-    Always returns a plain ``dict`` (never ``None``), including on any
-    resolution failure (unmapped listing, pool absent from the cache, its
-    site's projection not yet loaded) -- ``capped_hold_seconds({}, ...)``
-    already treats an empty/missing preference as "leave the caller's
-    requested TTL unchanged," so callers need no separate None-handling
-    branch, matching this function's own fail-open posture.
-    """
     if not listing_id:
         return {}
     try:
-        from domains.vms.listings.reconciler import (
-            pool_id_for_listing,
-            site_id_for_listing,
-        )
+        import sqlite3
 
         from market_storefront.services.site_projection_cache import (
             projection_caches,
         )
 
-        site_id = site_id_for_listing(sqlite_client.db_path, listing_id)
-        pool_id = pool_id_for_listing(sqlite_client.db_path, listing_id)
-        if not site_id or not pool_id:
+        conn = sqlite3.connect(
+            f"file:{sqlite_client.db_path}?mode=ro",
+            uri=True,
+            timeout=5,
+        )
+        try:
+            row = conn.execute(
+                """
+                SELECT site_id, pool_id
+                FROM storefront_listing_bindings
+                WHERE listing_id=?
+                """,
+                (listing_id,),
+            ).fetchone()
+        finally:
+            conn.close()
+        if row is None or not row[0] or not row[1]:
             return {}
+        site_id, pool_id = str(row[0]), str(row[1])
         caches = projection_caches().get(site_id)
         if caches is None:
             return {}
@@ -599,12 +600,7 @@ async def _place_capacity_hold(
             "hold_ttl_seconds",
             0,
         )
-        or 0
-    )
-    if ttl <= 0:
-        return
     try:
-        from domains.vms.listings.reconciler import site_id_for_listing
         from market_resource_pools.hints import capped_hold_seconds
 
         from market_storefront.services.capacity_client import build_capacity_client
@@ -612,13 +608,18 @@ async def _place_capacity_hold(
             compute_capacity_claim_from_order,
         )
 
-        claim = compute_capacity_claim_from_order(order_dict)
-        capacity = build_capacity_client(lambda: sqlite_client)
-        site_id = (
-            site_id_for_listing(sqlite_client.db_path, listing_id)
-            if listing_id
-            else None
+        if listing_id is None:
+            raise ValueError("capacity hold requires an authoritative listing")
+        listing_binding = await sqlite_client.load_listing_binding(
+            listing_id=listing_id
         )
+        claim = compute_capacity_claim_from_order(order_dict)
+        if claim.get("executor_kind") != listing_binding.binding.offering_mode:
+            raise ValueError(
+                "capacity claim offering mode disagrees with listing binding"
+            )
+        capacity = build_capacity_client(lambda: sqlite_client)
+        site_id = listing_binding.site_id
         policy_tags = lookup_pool_policy_tags(sqlite_client, listing_id)
         ttl = capped_hold_seconds(ttl, policy_tags)
         held = await capacity.reserve(
@@ -723,7 +724,7 @@ async def _compute_round_zero_decision(
 
 async def start_sync_negotiation(
     *,
-    domain: MarketDomainContract,
+    registry: Any,
     sqlite_client: Any,
     our_listing_id: str,
     buyer_principal: Identity,
@@ -762,11 +763,15 @@ async def start_sync_negotiation(
     listing) or if the buyer's duration / proposal doesn't match what
     the listing accepts.
     """
-    if getattr(sqlite_client, "market_domain", None) is not domain:
+    if getattr(sqlite_client, "domain_registry", None) is not registry:
         raise RuntimeError(
             "negotiation and SQLite repository must share the exact "
-            "market-domain contract object"
+            "storefront domain registry object"
         )
+    listing_binding = await sqlite_client.load_listing_binding(
+        listing_id=our_listing_id
+    )
+    domain = registry.resolve(listing_binding.binding)
     vm_message_terms = _normalize_vm_message_terms(domain, provision_terms)
     requested_duration_seconds = (
         vm_message_terms.duration_seconds if vm_message_terms is not None else None
@@ -800,6 +805,14 @@ async def start_sync_negotiation(
             f"listing_not_open (status={listing_status!r})",
             listing_id=our_listing_id,
         )
+    public_mode = (our_order_dict.get("offer_resource") or {}).get(
+        "virtualization_type"
+    )
+    if public_mode != listing_binding.binding.offering_mode:
+        raise OfferUnfulfillableError(
+            "listing_domain_binding_mismatch",
+            listing_id=our_listing_id,
+        )
 
     _reject_unsupported_resource_shape_request(
         vm_message_terms,
@@ -823,6 +836,67 @@ async def start_sync_negotiation(
             proposal=proposal_dict,
         )
     ]
+    neg_id = "neg_" + uuid.uuid4().hex
+    opening_buyer_amount = int(_amount_from_proposal(proposal_dict) or 0)
+    opening_seller_amount = _seller_reference_amount(
+        our_order,
+        requested_duration_seconds,
+    )
+    opening_terms = (
+        vm_message_terms.model_dump(mode="json")
+        if hasattr(vm_message_terms, "model_dump")
+        else vm_message_terms
+    )
+    opening_artifact = (
+        PreparedStorefrontDomainArtifact(
+            artifact_slot="message",
+            binding=listing_binding.binding,
+            artifact_json=json.dumps(
+                opening_terms,
+                sort_keys=True,
+                separators=(",", ":"),
+            ),
+        )
+        if opening_terms is not None
+        else None
+    )
+    await sqlite_client.create_negotiation_opening(
+        thread={
+            "negotiation_id": neg_id,
+            "listing_id": our_listing_id,
+            "counterparty_listing_id": "",
+            "seller_agent_url": our_base_url,
+            "buyer_agent_url": their_agent_url,
+            "buyer_principal": buyer_principal,
+            "seller_principal": seller_principal,
+            "requested_duration_seconds": requested_duration_seconds,
+            "requested_start_utc": requested_start_utc,
+            "pinned_proposal": proposal_dict,
+            "terms_wire": opening_terms,
+            "owner_id": our_base_url,
+            "seller_initial_amount": opening_seller_amount,
+            "strategy_label": "bound",
+        },
+        initial_message={
+            "sender_principal": buyer_principal,
+            "sender_role": "buyer",
+            "seller_amount": opening_seller_amount,
+            "buyer_amount": opening_buyer_amount,
+            "proposed_amount": opening_buyer_amount,
+            "action_taken": "make_offer",
+            "message_type": "offer",
+            "timestamp": datetime.now(UTC).isoformat(),
+            "round_number": 0,
+        },
+        binding=StorefrontThreadBinding(
+            negotiation_id=neg_id,
+            listing_id=our_listing_id,
+            site_id=listing_binding.site_id,
+            binding=listing_binding.binding,
+        ),
+        domain_artifact=opening_artifact,
+    )
+
     try:
         round_hook = seller_round_hook or _default_seller_round_hook(
             domain, sqlite_client
@@ -843,11 +917,6 @@ async def start_sync_negotiation(
             ) from exc
         raise
 
-    if decision.action == "reject":
-        raise OfferUnfulfillableError(
-            decision.reason or "rejected",
-            listing_id=our_listing_id,
-        )
 
     policy_intermediate = round_result.intermediate or {}
     accepted_selection = policy_intermediate.get("accepted_settlement_selection")
@@ -866,33 +935,8 @@ async def start_sync_negotiation(
         their_amount = 0
     their_amount = int(their_amount)
 
-    neg_id = "neg_" + uuid.uuid4().hex
-
-    await _create_sync_negotiation_thread(
-        negotiation_id=neg_id,
-        our_listing_id=our_listing_id,
-        their_listing_id="",  # buyer has no listing; column kept for symmetry
-        our_agent_id=our_base_url,
-        their_agent_id=their_agent_url,
-        buyer_principal=buyer_principal,
-        seller_principal=seller_principal,
-        our_initial_amount=our_amount,
-        our_strategy=strategy,
-        requested_duration_seconds=requested_duration_seconds,
-        requested_start_utc=requested_start_utc,
-        buyer_escrow_proposal=(
-            accepted_proposal.model_dump()
-            if accepted_proposal is not None
-            else proposal_dict
-        ),
-        provision_terms=(
-            provision_terms.model_dump(mode="json")
-            if provision_terms is not None
-            else None
-        ),
-        opening_sender_principal=buyer_principal,
-        opening_amount=their_amount,
-    )
+    # The opening binding and buyer message are already durable.  Every
+    # selected-domain policy outcome below is appended to that bound thread.
 
     await _record_seller_decision(
         neg_id=neg_id,
@@ -901,6 +945,11 @@ async def start_sync_negotiation(
         decision=decision,
         seller_principal=seller_principal,
     )
+    if decision.action == "reject":
+        raise OfferUnfulfillableError(
+            decision.reason or "rejected",
+            listing_id=our_listing_id,
+        )
     decision_amount = _amount_from_proposal(decision.proposal)
     if decision.action == "accept":
         agreed_duration_seconds = (
@@ -992,7 +1041,7 @@ async def start_sync_negotiation(
 
 async def continue_sync_negotiation(
     *,
-    domain: MarketDomainContract,
+    registry: Any,
     sqlite_client: Any,
     neg_id: str,
     buyer_action: str,
@@ -1013,11 +1062,15 @@ async def continue_sync_negotiation(
       - "exit": the buyer is walking away; we mark the thread terminal.
     """
     from core_storefront.stage_log import stage_event
-    if getattr(sqlite_client, "market_domain", None) is not domain:
+    if getattr(sqlite_client, "domain_registry", None) is not registry:
         raise RuntimeError(
             "negotiation and SQLite repository must share the exact "
-            "market-domain contract object"
+            "storefront domain registry object"
         )
+    thread_binding = await sqlite_client.load_thread_binding(
+        negotiation_id=neg_id
+    )
+    domain = registry.resolve(thread_binding.binding)
     from domains.vms.listings import determine_strategy_from_order
     from domains.vms.listings.models import Listing
 

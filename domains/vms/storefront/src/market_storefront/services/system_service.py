@@ -152,6 +152,15 @@ class SystemService:
             principal = self._marketplace_signer.identity
             result["agent_id"] = self._agent_id
             result["marketplace_principal"] = principal.model_dump(mode="json")
+            result["storefront_domains"] = tuple(
+                {
+                    "contribution_id": item.contribution_id,
+                    "offering_mode": item.offering_mode,
+                    "domain_identity": item.domain_identity,
+                    "contract_version": item.contract_version,
+                }
+                for item in self._db.domain_registry.projection()
+            )
             wallet = get_evm_wallet_address().lower() if CHAINS else ""
             result["evm_mechanisms"] = {
                 name: {

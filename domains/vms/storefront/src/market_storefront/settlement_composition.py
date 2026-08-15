@@ -13,7 +13,10 @@ from typing import Any
 
 from arkhai_vms import VmProvisionTerms
 from core_storefront.stage_log import stage_event
-from domains.vms.listings import reconciler as listings_reconciler
+from core_storefront.domain_lifecycle import (
+    StorefrontSettlementBuildContext,
+    build_domain_settlement_artifacts,
+)
 from market_alkahest import create_alkahest_registration
 from market_core import MarketDomainContract
 from market_core.schemas import (
@@ -262,29 +265,11 @@ def build_storefront_publication_clause_compiler() -> Callable[
 def _settlement_plan_obligations(
     *,
     domain: MarketDomainContract,
-    proposal: EscrowProposal,
-    agreed_amount: int,
-    duration_seconds: int,
-    buyer_principal: Identity,
-    seller_principal: Identity,
+    context: StorefrontSettlementBuildContext,
 ) -> tuple[dict[str, Any], ...]:
-    settlement = domain.settlement
-    if settlement is None:
-        raise RuntimeError(
-            f"domain {domain.identity!s} has no settlement-plan capability"
-        )
-    artifacts = settlement.build_plan(
-        proposal=proposal,
-        agreed_amount=agreed_amount,
-        duration_seconds=duration_seconds,
-        buyer_principal=buyer_principal,
-        seller_principal=seller_principal,
-    )
-    plan = artifacts.get("settlement_plan") if isinstance(artifacts, dict) else None
-    obligations = plan.get("obligations") if isinstance(plan, dict) else None
-    if not isinstance(obligations, list) or not obligations:
-        raise ValueError("accepted negotiation has no canonical settlement obligations")
-    return tuple(dict(item) for item in obligations if isinstance(item, dict))
+    artifacts = build_domain_settlement_artifacts(domain, context)
+    obligations = artifacts.settlement_plan["obligations"]
+    return tuple(dict(item) for item in obligations)
 
 
 
@@ -302,10 +287,13 @@ async def prepare_vm_settlement(
 ) -> PreparedSettlement:
     """Reload, verify, and pin accepted VM terms before provisioning."""
     del request
-    if getattr(sqlite_client, "market_domain", None) is not domain:
+    thread_binding = await sqlite_client.load_thread_binding(
+        negotiation_id=negotiation_id
+    )
+    selected_domain = sqlite_client.domain_registry.resolve(thread_binding.binding)
+    if selected_domain is not domain:
         raise RuntimeError(
-            "settlement preparation and SQLite repository must share the exact "
-            "market-domain contract object"
+            "settlement preparation contract disagrees with accepted binding"
         )
 
     thread = await sqlite_client.load_negotiation_thread_row(
@@ -371,11 +359,22 @@ async def prepare_vm_settlement(
 
     obligations = _settlement_plan_obligations(
         domain=domain,
-        proposal=proposal,
-        agreed_amount=int(thread["agreed_price"]),
-        duration_seconds=provision.duration_seconds,
-        buyer_principal=Identity.model_validate(thread.get("buyer_principal")),
-        seller_principal=local_principal,
+        context=StorefrontSettlementBuildContext(
+            binding=thread_binding.binding,
+            negotiation_id=negotiation_id,
+            listing_id=str(listing_id),
+            site_id=thread_binding.site_id,
+            proposal=proposal,
+            agreed_amount=int(thread["agreed_price"]),
+            duration_seconds=provision.duration_seconds,
+            buyer_principal=Identity.model_validate(thread.get("buyer_principal")),
+            seller_principal=local_principal,
+            seller_wallet_address=storefront_config.get_evm_wallet_address(),
+            chain_config_paths={
+                name: config.alkahest_address_config_path
+                for name, config in storefront_config.CHAINS.items()
+            },
+        ),
     )
     if obligation_index < 0 or obligation_index >= len(obligations):
         raise ValueError(
@@ -399,9 +398,7 @@ async def prepare_vm_settlement(
             listing_id=str(listing_id),
             order=dict(order),
             negotiation_id=negotiation_id,
-            site_id=listings_reconciler.site_id_for_listing(
-                sqlite_client.db_path, str(listing_id)
-            ),
+            site_id=thread_binding.site_id,
         ),
         projection_context=VmProjectionContext(
             sqlite_client=sqlite_client,
@@ -1189,11 +1186,12 @@ def build_vm_settlement_composition(
     marketplace_signer: Signer,
 ) -> VmSettlementComposition:
     """Construct the VM runtime from explicit settlement mechanisms."""
-    if getattr(sqlite_client, "market_domain", None) is not domain:
+    registry_owner = getattr(sqlite_client, "domain_registry", None)
+    if registry_owner is None:
         raise RuntimeError(
-            "settlement composition and SQLite repository must share the exact "
-            "market-domain contract object"
+            "settlement composition requires a repository-owned domain registry"
         )
+    registry_owner.registration_for_contract(domain)
 
     repository = SettlementSQLiteRepository(
         sqlite_client.db_path,

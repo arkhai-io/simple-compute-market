@@ -117,20 +117,12 @@ def ensure_derived_compute_listings_table(
 
 
 def site_id_for_listing(db_path: str, listing_id: str) -> str | None:
-    """The site a listing is mapped to, or None if unmapped.
+    """Return the exact trusted site from the common listing binding."""
 
-    `derived_compute_listings` is the single source of truth for this --
-    callers needing a listing's site (to build a site-scoped derivation
-    key, or to pin a capacity reservation) resolve it here rather than
-    reading it off the listing's own public offer, which never carries
-    it.
-    """
     conn = sqlite3.connect(f"file:{db_path}?mode=ro&nolock=1", uri=True, timeout=5)
     try:
-        if not _has_derived_listings_site_column(conn):
-            return None
         row = conn.execute(
-            "SELECT site_id FROM derived_compute_listings WHERE listing_id = ?",
+            "SELECT site_id FROM storefront_listing_bindings WHERE listing_id = ?",
             (listing_id,),
         ).fetchone()
     finally:
@@ -139,30 +131,12 @@ def site_id_for_listing(db_path: str, listing_id: str) -> str | None:
 
 
 def pool_id_for_listing(db_path: str, listing_id: str) -> str | None:
-    """The pool a listing is mapped to, or None if unmapped.
+    """Return the exact pool from the common listing binding."""
 
-    Mirrors ``site_id_for_listing`` -- ``derived_compute_listings`` is the
-    single source of truth for this mapping too.
-
-    For a listing recorded with only a ``resource_id`` (no genuine pool),
-    ``record_derived_listing`` backfills its ``pool_id`` column to the
-    resource_id itself (its own ``resolved_pool_id`` fallback, needed
-    because that column is used as a not-null join key) -- storage alone
-    cannot distinguish that case from a genuine pool, since both produce
-    an identical stored row shape. Callers looking up a *pool's*
-    ``policy_tags`` in the projection cache don't need that distinction
-    made here: a resource id looked up against the cache's
-    ``resource_pool_id`` field will not match any real pool in practice
-    (pool ids and physical resource ids are different id namespaces
-    throughout this system), so it naturally falls through to "no
-    policy_tags found" with no special-casing required.
-    """
     conn = sqlite3.connect(f"file:{db_path}?mode=ro&nolock=1", uri=True, timeout=5)
     try:
-        if not _has_derived_listings_site_column(conn):
-            return None
         row = conn.execute(
-            "SELECT pool_id FROM derived_compute_listings WHERE listing_id = ?",
+            "SELECT pool_id FROM storefront_listing_bindings WHERE listing_id = ?",
             (listing_id,),
         ).fetchone()
     finally:
@@ -1063,30 +1037,6 @@ def current_available_resource_keys(
     return keys
 
 
-def _has_derived_listings_site_column(conn: sqlite3.Connection) -> bool:
-    """Whether derived_compute_listings exists AND has its site_id column.
-
-    Table existence alone is not enough to prove the column is there --
-    an existing on-disk database can predate this column even though
-    `ensure_derived_compute_listings_table` is now the single place this
-    table's schema is defined (`SQLiteClient` delegates to it rather
-    than keeping its own copy); the column only appears once that
-    function has actually run against this specific file. Checking the
-    specific column here, not just the table, is what protects a query
-    against reading that pre-migration state.
-    """
-    if (
-        conn.execute(
-            "SELECT 1 FROM sqlite_master "
-            "WHERE type='table' AND name='derived_compute_listings'"
-        ).fetchone()
-        is None
-    ):
-        return False
-    cols = {
-        row[1] for row in conn.execute("PRAGMA table_info(derived_compute_listings)")
-    }
-    return "site_id" in cols
 
 
 def open_listing_resource_keys(
@@ -1095,42 +1045,26 @@ def open_listing_resource_keys(
     home_site: str,
     configured_site_count: int,
 ) -> set[str]:
-    """Return site-scoped keys already covered by open listings.
+    """Return exact site-scoped keys covered by bound open VM listings."""
 
-    See ``stale_open_listing_ids`` for the full rationale: a listing's
-    own mapping is used when it has one; an unmapped listing falls back
-    to ``home_site`` only when exactly one site is currently configured
-    (``configured_site_count == 1``), never assumed.
-    """
+    del home_site, configured_site_count
     conn = sqlite3.connect(f"file:{db_path}?mode=ro&nolock=1", uri=True, timeout=5)
     try:
-        has_derived = _has_derived_listings_site_column(conn)
-        site_select = "d.site_id" if has_derived else "NULL AS site_id"
-        join_clause = (
-            "LEFT JOIN derived_compute_listings d ON d.listing_id = l.listing_id"
-            if has_derived
-            else ""
-        )
         rows = conn.execute(
-            f"""
-            SELECT l.offer_resource, {site_select}
+            """
+            SELECT l.offer_resource, b.site_id
             FROM listings l
-            {join_clause}
+            JOIN storefront_listing_bindings b ON b.listing_id = l.listing_id
             WHERE l.status = 'open'
+              AND b.offering_mode = 'vm'
             """
         ).fetchall()
     finally:
         conn.close()
 
     covered: set[str] = set()
-    for raw, mapped_site_id in rows:
-        if not raw:
-            continue
-        if mapped_site_id:
-            site_id = str(mapped_site_id)
-        elif configured_site_count == 1:
-            site_id = home_site
-        else:
+    for raw, site_id in rows:
+        if not raw or not site_id:
             continue
         try:
             parsed = json.loads(raw)
@@ -1139,15 +1073,13 @@ def open_listing_resource_keys(
         if not isinstance(parsed, dict):
             continue
         pool_id = parsed.get("pool_id")
-        if pool_id:
+        resource_id = parsed.get("resource_id")
+        gpu_count = parsed.get("gpu_count")
+        if pool_id and resource_id is None:
+            covered.add(listing_pool_key(str(site_id), str(pool_id), gpu_count))
+        elif resource_id:
             covered.add(
-                listing_pool_key(site_id, str(pool_id), parsed.get("gpu_count"))
-            )
-            continue
-        rid = parsed.get("resource_id")
-        if rid:
-            covered.add(
-                listing_resource_key(site_id, str(rid), parsed.get("gpu_count"))
+                listing_resource_key(str(site_id), str(resource_id), gpu_count)
             )
     return covered
 
@@ -1161,21 +1093,9 @@ def stale_open_listing_ids(
     site_pool_projection: Mapping[str, list[dict[str, Any]]] | None = None,
     site_capacity_buckets: Mapping[str, list[dict[str, Any]]] | None = None,
 ) -> list[str]:
-    """Open listing IDs whose requested slice no longer fits capacity.
+    """Return bound VM listings whose exact site-scoped slice is unavailable."""
 
-    A listing's own site mapping is used when it has one. A listing with
-    no ``derived_compute_listings`` row at all falls back to
-    ``home_site`` only when ``configured_site_count == 1`` -- the caller
-    must pass the actual number of sites configured *right now*, not an
-    assumption baked into this function. With exactly one site, the
-    fallback is exact (there is no other site the listing could belong
-    to); with more than one, an unmapped listing is genuinely ambiguous
-    and is skipped instead, matching the same quarantine-rather-than-guess
-    principle a backfill migration also applies to legacy rows. This is
-    deliberately not a permanent single-site invariant -- the moment a
-    second site is configured, this function's own behavior changes
-    without needing a code change.
-    """
+    del configured_site_count
     available_keys = current_available_resource_keys(
         db_path,
         home_site=home_site,
@@ -1185,33 +1105,21 @@ def stale_open_listing_ids(
     )
     conn = sqlite3.connect(f"file:{db_path}?mode=ro&nolock=1", uri=True, timeout=5)
     try:
-        has_derived = _has_derived_listings_site_column(conn)
-        site_select = "d.site_id" if has_derived else "NULL AS site_id"
-        join_clause = (
-            "LEFT JOIN derived_compute_listings d ON d.listing_id = l.listing_id"
-            if has_derived
-            else ""
-        )
         rows = conn.execute(
-            f"""
-            SELECT l.listing_id, l.offer_resource, {site_select}
+            """
+            SELECT l.listing_id, l.offer_resource, b.site_id
             FROM listings l
-            {join_clause}
+            JOIN storefront_listing_bindings b ON b.listing_id = l.listing_id
             WHERE l.status = 'open'
+              AND b.offering_mode = 'vm'
             """
         ).fetchall()
     finally:
         conn.close()
 
     stale: list[str] = []
-    for listing_id, raw, mapped_site_id in rows:
-        if not raw:
-            continue
-        if mapped_site_id:
-            site_id = str(mapped_site_id)
-        elif configured_site_count == 1:
-            site_id = home_site
-        else:
+    for listing_id, raw, site_id in rows:
+        if not raw or not site_id:
             continue
         try:
             parsed = json.loads(raw)
@@ -1220,18 +1128,16 @@ def stale_open_listing_ids(
         if not isinstance(parsed, dict):
             continue
         pool_id = parsed.get("pool_id")
-        if pool_id:
-            key = listing_pool_key(site_id, str(pool_id), parsed.get("gpu_count"))
-            if key not in available_keys:
-                stale.append(str(listing_id))
-            continue
-        rid = parsed.get("resource_id")
-        if not rid:
-            continue
-        if (
-            listing_resource_key(site_id, str(rid), parsed.get("gpu_count"))
-            not in available_keys
-        ):
+        resource_id = parsed.get("resource_id")
+        gpu_count = parsed.get("gpu_count")
+        key = (
+            listing_pool_key(str(site_id), str(pool_id), gpu_count)
+            if pool_id and resource_id is None
+            else listing_resource_key(str(site_id), str(resource_id), gpu_count)
+            if resource_id
+            else None
+        )
+        if key is not None and key not in available_keys:
             stale.append(str(listing_id))
     return stale
 
@@ -1244,7 +1150,8 @@ def closed_available_listing_ids(
     site_pool_projection: Mapping[str, list[dict[str, Any]]] | None = None,
     site_capacity_buckets: Mapping[str, list[dict[str, Any]]] | None = None,
 ) -> list[str]:
-    """Closed derived listing IDs whose requested slice fits capacity again."""
+    """Return closed bound VM listings whose exact slice is available again."""
+
     available_keys = current_available_resource_keys(
         db_path,
         home_site=home_site,
@@ -1256,27 +1163,38 @@ def closed_available_listing_ids(
         return []
     conn = sqlite3.connect(f"file:{db_path}?mode=ro&nolock=1", uri=True, timeout=5)
     try:
-        table_exists = conn.execute(
-            "SELECT 1 FROM sqlite_master "
-            "WHERE type='table' AND name='derived_compute_listings'"
-        ).fetchone()
-        if table_exists is None:
-            return []
-        placeholders = ", ".join("?" for _ in available_keys)
         rows = conn.execute(
-            f"""
-            SELECT d.listing_id
-            FROM derived_compute_listings d
-            LEFT JOIN listings l ON l.listing_id = d.listing_id
-            WHERE d.derivation_key IN ({placeholders})
-              AND (d.status != 'open' OR l.status != 'open')
-            ORDER BY d.gpu_count
-            """,
-            tuple(sorted(available_keys)),
+            """
+            SELECT l.listing_id, l.offer_resource, b.site_id
+            FROM listings l
+            JOIN storefront_listing_bindings b ON b.listing_id = l.listing_id
+            WHERE l.status != 'open'
+              AND b.offering_mode = 'vm'
+            """
         ).fetchall()
     finally:
         conn.close()
-    return [str(row[0]) for row in rows]
+    available: list[tuple[int, str]] = []
+    for listing_id, raw, site_id in rows:
+        try:
+            offer = json.loads(raw)
+        except (TypeError, json.JSONDecodeError):
+            continue
+        if not isinstance(offer, dict):
+            continue
+        pool_id = offer.get("pool_id")
+        resource_id = offer.get("resource_id")
+        gpu_count = int(offer.get("gpu_count") or 1)
+        key = (
+            listing_pool_key(str(site_id), str(pool_id), gpu_count)
+            if pool_id and resource_id is None
+            else listing_resource_key(str(site_id), str(resource_id), gpu_count)
+            if resource_id
+            else None
+        )
+        if key in available_keys:
+            available.append((gpu_count, str(listing_id)))
+    return [listing_id for _, listing_id in sorted(available)]
 
 
 def record_derived_listing(

@@ -40,7 +40,7 @@ class ListingService:
     def __init__(
         self,
         *,
-        domain: MarketDomainContract,
+        registry: Any,
         sqlite_client: Any,
         marketplace_signer: Signer,
         alkahest_clients: dict[str, Any] | None = None,
@@ -51,12 +51,12 @@ class ListingService:
             get_evm_wallet_private_key,
         )
 
-        if getattr(sqlite_client, "market_domain", None) is not domain:
+        if getattr(sqlite_client, "domain_registry", None) is not registry:
             raise RuntimeError(
                 "listing service and SQLite repository must share the exact "
-                "market-domain contract object"
+                "storefront domain registry object"
             )
-        self._domain = domain
+        self._registry = registry
         self._db = sqlite_client
         self._marketplace_signer = marketplace_signer
         self._alkahest_clients: dict[str, Any] = alkahest_clients or {}
@@ -69,9 +69,9 @@ class ListingService:
         )
         self._alkahest_available = bool(self._alkahest_clients)
     @property
-    def market_domain(self) -> MarketDomainContract:
-        """Return the contract governing listing persistence and publication."""
-        return self._domain
+    def domain_registry(self) -> Any:
+        """Return the frozen registry governing listing bindings."""
+        return self._registry
 
 
     async def _resolve_chain_for_escrow(
@@ -299,7 +299,11 @@ class ListingService:
 
         try:
             normalized_offer = self._normalize_token_resource(request.offer)
-            self._domain.codecs.listing(normalized_offer)
+            offering_mode = normalized_offer.get("virtualization_type")
+            if not isinstance(offering_mode, str) or not offering_mode:
+                raise ValueError("offer_resource.virtualization_type is required")
+            registration = self._registry.resolve_mode(offering_mode)
+            registration.contract.codecs.listing(normalized_offer)
             offer_resource = parse_resource_from_dict(normalized_offer)
         except Exception as exc:
             raise ValueError(f"Invalid offer resource: {exc}") from exc
@@ -505,6 +509,8 @@ class ListingService:
         row = await self._db.load_listing(listing_id=listing_id)
         if not row:
             raise ValueError(f"Listing {listing_id} not found")
+        binding = await self._db.load_listing_binding(listing_id=listing_id)
+        domain = self._registry.resolve(binding.binding)
         listing = Listing.model_validate(row)
         their_amount_raw = _amount_from_proposal(proposal)
         if their_amount_raw is None:
@@ -520,7 +526,7 @@ class ListingService:
             decision,
         ) = await _compute_round_zero_decision(
             sqlite_client=self._db,
-            domain=self._domain,
+            domain=domain,
             listing=listing,
             their_proposal=proposal,
             requested_duration_seconds=requested_duration_seconds,

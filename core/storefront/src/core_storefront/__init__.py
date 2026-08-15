@@ -7,6 +7,16 @@ from .domain_plugins import (
     discover_storefront_domain_registry,
     parse_storefront_contribution_selections,
 )
+from .domain_lifecycle import (
+    StorefrontDomainLifecycleError,
+    StorefrontFulfillmentContext,
+    StorefrontFulfillmentLifecycle,
+    StorefrontFulfillmentPorts,
+    StorefrontSettlementArtifacts,
+    StorefrontSettlementBuildContext,
+    build_domain_settlement_artifacts,
+    fulfill_domain,
+)
 from .domain_registry import (
     DomainContractKey,
     PreparedStorefrontDomainArtifact,
@@ -21,6 +31,12 @@ from .domain_registry import (
 
 __all__ = [
     "DomainContractKey",
+    "StorefrontDomainLifecycleError",
+    "StorefrontFulfillmentContext",
+    "StorefrontFulfillmentLifecycle",
+    "StorefrontFulfillmentPorts",
+    "StorefrontSettlementArtifacts",
+    "StorefrontSettlementBuildContext",
     "PreparedStorefrontDomainArtifact",
     "STOREFRONT_CONTRIBUTION_GROUP",
     "StorefrontContributionSelection",
@@ -31,6 +47,8 @@ __all__ = [
     "StorefrontListingBinding",
     "StorefrontThreadBinding",
     "build_storefront_derivation_key",
+    "build_domain_settlement_artifacts",
+    "fulfill_domain",
     "canonical_source_envelope",
     "discover_storefront_domain_registry",
     "parse_storefront_contribution_selections",
