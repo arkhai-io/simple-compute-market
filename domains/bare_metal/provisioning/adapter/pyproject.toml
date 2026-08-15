@@ -6,7 +6,7 @@ description = "Bare-metal adapter for the compute provisioning service"
 requires-python = ">=3.12"
 dependencies = [
     "arkhai-bare-metal>=0.2.0",
-    "arkhai-compute-provisioning>=0.5.0",
+    "arkhai-compute-provisioning>=0.6.0",
     "arkhai-compute-provisioning-service>=0.1.0",
     "arkhai-vms-provisioning-operator-client>=0.3.0",
     "pydantic>=2.7",

@@ -76,12 +76,19 @@ def _insert_host(engine, *, name="kvm1", pool_id="default"):
         ), {"name": name, "pool_id": pool_id})
 
 
-def _insert_capacity_reservation(engine, *, reservation_id, state="reserved"):
+def _insert_capacity_reservation(
+    engine, *, reservation_id, state="reserved", executor_kind=None
+):
     with engine.begin() as connection:
         connection.execute(text(
-            "INSERT INTO capacity_reservations (capacity_reservation_id, units, state) "
-            "VALUES (:id, 1, :state)"
-        ), {"id": reservation_id, "state": state})
+            "INSERT INTO capacity_reservations "
+            "(capacity_reservation_id, units, state, executor_kind) "
+            "VALUES (:id, 1, :state, :executor_kind)"
+        ), {
+            "id": reservation_id,
+            "state": state,
+            "executor_kind": executor_kind,
+        })
 
 
 def _insert_vm_lease(
@@ -123,6 +130,20 @@ def _settlement_state(engine, reservation_id):
     return row["state"] if row else None
 
 
+def _executor_identities(engine, reservation_id):
+    with engine.begin() as connection:
+        row = connection.execute(text(
+            "SELECT cr.executor_kind AS reservation_kind, "
+            "json_extract(sr.scheduling_requirements, '$.executor_kind') "
+            "AS settlement_kind "
+            "FROM capacity_reservations cr "
+            "LEFT JOIN settlement_records sr "
+            "ON sr.capacity_reservation_id=cr.capacity_reservation_id "
+            "WHERE cr.capacity_reservation_id=:id"
+        ), {"id": reservation_id}).mappings().one()
+    return row["reservation_kind"], row["settlement_kind"]
+
+
 def _count(engine, table):
     with engine.begin() as connection:
         return connection.execute(text(f"SELECT COUNT(*) FROM {table}")).scalar_one()
@@ -159,6 +180,48 @@ def test_unmatched_reservation_does_not_obscure_a_real_lease():
     assert _settlement_state(engine, "reservation-active") == "active"
     assert _settlement_state(engine, "orphan-reservation") is None
     assert _count(engine, "settlement_records") == 1
+
+
+def test_backfill_persists_vm_identity_on_reservation_and_settlement():
+    engine = _bootstrap_engine()
+    _insert_host(engine)
+    _insert_capacity_reservation(engine, reservation_id="reservation-active")
+    _insert_vm_lease(
+        engine,
+        lease_id="lease-active",
+        allocation_id="reservation-active",
+        status="leased",
+        vm_target="vm-active",
+        create_job_id="job-1",
+    )
+
+    _apply_backfill(engine)
+
+    assert _executor_identities(engine, "reservation-active") == ("vm", "vm")
+
+
+def test_conflicting_reservation_executor_identity_is_rejected():
+    engine = _bootstrap_engine()
+    _insert_host(engine)
+    _insert_capacity_reservation(
+        engine,
+        reservation_id="reservation-active",
+        executor_kind="bare_metal",
+    )
+    _insert_vm_lease(
+        engine,
+        lease_id="lease-active",
+        allocation_id="reservation-active",
+        status="leased",
+        vm_target="vm-active",
+        create_job_id="job-1",
+    )
+
+    with pytest.raises(SchemaDriftError, match="conflicts with reservation executor"):
+        _apply_backfill(engine)
+
+    assert _executor_identities(engine, "reservation-active") == ("bare_metal", None)
+    assert _count(engine, "settlement_records") == 0
 
 
 def test_equivalent_rerun_is_idempotent_and_writes_nothing_new():

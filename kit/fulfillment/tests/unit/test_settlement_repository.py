@@ -38,6 +38,7 @@ def repo():
 
 def _requirement(**dimensions):
     return SettlementRequirement(
+        executor_kind="vm",
         resource_kind="compute.gpu", dimensions=dimensions or {"gpu_count": 1}
     )
 
@@ -46,6 +47,7 @@ def _resource(settlement_resource_id="host-a"):
     return SettlementResource(
         settlement_resource_id=settlement_resource_id,
         pool_id="pool-1",
+        executor_kind="vm",
         resource_kind="compute.gpu",
         provider="ansible",
     )
@@ -979,8 +981,13 @@ def test_transition_rejects_non_lifecycle_fields_before_state_mutation(
 
 
 def test_canonical_models_normalize_explicit_defaults_and_nested_payload(session_factory, repo):
-    implicit = SettlementRequirement(resource_kind="compute.gpu", dimensions={"gpu_count": 1})
+    implicit = SettlementRequirement(
+        executor_kind="vm",
+        resource_kind="compute.gpu",
+        dimensions={"gpu_count": 1},
+    )
     explicit = SettlementRequirement(
+        executor_kind="vm",
         resource_kind="compute.gpu", dimensions={"gpu_count": 1}, attributes={}
     )
     nested = envelope(

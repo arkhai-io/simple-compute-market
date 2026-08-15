@@ -38,7 +38,7 @@ from market_fulfillment import (
     SettlementRepository,
     SqlAlchemyFulfillmentUnitOfWork,
 )
-from market_resource_pools import ResourcePoolService
+from market_resource_pools import DEFAULT_POOL_ID, ResourcePool, ResourcePoolService
 from market_resource_pools.db import Base as PoolsBase
 from vm_provisioning_adapter.release import (
     FulfillmentServiceTeardownPort,
@@ -79,6 +79,22 @@ def session_factory():
     # which now begins durable fulfillment teardown rather than submitting
     # an Ansible job directly.
     FulfillmentBase.metadata.create_all(bind=engine)
+    with sessionmaker(bind=engine)() as db, db.begin():
+        db.add(
+            ResourcePool(
+                id=DEFAULT_POOL_ID,
+                label="Default Pool",
+                provider="ansible",
+                enabled=True,
+                policy_tags={
+                    "deliverable_modes": [
+                        BARE_METAL_EXECUTOR_KIND,
+                        "custom_executor",
+                        VM_EXECUTOR_KIND,
+                    ]
+                },
+            )
+        )
     return sessionmaker(bind=engine)
 
 
@@ -111,6 +127,7 @@ def _create_active_fulfillment(
     session_factory,
     *,
     capacity_reservation_id: str,
+    executor_kind: str,
     fulfillment_id: str = "fulfillment-1",
 ) -> None:
     """Persist a `SettlementRecord` in `active` state, already carrying a
@@ -127,7 +144,10 @@ def _create_active_fulfillment(
                 capacity_reservation_id=capacity_reservation_id,
                 fulfillment_id=fulfillment_id,
                 market="vms",
-                scheduling_requirements={"resource_kind": "vm"},
+                scheduling_requirements={
+                    "executor_kind": executor_kind,
+                    "resource_kind": "vm",
+                },
                 settlement_resource_id="kvm1",
                 pool_id="pool-1",
                 provider="ansible",
@@ -206,18 +226,12 @@ def _lifecycle(
         }
         if release_delegate is not None:
             executors[VM_EXECUTOR_KIND] = DelegateReleaseExecutor(release_delegate)
-        executor_release = ExecutorReleaseDispatcher(
-            executors,
-            default_executor_kind=VM_EXECUTOR_KIND,
-        )
-    release_jobs = ReleaseJobDispatcher(
-        {
-            VM_EXECUTOR_KIND: VmFulfillmentReleaseJobPort(
-                teardown_port=FulfillmentServiceTeardownPort(lambda: fulfillment_service),
-            ),
-        },
-        default_executor_kind=VM_EXECUTOR_KIND,
-    )
+        executor_release = ExecutorReleaseDispatcher(executors)
+    release_jobs = ReleaseJobDispatcher({
+        VM_EXECUTOR_KIND: VmFulfillmentReleaseJobPort(
+            teardown_port=FulfillmentServiceTeardownPort(lambda: fulfillment_service),
+        ),
+    })
     settings = _settings(**settings_overrides)
     principal_authority = MagicMock()
     principal_authority.active_principals.return_value = TrustedIdentitySet(
@@ -245,7 +259,11 @@ def _lifecycle(
 
 def _expired_reservation(ledger: CapacityLedgerService, escrow: str = "0xe") -> dict:
     reserved = ledger.reserve(
-        claim={"gpu_count": 2, "vm_host": "kvm1"},
+        claim={
+            "executor_kind": VM_EXECUTOR_KIND,
+            "gpu_count": 2,
+            "vm_host": "kvm1",
+        },
         deal_ref={"escrow_uid": escrow},
     )
     ledger.commit(
@@ -262,9 +280,18 @@ def _expired_reservation(ledger: CapacityLedgerService, escrow: str = "0xe") -> 
     return reserved
 
 
-def _just_expired_reservation(ledger: CapacityLedgerService, escrow: str = "0xe") -> dict:
+def _just_expired_reservation(
+    ledger: CapacityLedgerService,
+    escrow: str = "0xe",
+    *,
+    executor_kind: str,
+) -> dict:
     reserved = ledger.reserve(
-        claim={"gpu_count": 2, "vm_host": "kvm1"},
+        claim={
+            "executor_kind": executor_kind,
+            "gpu_count": 2,
+            "vm_host": "kvm1",
+        },
         deal_ref={"escrow_uid": escrow},
     )
     just_expired_dt = datetime.now(timezone.utc) - timedelta(seconds=1)
@@ -291,10 +318,15 @@ async def test_expired_ledger_lease_releases_locally_and_notifies(
     (simulated, since FulfillmentConvergenceWatchdog is tested separately)
     to local release + notification (next cycle)."""
 
-    reservation = _just_expired_reservation(ledger)
+    reservation = _just_expired_reservation(
+        ledger,
+        executor_kind=VM_EXECUTOR_KIND,
+    )
     capacity_reservation_id = reservation["capacity_reservation_id"]
     _create_active_fulfillment(
-        session_factory, capacity_reservation_id=capacity_reservation_id,
+        session_factory,
+        capacity_reservation_id=capacity_reservation_id,
+        executor_kind=VM_EXECUTOR_KIND,
     )
     svc = _lifecycle(session_factory, ledger)
 
@@ -351,10 +383,15 @@ async def test_expired_ledger_lease_releases_locally_and_notifies(
 async def test_release_survives_unreachable_storefront(session_factory, ledger):
     """The local transaction is authoritative; notification is best-effort
     (the storefront converges through the capacity-event feed)."""
-    reservation = _just_expired_reservation(ledger)
+    reservation = _just_expired_reservation(
+        ledger,
+        executor_kind=VM_EXECUTOR_KIND,
+    )
     capacity_reservation_id = reservation["capacity_reservation_id"]
     _create_active_fulfillment(
-        session_factory, capacity_reservation_id=capacity_reservation_id,
+        session_factory,
+        capacity_reservation_id=capacity_reservation_id,
+        executor_kind=VM_EXECUTOR_KIND,
     )
     svc = _lifecycle(session_factory, ledger)
 
@@ -380,7 +417,9 @@ async def test_releasing_reservation_past_grace_marks_release_failed(
     reservation = _expired_reservation(ledger)
     capacity_reservation_id = reservation["capacity_reservation_id"]
     _create_active_fulfillment(
-        session_factory, capacity_reservation_id=capacity_reservation_id,
+        session_factory,
+        capacity_reservation_id=capacity_reservation_id,
+        executor_kind=VM_EXECUTOR_KIND,
     )
     ledger.begin_releasing(capacity_reservation_id, vm_remove_job_id="fulfillment-1")
     _set_fulfillment_state(
@@ -409,7 +448,7 @@ async def test_releasing_reservation_past_grace_marks_release_failed(
 
 @pytest.mark.asyncio
 async def test_releasing_reservation_within_grace_skips(session_factory, ledger):
-    reserved = ledger.reserve(claim={}, deal_ref={})
+    reserved = ledger.reserve(claim={"executor_kind": "vm"}, deal_ref={})
     capacity_reservation_id = reserved["capacity_reservation_id"]
     soon_dt = datetime.now(timezone.utc) - timedelta(seconds=1)
     soon = soon_dt.isoformat()
@@ -420,7 +459,9 @@ async def test_releasing_reservation_within_grace_skips(session_factory, ledger)
         lease_end_utc=soon,
     )
     _create_active_fulfillment(
-        session_factory, capacity_reservation_id=capacity_reservation_id,
+        session_factory,
+        capacity_reservation_id=capacity_reservation_id,
+        executor_kind=VM_EXECUTOR_KIND,
     )
     ledger.begin_releasing(capacity_reservation_id, vm_remove_job_id="fulfillment-1")
     _set_fulfillment_state(
@@ -440,7 +481,9 @@ async def test_succeeded_vm_remove_releases_normally(session_factory, ledger):
     reservation = _expired_reservation(ledger)
     capacity_reservation_id = reservation["capacity_reservation_id"]
     _create_active_fulfillment(
-        session_factory, capacity_reservation_id=capacity_reservation_id,
+        session_factory,
+        capacity_reservation_id=capacity_reservation_id,
+        executor_kind=VM_EXECUTOR_KIND,
     )
     ledger.begin_releasing(capacity_reservation_id, vm_remove_job_id="fulfillment-1")
     _set_fulfillment_state(
@@ -466,7 +509,9 @@ async def test_failed_vm_remove_marks_release_failed_without_notification(sessio
     reservation = _expired_reservation(ledger)
     capacity_reservation_id = reservation["capacity_reservation_id"]
     _create_active_fulfillment(
-        session_factory, capacity_reservation_id=capacity_reservation_id,
+        session_factory,
+        capacity_reservation_id=capacity_reservation_id,
+        executor_kind=VM_EXECUTOR_KIND,
     )
     ledger.begin_releasing(capacity_reservation_id, vm_remove_job_id="fulfillment-1")
     _set_fulfillment_state(
@@ -497,10 +542,15 @@ async def test_failed_vm_remove_marks_release_failed_without_notification(sessio
 async def test_due_leased_reservation_begins_fulfillment_teardown(session_factory, ledger):
     # Lease ended seconds ago — within grace, so the same cycle that
     # begins teardown must NOT force-release it.
-    reservation = _just_expired_reservation(ledger)
+    reservation = _just_expired_reservation(
+        ledger,
+        executor_kind=VM_EXECUTOR_KIND,
+    )
     capacity_reservation_id = reservation["capacity_reservation_id"]
     _create_active_fulfillment(
-        session_factory, capacity_reservation_id=capacity_reservation_id,
+        session_factory,
+        capacity_reservation_id=capacity_reservation_id,
+        executor_kind=VM_EXECUTOR_KIND,
     )
 
     svc = _lifecycle(session_factory, ledger)
@@ -520,11 +570,16 @@ async def test_due_leased_reservation_begins_fulfillment_teardown(session_factor
 
 
 @pytest.mark.asyncio
-async def test_missing_executor_kind_falls_back_to_vm_release(session_factory, ledger):
-    reservation = _just_expired_reservation(ledger)
+async def test_missing_executor_kind_stays_held_and_retryable(session_factory, ledger):
+    reservation = _just_expired_reservation(
+        ledger,
+        executor_kind=VM_EXECUTOR_KIND,
+    )
     capacity_reservation_id = reservation["capacity_reservation_id"]
     _create_active_fulfillment(
-        session_factory, capacity_reservation_id=capacity_reservation_id,
+        session_factory,
+        capacity_reservation_id=capacity_reservation_id,
+        executor_kind=VM_EXECUTOR_KIND,
     )
 
     from market_site.db import CapacityReservation
@@ -539,14 +594,18 @@ async def test_missing_executor_kind_falls_back_to_vm_release(session_factory, l
 
     summary = await svc.force_check_leases()
 
-    assert summary["checked"] == 1
+    assert summary["checked"] == 0
+    assert summary["release_failed"] == 1
     row = ledger.get_reservation(capacity_reservation_id)
-    assert row["state"] == "releasing"
-    assert row["release_job_id"] == "fulfillment-1"
+    assert row["state"] == "release_failed"
+    assert row["executor_kind"] is None
+    assert row["release_job_id"] is None
+    assert row["failure_reason"] == "release_submit_failed"
+    assert ledger.snapshot()[0]["available_units"] < 8
 
     with session_factory() as db:
         record = db.get(SettlementRecord, capacity_reservation_id)
-        assert record.state == SettlementRecordState.teardown_dispatch_pending.value
+        assert record.state == SettlementRecordState.active.value
 
 
 @pytest.mark.asyncio
@@ -557,7 +616,10 @@ async def test_missing_fulfillment_aggregate_stays_held_and_retryable(session_fa
     a known, expected outcome, not a raised exception -- so it surfaces as
     `release_submit_failed`, distinct from an unexpected failure."""
 
-    reservation = _just_expired_reservation(ledger)
+    reservation = _just_expired_reservation(
+        ledger,
+        executor_kind=VM_EXECUTOR_KIND,
+    )
     capacity_reservation_id = reservation["capacity_reservation_id"]
     # Deliberately no _create_active_fulfillment call.
 
@@ -582,10 +644,15 @@ async def test_invalid_aggregate_state_propagates_as_release_submit_error(
     records the real reason, distinguishable from the "no aggregate at
     all" case above by both `failure_reason` and message content."""
 
-    reservation = _just_expired_reservation(ledger)
+    reservation = _just_expired_reservation(
+        ledger,
+        executor_kind=VM_EXECUTOR_KIND,
+    )
     capacity_reservation_id = reservation["capacity_reservation_id"]
     _create_active_fulfillment(
-        session_factory, capacity_reservation_id=capacity_reservation_id,
+        session_factory,
+        capacity_reservation_id=capacity_reservation_id,
+        executor_kind=VM_EXECUTOR_KIND,
     )
     _set_fulfillment_state(
         session_factory, capacity_reservation_id, SettlementRecordState.failed.value,
@@ -614,10 +681,15 @@ async def test_unavailable_teardown_port_propagates_as_release_submit_error(
     ordering bug) -- `DeferredFulfillmentTeardownPort.begin_teardown` raises
     `RuntimeError`. This must reach the operator, not be swallowed."""
 
-    reservation = _just_expired_reservation(ledger)
+    reservation = _just_expired_reservation(
+        ledger,
+        executor_kind=VM_EXECUTOR_KIND,
+    )
     capacity_reservation_id = reservation["capacity_reservation_id"]
     _create_active_fulfillment(
-        session_factory, capacity_reservation_id=capacity_reservation_id,
+        session_factory,
+        capacity_reservation_id=capacity_reservation_id,
+        executor_kind=VM_EXECUTOR_KIND,
     )
 
     class _UnboundTeardownPort:
@@ -627,17 +699,14 @@ async def test_unavailable_teardown_port_propagates_as_release_submit_error(
         def get_status(self, fulfillment_id: str):
             raise RuntimeError("fulfillment teardown port is not bound")
 
-    executor_release = ExecutorReleaseDispatcher(
-        {
-            BARE_METAL_EXECUTOR_KIND: BareMetalReleaseExecutor(),
-            VM_EXECUTOR_KIND: VmReleaseExecutor(
-                settlement_repository=SettlementRepository(),
-                session_factory=session_factory,
-                teardown_port=_UnboundTeardownPort(),
-            ),
-        },
-        default_executor_kind=VM_EXECUTOR_KIND,
-    )
+    executor_release = ExecutorReleaseDispatcher({
+        BARE_METAL_EXECUTOR_KIND: BareMetalReleaseExecutor(),
+        VM_EXECUTOR_KIND: VmReleaseExecutor(
+            settlement_repository=SettlementRepository(),
+            session_factory=session_factory,
+            teardown_port=_UnboundTeardownPort(),
+        ),
+    })
     svc = _lifecycle(session_factory, ledger, executor_release=executor_release)
     summary = await svc.force_check_leases()
 
@@ -662,29 +731,31 @@ async def test_unexpected_repository_failure_propagates_as_release_submit_error(
     found" -- the operator needs to know this is an infrastructure
     problem, not a registration gap."""
 
-    reservation = _just_expired_reservation(ledger)
+    reservation = _just_expired_reservation(
+        ledger,
+        executor_kind=VM_EXECUTOR_KIND,
+    )
     capacity_reservation_id = reservation["capacity_reservation_id"]
     _create_active_fulfillment(
-        session_factory, capacity_reservation_id=capacity_reservation_id,
+        session_factory,
+        capacity_reservation_id=capacity_reservation_id,
+        executor_kind=VM_EXECUTOR_KIND,
     )
 
     class _BrokenSettlementRepository:
         def get(self, db, capacity_reservation_id):
             raise RuntimeError("settlement database unavailable")
 
-    executor_release = ExecutorReleaseDispatcher(
-        {
-            BARE_METAL_EXECUTOR_KIND: BareMetalReleaseExecutor(),
-            VM_EXECUTOR_KIND: VmReleaseExecutor(
-                settlement_repository=_BrokenSettlementRepository(),
-                session_factory=session_factory,
-                teardown_port=FulfillmentServiceTeardownPort(
-                    lambda: _fulfillment_service(session_factory)
-                ),
+    executor_release = ExecutorReleaseDispatcher({
+        BARE_METAL_EXECUTOR_KIND: BareMetalReleaseExecutor(),
+        VM_EXECUTOR_KIND: VmReleaseExecutor(
+            settlement_repository=_BrokenSettlementRepository(),
+            session_factory=session_factory,
+            teardown_port=FulfillmentServiceTeardownPort(
+                lambda: _fulfillment_service(session_factory)
             ),
-        },
-        default_executor_kind=VM_EXECUTOR_KIND,
-    )
+        ),
+    })
     svc = _lifecycle(session_factory, ledger, executor_release=executor_release)
     summary = await svc.force_check_leases()
 
@@ -702,10 +773,12 @@ async def test_unexpected_repository_failure_propagates_as_release_submit_error(
 
 @pytest.mark.asyncio
 async def test_bare_metal_executor_releases_locally_and_notifies(session_factory, ledger):
-    reservation = _just_expired_reservation(ledger)
+    reservation = _just_expired_reservation(
+        ledger,
+        executor_kind=BARE_METAL_EXECUTOR_KIND,
+    )
     ledger.update_lease_fields(
         reservation["capacity_reservation_id"],
-        executor_kind=BARE_METAL_EXECUTOR_KIND,
         executor_target="node-1",
         executor_ref=bare_metal_executor_ref(
             "host-kvm1",
@@ -742,10 +815,12 @@ async def test_bare_metal_executor_releases_locally_and_notifies(session_factory
 async def test_bare_metal_executor_submits_reclaim_job_when_delegate_configured(
     session_factory, ledger,
 ):
-    reservation = _just_expired_reservation(ledger)
+    reservation = _just_expired_reservation(
+        ledger,
+        executor_kind=BARE_METAL_EXECUTOR_KIND,
+    )
     ledger.update_lease_fields(
         reservation["capacity_reservation_id"],
-        executor_kind=BARE_METAL_EXECUTOR_KIND,
         executor_target="node-1",
         executor_ref=bare_metal_executor_ref(
             "host-kvm1",
@@ -771,10 +846,12 @@ async def test_bare_metal_executor_submits_reclaim_job_when_delegate_configured(
 
 @pytest.mark.asyncio
 async def test_bare_metal_release_submission_failure_stays_held(session_factory, ledger):
-    reservation = _just_expired_reservation(ledger)
+    reservation = _just_expired_reservation(
+        ledger,
+        executor_kind=BARE_METAL_EXECUTOR_KIND,
+    )
     ledger.update_lease_fields(
         reservation["capacity_reservation_id"],
-        executor_kind=BARE_METAL_EXECUTOR_KIND,
         executor_target="node-1",
     )
 
@@ -798,10 +875,12 @@ async def test_bare_metal_release_submission_failure_stays_held(session_factory,
 
 @pytest.mark.asyncio
 async def test_unknown_executor_kind_stays_held_and_retryable(session_factory, ledger):
-    reservation = _just_expired_reservation(ledger)
+    reservation = _just_expired_reservation(
+        ledger,
+        executor_kind="custom_executor",
+    )
     ledger.update_lease_fields(
         reservation["capacity_reservation_id"],
-        executor_kind="custom_executor",
         executor_target="target-1",
     )
 
@@ -812,6 +891,7 @@ async def test_unknown_executor_kind_stays_held_and_retryable(session_factory, l
     assert summary["release_failed"] == 1
     row = ledger.get_reservation(reservation["capacity_reservation_id"])
     assert row["state"] == "release_failed"
+    assert row["executor_kind"] == "custom_executor"
     assert row["failure_reason"] == "release_submit_failed"
     assert ledger.snapshot()[0]["available_units"] < 8
 

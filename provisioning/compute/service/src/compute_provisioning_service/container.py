@@ -41,7 +41,6 @@ from market_fulfillment import (
     SqlAlchemyFulfillmentUnitOfWork,
 )
 
-DEFAULT_EXECUTOR_KIND = "vm"
 
 
 def _resolved_job_queue():
@@ -103,10 +102,7 @@ def _system_service(runtime, lease_lifecycle_service):
 
 
 def _compose_adapters(vm_bundle, bare_metal_bundle):
-    return compose_adapter_bundles(
-        [vm_bundle, bare_metal_bundle],
-        default_executor_kind=DEFAULT_EXECUTOR_KIND,
-    )
+    return compose_adapter_bundles([vm_bundle, bare_metal_bundle])
 
 
 def _provider_registry(composed_adapters):
@@ -133,7 +129,6 @@ def _make_release_job_dispatcher(vm_runtime, job_service):
             "vm": vm_runtime.release_job_port(),
             "bare_metal": job_service,
         },
-        default_executor_kind=DEFAULT_EXECUTOR_KIND,
     )
 
 
@@ -158,7 +153,6 @@ def _make_lease_lifecycle(
         site_authority,
         executor_release=release_dispatcher,
         release_jobs=release_jobs,
-        default_executor_kind=DEFAULT_EXECUTOR_KIND,
         capacity_released_notifier=(
             lambda reservation: notify_storefront_capacity_released(
                 cfg, reservation, sink=lifecycle_event_sink

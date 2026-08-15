@@ -47,6 +47,21 @@ def run_migrations(engine: Engine) -> None:
     service's schema actually needs to evolve.
     """
     Base.metadata.create_all(bind=engine)
+    from market_resource_pools import DEFAULT_POOL_ID, ResourcePool
+    from market_resource_pools.db import Base as PoolsBase
+
+    PoolsBase.metadata.create_all(bind=engine)
+    with Session(engine) as session, session.begin():
+        if session.get(ResourcePool, DEFAULT_POOL_ID) is None:
+            session.add(
+                ResourcePool(
+                    id=DEFAULT_POOL_ID,
+                    label="Default Pool",
+                    provider="api_credits",
+                    enabled=True,
+                    policy_tags={"deliverable_modes": ["api_credits"]},
+                )
+            )
     # Site-authority quota ledger tables ride market_site's own metadata.
     from market_site.db import Base as SiteBase
     SiteBase.metadata.create_all(bind=engine)

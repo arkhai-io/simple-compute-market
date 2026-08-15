@@ -587,7 +587,7 @@ async def _place_capacity_hold(
         policy_tags = lookup_pool_policy_tags(sqlite_client, listing_id)
         ttl = capped_hold_seconds(ttl, policy_tags)
         held = await capacity.reserve(
-            claim=claim or None,
+            claim=claim,
             deal_ref={
                 "listing_id": listing_id,
                 "negotiation_id": negotiation_id,

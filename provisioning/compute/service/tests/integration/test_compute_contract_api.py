@@ -37,6 +37,7 @@ def _leased_vm_reservation() -> dict:
         attributes={"vm_host": "kvm1"},
     )
     reserved = ledger.reserve(
+        claim={"executor_kind": "vm"},
         deal_ref={"escrow_uid": "escrow-contract", "listing_id": "listing-1"},
         lease_duration_seconds=3600,
     )
@@ -60,6 +61,7 @@ def _leased_bare_metal_reservation() -> dict:
     )
     reserved = ledger.reserve(
         claim={
+            "executor_kind": "bare_metal",
             "physical_host_id": "physical-contract-1",
             "allocation_mode": ALLOCATION_MODE_EXCLUSIVE,
         },
@@ -256,12 +258,14 @@ async def test_contract_lease_view_serializes_every_reachable_reservation_state(
     for raw_state, want in expected.items():
         view = _lease_view({
             "capacity_reservation_id": "reservation-1",
+            "executor_kind": "vm",
             "state": raw_state,
             "lease_end_utc": "2099-01-01T00:00:00Z",
         })
         assert view.status == want, f"{raw_state!r} should map to {want!r}"
         vm_view = _vm_lease_view({
             "capacity_reservation_id": "reservation-1",
+            "executor_kind": "vm",
             "resource_id": "resource-1",
             "state": raw_state,
             "lease_end_utc": "2099-01-01T00:00:00Z",

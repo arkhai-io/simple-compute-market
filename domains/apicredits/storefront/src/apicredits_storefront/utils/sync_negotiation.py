@@ -187,7 +187,10 @@ async def _place_quota_hold(
         )
 
         offer = coerce_resource_dict((order_dict or {}).get("offer_resource"))
-        claim: dict[str, Any] = {"units": int(quantity)}
+        claim: dict[str, Any] = {
+            "executor_kind": "api_credits",
+            "units": int(quantity),
+        }
         if offer.get("resource_id"):
             claim["resource_id"] = str(offer["resource_id"])
         capacity = build_capacity_client(lambda: sqlite_client)

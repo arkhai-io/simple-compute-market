@@ -86,20 +86,17 @@ def contribution(kind: str, *actions: str) -> ExecutorAdapterContribution:
 
 def test_composes_executor_and_provider_namespaces_independently():
     provider = FakeProvider()
-    composed = compose_adapter_bundles(
-        [
-            ExecutorAdapterBundle(
-                name="vm",
-                executors=(contribution("vm", "create"),),
-                fulfillment_providers={"ansible": provider},
-            ),
-            ExecutorAdapterBundle(
-                name="bare-metal",
-                executors=(contribution("bare_metal", "grant_access"),),
-            ),
-        ],
-        default_executor_kind="vm",
-    )
+    composed = compose_adapter_bundles([
+        ExecutorAdapterBundle(
+            name="vm",
+            executors=(contribution("vm", "create"),),
+            fulfillment_providers={"ansible": provider},
+        ),
+        ExecutorAdapterBundle(
+            name="bare-metal",
+            executors=(contribution("bare_metal", "grant_access"),),
+        ),
+    ])
 
     assert composed.executor_registry.get("vm").executor_kind == "vm"
     assert composed.executor_registry.get("bare_metal").executor_kind == "bare_metal"

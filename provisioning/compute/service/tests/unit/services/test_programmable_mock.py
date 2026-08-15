@@ -45,7 +45,7 @@ def _make_run(params: AnsibleJobParams | None = None) -> AnsibleRun:
 
 
 def _params(**kwargs) -> AnsibleJobParams:
-    defaults = dict(vm_host="kvm1", vm_action="create")
+    defaults = dict(vm_host="kvm1", vm_action="create", executor_kind="vm")
     defaults.update(kwargs)
     return AnsibleJobParams(**defaults)
 
@@ -261,7 +261,12 @@ class TestEvaluateJob:
     def _params(self, host: str = "kvm1", vm_action: str = "create"):
         from vm_provisioning_adapter.models.jobs_model import AnsibleJobParams
 
-        return AnsibleJobParams(vm_host=host, vm_action=vm_action, vm_target="t1")
+        return AnsibleJobParams(
+            vm_host=host,
+            vm_action=vm_action,
+            vm_target="t1",
+            executor_kind="vm",
+        )
 
     def _mock_host_service(self, host_exists: bool = True):
         svc = MagicMock()

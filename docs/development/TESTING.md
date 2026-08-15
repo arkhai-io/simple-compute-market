@@ -242,6 +242,37 @@ under its own `tests/` root, matching the four-level hierarchy above.
 System-level tests live in the separate `e2e-tests` package, itself
 split into `unit/` (its own helper logic), `smoke/`, and `e2e/`.
 
+## Pool Offering-Mode Enforcement
+
+Pool offering-mode coverage follows the lowest-meaningful-level rule while
+proving that no execution layer relies on another layer's earlier decision:
+
+- `kit/resource-pools` unit tests own declaration shape, typed reads,
+  membership, absent-as-empty behavior, and identical validation across
+  individual and bulk administration.
+- `kit/site` unit tests own explicit claim identity and reservation admission.
+  They assert that neither a VM-shaped resource nor any resource attribute
+  supplies a missing mode, that an undeclared mode creates no hold, and that
+  pool authorization remains independent of exclusive/shareable physical
+  accounting.
+- `kit/fulfillment` scheduler tests withdraw a declaration after reservation;
+  orchestration tests withdraw it after provider input is prepared and assert
+  no provider dispatch occurs.
+- Provisioning migration tests cover fresh bootstrap, the system-owned default
+  pool, exact derivation from provider/playbook/delegate configuration,
+  idempotent rerun, narrowing, INFO evidence, malformed drift, single-proof
+  backfill, conflicting proof, unproved active rows, and terminal rows.
+- The deployed `e2e_pool_declared_modes` scenario sends an unsupported explicit
+  mode for a real matching capacity resource and observes HTTP 409 plus no
+  reservation row. It stops at the reservation boundary by design: provider
+  failure would be evidence that admission occurred too late.
+
+An executor-default inventory is part of closeout for changes to this boundary.
+Search production compute contracts, persistence, dispatch, result, release,
+site, storefront, and domain adapters for default arguments, `or` fallbacks,
+and attribute-based inference; a passing focused suite alone cannot prove their
+absence.
+
 ## Marketplace Identity Verification
 
 Identity tests follow the same lowest-meaningful-level rule while exercising

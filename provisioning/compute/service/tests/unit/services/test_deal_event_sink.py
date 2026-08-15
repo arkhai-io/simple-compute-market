@@ -50,6 +50,7 @@ async def test_release_event_uses_service_signer_site_and_storefront_pin(
     )
     reservation = {
         "capacity_reservation_id": "alloc-7",
+        "executor_kind": "vm",
         "released_at": "2026-07-13T12:00:00+00:00",
         "deal_ref": {"storefront_url": "https://untrusted.example/"},
     }
@@ -103,6 +104,7 @@ async def test_uncertain_ack_retry_reuses_the_same_client_and_request_identity()
     )
     reservation = {
         "capacity_reservation_id": "alloc-7",
+        "executor_kind": "vm",
         "released_at": "2026-07-13T12:00:00+00:00",
     }
 

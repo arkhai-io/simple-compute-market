@@ -24,19 +24,20 @@
 - VM migration suites: `22 passed`.
 - Listing integration and CSV importer: `43 passed` with one pre-existing `agent_id` default warning.
 - Hosted routes: `9 passed`; seller-round hook: `8 passed` with one pre-existing `agent_id` warning.
-- VM storefront excluding the pool-prerequisite abandonment file: `1052 passed, 1 skipped, 2 warnings`; focused listing immutability: `1 passed`.
-- Release/package scripts: `66 passed`; Helm schema/render checks passed; targeted changed-file Ruff checks passed.
-- `openspec validate consume-expanded-stripe-funding --strict --json` passed.
+- VM storefront after pool integration: `1054 passed, 1 skipped, 2 warnings`; focused listing immutability: `1 passed`.
+- Pool/resource integration: resource-pool kit `94 passed`; site kit `149 passed`; fulfillment kit `154 passed`; provisioning service `655 passed` with six pre-existing deprecation warnings.
+- Release/package scripts: `66 passed`; Helm schema/render checks passed; targeted changed-file Ruff checks passed. Upgraded VM storefront, VM operator-client, and bare-metal adapter dependency floors/locks resolve the released pool/site/fulfillment/compute contracts; both leaf packages import successfully.
+- [x] 10.1 — Post-integration marketplace aggregates and package/typing-boundary suites pass. The repository defines no VM-storefront typecheck target; an exploratory whole-source mypy invocation reports 319 baseline diagnostics, predominantly missing `py.typed` markers, rather than a usable release gate.
+- Both `consume-expanded-stripe-funding` and `pool-declared-offering-modes` pass strict OpenSpec validation.
 - `make check-comment-hygiene` passed; direct review found no temporary change/task commentary or newly added local imports, and no core/domain direct hosted-client import or public legacy alias remains.
 
 ## Deferred and external evidence
 
 - [ ] 1.1 — Verify one complete signed producer release and record its exact manifest/client/service/image/API/schema/migration/capability/repository/workflow/provenance/source identities. **Blocked:** local producer output has the public client `0.2.0`, OpenAPI `0.2.0`, conformance/schema `5`, and migrations `v5`, but not a complete signed release-v2 manifest matching the committed trust pin, immutable service image/digest, service wheel/SBOM/provenance set, or workflow-attested repository/run/source identities. Sibling source is not evidence.
 - [ ] 7.4 — Exercise activation and rollback with matching old/new producer and consumer artifact sets. Deterministic config/package/wheelhouse/Compose/Helm/secret/rollback fixtures pass, but the staged artifact exercise requires the complete signed set blocked in 1.1.
-- [ ] 10.1 — Complete the post-integration marketplace aggregate and typing pass. All consumer-owned focused suites listed above are green; the two remaining storefront abandonment cases require integration of pool offering-mode tip `5412a732` (`impl-pool-declared-offering-modes`), which Main will merge after this branch handoff, followed by the final aggregate/type rerun.
 - [ ] 10.2 — Run the protected hosted Stripe profile matrix and preserve the signed sanitized report. **Blocked:** no complete signed staged producer/consumer artifact pair or protected Stripe test-mode rail/account/browser credentials and connectivity are available; local simulation cannot substitute for those assertions.
 
 ## Closeout
 
-- [x] 10.3 — Strict change validation, permanent documentation/index/link placement, generated release/deployment surfaces, package/import/provider boundaries, exact profile callsites, and stale-pin/legacy-alias audits are reconciled; remaining post-merge aggregate evidence is isolated under 10.1.
+- [x] 10.3 — Strict change validation, permanent documentation/index/link placement, generated release/deployment surfaces, package/import/provider boundaries, exact profile callsites, and stale-pin/legacy-alias audits are reconciled.
 - [x] 10.4 — Comment hygiene and direct Python comment/docstring/import review pass; accepted decisions are promoted to permanent specifications and architecture, durable rationale remains in `design.md`, roadmap state and the design-promotion record are current, and completed history is compressed here to final behavior, evidence, permanent destinations, and exact deferred prerequisites.

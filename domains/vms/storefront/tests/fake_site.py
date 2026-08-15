@@ -49,7 +49,8 @@ TEST_SITE_AUTHORITIES = TrustedIdentitySet(
 class FakeSite:
     """Dict-backed single-site capacity ledger."""
 
-    def __init__(self) -> None:
+    def __init__(self, *, deliverable_modes: set[str] | frozenset[str] | None = None) -> None:
+        self.deliverable_modes = frozenset(deliverable_modes or ())
         self.resources: dict[str, dict] = {}
         self.reservations: dict[str, dict] = {}
         self.events: list[dict] = []
@@ -296,6 +297,12 @@ class FakeSite:
 
     def _match(self, claim: dict) -> dict | None:
         claim = claim or {}
+        executor_kind = claim.get("executor_kind")
+        if (
+            not isinstance(executor_kind, str)
+            or executor_kind not in self.deliverable_modes
+        ):
+            return None
         # compute_capacity_claim_from_order now always routes gpu_count.
         # This fake only proves the GPU-count contract this test double
         # documents itself as covering but it must at least read the
@@ -324,7 +331,12 @@ class FakeSite:
             mismatched = any(
                 attrs.get(k, top_level.get(k)) != v
                 for k, v in claim.items()
-                if k not in ("gpu_count", "dimensions", "resource_type")
+                if k not in (
+                    "gpu_count",
+                    "dimensions",
+                    "resource_type",
+                    "executor_kind",
+                )
             )
             if mismatched:
                 continue

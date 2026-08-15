@@ -120,11 +120,15 @@ async def test_reserve_commit_release_lifecycle(capacity: CapacityApi):
     )
 
     assert (await capacity.snapshot())[0]["available_units"] == 8
-    assert await capacity.probe({"gpu_model": "H200", "vm_host": "kvm1"}) is not None
-    assert await capacity.probe({"gpu_model": "A100"}) is None
+    assert await capacity.probe(
+        {"executor_kind": "vm", "gpu_model": "H200", "vm_host": "kvm1"}
+    ) is not None
+    assert await capacity.probe(
+        {"executor_kind": "vm", "gpu_model": "A100"}
+    ) is None
 
     reserved = await capacity.reserve(
-        {"gpu_count": 3, "vm_host": "kvm1"},
+        {"executor_kind": "vm", "gpu_count": 3, "vm_host": "kvm1"},
         {"listing_id": "lst-1", "escrow_uid": "0xesc"},
     )
     # vm_host is intentionally opaque across this boundary (see
@@ -166,7 +170,7 @@ async def test_reserve_commit_release_lifecycle(capacity: CapacityApi):
 
 @pytest.mark.asyncio
 async def test_no_capacity_is_a_null_answer_not_an_error(capacity: CapacityApi):
-    assert await capacity.reserve({"gpu_count": 1}, {}) is None
+    assert await capacity.reserve({"executor_kind": "vm", "gpu_count": 1}, {}) is None
     assert await capacity.release(capacity_reservation_id="missing") is None
 
 
@@ -181,9 +185,12 @@ async def test_vm_and_bare_metal_claims_use_domain_attributes(capacity: Capacity
         },
     )
 
-    assert await capacity.probe({"gpu_count": 1, "vm_host": "kvm1"}) is None
+    assert await capacity.probe(
+        {"executor_kind": "vm", "gpu_count": 1, "vm_host": "kvm1"}
+    ) is None
     reserved = await capacity.reserve(
         {
+            "executor_kind": "bare_metal",
             "physical_host_id": "host-physical-1",
             "allocation_mode": ALLOCATION_MODE_EXCLUSIVE,
         },
@@ -225,7 +232,7 @@ async def test_capacity_snapshot_blocks_cross_mode_siblings(capacity: CapacityAp
     assert initial["bare-metal-node-1"]["available_units"] == 1
 
     reserved = await capacity.reserve(
-        {"gpu_count": 2, "vm_host": "kvm1"},
+        {"executor_kind": "vm", "gpu_count": 2, "vm_host": "kvm1"},
         {"escrow_uid": "0xvm-cross-mode"},
     )
 
@@ -234,6 +241,7 @@ async def test_capacity_snapshot_blocks_cross_mode_siblings(capacity: CapacityAp
     assert blocked["compute-host-1"]["available_units"] == 6
     assert blocked["bare-metal-node-1"]["available_units"] == 0
     assert await capacity.probe({
+        "executor_kind": "bare_metal",
         "physical_host_id": "host-physical-1",
         "allocation_mode": ALLOCATION_MODE_EXCLUSIVE,
     }) is None
@@ -255,7 +263,7 @@ async def test_register_lease_attaches_to_ledger_reservation(capacity: CapacityA
         "compute-kvm1-001", total_units=8, attributes={"vm_host": "kvm1"},
     )
     reserved = await capacity.reserve(
-        {"gpu_count": 1, "vm_host": "kvm1"},
+        {"executor_kind": "vm", "gpu_count": 1, "vm_host": "kvm1"},
         {"escrow_uid": "0xlease"},
     )
 

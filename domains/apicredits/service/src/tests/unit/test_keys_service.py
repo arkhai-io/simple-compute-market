@@ -8,6 +8,8 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from market_site.db import Base as SiteBase
+from market_resource_pools import DEFAULT_POOL_ID, ResourcePool
+from market_resource_pools.db import Base as PoolsBase
 from market_site.ledger import CapacityLedgerService
 from db.models import Base
 from services.keys_service import IssuanceError, KeysService, derive_key_id
@@ -35,6 +37,17 @@ def ledger_and_service() -> tuple[CapacityLedgerService, KeysService]:
     )
     Base.metadata.create_all(bind=engine)
     SiteBase.metadata.create_all(bind=engine)
+    PoolsBase.metadata.create_all(bind=engine)
+    with Session(engine) as db, db.begin():
+        db.add(
+            ResourcePool(
+                id=DEFAULT_POOL_ID,
+                label="Default Pool",
+                provider="api_credits",
+                enabled=True,
+                policy_tags={"deliverable_modes": ["api_credits"]},
+            )
+        )
     session_factory = sessionmaker(bind=engine)
     ledger = CapacityLedgerService(session_factory)
     ledger.register_resource(
@@ -152,7 +165,9 @@ def test_unowned_key_accepts_open_top_up(service):
 
 def test_issue_commits_negotiation_hold_instead_of_reserving(service, ledger):
     hold = ledger.reserve(
-        claim={"units": 200}, deal_ref={"escrow_uid": "0xheld"}, ttl_seconds=900,
+        claim={"executor_kind": "api_credits", "units": 200},
+        deal_ref={"escrow_uid": "0xheld"},
+        ttl_seconds=900,
     )
     result = service.issue(
         escrow_uid="0xheld", quantity=200, key_mode="new",

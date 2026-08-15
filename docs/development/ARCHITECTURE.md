@@ -211,6 +211,7 @@ Within a service, controllers stay thin: HTTP routing, request/response schemas,
 | Listing, negotiation, deal, and seller policy state | Storefront | Market-facing state, not physical inventory |
 | Capacity admission and reservation | Site authority | Serialization point for competing reservations |
 | Resource-pool metadata and provider configuration | Resource-pool service | Provisioning routing metadata; disabled pools remain resolvable |
+| Pool deliverable-mode authorization | Resource-pool operator and service | One explicit set per pool; absence authorizes no mode, and each execution layer rechecks it |
 | Settlement-resource selection | Fulfillment scheduler | Placement occurs before provider execution |
 | Provider-specific create/status/teardown | Fulfillment provider | Executes against the selected resource and does not substitute placement |
 | Asynchronous infrastructure job state | Compute provisioner | Durable job identity with in-process execution queue |
@@ -230,6 +231,13 @@ Storefront capacity pools and provisioning resource pools are separate concepts.
 
 A site authority owns resources, allocations, reservation expiry, capacity versions, and the event feed for one failure domain or datacenter. One storefront may aggregate several sites.
 
+Capacity claims name their requested offering mode explicitly. The authority
+records that value on the reservation and never derives it from host
+attributes, resource type, or a default executor. Admission refuses a matching
+resource when its pool does not authorize the mode; durable legacy rows are
+backfilled only from single-valued evidence and otherwise quarantined from
+execution.
+
 Each provisioning connection is bound to an operator-configured `site_id` and an exact service-peer principal. Marketplace version 2 proofs authenticate requests and signed responses or callbacks against those public trust pins; matching an address-like body value, administrator key, private-key field, or identifier under another scheme never substitutes for the configured principal and role. The trusted connection binding, not a counterparty assertion, selects the site.
 
 Capacity events are anonymous availability deltas broadcast through a pull feed. Deal-scoped fulfillment events are point-to-point to the owning storefront and retain deal context. A storefront reconciles listings in response to capacity deltas regardless of which seller action caused the change.
@@ -238,7 +246,22 @@ A site authority's client-facing surface splits into two separately typed client
 
 ### Resource pools
 
-Resource pools group physical settlement candidates and identify the provider plus provider-specific configuration used after selection. Pool disablement prevents new assignment but does not erase existing host membership or lifecycle records. Pool administration is distinct from scheduling policy.
+Resource pools group physical settlement candidates, identify the provider and
+provider-specific configuration used after selection, and declare the exact set
+of offering modes that configuration can deliver. The declaration belongs to
+the pool rather than each host because provider, playbook, and requirement
+delegate are pool-owned execution policy; missing or empty declarations deliver
+nothing. Pool disablement prevents new assignment but does not erase existing
+host membership or lifecycle records. Pool administration is distinct from
+scheduling policy.
+
+The site authority, fulfillment scheduler, and fulfillment orchestrator all use
+the shared pool-membership predicate at their own boundary. Rechecking before
+provider dispatch means narrowing a declaration blocks a held or assigned
+operation without rewriting its historical requested mode. This authorization
+does not replace physical accounting: a pool may authorize both VM slices and
+whole-host delivery while the exclusive/shareable conflict rule still prevents
+them from overlapping on one physical host.
 
 ## Shared vocabulary and identities
 

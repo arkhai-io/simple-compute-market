@@ -13,7 +13,11 @@ from market_site_client import SiteCapacityClient
 async def test_reserve_commit_send_no_placement_fields() -> None:
     caller = Ed25519Signer(b"\x66" * 32)
     authority = Ed25519Signer(b"\x77" * 32)
-    site = FakeSite(caller=caller, authority=authority)
+    site = FakeSite(
+        caller=caller,
+        authority=authority,
+        deliverable_modes={"vm"},
+    )
     site.add_resource("host-private", 4, attributes={"vm_host": "kvm-private"})
     capacity = SiteCapacityClient(
         "http://capacity.test",
@@ -23,7 +27,11 @@ async def test_reserve_commit_send_no_placement_fields() -> None:
     )
 
     reservation = await capacity.reserve(
-        claim={"pool_id": "host-private", "gpu_count": 1},
+        claim={
+            "executor_kind": "vm",
+            "pool_id": "host-private",
+            "gpu_count": 1,
+        },
         request_id="opaque-reserve",
     )
     assert reservation is not None

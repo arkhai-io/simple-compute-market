@@ -362,9 +362,11 @@ async def _ensure_recovery_capacity(
     site_id = (
         site_id_for_listing(sqlite_client.db_path, listing_id) if listing_id else None
     )
+    claim = dict(context.get("required_attributes") or {})
+    claim["executor_kind"] = "vm"
     try:
         reserved = await capacity_client.reserve(
-            claim=context.get("required_attributes") or None,
+            claim=claim,
             deal_ref={"listing_id": listing_id, "escrow_uid": escrow_uid},
             lease_start_utc=context.get("start_utc"),
             lease_duration_seconds=int(context.get("duration_seconds") or 3600),

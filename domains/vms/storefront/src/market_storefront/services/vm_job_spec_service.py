@@ -25,6 +25,7 @@ _REQUIRED_COMPUTE_KEYS = (
 # claim's resource_type constraint would reject every resource that
 # exists.
 _VM_RESOURCE_TYPE = "compute.gpu"
+_VM_EXECUTOR_KIND = "vm"
 
 # _DIMENSION_COMPUTE_KEYS (gpu_count/vcpu_count/ram_gb/disk_gb) comes from
 # arkhai_vms.compute_requirements -- the same shared vocabulary the
@@ -65,9 +66,11 @@ def compute_capacity_claim_from_order(
     """
     if not order_dict:
         raise ValueError("Cannot build a capacity claim without a settlement order.")
-    capacity_claim: dict[str, Any] = {}
+    capacity_claim: dict[str, Any] = {
+        "executor_kind": _VM_EXECUTOR_KIND,
+        "resource_type": _VM_RESOURCE_TYPE,
+    }
     dimensions: dict[str, Any] = {}
-    capacity_claim["resource_type"] = _VM_RESOURCE_TYPE
     compute_resource = extract_compute_from_order(order_dict)
     if hasattr(compute_resource, "model_dump"):
         compute_resource = compute_resource.model_dump()

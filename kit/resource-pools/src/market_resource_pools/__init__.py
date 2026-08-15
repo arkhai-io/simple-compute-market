@@ -1,6 +1,12 @@
 """Provider-neutral resource-pool administration."""
 
 from .db import DEFAULT_POOL_ID, ResourcePool
+from .hints import (
+    DELIVERABLE_MODES_POLICY_TAG,
+    declared_deliverable_modes,
+    pool_delivers_offering_mode,
+    validate_deliverable_modes,
+)
 from .pool_config_handler import PoolConfigHandler, PoolConfigValidationProblem
 from .pools import (
     PoolCreate,
@@ -26,6 +32,9 @@ from .service import (
 
 __all__ = [
     "DEFAULT_POOL_ID",
+    "DELIVERABLE_MODES_POLICY_TAG",
+    "declared_deliverable_modes",
+    "pool_delivers_offering_mode",
     "DocumentValidationResult",
     "PoolAlreadyExistsError",
     "PoolConfigHandler",
@@ -46,4 +55,5 @@ __all__ = [
     "ReconciliationPlan",
     "ResourcePool",
     "ResourcePoolService",
+    "validate_deliverable_modes",
 ]

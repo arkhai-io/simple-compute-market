@@ -218,7 +218,7 @@ class TestEvaluateSettle:
         await _seed_listing(db, "settle-eval-no-inv")
         from tests.fake_site import FakeSite, site_capacity
 
-        with site_capacity(FakeSite()):
+        with site_capacity(FakeSite(deliverable_modes={"vm"})):
             result = await c.evaluate_settle(
                 "eval-escrow-1",
                 listing_id="settle-eval-no-inv",
@@ -295,7 +295,7 @@ class TestEvaluateSettle:
 
         from tests.fake_site import FakeSite, site_capacity
 
-        fake = FakeSite()
+        fake = FakeSite(deliverable_modes={"vm"})
         fake.add_resource(
             "r-eval-match", 1,
             attributes={

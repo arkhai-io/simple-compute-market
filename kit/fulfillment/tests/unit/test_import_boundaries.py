@@ -81,7 +81,7 @@ def test_only_scheduler_and_ids_modules_import_the_two_allowed_kit_dependencies(
         "scheduler.py": {"market_resource_pools", "market_site"},
         "scheduling_persistence.py": {"market_resource_pools", "market_site", "sqlalchemy"},
         "provider.py": set(),
-        "fulfillment.py": set(),
+        "fulfillment.py": {"market_resource_pools"},
         "fulfillment_persistence.py": {"market_resource_pools", "sqlalchemy"},
         "transitions.py": set(),
         "db.py": {"sqlalchemy"},

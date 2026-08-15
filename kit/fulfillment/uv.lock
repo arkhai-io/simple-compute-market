@@ -35,7 +35,7 @@ wheels = [
 
 [[package]]
 name = "arkhai-kit-fulfillment"
-version = "0.1.0"
+version = "0.2.0"
 source = { editable = "." }
 dependencies = [
     { name = "arkhai-kit-resource-pools" },
@@ -53,8 +53,8 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "arkhai-kit-resource-pools", specifier = ">=0.1.0" },
-    { name = "arkhai-kit-site", specifier = ">=0.2.0" },
+    { name = "arkhai-kit-resource-pools", specifier = ">=0.2.0" },
+    { name = "arkhai-kit-site", specifier = ">=0.3.0" },
     { name = "pydantic", specifier = ">=2.7" },
     { name = "sqlalchemy", specifier = ">=2.0" },
     { name = "uuid6", specifier = ">=2024.7.10" },
@@ -68,7 +68,7 @@ dev = [
 
 [[package]]
 name = "arkhai-kit-resource-pools"
-version = "0.1.0"
+version = "0.2.0"
 source = { registry = "../../.dist" }
 dependencies = [
     { name = "pydantic" },
@@ -76,20 +76,21 @@ dependencies = [
     { name = "sqlalchemy" },
 ]
 wheels = [
-    { path = "arkhai_kit_resource_pools-0.1.0-py3-none-any.whl" },
+    { path = "arkhai_kit_resource_pools-0.2.0-py3-none-any.whl" },
 ]
 
 [[package]]
 name = "arkhai-kit-site"
-version = "0.2.0"
+version = "0.3.0"
 source = { registry = "../../.dist" }
 dependencies = [
+    { name = "arkhai-kit-resource-pools" },
     { name = "fastapi" },
     { name = "pydantic" },
     { name = "sqlalchemy" },
 ]
 wheels = [
-    { path = "arkhai_kit_site-0.2.0-py3-none-any.whl" },
+    { path = "arkhai_kit_site-0.3.0-py3-none-any.whl" },
 ]
 
 [[package]]
