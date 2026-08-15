@@ -106,6 +106,20 @@ The VM and API-credit plugins MUST run against the same selected-primary and ret
 - **WHEN** coordinated profile/run-log migration cannot validate or replace every candidate
 - **THEN** tests observe complete profile and run-log restoration, no partial activation, and an actionable unresolved-manifest failure
 
+### Requirement: Injected storefront contracts have boundary-owned evidence
+
+Focused tests MUST prove that one caller-supplied compatible domain contract reaches the application, lifespan/container, repository, publication, negotiation, settlement, and fulfillment boundaries by identity, and that incompatible type, identity, version, declaration, or hook-set inputs fail before startup side effects. Existing package and integration tests MUST continue to own observable VM listing, negotiation, settlement, Alkahest, restart, and accepted-row parity.
+
+#### Scenario: A distinct compatible contract is injected
+
+- **WHEN** a composition test supplies a compatible `compute.v1` contract object distinct from the ordinary default
+- **THEN** application state, dependencies, codecs, settlement, fulfillment, and repository assertions observe that exact object
+
+#### Scenario: Import-boundary evidence runs
+
+- **WHEN** architecture tests inspect production modules and installed package metadata
+- **THEN** they reject module-global contract access, concrete cross-domain imports, source-tree-only dependencies, and missing lower-layer contract declarations
+
 ## Evidence
 
 - Layer ownership: package unit/integration suites, role-level E2E scenarios, and the independently released hosted producer's financial-provider and webhook-inbox integration suites.

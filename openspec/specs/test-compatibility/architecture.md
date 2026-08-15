@@ -45,6 +45,10 @@ Scenario fixtures create the precise resource and policy state they assert, rema
 
 A moved or extracted boundary may require wheel-content checks, typing markers, dependency-direction tests, consumer suites, composition startup, duplicate-registration checks, and retry/idempotency coverage in addition to ordinary unit tests. Which checks apply follows the authority being changed.
 
+For an injected domain boundary, focused tests supply a compatible contract object distinct from the default and assert object identity at application, container, repository, codec, settlement, and fulfillment seams. Invalid type, identity, version, declarations, and hook sets are rejected at the root with stateful collaborators left untouched. Existing HTTP and package suites continue to own observable workflow parity; restart coverage reopens real persisted identifiers and confirms that parameterization adds no schema rewrite.
+
+Architecture tests inspect production imports and package metadata rather than test monkeypatch patterns. They enforce one default contract construction site, no lower-layer singleton accessor, no concrete cross-domain import, and an installed dependency on the lower-layer contract package.
+
 ## Hosted settlement evidence ownership
 
 Hosted settlement has one provider-authentic system lane and two lower-level

@@ -65,6 +65,12 @@ Composition roots register installed settlement mechanisms explicitly. Each regi
 
 Registration controls construction, not lifecycle ownership. A composition injects the marketplace signer, wallet, chains, or other shared resources only into mechanisms that declare them, then passes the resulting clients into the one settlement runtime. A fiat-only VM composition therefore starts without constructing EVM resources, while a dual-mechanism composition still shares obligation identity, journals, leases, retries, and aggregate status.
 
+## Storefront contract carriage
+
+A domain-owned storefront validates its contract once at the executable boundary, before constructing any stateful collaborator. That exact immutable object is carried through application state, lifespan/container state, repositories, services, routes, and workers. Identity comparison at composition seams catches accidentally reconstructed contracts even when two objects carry equal values.
+
+Single-domain persistence intentionally does not duplicate the process-selected domain identity on every row. The VM executable therefore reopens existing rows under its validated `compute.v1` contract without migration. A future multi-domain root must add explicit record ownership and dispatch rather than infer a domain from payload shape or restore a module-global resolver.
+
 ## Executable ownership
 
 The buyer CLI and registry executable are core-owned because their control flow is schema-opaque and extended through domain entry points or configuration. Storefront executables remain domain-owned composition roots where domain adapters and seller policy are wired into shared storefront machinery. A package move does not alter these authority boundaries.

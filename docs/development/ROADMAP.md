@@ -81,7 +81,7 @@ The site-to-storefront direction remains **one-to-one**. A provisioning service 
 
 The site models this correctly already. A capacity resource carries `publication_views` keyed by view identity — `bare_metal.v1`, `vm.ansible_pool_defaults.v1` — off one row per host identity, with a guard rejecting several capacity resources mapping to the same host, and `Cross-mode physical accounting` requires a shareable VM slice and an exclusive bare-metal claim on one host to conflict before executor work starts. One physical resource, several form-factor projections, is how inventory is already represented.
 
-The storefront cannot consume it. The VM storefront resolves its market-domain contract from a module-level singleton at five call sites; the bare-metal storefront is already domain-parameterized, carrying the contract as a runtime field, so the two roles disagree on how a contract arrives. No storefront table carries a domain discriminator.
+The VM storefront now validates one `compute.v1` contract at its outermost composition root and injects that exact object through the application, repository, publication, negotiation, settlement, fulfillment, and worker seams. This removes the module-global resolution prerequisite while preserving one-domain behavior. No storefront table yet carries a domain discriminator, and no repository or route dispatches a row to one of several contracts.
 
 The site also does not bound what may be sold. Pool policy declares listing mode, region, SLA, pricing, and hold caps, but not which offering modes a pool can deliver; `executor_kind` is recorded on reservations but never validated, and at reserve time it is inferred from whether the matched resource carries a `vm_host` attribute rather than supplied by the caller. A request for capacity a pool cannot deliver is admitted, held, scheduled, and fails at provisioning.
 
@@ -92,8 +92,7 @@ The direction is settled: several compute-family contracts hosted in one storefr
 | Open gap | Owned by |
 |---|---|
 | Pools do not declare which offering modes they can deliver, and nothing rejects a request for capacity a pool cannot serve | [`pool-declared-offering-modes`](../../openspec/changes/pool-declared-offering-modes/) |
-| The VM storefront resolves its contract from module scope, so it cannot be selected per record | [`storefront-domain-parameterization`](../../openspec/changes/storefront-domain-parameterization/) |
-| A storefront serves one market domain, forcing hardware to be partitioned by how it is sold | [`multi-domain-storefront-composition`](../../openspec/changes/multi-domain-storefront-composition/) |
+| Storefront records carry no domain discriminator and composition selects only one process-wide contract, so one storefront still cannot serve several market domains | [`multi-domain-storefront-composition`](../../openspec/changes/multi-domain-storefront-composition/) |
 | Bare metal has no buyer package, and no registry identity admits a bare-metal buyer | [`bare-metal-buyer-domain`](../../openspec/changes/bare-metal-buyer-domain/) |
 | Listings do not publish their offering mode, so the registry's form-factor filter matches nothing | [`publish-multidimensional-listing-shape`](../../openspec/changes/publish-multidimensional-listing-shape/) |
 | Bare metal has no runnable seller storefront composition; the trusted per-resource projection and selected-site fulfillment routing it needs are incomplete | [`market-platform-bare-metal-10-storefront-composition`](../../openspec/changes/market-platform-bare-metal-10-storefront-composition/) |

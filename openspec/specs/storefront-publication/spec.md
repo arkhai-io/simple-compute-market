@@ -427,6 +427,25 @@ Migration MUST NOT guess units, synthesize partial clauses, or reinterpret
 - **WHEN** a proposed migration contains an unknown field, invalid rate, unsupported asset, or invalid mechanism-owned input
 - **THEN** migration fails before backup or mutation rather than persisting a partially validated document
 
+### Requirement: One startup-selected domain governs a storefront record
+
+For a single-domain storefront process, the contract selected and validated at startup MUST be the sole authority for listing normalization, publication projection, negotiation messages and terms, accepted settlement-plan construction, fulfillment invocation, and repository rehydration. The role shell MUST fail before the relevant state transition or side effect when the selected contract lacks the required capability.
+
+#### Scenario: Listing is created and republished
+
+- **WHEN** the VM storefront accepts a listing and later reloads it for registry publication
+- **THEN** the injected contract validates and normalizes the persisted and public payload with no second domain lookup
+
+#### Scenario: Negotiation and fulfillment execute
+
+- **WHEN** the storefront receives a provision envelope, constructs accepted settlement terms, and services the accepted obligation
+- **THEN** the same injected contract validates the message, builds the plan, and invokes fulfillment
+
+#### Scenario: Existing accepted state is reopened
+
+- **WHEN** an existing VM listing, negotiation, Alkahest obligation, settlement, fulfillment, or operation row is reopened after restart
+- **THEN** its identifier, public projection, settlement behavior, and side-effect ordering remain unchanged
+
 ## Evidence
 
 - Canonical listing, negotiation, settlement, fulfillment, and stage-log principals: `core/storefront/tests/unit/test_identity_migrations.py`, `test_settle_identity_models.py`, `test_sqlite_client_escrow_fulfillment_identity.py`, and `test_stage_log_identity.py`.
