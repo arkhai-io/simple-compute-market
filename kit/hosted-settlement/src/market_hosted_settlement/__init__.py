@@ -66,6 +66,7 @@ from .settlement_config import (
     StripeResolverConfig,
     StripeSettlementConfig,
     create_stripe_registration,
+    stripe_accepted_obligation_builder,
     stripe_contract_fingerprint,
 )
 
@@ -120,6 +121,7 @@ __all__ = [
     "instrument_list_projection",
     "instrument_projection",
     "onboard_hosted_seller",
+    "stripe_accepted_obligation_builder",
     "payer_compatibility_context",
     "payer_profile_projection",
     "payer_setup_projection",

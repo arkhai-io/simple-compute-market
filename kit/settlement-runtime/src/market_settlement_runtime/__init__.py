@@ -17,6 +17,8 @@ from .clauses import (
 )
 from .configuration import (
     SETTLEMENT_CONFIG_SCHEMA_VERSION,
+    AcceptedObligationArtifacts,
+    AcceptedObligationBuilder,
     BuyerCompatibilityHook,
     ClientFactory,
     MechanismReadiness,
@@ -105,6 +107,8 @@ from .sqlite_repository import (
 
 __all__ = [
     "SETTLEMENT_CONFIG_SCHEMA_VERSION",
+    "AcceptedObligationArtifacts",
+    "AcceptedObligationBuilder",
     "SETTLEMENT_MIGRATION_ID",
     "SETTLEMENT_MECHANISM_PARAMS_MIGRATION_ID",
     "SETTLEMENT_PRINCIPAL_MIGRATION_ID",

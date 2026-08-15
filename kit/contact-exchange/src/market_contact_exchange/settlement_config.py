@@ -7,8 +7,9 @@ import re
 from collections.abc import Mapping
 from typing import Any
 
-from market_core.schemas import derive_settlement_option_id
+from market_core.schemas import SettlementOption, derive_settlement_option_id
 from market_settlement_runtime import (
+    AcceptedObligationArtifacts,
     ComparisonOperator,
     FieldDescriptor,
     MechanismReadiness,
@@ -273,6 +274,73 @@ def contact_buyer_compatibility(
     )
 
 
+def contact_accepted_obligation_builder(
+    section: BaseModel,
+    option: Any,
+    context: Mapping[str, Any],
+) -> AcceptedObligationArtifacts:
+    """Build the one non-financial introduction obligation from a selection.
+
+    The obligation carries no amount and no asset — the deal's value does not
+    reduce to a number — and the contact payload never enters it; the payload
+    travels only on the authenticated reveal surface.
+    """
+
+    config = ContactSettlementConfig.model_validate(section)
+    selected = SettlementOption.model_validate(option)
+    if selected.rates:
+        raise ValueError("contact exchange declines scalar rates")
+    buyer = _principal_json(context.get("buyer_principal"))
+    seller = _principal_json(context.get("seller_principal"))
+    expiration_unix = int(context.get("expiration_unix") or 0)
+    if expiration_unix <= 0:
+        raise ValueError("introduction acceptance requires an expiration")
+    advertised_claimant = selected.params.get("claimant_principal")
+    if not isinstance(advertised_claimant, Mapping) or (
+        dict(advertised_claimant) != seller
+    ):
+        raise ValueError("contact option claimant does not match the listing seller")
+    params = dict(selected.params)
+    for key in context.get("domain_param_keys", ()):
+        params.pop(key, None)
+    introduction_package: dict[str, Any] = {
+        "option_id": selected.option_id,
+        "profile": params.get("profile"),
+        "channel": params.get("channel"),
+        "terms": params.get("terms"),
+    }
+    listing_id = context.get("listing_id")
+    if isinstance(listing_id, str) and listing_id:
+        introduction_package["listing_id"] = listing_id
+    negotiated_context = context.get("negotiated_context")
+    if isinstance(negotiated_context, Mapping) and negotiated_context:
+        introduction_package["negotiated_context"] = dict(negotiated_context)
+    public_payload = json.dumps(
+        {"params": params, "introduction": introduction_package},
+        ensure_ascii=False,
+        sort_keys=True,
+    )
+    if any(
+        value and value in public_payload
+        for value in config.contact_payload.values()
+    ):
+        raise ValueError("contact payload must not reach an accepted obligation")
+    return AcceptedObligationArtifacts(
+        obligation={
+            "payer": "buyer",
+            "claimant": "seller",
+            "payer_principal": buyer,
+            "claimant_principal": seller,
+            "expiration_unix": expiration_unix,
+            "conditions": [],
+            "mechanism": MECHANISM,
+            "params": params,
+        },
+        amount=None,
+        service_terms={MECHANISM: introduction_package},
+    )
+
+
 def contact_channel_projection(option: Any) -> str | None:
     """Project the exact advertised introduction channel."""
 
@@ -312,6 +380,7 @@ def create_contact_exchange_registration(
         client_factory=contact_client_factory,
         option_builder=contact_option_builder,
         buyer_compatibility=contact_buyer_compatibility,
+        accepted_obligation_builder=contact_accepted_obligation_builder,
         command_group=command_group,
         public_detail_keys=frozenset({"channels"}),
         clause_fields=(

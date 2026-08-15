@@ -49,11 +49,11 @@ portions after the corresponding `consume-expanded-stripe-funding` tasks.
       kit/negotiation-runtime 7 passed (new: a non-scalar selection reaches
       acceptance through the runtime with no `fields.amount`, `agreed_price` 0);
       kit/alkahest 178 passed; core/buyer priceless-ordering pin (2 new tests).
-      Disclosed: kit/hosted-settlement's suite was not run — it requires the
-      verified released client wheel, not staged locally; its one-line factory
-      edit is exercised by the settlement-runtime registration suite. VM domain
-      suites likewise not run here (hosted wheel dependency); their guard path is
-      the shared kit helper covered above.
+      Disclosure closed after the fact: the verified hosted release
+      (v0.2.0, trust manifest added on main) was staged into `.dist` via
+      `gh release download` + `make verify-hosted-release`, and
+      kit/hosted-settlement now runs locally — 143 passed including the factory
+      declaration. VM domain suites run once the full wheel set is built.
 - [x] 2.4 Closeout: `make check-comment-hygiene` clean; imports module-level; no
       roadmap edit owed (gap row remains until the change completes); promotion
       recorded below; design decision updated to record the option-shape carrier

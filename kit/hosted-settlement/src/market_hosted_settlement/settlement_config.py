@@ -20,8 +20,10 @@ from hosted_settlement_client import (
     FundingProfile,
     HostedSettlementAsyncClient,
 )
+from market_core.schemas import SettlementOption, compute_rate_total
 from market_identity import Identity, TrustedIdentitySet
 from market_settlement_runtime import (
+    AcceptedObligationArtifacts,
     ComparisonOperator,
     FieldDescriptor,
     MechanismReadiness,
@@ -39,6 +41,7 @@ from .adapter import (
     MECHANISM,
     REQUIRED_HOSTED_CAPABILITIES,
     HostedConditionalEscrowClient,
+    HostedObligationParams,
     MarketplaceSignerAdapter,
     adapt_expected_authorities,
 )
@@ -973,6 +976,70 @@ def stripe_funds_flow_projection(option: Any) -> str | None:
     return _stripe_param_projection(option, "funds_flow")
 
 
+def stripe_accepted_obligation_builder(
+    section: BaseModel,
+    option: Any,
+    context: Mapping[str, Any],
+) -> AcceptedObligationArtifacts:
+    """Rebuild the one canonical hosted obligation from a selected option.
+
+    The domain supplies acceptance inputs through ``context`` —
+    ``buyer_principal`` / ``seller_principal``, ``expiration_unix``,
+    ``duration_seconds``, and ``domain_param_keys`` naming the option params
+    it owns (dropped before mechanism validation). Everything
+    obligation-shaped stays here.
+    """
+
+    StripeSettlementConfig.model_validate(section)
+    selected = SettlementOption.model_validate(option)
+    buyer = _principal_json(context.get("buyer_principal"))
+    seller = _principal_json(context.get("seller_principal"))
+    duration_seconds = int(context.get("duration_seconds") or 0)
+    if duration_seconds <= 0:
+        raise ValueError("hosted acceptance requires a positive duration")
+    expiration_unix = int(context.get("expiration_unix") or 0)
+    if expiration_unix <= 0:
+        raise ValueError("hosted acceptance requires an expiration")
+    if not selected.rates:
+        raise ValueError("hosted option advertises no rate")
+    amount = compute_rate_total(selected.rates[0], duration_seconds)
+    if amount <= 0:
+        raise ValueError("trusted duration-scaled hosted amount must be positive")
+    params = dict(selected.params)
+    for key in context.get("domain_param_keys", ()):
+        params.pop(key, None)
+    if "funding_authorization_ref" in params:
+        raise ValueError("listing cannot pre-authorize hosted funding")
+    advertised_claimant = params.get("claimant_principal")
+    if not isinstance(advertised_claimant, Mapping) or (
+        dict(advertised_claimant) != seller
+    ):
+        raise ValueError("hosted option claimant does not match the listing seller")
+    params["payer_principal"] = buyer
+    params["claimant_principal"] = seller
+    params = HostedObligationParams.model_validate(
+        {**params, "funding_authorization_ref": "accepted-plan-validation"}
+    ).model_dump(mode="json", exclude={"funding_authorization_ref"})
+    condition = params.get("condition")
+    if not isinstance(condition, Mapping):
+        raise ValueError("hosted option has no portable condition")
+    return AcceptedObligationArtifacts(
+        obligation={
+            "payer": "buyer",
+            "claimant": "seller",
+            "payer_principal": buyer,
+            "claimant_principal": seller,
+            "amount": amount,
+            "asset": selected.asset,
+            "expiration_unix": expiration_unix,
+            "conditions": [dict(condition)],
+            "mechanism": MECHANISM,
+            "params": params,
+        },
+        amount=amount,
+    )
+
+
 def validate_stripe_publication_input(
     section: BaseModel,
     value: BaseModel,
@@ -999,6 +1066,7 @@ def create_stripe_registration(*, command_group: Any | None = None) -> Mechanism
         client_factory=stripe_client_factory,
         option_builder=stripe_option_builder,
         buyer_compatibility=stripe_buyer_compatibility,
+        accepted_obligation_builder=stripe_accepted_obligation_builder,
         command_group=command_group,
         public_detail_keys=frozenset(
             {

@@ -17,6 +17,7 @@ _ALLOWED_IMPORT_ROOTS = {
     "hosted_settlement_client",
     "inspect",
     "json",
+    "market_core",
     "market_hosted_settlement",
     "market_identity",
     "market_settlement_runtime",
