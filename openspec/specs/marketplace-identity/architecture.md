@@ -49,6 +49,14 @@ Marketplace credentials and chain wallets are orthogonal configuration. Ed25519 
 
 Ordinary configuration carries only public principals and trust pins. Private credential material enters through an approved secret boundary and is consumed only while constructing a signer. Public carriers and durable state may record the canonical principal, request and operation identity, signature version, and audit history; they never record the signer secret.
 
+## Local buyer profile boundary
+
+The XDG profile repository is public local metadata, not an identity authority or secret store. Its stable UUID groups canonical principal history, exact credential references, lifecycle, selection, and authority-scoped opaque payer bindings. Provider backends alone read or write signing material. Keyring, strict file, and environment references are explicit alternatives with no precedence chain.
+
+Core buyer orchestration resolves a `ResolvedBuyerIdentity` once. Fresh work uses the selected profile's primary principal; recovery uses the profile UUID and canonical principal already reserved in run-log version 3. Rotation therefore changes the signer for new work without mutating accepted operation ownership. Retention blockers are computed across recoverable runs and hosted bindings before retirement or deletion.
+
+Profile-store and run-log migration is one recoverable commit protocol: all candidates are staged and validated, originals are retained behind a durable manifest, and a pre-activation failure restores every replacement. An unresolved manifest blocks runtime rather than admitting mixed legacy/profile identity.
+
 ## Protocol ownership
 
 Marketplace and hosted-service protocols may support the same cryptographic schemes, but they have distinct domain separation, canonical bytes, release ownership, and response contracts. The marketplace hosted adapter passes the injected signer through the exact released hosted client interface. It does not copy hosted headers, canonicalization, response verification, account-link behavior, principal models, or provider concepts into this repository.

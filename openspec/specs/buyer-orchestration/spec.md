@@ -204,7 +204,32 @@ Generated buyer configuration MUST use the shared `[Settlement]` vocabulary whil
 #### Scenario: Fiat-only buyer initializes configuration
 
 - **WHEN** the user generates an Ed25519 hosted-fiat buyer config
-- **THEN** the output contains identity and settlement preference inputs but no wallet/chains or seller account configuration
+- **THEN** the output contains profile-store and settlement preference inputs but no private identity, wallet/chains, or seller account configuration
+
+### Requirement: Core owns profile selection and signer injection
+
+The core `market profile` surface MUST provide create, import, list, show, select, rotate, retire, and delete without requiring a domain plugin. Fresh domain commands MUST receive one resolved selected-primary signer plus safe immutable profile context. Recovery commands MUST receive the exact signer recorded by profile UUID and canonical principal in the run, regardless of current selection.
+
+Every buyer plugin MUST declare `core.resolved-buyer-identity.v1`; plugin discovery MUST fail before command registration when the contract is absent. Plugins MUST NOT read `[Identity]`, resolve a raw marketplace credential, or add a fallback provider.
+
+#### Scenario: Selection changes between fresh and resumed work
+
+- **WHEN** a new profile is selected after a run was accepted
+- **THEN** a fresh run uses the new primary signer while `--from` resolves the accepted run's retained profile and principal
+
+#### Scenario: No profile is selected
+
+- **WHEN** a fresh buyer command starts without one selected active profile
+- **THEN** it fails before discovery, negotiation, settlement, or a domain-specific effect
+
+### Requirement: Buyer configuration references profiles without secrets
+
+Generated buyer configuration MUST reference the XDG profile store and credential-provider setup workflow, reject direct legacy `[Identity]` and raw secret aliases, and keep optional wallet/chain settings independent.
+
+#### Scenario: Headless configuration is generated
+
+- **WHEN** strict file or explicit environment credential storage is selected
+- **THEN** output contains only the provider kind, bounded locator guidance, and profile commands, never the resolved signing value
 
 ## Evidence
 

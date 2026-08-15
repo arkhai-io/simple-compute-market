@@ -275,6 +275,26 @@ referenced by current production or test entry points.
 - **WHEN** active hosted test and packaging surfaces are examined
 - **THEN** only the ordinary production hosted release and protected Stripe test prerequisites remain and no alternate provider artifact can be selected or started
 
+### Requirement: Buyer profile deployments separate XDG state and provider secrets
+
+Buyer public configuration, mutable profile metadata, run logs, and credential material MUST occupy separate deployment mounts. `XDG_CONFIG_HOME`, `XDG_DATA_HOME`, and `XDG_STATE_HOME` MUST be explicit for one-shot and long-running buyer roles. Profile-store directories/files MUST deny group/other writes; strict credential files MUST be regular non-symlink files owned by the buyer process with no group/other permission bits.
+
+Compose and Helm buyer jobs MUST persist the profile metadata directory across restart and mount the exact provider secret only into the buyer process. Generated TOML, ConfigMaps, arguments, evidence, and release artifacts MUST omit secret values and removed buyer `[Identity]` fields.
+
+#### Scenario: A headless buyer pod restarts
+
+- **WHEN** the pod is recreated with the same profile PVC and strict credential Secret
+- **THEN** it selects the same stable profile and resumes version-3 runs without reconstructing identity from a wallet or public config
+
+### Requirement: Legacy buyer identity migration activates atomically
+
+An operator MUST preview and explicitly import legacy buyer identity into one exact profile before removed fields are deleted. Profile-store and all run-log candidates MUST validate before activation; an incomplete durable migration manifest blocks buyer work and supports complete restoration before profile-based effects occur.
+
+#### Scenario: Migration is interrupted
+
+- **WHEN** replacement fails after one candidate was written
+- **THEN** startup refuses mixed state and recovery restores every recorded original before retry
+
 ## Evidence
 
 - Configurable registry endpoints and independently composed role stacks: core buyer registry configuration plus domain Compose and Helm manifests.

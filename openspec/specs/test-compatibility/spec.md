@@ -90,6 +90,22 @@ Protected hosted E2E MUST classify terminal outcomes as `product`, `account`, `e
 - **WHEN** prerequisites remain valid but a named observable state does not arrive within its declared bound
 - **THEN** the run reports a `timeout` failure under the original operation identity without issuing a replacement mutation
 
+### Requirement: Buyer profile compatibility is deterministic across domains
+
+Focused tests MUST exercise versioned profile creation/import/selection/update/rotation/retirement/deletion, every exact credential provider, strict ownership and permissions, malformed and interrupted stores, missing secrets, principal mismatch, duplicate profile/principal, rotation overlap, run and binding blockers, and coordinated multi-run migration rollback.
+
+The VM and API-credit plugins MUST run against the same selected-primary and retained-recovery matrix. Secret canaries MUST be absent from JSONL, TOML, stdout/stderr, exception and object reprs, Compose/Helm renders, ConfigMaps, images, wheels, and evidence.
+
+#### Scenario: One plugin attempts legacy fallback
+
+- **WHEN** an installed buyer plugin lacks the resolved-identity injection contract or reads direct identity configuration
+- **THEN** conformance fails before the plugin performs discovery or an authenticated effect
+
+#### Scenario: A migration candidate fails after an earlier replacement
+
+- **WHEN** coordinated profile/run-log migration cannot validate or replace every candidate
+- **THEN** tests observe complete profile and run-log restoration, no partial activation, and an actionable unresolved-manifest failure
+
 ## Evidence
 
 - Layer ownership: package unit/integration suites, role-level E2E scenarios, and the independently released hosted producer's financial-provider and webhook-inbox integration suites.

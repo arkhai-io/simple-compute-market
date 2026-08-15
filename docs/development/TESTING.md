@@ -256,11 +256,17 @@ Ed25519 with every wallet and chain setting absent, while focused EIP-191
 integration coverage proves that selecting that scheme or an EVM effect does
 not change the common marketplace contract.
 
-Identity migrations are tested as atomic state transformations, not as
-compatibility-mode behavior: populated legacy fixtures must become canonical
-principals while stable subject and operation identifiers survive, malformed
-populations must roll back completely, and no test environment may continue
-with mixed signature versions or an address-only fallback.
+Buyer profile tests treat metadata, provider access, and run ownership as
+separate boundaries. The deterministic matrix covers create/import/select,
+strict permissions and symlink rejection, exact-provider failures, generated
+secret cleanup, dual-proof rotation, retention blockers, restart, retirement,
+and deletion without inspecting a secret through a second path.
+
+Run-log migration is an atomic multi-artifact transformation: populated v1/v2
+runs become version 3 with stable profile UUID and canonical principal, every
+candidate validates before activation, and a failure after an earlier
+replacement restores the profile store and all run logs. An unresolved durable
+manifest must fail startup rather than admit mixed identity precedence.
 
 - Identity-kit unit and conformance fixtures cover strict Ed25519 and EIP-191
   principal normalization, byte-identical version 2 request/response and
@@ -286,6 +292,13 @@ with mixed signature versions or an address-only fallback.
   the exact manifest-pinned released client and shared conformance fixtures;
   editable sibling imports or copied hosted signing behavior are test
   failures.
+- VM and API-credit plugin conformance uses the same selected-primary and
+  retained-principal recovery fixtures. Discovery rejects any plugin missing
+  `core.resolved-buyer-identity.v1` before command registration.
+- Secret-canary scans include profile JSON, run-log JSONL, human/JSON CLI
+  output, exceptions/reprs, generated buyer TOML, Compose/Helm renders,
+  ConfigMaps, wheels, images, and evidence. Credential values may appear only
+  inside the selected provider boundary.
 - The system-level identity scenario runs publication, discovery, negotiation,
   hosted funding, settlement, status, reclaim, and recovery with Ed25519
   principals and no wallet configuration. It also checks coordinated

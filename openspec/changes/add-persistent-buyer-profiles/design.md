@@ -204,10 +204,10 @@ The cutover generator removes direct buyer `[Identity]` from role templates. Ser
 
 | Accepted decision | Permanent destination |
 |---|---|
-| Profile aggregate, XDG store, credential providers, atomicity, rotation retention, opaque hosted bindings | `openspec/specs/marketplace-identity/{spec.md,architecture.md}` |
-| Fresh/recovery resolver, core commands, plugin injection, run-log version 3, legacy runtime rejection | `openspec/specs/buyer-orchestration/spec.md` |
-| XDG mounts, permissions, provider-specific headless injection, cutover and generated config | `openspec/specs/deployment-state/spec.md` and `docs/development/DEPLOYMENT_AND_CONFIG.md` |
-| Deterministic store/provider/migration matrix, multi-domain conformance, canary boundaries | `openspec/specs/test-compatibility/spec.md` and `docs/development/TESTING.md` |
-| Foundation layering and buyer profile flow | `docs/development/ARCHITECTURE.md` |
-| User lifecycle, import, selection, rotation, and recovery commands | `docs/buyer-quickstart.md` |
-| Goal state and change mapping | `docs/development/ROADMAP.md` |
+| Profile aggregate, credential providers, atomicity, rotation retention, opaque bindings | `marketplace-identity/spec.md`: “Durable local buyer profiles separate metadata from credentials”, “Buyer credential providers are exact and closed”, “Profile rotation retains recoverable principals”; `marketplace-identity/architecture.md`: “Local buyer profile boundary” |
+| Fresh/recovery resolver, commands, plugin injection, run-log v3, legacy rejection | `buyer-orchestration/spec.md`: “Core owns profile selection and signer injection”, “Buyer configuration references profiles without secrets” |
+| XDG mounts, permissions, headless injection, cutover, generated config | `deployment-state/spec.md`: “Buyer profile deployments separate XDG state and provider secrets”, “Legacy buyer identity migration activates atomically”; `DEPLOYMENT_AND_CONFIG.md`: “Marketplace identity configuration” |
+| Deterministic store/provider/migration matrix, conformance, canaries | `test-compatibility/spec.md`: “Buyer profile compatibility is deterministic across domains”; `TESTING.md`: “Marketplace Identity Verification” |
+| Foundation layering and resolved identity flow | `ARCHITECTURE.md`: “Marketplace identity” |
+| User lifecycle, import, selection, rotation, and recovery | `buyer-quickstart.md`: “Configure”, “Resume an interrupted buy” |
+| Goal state and change mapping | `ROADMAP.md`: “Buyer identity lifecycle status” |

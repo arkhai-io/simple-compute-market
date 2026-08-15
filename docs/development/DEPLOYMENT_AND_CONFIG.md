@@ -88,26 +88,27 @@ profile on top.
 
 ## Marketplace identity configuration
 
-Every authenticated role configures a canonical public marketplace principal
-(`scheme` plus `identifier`) and any service-peer trust pins in ordinary
-profile data. Its matching private credential is supplied through a separately
-mounted Secret-backed profile and is consumed only by the composition root
-that constructs the signer. Startup fails before authenticated routes,
-publication, negotiation, or settlement become available when the scheme is
-unsupported, the secret is absent, or the derived public principal does not
-match configuration.
+Service roles configure canonical public principals and trust pins in ordinary
+configuration, with role-owned credentials supplied through their Secret
+boundary. Buyers are different because they require durable local lifecycle:
+public buyer TOML references `[BuyerProfile].store_path`, while the versioned
+XDG data store holds stable profile UUIDs, canonical principal history,
+redacted credential references, selection, lifecycle, and authority-scoped
+opaque payer bindings.
 
-Ed25519 is the wallet-free default. EIP-191 is an explicit marketplace
-identity choice. Wallet, RPC, chain ID, deployed address, and gas settings are
-separate optional configuration rendered only for a selected EVM effect; a
-non-EVM storefront or buyer profile does not require or infer them.
+Buyer providers are exact: OS keyring, an absolute owner-only regular secret
+file, or one explicitly named environment variable. There is no fallback.
+Profile metadata, run state, public config, and provider secrets use separate
+mounts. Compose/Helm set `XDG_CONFIG_HOME`, `XDG_DATA_HOME`, and
+`XDG_STATE_HOME`, persist the profile directory, and mount the selected
+credential only into the buyer process. Invalid owner/mode, symlink, missing
+secret, unsupported store version, or principal mismatch fails before buyer
+work.
 
-ConfigMaps, rendered command arguments, image layers, release artifacts, logs,
-probes, and examples contain no private signing material. Public principals
-and trust pins may appear in those public carriers. Provisioning and other
-service-peer connections pin the exact expected principal and role alongside
-their operator-configured site binding; there is no administrator-key,
-address-body, or private-key fallback.
+Ed25519 is the wallet-free default. Optional EIP-191 wallet/RPC/chain inputs are
+separate mechanism resources and never determine profile selection. ConfigMaps,
+arguments, image layers, run logs, evidence, output, and examples contain no
+resolved signing value.
 
 ## Stateful service persistence
 
@@ -161,11 +162,12 @@ identity history and operation journals rather than restoring stale state.
 Marketplace roles resolve one strict `[Settlement]` root. `schema_version`
 selects the configuration contract, `priority` orders mechanism IDs, and peer
 `[Settlement.stripe]` and `[Settlement.alkahest]` tables contain only
-mechanism-owned consumer settings. Marketplace identity remains in
-`[Identity]`; EVM credentials and networks remain in `[Wallet]` and
-`[Chains]`. A hosted-only buyer therefore needs no wallet, chain, RPC, balance,
-or gas configuration. Secret or environment input supplies signing material;
-generated TOML, ConfigMaps, status output, and run logs contain only public
+mechanism-owned consumer settings. Buyer marketplace identity comes only from
+the selected durable profile referenced by `[BuyerProfile]`; storefront and
+service-role principals retain their role-owned public identity configuration.
+EVM credentials and networks remain in `[Wallet]` and `[Chains]`. A hosted-only
+buyer therefore needs no wallet, chain, RPC, balance, or gas configuration.
+Generated TOML, ConfigMaps, status output, and run logs contain only public
 configuration projections.
 
 Role CLIs reject legacy settlement keys and expose the same explicit migration contract. The storefront additionally rejects legacy publication pricing that would synthesize options from `min_price`, `token`, or raw `accepted_escrows`. A check is read-only and reports paths and actions with values redacted. A write requires `--backup`, validates the complete candidate before mutation, creates a restrictive same-directory `.bak`, fsyncs, and atomically replaces the source. Conflicting old and new values fail rather than choosing one. Repeating a completed migration is a no-op.

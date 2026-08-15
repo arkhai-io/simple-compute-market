@@ -66,19 +66,31 @@ market --version
 
 ## 2. Configure
 
-`market` reads `~/.config/arkhai/buyer.toml`. Generate the current typed
-template, including optional EVM resources only when needed:
+`market` keeps public buyer configuration under `~/.config/arkhai` and durable
+profile metadata under `$XDG_DATA_HOME/arkhai/buyer/profiles.json` (normally
+`~/.local/share/arkhai/buyer/profiles.json`). Generate the role template, then
+create or import one profile:
 
 ```bash
 market config init-user
-# Alkahest users:
+# Desktop: generate Ed25519 material into the OS keyring.
+market profile create --name personal --provider os-keyring \
+  --reference arkhai/buyer/personal --scheme ed25519 --generate
+
+# Headless: first create an owner-only regular secret file, then:
+market profile create --name automation --provider secret-file \
+  --reference /run/secrets/arkhai/buyer-credential --scheme ed25519
+
+# Alkahest users additionally render independent wallet/chain inputs:
 market config init-user --include-evm-resources
 ```
 
-Set `[Identity].scheme` and `[Identity].identifier` to the public principal
-derived from `ARKHAI_IDENTITY_CREDENTIAL`, set
-`[provisioning].ssh_public_key`, and configure `[registry].urls` plus each
-registry authority pin. The generated template documents every field.
+`market profile list|show|select|rotate|retire|delete` manages only public
+metadata and redacted references. There is no provider fallback: keyring,
+strict file, and an explicitly named environment variable are distinct choices.
+Set `[provisioning].ssh_public_key`, `[registry].urls`, and each signed registry
+authority pin in public config. Never put a seed or marketplace private key in
+TOML.
 
 Settlement mechanisms are explicit and disabled by default. A hosted-only
 buyer uses:
@@ -102,9 +114,15 @@ An Alkahest buyer instead enables and prioritizes `alkahest.v1`, supplies
 and `[Chains.<name>]` tables. Enabling a mechanism does not make an incompatible
 listing selectable; discovery still requires one advertised compatible option.
 
-Preview and migrate a legacy buyer config explicitly:
+Import a legacy `[Identity]` explicitly before removing it. The credential must
+derive the exact configured principal; preview validates every conflict without
+writing, and an exact rerun converges:
 
 ```bash
+market profile import ~/.config/arkhai/legacy-buyer.toml --name personal \
+  --provider secret-file --reference /run/secrets/arkhai/buyer-credential --check
+market profile import ~/.config/arkhai/legacy-buyer.toml --name personal \
+  --provider secret-file --reference /run/secrets/arkhai/buyer-credential
 market config migrate --scope settlement --check
 market config migrate --scope settlement --write --backup
 ```
@@ -184,10 +202,12 @@ market logs show <run_id>         # full event log for one run
 market buy --from <run_id>        # resume from wherever the run stopped
 ```
 
-`buy --from` picks up the same run log at its last authoritative handoff.
+`buy --from` reads `buyer_profile_id` and the canonical principal from run-log
+version 3, then resolves that exact retained signer. Changing the selected
+profile or rotating the primary affects only fresh work. A predecessor cannot
+be retired while a recoverable run or hosted payer binding still needs it.
 `market settle --from <run_id>` is the narrower accepted-settlement resume path;
-it derives mechanism, chain/token metadata, and action handling from the run and
-typed configuration rather than accepting mechanism-specific overrides.
+it derives mechanism, chain/token metadata, and action handling from the run.
 
 If `buy` crashed after an accepted settlement was created, **always resume**.
 Starting a new buy can create a second commercial commitment or lock more funds.
@@ -243,3 +263,5 @@ URL or payment data. Resume the accepted run to retrieve a current action.
 - **`[registry.auth]` keys must match `[registry] urls` exactly** —
   scheme, host, port, no trailing slash. Mismatch silently sends
   unauthenticated requests, you get 401s.
+- **Do not restore `[Identity]` after import.** Buyer commands reject it; select
+  a durable profile and recover forward with retained principal history.

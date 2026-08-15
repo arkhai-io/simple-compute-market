@@ -117,3 +117,32 @@ Private signing material MUST be supplied through an approved secret boundary, c
 
 - **WHEN** a buyer or storefront records resumable operation state
 - **THEN** the record contains the canonical public principal and operation identity but no private signing material
+
+### Requirement: Durable local buyer profiles separate metadata from credentials
+
+A buyer profile store MUST use the versioned XDG JSON schema and stable random profile UUIDs. Each named profile records one primary canonical principal, complete retained principal history, redacted credential references, lifecycle state, selection state, and per-authority opaque payer bindings. Credential values and provider resources MUST NOT enter profile metadata.
+
+Profile mutation MUST validate the complete candidate before fsynced atomic replacement under store serialization. Duplicate names, duplicate active principals, unsupported versions, malformed stores, permission failures, or interrupted writes MUST leave the last valid store unchanged.
+
+#### Scenario: A selected profile is restarted
+
+- **WHEN** a buyer process restarts after profile creation or selection
+- **THEN** it resolves the same stable profile UUID and primary public principal while loading the secret only from the exact referenced provider
+
+### Requirement: Buyer credential providers are exact and closed
+
+Durable buyer signing credentials MUST use exactly one approved provider: OS keyring, owner-only regular secret file, or an explicitly named environment variable. No provider fallback, default raw value, symlink traversal, secret copying, or value persistence is permitted. File locators MUST be absolute and pass owner and mode checks at use time.
+
+#### Scenario: The exact provider is unavailable
+
+- **WHEN** the selected credential reference cannot be resolved
+- **THEN** buyer work fails with bounded provider/reference context and does not attempt another provider or expose the value
+
+### Requirement: Profile rotation retains recoverable principals
+
+Rotation MUST verify current and replacement signer proofs over the same bounded intent, promote the replacement for new runs, and retain the predecessor while a recoverable run or opaque authority binding needs it. Retirement or deletion MUST reject blockers atomically. A hosted payer binding is opaque local metadata and MUST NOT contain provider identifiers.
+
+#### Scenario: An old run resumes after rotation
+
+- **WHEN** a version-3 run records the predecessor principal and stable profile UUID
+- **THEN** recovery resolves that exact retained credential even if another profile or replacement principal is currently selected

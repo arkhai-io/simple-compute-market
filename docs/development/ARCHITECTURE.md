@@ -115,6 +115,21 @@ Within `market_fulfillment`, carrier modules such as identifiers, envelopes, req
 
 The same scheme-neutral role lifecycle supports wallet-free Ed25519 discovery, negotiation, hosted settlement, status, reclaim, and recovery. Wallet and chain inputs are optional adapter-owned configuration required only after selection of an explicit EVM effect. The independently released hosted client owns its own canonical wire, response verification, and provider-facing identity models; the marketplace adapter passes an injected signer through that exact client rather than copying the protocol.
 
+Buyer identity lifecycle is core-owned above that cryptographic foundation.
+`market_identity.profiles` stores versioned public XDG metadata: stable random
+profile UUIDs, canonical principal history, redacted provider references,
+selection/lifecycle, and opaque authority bindings. `market_identity.credentials`
+is the closed keyring/strict-file/environment provider registry. Neither package
+depends upward into buyer core or a domain.
+
+Core resolves one `ResolvedBuyerIdentity` at the command boundary. Fresh work
+uses the selected primary; run-log-v3 recovery uses the exact recorded profile
+UUID and retained canonical principal. Every buyer plugin declares
+`core.resolved-buyer-identity.v1` and receives only the signer plus safe profile
+context. VM and API-credit packages cannot add direct `[Identity]` precedence or
+resolve provider values themselves. Rotation therefore advances new work while
+accepted runs recover under immutable ownership.
+
 See the [marketplace identity contract](../../openspec/specs/marketplace-identity/spec.md) and its [architecture](../../openspec/specs/marketplace-identity/architecture.md).
 
 ### Settlement configuration

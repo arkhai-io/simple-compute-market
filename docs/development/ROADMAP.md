@@ -174,6 +174,23 @@ Restoring a non-zero hold default is `billable-capacity-reservations`' own work:
 
 ---
 
+## Buyer identity lifecycle status
+
+Buyer marketplace identity is now a core-owned durable profile rather than
+repeated domain-local `[Identity]` configuration. The XDG profile store keeps a
+stable random UUID, canonical principal history, redacted credential-provider
+references, lifecycle/selection, and opaque authority bindings. Fresh VM and
+API-credit work uses the selected primary; version-3 run recovery resolves the
+recorded retained principal. Installed buyer plugins must declare the shared
+resolved-identity injection contract.
+
+The implemented change mapping is
+[`add-persistent-buyer-profiles`](../../openspec/changes/add-persistent-buyer-profiles/).
+Remaining external operational evidence belongs to that change's unchecked
+verification tasks; it does not restore legacy identity precedence.
+
+---
+
 ## Hosted settlement release status
 
 The marketplace consumes `fiat.stripe.v1` through the signed
