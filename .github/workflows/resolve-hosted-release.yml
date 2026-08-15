@@ -26,5 +26,4 @@ jobs:
             --workflow release.yml \
             --event push \
             --limit 20 \
-            --json databaseId,headBranch,headSha,status,conclusion,url \
-            --jq '.[] | select(.headBranch == env.TAG)'
+            --json databaseId,headBranch,headSha,status,conclusion,url
