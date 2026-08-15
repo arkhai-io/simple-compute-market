@@ -168,3 +168,24 @@ def test_hosted_option_binding_compares_physical_host_identity() -> None:
             listing,
             physical_host_id="different-host",
         )
+
+def test_contact_entries_parse_as_bounded_pairs() -> None:
+    from arkhai_bare_metal_buyer.cli import _parse_contact
+
+    assert _parse_contact(["telegram=@buyer", "email= me@example.com "]) == {
+        "telegram": "@buyer",
+        "email": "me@example.com",
+    }
+    import typer
+
+    with pytest.raises(typer.BadParameter):
+        _parse_contact(["telegram"])
+    with pytest.raises(typer.BadParameter):
+        _parse_contact(["=value"])
+
+
+def test_introduction_commands_are_registered() -> None:
+    from arkhai_bare_metal_buyer.cli import bare_metal_app
+
+    names = {command.name for command in bare_metal_app.registered_commands}
+    assert {"request-introduction", "introduce", "introduction"} <= names
