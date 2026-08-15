@@ -7,6 +7,7 @@ from core_storefront.domain_plugins import (
     StorefrontContributionSelection,
     StorefrontDomainContribution,
     discover_storefront_domain_registry,
+    parse_storefront_contribution_selections,
 )
 from core_storefront.domain_registry import StorefrontDomainRegistryError
 
@@ -156,3 +157,55 @@ def test_config_assertions_must_match_returned_contract(selection, contract, mes
                 ),
             ),
         )
+
+
+
+def test_parse_explicit_public_contribution_config():
+    parsed = parse_storefront_contribution_selections(
+        [
+            {
+                "contribution": "vms",
+                "offering_mode": "vm",
+                "domain_identity": "compute.v1",
+                "contract_version": "1.0",
+            },
+            {
+                "contribution": "bare_metal",
+                "offering_mode": "bare_metal",
+                "domain_identity": "bare_metal.v1",
+                "contract_version": "1.0",
+            },
+        ]
+    )
+
+    assert tuple(item.contribution_id for item in parsed) == ("vms", "bare_metal")
+    assert parsed[0].contract_version == ContractVersion(1, 0)
+
+
+@pytest.mark.parametrize(
+    "configured",
+    [
+        [],
+        [{"contribution": "vms"}],
+        [
+            {
+                "contribution": "vms",
+                "offering_mode": "vm",
+                "domain_identity": "compute.v1",
+                "contract_version": "1",
+            }
+        ],
+        [
+            {
+                "contribution": "vms",
+                "offering_mode": "vm",
+                "domain_identity": "compute.v1",
+                "contract_version": "1.0",
+                "credential": "forbidden",
+            }
+        ],
+    ],
+)
+def test_parse_config_rejects_missing_malformed_and_unknown_fields(configured):
+    with pytest.raises(StorefrontDomainRegistryError):
+        parse_storefront_contribution_selections(configured)

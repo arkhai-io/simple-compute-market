@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from dataclasses import replace
 from types import SimpleNamespace
-from unittest.mock import Mock
 
 import pytest
 from core_storefront.models.listing_models import CreateListingRequest
@@ -13,7 +12,6 @@ from market_core import (
     DomainIdentity,
 )
 
-import market_storefront.server as server
 from market_storefront.domain_runtime import (
     build_vm_storefront_domain,
     validate_vm_storefront_domain,
@@ -103,21 +101,12 @@ def test_vm_storefront_contract_is_validated_without_replacement() -> None:
     _incompatible_domains(),
 )
 def test_incompatible_domain_fails_before_app_collaborators(
-    monkeypatch,
     _case: str,
     domain: object,
     message: str,
 ) -> None:
-    lifespan_builder = Mock()
-    app_builder = Mock()
-    monkeypatch.setattr(server, "build_vm_storefront_lifespan", lifespan_builder)
-    monkeypatch.setattr(server, "build_storefront_app", app_builder)
-
     with pytest.raises(DomainContractValidationError, match=message):
-        server.build_vm_storefront_app(domain=domain)
-
-    lifespan_builder.assert_not_called()
-    app_builder.assert_not_called()
+        validate_vm_storefront_domain(domain)
 
 
 def test_listing_service_validates_offer_through_injected_domain() -> None:

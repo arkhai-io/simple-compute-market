@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass
 from importlib.metadata import EntryPoint, entry_points
 from typing import Any
@@ -63,6 +63,70 @@ class StorefrontContributionSelection:
             )
         if not isinstance(self.contract_version, ContractVersion):
             raise TypeError("contract_version must be a ContractVersion")
+
+def parse_storefront_contribution_selections(
+    value: Any,
+) -> tuple[StorefrontContributionSelection, ...]:
+    """Parse the exact, public ``[[storefront_domains]]`` configuration."""
+
+    if not isinstance(value, (list, tuple)) or not value:
+        raise StorefrontDomainRegistryError(
+            "storefront_domains must be a non-empty array of tables"
+        )
+    allowed = {
+        "contribution",
+        "offering_mode",
+        "domain_identity",
+        "contract_version",
+    }
+    selections: list[StorefrontContributionSelection] = []
+    for index, raw in enumerate(value):
+        if not isinstance(raw, Mapping):
+            raise StorefrontDomainRegistryError(
+                f"storefront_domains[{index}] must be a table"
+            )
+        normalized = {str(key).lower(): item for key, item in raw.items()}
+        unknown = sorted(set(normalized) - allowed)
+        missing = sorted(allowed - set(normalized))
+        if unknown or missing:
+            detail = []
+            if missing:
+                detail.append("missing " + ", ".join(missing))
+            if unknown:
+                detail.append("unknown " + ", ".join(unknown))
+            raise StorefrontDomainRegistryError(
+                f"storefront_domains[{index}] has invalid keys: "
+                + "; ".join(detail)
+            )
+        version_text = normalized["contract_version"]
+        if not isinstance(version_text, str):
+            raise StorefrontDomainRegistryError(
+                f"storefront_domains[{index}].contract_version must be major.minor"
+            )
+        version_parts = version_text.split(".")
+        if (
+            len(version_parts) != 2
+            or not all(part.isdigit() for part in version_parts)
+        ):
+            raise StorefrontDomainRegistryError(
+                f"storefront_domains[{index}].contract_version must be major.minor"
+            )
+        try:
+            selections.append(
+                StorefrontContributionSelection(
+                    contribution_id=normalized["contribution"],
+                    offering_mode=normalized["offering_mode"],
+                    domain_identity=DomainIdentity(normalized["domain_identity"]),
+                    contract_version=ContractVersion(
+                        int(version_parts[0]), int(version_parts[1])
+                    ),
+                )
+            )
+        except (TypeError, ValueError) as exc:
+            raise StorefrontDomainRegistryError(
+                f"storefront_domains[{index}] is invalid: {exc}"
+            ) from exc
+    return tuple(selections)
 
 
 def _installed_entry_points() -> tuple[EntryPoint, ...]:

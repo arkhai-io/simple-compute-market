@@ -10,13 +10,24 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Protocol
 
-from market_core import MarketDomainContract, validate_domain_contract
-
+from core_storefront.domain_registry import (
+    StorefrontDomainBinding,
+    StorefrontDomainRegistration,
+    StorefrontDomainRegistry,
+)
 from core_storefront.openapi import install_marketplace_identity_openapi
 
 
+
+class StorefrontRuntimeResolver(Protocol):
+    """Resolve a persisted binding to the startup-owned runtime registration."""
+
+    def __call__(
+        self,
+        binding: StorefrontDomainBinding,
+    ) -> StorefrontDomainRegistration: ...
 @dataclass(frozen=True)
 class StorefrontAppConfig:
     """Configuration for a storefront FastAPI app shell."""
@@ -56,7 +67,8 @@ def default_storefront_app_config(*, root_path: str = "") -> StorefrontAppConfig
 def build_storefront_app(
     *,
     config: StorefrontAppConfig,
-    domain: MarketDomainContract,
+    registry: StorefrontDomainRegistry,
+    runtime_resolver: StorefrontRuntimeResolver,
     lifespan: Any | None = None,
     routers: Iterable[Any] = (),
 ) -> Any:
@@ -79,7 +91,14 @@ def build_storefront_app(
         swagger_ui_parameters=config.swagger_ui_parameters,
     )
 
-    app.state.market_domain = validate_domain_contract(domain)
+    for registration in registry.registrations:
+        resolved = runtime_resolver(registration.binding)
+        if resolved is not registration:
+            raise RuntimeError(
+                "storefront runtime resolver must return the exact startup-owned "
+                f"registration for {registration.binding!r}"
+            )
+    app.state.market_domains = registry.projection()
 
     for router in routers:
         app.include_router(router)

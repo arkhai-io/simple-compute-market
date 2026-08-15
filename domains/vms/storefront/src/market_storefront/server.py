@@ -31,6 +31,7 @@ from core_storefront.app_lifecycle import (
 from core_storefront.services.negotiation_service import NegotiationService
 from core_storefront.stage_log import set_stage_event_db_path, stage_event
 from market_core import MarketDomainContract
+from core_storefront.domain_registry import StorefrontDomainRegistry
 
 import market_storefront.container as _container
 from market_storefront.domain_runtime import (
@@ -51,6 +52,7 @@ from market_storefront.utils.config import (
     get_registry_authorities,
     resolve_marketplace_signer,
     settings,
+    storefront_domain_registry,
 )
 from market_storefront.utils.sqlite_client import get_sqlite_client
 from market_storefront.utils.sync_negotiation import continue_sync_negotiation
@@ -232,10 +234,15 @@ def build_vm_storefront_lifespan(*, domain: MarketDomainContract):
 
     @asynccontextmanager
     async def lifespan(application):
-        if getattr(application.state, "market_domain", None) is not domain:
+        configured = tuple(application.state.market_domains)
+        if not any(
+            item.domain_identity == domain.identity
+            and item.contract_version == str(domain.contract_version)
+            for item in configured
+        ):
             raise RuntimeError(
-                "FastAPI app is not bound to its lifespan market-domain "
-                "contract object"
+                "FastAPI app registration projection does not contain its "
+                "lifespan market-domain contract"
             )
         try:
             async with shared_lifespan(application):
@@ -280,12 +287,15 @@ from market_storefront.controllers.system_controller import (  # noqa: E402
     router as system_router,
 )
 
-def build_vm_storefront_app(*, domain: MarketDomainContract):
-    """Build the VM HTTP application around one validated contract."""
-    selected_domain = validate_vm_storefront_domain(domain)
+def build_vm_storefront_app(*, registry: StorefrontDomainRegistry):
+    """Build the compute-family HTTP application from an explicit registry."""
+
+    registration = registry.resolve_mode("vm")
+    selected_domain = validate_vm_storefront_domain(registration.contract)
     application = build_storefront_app(
         config=default_storefront_app_config(root_path=settings.gateway.root_path),
-        domain=selected_domain,
+        registry=registry,
+        runtime_resolver=registry.resolve_registration,
         lifespan=build_vm_storefront_lifespan(domain=selected_domain),
         routers=(
             system_router,
@@ -306,4 +316,4 @@ def build_vm_storefront_app(*, domain: MarketDomainContract):
     return application
 
 
-app = build_vm_storefront_app(domain=build_vm_storefront_domain())
+app = build_vm_storefront_app(registry=storefront_domain_registry())

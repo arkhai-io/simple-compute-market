@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import replace
 
 from arkhai_vms.domain_runtime import market_domain
+from core_storefront.domain_plugins import StorefrontDomainContribution
 from core_storefront.escrow_verification import verify_escrow_for_settlement
 from domains.vms.negotiation.storefront_round import default_seller_round_hook
 from market_core import (
@@ -59,6 +60,11 @@ def build_vm_storefront_domain() -> MarketDomainContract:
             ),
         )
     )
+
+VM_STOREFRONT_CONTRIBUTION = StorefrontDomainContribution(
+    contribution_id="vms",
+    build_contract=build_vm_storefront_domain,
+)
 
 
 def validate_vm_storefront_domain(domain: object) -> MarketDomainContract:
