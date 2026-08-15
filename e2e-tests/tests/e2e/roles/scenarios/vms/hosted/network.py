@@ -9,16 +9,14 @@ import tomllib
 import uuid
 from pathlib import Path
 from typing import Any, Literal, cast
+import httpx
+
+from core_buyer.hosted_settlement import HostedSettlementTransport
 from core_buyer.orchestration import make_publisher_trust_resolver
 from core_buyer.orchestrator import BuyConfig
 from core_buyer.profile_service import BuyerProfileService
 from core_buyer.registry_config import RegistryAuthority
 from domains.vms.buyer.hosted_authorization import prepare_hosted_funding_authorization
-from domains.vms.buyer.hosted_settlement import (
-    poll_hosted_settlement,
-    reclaim_hosted_settlement,
-    start_hosted_settlement,
-)
 from hosted_settlement_client import (
     FundingMode,
     FundingProfile,
@@ -175,9 +173,7 @@ class NetworkMarketplacePort:
         self._stripe_config = StripeSettlementConfig.model_validate(
             self.buyer_config["Settlement"]["stripe"]
         )
-        self._funding_profile = FundingProfile(
-            _required("HOSTED_SETTLEMENT_E2E_FUNDING_PROFILE")
-        )
+        self._funding_profile = FundingProfile(_required("HOSTED_SETTLEMENT_E2E_FUNDING_PROFILE"))
         self._interaction = FundingMode(_required("HOSTED_SETTLEMENT_E2E_INTERACTION"))
         self._payer_context = payer_command_context_from_config(
             self._stripe_config,
@@ -360,6 +356,7 @@ class NetworkMarketplacePort:
                 self._selected_instrument_ref = selected.instrument_ref
                 ready = True
         return {
+            "ok": True,
             "available": True,
             "selected_owner_bound": True,
             "historical_owner_recoverable": True,
@@ -557,14 +554,15 @@ class NetworkMarketplacePort:
             automatic=False,
             profiles=self._profiles,
         )
-        started = start_hosted_settlement(
+        started = HostedSettlementTransport(
             seller_url=self.storefront_url,
-            negotiation_id=negotiation_id,
-            obligation_ref=obligation_ref,
-            funding_authorization_ref=authorization.funding_authorization_ref,
             principal=self._buyer_signer.identity,
             signer=self._buyer_signer,
             resolve_seller_principals=self._publisher_resolver(),
+        ).start(
+            negotiation_id=negotiation_id,
+            obligation_ref=obligation_ref,
+            funding_authorization_ref=authorization.funding_authorization_ref,
         )
         action_value = started.get("action")
         action: BuyerAction | None = None
@@ -578,9 +576,7 @@ class NetworkMarketplacePort:
                 kind=str(action_value.get("kind")),
                 expires_at_unix=expires_at,
                 url=(
-                    str(action_value["url"])
-                    if isinstance(action_value.get("url"), str)
-                    else None
+                    str(action_value["url"]) if isinstance(action_value.get("url"), str) else None
                 ),
             )
         settlement_ref = started.get("settlement_ref")
@@ -644,7 +640,7 @@ class NetworkMarketplacePort:
         status: dict[str, Any] | None = None
         try:
             status = self._buyer_call(
-                poll_hosted_settlement,
+                "status",
                 settlement_ref,
                 timeout=5.0,
             )
@@ -695,7 +691,7 @@ class NetworkMarketplacePort:
         )
 
     def reclaim(self, settlement_ref: str) -> TerminalSnapshot:
-        result = self._buyer_call(reclaim_hosted_settlement, settlement_ref)
+        result = self._buyer_call("reclaim", settlement_ref)
         if result.get("status") != "reclaimed":
             result = self._wait_public_status(settlement_ref, {"reclaimed"})
         return TerminalSnapshot(
@@ -726,25 +722,27 @@ class NetworkMarketplacePort:
         return self.reclaim(settlement_ref)
 
     def _buyer_status(self, settlement_ref: str) -> dict[str, Any]:
-        return self._buyer_call(poll_hosted_settlement, settlement_ref)
+        return self._buyer_call("status", settlement_ref)
 
     def _buyer_call(
         self,
-        function,
+        operation: Literal["status", "reclaim"],
         settlement_ref: str,
         *,
         timeout: float | None = None,
-    ):
-        kwargs = {
-            "seller_url": self.storefront_url,
-            "settlement_ref": settlement_ref,
-            "principal": self._buyer_signer.identity,
-            "signer": self._buyer_signer,
-            "resolve_seller_principals": self._publisher_resolver(),
-        }
-        if timeout is not None:
-            kwargs["timeout"] = timeout
-        return function(**kwargs)
+    ) -> dict[str, Any]:
+        options = {} if timeout is None else {"request_timeout": timeout}
+        transport = HostedSettlementTransport(
+            seller_url=self.storefront_url,
+            principal=self._buyer_signer.identity,
+            signer=self._buyer_signer,
+            resolve_seller_principals=self._publisher_resolver(),
+            **options,
+        )
+        return cast(
+            dict[str, Any],
+            getattr(transport, operation)(settlement_ref=settlement_ref),
+        )
 
     def _operation(self, settlement_ref: str) -> str:
         try:

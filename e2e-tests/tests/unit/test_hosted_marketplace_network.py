@@ -10,6 +10,18 @@ from tests.e2e.roles.scenarios.vms.hosted.network import (
 )
 
 
+def test_interactive_payer_fixture_is_a_successful_lifecycle_response() -> None:
+    marketplace = object.__new__(NetworkMarketplacePort)
+    marketplace._funding_profile = network.FundingProfile.CARD
+    marketplace._interaction = network.FundingMode.INTERACTIVE
+
+    response = marketplace.ensure_payer_profile_fixture("card.v1", "interactive")
+
+    assert response["ok"] is True
+    assert response["available"] is True
+    assert response["saved_instrument_ready"] is True
+
+
 def test_primary_registry_authority_uses_advertised_url_not_runtime_endpoint() -> None:
     authority = _primary_registry_authority(
         {
@@ -87,10 +99,10 @@ def test_refund_funding_reconciles_materialization_without_fulfillment(
 ) -> None:
     marketplace = object.__new__(NetworkMarketplacePort)
     marketplace._stripe_test_case = "refund"
-    marketplace._buyer_authority = SimpleNamespace(
-        get_status=lambda *_args, **_kwargs: SimpleNamespace(
-            financial_state=SimpleNamespace(value="funded")
-        )
+    monkeypatch.setattr(
+        marketplace,
+        "_buyer_status",
+        lambda _settlement_ref: {"status": "ready"},
     )
     monkeypatch.setattr(
         marketplace,
