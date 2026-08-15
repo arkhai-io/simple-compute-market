@@ -2,60 +2,73 @@ from __future__ import annotations
 
 from typing import Any
 
+import pytest
+
 from core_storefront.publication_runner import (
     PublicationSourceSelection,
-    build_publication_source_selection,
     close_stale_publication_listings,
     open_publication_keys,
     publish_round,
-    publish_source_by_name,
-    run_publication_command_by_name,
     run_publication_cycle,
-    run_publication_cycle_by_name,
 )
 from core_storefront.publication_sources import PublicationSource
 
 
 def _source(
     *,
+    name: str = "test",
     candidate: dict[str, Any] | None = None,
     open_keys: set[str] | None = None,
 ) -> PublicationSource:
-    candidate = candidate or {"resource_id": "r1", "price": "1"}
+    candidate = candidate or {"resource_id": name, "price": "1"}
     return PublicationSource(
-        name="test",
+        name=name,
         open_keys=lambda _db: open_keys or set(),
-        close_stale=lambda _db, _url: ["stale-1"],
+        close_stale=lambda _db, _url: [f"stale-{name}"],
         available_candidates=lambda _db: [candidate],
-        skip_keys=lambda c: {str(c["resource_id"])},
-        offer_resource=lambda c: {"resource_id": c["resource_id"]},
-        record_published=lambda _db, c, listing_id: c.__setitem__("listing_id", listing_id),
+        skip_keys=lambda value: {str(value["resource_id"])},
+        offer_resource=lambda value: {"resource_id": value["resource_id"]},
+        record_published=lambda _db, value, listing_id: value.__setitem__(
+            "listing_id", listing_id
+        ),
         reopen_existing=lambda *_args: None,
-        reopen_error_label="reopen test",
+        reopen_error_label=f"reopen {name}",
     )
 
 
-def test_lifecycle_helpers_union_sources() -> None:
-    first = _source(open_keys={"a"})
-    second = _source(open_keys={"b"})
+def _payload(*_args):
+    return ([{"escrow": "e"}], [{"demand": "d"}], 60)
 
-    assert open_publication_keys([first, second], "db.sqlite") == {"a", "b"}
-    assert close_stale_publication_listings([first],
-    db_path="db.sqlite",
-    base_url="http://seller", ) == {"test": ["stale-1"]}
+
+def _publish(offer, *_args):
+    return {
+        "status": "published",
+        "listing_id": f"listing-{offer['resource_id']}",
+    }
+
+
+def test_lifecycle_helpers_union_frozen_sources() -> None:
+    first = _source(name="first", open_keys={"a"})
+    second = _source(name="second", open_keys={"b"})
+
+    assert open_publication_keys((first, second), "db.sqlite") == {"a", "b"}
+    assert close_stale_publication_listings(
+        (first, second),
+        db_path="db.sqlite",
+        base_url="http://seller",
+    ) == {"first": ["stale-first"], "second": ["stale-second"]}
 
 
 def test_publish_round_is_schema_opaque() -> None:
     candidate = {"resource_id": "r1", "price": "1"}
-    source = _source(candidate=candidate)
 
-    published, failed, skipped = publish_round([source],
-    db_path="db.sqlite",
-    base_url="http://seller", build_payload=lambda _source, _candidate, _offer: ([{"escrow": "e"}], [{"demand": "d"}], 60),
-    publish_offer=lambda offer, _escrows, _demands, _duration: {
-        "status": "published",
-        "listing_id": f"listing-{offer['resource_id']}",
-    },)
+    published, failed, skipped = publish_round(
+        (_source(candidate=candidate),),
+        db_path="db.sqlite",
+        base_url="http://seller",
+        build_payload=_payload,
+        publish_offer=_publish,
+    )
 
     assert failed == []
     assert skipped == []
@@ -64,158 +77,69 @@ def test_publish_round_is_schema_opaque() -> None:
 
 
 def test_publish_round_skips_covered_candidate() -> None:
-    published, failed, skipped = publish_round([_source()],
-    db_path="db.sqlite",
-    base_url="http://seller", build_payload=lambda *_args: ([{}], [], None),
-    publish_offer=lambda *_args: {"status": "published"},
-    skip_ids={"r1"},)
+    published, failed, skipped = publish_round(
+        (_source(candidate={"resource_id": "r1", "price": "1"}),),
+        db_path="db.sqlite",
+        base_url="http://seller",
+        build_payload=_payload,
+        publish_offer=_publish,
+        skip_ids={"r1"},
+    )
 
     assert published == []
     assert failed == []
     assert skipped == [{"resource_id": "r1", "price": "1"}]
 
 
-def test_run_publication_cycle_closes_stale_and_skips_open_keys() -> None:
-    source = _source(open_keys={"r1"})
+def test_selection_reuses_exact_prebuilt_sources_across_cycle() -> None:
+    source = _source(name="vms")
+    selection = PublicationSourceSelection(sources=(source,))
 
-    result = run_publication_cycle([source],
-    db_path="db.sqlite",
-    base_url="http://seller", build_payload=lambda *_args: ([{}], [], None),
-    publish_offer=lambda *_args: {"status": "published"},)
-
-    assert result.closed == {"test": ["stale-1"]}
-    assert result.published == []
-    assert result.failed == []
-    assert result.skipped == [{"resource_id": "r1", "price": "1"}]
-
-
-def test_run_publication_cycle_by_name_builds_selected_sources(monkeypatch) -> None:
-    import core_storefront.publication_runner as runner
-
-    monkeypatch.setattr(
-        runner,
-        "build_publication_source",
-        lambda name, **kwargs: _source(candidate={"resource_id": name, **kwargs}),
+    assert selection.build_sources() == (source,)
+    assert selection.source_names == ("vms",)
+    result = selection.run_cycle(
+        db_path="db.sqlite",
+        base_url="http://seller",
+        build_payload=_payload,
+        publish_offer=_publish,
     )
 
-    result = run_publication_cycle_by_name(["vms"],
-    source_kwargs_by_name={"vms": {"price": "2"}},
-    db_path="db.sqlite",
-    base_url="http://seller", build_payload=lambda *_args: ([{}], [], None),
-    publish_offer=lambda offer, *_args: {
-        "status": "published",
-        "listing_id": offer["resource_id"],
-    },)
-
-    assert result.failed == []
-    assert result.skipped == []
-    assert result.published[0]["response"]["listing_id"] == "vms"
+    assert result.closed == {"vms": ["stale-vms"]}
+    assert result.published[0]["response"]["listing_id"] == "listing-vms"
 
 
-def test_publication_source_selection_wraps_command_cycle(monkeypatch) -> None:
-    import core_storefront.publication_runner as runner
+def test_two_domains_publish_in_registry_order_and_isolate_skips() -> None:
+    vm = _source(name="vms", candidate={"resource_id": "vm-1"})
+    bare = _source(name="bare_metal", candidate={"resource_id": "host-1"})
+    selection = PublicationSourceSelection(sources=(vm, bare))
 
-    monkeypatch.setattr(
-        runner,
-        "build_publication_source",
-        lambda name, **kwargs: _source(
-            candidate={"resource_id": name, **kwargs},
-            open_keys={"already-open"},
-        ),
-    )
+    result = selection.command(
+        db_path="db.sqlite",
+        base_url="http://seller",
+        build_payload=_payload,
+        publish_offer=_publish,
+    ).run(skip_ids={"vm-1"}, close_stale=False, skip_open=False)
 
-    selection = PublicationSourceSelection(
-        source_names=("vms",),
-        source_kwargs_by_name={"vms": {"price": "3"}},
-    )
-
-    assert [source.name for source in selection.build_sources()] == ["test"]
-    assert selection.open_keys("db.sqlite") == {"already-open"}
-
-    result = selection.run_cycle(db_path="db.sqlite",
-    base_url="http://seller", build_payload=lambda *_args: ([{}], [], None),
-    publish_offer=lambda offer, *_args: {
-        "status": "published",
-        "listing_id": offer["resource_id"],
-    },)
-
-    assert result.closed == {"test": ["stale-1"]}
-    assert result.failed == []
-    assert result.skipped == []
-    assert result.published[0]["resource"] == {
-        "resource_id": "vms",
-        "price": "3",
-        "listing_id": "vms",
-    }
+    assert result.skipped == [{"resource_id": "vm-1"}]
+    assert [item["response"]["listing_id"] for item in result.published] == [
+        "listing-host-1"
+    ]
 
 
-def test_build_publication_source_selection_composes_named_sources(monkeypatch) -> None:
-    import core_storefront.publication_runner as runner
-
-    monkeypatch.setattr(
-        runner,
-        "build_publication_source",
-        lambda name, **kwargs: _source(candidate={"resource_id": name, **kwargs}),
-    )
-
-    def run(source_names: tuple[str, ...]) -> list[str]:
-        selection = build_publication_source_selection(
-            source_names,
-            source_kwargs_by_name={
-                "vms": {"price": "vm-price"},
-                "bare_metal": {"price": "bm-price"},
-            },
+def test_selection_rejects_duplicate_source_names() -> None:
+    with pytest.raises(ValueError, match="unique"):
+        PublicationSourceSelection(
+            sources=(_source(name="same"), _source(name="same"))
         )
-        result = selection.run_command(db_path="db.sqlite",
-        base_url="http://seller", build_payload=lambda *_args: ([{}], [], None),
-        publish_offer=lambda offer, *_args: {
-            "status": "published",
-            "listing_id": offer["resource_id"],
-        },
-        close_stale=False,
-        skip_open=False,)
-        return [item["response"]["listing_id"] for item in result.published]
-
-    assert run(("vms",)) == ["vms"]
-    assert run(("bare_metal",)) == ["bare_metal"]
-    assert run(("vms", "bare_metal")) == ["vms", "bare_metal"]
 
 
-def test_publication_command_result_exposes_summary_counts(monkeypatch) -> None:
-    import core_storefront.publication_runner as runner
-
-    monkeypatch.setattr(
-        runner,
-        "build_publication_source",
-        lambda name, **kwargs: _source(candidate={"resource_id": name, **kwargs}),
-    )
-
-    result = run_publication_command_by_name(["vms"],
-    source_kwargs_by_name={"vms": {"price": "4"}},
-    db_path="db.sqlite",
-    base_url="http://seller", build_payload=lambda *_args: ([{}], [], None),
-    publish_offer=lambda offer, *_args: {
-        "status": "published",
-        "listing_id": offer["resource_id"],
-    },)
-
-    assert result.published_count == 1
-    assert result.failed_count == 0
-    assert result.skipped_count == 0
-    assert result.closed_count == 1
-    assert result.has_publications is True
-    assert result.has_failures is False
-    assert result.no_new_listings is False
-    assert result.published[0]["response"]["listing_id"] == "vms"
-
-
-def test_publication_command_no_new_when_only_skipped() -> None:
-    selection = PublicationSourceSelection(source_names=())
-    command = selection.command(db_path="db.sqlite",
-    base_url="http://seller", build_payload=lambda *_args: ([{}], [], None),
-    publish_offer=lambda *_args: {"status": "published"},)
-
-    result = command.run()
+def test_empty_prebuilt_selection_has_no_new_listings() -> None:
+    result = PublicationSourceSelection(sources=()).command(
+        db_path="db.sqlite",
+        base_url="http://seller",
+        build_payload=_payload,
+        publish_offer=_publish,
+    ).run()
 
     assert result.published_count == 0
     assert result.failed_count == 0
@@ -223,24 +147,16 @@ def test_publication_command_no_new_when_only_skipped() -> None:
     assert result.no_new_listings is True
 
 
-def test_publish_source_by_name_loads_source(monkeypatch) -> None:
-    import core_storefront.publication_runner as runner
-
-    monkeypatch.setattr(
-        runner,
-        "build_publication_source",
-        lambda name, **kwargs: _source(candidate={"resource_id": name, **kwargs}),
+def test_run_publication_cycle_closes_stale_and_skips_open_keys() -> None:
+    result = run_publication_cycle(
+        (_source(open_keys={"test"}),),
+        db_path="db.sqlite",
+        base_url="http://seller",
+        build_payload=_payload,
+        publish_offer=_publish,
     )
 
-    published, failed, skipped = publish_source_by_name("loaded",
-    source_kwargs={"price": "2"},
-    db_path="db.sqlite",
-    base_url="http://seller", build_payload=lambda *_args: ([{}], [], None),
-    publish_offer=lambda offer, *_args: {
-        "status": "published",
-        "listing_id": offer["resource_id"],
-    },)
-
-    assert failed == []
-    assert skipped == []
-    assert published[0]["response"]["listing_id"] == "loaded"
+    assert result.closed == {"test": ["stale-test"]}
+    assert result.published == []
+    assert result.failed == []
+    assert result.skipped == [{"resource_id": "test", "price": "1"}]

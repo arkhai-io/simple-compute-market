@@ -14,6 +14,7 @@ from typing import Any
 from core_storefront.publication_composition import (
     build_storefront_publication_selection as _build_core_publication_selection,
 )
+from core_storefront.domain_registry import StorefrontDomainRegistry
 from core_storefront.publication_runner import PublicationSourceSelection
 
 
@@ -75,24 +76,26 @@ def build_bare_metal_publication_source_kwargs(
 
 
 def build_vm_storefront_publication_selection(
+    registry: StorefrontDomainRegistry,
     callbacks: VmPublicationSourceCallbacks,
 ) -> PublicationSourceSelection:
-    """Build the VM-only publication selection."""
+    """Build the explicitly registered VM publication selection."""
     return _build_core_publication_selection(
-        ("vms",),
-        source_kwargs_by_name={
+        registry,
+        source_kwargs_by_contribution={
             "vms": build_vm_publication_source_kwargs(callbacks),
         },
     )
 
 
 def build_bare_metal_storefront_publication_selection(
+    registry: StorefrontDomainRegistry,
     callbacks: BareMetalPublicationSourceCallbacks,
 ) -> PublicationSourceSelection:
-    """Build a bare-metal-only publication selection."""
+    """Build the explicitly registered bare-metal publication selection."""
     return _build_core_publication_selection(
-        ("bare_metal",),
-        source_kwargs_by_name={
+        registry,
+        source_kwargs_by_contribution={
             "bare_metal": build_bare_metal_publication_source_kwargs(callbacks),
         },
     )
@@ -100,14 +103,14 @@ def build_bare_metal_storefront_publication_selection(
 
 def build_storefront_publication_selection(
     *,
-    source_names: tuple[str, ...],
+    registry: StorefrontDomainRegistry,
     vm_callbacks: VmPublicationSourceCallbacks,
     bare_metal_callbacks: BareMetalPublicationSourceCallbacks,
 ) -> PublicationSourceSelection:
-    """Build a selected VM/bare-metal publication-source composition."""
+    """Build every publication source in the frozen storefront registry."""
     return _build_core_publication_selection(
-        source_names,
-        source_kwargs_by_name={
+        registry,
+        source_kwargs_by_contribution={
             "vms": build_vm_publication_source_kwargs(vm_callbacks),
             "bare_metal": build_bare_metal_publication_source_kwargs(
                 bare_metal_callbacks,
