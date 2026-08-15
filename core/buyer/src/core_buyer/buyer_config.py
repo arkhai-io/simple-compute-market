@@ -59,7 +59,10 @@ class BuyerProfileResolver:
 
     def recovery(self, run_id: str) -> ResolvedBuyerIdentity:
         reject_legacy_buyer_identity_config()
-        recorded = read_run_identity(run_id)
+        recorded = read_run_identity(
+            run_id,
+            directory=self.service.run_logs_directory,
+        )
         profile, signer = self.service.resolve_recovery_signer(
             profile_id=recorded.profile_id,
             principal=recorded.principal,

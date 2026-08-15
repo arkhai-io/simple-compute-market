@@ -393,11 +393,16 @@ class ProfileRepository:
                     f"profile-store revision changed from {expected_revision} "
                     f"to {current.revision}"
                 )
-            if candidate.revision != expected_revision + 1:
+            if candidate.revision <= expected_revision:
                 raise ProfileRevisionConflict(
-                    "candidate revision must be exactly one greater than current"
+                    "candidate revision must advance beyond current"
                 )
-            validated = ProfileStore.model_validate(candidate.model_dump(mode="python"))
+            committed = candidate.model_copy(
+                update={"revision": expected_revision + 1}
+            )
+            validated = ProfileStore.model_validate(
+                committed.model_dump(mode="python")
+            )
             self._write_atomic(validated)
             return validated
         finally:

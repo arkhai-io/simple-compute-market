@@ -264,13 +264,14 @@ def test_fresh_resolver_tracks_selection_while_recovery_uses_recorded_profile(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
-    _state_dir(monkeypatch, tmp_path)
+    run_logs_directory = _state_dir(monkeypatch, tmp_path)
     old = Ed25519Signer(b"a" * 32)
     other = Ed25519Signer(b"b" * 32)
     environment = {"OLD_SEED": _encoded(b"a" * 32), "OTHER_SEED": _encoded(b"b" * 32)}
     service = BuyerProfileService(
         ProfileRepository((tmp_path / "profiles.json").absolute()),
         default_credential_registry(environ=environment),
+        run_logs_directory=run_logs_directory,
     )
     first = service.create(
         name="first",
@@ -309,11 +310,12 @@ def test_recovery_fails_for_missing_or_mismatched_history(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
-    _state_dir(monkeypatch, tmp_path)
+    run_logs_directory = _state_dir(monkeypatch, tmp_path)
     signer = Ed25519Signer(b"a" * 32)
     service = BuyerProfileService(
         ProfileRepository((tmp_path / "profiles.json").absolute()),
         default_credential_registry(environ={"BUYER_SEED": _encoded(b"b" * 32)}),
+        run_logs_directory=run_logs_directory,
     )
     profile = new_profile(
         name="buyer",

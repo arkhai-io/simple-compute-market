@@ -102,12 +102,13 @@ class RunSummary:
     recoverable: bool
 
 
-def runs_dir() -> Path:
-    """Return the directory holding per-run JSONL log files."""
+def runs_dir(environ: Mapping[str, str] | None = None) -> Path:
+    """Resolve the XDG directory holding per-run JSONL log files."""
 
-    xdg = os.environ.get("XDG_STATE_HOME")
+    values = environ if environ is not None else os.environ
+    xdg = values.get("XDG_STATE_HOME")
     base = Path(xdg) if xdg else Path.home() / ".local" / "state"
-    return base / "arkhai" / "buy-runs"
+    return (base / "arkhai" / "buy-runs").absolute()
 
 
 def _new_run_id() -> str:
@@ -375,10 +376,12 @@ def migrate_run_logs(
     if candidate_store is not None:
         if expected_revision is None or current_store.revision != expected_revision:
             raise RunLogError("profile-store migration revision is stale")
-        if candidate_store.revision != current_store.revision + 1:
+        if candidate_store.revision <= current_store.revision:
             raise RunLogError("profile-store migration candidate revision is invalid")
         migration_store = ProfileStore.model_validate(
-            candidate_store.model_dump(mode="python")
+            candidate_store.model_copy(
+                update={"revision": current_store.revision + 1}
+            ).model_dump(mode="python")
         )
     else:
         if expected_revision is not None:
@@ -645,10 +648,14 @@ class RunLog:
         self.event("run_ended", status=status, **fields)
 
 
-def read_run_identity(run_id: str) -> RunIdentity:
+def read_run_identity(
+    run_id: str,
+    *,
+    directory: Path | None = None,
+) -> RunIdentity:
     """Read only validated public ownership metadata for recovery resolution."""
 
-    path = runs_dir() / f"{run_id}.jsonl"
+    path = (directory or runs_dir()) / f"{run_id}.jsonl"
     _, identity = _load_versioned(path, run_id=run_id)
     return identity
 
@@ -658,10 +665,11 @@ def read_run(
     *,
     signer: Signer | None = None,
     profile_id: uuid.UUID | str | None = None,
+    directory: Path | None = None,
 ) -> list[dict[str, Any]]:
     """Read and validate one current profile-bound run log."""
 
-    path = runs_dir() / f"{run_id}.jsonl"
+    path = (directory or runs_dir()) / f"{run_id}.jsonl"
     if not path.exists():
         return []
     events, identity = _load_versioned(path, run_id=run_id)
@@ -672,21 +680,21 @@ def read_run(
     return events
 
 
-def list_runs() -> list[RunSummary]:
+def list_runs(*, directory: Path | None = None) -> list[RunSummary]:
     """Return validated run summaries, newest first by file modification time."""
 
-    directory = runs_dir()
-    if not directory.exists():
+    root = directory or runs_dir()
+    if not root.exists():
         return []
-    assert_migration_resolved(directory)
+    assert_migration_resolved(root)
     files: Iterable[Path] = sorted(
-        directory.glob("*.jsonl"),
+        root.glob("*.jsonl"),
         key=lambda path: path.stat().st_mtime,
         reverse=True,
     )
     summaries: list[RunSummary] = []
     for path in files:
-        events = read_run(path.stem)
+        events = read_run(path.stem, directory=root)
         if not events:
             continue
         identity = _validate_current(events, run_id=path.stem)
@@ -713,13 +721,14 @@ def recoverable_run_ids(
     profile_id: uuid.UUID | str,
     *,
     principal: Identity | None = None,
+    directory: Path | None = None,
 ) -> tuple[str, ...]:
     """Return exact run blockers for profile/principal retirement."""
 
     wanted = _parse_profile_id(profile_id)
     return tuple(
         summary.run_id
-        for summary in list_runs()
+        for summary in list_runs(directory=directory)
         if summary.recoverable
         and summary.buyer_profile_id == wanted
         and (principal is None or summary.buyer_principal == principal)

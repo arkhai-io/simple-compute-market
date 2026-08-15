@@ -40,6 +40,7 @@ def _service(tmp_path: Path, environ: dict[str, str]) -> BuyerProfileService:
     return BuyerProfileService(
         ProfileRepository((tmp_path / "profiles.json").absolute()),
         default_credential_registry(environ=environ),
+        run_logs_directory=(tmp_path / "runs").absolute(),
     )
 
 
@@ -101,6 +102,7 @@ def test_generated_file_secret_is_cleaned_when_metadata_commit_fails(
     service = BuyerProfileService(
         repository,
         default_credential_registry(environ={}),
+        run_logs_directory=(tmp_path / "runs").absolute(),
     )
 
     def fail_replace(*_args, **_kwargs):
@@ -124,7 +126,7 @@ def test_cleanup_failure_returns_only_bounded_reference(
         kind = CredentialProviderKind.SECRET_FILE
 
         def load(self, reference):
-            return _seed(b"a" * 32)
+            return _seed(b"a" * 32).encode("ascii")
 
         def generate(self, reference, *, scheme):
             return None
@@ -135,7 +137,11 @@ def test_cleanup_failure_returns_only_bounded_reference(
     from market_identity import CredentialProviderRegistry
 
     repository = ProfileRepository((tmp_path / "profiles.json").absolute())
-    service = BuyerProfileService(repository, CredentialProviderRegistry((Provider(),)))
+    service = BuyerProfileService(
+        repository,
+        CredentialProviderRegistry((Provider(),)),
+        run_logs_directory=(tmp_path / "runs").absolute(),
+    )
     reference = CredentialReference(
         provider=CredentialProviderKind.SECRET_FILE,
         locator=str((tmp_path / "seed").absolute()),

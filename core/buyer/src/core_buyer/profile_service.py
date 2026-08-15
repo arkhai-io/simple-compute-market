@@ -39,7 +39,7 @@ from market_identity import (
     sign_rotation,
 )
 
-from core_buyer.run_log import migrate_run_logs, recoverable_run_ids
+from core_buyer.run_log import migrate_run_logs, recoverable_run_ids, runs_dir
 
 PROFILE_STORE_ENV = "ARKHAI_BUYER_PROFILE_STORE"
 
@@ -133,9 +133,14 @@ class BuyerProfileService:
         providers: CredentialProviderRegistry | None = None,
         *,
         environ: Mapping[str, str] | None = None,
+        run_logs_directory: Path | None = None,
     ) -> None:
         self.repository = repository or ProfileRepository(profile_store_path(environ))
         self.providers = providers or default_credential_registry(environ=environ)
+        resolved_runs = run_logs_directory or runs_dir(environ)
+        if not resolved_runs.is_absolute():
+            raise ProfileServiceError("buyer run-log directory must be absolute")
+        self.run_logs_directory = resolved_runs
 
     def list_profiles(self) -> tuple[dict[str, Any], ...]:
         store = self.repository.load()
@@ -267,6 +272,7 @@ class BuyerProfileService:
             self.repository,
             candidate_store=candidate,
             expected_revision=current.revision,
+            directory=self.run_logs_directory,
         )
         written = self.repository.load()
         imported = written.profile(profile.profile_id)
@@ -283,8 +289,11 @@ class BuyerProfileService:
     def select(self, profile: str | uuid.UUID) -> dict[str, Any]:
         current = self.repository.load()
         value = self._profile(current, profile)
+        candidate = select_profile(current, value.profile_id)
+        if candidate is current:
+            return value.redacted(selected=True)
         written = self.repository.replace(
-            select_profile(current, value.profile_id),
+            candidate,
             expected_revision=current.revision,
         )
         return written.profile(value.profile_id).redacted(selected=True)
@@ -360,7 +369,11 @@ class BuyerProfileService:
     ) -> dict[str, Any]:
         current = self.repository.load()
         value = self._profile(current, profile)
-        blockers = recoverable_run_ids(value.profile_id, principal=principal)
+        blockers = recoverable_run_ids(
+            value.profile_id,
+            principal=principal,
+            directory=self.run_logs_directory,
+        )
         candidate = retire_principal(
             current,
             value.profile_id,
@@ -380,7 +393,10 @@ class BuyerProfileService:
     def retire(self, profile: str | uuid.UUID) -> dict[str, Any]:
         current = self.repository.load()
         value = self._profile(current, profile)
-        blockers = recoverable_run_ids(value.profile_id)
+        blockers = recoverable_run_ids(
+            value.profile_id,
+            directory=self.run_logs_directory,
+        )
         candidate = retire_profile(
             current,
             value.profile_id,
@@ -403,7 +419,10 @@ class BuyerProfileService:
     ) -> ProfileDeletionResult:
         current = self.repository.load()
         value = self._profile(current, profile)
-        blockers = recoverable_run_ids(value.profile_id)
+        blockers = recoverable_run_ids(
+            value.profile_id,
+            directory=self.run_logs_directory,
+        )
         references = tuple(
             entry.credential_reference for entry in value.principal_history
         )
@@ -487,11 +506,11 @@ class BuyerProfileService:
     def _cleanup_generated(self, reference: CredentialReference) -> None:
         try:
             self.providers.delete(reference)
-        except CredentialProviderError as exc:
+        except Exception:
             raise GeneratedCredentialCleanupRequired(
                 "generated credential cleanup is required for reference "
                 f"{reference.fingerprint}"
-            ) from exc
+            ) from None
 
     @staticmethod
     def _profile(store: ProfileStore, profile: str | uuid.UUID) -> BuyerProfile:
