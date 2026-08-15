@@ -181,6 +181,14 @@ jobs:
           ref: ${{ env.TRUSTED_MARKETPLACE_COMMIT }}
           fetch-depth: 0
           persist-credentials: false
+      - name: Set up exact Python and uv
+        if: env.SELECTED == 'true'
+        uses: astral-sh/setup-uv@v6
+        with:
+          version: 0.8.13
+          python-version: 3.13.7
+          enable-cache: true
+
 
       - name: Reject untrusted or incomplete run identities
         if: env.SELECTED == 'true'
