@@ -110,6 +110,20 @@ The protected VM lane attributes each selected `card.v1`, `us_bank_transfer.v1`,
 
 Reports permit only public lifecycle stages, profile/currency, normalized outcomes, timestamps, attempts, and bounded hashed opaque correlations. Recursive canary scanning rejects credentials, provider/customer/payment-method/mandate/bank/card data, raw actions or URLs, payloads, events, requests, source-bearing local paths, and unrestricted logs before evidence is signed.
 
+## Multi-domain storefront evidence ownership
+
+Core tests own contribution discovery, frozen registry invariants, exact-object
+resolution, schema-opaque carriers, publication source fan-out, immutable
+bindings, and cross-swap rejection. VM composition tests own adapters,
+selected-site calls, exact mode projection, migration, and restart. Bare-metal
+tests own only their codecs/publication and the concrete fulfillment hook.
+Deployment tests inspect staged wheels and rendered public/secret separation.
+
+One system proof must run real VM and selected-site bare-metal deals through
+one process, observe result and teardown, and prove capacity restoration. Until
+the bare-metal producer and POOLS-7 lifecycle are real, this evidence is a
+named external blocker; test seams cannot claim acceptance in its place.
+
 ## Current limits
 
 The e2e harness predominantly uses HTTP clients and explicit test seams, but it is not yet completely external to service packages and a few scenarios retain timing or private-client dependencies. The architecture therefore states the desired boundary only where current tests establish it and treats full harness extraction as separate work.

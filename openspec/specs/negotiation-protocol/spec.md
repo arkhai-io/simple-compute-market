@@ -151,6 +151,25 @@ Address-shaped negotiation parties, message authors, and accepted Terms MUST mig
 - **WHEN** migration encounters a malformed principal, conflicting identity representation, incomplete party population, or ambiguous owner
 - **THEN** the migration aborts atomically without leaving mixed address and principal authorization state
 
+### Requirement: Negotiation inherits an immutable listing-domain binding
+
+Opening a negotiation MUST transactionally load the authoritative seller listing and common binding, resolve the exact pre-registered contract, validate the versioned provision envelope with that contract, and persist the thread, canonical parties, opening message, initial domain artifact, trusted site, offering mode, domain identity, and contract version before policy runs. Caller-supplied discriminators are assertions only. Continuation, Terms reduction, and acceptance MUST route from the recorded thread binding.
+
+#### Scenario: Opening matches the VM listing
+
+- **WHEN** a buyer opens a supported VM provision envelope against a VM-bound listing
+- **THEN** the new thread copies that exact binding and only the selected VM policy receives the normalized message
+
+#### Scenario: Opening names another domain
+
+- **WHEN** a valid bare-metal envelope is submitted against a VM-bound listing, or any requested mode/domain/version conflicts
+- **THEN** the storefront rejects the opening before message persistence, policy, capacity, settlement, or fulfillment effects
+
+#### Scenario: Configuration changes during an accepted thread
+
+- **WHEN** the current registration or listing changes after a thread recorded an exact nonterminal or accepted binding
+- **THEN** recovery resolves the recorded contract or blocks that record and never redirects it to the new mapping
+
 ## Evidence
 
 - Synchronous new/continue HTTP behavior and lossless uint256-domain persistence: `domains/vms/storefront/tests/integration/test_negotiate_controller.py`.
@@ -158,5 +177,6 @@ Address-shaped negotiation parties, message authors, and accepted Terms MUST mig
 - History reconstruction and policy-chain primitives: `core/storefront/tests/unit/test_negotiation_sync.py`.
 - Agreed-term commit and authenticated administrator authorship: `domains/vms/storefront/tests/services/test_negotiation_service.py` and `domains/vms/storefront/tests/integration/test_negotiations_api.py`.
 - Transactional principal migration and fail-closed recovery ownership: `core/storefront/tests/unit/test_identity_migrations.py` and `core/buyer/tests/unit/test_identity_recovery.py`.
+- Immutable listing-to-thread inheritance, cross-domain rejection, exact contract resolution, and restart binding: `domains/vms/storefront/tests/unit/test_domain_thread_bindings.py`, `test_sync_negotiation_domain.py`, and `core/storefront/tests/unit/test_domain_registry.py`.
 
-The stronger claim that a restart preserves every in-flight continuation path is not independently covered by the cited tests and is therefore not stated as a baseline scenario.
+The complete live VM/bare-metal restart proof is owned by the multi-domain system lane and remains gated on the production bare-metal contribution.

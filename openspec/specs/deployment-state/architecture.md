@@ -119,6 +119,21 @@ Marketplace deployment carries only public authority trust, exact release pins, 
 
 Before activation, rollback restores the matching prior client, config, image coordinates, and Secret mapping together. After new profile publication or purchase authorization occurs, rollback cannot reinterpret accepted state; operators roll forward using immutable obligation, authorization, and hosted operation identities. Protected profile evidence remains blocked unless every signed producer artifact and selected Stripe rail prerequisite is available.
 
+## Multi-domain storefront activation
+
+The deployment unit is one shared storefront shell, one single-writer SQLite
+database, and a set of installed domain contribution wheels. Public config
+names each contribution, mode, domain identity, and contract version; trusted
+site bindings are independent. Image, Compose, and Helm surfaces install and
+render the same set and never embed signer/provider/SSH/private-result data.
+
+Legacy state is an explicit expand/contract boundary, not an automatic startup
+guess. Operators quiesce effects, select one migration adapter, inspect its
+complete read-only report, then request restrictive backup plus atomic
+replacement. Only rows with exact site and pool/resource provenance migrate.
+Once common bindings have participated in effects, rollback is forward
+recovery using those immutable bindings.
+
 ## Current limits
 
 The repository does not yet have one universal configuration-delivery mechanism or migration phase for every service. Publication authority between private artifact registries and public package releases, removal of all local source overrides, and a repository-wide typed-client versioning policy remain separate decisions.

@@ -362,12 +362,47 @@ An operator MUST preview and explicitly import legacy buyer identity into one ex
 - **WHEN** replacement fails after one candidate was written
 - **THEN** startup refuses mixed state and recovery restores every recorded original before retry
 
+### Requirement: Multi-domain storefront configuration is explicit
+
+A compute-family storefront deployment MUST configure a non-empty public list of domain registrations, each naming one contribution, offering mode, exact domain identity, and supported contract version. The image MUST contain the shared shell and every enabled contribution as staged immutable wheels. Helm and Compose MUST run one process against one single-writer SQLite volume, render trusted sites independently, and keep signer credentials, provider settings, SSH material, and private results in Secret-only channels.
+
+#### Scenario: Combined storefront is rendered
+
+- **WHEN** VM and bare-metal registrations are configured with complete trusted sites
+- **THEN** the rendered workload starts one common storefront command and database with both public registrations and no private credential in ConfigMaps, arguments, or image layers
+
+#### Scenario: Registration package is absent
+
+- **WHEN** preflight cannot find a configured contribution or its complete exact contract
+- **THEN** activation remains quiesced and reports the missing contribution/mode/domain/version without serving new work
+
+### Requirement: Legacy storefront domain migration is transactional
+
+An operator MUST quiesce effects and run the explicitly selected contribution's migration adapter in read-only check mode before write. Write MUST require a restrictive same-directory backup, fsync the complete validated replacement, atomically replace the source, and retain stable listing, negotiation, settlement, obligation, reservation, fulfillment, operation, and provider identities. Missing provenance, mixed kinds, orphan relationships, collision, binding disagreement, or unsupported version MUST abort without partial source mutation. No adapter may infer a domain from payload shape or from having one installed contribution.
+
+#### Scenario: A valid VM database is activated
+
+- **WHEN** every legacy derived row proves its site and pool or Physical Resource provenance and the configured registration matches exactly
+- **THEN** migration records common listing/thread/fulfillment bindings, retires the old mapping as a writable authority, and an idempotent check succeeds after replacement
+
+#### Scenario: A legacy row is ambiguous
+
+- **WHEN** a row lacks trusted site/provenance, conflicts with public mode, is orphaned, duplicates a derivation identity, or names another contract
+- **THEN** check and write fail with redacted diagnostics while the source database and backup set remain unchanged
+
+#### Scenario: Replacement is interrupted
+
+- **WHEN** failure occurs after the original backup but before atomic replacement
+- **THEN** the original database remains byte-identical, the restrictive backup is retained for recovery, and startup does not activate mixed state
+
 ## Evidence
 
 - Configurable registry endpoints and independently composed role stacks: core buyer registry configuration plus domain Compose and Helm manifests.
 - Service-owned persistence, provisioning migration init, and schema-drift rejection: registry Alembic tests, `provisioning/compute/service/tests/unit/test_database.py`, and `helm/charts/provisioning/templates/deployment.yaml`.
 - Wheel-directory dependency resolution without parent-path UV sources: package `pyproject.toml` files and package Makefiles using `--find-links`.
 - Extracted compute API/worker packaging and image lifecycle: `provisioning/compute/service/pyproject.toml`, `provisioning/compute/service/Dockerfile`, and its composition, worker, and image smoke tests.
+- Explicit contribution configuration and secret-free render surfaces: `domains/vms/storefront/tests/unit/test_config_loader.py`, `test_cli.py`, `helm/charts/storefront/templates/tests/storefront-environment-test.yaml`, and Helm schema fixtures.
+- Transactional legacy storefront migration, byte-stable refusal, restrictive backup, atomic replacement, and idempotency: `domains/vms/storefront/tests/unit/test_domain_migration.py`.
 
 Repository-wide migration entrypoints and compatibility-preserving non-additive registry rollout remain proposed in `add-database-migration-commands` and `migrate-registry-to-postgres`.
 

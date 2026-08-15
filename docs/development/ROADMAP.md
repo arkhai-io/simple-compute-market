@@ -75,27 +75,32 @@ Pricing is the binding constraint on negotiating the shape. Commercial resolutio
 
 **Value.** This decouples *how hardware is sold* from *how hardware is partitioned*. Today the listing form factor is a deployment boundary, so a site owner must physically dedicate hosts to VMs rather than bare metal rather than pods. Removing that lets one pool of hardware be offered concurrently as several form factors, priced independently, with the site authority arbitrating exclusivity between them — higher utilization and better price discovery without buying more hardware.
 
-**Current state.** The storefront-to-site direction is already one-to-many: a storefront aggregates several configured site clients, ranks them per request, routes each reservation to one authority, and persists the selected binding. A single provisioner can register VM and bare-metal adapters concurrently, and the site authority already resolves cross-mode conflicts over one physical resource. The buyer CLI already loads several market-domain contracts in one process, and the core carrier already validates a set of contracts and rejects duplicate identities.
+**Current state.** The common storefront shell now discovers installed domain
+contributions, applies explicit public registrations, and freezes an exact
+mode/domain/version registry. VM and bare-metal publication sources can share
+one process. Listings, negotiation threads, and fulfillment contexts carry
+immutable domain, offering-mode, selected-site, and provenance bindings;
+negotiation, settlement, fulfillment, result recovery, and teardown route from
+those records rather than payload guessing, installed order, or a VM default.
+Existing single-domain VM databases enter this schema only through the
+explicit, preview-first, backed-up transactional migration.
 
-The site-to-storefront direction remains **one-to-one**. A provisioning service still binds to one `storefront_url`, and the reverse channel's per-deal override for that URL exists in the event sink but no storefront populates it, so it always falls through to the global setting. Authentication no longer forces both directions to share one secret: each peer has its own Secret-backed signer, and exact scheme-tagged trust pins bind requests and signed responses. Making one site serve several storefronts therefore requires explicit topology and routing work, not another identity path.
+Resource Pools already declare exact deliverable offering modes. Capacity
+claims carry that mode through reservation, scheduling, and provider dispatch,
+and accepted records retain it when publication changes. The shared
+storefront-to-site clients pin mapped work to one trusted authority with no
+cross-site fallback. The registry catalogue can now receive the public
+`offer_resource.virtualization_type` projected from the frozen binding.
 
-The site models this correctly already. A capacity resource carries `publication_views` keyed by view identity — `bare_metal.v1`, `vm.ansible_pool_defaults.v1` — off one row per host identity, with a guard rejecting several capacity resources mapping to the same host. Each Resource Pool now declares the exact offering modes its provider/playbook/delegate configuration can deliver; missing declarations deliver nothing. Capacity claims carry the requested mode explicitly, and the shared declaration predicate is enforced independently at reservation, scheduling, and pre-provider dispatch. `Cross-mode physical accounting` remains a separate rule: even a pool authorizing both modes rejects a shareable VM slice and an exclusive bare-metal claim on the same host before executor work starts. One physical resource, several authorized form-factor projections, is how inventory is already represented.
-
-The VM and bare-metal storefronts now each validate one injected `MarketDomainContract` at their outermost composition root and pass that exact object through their application seams rather than resolving it from module scope. This removes the module-global resolution prerequisite while preserving one-domain behavior. No storefront table yet carries a domain discriminator, and no repository or route dispatches a row to one of several contracts.
-
-Existing provisioning data is migrated without an executor fallback. Provable legacy reservation, settlement, and job identities are backfilled; ambiguous or unproved active rows are quarantined, terminal lifecycle state is retained, and existing pools — including `default` — receive exact mode sets derived from durable provider configuration rather than reservation history.
-
-Discovery is closer than it looks. The registry's listing shape already constrains `virtualization_type` to `[bare_metal, vm, container]`, carries host-level fields alongside slice-level ones, and already exposes that field in its filter vocabulary — the catalogue is family-shaped. What is missing is that nothing publishes the field, the registry's declared identity names one domain (`vms.compute`), and bare metal has no buyer package at all.
-
-The direction is settled: several compute-family contracts hosted in one storefront process, rather than federating single-domain storefronts over one site. Federation would require several storefronts to share one site authority, and that relationship is one-to-one today. Both the bare-metal composition and the multi-domain topology proof recorded one-contract-per-process as a non-goal. Both are now reconciled: the first struck as a superseded scope fence, the second rewritten against current code — its topology is now one multi-domain storefront against two authorities, and its many-to-many storefront-to-authority axis was removed rather than deferred, since there are no plans to support it.
+Goal 3's shared storefront boundary is therefore implemented and promoted.
+Complete product acceptance still depends on the domain producers and topology
+proof below; the shell deliberately does not fake their missing behavior.
 
 | Open gap | Owned by |
 |---|---|
-| Storefront records carry no domain discriminator or per-record market-domain-contract selection, so one storefront cannot yet serve several market domains | [`multi-domain-storefront-composition`](../../openspec/changes/multi-domain-storefront-composition/) |
-| Bare metal has no buyer package, and no registry identity admits a bare-metal buyer | [`bare-metal-buyer-domain`](../../openspec/changes/bare-metal-buyer-domain/) |
-| Listings do not publish their offering mode, so the registry's form-factor filter matches nothing | [`publish-multidimensional-listing-shape`](../../openspec/changes/publish-multidimensional-listing-shape/) |
-| Bare metal has no runnable seller storefront composition; the trusted per-resource projection and selected-site fulfillment routing it needs are incomplete | [`market-platform-bare-metal-10-storefront-composition`](../../openspec/changes/market-platform-bare-metal-10-storefront-composition/) |
-| Selected-authority ownership, cross-mode rejection, and executor strictness have never been exercised together across more than one authority | [`market-platform-compute-40-multi-domain-proof`](../../openspec/changes/market-platform-compute-40-multi-domain-proof/) |
+| Bare metal has no runnable buyer package or admitted registry identity | [`bare-metal-buyer-domain`](../../openspec/changes/bare-metal-buyer-domain/) |
+| The bare-metal seller contribution still owes its real selected-site fulfillment/result/teardown hook | [`market-platform-bare-metal-10-storefront-composition`](../../openspec/changes/market-platform-bare-metal-10-storefront-composition/) |
+| One-process VM/bare-metal behavior across more than one authority needs live selected-authority, cross-mode, executor, teardown, and capacity-restoration evidence | [`market-platform-compute-40-multi-domain-proof`](../../openspec/changes/market-platform-compute-40-multi-domain-proof/) |
 
 ---
 

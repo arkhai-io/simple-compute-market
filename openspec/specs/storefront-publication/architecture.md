@@ -8,11 +8,22 @@ A storefront is the seller's market-facing authority. It composes domain codecs,
 
 The storefront may publish to multiple registries, but each publication remains derived from seller state and signed under the complete canonical publisher principal expected by that registry. The listing ID and storefront URL remain stable commercial subjects; changing an authorized credential does not manufacture a new listing or transfer ownership implicitly.
 
-## One selected domain per storefront process
+## Immutable domain-bound publication
 
-The VM storefront validates one immutable `compute.v1` contract at its application root and passes that exact object into persistence, publication, negotiation, settlement, fulfillment, routes, and workers. Repository rehydration uses the same codec authority that validated the original write; a lower layer cannot replace it through a singleton, optional default, payload-shape guess, or domain-name branch.
+The common storefront validates all explicitly configured contributions at its
+application root and freezes their exact contracts. Every derived listing is
+persisted with one common binding containing trusted site, mode, exact domain
+identity/version, source envelope, and collision-safe pool or Physical
+Resource provenance. Public `virtualization_type` is projected from this
+binding, not guessed from a listing payload. One pool may therefore produce
+distinct VM and bare-metal listings without creating competing domain-specific
+mapping authorities.
 
-This process-wide selection preserves existing single-domain state and does not add a domain column. Accepted Alkahest and hosted terms remain pinned by their existing settlement carriers and identifiers. Per-record domain ownership is a separate multi-domain composition responsibility.
+Publication runners are built from the configured registry once. Disabling a
+contribution removes its source and wait path; withdrawing a pool mode closes
+new listings for only that mode. Accepted records retain their binding.
+Mapped capacity traffic pins the selected site and never falls back to another
+authority on refusal or outage.
 
 ## Advisory publication, authoritative admission
 

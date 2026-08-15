@@ -275,6 +275,34 @@ site, storefront, and domain adapters for default arguments, `or` fallbacks,
 and attribute-based inference; a passing focused suite alone cannot prove their
 absence.
 
+## Multi-Domain Storefront Composition
+
+The common shell owns a boundary matrix rather than duplicating complete domain
+scenarios at every level:
+
+- core storefront unit tests cover contribution discovery, duplicate/unknown
+  rejection, exact-object registry resolution, immutable listing/thread
+  bindings, lifecycle carriers, publication fan-out, and schema-opaque result
+  dispatch;
+- VM storefront tests cover installed contribution wiring, exact public
+  `virtualization_type`, configured source selection, negotiation/settlement
+  adapters, selected-site capacity calls, restart recovery, and transactional
+  legacy migration;
+- bare-metal domain/storefront tests own only bare-metal codecs, publication
+  semantics, and the production lifecycle hook supplied by that package;
+- deployment tests render one combined image/command/database, both explicit
+  registrations, disabled-domain absence, and secret canary exclusion;
+- the system lane must observe a real VM deal and a real selected-site POOLS-7
+  bare-metal deal concurrently, including result, teardown, and restored
+  capacity. It remains blocked—not mocked—until the production bare-metal
+  contribution and its live provisioning prerequisites are installed.
+
+Every cross-swap test asserts the unselected policy, repository mutation,
+capacity/provider call, result decoder, and teardown spy remain untouched.
+Restart fixtures route from recorded bindings even when current publication
+configuration changes. Migration tests compare source bytes on failed check or
+write and prove the successful rerun idempotent.
+
 ## Marketplace Identity Verification
 
 Identity tests follow the same lowest-meaningful-level rule while exercising

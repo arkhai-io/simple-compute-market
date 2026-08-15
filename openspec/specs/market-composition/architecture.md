@@ -65,15 +65,26 @@ Composition roots register installed settlement mechanisms explicitly. Each regi
 
 Registration controls construction, not lifecycle ownership. A composition injects the marketplace signer, wallet, chains, or other shared resources only into mechanisms that declare them, then passes the resulting clients into the one settlement runtime. A fiat-only VM composition therefore starts without constructing EVM resources, while a dual-mechanism composition still shares obligation identity, journals, leases, retries, and aggregate status.
 
-## Storefront contract carriage
+## Frozen storefront registry and executable ownership
 
-A domain-owned storefront validates its contract once at the executable boundary, before constructing any stateful collaborator. That exact immutable object is carried through application state, lifespan/container state, repositories, services, routes, and workers. Identity comparison at composition seams catches accidentally reconstructed contracts even when two objects carry equal values.
+The compute-family storefront executable is core-owned, schema-opaque role
+machinery extended from below. Installed domain packages publish one
+`StorefrontDomainContribution` entry point. Public configuration selects an
+exact contribution/mode/domain/version set; startup validates it and freezes
+one registry before state or network effects. Each registry value retains the
+exact contract object plus its publication and legacy-migration hooks.
 
-Single-domain persistence intentionally does not duplicate the process-selected domain identity on every row. The VM executable therefore reopens existing rows under its validated `compute.v1` contract without migration. A future multi-domain root must add explicit record ownership and dispatch rather than infer a domain from payload shape or restore a module-global resolver.
+Application, persistence, publication, negotiation, settlement, fulfillment,
+recovery, result, and teardown layers receive that same registry. Durable
+bindings resolve only to their pre-registered exact objects. Domain payloads
+cross common lifecycle boundaries as immutable schema-opaque carriers and are
+validated only by the selected contract. The one-domain topology is the same
+composition with one explicit row, never a separate executable or default.
 
-## Executable ownership
-
-The buyer CLI and registry executable are core-owned because their control flow is schema-opaque and extended through domain entry points or configuration. Storefront executables remain domain-owned composition roots where domain adapters and seller policy are wired into shared storefront machinery. A package move does not alter these authority boundaries.
+The buyer CLI and registry executable remain core-owned for the same reason:
+their control flow is schema-opaque and extended through installed domain
+entry points or configuration. Domain packages retain market meaning, codecs,
+publication semantics, seller policy, and concrete fulfillment behavior.
 
 ## Identity composition
 

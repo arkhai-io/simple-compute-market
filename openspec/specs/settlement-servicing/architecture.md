@@ -108,6 +108,22 @@ Only the hosted authority's normalized `funded` result after the selected profil
 
 Reclaim uses the same opaque settlement and operation identity and never asks marketplace code to choose refund, return, reversal, or dispute behavior. A pre-collection return blocks collection; a post-fulfillment/pre-collection return preserves fulfillment attribution while domain teardown and hosted financial recovery converge independently. A post-collection loss becomes operator-required state rather than rewriting completed marketplace identities.
 
+## Accepted domain continuity
+
+The accepted negotiation binding is a second routing dimension beside the
+settlement mechanism. It selects the domain plan builder and schema-opaque
+fulfillment hook while the mechanism registry selects financial effects. Core
+carriers retain the accepted buyer, site, mode, domain payload, and public
+operation identity without provider configuration or credentials. Hooks return
+validated lifecycle projections, including a domain result that is decoded by
+only the selected contract.
+
+Fulfillment contexts persist the exact binding and site. Restart, result
+retrieval, failure handling, and teardown compare those values before any call;
+they do not consult current listings or payload kinds. Provisioning remains the
+executor authority and dispatches teardown from its durable executor kind, so
+the storefront never derives VM versus bare-metal teardown locally.
+
 ## Current limits
 
 Heartbeat evidence remains persisted but is not an automated adjudication

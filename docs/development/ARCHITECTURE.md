@@ -136,6 +136,34 @@ accepted runs recover under immutable ownership.
 
 See the [marketplace identity contract](../../openspec/specs/marketplace-identity/spec.md) and its [architecture](../../openspec/specs/marketplace-identity/architecture.md).
 
+### Multi-domain storefront composition
+
+The storefront role is one domain-neutral compute-family shell. At startup it
+discovers installed `market.storefront.contributions`, applies the operator's
+explicit `[storefront_domains]` selection, and freezes one registry. Each
+registration binds a contribution ID, pool offering mode, exact domain
+identity, contract version, and the exact validated `MarketDomainContract`.
+One-domain deployments use the identical registry with one entry; there is no
+singleton, module getter, installed-order fallback, or contract reconstruction.
+
+The common database owns immutable listing, negotiation-thread, and fulfillment
+bindings. They carry the selected site, mode, domain identity/version, and
+collision-safe provenance. Opening a thread inherits its listing binding before
+domain policy runs. Settlement and fulfillment receive schema-opaque,
+domain-neutral carriers containing the recorded binding and domain payload;
+result recovery validates with that same contract. Selected-site calls are
+pinned and never fan out. Removing a mode closes new publication but does not
+reinterpret accepted work.
+
+Legacy single-domain databases cross this boundary only through an explicit
+contribution migration adapter. Check mode validates the complete population.
+Write mode uses a restrictive backup and atomic replacement; ambiguity,
+orphaned provenance, cross-domain rows, or unsupported versions abort without
+partial state. The bare-metal contribution currently supplies codecs and
+publication semantics but not the production fulfillment hook, so complete
+one-process bare-metal servicing remains gated on its owning composition
+change; the shared shell does not substitute a no-op.
+
 ### Settlement configuration
 
 Marketplace roles configure peer settlement mechanisms through one typed `[Settlement]` root. Its duplicate-free `priority` list contains canonical mechanism IDs; registered `stripe` and `alkahest` subsections own their mechanism policy and public client inputs. Identity, wallet, and chains remain independent shared resources. Composition roots register installed mechanisms explicitly, inject only the signer or EVM resources each declares, and pass every resulting client into the single `market_settlement_runtime` lifecycle.

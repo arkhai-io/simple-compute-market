@@ -479,24 +479,33 @@ Migration MUST NOT guess units, synthesize partial clauses, or reinterpret
 - **WHEN** a proposed migration contains an unknown field, invalid rate, unsupported asset, or invalid mechanism-owned input
 - **THEN** migration fails before backup or mutation rather than persisting a partially validated document
 
-### Requirement: One startup-selected domain governs a storefront record
+### Requirement: Durable bindings govern multi-domain publication
 
-For a single-domain storefront process, the contract selected and validated at startup MUST be the sole authority for listing normalization, publication projection, negotiation messages and terms, accepted settlement-plan construction, fulfillment invocation, and repository rehydration. The role shell MUST fail before the relevant state transition or side effect when the selected contract lacks the required capability.
+Every storefront listing MUST have one immutable common mapping binding the listing ID, trusted site, explicit pool or Physical Resource provenance, offering mode, exact domain identity/version, collision-safe derivation identity, and public-safe versioned source envelope. Public `offer_resource.virtualization_type` MUST equal the recorded offering mode. Pricing, settlement clauses, and seller policy remain on the generic listing; secret, provider, credential, SSH, and private result material MUST NOT enter the binding or public offer.
 
-#### Scenario: Listing is created and republished
+#### Scenario: One pool exposes VM and bare-metal modes
 
-- **WHEN** the VM storefront accepts a listing and later reloads it for registry publication
-- **THEN** the injected contract validates and normalizes the persisted and public payload with no second domain lookup
+- **WHEN** a trusted pool declares both modes and both registered publication sources derive candidates
+- **THEN** the storefront creates distinct VM and bare-metal listing/binding identities even when their site-local source identifiers are equal
 
-#### Scenario: Negotiation and fulfillment execute
+#### Scenario: One declared mode is withdrawn
 
-- **WHEN** the storefront receives a provision envelope, constructs accepted settlement terms, and services the accepted obligation
-- **THEN** the same injected contract validates the message, builds the plan, and invokes fulfillment
+- **WHEN** the pool stops declaring one registered offering mode
+- **THEN** publication closes only new-work listings for that mode while sibling listings and accepted records retain their original bindings
 
-#### Scenario: Existing accepted state is reopened
+#### Scenario: Public mode conflicts with the contribution
 
-- **WHEN** an existing VM listing, negotiation, Alkahest obligation, settlement, fulfillment, or operation row is reopened after restart
-- **THEN** its identifier, public projection, settlement behavior, and side-effect ordering remain unchanged
+- **WHEN** a normalized domain listing projects a `virtualization_type` different from its registration or durable binding
+- **THEN** the listing and binding transaction fails before registry publication or capacity mutation
+
+### Requirement: Trusted listing mappings route to one site
+
+A listing with a durable site mapping MUST route all capacity claims to exactly that configured site and pinned authority. Refusal, outage, missing trust, or mode disagreement at that site MUST fail closed and MUST NOT fan out to another site.
+
+#### Scenario: Another site could satisfy the claim
+
+- **WHEN** the bound site refuses a listing claim while another configured site has compatible capacity
+- **THEN** the storefront reports the bound-site refusal and the other site receives zero calls
 
 ## Evidence
 
@@ -512,8 +521,9 @@ For a single-domain storefront process, the contract selected and validated at s
 - Resource-count diagnosis: `domains/vms/storefront/src/market_storefront/services/system_service.py` and `e2e-tests/tests/smoke/test_storefront_smoke.py`.
 - Site-scoped derivation keys and collision resistance (VM and bare-metal): `domains/vms/storefront/tests/unit/test_reconciler.py`, `domains/bare_metal/tests/test_publication.py`, and `domains/bare_metal/tests/test_storefront_publication.py`.
 - Site-pinned claim routing, including the collision case placement policy would otherwise choose wrongly: `core/storefront/tests/unit/test_aggregation.py`. Mapped-listing routing reached through the real admin, negotiation-hold, and settlement/fulfillment entry points: `domains/vms/storefront/tests/integration/test_admin_api.py`, `domains/vms/storefront/tests/unit/test_two_phase_reserve.py`, and `domains/vms/storefront/tests/unit/test_settlement_jobs.py`.
-- Domain-owned listing-mode resolution, bucket-sourced fungible candidates, multi-member specific-resource derivation, the resource-keyed derivation-key collision fix, and the live (never persisted) hold-preference cap: `domains/vms/storefront/tests/unit/test_reconciler.py`, `domains/vms/storefront/tests/unit/test_listing_mode.py`, `domains/vms/storefront/tests/unit/test_sync_negotiation_hold_cap.py`, and `domains/vms/storefront/tests/unit/test_remote_capacity_client.py`. VM is currently the only domain with a `listing_mode` resolver wired to a real publication consumer; another domain adds its own resolver and evidence line here once it gains a concrete consumer.
+- Domain-owned listing-mode resolution, bucket-sourced fungible candidates, multi-member specific-resource derivation, the resource-keyed derivation-key collision fix, and the live (never persisted) hold-preference cap: `domains/vms/storefront/tests/unit/test_reconciler.py`, `domains/vms/storefront/tests/unit/test_listing_mode.py`, `domains/vms/storefront/tests/unit/test_sync_negotiation_hold_cap.py`, `domains/vms/storefront/tests/unit/test_remote_capacity_client.py`, and `domains/bare_metal/storefront/tests/test_publication.py`.
 - Region/SLA hint resolution (including SLA's storefront-wide trust gate) and negotiation-floor pricing-policy precedence: `domains/vms/storefront/tests/unit/test_pool_descriptors.py`, `domains/vms/storefront/tests/unit/test_pricing_resolution.py`, `domains/vms/storefront/tests/unit/test_reconciler.py`, and `domains/vms/storefront/tests/unit/test_cli_publish_helpers.py::TestPoolHintResolutionSettings`.
 - Structured publication defaults/imports and preview-first, typed, backed-up atomic migration with ambiguity refusal: `domains/vms/storefront/tests/unit/test_config_loader.py`, `test_resource_csv_importer.py`, and `test_publication_migration.py`.
 
-Replacing the domain-owned storefront executables remains proposed work rather than baseline behavior. Bare metal currently supplies domain codecs and publication semantics but not a complete runnable storefront composition.
+- Common multi-domain listing bindings, collision-safe derivation, frozen publication sources, and exact public mode: `core/storefront/tests/unit/test_domain_binding_migrations.py`, `test_publication_runner.py`, `test_publication_plugins.py`, and `domains/vms/storefront/tests/unit/test_publication_wiring.py`.
+Complete runnable bare-metal servicing remains gated on its producer contribution; the common shell does not substitute a fulfillment hook.

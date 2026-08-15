@@ -193,19 +193,29 @@ The VM and API-credit plugins MUST run against the same selected-primary and ret
 - **WHEN** coordinated profile/run-log migration cannot validate or replace every candidate
 - **THEN** tests observe complete profile and run-log restoration, no partial activation, and an actionable unresolved-manifest failure
 
-### Requirement: Injected storefront contracts have boundary-owned evidence
+### Requirement: Multi-domain storefront selection has focused compatibility coverage
 
-Focused tests MUST prove that one caller-supplied compatible domain contract reaches the application, lifespan/container, repository, publication, negotiation, settlement, and fulfillment boundaries by identity, and that incompatible type, identity, version, declaration, or hook-set inputs fail before startup side effects. Existing package and integration tests MUST continue to own observable VM listing, negotiation, settlement, Alkahest, restart, and accepted-row parity.
+Deterministic focused tests MUST cover frozen registry validation, immutable listing/thread binding, publication mode enforcement, domain-envelope matching, selected-site routing, settlement/fulfillment contexts, migration, restart recovery, result decoding, and teardown under both VM and bare-metal contracts. Duplicate, missing, unknown, unsupported, mismatched, and cross-swapped modes/identities/versions MUST fail before an unselected policy, persistence mutation, capacity call, provider call, or decoder runs.
 
-#### Scenario: A distinct compatible contract is injected
+#### Scenario: One and two registrations use the same shell
 
-- **WHEN** a composition test supplies a compatible `compute.v1` contract object distinct from the ordinary default
-- **THEN** application state, dependencies, codecs, settlement, fulfillment, and repository assertions observe that exact object
+- **WHEN** focused composition runs with one explicit registration and with VM plus bare-metal registrations
+- **THEN** both use the same common routes, repository, publication runner, and lifecycle carriers without a singleton or domain-specific control-flow copy
 
-#### Scenario: Import-boundary evidence runs
+#### Scenario: Unknown binding is injected at a lifecycle boundary
 
-- **WHEN** architecture tests inspect production modules and installed package metadata
-- **THEN** they reject module-global contract access, concrete cross-domain imports, source-tree-only dependencies, and missing lower-layer contract declarations
+- **WHEN** publication, opening, continuation, settlement, fulfillment, result, recovery, or teardown receives an unknown or mismatched binding
+- **THEN** the owning boundary rejects it and its mutation/network spies remain untouched
+
+#### Scenario: Installed-artifact deployment is inspected
+
+- **WHEN** clean staged wheels render the combined image, Compose, and Helm configuration
+- **THEN** both enabled contributions are discoverable, disabled domains leave no wait/source path, and signer/provider/SSH/private-result canaries are absent from public artifacts
+
+#### Scenario: Full live proof is requested
+
+- **WHEN** the production bare-metal contribution or selected-site POOLS-7 lifecycle is unavailable
+- **THEN** the real multi-domain E2E remains explicitly blocked rather than recording fake publication, fulfillment, teardown, or capacity-restoration success
 
 ## Evidence
 
@@ -213,5 +223,7 @@ Focused tests MUST prove that one caller-supplied compatible domain contract rea
 - Cross-language API-credit protocol behavior: `middleware/conformance/session.json` and the Python, TypeScript, and Rust conformance runners.
 - Explicit staged dependencies: `e2e-tests/tests/e2e/roles/scenarios/vms/conftest.py`, scenario `require_state` calls, and `e2e-tests/tests/e2e/roles/README.md`.
 - Protected hosted system evidence: the canonical `hosted-stripe-test` target and workflow, their schema-validated sanitized report, and the exact ordinary hosted production release recorded by that report.
+- Frozen registry and lifecycle boundary matrix: `core/storefront/tests/unit/test_domain_registry.py`, `test_domain_plugins.py`, `test_domain_lifecycle.py`, `test_publication_plugins.py`, and `test_publication_runner.py`.
+- VM contribution, immutable bindings, migration, publication, settlement, and selected-site recovery adapters: `domains/vms/storefront/tests/unit/test_domain_registry.py`, `test_domain_thread_bindings.py`, `test_domain_migration.py`, `test_publication_wiring.py`, `test_settlement_composition.py`, and `test_fulfillment_resume_runtime.py`.
 
 Additive/optional client coexistence during a staged rollout is not established as a general baseline contract; registry rollout work remains proposed in `migrate-registry-to-postgres`.
