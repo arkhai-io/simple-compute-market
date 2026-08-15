@@ -48,7 +48,7 @@ services:
       - "${BARE_METAL_PROVISIONING_PORT:-8081}:8081"
     environment:
       - ACTIVE_PROFILES=docker
-      - DATABASE_URL=sqlite:////app/data/provisioning.db
+      - PROVISIONING_DATABASE_URL=sqlite:////app/data/provisioning.db
       - REDIS_URL=redis://bare-metal-redis:6379
       - PROVISIONING_STOREFRONT_URL=http://bare-metal-storefront:8000
       - PROVISIONING_INVENTORY_PATH=/run/config/bare-metal-hosts.ini
