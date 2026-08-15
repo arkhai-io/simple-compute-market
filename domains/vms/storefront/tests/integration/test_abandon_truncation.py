@@ -25,12 +25,12 @@ def db(tmp_path):
 
 @pytest.mark.asyncio
 async def test_truncates_the_ledger_lease_to_now(db):
-    fake = FakeSite()
+    fake = FakeSite(deliverable_modes={"vm"})
     fake.add_resource("res-trunc", 2, attributes={"vm_host": "kvm1"})
 
     with site_capacity(fake) as capacity:
         reserved = await capacity.reserve(
-            claim={},
+            claim={"executor_kind": "vm"},
             deal_ref={"escrow_uid": "0xabandoned"},
         )
         await capacity.commit(
@@ -54,7 +54,7 @@ async def test_truncates_the_ledger_lease_to_now(db):
 
 @pytest.mark.asyncio
 async def test_no_live_reservation_is_a_quiet_noop(db):
-    with site_capacity(FakeSite()):
+    with site_capacity(FakeSite(deliverable_modes={"vm"})):
         assert (
             await truncate_lease_for_terminal_settlement(
                 sqlite_client=db,

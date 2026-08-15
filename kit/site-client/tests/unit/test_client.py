@@ -33,7 +33,11 @@ def signer_pair(request: pytest.FixtureRequest) -> tuple[Signer, Signer]:
 @pytest.fixture
 def site(signer_pair: tuple[Signer, Signer]) -> FakeSite:
     caller, authority = signer_pair
-    fake = FakeSite(caller=caller, authority=authority)
+    fake = FakeSite(
+        caller=caller,
+        authority=authority,
+        deliverable_modes={"vm"},
+    )
     fake.add_resource(
         "compute-kvm1-001",
         8,
@@ -91,11 +95,17 @@ async def test_every_public_async_method_uses_the_exact_route_contract(
     assert (await capacity_client.resource_pool_projection())["resource_pools"] == []
     assert (await capacity_client.capacity_bucket_projection_version())["revision"] == 1
     assert (await capacity_client.capacity_bucket_projection())["capacity_buckets"] == []
-    assert await capacity_client.probe(claim={"gpu_model": "A100"}) is None
-    assert (await capacity_client.probe(claim={"gpu_model": "H200"}))["vm_host"] == "kvm1"
+    assert await capacity_client.probe(
+        claim={"executor_kind": "vm", "gpu_model": "A100"}
+    ) is None
+    assert (
+        await capacity_client.probe(
+            claim={"executor_kind": "vm", "gpu_model": "H200"}
+        )
+    )["vm_host"] == "kvm1"
 
     reserved = await capacity_client.reserve(
-        claim={"gpu_count": 3},
+        claim={"executor_kind": "vm", "gpu_count": 3},
         deal_ref={"escrow_uid": "0xesc"},
         request_id="reserve",
     )
@@ -187,14 +197,14 @@ async def test_later_exact_retry_refreshes_signature_without_redispatch(
     clock = [int(time.time())]
     monkeypatch.setattr("market_site_client.client.time.time", lambda: clock[0])
     first = await capacity_client.reserve(
-        claim={"gpu_count": 1},
+        claim={"executor_kind": "vm", "gpu_count": 1},
         deal_ref={"escrow_uid": "exact"},
         request_id="stable-request",
     )
     dispatches = site.dispatch_count
     clock[0] += 1
     second = await capacity_client.reserve(
-        claim={"gpu_count": 1},
+        claim={"executor_kind": "vm", "gpu_count": 1},
         deal_ref={"escrow_uid": "exact"},
         request_id="stable-request",
     )
@@ -210,11 +220,17 @@ async def test_later_exact_retry_refreshes_signature_without_redispatch(
 async def test_changed_local_request_id_reuse_fails_before_transport(
     capacity_client: SiteCapacityClient, site: FakeSite
 ) -> None:
-    await capacity_client.probe(claim={"gpu_count": 1}, request_id="fixed")
+    await capacity_client.probe(
+        claim={"executor_kind": "vm", "gpu_count": 1},
+        request_id="fixed",
+    )
     sent = len(site.seen_requests)
 
     with pytest.raises(ValueError, match="changed request content"):
-        await capacity_client.probe(claim={"gpu_count": 2}, request_id="fixed")
+        await capacity_client.probe(
+            claim={"executor_kind": "vm", "gpu_count": 2},
+            request_id="fixed",
+        )
 
     assert len(site.seen_requests) == sent
 
@@ -236,10 +252,16 @@ async def test_changed_reuse_from_an_independent_client_gets_verified_conflict(
         TrustedIdentitySet(identities=(authority.identity,)),
         transport=site.transport(),
     )
-    await first.probe(claim={"gpu_count": 1}, request_id="shared")
+    await first.probe(
+        claim={"executor_kind": "vm", "gpu_count": 1},
+        request_id="shared",
+    )
 
     with pytest.raises(SiteCapacityClientError) as excinfo:
-        await second.probe(claim={"gpu_count": 2}, request_id="shared")
+        await second.probe(
+            claim={"executor_kind": "vm", "gpu_count": 2},
+            request_id="shared",
+        )
 
     assert excinfo.value.status_code == 409
     assert site.seen_requests[-1]["verification"] == VerificationCode.CHANGED_REUSE
@@ -252,7 +274,8 @@ async def test_request_body_mutation_is_rejected_but_signed_error_is_accepted(
     site.mutate_next_request_body = True
     with pytest.raises(SiteCapacityClientError) as excinfo:
         await capacity_client.reserve(
-            claim={"gpu_count": 1}, request_id="mutated-request"
+            claim={"executor_kind": "vm", "gpu_count": 1},
+            request_id="mutated-request",
         )
 
     assert excinfo.value.status_code == 403
@@ -367,7 +390,11 @@ async def test_missing_or_unknown_response_protocol_is_rejected(
 async def test_ed25519_client_construction_needs_no_wallet_or_chain_configuration() -> None:
     caller = Ed25519Signer(b"\x44" * 32)
     authority = Ed25519Signer(b"\x55" * 32)
-    site = FakeSite(caller=caller, authority=authority)
+    site = FakeSite(
+        caller=caller,
+        authority=authority,
+        deliverable_modes={"vm"},
+    )
     site.add_resource("ed-resource", 1)
     client = SiteCapacityClient(
         "http://site-authority:8081",

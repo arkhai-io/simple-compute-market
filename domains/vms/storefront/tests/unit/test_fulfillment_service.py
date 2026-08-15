@@ -136,7 +136,7 @@ async def test_fulfill_compute_obligation_reports_error_when_onchain_fulfillment
             return registration
 
     await _seed_compute_pool(client)
-    fake = FakeSite()
+    fake = FakeSite(deliverable_modes={"vm"})
     fake.add_resource(
         "pool-h200-1", 1,
         attributes={"gpu_model": "H200", "region": "California, US", "vm_host": "host-1"},
@@ -213,7 +213,7 @@ async def test_reservation_closes_oversized_dynamic_listings(client, monkeypatch
         },
     )
     await _seed_compute_listings(client, max_gpu_count=4)
-    fake = FakeSite()
+    fake = FakeSite(deliverable_modes={"vm"})
     fake.add_resource(
         "pool-h200-1", 4,
         attributes={"gpu_model": "H200", "region": "California, US", "vm_host": "host-1"},
@@ -378,7 +378,7 @@ async def test_do_provision_end_to_end_delivers_credentials_for_storage(
         escrow_uid="escrow-e2e-1", negotiation_id="neg-e2e-1",
         chain_name="anvil", escrow_address="0x" + "11" * 20,
     )
-    fake = FakeSite()
+    fake = FakeSite(deliverable_modes={"vm"})
     fake.add_resource(
         "pool-h200-1", 1,
         attributes={"gpu_model": "H200", "region": "California, US", "vm_host": "host-1"},
@@ -514,7 +514,7 @@ async def test_do_provision_result_fetch_is_safe_to_repeat(client, monkeypatch):
         escrow_uid="escrow-dup-1", negotiation_id="neg-dup-1",
         chain_name="anvil", escrow_address="0x" + "11" * 20,
     )
-    fake = FakeSite()
+    fake = FakeSite(deliverable_modes={"vm"})
     fake.add_resource(
         "pool-h200-1", 1,
         attributes={"gpu_model": "H200", "region": "California, US", "vm_host": "host-1"},

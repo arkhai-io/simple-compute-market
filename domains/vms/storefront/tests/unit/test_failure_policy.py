@@ -21,7 +21,7 @@ async def test_failure_policy_releases_capacity_and_runs_webhook(tmp_path, monke
     from tests.fake_site import FakeSite, site_capacity
 
     db = SQLiteClient(db_path=str(tmp_path / "failure-policy.db"))
-    fake = FakeSite()
+    fake = FakeSite(deliverable_modes={"vm"})
     fake.add_resource(
         "gpu-host-1",
         2,
@@ -43,7 +43,11 @@ async def test_failure_policy_releases_capacity_and_runs_webhook(tmp_path, monke
 
     with site_capacity(fake) as capacity:
         reserved = await capacity.reserve(
-            claim={"resource_id": "gpu-host-1", "gpu_count": 1},
+            claim={
+                "executor_kind": "vm",
+                "resource_id": "gpu-host-1",
+                "gpu_count": 1,
+            },
             deal_ref={"listing_id": "listing-1x", "escrow_uid": "escrow-1"},
         )
         assert reserved is not None

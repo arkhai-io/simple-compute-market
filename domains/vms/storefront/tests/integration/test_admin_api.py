@@ -464,7 +464,7 @@ async def _seed_dynamic_listing_pool_rows(
 def _fake_pool_site():
     from tests.fake_site import FakeSite
 
-    fake = FakeSite()
+    fake = FakeSite(deliverable_modes={"vm"})
     fake.add_resource(
         "pool-h200-1", 4,
         attributes={
@@ -478,7 +478,11 @@ def _fake_pool_site():
 
 async def _ledger_hold(capacity, *, gpu_count: int = 2) -> str:
     reserved = await capacity.reserve(
-        claim={"resource_id": "pool-h200-1", "gpu_count": gpu_count},
+        claim={
+            "executor_kind": "vm",
+            "resource_id": "pool-h200-1",
+            "gpu_count": gpu_count,
+        },
         deal_ref={"listing_id": "listing-2x", "escrow_uid": "escrow-2x"},
     )
     assert reserved is not None
@@ -579,7 +583,7 @@ class TestFulfillmentEvents:
 
         c, db = client
         # The live site genuinely has zero capacity for this resource.
-        fake = FakeSite()
+        fake = FakeSite(deliverable_modes={"vm"})
         fake.add_resource(
             "pool-h200-1", 0,
             attributes={"gpu_model": "H200", "vm_host": "host-1"},
@@ -902,7 +906,7 @@ class TestFulfillmentEvents:
         """The watchdog usually released first; a second capacity-released
         for the same (or an unknown) reservation must land cleanly."""
         from tests.fake_site import FakeSite, site_capacity
-        with site_capacity(FakeSite()):
+        with site_capacity(FakeSite(deliverable_modes={"vm"})):
             response = await service_client.notify_capacity_released(
                 "ledger-only-alloc",
                 site_id="default",

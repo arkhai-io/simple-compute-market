@@ -31,7 +31,7 @@ from tests.fake_site import (
 
 @pytest.fixture
 def site() -> FakeSite:
-    fake = FakeSite()
+    fake = FakeSite(deliverable_modes={"vm"})
     fake.add_resource(
         "compute-kvm1-001",
         8,
@@ -118,7 +118,10 @@ def _reset_aggregate_cache():
 async def test_member_availability_view_reflects_consumption(
     client: cc.SiteCapacityClient,
 ):
-    await client.reserve(claim={"gpu_count": 3}, deal_ref={})
+    await client.reserve(
+        claim={"executor_kind": "vm", "gpu_count": 3},
+        deal_ref={},
+    )
     view = await cc.member_availability_view(client)
     assert view[(None, "compute-kvm1-001")] == 5
     assert view[("default", "compute-kvm1-001")] == 5
@@ -211,9 +214,9 @@ async def test_most_available_ranks_by_legacy_gpu_count_claim_through_the_real_a
     non-dimensional claim shape -- correctly through the full snapshot ->
     placement -> probe path, using real FakeSite-backed HTTP transports,
     not by inspecting functools.partial keywords in isolation."""
-    small_site = FakeSite()
+    small_site = FakeSite(deliverable_modes={"vm"})
     small_site.add_resource("small-res", 2, attributes={"gpu_model": "H200"})
-    big_site = FakeSite()
+    big_site = FakeSite(deliverable_modes={"vm"})
     big_site.add_resource("big-res", 10, attributes={"gpu_model": "H200"})
 
     with patch(
@@ -239,7 +242,7 @@ async def test_most_available_ranks_by_legacy_gpu_count_claim_through_the_real_a
         transport=big_site.transport(),
     )
 
-    match = await built.probe(claim={"gpu_count": 2})
+    match = await built.probe(claim={"executor_kind": "vm", "gpu_count": 2})
 
     assert match is not None
     assert match["resource_id"] == "big-res"
@@ -251,9 +254,9 @@ async def test_most_available_excludes_a_resource_type_mismatch_through_the_real
     match/mismatch coverage: a claim naming a resource_type no available
     resource actually has must not select any site, even one reporting
     abundant available_units."""
-    wrong_type_site = FakeSite()
+    wrong_type_site = FakeSite(deliverable_modes={"vm"})
     wrong_type_site.add_resource("cpu-only-res", 20, attributes={"gpu_model": "H200"})
-    right_type_site = FakeSite()
+    right_type_site = FakeSite(deliverable_modes={"vm"})
     right_type_site.add_resource("gpu-res", 1, attributes={"gpu_model": "H200"})
 
     with patch(
@@ -277,7 +280,13 @@ async def test_most_available_excludes_a_resource_type_mismatch_through_the_real
         transport=right_type_site.transport(),
     )
 
-    match = await built.probe(claim={"resource_type": "compute.cpu", "gpu_count": 1})
+    match = await built.probe(
+        claim={
+            "executor_kind": "vm",
+            "resource_type": "compute.cpu",
+            "gpu_count": 1,
+        }
+    )
 
     # FakeSite always reports "compute.gpu" (see its snapshot handler) --
     # neither site actually satisfies a compute.cpu claim, so this proves
@@ -318,7 +327,10 @@ async def test_subscriber_closes_and_reopens_with_site_availability(
         lambda: SimpleNamespace(db_path="/tmp/x.db"),
         client,
     )
-    await client.reserve(claim={"gpu_count": 2}, deal_ref={})
+    await client.reserve(
+        claim={"executor_kind": "vm", "gpu_count": 2},
+        deal_ref={},
+    )
     with (
         patch(
             "market_storefront.services.publication_service."

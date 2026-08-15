@@ -155,7 +155,7 @@ async def client(db):
     # in-memory ledger with a matching resource.
     from tests.fake_site import FakeSite, site_capacity
 
-    fake_site = FakeSite()
+    fake_site = FakeSite(deliverable_modes={"vm"})
     fake_site.add_resource(
         "res-fake-site",
         8,
