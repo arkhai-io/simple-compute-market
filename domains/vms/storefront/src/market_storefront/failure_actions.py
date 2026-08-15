@@ -290,6 +290,7 @@ async def _release_capacity(
         capacity_reservation_id=str(ctx.capacity_reservation_id or ""),
         deal_ref={"escrow_uid": ctx.escrow_uid} if ctx.escrow_uid else None,
         failure_reason=ctx.reason,
+        failure_message=ctx.message,
     )
     if reservation is not None:
         result.capacity_reservation_id = reservation.get("capacity_reservation_id")

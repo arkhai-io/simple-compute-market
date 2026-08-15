@@ -246,8 +246,15 @@ class AdminController:
 
         truncated: dict[str, Any] | None = None
         if not body.dry_run:
-            capacity = self._capacity()
+            from market_storefront.services.capacity_client import (
+                build_capacity_runtime,
+                capacity_binding_for_listing,
+            )
+
+            binding = await capacity_binding_for_listing(self._db, listing_id)
+            capacity = build_capacity_runtime(lambda: self._db)
             truncated = await capacity.truncate_lease(
+                binding,
                 capacity_reservation_id=capacity_reservation_id,
                 lease_end_utc=interrupted_at,
             )

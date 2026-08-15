@@ -267,6 +267,7 @@ class CapacityRuntime:
         capacity_reservation_id: str,
         deal_ref: Mapping[str, Any] | None = None,
         failure_reason: str | None = None,
+        failure_message: str | None = None,
     ) -> dict[str, Any] | None:
         """Release directly at the recorded site, without discovery fan-out."""
         binding = self.require_binding(binding)
@@ -274,10 +275,30 @@ class CapacityRuntime:
             capacity_reservation_id=capacity_reservation_id,
             deal_ref=deal_ref,
             failure_reason=failure_reason,
+            failure_message=failure_message,
         )
         if released is None:
             return None
         out = dict(released)
+        out["site"] = binding.site_id
+        return out
+
+    async def truncate_lease(
+        self,
+        binding: CapacityBinding,
+        *,
+        capacity_reservation_id: str,
+        lease_end_utc: str,
+    ) -> dict[str, Any] | None:
+        """Truncate only at the durable site binding."""
+        binding = self.require_binding(binding)
+        truncated = await self.site_client(binding.site_id).truncate_lease(
+            capacity_reservation_id=capacity_reservation_id,
+            lease_end_utc=lease_end_utc,
+        )
+        if truncated is None:
+            return None
+        out = dict(truncated)
         out["site"] = binding.site_id
         return out
 
