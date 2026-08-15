@@ -28,10 +28,10 @@ from core_storefront.app_lifecycle import (
     StorefrontLifecycleCallbacks,
     build_storefront_lifespan,
 )
+from core_storefront.domain_registry import StorefrontDomainRegistry
 from core_storefront.services.negotiation_service import NegotiationService
 from core_storefront.stage_log import set_stage_event_db_path, stage_event
 from market_core import MarketDomainContract
-from core_storefront.domain_registry import StorefrontDomainRegistry
 
 import market_storefront.container as _container
 from market_storefront.domain_runtime import (
