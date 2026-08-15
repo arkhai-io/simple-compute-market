@@ -47,6 +47,7 @@ from .site_clients import (
 from .settlement_composition import (
     ALKAHEST_MECHANISM,
     BareMetalStorefrontSettlementComposition,
+    default_hosted_selection_dispatch,
 )
 
 
@@ -143,6 +144,11 @@ class BareMetalStorefrontRuntime:
             seller_principal=self.seller_principal,
             round_hook=default_seller_round_hook(),
             build_plan=self.plan_builder,
+            accepted_obligation_dispatch=(
+                self.settlement_composition.accepted_obligation_dispatch()
+                if self.settlement_composition is not None
+                else default_hosted_selection_dispatch()
+            ),
         )
 
     def settlement_service(self) -> BareMetalSettlementService:

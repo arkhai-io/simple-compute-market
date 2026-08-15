@@ -336,6 +336,7 @@ name = "arkhai-kit-hosted-settlement"
 version = "0.1.1"
 source = { registry = "../../../.dist" }
 dependencies = [
+    { name = "arkhai-core" },
     { name = "arkhai-hosted-settlement-client" },
     { name = "arkhai-kit-identity" },
     { name = "arkhai-kit-settlement-runtime" },

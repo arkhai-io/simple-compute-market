@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import datetime
 from types import MappingProxyType
@@ -15,7 +15,10 @@ from arkhai_bare_metal import (
 from core_storefront.publication_runner import PublicationPayload
 from market_alkahest import create_alkahest_registration
 from market_core.schemas import SettlementOption
-from market_hosted_settlement import create_stripe_registration
+from market_hosted_settlement import (
+    StripeSettlementConfig,
+    create_stripe_registration,
+)
 from market_settlement_runtime import (
     MechanismReadiness,
     SettlementConfig,
@@ -183,10 +186,64 @@ class BareMetalStorefrontSettlementComposition:
             resources=self.resources,
         )
 
+    def accepted_obligation_dispatch(
+        self,
+    ) -> dict[str, Callable[[Mapping[str, Any], Mapping[str, Any]], Any]]:
+        """Curried registry dispatch for every enabled obligation-building mechanism."""
+
+        dispatch: dict[str, Callable[[Mapping[str, Any], Mapping[str, Any]], Any]] = {}
+        for mechanism_id in self.config.priority:
+            registration = self.registry.registration(mechanism_id)
+            if registration.accepted_obligation_builder is None:
+                continue
+
+            def build(
+                option: Mapping[str, Any],
+                context: Mapping[str, Any],
+                *,
+                _mechanism_id: str = mechanism_id,
+            ) -> Any:
+                return self.registry.build_accepted_obligation(
+                    _mechanism_id,
+                    option,
+                    self.config,
+                    role="seller",
+                    context=context,
+                )
+
+            dispatch[mechanism_id] = build
+        return dispatch
+
+
+def default_hosted_selection_dispatch() -> dict[
+    str, Callable[[Mapping[str, Any], Mapping[str, Any]], Any]
+]:
+    """Hosted-only dispatch for runtimes composed without settlement config.
+
+    Selection acceptance works from listing data alone, so a legacy
+    deployment keeps accepting hosted selections exactly as before; the
+    validation-only section carries no deployment state.
+    """
+
+    registry = SettlementConfigurationRegistry((create_stripe_registration(),))
+    config = SettlementConfig(mechanisms={"stripe": StripeSettlementConfig()})
+
+    def build(option: Mapping[str, Any], context: Mapping[str, Any]) -> Any:
+        return registry.build_accepted_obligation(
+            HOSTED_MECHANISM,
+            option,
+            config,
+            role="seller",
+            context=context,
+        )
+
+    return {HOSTED_MECHANISM: build}
+
 
 __all__ = [
     "ALKAHEST_MECHANISM",
     "HOSTED_MECHANISM",
     "BareMetalStorefrontSettlementComposition",
     "build_bare_metal_settlement_registry",
+    "default_hosted_selection_dispatch",
 ]
