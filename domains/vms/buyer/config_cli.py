@@ -39,6 +39,40 @@ def _validate_settlement_candidate(
     registry.resolve(document.get("Settlement", {}), role=role)
 
 
+_REMOVED_IDENTITY_ROOTS = {
+    "identity",
+    "identity_credential",
+    "buyer_private_key",
+    "marketplace_private_key",
+    "marketplace_seed",
+    "marketplace_mnemonic",
+}
+
+
+def _reject_removed_identity_document(document: Mapping[str, Any]) -> None:
+    present = sorted(
+        str(key)
+        for key in document
+        if str(key).casefold() in _REMOVED_IDENTITY_ROOTS
+    )
+    if present:
+        raise typer.BadParameter(
+            "direct buyer identity fields are import-only: "
+            + ", ".join(present)
+            + "; run `market profile import --check`, import explicitly, "
+            "then remove them"
+        )
+
+
+def _reject_removed_identity_path(path: str) -> None:
+    root = path.partition(".")[0].casefold()
+    if root in _REMOVED_IDENTITY_ROOTS:
+        raise typer.BadParameter(
+            f"{path!r} is import-only; run `market profile import --check` "
+            "and remove the legacy field"
+        )
+
+
 @config_app.command("path")
 def config_path() -> None:
     """Print the path of the buyer.toml (whether or not it exists)."""
@@ -64,11 +98,12 @@ def config_show(
     if not p.exists():
         typer.secho(f"No user config at {p}.", fg=typer.colors.YELLOW)
         raise typer.Exit(1)
+    document = load_user_config(p)
+    _reject_removed_identity_document(document)
     if raw:
         typer.echo(p.read_text())
         return
-    cfg = load_user_config(p)
-    typer.echo(json.dumps(cfg, indent=2, sort_keys=True))
+    typer.echo(json.dumps(document, indent=2, sort_keys=True))
 
 
 @config_app.command("set")
@@ -84,6 +119,7 @@ def config_set(
     float-looking strings → float, otherwise left as strings. Use quotes around
     strings that look numeric if you want to keep them as text.
     """
+    _reject_removed_identity_path(key)
     try:
         reject_legacy_settlement_path(key, command=BUYER_MIGRATION_COMMAND)
     except SettlementMigrationError as exc:
@@ -147,10 +183,23 @@ def config_migrate(
         help="Create the required same-directory backup in write mode.",
     ),
 ) -> None:
-    """Migrate a legacy buyer configuration through an explicit clean cutover."""
+    """Migrate settlement config; buyer identity uses explicit profile import."""
 
+    if scope == "identity":
+        typer.secho(
+            "Identity migration is explicit: run `market profile import --check "
+            "<buyer.toml> --name <name> --provider <kind> --reference <locator>`, "
+            "then repeat without --check and remove [Identity].",
+            err=True,
+            fg=typer.colors.YELLOW,
+        )
+        raise typer.Exit(2)
     if scope != "settlement":
-        typer.secho("Only --scope settlement is supported.", err=True, fg=typer.colors.RED)
+        typer.secho(
+            "Only --scope settlement or identity is supported.",
+            err=True,
+            fg=typer.colors.RED,
+        )
         raise typer.Exit(2)
     try:
         result = migrate_settlement_config(
@@ -171,13 +220,15 @@ def config_migrate(
 
 _INIT_USER_TEMPLATE = """\
 # arkhai buyer config — see `market config path` for this file's location
-# Public marketplace identity is required. Signing material is never written
-# here: inject it through the ARKHAI_IDENTITY_CREDENTIAL secret environment
-# variable. Hosted-fiat Ed25519 operation needs no EVM wallet or chain tables.
-
-[Identity]
-# scheme = "ed25519"
-# identifier = "<unpadded-base64url-public-key>"
+# Marketplace signing identity comes only from the selected durable buyer
+# profile. Metadata defaults to $XDG_DATA_HOME/arkhai/buyer/profiles.json;
+# credentials remain in the exact keyring.v1, secret_file.v1, or
+# environment.v1 provider recorded by `market profile create|import`.
+# Run `market profile --help`; direct [Identity], raw seed, mnemonic, and
+# ARKHAI_IDENTITY_CREDENTIAL inputs are rejected rather than used as fallback.
+#
+# [BuyerProfile]
+# store_path = "/absolute/override/profiles.json"  # optional; XDG is preferred
 
 
 [provisioning]

@@ -25,11 +25,8 @@ from core_buyer.orchestrator import (
     fetch_listing_dict_multi,
     query_registry_for_matches_multi,
 )
-from core_buyer.buyer_config import (
-    resolve_buyer_signer,
-    resolve_identity_config,
-    resolve_identity_credential,
-)
+from core_buyer.buyer_config import resolve_fresh_buyer_identity
+from core_buyer.profile_service import BuyerProfileService
 from core_buyer.plugins import discover_domains
 from core_buyer.registry_config import (
     resolve_discovery_timeout,
@@ -38,19 +35,21 @@ from core_buyer.registry_config import (
     resolve_registry_authorities,
 )
 from market_core import MarketDomainContract, validate_domain_contracts
+from market_identity import (
+    CredentialProviderKind,
+    CredentialReference,
+    Identity,
+    IdentityScheme,
+)
 
 if TYPE_CHECKING:
     from market_policy.buyer_policy import BuyerPolicy
 
 
 def _registry_identity_context(registry_urls: list[str]):
-    identity_config = resolve_identity_config()
-    signer = resolve_buyer_signer(
-        identity_config,
-        resolve_identity_credential(),
-    )
+    resolved = resolve_fresh_buyer_identity()
     return (
-        signer,
+        resolved.signer,
         resolve_registry_authorities(registry_urls),
         resolve_registry_api_keys(),
     )
@@ -150,6 +149,237 @@ def register_policy_verb(
     from market_policy.buyer_policy import inject_policy_cli_params
 
     app.command(name)(inject_policy_cli_params(fn, policy))
+
+
+def _credential_reference(provider: str, locator: str) -> CredentialReference:
+    try:
+        return CredentialReference(
+            provider=CredentialProviderKind(provider),
+            locator=locator,
+        )
+    except (TypeError, ValueError) as exc:
+        raise typer.BadParameter(
+            "provider/reference must identify keyring.v1, secret_file.v1, "
+            "or environment.v1 exactly"
+        ) from exc
+
+
+def _canonical_principal(value: str) -> Identity:
+    scheme, separator, identifier = value.partition(":")
+    if not separator or not identifier:
+        raise typer.BadParameter("principal must be scheme:identifier")
+    try:
+        return Identity(scheme=IdentityScheme(scheme), identifier=identifier)
+    except (TypeError, ValueError) as exc:
+        raise typer.BadParameter("principal is not canonical") from exc
+
+
+def _emit_profile(value: Any, *, json_output: bool) -> None:
+    if json_output:
+        typer.echo(json.dumps(value, sort_keys=True, separators=(",", ":")))
+        return
+    typer.echo(json.dumps(value, indent=2, sort_keys=True))
+
+
+def _profile_service() -> BuyerProfileService:
+    return BuyerProfileService()
+
+
+def _build_profile_app() -> typer.Typer:
+    profile_app = typer.Typer(no_args_is_help=True)
+
+    @profile_app.command("create")
+    def profile_create(
+        name: str = typer.Argument(..., help="Unique local profile name."),
+        provider: str = typer.Option(..., "--provider", help="Exact provider kind."),
+        reference: str = typer.Option(
+            ...,
+            "--reference",
+            help="Provider-owned locator; never the secret value.",
+        ),
+        scheme: str = typer.Option("ed25519", "--scheme"),
+        generate: bool = typer.Option(
+            False,
+            "--generate",
+            help="Generate a new Ed25519 seed through the selected provider.",
+        ),
+        select: bool = typer.Option(
+            False,
+            "--select",
+            help="Select this profile for fresh runs (the first is selected automatically).",
+        ),
+        json_output: bool = typer.Option(False, "--json"),
+    ) -> None:
+        """Create a durable profile from one exact credential reference."""
+
+        try:
+            result = _profile_service().create(
+                name=name,
+                credential_reference=_credential_reference(provider, reference),
+                scheme=IdentityScheme(scheme),
+                generate=generate,
+                select=True if select else None,
+            )
+        except Exception as exc:
+            typer.secho(str(exc), err=True, fg=typer.colors.RED)
+            raise typer.Exit(2) from exc
+        _emit_profile(result.redacted(), json_output=json_output)
+
+    @profile_app.command("import")
+    def profile_import(
+        source: Path = typer.Argument(
+            ...,
+            exists=True,
+            dir_okay=False,
+            readable=True,
+            resolve_path=True,
+            help="Legacy buyer TOML containing exactly [Identity].",
+        ),
+        name: str = typer.Option(..., "--name"),
+        provider: str = typer.Option(..., "--provider"),
+        reference: str = typer.Option(..., "--reference"),
+        check: bool = typer.Option(
+            False,
+            "--check",
+            help="Validate and preview without writing profile metadata.",
+        ),
+        select: bool = typer.Option(False, "--select"),
+        json_output: bool = typer.Option(False, "--json"),
+    ) -> None:
+        """Explicitly preview or import one legacy public buyer identity."""
+
+        try:
+            result = _profile_service().import_legacy(
+                source=source,
+                name=name,
+                credential_reference=_credential_reference(provider, reference),
+                check=check,
+                select=True if select else None,
+            )
+        except Exception as exc:
+            typer.secho(str(exc), err=True, fg=typer.colors.RED)
+            raise typer.Exit(2) from exc
+        _emit_profile(result.redacted(), json_output=json_output)
+
+    @profile_app.command("list")
+    def profile_list(
+        json_output: bool = typer.Option(False, "--json"),
+    ) -> None:
+        """List public profile metadata and redacted credential references."""
+
+        try:
+            profiles = _profile_service().list_profiles()
+        except Exception as exc:
+            typer.secho(str(exc), err=True, fg=typer.colors.RED)
+            raise typer.Exit(2) from exc
+        _emit_profile(list(profiles), json_output=json_output)
+
+    @profile_app.command("show")
+    def profile_show(
+        profile: str = typer.Argument(..., help="Profile UUID or name."),
+        json_output: bool = typer.Option(False, "--json"),
+    ) -> None:
+        """Show one profile without resolving or displaying its credential."""
+
+        try:
+            value = _profile_service().show(profile)
+        except Exception as exc:
+            typer.secho(str(exc), err=True, fg=typer.colors.RED)
+            raise typer.Exit(2) from exc
+        _emit_profile(value, json_output=json_output)
+
+    @profile_app.command("select")
+    def profile_select(
+        profile: str = typer.Argument(..., help="Profile UUID or name."),
+        json_output: bool = typer.Option(False, "--json"),
+    ) -> None:
+        """Select one active profile for subsequent fresh runs."""
+
+        try:
+            value = _profile_service().select(profile)
+        except Exception as exc:
+            typer.secho(str(exc), err=True, fg=typer.colors.RED)
+            raise typer.Exit(2) from exc
+        _emit_profile(value, json_output=json_output)
+
+    @profile_app.command("rotate")
+    def profile_rotate(
+        profile: str = typer.Argument(..., help="Profile UUID or name."),
+        provider: str = typer.Option(..., "--provider"),
+        reference: str = typer.Option(..., "--reference"),
+        scheme: str = typer.Option("ed25519", "--scheme"),
+        generate: bool = typer.Option(False, "--generate"),
+        overlap_seconds: int = typer.Option(0, "--overlap-seconds", min=0),
+        json_output: bool = typer.Option(False, "--json"),
+    ) -> None:
+        """Prove both signers and promote a replacement for fresh runs."""
+
+        try:
+            result = _profile_service().rotate(
+                profile,
+                replacement_reference=_credential_reference(provider, reference),
+                replacement_scheme=IdentityScheme(scheme),
+                generate=generate,
+                overlap_seconds=overlap_seconds,
+            )
+        except Exception as exc:
+            typer.secho(str(exc), err=True, fg=typer.colors.RED)
+            raise typer.Exit(2) from exc
+        _emit_profile(result.redacted(), json_output=json_output)
+
+    @profile_app.command("retire")
+    def profile_retire(
+        profile: str = typer.Argument(..., help="Profile UUID or name."),
+        principal: Optional[str] = typer.Option(
+            None,
+            "--principal",
+            help="Retire one eligible non-primary scheme:identifier predecessor.",
+        ),
+        json_output: bool = typer.Option(False, "--json"),
+    ) -> None:
+        """Retire one predecessor or the whole eligible profile."""
+
+        try:
+            service = _profile_service()
+            value = (
+                service.retire_principal(profile, _canonical_principal(principal))
+                if principal is not None
+                else service.retire(profile)
+            )
+        except Exception as exc:
+            typer.secho(str(exc), err=True, fg=typer.colors.RED)
+            raise typer.Exit(2) from exc
+        _emit_profile(value, json_output=json_output)
+
+    @profile_app.command("delete")
+    def profile_delete(
+        profile: str = typer.Argument(..., help="Retired profile UUID or name."),
+        confirm_history_release: bool = typer.Option(
+            False,
+            "--confirm-history-release",
+            help="Confirm that retained public history may be removed.",
+        ),
+        delete_credentials: bool = typer.Option(
+            False,
+            "--delete-credentials",
+            help="Separately delete each now-unshared provider entry.",
+        ),
+        json_output: bool = typer.Option(False, "--json"),
+    ) -> None:
+        """Delete eligible metadata and, only when confirmed, provider entries."""
+
+        try:
+            result = _profile_service().delete(
+                profile,
+                confirm_history_release=confirm_history_release,
+                delete_credentials=delete_credentials,
+            )
+        except Exception as exc:
+            typer.secho(str(exc), err=True, fg=typer.colors.RED)
+            raise typer.Exit(2) from exc
+        _emit_profile(result.redacted(), json_output=json_output)
+
+    return profile_app
 
 
 # ---------------------------------------------------------------------------
@@ -345,6 +575,12 @@ def build_app(domains: list[MarketDomainContract] | None = None) -> typer.Typer:
             return
         for domain in domains:
             typer.echo(f"{domain.identity}  [contract {domain.contract_version}]")
+
+    app.add_typer(
+        _build_profile_app(),
+        name="profile",
+        help="Manage durable local buyer profiles and retained signer history.",
+    )
 
     for domain in domains:
         if domain.buyer is not None:

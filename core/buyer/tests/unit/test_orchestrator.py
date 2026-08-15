@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import uuid
 from unittest.mock import patch
 
 import pytest
@@ -34,6 +35,7 @@ def _config() -> BuyConfig:
         registry_urls=["http://registry"],
         registry_authorities={"http://registry": _authority("registry", registry)},
         principal=signer.identity,
+        buyer_profile_id=uuid.UUID("11111111-1111-4111-8111-111111111111"),
         signer=signer,
     )
 
@@ -47,6 +49,7 @@ def test_buy_config_rejects_signer_principal_mismatch() -> None:
             registry_urls=[],
             registry_authorities={},
             principal=owner.identity,
+            buyer_profile_id=uuid.UUID("11111111-1111-4111-8111-111111111111"),
             signer=other,
         )
 
@@ -59,6 +62,7 @@ def test_buy_config_requires_exact_registry_authority_set() -> None:
             registry_urls=["http://registry"],
             registry_authorities={"http://other": _authority("other", registry)},
             principal=buyer.identity,
+            buyer_profile_id=uuid.UUID("11111111-1111-4111-8111-111111111111"),
             signer=buyer,
         )
 
@@ -123,6 +127,7 @@ def test_run_buy_composes_injected_negotiate_and_settle_hooks() -> None:
                 )
             },
             principal=signer.identity,
+            buyer_profile_id=uuid.UUID("11111111-1111-4111-8111-111111111111"),
             signer=signer,
             aggregation_policy="domain-policy",
         ),

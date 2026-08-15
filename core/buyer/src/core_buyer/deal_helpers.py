@@ -7,6 +7,7 @@ decoding those payloads and deriving mechanism-specific enrichments.
 
 from __future__ import annotations
 
+import uuid
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
@@ -15,7 +16,7 @@ import typer
 from market_identity import Identity, Signer, TrustedIdentitySet
 from market_core.schemas import SettlementPlan
 
-from .run_log import RunLog, read_run
+from .run_log import RunLog, read_run, read_run_identity
 
 
 @dataclass
@@ -177,7 +178,11 @@ def _refresh_publisher_trust(
             "Signed listing refresh did not return publisher_principals"
         )
     if current != recorded:
-        RunLog.open(run_id, signer=signer).event(
+        RunLog.open(
+            run_id,
+            signer=signer,
+            profile_id=read_run_identity(run_id).profile_id,
+        ).event(
             "publisher_trust_refreshed",
             listing_id=listing_id,
             publisher_id=publisher_id,
@@ -526,9 +531,15 @@ def load_deal_context(
     )
 
 
-def open_run_log(run_id: str, *, signer: Signer) -> RunLog:
-    """Append-only run log for the signer-bound run being recovered."""
-    return RunLog.open(run_id, signer=signer)
+def open_run_log(
+    run_id: str,
+    *,
+    signer: Signer,
+    profile_id: uuid.UUID | str,
+) -> RunLog:
+    """Append-only run log for the exact profile signer being recovered."""
+
+    return RunLog.open(run_id, signer=signer, profile_id=profile_id)
 
 
 def _settlement_plan_semantics(plan: SettlementPlan) -> SettlementPlan:

@@ -19,10 +19,8 @@ from market_settlement_runtime import (
 from .chain_cli import chain_app
 from .common import (
     buyer_chains,
-    resolve_buyer_signer,
     resolve_buyer_wallet,
-    resolve_identity_config,
-    resolve_identity_credential,
+    resolve_fresh_buyer_identity,
 )
 from .escrow_cli import escrow_app
 
@@ -57,13 +55,7 @@ async def buyer_settlement_readiness() -> tuple[
 
     stripe = config.mechanism_config("stripe")
     if stripe is not None and stripe.enabled:
-        try:
-            resources["marketplace_signer"] = resolve_buyer_signer(
-                resolve_identity_config(),
-                resolve_identity_credential(),
-            )
-        except (RuntimeError, ValueError):
-            pass
+        resources["marketplace_signer"] = resolve_fresh_buyer_identity().signer
 
     alkahest = config.mechanism_config("alkahest")
     if alkahest is not None and alkahest.enabled:

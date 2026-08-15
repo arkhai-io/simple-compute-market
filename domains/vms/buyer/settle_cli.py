@@ -20,6 +20,7 @@ from arkhai_vms.provision_terms import VmProvisionPayload, VmProvisionTerms
 from market_core.schemas import SettlementPlan
 from market_identity import Identity
 from market_settlement_runtime import derive_obligation_ref
+from core_buyer.buyer_config import ResolvedBuyerIdentity
 from core_buyer.action_policy import (
     ACTION_REQUIRED_EXIT_CODE,
     BuyerActionHandler,
@@ -153,6 +154,7 @@ def run_settle_from_log(
     settlement_timeout: float,
     console: Console | None = None,
     action_policy: BuyerActionPolicy | None = None,
+    identity: ResolvedBuyerIdentity | None = None,
 ) -> dict:
     """Resume one accepted deal from its buyer run log.
 
@@ -166,21 +168,17 @@ def run_settle_from_log(
     mechanism, provider/chain, timeout, or non-ready terminal failures.
     """
     console = console or Console()
-    from .common import (
-        chain_by_name,
-        resolve_buyer_signer,
-        resolve_identity_config,
-        resolve_identity_credential,
-    )
+    from .common import chain_by_name, resolve_recovery_buyer_identity
 
-    identity_config = resolve_identity_config()
-    signer = resolve_buyer_signer(
-        identity_config,
-        resolve_identity_credential(),
-    )
+    identity = identity or resolve_recovery_buyer_identity(run_id)
+    signer = identity.signer
     deal = load_deal_context(run_id, signer=signer)
     resolve_seller_principals = make_deal_publisher_trust_resolver(run_id, deal, signer)
-    log = open_run_log(run_id, signer=signer)
+    log = open_run_log(
+        run_id,
+        signer=signer,
+        profile_id=identity.profile_id,
+    )
     log.event("settle_resumed", run_id=run_id)
 
     try:

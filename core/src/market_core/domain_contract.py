@@ -85,9 +85,13 @@ class ImmutableCodecCapability:
         return self.normalize_result(value)
 
 
+BUYER_IDENTITY_INJECTION_CONTRACT = "core.resolved-buyer-identity.v1"
+
+
 @runtime_checkable
 class BuyerCapability(Protocol):
     """Buyer command and schema-specific orchestration hooks."""
+    identity_injection_contract: str
 
     register_commands: DomainCallable
     build_provision_terms: DomainCallable
@@ -97,6 +101,7 @@ class BuyerCapability(Protocol):
 
 @dataclass(frozen=True)
 class ImmutableBuyerCapability:
+    identity_injection_contract: str
     register_commands: DomainCallable
     build_provision_terms: DomainCallable
     select_policy: DomainCallable
@@ -283,6 +288,15 @@ def validate_domain_contract(
             raise DomainContractValidationError(
                 f"domain {contract.identity!s} capability {capability.value!r} "
                 f"is incomplete; missing callable hooks: {', '.join(missing)}"
+            )
+        if (
+            capability is DomainCapability.BUYER
+            and getattr(implementation, "identity_injection_contract", None)
+            != BUYER_IDENTITY_INJECTION_CONTRACT
+        ):
+            raise DomainContractValidationError(
+                f"domain {contract.identity!s} buyer capability must require "
+                f"{BUYER_IDENTITY_INJECTION_CONTRACT}"
             )
     return contract
 

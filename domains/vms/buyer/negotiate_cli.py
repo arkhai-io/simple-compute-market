@@ -185,17 +185,17 @@ def register(app: typer.Typer) -> None:
         _max_explicit = max_price is not None
 
         from .common import (
-            resolve_buyer_signer,
-            resolve_identity_config,
-            resolve_identity_credential,
+            resolve_fresh_buyer_identity,
+            resolve_recovery_buyer_identity,
             resolve_ssh_public_key,
         )
 
-        identity_config = resolve_identity_config()
-        signer = resolve_buyer_signer(
-            identity_config,
-            resolve_identity_credential(),
+        identity = (
+            resolve_recovery_buyer_identity(from_run)
+            if from_run
+            else resolve_fresh_buyer_identity()
         )
+        signer = identity.signer
 
         if from_run and settlement:
             raise typer.BadParameter(
@@ -457,7 +457,8 @@ def register(app: typer.Typer) -> None:
             raise typer.BadParameter("listing publisher provenance is incomplete")
         run_log = RunLog.start(
             command="market negotiate",
-            principal=identity_config.principal,
+            profile_id=identity.profile_id,
+            principal=identity.principal,
             seller_url=seller_url,
             listing_id=listing_id,
             publisher_principals=expected_seller_principals.model_dump(mode="json"),

@@ -20,9 +20,11 @@ What these tests catch that the unit layers don't:
 from __future__ import annotations
 
 import json
+import uuid
 from dataclasses import dataclass
 
 import pytest
+from core_buyer.buyer_config import ResolvedBuyerIdentity
 from core_buyer.registry_config import RegistryAuthority
 from domains.vms.buyer.buy_orchestrator import BuyResult
 from domains.vms.buyer.cli import app
@@ -43,21 +45,31 @@ _BUYER_PK = "0x" + "11" * 32
 _BUYER_ADDR = "0xCC" + "cc" * 19  # placeholder; not signature-checked here
 
 
+_PROFILE_ID = uuid.UUID("11111111-1111-4111-8111-111111111111")
+_RESOLVED = ResolvedBuyerIdentity(
+    profile_id=_PROFILE_ID,
+    principal=BUYER_SIGNER.identity,
+    signer=BUYER_SIGNER,
+    source="fresh",
+)
+
+
 @pytest.fixture(autouse=True)
 def _isolated_runs_dir(tmp_path, monkeypatch):
     """Pin the run-log directory at tmp_path for hermetic tests."""
     monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path))
     monkeypatch.setattr(
-        "domains.vms.buyer.common.resolve_identity_config",
-        lambda: type("IdentityConfig", (), {"principal": BUYER_SIGNER.identity})(),
+        "domains.vms.buyer.common.resolve_fresh_buyer_identity",
+        lambda: _RESOLVED,
     )
     monkeypatch.setattr(
-        "domains.vms.buyer.common.resolve_identity_credential",
-        lambda: b"unused-test-credential",
-    )
-    monkeypatch.setattr(
-        "domains.vms.buyer.common.resolve_buyer_signer",
-        lambda *_: BUYER_SIGNER,
+        "domains.vms.buyer.common.resolve_recovery_buyer_identity",
+        lambda _run_id: ResolvedBuyerIdentity(
+            profile_id=_PROFILE_ID,
+            principal=BUYER_SIGNER.identity,
+            signer=BUYER_SIGNER,
+            source="recovery",
+        ),
     )
     monkeypatch.setattr(
         "domains.vms.buyer.common.resolve_buyer_wallet",
@@ -133,7 +145,11 @@ def _start_log(**fields):
     )
     fields.setdefault("source_registry_url", "http://registry:8080")
     fields.setdefault("source_registry_authority", "registry")
-    return RunLog.start(principal=BUYER_SIGNER.identity, **fields)
+    return RunLog.start(
+        profile_id=_PROFILE_ID,
+        principal=BUYER_SIGNER.identity,
+        **fields,
+    )
 
 
 def _seed_partial_negotiation(

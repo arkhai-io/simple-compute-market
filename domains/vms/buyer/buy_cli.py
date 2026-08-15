@@ -270,17 +270,10 @@ def _run_resume_from(
     events when finishing the negotiation, then `settle_*` events from
     ``run_settle_from_log``.
     """
-    from .common import (
-        resolve_buyer_signer,
-        resolve_identity_config,
-        resolve_identity_credential,
-    )
+    from .common import resolve_recovery_buyer_identity
 
-    identity_config = resolve_identity_config()
-    signer = resolve_buyer_signer(
-        identity_config,
-        resolve_identity_credential(),
-    )
+    identity = resolve_recovery_buyer_identity(from_run)
+    signer = identity.signer
     if not is_negotiation_complete(from_run, signer=signer):
         if max_price is not None:
             raise typer.BadParameter(
@@ -291,7 +284,11 @@ def _run_resume_from(
         resume_point = load_negotiation_resume_point(from_run, signer=signer)
         resumed_initial_price = resume_point.initial_price
         resumed_max_price = resume_point.max_price
-        run_log = open_run_log(from_run, signer=signer)
+        run_log = open_run_log(
+            from_run,
+            signer=signer,
+            profile_id=identity.profile_id,
+        )
         run_log.event(
             "negotiation_resumed",
             from_run=from_run,
@@ -434,6 +431,7 @@ def _run_resume_from(
         settlement_timeout=settlement_timeout,
         console=console,
         action_policy=action_policy,
+        identity=identity,
     )
 
 
@@ -648,11 +646,9 @@ def register(app: typer.Typer) -> None:
 
         from .common import (
             VMS_SCHEMA_ID,
-            resolve_buyer_signer,
             resolve_buyer_wallet,
             resolve_discovery_timeout,
-            resolve_identity_config,
-            resolve_identity_credential,
+            resolve_fresh_buyer_identity,
             resolve_indexer_urls,
             resolve_indexer_urls_for_schema,
             resolve_registry_api_keys,
@@ -660,11 +656,8 @@ def register(app: typer.Typer) -> None:
             resolve_ssh_public_key,
         )
 
-        identity_config = resolve_identity_config()
-        signer = resolve_buyer_signer(
-            identity_config,
-            resolve_identity_credential(),
-        )
+        identity = resolve_fresh_buyer_identity()
+        signer = identity.signer
         ssh = None if explain else resolve_ssh_public_key(override=ssh_public_key)
         try:
             settlement_policy = resolve_buyer_settlement_policy()
@@ -904,11 +897,10 @@ def register(app: typer.Typer) -> None:
             or "best_price"
         )
 
-        config = BuyConfig(
+        config = BuyConfig.from_resolved_identity(
+            identity=identity,
             registry_urls=reg_urls,
             registry_authorities=registry_authorities,
-            principal=identity_config.principal,
-            signer=signer,
             discovery_timeout=deadline,
             registry_api_keys=registry_api_keys,
             aggregation_policy=aggregation_policy,
@@ -945,7 +937,8 @@ def register(app: typer.Typer) -> None:
 
         run_log = RunLog.start(
             command="market buy",
-            principal=identity_config.principal,
+            profile_id=identity.profile_id,
+            principal=identity.principal,
             registry_urls=reg_urls,
             policy=_policy.name,
             policy_params=policy_params_all,
@@ -965,8 +958,8 @@ def register(app: typer.Typer) -> None:
         header.add_row("Registries", ", ".join(reg_urls))
         header.add_row(
             "Buyer principal",
-            f"{identity_config.principal.scheme.value}:"
-            f"{identity_config.principal.identifier}",
+            f"{identity.principal.scheme.value}:"
+            f"{identity.principal.identifier}",
         )
         if not hosted_mode:
             header.add_row("EVM wallet", addr)

@@ -69,18 +69,16 @@ def _registry_context(
     """Resolve one signer-authenticated, authority-pinned registry set."""
     from .common import (
         VMS_SCHEMA_ID,
-        resolve_buyer_signer,
         resolve_discovery_timeout,
-        resolve_identity_config,
-        resolve_identity_credential,
+        resolve_fresh_buyer_identity,
         resolve_indexer_urls,
         resolve_indexer_urls_for_schema,
         resolve_registry_api_keys,
         resolve_registry_authorities,
     )
 
-    identity = resolve_identity_config()
-    signer = resolve_buyer_signer(identity, resolve_identity_credential())
+    identity = resolve_fresh_buyer_identity()
+    signer = identity.signer
     configured_urls = resolve_indexer_urls(override=registry_urls)
     authorities = resolve_registry_authorities(configured_urls)
     deadline = resolve_discovery_timeout(override=discovery_timeout)

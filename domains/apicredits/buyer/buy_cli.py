@@ -210,16 +210,6 @@ def register(credits_app: typer.Typer) -> None:
             "--settlement-timeout",
             help="Max seconds to wait for issuance before giving up.",
         ),
-        identity_scheme: Optional[str] = typer.Option(
-            None,
-            "--identity-scheme",
-            help="Marketplace signer scheme (default: identity.scheme).",
-        ),
-        identity_identifier: Optional[str] = typer.Option(
-            None,
-            "--identity-identifier",
-            help="Public marketplace signer identifier (default: identity.identifier).",
-        ),
         evm_address: Optional[str] = typer.Option(
             None,
             "--evm-address",
@@ -261,20 +251,17 @@ def register(credits_app: typer.Typer) -> None:
         initial_price: Optional[float] = policy_params_all.get("initial_price")
         max_price: Optional[float] = policy_params_all.get("max_price")
         from .common import (
-            resolve_buyer_signer,
-            resolve_identity_config,
-            resolve_identity_credential,
+            resolve_fresh_buyer_identity,
+            resolve_recovery_buyer_identity,
         )
 
-        identity_config = resolve_identity_config(
-            override_scheme=identity_scheme,
-            override_identifier=identity_identifier,
+        identity = (
+            resolve_recovery_buyer_identity(from_run)
+            if from_run
+            else resolve_fresh_buyer_identity()
         )
-        signer = resolve_buyer_signer(
-            identity_config,
-            resolve_identity_credential(),
-        )
-        principal = identity_config.principal
+        signer = identity.signer
+        principal = identity.principal
 
         if from_run:
             if not is_negotiation_complete(from_run):
@@ -287,9 +274,9 @@ def register(credits_app: typer.Typer) -> None:
                 )
                 raise typer.Exit(2)
             run_settle_from_log(
+                identity=identity,
                 run_id=from_run,
                 escrow_uid=None,
-                signer=signer,
                 evm_address=evm_address,
                 evm_private_key=evm_private_key,
                 chain_name=chain_name,
@@ -496,11 +483,10 @@ def register(credits_app: typer.Typer) -> None:
             or None
         )
 
-        config = BuyConfig(
+        config = BuyConfig.from_resolved_identity(
+            identity=identity,
             registry_urls=reg_urls,
             registry_authorities=registry_authorities,
-            principal=principal,
-            signer=signer,
             discovery_timeout=deadline,
             registry_api_keys=registry_api_keys,
             aggregation_policy=aggregation_policy,
@@ -539,7 +525,8 @@ def register(credits_app: typer.Typer) -> None:
             )
 
         run_log = RunLog.start(
-            principal=principal,
+            profile_id=identity.profile_id,
+            principal=identity.principal,
             command="market credits buy",
             buyer_evm_address=evm_addr,
             registry_urls=reg_urls,

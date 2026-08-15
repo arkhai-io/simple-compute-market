@@ -11,6 +11,7 @@ from core_buyer.policy_surface import configured_buyer_policy
 from domains.apicredits.domain_runtime import market_domain
 from domains.apicredits.negotiation import make_api_credits_provision_terms
 from market_core import (
+    BUYER_IDENTITY_INJECTION_CONTRACT,
     DomainCapability,
     ImmutableBuyerCapability,
     MarketDomainContract,
@@ -48,6 +49,7 @@ def _buyer_market_domain() -> MarketDomainContract:
         base,
         declared_capabilities=(base.declared_capabilities | {DomainCapability.BUYER}),
         buyer=ImmutableBuyerCapability(
+            identity_injection_contract=BUYER_IDENTITY_INJECTION_CONTRACT,
             register_commands=register,
             build_provision_terms=make_api_credits_provision_terms,
             select_policy=configured_buyer_policy,

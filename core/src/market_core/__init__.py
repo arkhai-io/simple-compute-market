@@ -3,6 +3,7 @@
 from .domain_contract import (
     MARKET_DOMAIN_CONTRACT_VERSION,
     SUPPORTED_MARKET_DOMAIN_CONTRACT_VERSIONS,
+    BUYER_IDENTITY_INJECTION_CONTRACT,
     BuyerCapability,
     CodecCapability,
     ComputeProvisioningCapability,
@@ -58,6 +59,7 @@ from .query_dsl import (
 __all__ = [
     "MARKET_DOMAIN_CONTRACT_VERSION",
     "SUPPORTED_MARKET_DOMAIN_CONTRACT_VERSIONS",
+    "BUYER_IDENTITY_INJECTION_CONTRACT",
     "BuyerCapability",
     "CodecCapability",
     "ComputeProvisioningCapability",

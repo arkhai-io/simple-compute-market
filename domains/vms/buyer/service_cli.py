@@ -246,12 +246,7 @@ def register(app: typer.Typer) -> None:
         ),
     ) -> None:
         """Service a settled deal: heartbeat while healthy, reclaim on expiry."""
-        from .common import (
-            chain_by_name,
-            resolve_buyer_signer,
-            resolve_identity_config,
-            resolve_identity_credential,
-        )
+        from .common import chain_by_name, resolve_recovery_buyer_identity
         from .deal_helpers import (
             load_deal_context,
             make_deal_publisher_trust_resolver,
@@ -260,11 +255,8 @@ def register(app: typer.Typer) -> None:
         from .run_log import RunLog
         from .settle_cli import _accepted_proposal_chain, _first_listing_chain
 
-        identity_config = resolve_identity_config()
-        signer = resolve_buyer_signer(
-            identity_config,
-            resolve_identity_credential(),
-        )
+        identity = resolve_recovery_buyer_identity(run_id)
+        signer = identity.signer
         deal = load_deal_context(run_id, signer=signer)
         resolve_seller_principals = make_deal_publisher_trust_resolver(
             run_id, deal, signer
@@ -299,7 +291,11 @@ def register(app: typer.Typer) -> None:
             else (_plan_heartbeat_interval(deal) or 60.0)
         )
 
-        log = RunLog.open(run_id, signer=signer)
+        log = RunLog.open(
+            run_id,
+            signer=signer,
+            profile_id=identity.profile_id,
+        )
         log.event(
             "service_started",
             escrow_uid=deal.escrow_uid,

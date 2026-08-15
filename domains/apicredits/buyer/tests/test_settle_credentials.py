@@ -10,11 +10,13 @@ once-only secret must land durably in the run-log
 from __future__ import annotations
 
 import json
+import uuid
 from types import SimpleNamespace
 
 import pytest
 
 import domains.apicredits.buyer.settle_cli as settle_cli
+from core_buyer.buyer_config import ResolvedBuyerIdentity
 from core_buyer.run_log import read_run
 from market_identity import Eip191Signer, REQUEST_PROTOCOL, TrustedIdentitySet
 
@@ -30,6 +32,13 @@ _PROPOSAL = {
 }
 _SIGNER = Eip191Signer(bytes.fromhex("11" * 32))
 _SELLER_SIGNER = Eip191Signer(bytes.fromhex("22" * 32))
+_PROFILE_ID = uuid.UUID("11111111-1111-4111-8111-111111111111")
+_IDENTITY = ResolvedBuyerIdentity(
+    profile_id=_PROFILE_ID,
+    principal=_SIGNER.identity,
+    signer=_SIGNER,
+    source="recovery",
+)
 
 _CREDENTIALS = {
     "key_id": "ak_test_1",
@@ -43,8 +52,10 @@ def _run_event(run_id: str, event: str, **fields) -> dict:
     return {
         "event": event,
         "run_id": run_id,
-        "log_version": 2,
+        "log_version": 3,
         "signature_protocol": REQUEST_PROTOCOL,
+        "signature_version": 2,
+        "buyer_profile_id": str(_PROFILE_ID),
         "buyer_principal": _SIGNER.identity.model_dump(mode="json"),
         **fields,
     }
@@ -162,7 +173,7 @@ def test_settle_writes_credentials_delivered_event(
     final = settle_cli.run_settle_from_log(
         run_id=agreed_run,
         escrow_uid=None,
-        signer=_SIGNER,
+        identity=_IDENTITY,
         evm_address=None,
         evm_private_key=None,
         chain_name=None,
@@ -225,7 +236,7 @@ def test_settle_without_agreed_proposal_refuses(
         settle_cli.run_settle_from_log(
             run_id="run-tok-2",
             escrow_uid=None,
-            signer=_SIGNER,
+            identity=_IDENTITY,
             evm_address=None,
             evm_private_key=None,
             chain_name=None,

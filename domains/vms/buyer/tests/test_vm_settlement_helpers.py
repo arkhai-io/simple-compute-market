@@ -1,3 +1,4 @@
+import uuid
 from types import SimpleNamespace
 
 import pytest
@@ -13,6 +14,7 @@ from domains.vms.buyer.escrow_selection import select_escrow_entry
 from domains.vms.buyer.settlement_composition import resolve_buyer_settlement_policy
 from domains.vms.settlement import escrow_proposal_from_accepted_entry
 from market_core.schemas import SettlementOption, derive_settlement_option_id
+from core_buyer.buyer_config import ResolvedBuyerIdentity
 from core_buyer.action_policy import BuyerActionPolicy
 from market_identity import Ed25519Signer
 
@@ -20,6 +22,15 @@ _ESCROW = "0x" + "11" * 20
 _TOKEN = "0x" + "22" * 20
 _OTHER = "0x" + "33" * 20
 _ARBITER = "0x" + "44" * 20
+
+def _resolved(signer: Ed25519Signer) -> ResolvedBuyerIdentity:
+    return ResolvedBuyerIdentity(
+        profile_id=uuid.UUID("11111111-1111-4111-8111-111111111111"),
+        principal=signer.identity,
+        signer=signer,
+        source="recovery",
+    )
+
 
 
 def test_hosted_start_binds_canonical_obligation_parties(monkeypatch):
@@ -172,11 +183,9 @@ def test_alkahest_resume_preserves_accepted_ssh_after_config_rotation(monkeypatc
 
     monkeypatch.setattr(
         common,
-        "resolve_identity_config",
-        lambda: SimpleNamespace(principal=buyer.identity),
+        "resolve_recovery_buyer_identity",
+        lambda _run_id: _resolved(buyer),
     )
-    monkeypatch.setattr(common, "resolve_identity_credential", lambda: "credential")
-    monkeypatch.setattr(common, "resolve_buyer_signer", lambda *_args: buyer)
     monkeypatch.setattr(
         common,
         "resolve_buyer_wallet",
@@ -278,11 +287,9 @@ def test_recovery_never_falls_back_for_uninstalled_accepted_mechanism(
 
     monkeypatch.setattr(
         common,
-        "resolve_identity_config",
-        lambda: SimpleNamespace(principal=buyer.identity),
+        "resolve_recovery_buyer_identity",
+        lambda _run_id: _resolved(buyer),
     )
-    monkeypatch.setattr(common, "resolve_identity_credential", lambda: "credential")
-    monkeypatch.setattr(common, "resolve_buyer_signer", lambda *_args: buyer)
     monkeypatch.setattr(
         common,
         "chain_by_name",
@@ -346,11 +353,9 @@ def test_hosted_recovery_is_pinned_and_never_touches_chain_config(monkeypatch, c
 
     monkeypatch.setattr(
         common,
-        "resolve_identity_config",
-        lambda: SimpleNamespace(principal=buyer.identity),
+        "resolve_recovery_buyer_identity",
+        lambda _run_id: _resolved(buyer),
     )
-    monkeypatch.setattr(common, "resolve_identity_credential", lambda: "credential")
-    monkeypatch.setattr(common, "resolve_buyer_signer", lambda *_args: buyer)
     monkeypatch.setattr(
         common,
         "chain_by_name",

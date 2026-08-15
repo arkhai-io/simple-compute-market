@@ -57,6 +57,7 @@ def _external_domain(identity: str = "external.example") -> MarketDomainContract
         codecs=ExternalCodecs(),
         declared_capabilities=frozenset({DomainCapability.BUYER}),
         buyer=ImmutableBuyerCapability(
+            identity_injection_contract="core.resolved-buyer-identity.v1",
             register_commands=lambda app: None,
             build_provision_terms=lambda **payload: payload,
             select_policy=lambda: "external-policy",

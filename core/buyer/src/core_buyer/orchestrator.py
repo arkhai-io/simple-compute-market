@@ -12,10 +12,12 @@ the generic registry discovery helpers.
 from __future__ import annotations
 
 import sys
+import uuid
 from dataclasses import dataclass, field
 from typing import Any, Callable, Optional
 
 from market_identity import Identity, Signer
+from core_buyer.buyer_config import ResolvedBuyerIdentity
 from core_buyer.registry_config import RegistryAuthority
 from registry_client import (
     CompiledResourceQuery,
@@ -35,12 +37,15 @@ class BuyConfig:
     registry_urls: list[str]
     registry_authorities: dict[str, RegistryAuthority]
     principal: Identity
+    buyer_profile_id: uuid.UUID
     signer: Signer = field(repr=False)
     discovery_timeout: Optional[float] = None
     registry_api_keys: dict[str, str] = field(default_factory=dict, repr=False)
     aggregation_policy: Optional[str] = None
 
     def __post_init__(self) -> None:
+        if not isinstance(self.buyer_profile_id, uuid.UUID):
+            raise TypeError("buyer_profile_id must be a stable UUID")
         if self.signer.identity != self.principal:
             raise ValueError(
                 "buyer signer identity does not match configured principal"
@@ -58,6 +63,30 @@ class BuyConfig:
                 f"buyer registry API keys contain unknown URLs: "
                 f"{sorted(unknown_api_keys)}"
             )
+
+    @classmethod
+    def from_resolved_identity(
+        cls,
+        *,
+        identity: ResolvedBuyerIdentity,
+        registry_urls: list[str],
+        registry_authorities: dict[str, RegistryAuthority],
+        discovery_timeout: Optional[float] = None,
+        registry_api_keys: dict[str, str] | None = None,
+        aggregation_policy: Optional[str] = None,
+    ) -> BuyConfig:
+        """Build orchestration config from one already-resolved safe identity."""
+
+        return cls(
+            registry_urls=registry_urls,
+            registry_authorities=registry_authorities,
+            principal=identity.principal,
+            buyer_profile_id=identity.profile_id,
+            signer=identity.signer,
+            discovery_timeout=discovery_timeout,
+            registry_api_keys=registry_api_keys or {},
+            aggregation_policy=aggregation_policy,
+        )
 
 
 @dataclass

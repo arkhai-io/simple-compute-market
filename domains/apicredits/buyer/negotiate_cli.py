@@ -102,16 +102,6 @@ def register(credits_app: typer.Typer) -> None:
             "/negotiate/new; replays the seller's last counter into "
             "the strategy and continues.",
         ),
-        identity_scheme: Optional[str] = typer.Option(
-            None,
-            "--identity-scheme",
-            help="Marketplace signer scheme (default: identity.scheme).",
-        ),
-        identity_identifier: Optional[str] = typer.Option(
-            None,
-            "--identity-identifier",
-            help="Public marketplace signer identifier (default: identity.identifier).",
-        ),
         evm_address: Optional[str] = typer.Option(
             None,
             "--evm-address",
@@ -173,23 +163,20 @@ def register(credits_app: typer.Typer) -> None:
         _max_explicit = max_price is not None
 
         from .common import (
-            resolve_buyer_signer,
-            resolve_buyer_wallet,
-            resolve_identity_config,
-            resolve_identity_credential,
-            resolve_key_disposition,
             make_run_publisher_principals_refresh,
+            resolve_buyer_wallet,
+            resolve_fresh_buyer_identity,
+            resolve_key_disposition,
+            resolve_recovery_buyer_identity,
         )
 
-        identity_config = resolve_identity_config(
-            override_scheme=identity_scheme,
-            override_identifier=identity_identifier,
+        identity = (
+            resolve_recovery_buyer_identity(from_run)
+            if from_run
+            else resolve_fresh_buyer_identity()
         )
-        signer = resolve_buyer_signer(
-            identity_config,
-            resolve_identity_credential(),
-        )
-        principal = identity_config.principal
+        signer = identity.signer
+        principal = identity.principal
         evm_addr, _evm_key = resolve_buyer_wallet(
             override_addr=evm_address,
             override_pk=evm_private_key,
@@ -473,7 +460,8 @@ def register(credits_app: typer.Typer) -> None:
             "source_registry_authority": source_registry_authority,
         }
         run_log = RunLog.start(
-            principal=principal,
+            profile_id=identity.profile_id,
+            principal=identity.principal,
             command="market credits negotiate",
             seller_url=seller_url,
             listing_id=listing_id,
@@ -498,11 +486,10 @@ def register(credits_app: typer.Typer) -> None:
         from core_buyer.orchestrator import BuyConfig
 
         resolve_seller_principals = make_publisher_trust_resolver(
-            config=BuyConfig(
+            config=BuyConfig.from_resolved_identity(
+                identity=identity,
                 registry_urls=reg_urls,
                 registry_authorities=registry_authorities,
-                principal=principal,
-                signer=signer,
                 discovery_timeout=deadline,
                 registry_api_keys=registry_api_keys,
             ),

@@ -14,6 +14,7 @@ The urlopen stub routes by request host so parallel negotiations
 
 from __future__ import annotations
 
+import uuid
 import json
 from contextlib import ExitStack, contextmanager
 from dataclasses import dataclass
@@ -64,6 +65,7 @@ def _config(aggregation_policy: str | None = None) -> BuyConfig:
             )
         },
         principal=BUYER_SIGNER.identity,
+        buyer_profile_id=uuid.UUID("11111111-1111-4111-8111-111111111111"),
         signer=BUYER_SIGNER,
         aggregation_policy=aggregation_policy,
     )

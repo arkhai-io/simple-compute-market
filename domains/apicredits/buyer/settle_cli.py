@@ -21,6 +21,7 @@ from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
 from market_identity import Signer
+from core_buyer.buyer_config import ResolvedBuyerIdentity
 
 from .deal_helpers import load_deal_context
 from core_buyer.deal_helpers import open_run_log
@@ -98,7 +99,7 @@ def run_settle_from_log(
     *,
     run_id: str,
     escrow_uid: Optional[str],
-    signer: Signer,
+    identity: ResolvedBuyerIdentity,
     evm_address: Optional[str],
     evm_private_key: Optional[str],
     chain_name: Optional[str],
@@ -118,6 +119,7 @@ def run_settle_from_log(
     fatal errors.
     """
     console = console or Console()
+    signer = identity.signer
     from .common import (
         chain_by_name,
         make_run_publisher_principals_refresh,
@@ -181,7 +183,11 @@ def run_settle_from_log(
         alkahest_addr_config=chain_cfg.alkahest_address_config_path,
     )
 
-    log = open_run_log(run_id, signer=signer)
+    log = open_run_log(
+        run_id,
+        signer=signer,
+        profile_id=identity.profile_id,
+    )
     log.event("settle_resumed")
     from core_buyer.orchestration import make_publisher_trust_resolver
     from core_buyer.orchestrator import BuyConfig
@@ -189,11 +195,10 @@ def run_settle_from_log(
     registry_urls = resolve_indexer_urls()
     registry_authorities = resolve_registry_authorities(registry_urls)
     resolve_seller_principals = make_publisher_trust_resolver(
-        config=BuyConfig(
+        config=BuyConfig.from_resolved_identity(
+            identity=identity,
             registry_urls=registry_urls,
             registry_authorities=registry_authorities,
-            principal=deal.buyer_principal,
-            signer=signer,
             discovery_timeout=resolve_discovery_timeout(),
             registry_api_keys=resolve_registry_api_keys(),
         ),
@@ -389,16 +394,6 @@ def register(credits_app: typer.Typer) -> None:
             help="Skip escrow.create when the on-chain escrow already exists. "
             "If absent, the run-log is checked for an `escrow_created` event.",
         ),
-        identity_scheme: Optional[str] = typer.Option(
-            None,
-            "--identity-scheme",
-            help="Marketplace signer scheme (default: identity.scheme).",
-        ),
-        identity_identifier: Optional[str] = typer.Option(
-            None,
-            "--identity-identifier",
-            help="Public marketplace signer identifier (default: identity.identifier).",
-        ),
         evm_address: Optional[str] = typer.Option(
             None,
             "--evm-address",
@@ -437,24 +432,13 @@ def register(credits_app: typer.Typer) -> None:
 
         Requires the run-log to contain an `agreed` negotiation outcome.
         """
-        from .common import (
-            resolve_buyer_signer,
-            resolve_identity_config,
-            resolve_identity_credential,
-        )
+        from .common import resolve_recovery_buyer_identity
 
-        identity_config = resolve_identity_config(
-            override_scheme=identity_scheme,
-            override_identifier=identity_identifier,
-        )
-        signer = resolve_buyer_signer(
-            identity_config,
-            resolve_identity_credential(),
-        )
+        identity = resolve_recovery_buyer_identity(run_id)
         run_settle_from_log(
             run_id=run_id,
             escrow_uid=escrow_uid,
-            signer=signer,
+            identity=identity,
             evm_address=evm_address,
             evm_private_key=evm_private_key,
             chain_name=chain_name,

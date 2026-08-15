@@ -23,6 +23,10 @@ def test_domain_is_well_formed():
     assert isinstance(domain, MarketDomainContract)
     assert domain.identity == "compute.v1"
     assert domain.has_capability(DomainCapability.BUYER)
+    assert (
+        domain.buyer.identity_injection_contract
+        == "core.resolved-buyer-identity.v1"
+    )
 
 
 def test_assembled_app_exposes_vm_verbs():
@@ -40,6 +44,7 @@ def test_assembled_app_exposes_vm_verbs():
         "plugins",
     ):
         assert name in result.output, f"missing command {name!r}"
+    assert "profile" in result.output
 
 
 def test_raw_settlement_utilities_are_mechanism_namespaced() -> None:

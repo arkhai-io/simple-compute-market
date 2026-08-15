@@ -9,8 +9,10 @@ from core_buyer.plugins import discover_domains
 from market_core import (
     MARKET_DOMAIN_CONTRACT_VERSION,
     DomainContractValidationError,
+    DomainCapability,
     DomainIdentity,
     ImmutableCodecCapability,
+    ImmutableBuyerCapability,
     MarketDomainContract,
 )
 
@@ -87,3 +89,32 @@ def test_discover_rejects_duplicate_identities(monkeypatch):
 def test_discover_empty_when_nothing_installed(monkeypatch):
     monkeypatch.setattr(plugins_mod, "_iter_entry_points", lambda: [])
     assert discover_domains() == []
+
+
+def test_discovery_rejects_plugin_without_resolved_identity_injection_contract(
+    monkeypatch,
+):
+    base = _domain("legacy-buyer")
+    legacy = MarketDomainContract(
+        identity=base.identity,
+        contract_version=base.contract_version,
+        codecs=base.codecs,
+        declared_capabilities=frozenset({DomainCapability.BUYER}),
+        buyer=ImmutableBuyerCapability(
+            identity_injection_contract="legacy.raw-identity.v1",
+            register_commands=lambda app: None,
+            build_provision_terms=lambda **payload: payload,
+            select_policy=lambda: object(),
+            decode_result=lambda payload: payload,
+        ),
+    )
+    monkeypatch.setattr(
+        plugins_mod,
+        "_iter_entry_points",
+        lambda: [_FakeEntryPoint("legacy", lambda: legacy)],
+    )
+    with pytest.raises(
+        DomainContractValidationError,
+        match="core.resolved-buyer-identity.v1",
+    ):
+        discover_domains()

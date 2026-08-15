@@ -16,12 +16,11 @@ import typer
 
 # Generic buyer config remains core-owned; chain selection below is VM-owned.
 from core_buyer.buyer_config import (  # noqa: F401
-    resolve_buyer_signer,
-    resolve_config_value,
-    resolve_negotiation_config,
-    resolve_identity_config,
-    resolve_identity_credential,
     resolve_buyer_wallet,
+    resolve_config_value,
+    resolve_fresh_buyer_identity,
+    resolve_negotiation_config,
+    resolve_recovery_buyer_identity,
     resolve_storefront_url,
 )
 from core_buyer.registry_config import (  # noqa: F401

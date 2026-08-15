@@ -120,21 +120,15 @@ def listing_list(
 
     from .common import (
         APICREDITS_SCHEMA_ID,
-        resolve_buyer_signer,
         resolve_discovery_timeout,
-        resolve_identity_config,
-        resolve_identity_credential,
+        resolve_fresh_buyer_identity,
         resolve_indexer_urls,
         resolve_indexer_urls_for_schema,
         resolve_registry_api_keys,
         resolve_registry_authorities,
     )
 
-    identity_config = resolve_identity_config()
-    signer = resolve_buyer_signer(
-        identity_config,
-        resolve_identity_credential(),
-    )
+    signer = resolve_fresh_buyer_identity().signer
     deadline = resolve_discovery_timeout(override=discovery_timeout)
     candidate_urls = resolve_indexer_urls(override=registry_urls)
     authorities = resolve_registry_authorities(candidate_urls)
@@ -228,21 +222,15 @@ def listing_show(
 
     from .common import (
         APICREDITS_SCHEMA_ID,
-        resolve_buyer_signer,
         resolve_discovery_timeout,
-        resolve_identity_config,
-        resolve_identity_credential,
+        resolve_fresh_buyer_identity,
         resolve_indexer_urls,
         resolve_indexer_urls_for_schema,
         resolve_registry_api_keys,
         resolve_registry_authorities,
     )
 
-    identity_config = resolve_identity_config()
-    signer = resolve_buyer_signer(
-        identity_config,
-        resolve_identity_credential(),
-    )
+    signer = resolve_fresh_buyer_identity().signer
     deadline = resolve_discovery_timeout(override=discovery_timeout)
     candidate_urls = resolve_indexer_urls(override=registry_urls)
     authorities = resolve_registry_authorities(candidate_urls)

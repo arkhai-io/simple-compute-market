@@ -19,6 +19,7 @@ shape breaks tests immediately rather than at runtime.
 """
 
 from __future__ import annotations
+import uuid
 
 import pytest
 import typer
@@ -43,7 +44,11 @@ def _start_log(**fields):
     fields.setdefault("source_registry_authority", "registry")
     fields.setdefault("initial_price", 50)
     fields.setdefault("max_price", 100)
-    return RunLog.start(principal=BUYER_SIGNER.identity, **fields)
+    return RunLog.start(
+        profile_id=uuid.UUID("11111111-1111-4111-8111-111111111111"),
+        principal=BUYER_SIGNER.identity,
+        **fields,
+    )
 
 
 @pytest.fixture(autouse=True)

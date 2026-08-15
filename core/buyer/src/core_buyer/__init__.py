@@ -10,11 +10,10 @@ from core_buyer.action_policy import (
 )
 
 from core_buyer.buyer_config import (
-    IDENTITY_CREDENTIAL_ENV,
-    IdentityConfig,
-    resolve_buyer_signer,
-    resolve_identity_config,
-    resolve_identity_credential,
+    BuyerProfileResolver,
+    ResolvedBuyerIdentity,
+    resolve_fresh_buyer_identity,
+    resolve_recovery_buyer_identity,
 )
 from core_buyer.explanation import (
     EXPLANATION_SCHEMA_VERSION,
@@ -57,7 +56,7 @@ __all__ = [
     "ACTION_REQUIRED_EXIT_CODE",
     "DEFAULT_HTTP_TIMEOUT",
     "DOMAIN_GROUP",
-    "IDENTITY_CREDENTIAL_ENV",
+    "BuyerProfileResolver",
     "BuyConfig",
     "EXPLANATION_SCHEMA_VERSION",
     "BuyConstraints",
@@ -68,7 +67,7 @@ __all__ = [
     "BuyerActionPolicy",
     "BuyerActionRequired",
     "BuyerSettlementPolicy",
-    "IdentityConfig",
+    "ResolvedBuyerIdentity",
     "NegotiateFn",
     "NegotiationResult",
     "RegistryDiscovery",
@@ -85,10 +84,8 @@ __all__ = [
     "fetch_listing_dict_multi",
     "query_registry_for_matches",
     "query_registry_for_matches_multi",
-    "resolve_buyer_signer",
-    "resolve_discovery_timeout",
-    "resolve_identity_config",
-    "resolve_identity_credential",
+    "resolve_fresh_buyer_identity",
+    "resolve_recovery_buyer_identity",
     "resolve_indexer_urls",
     "resolve_registry_api_keys",
     "resolve_registry_authorities",

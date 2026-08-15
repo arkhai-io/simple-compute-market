@@ -4,6 +4,7 @@ on `market buy`.
 
 from __future__ import annotations
 
+import uuid
 import json
 from types import SimpleNamespace
 from typing import Any
@@ -47,6 +48,7 @@ def _config(registry_url: str = "http://reg") -> BuyConfig:
             )
         },
         principal=BUYER_SIGNER.identity,
+        buyer_profile_id=uuid.UUID("11111111-1111-4111-8111-111111111111"),
         signer=BUYER_SIGNER,
     )
 

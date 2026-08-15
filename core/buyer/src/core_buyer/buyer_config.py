@@ -1,89 +1,109 @@
-"""Schema-invariant buyer config resolution.
-
-Marketplace identity is resolved from public configuration and separately
-injected secret material. Generic scalar and wallet values remain here;
-domain packages own concrete chain selection and mechanism interpretation.
-"""
+"""Schema-invariant buyer profile, generic config, and optional wallet resolution."""
 
 from __future__ import annotations
 
-import os
-from collections.abc import Mapping
+import uuid
 from dataclasses import dataclass
+from typing import Literal
 
 import typer
-from market_identity import Identity, IdentityScheme, Signer, create_signer
+from market_config.config_loader import derive_wallet_address, get_dotted, load_user_config
+from market_identity import Identity, Signer
 
-IDENTITY_CREDENTIAL_ENV = "ARKHAI_IDENTITY_CREDENTIAL"
+from core_buyer.profile_service import BuyerProfileService
+from core_buyer.run_log import read_run_identity
 
 
 @dataclass(frozen=True, slots=True)
-class IdentityConfig:
-    """Public buyer identity configuration, separate from signer credentials."""
+class ResolvedBuyerIdentity:
+    """One exact signer plus public immutable profile context."""
 
+    profile_id: uuid.UUID
     principal: Identity
+    signer: Signer
+    source: Literal["fresh", "recovery"]
 
+    def safe_context(self) -> dict[str, str]:
+        return {
+            "buyer_profile_id": str(self.profile_id),
+            "buyer_principal": (
+                f"{self.principal.scheme.value}:{self.principal.identifier}"
+            ),
+            "signature_version": "2",
+            "source": self.source,
+        }
 
-def resolve_identity_config(
-    *,
-    override_scheme: str | None = None,
-    override_identifier: str | None = None,
-) -> IdentityConfig:
-    """Resolve the buyer's public ``[Identity]`` principal."""
-
-    scheme = resolve_config_value(
-        override=override_scheme,
-        toml_path="Identity.scheme",
-    )
-    identifier = resolve_config_value(
-        override=override_identifier,
-        toml_path="Identity.identifier",
-    )
-    missing = [
-        name
-        for name, value in (
-            ("Identity.scheme", scheme),
-            ("Identity.identifier", identifier),
+    def __repr__(self) -> str:
+        return (
+            "ResolvedBuyerIdentity("
+            f"profile_id={str(self.profile_id)!r}, "
+            f"principal={self.principal!r}, source={self.source!r})"
         )
-        if not value
-    ]
-    if missing:
+
+
+class BuyerProfileResolver:
+    """Resolve selected-primary fresh work or exact recorded recovery history."""
+
+    def __init__(self, service: BuyerProfileService | None = None) -> None:
+        self.service = service or BuyerProfileService()
+
+    def fresh(self) -> ResolvedBuyerIdentity:
+        reject_legacy_buyer_identity_config()
+        profile, signer = self.service.resolve_fresh_signer()
+        return ResolvedBuyerIdentity(
+            profile_id=profile.profile_id,
+            principal=signer.identity,
+            signer=signer,
+            source="fresh",
+        )
+
+    def recovery(self, run_id: str) -> ResolvedBuyerIdentity:
+        reject_legacy_buyer_identity_config()
+        recorded = read_run_identity(run_id)
+        profile, signer = self.service.resolve_recovery_signer(
+            profile_id=recorded.profile_id,
+            principal=recorded.principal,
+        )
+        return ResolvedBuyerIdentity(
+            profile_id=profile.profile_id,
+            principal=recorded.principal,
+            signer=signer,
+            source="recovery",
+        )
+
+
+def resolve_fresh_buyer_identity() -> ResolvedBuyerIdentity:
+    """Resolve the selected active profile exactly once for fresh work."""
+
+    return BuyerProfileResolver().fresh()
+
+
+def resolve_recovery_buyer_identity(run_id: str) -> ResolvedBuyerIdentity:
+    """Resolve the run-recorded profile/principal, ignoring current selection."""
+
+    return BuyerProfileResolver().recovery(run_id)
+
+
+def reject_legacy_buyer_identity_config() -> None:
+    """Reject removed direct marketplace identity fields with an import action."""
+
+    config = load_user_config()
+    forbidden = {
+        "Identity",
+        "identity_credential",
+        "buyer_private_key",
+        "marketplace_private_key",
+        "marketplace_seed",
+        "marketplace_mnemonic",
+    }
+    present = sorted(key for key in forbidden if key in config)
+    if present:
         raise RuntimeError(
-            "Missing required public identity config: " + ", ".join(missing)
+            "Direct buyer identity configuration is no longer accepted ("
+            + ", ".join(present)
+            + "); run `market profile import --check`, import explicitly, "
+            "then remove the legacy fields."
         )
-    return IdentityConfig(
-        principal=Identity(
-            scheme=IdentityScheme(scheme),
-            identifier=identifier,
-        )
-    )
-
-
-def resolve_identity_credential(
-    environ: Mapping[str, str] | None = None,
-) -> str:
-    """Read signer material from the buyer's secret-only environment boundary."""
-
-    credential = (environ if environ is not None else os.environ).get(
-        IDENTITY_CREDENTIAL_ENV
-    )
-    if not credential:
-        raise RuntimeError(
-            f"Missing required signer credential in {IDENTITY_CREDENTIAL_ENV}"
-        )
-    return credential
-
-
-def resolve_buyer_signer(
-    config: IdentityConfig,
-    credential: bytes | str,
-) -> Signer:
-    """Build the configured signer and fail closed on principal mismatch."""
-
-    signer = create_signer(config.principal.scheme, credential)
-    if signer.identity != config.principal:
-        raise ValueError("resolved signer identity does not match configured principal")
-    return signer
 
 
 def resolve_config_value(
@@ -100,8 +120,6 @@ def resolve_config_value(
     if override:
         return override
     if toml_path:
-        from market_config.config_loader import get_dotted, load_user_config
-
         v = get_dotted(load_user_config(), toml_path)
         if v not in (None, ""):
             return str(v)
@@ -110,8 +128,6 @@ def resolve_config_value(
 
 def resolve_negotiation_config() -> tuple[object | None, str | None]:
     """Resolve negotiation policy config without flattening TOML lists."""
-    from market_config.config_loader import get_dotted, load_user_config
-
     cfg = load_user_config()
     raw_policies = get_dotted(cfg, "negotiation.policies")
     policies: object | None = None
@@ -145,8 +161,6 @@ def resolve_buyer_wallet(
     addr = resolve_config_value(override=override_addr, toml_path="wallet.address")
     pk = resolve_config_value(override=override_pk, toml_path="wallet.private_key")
     if pk:
-        from market_config.config_loader import derive_wallet_address
-
         derived = derive_wallet_address(pk)
         if derived:
             if not addr:
@@ -173,8 +187,6 @@ def resolve_storefront_url(
     """
     if agent_url:
         return agent_url
-    from market_config.config_loader import get_dotted, load_user_config
-
     cfg = load_user_config()
     base_url = get_dotted(cfg, "seller.base_url")
     if isinstance(base_url, str) and base_url:

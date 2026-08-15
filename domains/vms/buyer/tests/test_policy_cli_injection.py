@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import uuid
 from typing import Optional
 from unittest.mock import patch
 
@@ -147,6 +148,7 @@ def test_resume_point_carries_the_recorded_policy(tmp_path, monkeypatch):
     monkeypatch.setattr(run_log, "runs_dir", lambda: tmp_path)
     trust = seller_principals()
     log = RunLog.start(
+        profile_id=uuid.UUID("11111111-1111-4111-8111-111111111111"),
         principal=BUYER_SIGNER.identity,
         seller_url="http://s:8001",
         listing_id="lst-1",

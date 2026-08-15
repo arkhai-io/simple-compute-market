@@ -28,15 +28,14 @@ def _resolve_escrow_uid_from_run(run_id: str) -> Optional[str]:
     escrow_uid logged by the buy_orchestrator."""
     from .run_log import read_run
 
-    from .common import (
-        resolve_buyer_signer,
-        resolve_identity_config,
-        resolve_identity_credential,
-    )
+    from .common import resolve_recovery_buyer_identity
 
-    identity_config = resolve_identity_config()
-    signer = resolve_buyer_signer(identity_config, resolve_identity_credential())
-    events = read_run(run_id, signer=signer)
+    identity = resolve_recovery_buyer_identity(run_id)
+    events = read_run(
+        run_id,
+        signer=identity.signer,
+        profile_id=identity.profile_id,
+    )
     if not events:
         return None
     for ev in reversed(events):
@@ -61,18 +60,10 @@ def _resolve_escrow_context_from_run(
         return None, None, None
     try:
         from .deal_helpers import load_deal_context
-        from .common import (
-            resolve_buyer_signer,
-            resolve_identity_config,
-            resolve_identity_credential,
-        )
+        from .common import resolve_recovery_buyer_identity
 
-        identity_config = resolve_identity_config()
-        signer = resolve_buyer_signer(
-            identity_config,
-            resolve_identity_credential(),
-        )
-        deal = load_deal_context(run_id, signer=signer)
+        identity = resolve_recovery_buyer_identity(run_id)
+        deal = load_deal_context(run_id, signer=identity.signer)
     except Exception:
         return _resolve_escrow_uid_from_run(run_id), None, None
 
@@ -380,14 +371,12 @@ def create_cmd(
     )
     from .common import (
         chain_by_name,
-        resolve_buyer_signer,
-        resolve_identity_config,
-        resolve_identity_credential,
+        resolve_recovery_buyer_identity,
         select_chain_for_listing,
     )
 
-    identity_config = resolve_identity_config()
-    signer = resolve_buyer_signer(identity_config, resolve_identity_credential())
+    identity = resolve_recovery_buyer_identity(run_id)
+    signer = identity.signer
     deal = load_deal_context(run_id, signer=signer)
     if deal.escrow_uid:
         typer.secho(
@@ -472,7 +461,11 @@ def create_cmd(
         else deal.duration_seconds
     )
 
-    log = open_run_log(run_id, signer=signer)
+    log = open_run_log(
+        run_id,
+        signer=signer,
+        profile_id=identity.profile_id,
+    )
 
     seller_wallet = deal.seller_wallet_address
     if not seller_wallet and deal.accepted_escrow_proposal is None:

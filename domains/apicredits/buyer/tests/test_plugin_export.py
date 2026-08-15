@@ -21,6 +21,10 @@ def test_domain_is_well_formed_without_compute_capability():
     assert domain.identity == "api_credits.v1"
     assert domain.has_capability(DomainCapability.BUYER)
     assert not domain.has_capability(DomainCapability.COMPUTE_PROVISIONING)
+    assert (
+        domain.buyer.identity_injection_contract
+        == "core.resolved-buyer-identity.v1"
+    )
     assert domain.compute_provisioning is None
 
 
@@ -35,6 +39,7 @@ def test_assembled_app_exposes_credits_group_only():
     assert result.exit_code == 0, result.output
     for name in ("buy", "negotiate", "settle", "listing"):
         assert name in result.output, f"missing credits command {name!r}"
+    assert "profile" in result.output
 
 
 def test_buy_surface_has_quantity_key_and_scalar_price_flags():

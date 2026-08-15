@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 
+from types import SimpleNamespace
 import typer
 from typer.testing import CliRunner
 
@@ -179,6 +180,109 @@ def test_plugins_command_reports_empty():
     assert "No buyer market domains installed" in _all_output(result)
 
 
+def test_profile_commands_are_available_without_domain_plugins(monkeypatch):
+    calls = []
+    public = {
+        "profile_id": "4a3de310-7e5a-4e1f-8f0a-716856cf56b8",
+        "name": "buyer",
+        "principal_history": [],
+        "selected": True,
+    }
+
+    class Service:
+        def create(self, **kwargs):
+            calls.append(("create", kwargs))
+            return SimpleNamespace(redacted=lambda: public | {"created": True})
+
+        def import_legacy(self, **kwargs):
+            calls.append(("import", kwargs))
+            return SimpleNamespace(redacted=lambda: public | {"already_imported": False})
+
+        def list_profiles(self):
+            return (public,)
+
+        def show(self, profile):
+            calls.append(("show", profile))
+            return public
+
+        def select(self, profile):
+            calls.append(("select", profile))
+            return public
+
+        def rotate(self, profile, **kwargs):
+            calls.append(("rotate", profile, kwargs))
+            return SimpleNamespace(redacted=lambda: public | {"created": False})
+
+        def retire_principal(self, profile, principal):
+            calls.append(("retire-principal", profile, principal))
+            return public | {"selected": False}
+
+        def retire(self, profile):
+            calls.append(("retire", profile))
+            return public | {"selected": False}
+
+        def delete(self, profile, **kwargs):
+            calls.append(("delete", profile, kwargs))
+            return SimpleNamespace(
+                redacted=lambda: {
+                    "profile_id": public["profile_id"],
+                    "deleted": True,
+                    "deleted_credential_references": [],
+                }
+            )
+
+    monkeypatch.setattr(cli_mod, "_profile_service", Service)
+    app = build_app(domains=[])
+    result = runner.invoke(app, ["profile", "list", "--json"])
+    assert result.exit_code == 0, result.output
+    assert json.loads(result.output) == [public]
+    result = runner.invoke(app, ["profile", "show", "buyer", "--json"])
+    assert result.exit_code == 0, result.output
+    assert calls[-1] == ("show", "buyer")
+    result = runner.invoke(app, ["profile", "select", "buyer", "--json"])
+    assert result.exit_code == 0, result.output
+    assert calls[-1] == ("select", "buyer")
+
+
+def test_profile_cli_json_and_errors_never_emit_secret_canary(monkeypatch):
+    canary = "PRIVATE-SEED-CANARY"
+
+    class Service:
+        def list_profiles(self):
+            return (
+                {
+                    "name": "buyer",
+                    "credential_reference": {
+                        "provider": "environment.v1",
+                        "reference": "c3329074edb493fd",
+                    },
+                },
+            )
+
+        def create(self, **_kwargs):
+            raise RuntimeError("credential reference c3329074edb493fd is unavailable")
+
+    monkeypatch.setattr(cli_mod, "_profile_service", Service)
+    app = build_app(domains=[])
+    listed = runner.invoke(app, ["profile", "list", "--json"])
+    assert listed.exit_code == 0
+    failed = runner.invoke(
+        app,
+        [
+            "profile",
+            "create",
+            "buyer",
+            "--provider",
+            "environment.v1",
+            "--reference",
+            "BUYER_SEED",
+        ],
+    )
+    assert failed.exit_code == 2
+    assert canary not in _all_output(listed)
+    assert canary not in _all_output(failed)
+
+
 # ---------------------------------------------------------------------------
 # With a plugin: registered verbs replace the core fallbacks
 # ---------------------------------------------------------------------------
@@ -214,6 +318,7 @@ def _vm_like_plugin() -> MarketDomainContract:
         ),
         declared_capabilities=frozenset({DomainCapability.BUYER}),
         buyer=ImmutableBuyerCapability(
+            identity_injection_contract="core.resolved-buyer-identity.v1",
             register_commands=register,
             build_provision_terms=lambda **kwargs: kwargs,
             select_policy=lambda: object(),

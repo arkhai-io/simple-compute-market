@@ -16,6 +16,7 @@ What the tests verify:
 
 from __future__ import annotations
 
+import uuid
 import json
 import time
 from contextlib import ExitStack, contextmanager
@@ -73,6 +74,7 @@ def _config(
             )
         },
         principal=BUYER_SIGNER.identity,
+        buyer_profile_id=uuid.UUID("11111111-1111-4111-8111-111111111111"),
         signer=BUYER_SIGNER,
         aggregation_policy=aggregation_policy,
     )

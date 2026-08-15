@@ -16,12 +16,11 @@ from market_identity import Signer, TrustedIdentitySet
 
 
 from core_buyer.buyer_config import (  # noqa: F401 — re-exports
-    resolve_buyer_signer,
-    resolve_identity_config,
-    resolve_identity_credential,
     resolve_buyer_wallet,
     resolve_config_value,
+    resolve_fresh_buyer_identity,
     resolve_negotiation_config,
+    resolve_recovery_buyer_identity,
 )
 from core_buyer.registry_config import (  # noqa: F401 — re-exports
     resolve_discovery_timeout,

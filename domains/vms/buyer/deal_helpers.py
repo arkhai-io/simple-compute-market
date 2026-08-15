@@ -122,7 +122,7 @@ def make_publisher_trust_resolver(
     current,
     signer,
 ):
-    from .run_log import RunLog
+    from .run_log import RunLog, read_run_identity
 
     refresh = _publisher_trust_refresh(signer)
 
@@ -136,7 +136,11 @@ def make_publisher_trust_resolver(
         )
         if replacement != current:
             current = replacement
-            RunLog.open(run_id, signer=signer).event(
+            RunLog.open(
+                run_id,
+                signer=signer,
+                profile_id=read_run_identity(run_id).profile_id,
+            ).event(
                 "publisher_trust_refreshed",
                 listing_id=listing_id,
                 publisher_id=publisher_id,
