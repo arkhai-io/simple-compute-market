@@ -6,19 +6,19 @@
 
 ## 2. Exact profile configuration and registration
 
-- [ ] 2.1 Replace the card-only publication input in `kit/hosted-settlement/src/market_hosted_settlement/settlement_config.py` with strict `card.v1`, `us_bank_transfer.v1`, and `us_ach_debit.v1` profile, currency/country, interaction, ordered clause, and exact signed capability models; reject `payment_method_types`, `method="card"`, provider strings, and role-inapplicable/sensitive fields.
-- [ ] 2.2 Extend hosted preflight to verify exact manifest/API/schema/profile/payer/authorization capabilities and return allowlisted per-profile readiness/blockers while preserving mechanism-wide authority/account failures and independently ready hosted/Alkahest options.
-- [ ] 2.3 Update option construction and clause projections to emit one deterministic option per ready clause with exact profile in its identity, fixed separate-charges/transfers flow, lowercase currency, positive minor-unit rate, condition, account, parties, and interaction capability.
+- [x] 2.1 Replace the card-only publication input in `kit/hosted-settlement/src/market_hosted_settlement/settlement_config.py` with strict `card.v1`, `us_bank_transfer.v1`, and `us_ach_debit.v1` profile, currency/country, interaction, ordered clause, and exact signed capability models; reject `payment_method_types`, `method="card"`, provider strings, and role-inapplicable/sensitive fields.
+- [x] 2.2 Extend hosted preflight to verify exact manifest/API/schema/profile/payer/authorization capabilities and return allowlisted per-profile readiness/blockers while preserving mechanism-wide authority/account failures and independently ready hosted/Alkahest options.
+- [x] 2.3 Update option construction and clause projections to emit one deterministic option per ready clause with exact profile in its identity, fixed separate-charges/transfers flow, lowercase currency, positive minor-unit rate, condition, account, parties, and interaction capability.
 - [ ] 2.4 Update buyer compatibility to require the selected persistent profile's matching authority/environment opaque binding, exact profile/currency/country and interaction ability, and safe local readiness; revalidate before negotiation/authorization without discovery-time mutation.
-- [ ] 2.5 Add focused hosted-kit configuration, readiness, profile-order/identity, clause/query projection, compatibility, sanitized blocker, unsupported-profile, and independent-failure tests in `kit/hosted-settlement/tests/unit/` and shared settlement registration tests.
+- [x] 2.5 Add focused hosted-kit configuration, readiness, profile-order/identity, clause/query projection, compatibility, sanitized blocker, unsupported-profile, and independent-failure tests in `kit/hosted-settlement/tests/unit/` and shared settlement registration tests.
 
 ## 3. Direct payer-profile composition
 
-- [ ] 3.1 Add provider-neutral payer profile, owner rotation/retirement, setup/status, instrument lifecycle, and safe projection façades to `kit/hosted-settlement` using only the released client and injected marketplace signer; export them without redefining hosted wire/signature/provider behavior.
-- [ ] 3.2 Extend the settlement registration/VM buyer composition contribution seam so `market settlement stripe payer` registers create/show/delete, owner rotate/retire, setup start/status, and instrument list/default/revoke/delete commands without importing the hosted client into core or another domain.
-- [ ] 3.3 Integrate payer commands with the `add-persistent-buyer-profiles` selected/historical signer and atomic owner-only profile-store updates; persist only authority/environment, opaque payer binding, canonical owner/history, and safe lifecycle metadata.
-- [ ] 3.4 Route setup and instrument actions through common `--action open|print|fail`, keep action values transient, and reject provider/customer/payment-method/mandate/bank/card data in config, profile projections, logs, errors, and command JSON.
-- [ ] 3.5 Add hosted-kit and CLI tests for exact signer ownership, dual-proof rotation, historical signer recovery, setup/action resume, instrument lifecycle, atomic local binding updates, deterministic failures, redaction, and core/domain import boundaries.
+- [x] 3.1 Add provider-neutral payer profile, owner rotation/retirement, setup/status, instrument lifecycle, and safe projection façades to `kit/hosted-settlement` using only the released client and injected marketplace signer; export them without redefining hosted wire/signature/provider behavior.
+- [x] 3.2 Extend the settlement registration/VM buyer composition contribution seam so `market settlement stripe payer` registers create/show/delete, owner rotate/retire, setup start/status, and instrument list/default/revoke/delete commands without importing the hosted client into core or another domain.
+- [x] 3.3 Integrate payer commands with the `add-persistent-buyer-profiles` selected/historical signer and atomic owner-only profile-store updates; persist only authority/environment, opaque payer binding, canonical owner/history, and safe lifecycle metadata.
+- [x] 3.4 Route setup and instrument actions through common `--action open|print|fail`, keep action values transient, and reject provider/customer/payment-method/mandate/bank/card data in config, profile projections, logs, errors, and command JSON.
+- [x] 3.5 Add hosted-kit and CLI tests for exact signer ownership, dual-proof rotation, historical signer recovery, setup/action resume, instrument lifecycle, atomic local binding updates, deterministic failures, redaction, and core/domain import boundaries.
 
 ## 4. Buyer authorization and automation policy
 
@@ -30,7 +30,7 @@
 
 ## 5. VM storefront start and publication
 
-- [ ] 5.1 Update VM listing settlement config/compiler/publication/reconciliation to consume ordered exact hosted clauses, publish all independently ready profile options, expose sanitized profile blockers, and preserve Alkahest behavior and ordering.
+- [x] 5.1 Update VM listing settlement config/compiler/publication/reconciliation to consume ordered exact hosted clauses, publish all independently ready profile options, expose sanitized profile blockers, and preserve Alkahest behavior and ordering.
 - [ ] 5.2 Change `domains/vms/buyer/hosted_settlement.py` and storefront `/api/v1/settlements` start models/routes to carry only accepted negotiation ID, obligation ID, and safe `funding_authorization_ref`; remove buyer/claimant and all caller-controlled commercial/provider overrides.
 - [ ] 5.3 Update `load_hosted_agreement`, accepted-artifact validation, and deterministic plan derivation to reload parties, amount, currency, account, profile, expiry, condition, and VM provision input from seller-accepted state and verify authorization through ordinary hosted materialization.
 - [ ] 5.4 Update storefront public status/reclaim projections and buyer polling/resume to retain only settlement/authorization refs, profile, public status/reason/deadline, action kind/expiry, receipt, and accepted identities; retrieve every current action instead of storing its URL/details.
@@ -38,7 +38,7 @@
 
 ## 6. Runtime servicing, fulfillment, and legacy recovery
 
-- [ ] 6.1 Extend `HostedObligationParams`, adapter materialization, immutable fingerprints, mechanism state, and operation receipts to carry exact profile and safe authorization reference while excluding stable payer/instrument and provider data.
+- [x] 6.1 Extend `HostedObligationParams`, adapter materialization, immutable fingerprints, mechanism state, and operation receipts to carry exact profile and safe authorization reference while excluding stable payer/instrument and provider data.
 - [ ] 6.2 Map producer awaiting/action/availability/return/loss results monotonically into the common runtime so only authoritative funded state starts `ensure_hosted_fulfillment`; keep pending bank/ACH/confirmation states non-fulfilling, make return after fulfillment but before collection preserve evidence while ordering VM teardown/capacity cleanup and hosted financial recovery, and project post-collection loss as manual/incident without rewriting completion.
 - [ ] 6.3 Preserve the shared status/fulfill/check/collect/reclaim journal, leases, and compare-and-set exclusion at funding/expiry boundaries; recovery must use accepted profile/authorization/obligation/operation identities despite current config, readiness, priority, or automation changes.
 - [ ] 6.4 Add storefront/buyer profile-store and settlement database migrations plus fixtures for new safe fields and recovery-only legacy card classification, preserving historical option/obligation/settlement/operation/request/receipt identities and rolling back ambiguous rows atomically.
