@@ -55,7 +55,9 @@ services:
     ports:
       - "8092:8082"
     environment:
-      - APICREDITS_STOREFRONT_ADMIN_KEY=test-api-key
+      - APICREDITS_STOREFRONT_ADMIN_KEY_FILE=/run/secrets/arkhai/api-credits-admin-key
+    volumes:
+      - ${APICREDITS_ADMIN_KEY_FILE:?set API-credits admin credential file}:/run/secrets/arkhai/api-credits-admin-key:ro
     restart: unless-stopped
     deploy:
       resources:
@@ -79,7 +81,7 @@ services:
       - "8095:8085"
     environment:
       - APICREDITS_MIDDLEWARE_SERVICE_URL=http://credits-service:8082
-      - APICREDITS_MIDDLEWARE_ADMIN_KEY=test-api-key
+      - APICREDITS_MIDDLEWARE_ADMIN_KEY_FILE=/run/secrets/arkhai/api-credits-admin-key
       - APICREDITS_MIDDLEWARE_AMOUNT_PER_REQUEST=1
       # Short verify cache so a re-purchase (top-up) becomes visible to
       # the gate quickly — the e2e polls through this window.
@@ -87,6 +89,8 @@ services:
       - APICREDITS_MIDDLEWARE_PURCHASE_SERVICE_NAME=weather-api
       - APICREDITS_MIDDLEWARE_PURCHASE_STOREFRONT_URL=http://credits-storefront:8000
       - APICREDITS_MIDDLEWARE_PURCHASE_REGISTRY_URL=http://api-credits-registry:8080
+    volumes:
+      - ${APICREDITS_ADMIN_KEY_FILE:?set API-credits admin credential file}:/run/secrets/arkhai/api-credits-admin-key:ro
     restart: unless-stopped
     deploy:
       resources:
@@ -128,6 +132,7 @@ services:
       # the VM storefront's data tree (the canonical anvil address book). A
       # non-Anvil deployment supplies its own address book here.
       - ../vms/storefront/src/market_storefront/data/alkahest_anvil_addresses.json:/app/alkahest_anvil_addresses.json:ro
+      - ${APICREDITS_ADMIN_KEY_FILE:?set API-credits admin credential file}:/run/secrets/arkhai/api-credits-admin-key:ro
     restart: unless-stopped
     deploy:
       resources:

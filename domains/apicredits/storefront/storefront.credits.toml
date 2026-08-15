@@ -49,7 +49,7 @@ identities = [
 # The credits service this storefront sells for. It hosts the quota ledger
 # selected explicitly below and the separate issuance/keys mechanism API.
 service_url         = "http://credits-service:8082"
-admin_key           = "test-api-key"
+admin_key_file      = "/run/secrets/arkhai/api-credits-admin-key"
 preflight_timeout   = 60
 fail_on_unreachable = true
 

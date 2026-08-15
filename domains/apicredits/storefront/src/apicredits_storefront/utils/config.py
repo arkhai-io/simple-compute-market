@@ -16,8 +16,9 @@ from __future__ import annotations
 
 import logging
 import os
-from pathlib import Path
+import stat
 from collections.abc import Mapping
+from pathlib import Path
 from typing import Any
 
 from dynaconf import Dynaconf
@@ -200,8 +201,28 @@ def credits_service_url() -> str:
 
 
 def credits_admin_key() -> str:
-    """Resolve the credits-service mechanism credential without fallback."""
-    return str(settings.get("credits.admin_key", "") or "")
+    """Resolve one exact credits-service mechanism credential."""
+    inline = str(settings.get("credits.admin_key", "") or "")
+    file_name = str(settings.get("credits.admin_key_file", "") or "")
+    if inline and file_name:
+        raise RuntimeError(
+            "credits.admin_key and credits.admin_key_file are mutually exclusive"
+        )
+    if inline:
+        return inline
+    if not file_name:
+        return ""
+    path = Path(file_name)
+    try:
+        metadata = path.lstat()
+        if not stat.S_ISREG(metadata.st_mode):
+            raise RuntimeError("credits.admin_key_file must be a regular file")
+        value = path.read_text(encoding="utf-8").strip()
+    except OSError as exc:
+        raise RuntimeError("credits.admin_key_file cannot be read") from exc
+    if not value:
+        raise RuntimeError("credits.admin_key_file is empty")
+    return value
 
 
 AGENT_ID: str = _validate_agent_id(settings.get("agent_id", ""))

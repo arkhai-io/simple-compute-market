@@ -10,7 +10,9 @@ knows where to buy more (the re-purchase loop).
 from __future__ import annotations
 
 import os
+import stat
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any
 
 
@@ -66,11 +68,11 @@ class GateConfig:
     def from_env(cls, prefix: str = "APICREDITS_MIDDLEWARE_") -> "GateConfig":
         """Build from ``<PREFIX>*`` environment variables.
 
-        Recognised: ``SERVICE_URL``, ``ADMIN_KEY``, ``AMOUNT_PER_REQUEST``,
-        ``VERIFY_TTL_SECONDS``, ``LOW_BALANCE_THRESHOLD``,
-        ``FLUSH_INTERVAL_SECONDS``, ``FLUSH_MAX_BATCH``,
-        ``REQUEST_TIMEOUT_SECONDS``, and the purchase pointer
-        ``PURCHASE_SERVICE_NAME`` / ``PURCHASE_LISTING_ID`` /
+        Recognised: ``SERVICE_URL``, exactly one of ``ADMIN_KEY`` or
+        ``ADMIN_KEY_FILE``, ``AMOUNT_PER_REQUEST``, ``VERIFY_TTL_SECONDS``,
+        ``LOW_BALANCE_THRESHOLD``, ``FLUSH_INTERVAL_SECONDS``,
+        ``FLUSH_MAX_BATCH``, ``REQUEST_TIMEOUT_SECONDS``, and the purchase
+        pointer ``PURCHASE_SERVICE_NAME`` / ``PURCHASE_LISTING_ID`` /
         ``PURCHASE_STOREFRONT_URL`` / ``PURCHASE_REGISTRY_URL``.
         """
 
@@ -91,9 +93,30 @@ class GateConfig:
             except ValueError:
                 return default
 
+        def _admin_key() -> str:
+            inline = _get("ADMIN_KEY")
+            file_name = _get("ADMIN_KEY_FILE")
+            if inline and file_name:
+                raise ValueError("ADMIN_KEY and ADMIN_KEY_FILE are mutually exclusive")
+            if inline:
+                return inline
+            if not file_name:
+                return ""
+            path = Path(file_name)
+            try:
+                metadata = path.lstat()
+                if not stat.S_ISREG(metadata.st_mode):
+                    raise ValueError("ADMIN_KEY_FILE must be a regular file")
+                value = path.read_text(encoding="utf-8").strip()
+            except OSError as exc:
+                raise ValueError("ADMIN_KEY_FILE cannot be read") from exc
+            if not value:
+                raise ValueError("ADMIN_KEY_FILE is empty")
+            return value
+
         return cls(
             service_url=_get("SERVICE_URL", "http://localhost:8082").rstrip("/"),
-            admin_key=_get("ADMIN_KEY"),
+            admin_key=_admin_key(),
             amount_per_request=_int("AMOUNT_PER_REQUEST", 1),
             verify_ttl_seconds=_float("VERIFY_TTL_SECONDS", 30.0),
             low_balance_threshold=_int("LOW_BALANCE_THRESHOLD", 0),
