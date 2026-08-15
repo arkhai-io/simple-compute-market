@@ -169,3 +169,32 @@ allow-direct-references=true
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/market_storefront"]
+
+[tool.hatch.build.targets.wheel.force-include]
+"../../__init__.py" = "domains/__init__.py"
+"../__init__.py" = "domains/vms/__init__.py"
+"../listings/__init__.py" = "domains/vms/listings/__init__.py"
+"../listings/buyer_cli.py" = "domains/vms/listings/buyer_cli.py"
+"../listings/host_csv_importer.py" = "domains/vms/listings/host_csv_importer.py"
+"../listings/listing_mode.py" = "domains/vms/listings/listing_mode.py"
+"../listings/models.py" = "domains/vms/listings/models.py"
+"../listings/pricing.py" = "domains/vms/listings/pricing.py"
+"../listings/pool_descriptors.py" = "domains/vms/listings/pool_descriptors.py"
+"../listings/pricing_resolution.py" = "domains/vms/listings/pricing_resolution.py"
+"../listings/reconciler.py" = "domains/vms/listings/reconciler.py"
+"../listings/resource_csv_importer.py" = "domains/vms/listings/resource_csv_importer.py"
+"../listings/resources.py" = "domains/vms/listings/resources.py"
+"../listings/strategy.py" = "domains/vms/listings/strategy.py"
+"../negotiation/__init__.py" = "domains/vms/negotiation/__init__.py"
+"../negotiation/policies.py" = "domains/vms/negotiation/policies.py"
+"../negotiation/storefront_round.py" = "domains/vms/negotiation/storefront_round.py"
+"../negotiation/rl/__init__.py" = "domains/vms/negotiation/rl/__init__.py"
+"../negotiation/rl/arkhai_common.py" = "domains/vms/negotiation/rl/arkhai_common.py"
+"../negotiation/rl/torch_arkhai_strategy.py" = "domains/vms/negotiation/rl/torch_arkhai_strategy.py"
+"../negotiation/rl/models/arkhai_negotiator_buyer.pt" = "domains/vms/negotiation/rl/models/arkhai_negotiator_buyer.pt"
+"../negotiation/rl/models/arkhai_negotiator_seller.pt" = "domains/vms/negotiation/rl/models/arkhai_negotiator_seller.pt"
+"../settlement/__init__.py" = "domains/vms/settlement/__init__.py"
+"../settlement/compute_lease.py" = "domains/vms/settlement/compute_lease.py"
+"../settlement/fulfillment.py" = "domains/vms/settlement/fulfillment.py"
+"../settlement/heartbeats.py" = "domains/vms/settlement/heartbeats.py"
+"../settlement/proposals.py" = "domains/vms/settlement/proposals.py"

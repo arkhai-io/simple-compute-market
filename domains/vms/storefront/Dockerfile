@@ -143,7 +143,7 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 
 # Fail the image build if the immutable hosted client regains a seller command
 # or any repository dependency was installed as an editable sibling source.
-RUN python -c 'import importlib.metadata as m, json; assert all(ep.name != "hosted-settlement-seller" for ep in m.entry_points(group="console_scripts")); assert all(not (json.loads(text).get("dir_info") or {}).get("editable", False) for dist in m.distributions() if (text := dist.read_text("direct_url.json")))'
+RUN python -c 'import importlib.metadata as m, json; import domains.vms.listings, domains.vms.negotiation, domains.vms.settlement, market_storefront.cli; assert all(ep.name != "hosted-settlement-seller" for ep in m.entry_points(group="console_scripts")); assert all(not (json.loads(text).get("dir_info") or {}).get("editable", False) for dist in m.distributions() if (text := dist.read_text("direct_url.json")))'
 
 ARG PORT=8080
 ENV PORT=${PORT}
