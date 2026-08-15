@@ -14,6 +14,9 @@ from arkhai_bare_metal_storefront.publication import (
     run_bare_metal_publication,
 )
 from arkhai_bare_metal_storefront.sqlite_client import SQLiteClient
+from arkhai_bare_metal_storefront.domain_runtime import get_market_domain_contract
+from arkhai_bare_metal_storefront.server import BARE_METAL_STOREFRONT_REGISTRY
+
 
 
 def _projection():
@@ -37,27 +40,30 @@ def _projection():
     )
 
 
-def test_selection_builds_only_bare_metal_source():
-    selection = build_bare_metal_publication_selection(
+def _selection():
+    return build_bare_metal_publication_selection(
+        BARE_METAL_STOREFRONT_REGISTRY,
         projection_snapshot=lambda: [_projection()],
         close_listing=lambda *_args: {"status": "closed"},
         publish_existing_listing=lambda **kwargs: kwargs,
     )
 
+
+def test_selection_builds_only_bare_metal_source():
+    registration = BARE_METAL_STOREFRONT_REGISTRY.resolve_mode("bare_metal")
+    selection = _selection()
+
     sources = selection.build_sources()
 
-    assert tuple(selection.source_names) == ("bare_metal",)
-    assert [source.name for source in sources] == ["bare_metal"]
+    assert registration.contract is get_market_domain_contract()
+    assert tuple(selection.source_names) == (registration.contribution_id,)
+    assert [source.name for source in sources] == [registration.contribution_id]
 
 
 def test_core_runner_publishes_exact_opaque_bare_metal_payload(tmp_path):
     path = str(tmp_path / "storefront.db")
     SQLiteClient(path)
-    selection = build_bare_metal_publication_selection(
-        projection_snapshot=lambda: [_projection()],
-        close_listing=lambda *_args: {"status": "closed"},
-        publish_existing_listing=lambda **kwargs: kwargs,
-    )
+    selection = _selection()
     offers = []
 
     result = run_bare_metal_publication(

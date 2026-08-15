@@ -84,8 +84,12 @@ def _runtime(path: str) -> BareMetalStorefrontRuntime:
         storefront_url="http://seller:8000",
         marketplace_signer=SELLER_SIGNER,
         seller_evm_address="0x3333333333333333333333333333333333333333",
-        plan_builder=lambda **_kwargs: {
-            "settlement_plan": {"obligations": []},
+        plan_builder=lambda **kwargs: {
+            "settlement_plan": {
+                "buyer_principal": kwargs["buyer_principal"].model_dump(mode="json"),
+                "seller_principal": kwargs["seller_principal"].model_dump(mode="json"),
+                "obligations": [],
+            },
             "accepted_escrow_terms": [],
         },
     )
@@ -170,6 +174,8 @@ async def test_signed_opening_accepts_and_persists_domain_artifacts(tmp_path) ->
     assert response.json()["action"] == "accept"
     assert response.json()["accepted_provision_terms"] == _opening()["provision_terms"]
     assert response.json()["settlement_plan"] == {
+        "buyer_principal": BUYER_SIGNER.identity.model_dump(mode="json"),
+        "seller_principal": SELLER_SIGNER.identity.model_dump(mode="json"),
         "obligations": [],
         "service_terms": {},
     }

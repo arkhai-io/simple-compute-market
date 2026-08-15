@@ -2,13 +2,23 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import sqlite3
 from typing import Any
 
+from market_identity import Identity
 from market_settlement_runtime import SettlementPublicationClause
 
 from market_storefront.cli_publish import _publish_command_round
+from market_storefront.domain_runtime import (
+    build_vm_storefront_domain,
+    build_vm_storefront_registry,
+)
+from market_storefront.utils.sqlite_client import SQLiteClient
+
+
+_VM_REGISTRY = build_vm_storefront_registry(build_vm_storefront_domain())
 
 
 def _clause(
@@ -28,38 +38,7 @@ def _clause(
 
 
 def _init_db(path: str) -> None:
-    conn = sqlite3.connect(path)
-    try:
-        conn.executescript(
-            """
-            CREATE TABLE resources (
-                pk INTEGER PRIMARY KEY AUTOINCREMENT,
-                resource_id TEXT NOT NULL UNIQUE,
-                resource_type TEXT NOT NULL,
-                resource_subtype TEXT,
-                unit TEXT,
-                value NUMERIC,
-                state TEXT,
-                attributes TEXT,
-                min_price TEXT,
-                token TEXT,
-                accepted_escrows TEXT,
-                settlements TEXT,
-                max_duration_seconds INTEGER,
-                created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-                updated_at TEXT DEFAULT CURRENT_TIMESTAMP
-            );
-            CREATE TABLE listings (
-                listing_id TEXT PRIMARY KEY,
-                status TEXT NOT NULL,
-                offer_resource TEXT,
-                created_at TEXT DEFAULT CURRENT_TIMESTAMP
-            );
-            """
-        )
-        conn.commit()
-    finally:
-        conn.close()
+    SQLiteClient(db_path=path, registry=_VM_REGISTRY)
 
 
 def _insert_resource(
@@ -77,7 +56,24 @@ def _insert_resource(
                VALUES (?, 'compute.gpu', 'h100', 'count', 1, 'available', ?, ?)""",
             (
                 resource_id,
-                json.dumps({"gpu_model": "H100", "sla": 99.0, "region": "NY"}),
+                json.dumps(
+                    {
+                        "gpu_model": "H100",
+                        "sla": 99.0,
+                        "region": "NY",
+                        "virtualization_type": "vm",
+                    }
+                ),
+                json.dumps(settlements) if settlements is not None else None,
+            ),
+        )
+        conn.execute(
+            """INSERT INTO compute_capacity_pools
+               (pool_id, resource_type, gpu_model, region, sla, total_gpu_count,
+                status, settlements)
+               VALUES (?, 'compute.gpu', 'H100', 'NY', 99.0, 1, 'active', ?)""",
+            (
+                resource_id,
                 json.dumps(settlements) if settlements is not None else None,
             ),
         )
@@ -102,6 +98,24 @@ def _run_round(db_path: str, command_settlements, monkeypatch):
         max_duration_seconds,
         **payload,
     ):
+        asyncio.run(
+            SQLiteClient(db_path=db_path, registry=_VM_REGISTRY).upsert_listing(
+                listing_id="listing-1",
+                status="open",
+                created_at="2026-08-15T00:00:00Z",
+                updated_at="2026-08-15T00:00:00Z",
+                offer_resource=offer,
+                fulfillment_resource=None,
+                max_duration_seconds=max_duration_seconds,
+                storefront_url=agent_url,
+                seller_principal=Identity(
+                    scheme="ed25519",
+                    identifier=(
+                        "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8"
+                    ),
+                ),
+            )
+        )
         published_payloads.append(
             {
                 "agent_url": agent_url,
@@ -114,7 +128,50 @@ def _run_round(db_path: str, command_settlements, monkeypatch):
         )
         return {"status": "created", "listing_id": "listing-1"}
 
+    monkeypatch.setattr(
+        "market_storefront.cli_publish._site_topology_sync",
+        lambda: ("site-a", 1),
+    )
+    conn = sqlite3.connect(db_path)
+    try:
+        resource_ids = [
+            str(row[0])
+            for row in conn.execute("SELECT resource_id FROM resources").fetchall()
+        ]
+    finally:
+        conn.close()
+    monkeypatch.setattr(
+        "market_storefront.cli_publish._member_availability_sync",
+        lambda: {("site-a", resource_id): 1 for resource_id in resource_ids},
+    )
+    monkeypatch.setattr(
+        "market_storefront.cli_publish._site_pool_projection_if_enabled",
+        lambda: {
+            "site-a": [
+                {
+                    "resource_pool_id": resource_id,
+                    "pool_metadata": {
+                        "policy_tags": {"deliverable_modes": ["vm"]},
+                    },
+                    "resources": [
+                        {
+                            "physical_resource_id": resource_id,
+                            "capacity": {"gpu_count": 1},
+                            "available": {"gpu_count": 1},
+                            "attributes": {"gpu_model": "H100"},
+                            "enabled": True,
+                        }
+                    ],
+                }
+                for resource_id in resource_ids
+            ]
+        },
+    )
     monkeypatch.setattr("market_storefront.cli_publish._publish_offer", publish_offer)
+    monkeypatch.setattr(
+        "market_storefront.utils.config.storefront_domain_registry",
+        lambda: _VM_REGISTRY,
+    )
     monkeypatch.setattr(
         "market_storefront.cli_publish._compile_publication_clauses",
         compile_clauses,

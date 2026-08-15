@@ -1,3 +1,4 @@
+import base64
 import json
 import sqlite3
 from datetime import UTC, datetime
@@ -24,7 +25,8 @@ from core_storefront.sqlite_migrations import (
 from test_domain_registry import _registration
 
 
-def _principal(identifier: str) -> Identity:
+def _principal(byte: int) -> Identity:
+    identifier = base64.urlsafe_b64encode(bytes([byte]) * 32).rstrip(b"=").decode()
     return Identity(scheme=IdentityScheme.ED25519, identifier=identifier)
 
 
@@ -68,7 +70,7 @@ async def _persist_listing(client, binding, *, status="open"):
         fulfillment_resource=None,
         max_duration_seconds=3600,
         storefront_url="https://seller.example",
-        seller_principal=_principal("11" * 32),
+        seller_principal=_principal(0x11),
     )
 
 
@@ -118,7 +120,7 @@ async def test_public_mode_disagreement_fails_before_listing_or_binding_write(tm
             fulfillment_resource=None,
             max_duration_seconds=3600,
             storefront_url="https://seller.example",
-            seller_principal=_principal("22" * 32),
+            seller_principal=_principal(0x22),
         )
     assert await client.load_listing(listing_id=binding.listing_id) is None
 
@@ -148,8 +150,8 @@ async def test_opening_copies_binding_message_and_artifact_in_one_transaction(tm
         counterparty_listing_id="buyer-listing-a",
         seller_agent_url="https://seller.example",
         buyer_agent_url="https://buyer.example",
-        buyer_principal=_principal("33" * 32),
-        seller_principal=_principal("11" * 32),
+        buyer_principal=_principal(0x33),
+        seller_principal=_principal(0x11),
         owner_id="seller",
         seller_initial_amount=100,
         strategy_label="fixed",
@@ -215,8 +217,8 @@ async def test_thread_and_artifact_cross_swaps_fail_before_mutation(tmp_path):
             their_listing_id="buyer-listing",
             our_agent_id="https://seller.example",
             their_agent_id="https://buyer.example",
-            buyer_principal=_principal("33" * 32),
-            seller_principal=_principal("11" * 32),
+            buyer_principal=_principal(0x33),
+            seller_principal=_principal(0x11),
             owner_id="seller",
             binding=other,
         )

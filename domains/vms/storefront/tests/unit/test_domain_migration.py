@@ -148,6 +148,8 @@ def test_write_atomically_binds_rows_and_retires_legacy_authority(tmp_path):
             "SELECT fulfillment_context FROM escrows WHERE escrow_uid='escrow-1'"
         ).fetchone()[0])
         assert context["storefront_domain_binding"] == {
+            "negotiation_id": "thread-1",
+            "listing_id": "listing-1",
             "offering_mode": "vm",
             "domain_identity": "compute.v1",
             "contract_major": 1,

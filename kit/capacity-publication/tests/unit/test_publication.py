@@ -81,7 +81,7 @@ async def test_publish_requires_exact_durable_site_and_mode_binding():
 
     result = await runtime(repository, hooks).publish(candidate())
 
-    assert result["status"] == "skipped"
+    assert result["status"] == "disabled"
     assert hooks.validated == ["listing-1"]
 
     with pytest.raises(CapacityBindingError, match="does not match"):

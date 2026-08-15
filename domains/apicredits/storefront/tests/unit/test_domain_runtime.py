@@ -23,6 +23,7 @@ def test_domain_runtime_normalizes_api_credits_schema_slots() -> None:
     listing = runtime.codecs.listing({
         "service_name": "Acme Inference",
         "resource_id": "quota-a",
+        "capacity_site_id": "tokens",
     })
     message = runtime.codecs.message({
         "kind": "api_credits.v1",
@@ -54,6 +55,7 @@ def test_domain_runtime_normalizes_api_credits_schema_slots() -> None:
     assert runtime.identity == API_CREDITS_SCHEMA_KIND
     assert listing.offer_resource.service_name == "Acme Inference"
     assert listing.offer_resource.resource_id == "quota-a"
+    assert listing.offer_resource.capacity_site_id == "tokens"
     assert message.quantity == 5
     assert message.key_mode == "new"
     assert terms.quantity == 7
@@ -91,29 +93,33 @@ def test_domain_runtime_normalizes_offer_resource_from_foreign_model() -> None:
         kind: str
         service_name: str
         resource_id: str
+        capacity_site_id: str
 
     listing = market_domain().codecs.listing({
         "offer_resource": ForeignApiCreditsResource(
             kind="api_credits.v1",
             service_name="Acme Inference",
             resource_id="quota-a",
+            capacity_site_id="tokens",
         ),
     })
 
     assert listing.offer_resource.service_name == "Acme Inference"
     assert listing.offer_resource.resource_id == "quota-a"
+    assert listing.offer_resource.capacity_site_id == "tokens"
 
 
 def test_domain_runtime_normalizes_json_encoded_offer_resource() -> None:
     listing = market_domain().codecs.listing({
         "offer_resource": (
             '{"kind":"api_credits.v1","service_name":"Acme Inference",'
-            '"resource_id":"quota-a"}'
+            '"resource_id":"quota-a","capacity_site_id":"tokens"}'
         ),
     })
 
     assert listing.offer_resource.service_name == "Acme Inference"
     assert listing.offer_resource.resource_id == "quota-a"
+    assert listing.offer_resource.capacity_site_id == "tokens"
 
 
 def test_domain_runtime_surfaces_api_credits_validation_errors() -> None:

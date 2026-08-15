@@ -1,10 +1,10 @@
-"""Durable selected-site POOLS-7 lifecycle for bare-metal agreements."""
+"""Durable selected-site fulfillment lifecycle for bare-metal agreements."""
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from arkhai_bare_metal import (
     BareMetalMaterialization,
@@ -18,7 +18,8 @@ from core_storefront import StorefrontFulfillmentContext
 from market_fulfillment import VersionedEnvelope
 from market_identity import Identity
 
-from .sqlite_client import SQLiteClient
+if TYPE_CHECKING:
+    from .sqlite_client import SQLiteClient
 
 
 class BareMetalFulfillmentError(RuntimeError):

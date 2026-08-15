@@ -130,10 +130,11 @@ def build_bare_metal_storefront_app(
     )
 
 
+BARE_METAL_STOREFRONT_REGISTRY = build_bare_metal_storefront_registry(
+    domain=get_market_domain_contract(),
+)
 app = build_bare_metal_storefront_app(
-    registry=build_bare_metal_storefront_registry(
-        domain=get_market_domain_contract(),
-    )
+    registry=BARE_METAL_STOREFRONT_REGISTRY,
 )
 
 

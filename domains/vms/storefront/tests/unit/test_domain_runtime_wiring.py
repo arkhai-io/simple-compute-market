@@ -14,10 +14,12 @@ from market_core import (
 
 from market_storefront.domain_runtime import (
     build_vm_storefront_domain,
+    build_vm_storefront_registry,
     validate_vm_storefront_domain,
 )
 from market_storefront.services.listing_service import ListingService
-from tests.fake_site import TEST_MARKETPLACE_SIGNER
+from tests.fake_site import TEST_MARKETPLACE_SIGNER, TEST_SITE_AUTHORITIES
+from tests.listing_service_fixtures import vm_listing_collaborators
 
 _ACCEPTED_ESCROWS = [
     {
@@ -89,10 +91,11 @@ def test_vm_storefront_contract_is_validated_without_replacement() -> None:
     assert validate_vm_storefront_domain(domain) is domain
     assert domain.identity == "compute.v1"
     assert domain.codecs.listing(
-        {"gpu_model": "H200", "gpu_count": 1}
+        {"gpu_model": "H200", "gpu_count": 1, "virtualization_type": "vm"}
     ).offer_resource == {
         "gpu_model": "H200",
         "gpu_count": 1,
+        "virtualization_type": "vm",
     }
 
 
@@ -111,17 +114,30 @@ def test_incompatible_domain_fails_before_app_collaborators(
 
 def test_listing_service_validates_offer_through_injected_domain() -> None:
     domain = build_vm_storefront_domain()
+    registry = build_vm_storefront_registry(domain)
+    collaborators = vm_listing_collaborators(
+        registry,
+        signer=TEST_MARKETPLACE_SIGNER,
+        authorities=TEST_SITE_AUTHORITIES,
+    )
     service = ListingService(
-        domain=domain,
-        sqlite_client=SimpleNamespace(market_domain=domain),
-        alkahest_clients=None,
+        registry=collaborators.registry,
+        binding=collaborators.binding,
+        domain=collaborators.domain,
+        capacity_runtime=collaborators.capacity_runtime,
+        sqlite_client=SimpleNamespace(
+            domain_registry=registry,
+            market_domain=domain,
+        ),
+        alkahest_clients={},
         marketplace_signer=TEST_MARKETPLACE_SIGNER,
+        settlement_composition_provider=lambda: object(),
     )
 
     with pytest.raises(ValueError, match="offer_resource must include gpu_model"):
         service._parse_offer_and_escrows(
             CreateListingRequest(
-                offer={"gpu_count": 1},
+                offer={"gpu_count": 1, "virtualization_type": "vm"},
                 accepted_escrows=_ACCEPTED_ESCROWS,
             )
         )

@@ -238,7 +238,7 @@ class BareMetalSettlementService:
         try:
             outcome = await self.settlement_runtime.adopt(
                 records[matched_index].obligation_ref,
-                local_role="seller",
+                local_principal=Identity.model_validate(thread["seller_principal"]),
                 mechanism_ref=escrow_uid,
                 receipt=None,
                 condition_anchor=None,

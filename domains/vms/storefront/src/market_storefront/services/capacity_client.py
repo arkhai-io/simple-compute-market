@@ -46,7 +46,6 @@ from market_capacity_publication import (
 )
 from market_fulfillment import VersionedEnvelope
 from market_site import dict_resource_satisfies_claim
-from market_resource_pools import pool_delivers_offering_mode
 from market_site_client import SiteCapacityClient
 
 from market_storefront.utils.config import get_provisioning_authorities, settings
@@ -247,32 +246,28 @@ async def capacity_binding_for_listing(
     sqlite_client: Any,
     listing_id: str,
 ) -> CapacityBinding:
-    """Resolve and validate the VM candidate's exact durable pool binding."""
+    """Resolve the VM candidate's exact durable site, mode, and source."""
     from domains.vms.listings.models import Listing
-    from domains.vms.listings.reconciler import (
-        pool_id_for_listing,
-        site_id_for_listing,
-    )
-    from market_storefront.negotiation_runtime import lookup_pool_policy_tags
 
-    site_id = site_id_for_listing(sqlite_client.db_path, listing_id)
-    source_id = pool_id_for_listing(sqlite_client.db_path, listing_id)
+    durable = await sqlite_client.load_listing_binding(listing_id=listing_id)
     row = await sqlite_client.load_listing(listing_id=listing_id)
-    if site_id is None or source_id is None or row is None:
+    source_id = (
+        durable.pool_id or durable.physical_resource_id
+        if durable is not None
+        else None
+    )
+    if durable is None or source_id is None or row is None:
         raise RuntimeError(
             f"listing {listing_id!r} has no complete durable capacity binding"
         )
     listing = Listing.model_validate(row)
     mode = listing.offer_resource.virtualization_type
     offering_mode = mode.value if hasattr(mode, "value") else str(mode or "")
-    if not offering_mode:
-        raise RuntimeError(f"listing {listing_id!r} has no offering mode")
-    policy_tags = lookup_pool_policy_tags(sqlite_client, listing_id)
-    if not pool_delivers_offering_mode(policy_tags, offering_mode):
+    if offering_mode != durable.binding.offering_mode:
         raise RuntimeError(
-            f"pool {source_id!r} does not declare offering mode {offering_mode!r}"
+            f"listing {listing_id!r} offering mode disagrees with its durable binding"
         )
-    return CapacityBinding(site_id, offering_mode, source_id)
+    return CapacityBinding(durable.site_id, offering_mode, source_id)
 
 
 # ---------------------------------------------------------------------------

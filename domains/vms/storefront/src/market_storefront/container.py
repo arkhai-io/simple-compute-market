@@ -19,6 +19,7 @@ if TYPE_CHECKING:
         StorefrontDomainRegistry,
     )
     from core_storefront.services.negotiation_service import NegotiationService
+    from market_capacity_publication import CapacityRuntime
     from market_identity import Signer
     from market_negotiation_runtime import NegotiationRuntime
 
@@ -35,6 +36,7 @@ resolved_domain_registry: StorefrontDomainRegistry | None = None
 resolved_sqlite_client: SQLiteClient | None = None
 resolved_marketplace_signer: Signer | None = None
 resolved_negotiation_runtime: NegotiationRuntime | None = None
+resolved_capacity_runtime: CapacityRuntime | None = None
 
 # AlkahestClient instances keyed by chain name. Populated from
 # AlkahestService.build_clients(). May be empty if no chains are
@@ -62,6 +64,7 @@ def clear_lifespan_state(*, registry: StorefrontDomainRegistry) -> None:
     global resolved_sqlite_client
     global resolved_marketplace_signer
     global resolved_negotiation_runtime
+    global resolved_capacity_runtime
     global resolved_alkahest_clients
     global resolved_listing_service
     global resolved_negotiation_service
@@ -82,6 +85,7 @@ def clear_lifespan_state(*, registry: StorefrontDomainRegistry) -> None:
     resolved_marketplace_signer = None
     resolved_alkahest_clients = {}
     resolved_negotiation_runtime = None
+    resolved_capacity_runtime = None
     resolved_listing_service = None
     resolved_negotiation_service = None
     resolved_system_service = None

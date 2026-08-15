@@ -6,8 +6,9 @@ from importlib.metadata import entry_points
 
 import pytest
 from fastapi import APIRouter
-from market_core import DomainCapability, DomainContractValidationError
+from market_core import DomainCapability
 from core_storefront.domain_plugins import STOREFRONT_CONTRIBUTION_GROUP
+from core_storefront.domain_registry import StorefrontDomainRegistryError
 
 import arkhai_bare_metal_storefront.runtime as runtime_module
 import arkhai_bare_metal_storefront.server as server_module
@@ -54,7 +55,7 @@ def test_app_rejects_inconsistent_domain_before_startup() -> None:
     )
 
     with pytest.raises(
-        DomainContractValidationError,
+        StorefrontDomainRegistryError,
         match="provides no implementation",
     ):
         build_bare_metal_storefront_app(registry=_registry(invalid))

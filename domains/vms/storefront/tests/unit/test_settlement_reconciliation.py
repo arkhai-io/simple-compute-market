@@ -7,7 +7,8 @@ import pytest
 
 from market_storefront.domain_runtime import build_vm_storefront_domain, build_vm_storefront_registry
 from market_storefront.services.listing_service import ListingService
-from tests.fake_site import TEST_MARKETPLACE_SIGNER
+from tests.fake_site import TEST_MARKETPLACE_SIGNER, TEST_SITE_AUTHORITIES
+from tests.listing_service_fixtures import vm_listing_collaborators
 
 
 @pytest.mark.asyncio
@@ -15,6 +16,12 @@ async def test_readiness_reconciliation_preserves_listing_identity_and_accepted_
     monkeypatch,
 ):
     domain = build_vm_storefront_domain()
+    registry = build_vm_storefront_registry(domain)
+    collaborators = vm_listing_collaborators(
+        registry,
+        signer=TEST_MARKETPLACE_SIGNER,
+        authorities=TEST_SITE_AUTHORITIES,
+    )
     accepted_terms = {
         "mechanism": "fiat.stripe.v1",
         "option_id": "accepted-option",
@@ -55,6 +62,7 @@ async def test_readiness_reconciliation_preserves_listing_identity_and_accepted_
         "accepted_terms": accepted_terms,
     }
     db = SimpleNamespace(
+        domain_registry=registry,
         market_domain=domain,
         load_listing=AsyncMock(return_value=stored),
         update_listing=AsyncMock(),
@@ -75,9 +83,13 @@ async def test_readiness_reconciliation_preserves_listing_identity_and_accepted_
         publish,
     )
     service = ListingService(
-        domain=domain,
+        registry=collaborators.registry,
+        binding=collaborators.binding,
+        domain=collaborators.domain,
+        capacity_runtime=collaborators.capacity_runtime,
         sqlite_client=db,
         marketplace_signer=TEST_MARKETPLACE_SIGNER,
+        alkahest_clients={},
         settlement_composition_provider=lambda: composition,
     )
 

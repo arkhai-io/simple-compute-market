@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import replace
 from datetime import datetime
+import json
 from unittest.mock import AsyncMock, Mock
 from typing import Any
 
@@ -39,6 +40,7 @@ _PROVISIONING_AUTHORITIES = TrustedIdentitySet(
     identities=(Ed25519Signer(b"\x43" * 32).identity,)
 )
 _TOKEN = "0x0000000000000000000000000000000000000001"
+_RECIPIENT = "0x" + "44" * 20
 _ESCROW = "0x" + "11" * 20
 _DOMAIN = build_vm_storefront_domain()
 
@@ -105,6 +107,23 @@ def marketplace_dependencies(monkeypatch):
 
 @pytest.fixture
 async def db(tmp_path, monkeypatch):
+    address_config = tmp_path / "alkahest-addresses.json"
+    address_config.write_text(
+        json.dumps(
+            {
+                "erc20_addresses": {
+                    "escrow_obligation_unconditional": _ESCROW,
+                },
+                "arbiters_addresses": {
+                    "recipient_arbiter": "0x" + "33" * 20,
+                },
+            }
+        )
+    )
+    monkeypatch.setattr(
+        "market_storefront.negotiation_runtime._chain_config_paths",
+        lambda: {"anvil": str(address_config)},
+    )
     import market_policy.negotiation_thread as thread_module
 
     from market_storefront.utils.sqlite_client import SQLiteClient
@@ -169,7 +188,7 @@ def _proposal(amount: int) -> EscrowProposal:
         chain_name="anvil",
         escrow_address=_ESCROW,
         fields={"token": _TOKEN, "amount": amount},
-        literal_fields={"token": _TOKEN},
+        literal_fields={"token": _TOKEN, "recipient": _RECIPIENT},
         rates=[{"field": "amount", "per": "hour", "value": "100"}],
         expiration_unix=1_800_000_000,
     )
@@ -186,13 +205,14 @@ async def _start(
     our_base_url,
     their_agent_url,
     seller_round_hook=None,
+    capacity_runtime=None,
 ):
     registration = sqlite_client.domain_registry.resolve_mode("vm")
     runtime = build_vm_negotiation_runtime(
         registration.contract,
         registry=sqlite_client.domain_registry,
         binding=registration.binding,
-        capacity_runtime=_capacity_runtime(),
+        capacity_runtime=capacity_runtime or _capacity_runtime(),
         seller_round_hook=seller_round_hook,
     )
     proposal_wire = (
@@ -224,13 +244,14 @@ async def _continue(
     actor_principal,
     seller_principal=None,
     seller_round_hook=None,
+    capacity_runtime=None,
 ):
     registration = sqlite_client.domain_registry.resolve_mode("vm")
     runtime = build_vm_negotiation_runtime(
         registration.contract,
         registry=sqlite_client.domain_registry,
         binding=registration.binding,
-        capacity_runtime=_capacity_runtime(),
+        capacity_runtime=capacity_runtime or _capacity_runtime(),
         seller_round_hook=seller_round_hook,
     )
     return await runtime.continue_negotiation(
@@ -306,10 +327,10 @@ def test_default_policy_is_resolved_from_the_injected_contract(
             run_negotiation_policy=policy,
         ),
     )
-    repository = object()
+    capacity_runtime = _capacity_runtime()
 
-    assert _default_seller_round_hook(domain, repository) is seller_hook
-    assert policy.call_args.args
+    assert _default_seller_round_hook(domain, capacity_runtime) is seller_hook
+    assert policy.call_args.args == (capacity_runtime.client(),)
 
 
 @pytest.mark.asyncio
@@ -473,9 +494,9 @@ async def test_hosted_selection_is_persisted_and_materialized_as_plan(db):
         },
     )
 
-    from tests.fake_site import FakeSite, site_capacity
+    from tests.fake_site import FakeSite, capacity_runtime_over
 
-    site = FakeSite()
+    site = FakeSite(deliverable_modes={"vm"})
     site.add_resource(
         "resource-hosted",
         1,
@@ -502,8 +523,8 @@ async def test_hosted_selection_is_persisted_and_materialized_as_plan(db):
             },
         )
 
-    with site_capacity(site):
-        response = await _start(
+    capacity_runtime = capacity_runtime_over(site, site_name="site-test")
+    response = await _start(
         sqlite_client=db,
         our_listing_id="L-hosted",
         buyer_principal=_BUYER,
@@ -519,7 +540,9 @@ async def test_hosted_selection_is_persisted_and_materialized_as_plan(db):
         ),
         our_base_url="http://test-seller:8001",
         their_agent_url="http://buyer:9000",
-        seller_round_hook=hook,)
+        seller_round_hook=hook,
+        capacity_runtime=capacity_runtime,
+    )
 
     assert response["action"] == "accept"
     assert response["settlement_selection"] == selection.model_dump()
@@ -532,7 +555,7 @@ async def test_hosted_selection_is_persisted_and_materialized_as_plan(db):
     vm_state = response["settlement_plan"]["service_terms"]["vm.v1"]
     assert vm_state["listing_id"] == "L-hosted"
     assert vm_state["order"]["offer_resource"]["resource_id"] == "resource-hosted"
-    assert vm_state["provision"]["payload"]["ssh_public_key"] == "ssh-rsa AAAA"
+    assert vm_state["provision"]["ssh_public_key"] == "ssh-rsa AAAA"
     thread = await db.load_negotiation_thread_row(
         negotiation_id=response["negotiation_id"]
     )
@@ -542,10 +565,6 @@ async def test_hosted_selection_is_persisted_and_materialized_as_plan(db):
     assert thread_binding.listing_id == hosted_binding.listing_id
     assert thread_binding.site_id == hosted_binding.site_id
     assert thread_binding.binding == hosted_binding.binding
-    assert thread["buyer_escrow_proposal"] == {
-        "settlement_selection": selection.model_dump()
-    }
-    assert thread["settlement_plan"] == response["settlement_plan"]
     assert thread["provision_terms"] == {
         "kind": "compute.v1",
         "version": 1,

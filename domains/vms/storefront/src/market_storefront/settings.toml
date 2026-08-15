@@ -29,15 +29,6 @@ db_path         = "./src/market_storefront/data/storefront/agent.db"
 log_file_path   = ""
 log_level       = "INFO"
 
-# Installed storefront contributions are public, version-pinned assertions.
-# Deployment overlays may replace this array with VM + bare-metal or one exact
-# registration; private keys, provider settings, and authority credentials do
-# not belong here.
-[[storefront_domains]]
-contribution = "vms"
-offering_mode = "vm"
-domain_identity = "compute.v1"
-contract_version = "1.0"
 
 # Resource auto-seeding — inline content wins over path
 resources_csv_inline = ""
@@ -65,6 +56,15 @@ claims_sweep_interval = 30
 # endpoint; gating collection on heartbeats is lifecycle policy (I.5).
 heartbeat_interval_seconds = 60
 default_vm_host               = "kvm1"
+# Installed storefront contributions are public, version-pinned assertions.
+# Deployment overlays may replace this array with VM + bare-metal or one exact
+# registration; private keys, provider settings, and authority credentials do
+# not belong here.
+[[storefront_domains]]
+contribution = "vms"
+offering_mode = "vm"
+domain_identity = "compute.v1"
+contract_version = "1.0"
 # Marketplace identity (public). Signing material is supplied only through
 # the ARKHAI_IDENTITY_CREDENTIAL secret environment variable.
 [Identity.principal]

@@ -36,6 +36,7 @@ class StorefrontSettlementBuildContext:
     duration_seconds: int
     buyer_principal: Identity
     seller_principal: Identity
+    uses_scalar_amount: bool = True
     seller_wallet_address: str | None = None
     chain_config_paths: Mapping[str, str | None] = field(
         default_factory=lambda: MappingProxyType({}), repr=False

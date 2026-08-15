@@ -40,6 +40,7 @@ from core_storefront.domain_registry import (
     StorefrontDomainRegistry,
     StorefrontListingBinding,
     StorefrontThreadBinding,
+    bind_fulfillment_context,
 )
 from .sqlite_migrations import (
     LegacyMigrationInputs,
@@ -1385,7 +1386,7 @@ class SQLiteClient:
                     raise KeyError(
                         f"unknown listing {binding.listing_id!r}"
                     )
-                offer = self._deserialize_json(row[0])
+                offer = self._normalize_resource(row[0])
                 if (
                     not isinstance(offer, dict)
                     or offer.get("virtualization_type")
@@ -1967,22 +1968,10 @@ class SQLiteClient:
         *,
         thread_binding: StorefrontThreadBinding,
     ) -> dict[str, Any]:
-        """Copy the safe accepted binding into domain fulfillment context."""
-
-        result = dict(context)
-        projection = {
-            "negotiation_id": thread_binding.negotiation_id,
-            "listing_id": thread_binding.listing_id,
-            "site_id": thread_binding.site_id,
-            **thread_binding.binding.as_record(),
-        }
-        existing = result.get("storefront_domain_binding")
-        if existing is not None and existing != projection:
-            raise StorefrontDomainBindingError(
-                "fulfillment context contains a conflicting domain binding"
-            )
-        result["storefront_domain_binding"] = projection
-        return result
+        return bind_fulfillment_context(
+            context,
+            thread_binding=thread_binding,
+        )
 
     async def validate_fulfillment_context_binding(
         self,
@@ -3690,6 +3679,7 @@ class SQLiteClient:
                            domain_listing_id, site_id, offering_mode,
                            domain_identity, contract_major, contract_minor
                     FROM negotiation_threads
+                    WHERE negotiation_id = ?
                     """,
                     (negotiation_id,),
                 ).fetchone()

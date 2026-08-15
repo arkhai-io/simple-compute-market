@@ -45,6 +45,7 @@ class Migration:
     apply_with_legacy_context: Callable[
         [sqlite3.Connection, LegacyMigrationInputs | None], None
     ] | None = None
+    required_tables: tuple[str, ...] = ()
 
 
 class MigrationLike(Protocol):
@@ -74,6 +75,11 @@ def apply_schema_migrations(
 
     for migration in (*_MIGRATIONS, *extra_migrations):
         if migration.id in applied:
+            continue
+        if any(
+            not _table_exists(conn, table_name)
+            for table_name in getattr(migration, "required_tables", ())
+        ):
             continue
         savepoint = "schema_migration"
         conn.execute(f"SAVEPOINT {savepoint}")
@@ -1822,5 +1828,6 @@ _MIGRATIONS: tuple[Migration, ...] = (
     Migration(
         "20260815_001_storefront_domain_bindings",
         migrate_storefront_domain_bindings_schema,
+        required_tables=("listings", "negotiation_threads"),
     ),
 )

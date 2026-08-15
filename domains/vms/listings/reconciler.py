@@ -12,7 +12,6 @@ from domains.vms.listings.pricing_resolution import (
     resolve_gpu_pricing,
 )
 from market_identity import Identity
-from market_resource_pools import pool_delivers_offering_mode
 
 
 HELD_ALLOCATION_STATES = {
@@ -278,6 +277,7 @@ def _pool_rows_from_capacity_pools(
                 "max_duration_seconds": row["max_duration_seconds"],
                 "single_resource_id": None,
                 "member_count": 0,
+                "offering_mode": "vm",
             },
         )
         _accumulate_capacity_pool_member(
@@ -334,6 +334,7 @@ def _project_legacy_resource_row(
         "max_duration_seconds": (
             row["max_duration_seconds"] if has_max_duration else None
         ),
+        "offering_mode": "vm",
     }
 
 
@@ -655,6 +656,10 @@ def _projected_pool_rows(
     specific_resource) so an untagged pool's publication shape does not
     change out from under an existing derived-listing mapping.
     """
+    # Buyer-side listing helpers import this module without installing the
+    # resource-pool authority package; only storefront projection needs it.
+    from market_resource_pools import pool_delivers_offering_mode
+
     pool_id = str(pool.get("resource_pool_id") or "").strip()
     if not pool_id:
         return []

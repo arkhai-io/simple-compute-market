@@ -6,6 +6,11 @@ import tempfile
 import os
 import sqlite3
 
+from core_storefront.domain_registry import (
+    StorefrontListingBinding,
+    StorefrontThreadBinding,
+    build_storefront_derivation_key,
+)
 from market_identity import create_signer
 from market_storefront.domain_runtime import build_vm_storefront_domain, build_vm_storefront_registry
 from market_storefront.utils.sqlite_client import SQLiteClient
@@ -41,6 +46,47 @@ _OWNED_NEGOTIATION_IDS = (
 
 
 async def _seed_owned_threads(client: SQLiteClient) -> None:
+    registration = client.domain_registry.resolve_mode("vm")
+    binding = registration.binding
+    assert client.domain_registry.resolve(binding) is registration.contract
+    source = {
+        "kind": "compute.listing_source",
+        "schema_version": 1,
+        "payload": {
+            "site_id": "site-1",
+            "pool_id": "pool-1",
+            "gpu_count": 1,
+        },
+    }
+    listing_binding = StorefrontListingBinding.from_source_envelope(
+        listing_id="listing-1",
+        site_id="site-1",
+        binding=binding,
+        derivation_key=build_storefront_derivation_key(
+            site_id="site-1",
+            offering_mode=binding.offering_mode,
+            binding=binding,
+            source_identity=source,
+        ),
+        source_envelope=source,
+        last_reconciled_at="2026-08-15T00:00:00Z",
+        pool_id="pool-1",
+    )
+    await client.upsert_listing_with_binding(
+        binding=listing_binding,
+        status="open",
+        created_at="2026-08-15T00:00:00Z",
+        updated_at="2026-08-15T00:00:00Z",
+        offer_resource={
+            "virtualization_type": "vm",
+            "pool_id": "pool-1",
+            "gpu_count": 1,
+        },
+        fulfillment_resource=None,
+        max_duration_seconds=3600,
+        storefront_url="http://seller",
+        seller_principal=_SELLER_PRINCIPAL,
+    )
     for negotiation_id in _OWNED_NEGOTIATION_IDS:
         await client.create_negotiation_thread(
             negotiation_id=negotiation_id,
@@ -51,6 +97,12 @@ async def _seed_owned_threads(client: SQLiteClient) -> None:
             buyer_principal=_BUYER_PRINCIPAL,
             seller_principal=_SELLER_PRINCIPAL,
             owner_id="seller-agent",
+            binding=StorefrontThreadBinding(
+                negotiation_id=negotiation_id,
+                listing_id="listing-1",
+                site_id="site-1",
+                binding=binding,
+            ),
         )
 
 
@@ -68,7 +120,11 @@ def temp_db():
 @pytest.fixture
 def sqlite_client(temp_db):
     """Create a SQLiteClient with canonically owned negotiation fixtures."""
-    client = SQLiteClient(db_path=temp_db, registry=build_vm_storefront_registry(build_vm_storefront_domain()))
+    domain = build_vm_storefront_domain()
+    registry = build_vm_storefront_registry(domain)
+    binding = registry.resolve_mode("vm").binding
+    assert registry.resolve(binding) is domain
+    client = SQLiteClient(db_path=temp_db, registry=registry)
     asyncio.run(_seed_owned_threads(client))
     return client
 
@@ -254,7 +310,10 @@ class TestNegotiationThreadStore:
         )
         
         # Create second store with same database
-        client2 = SQLiteClient(db_path=temp_db, registry=build_vm_storefront_registry(build_vm_storefront_domain()))
+        client2 = SQLiteClient(
+            db_path=temp_db,
+            registry=sqlite_client.domain_registry,
+        )
         store2 = NegotiationThreadStore(sqlite_client=client2, identity=_TEST_IDENTITY)
         
         # Load thread from second store
@@ -485,13 +544,19 @@ class TestSQLiteClientNegotiationMethods:
         finally:
             conn.close()
 
+        domain = build_vm_storefront_domain()
+        registry = build_vm_storefront_registry(domain)
+        binding = registry.resolve_mode("vm").binding
+        assert registry.resolve(binding) is domain
         migrated = SQLiteClient(
             db_path=str(db_path),
-            domain=build_vm_storefront_domain(),
+            registry=registry,
             local_listing_principal=_SELLER_PRINCIPAL,
             expected_legacy_sellers=("http://seller",),
         )
 
+        assert migrated.domain_registry is registry
+        assert asyncio.run(migrated.list_storefront_domain_bindings()) == ()
         conn = sqlite3.connect(migrated.db_path)
         try:
             thread_types = {
@@ -564,8 +629,12 @@ class TestSQLiteClientNegotiationMethods:
         finally:
             conn.close()
 
+        domain = build_vm_storefront_domain()
+        registry = build_vm_storefront_registry(domain)
+        binding = registry.resolve_mode("vm").binding
+        assert registry.resolve(binding) is domain
         with pytest.raises(ValueError, match="has no seller ownership"):
-            SQLiteClient(db_path=str(db_path), registry=build_vm_storefront_registry(build_vm_storefront_domain()))
+            SQLiteClient(db_path=str(db_path), registry=registry)
 
         conn = sqlite3.connect(db_path)
         try:

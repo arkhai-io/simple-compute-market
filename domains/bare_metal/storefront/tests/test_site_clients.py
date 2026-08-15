@@ -62,6 +62,15 @@ def test_site_binding_diagnostics_redact_routing_url() -> None:
             [
                 {
                     "site_id": "site-a",
+                    "authority_url": "https://user:secret＠example.test",
+                    "authority_principal": PRINCIPAL,
+                }
+            ]
+        ),
+        json.dumps(
+            [
+                {
+                    "site_id": "site-a",
                     "authority_url": "https://one.example.test",
                     "authority_principal": PRINCIPAL,
                 },

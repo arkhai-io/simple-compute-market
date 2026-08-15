@@ -1,6 +1,7 @@
 """Schema-opaque listing publication and capacity reconciliation mechanics."""
 
 from __future__ import annotations
+from contextlib import asynccontextmanager
 
 import logging
 from collections.abc import Awaitable, Callable, Sequence
@@ -119,7 +120,7 @@ class PublicationRuntime(Generic[PayloadT]):
         return await publish_listing_to_registries(
             candidate.payload,
             enabled=self._enabled,
-            registry_client_factory=self._registry_client_factory,
+            registry_client_factory=self._open_registry_client,
             listing_request_factory=self._listing_request_factory,
             storefront_url=self._storefront_url,
             record_publications=self._record_publications,
@@ -143,10 +144,10 @@ class PublicationRuntime(Generic[PayloadT]):
         return await close_listing_in_registries(
             listing.listing_id,
             enabled=self._enabled,
-            registry_client_factory=self._registry_client_factory,
+            registry_client_factory=self._open_registry_client,
             update_listing_request_factory=self._update_listing_request_factory,
             select_target_registries=self._registries_to_target,
-            record_publications=self._record_publications,
+            record_publications=self._record_closures,
         )
 
     async def reopen(
@@ -186,6 +187,7 @@ class PublicationRuntime(Generic[PayloadT]):
             result = await self.reopen(candidate)
             if str(result.get("status", "?")) in {
                 "published",
+                "disabled",
                 "skipped",
                 "queued",
             }:
@@ -205,6 +207,17 @@ class PublicationRuntime(Generic[PayloadT]):
                 f"listing {listing_id!r} capacity binding does not match durable state"
             )
 
+    @asynccontextmanager
+    async def _open_registry_client(self):
+        async with self._registry_client_factory() as client:
+            active_urls = tuple(client.urls)
+            if active_urls != self._registry_urls:
+                raise ValueError(
+                    "registry publication client URLs do not match the exact "
+                    "configured fanout"
+                )
+            yield client
+
     async def _registries_to_target(
         self, listing_id: str, fallback_urls: list[str]
     ) -> list[str]:
@@ -221,8 +234,30 @@ class PublicationRuntime(Generic[PayloadT]):
         ]
         return active if active else list(fallback_urls)
 
+    async def _record_closures(
+        self, listing_id: str, results: list[dict[str, Any]]
+    ) -> None:
+        await self._record_results(
+            listing_id,
+            results,
+            success_status="unpublished",
+        )
+
     async def _record_publications(
         self, listing_id: str, results: list[dict[str, Any]]
+    ) -> None:
+        await self._record_results(
+            listing_id,
+            results,
+            success_status="published",
+        )
+
+    async def _record_results(
+        self,
+        listing_id: str,
+        results: list[dict[str, Any]],
+        *,
+        success_status: str,
     ) -> None:
         for result in results:
             try:
@@ -230,13 +265,13 @@ class PublicationRuntime(Generic[PayloadT]):
                     listing_id=listing_id,
                     registry_url=result["registry_url"],
                     payload=result.get("payload") or {},
-                    status="published" if result.get("success") else "failed",
+                    status=success_status if result.get("success") else "failed",
                     registry_assigned_id=result.get("registry_assigned_id"),
                     last_error=result.get("error"),
                 )
             except Exception as exc:
                 logger.warning(
-                    "[PUBLICATIONS] Failed to record publication for %s @ %s: %s",
+                    "[PUBLICATIONS] Failed to record registry result for %s @ %s: %s",
                     listing_id,
                     result.get("registry_url"),
                     exc,

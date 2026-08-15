@@ -1,11 +1,10 @@
 """In-memory site authority for storefront tests.
 
 ``FakeSite`` mirrors the provisioning service's ``/api/v1/capacity``
-surface behind an ``httpx.MockTransport`` (the real wire shapes are
-pinned by that service's own integration tests). ``site_capacity``
-patches ``build_capacity_client`` so every storefront code path — admin
-endpoints, failure policy, claims truncation, negotiation holds,
-fulfillment — runs against the fake ledger.
+surface behind an ``httpx.MockTransport``. The real wire shapes are pinned
+by that service's own integration tests. ``site_capacity`` injects the exact
+``CapacityRuntime`` and pool projection used by settle/fulfillment tests;
+``capacity_runtime_over`` is available when a test owns composition directly.
 """
 
 from __future__ import annotations
@@ -262,6 +261,15 @@ class FakeSite:
             reservation["lease_end_utc"] = body["lease_end_utc"]
             self._emit("lease_truncated", reservation["resource_id"])
             return httpx.Response(200, json={"reservation": reservation})
+        if (
+            request.method == "GET"
+            and path.startswith("/api/v1/capacity/reservations/")
+        ):
+            capacity_reservation_id = path.rsplit("/", 1)[1]
+            reservation = self.reservations.get(capacity_reservation_id)
+            if reservation is None:
+                return httpx.Response(404, json={"detail": "not found"})
+            return httpx.Response(200, json={"reservation": reservation})
 
         if request.method == "GET" and path == "/api/v1/capacity/reservations":
             escrow = request.url.params.get("escrow_uid")
@@ -400,46 +408,140 @@ def aggregate_over(
     return aggregate
 
 
+def capacity_runtime_over(
+    fake: FakeSite,
+    *,
+    site_name: str = "default",
+    sqlite_client_factory: Any | None = None,
+):
+    """A kit-owned ``CapacityRuntime`` over the fake site's transport."""
+    from core_storefront.aggregation import fill_first
+    from market_capacity_publication import CapacityRuntime, CapacitySite
+    from market_site_client import SiteCapacityClient
+
+    from market_storefront.services.capacity_client import _capacity_reconciler
+
+    if sqlite_client_factory is None:
+        async def reconcile(_context):
+            return None
+    else:
+        reconcile = _capacity_reconciler(sqlite_client_factory)
+
+    return CapacityRuntime(
+        sites=(
+            CapacitySite(
+                site_name,
+                "http://fake-site:8081",
+                TEST_SITE_AUTHORITIES,
+            ),
+        ),
+        signer=TEST_MARKETPLACE_SIGNER,
+        placement=fill_first,
+        reconcile=reconcile,
+        site_client_factory=lambda _site, _signer: SiteCapacityClient(
+            "http://fake-site:8081",
+            signer=TEST_MARKETPLACE_SIGNER,
+            expected_authorities=TEST_SITE_AUTHORITIES,
+            transport=fake.transport(),
+        ),
+    )
+
+
+def _pool_projection_rows(fake: FakeSite) -> list[dict[str, Any]]:
+    """Project each fake resource as its exact one-member VM pool."""
+    return [
+        {
+            "resource_pool_id": resource_id,
+            "pool_metadata": {
+                "policy_tags": {
+                    "deliverable_modes": sorted(fake.deliverable_modes),
+                },
+            },
+            "resources": [
+                {
+                    "physical_resource_id": resource_id,
+                    "capacity": {"gpu_count": row["total_units"]},
+                    "available": {"gpu_count": fake._available(resource_id)},
+                    "attributes": dict(row["attributes"]),
+                    "enabled": bool(row["enabled"]),
+                },
+            ],
+        }
+        for resource_id, row in fake.resources.items()
+    ]
+
+
+def _pool_projection_caches(fake: FakeSite, *, site_name: str):
+    """Loaded pool metadata for the fake authority's exact VM capabilities."""
+    from core_storefront.site_projections import (
+        ProjectionCache,
+        ProjectionIdentity,
+        ProjectionState,
+    )
+    from market_storefront.services.site_projection_cache import SiteProjectionCaches
+
+    resource_pools = ProjectionCache(client=None)
+    resource_pools._value = _pool_projection_rows(fake)
+    resource_pools._state = ProjectionState.loaded
+    resource_pools._identity = ProjectionIdentity(
+        revision=1,
+        digest=f"fake:{site_name}:{','.join(sorted(fake.resources))}",
+    )
+    return SiteProjectionCaches(
+        resource_pools=resource_pools,
+        capacity_buckets=ProjectionCache(client=None),
+    )
+
+
 @contextlib.contextmanager
 def site_capacity(
     fake: FakeSite,
     *,
     site_name: str = "default",
     sqlite_client_factory: Any | None = None,
+    project_pool_modes: bool = False,
 ) -> Iterator[Any]:
-    """Route every build_capacity_client() call at the fake ledger."""
-    aggregate = aggregate_over(
+    """Inject one explicit fake-backed capacity runtime and optional pools."""
+    from market_storefront.services import site_projection_cache
+    import market_storefront.container as container
+
+    runtime = capacity_runtime_over(
         fake,
         site_name=site_name,
         sqlite_client_factory=sqlite_client_factory,
     )
+    aggregate = runtime.client()
     patches = [
+        patch(
+            "market_storefront.services.capacity_client.build_capacity_runtime",
+            return_value=runtime,
+        ),
         patch(
             "market_storefront.services.capacity_client.build_capacity_client",
             return_value=aggregate,
         ),
+        # fulfillment_service binds both factory names at import time.
         patch(
-            "market_storefront.negotiation_runtime.build_capacity_client",
-            return_value=aggregate,
+            "market_storefront.services.fulfillment_service.build_capacity_runtime",
+            return_value=runtime,
         ),
-    ]
-    # fulfillment_service binds the name at import time.
-    patches.append(
         patch(
             "market_storefront.services.fulfillment_service.build_capacity_client",
             return_value=aggregate,
+        ),
+        patch.object(container, "resolved_capacity_runtime", runtime),
+    ]
+    if project_pool_modes:
+        patches.append(
+            patch.dict(
+                site_projection_cache._caches,
+                {site_name: _pool_projection_caches(fake, site_name=site_name)},
+                clear=True,
+            )
         )
-    )
-    # settlement_composition also binds the factory at import time.
-    patches.append(
-        patch(
-            "market_storefront.settlement_composition.build_capacity_client",
-            return_value=aggregate,
-        )
-    )
     with contextlib.ExitStack() as stack:
-        for p in patches:
-            stack.enter_context(p)
+        for capacity_patch in patches:
+            stack.enter_context(capacity_patch)
         yield aggregate
 
 
@@ -453,6 +555,20 @@ async def pump_events(
     """Deliver the fake site's events to aggregate subscribers (the
     production poller's job). Returns the last delivered version."""
     from core_storefront.capacity import CapacityDelta
+    from market_storefront.services.site_projection_cache import projection_caches
+
+    caches = projection_caches().get(site_name)
+    if caches is not None and str(
+        getattr(
+            getattr(caches.resource_pools, "_identity", None),
+            "digest",
+            "",
+        )
+    ).startswith(f"fake:{site_name}:"):
+        # The real projection poller refreshes this view before capacity
+        # deltas are reconciled. Mirror that ordering with the fake's
+        # post-reservation availability so only genuinely oversized slices close.
+        caches.resource_pools._value = _pool_projection_rows(fake)
 
     last = after
     for event in fake.events:

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import replace
+from datetime import datetime
 import json
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock
@@ -11,7 +12,12 @@ from market_hosted_settlement import StripeResolverConfig
 from market_identity import Ed25519Signer
 from market_settlement_runtime import PreparedSettlement, derive_obligation_ref
 from core_storefront.domain_lifecycle import StorefrontSettlementFulfillmentInput
-from core_storefront.domain_registry import StorefrontThreadBinding
+from core_storefront.domain_registry import (
+    StorefrontListingBinding,
+    StorefrontThreadBinding,
+    build_storefront_derivation_key,
+    StorefrontDomainBindingError,
+)
 
 from market_storefront.models.hosted_settlement_models import SettlementPublicResponse
 from market_storefront.settlement_composition import (
@@ -54,6 +60,85 @@ def _obligation(index: int = 0) -> dict:
             "obligation_data": {"amount": index + 1},
         },
     }
+
+
+async def _persist_accepted_negotiation(
+    db: SQLiteClient,
+    *,
+    negotiation_id: str,
+    listing_id: str,
+    proposal: dict | None,
+) -> StorefrontThreadBinding:
+    registration = db.domain_registry.resolve_mode("vm")
+    timestamp = datetime.now().isoformat()
+    pool_id = f"pool-{listing_id}"
+    listing_binding = StorefrontListingBinding.from_source_envelope(
+        listing_id=listing_id,
+        site_id="site-1",
+        pool_id=pool_id,
+        binding=registration.binding,
+        derivation_key=build_storefront_derivation_key(
+            site_id="site-1",
+            offering_mode=registration.offering_mode,
+            binding=registration.binding,
+            source_identity={"pool_id": pool_id},
+        ),
+        source_envelope={
+            "kind": "vm.test-listing-source.v1",
+            "schema_version": 1,
+            "payload": {"pool_id": pool_id},
+        },
+        last_reconciled_at=timestamp,
+    )
+    await db.upsert_listing_with_binding(
+        binding=listing_binding,
+        status="open",
+        created_at=timestamp,
+        updated_at=timestamp,
+        offer_resource={
+            "resource_id": f"resource-{listing_id}",
+            "gpu_model": "H200",
+            "gpu_count": 1,
+            "sla": 99.9,
+            "region": "California, US",
+            "virtualization_type": "vm",
+        },
+        fulfillment_resource=None,
+        max_duration_seconds=3600,
+        storefront_url="http://storefront.test",
+        seller_principal=_SELLER,
+    )
+    thread_binding = StorefrontThreadBinding(
+        negotiation_id=negotiation_id,
+        listing_id=listing_id,
+        site_id=listing_binding.site_id,
+        binding=listing_binding.binding,
+    )
+    await db.create_negotiation_thread(
+        negotiation_id=negotiation_id,
+        our_listing_id=listing_id,
+        their_listing_id=f"buyer-{listing_id}",
+        our_agent_id="seller-agent",
+        their_agent_id="buyer-agent",
+        buyer_principal=_BUYER,
+        seller_principal=_SELLER,
+        owner_id="seller-agent",
+        our_initial_price=42,
+        requested_duration_seconds=3600,
+        buyer_escrow_proposal=proposal,
+        provision_terms=_ACCEPTED_PROVISION,
+        binding=thread_binding,
+    )
+    await db.commit_agreed_terms(
+        negotiation_id=negotiation_id,
+        agreed_price=42,
+        agreed_duration_seconds=3600,
+    )
+    await db.update_negotiation_thread_terminal(
+        negotiation_id=negotiation_id,
+        terminal_state="success",
+    )
+    return thread_binding
 
 
 def _prepared(db: SQLiteClient, *, escrow_uid: str = "0xescrow") -> PreparedSettlement:
@@ -210,44 +295,32 @@ async def test_prepare_pins_the_exact_verified_obligation(tmp_path, monkeypatch)
         "expiration_unix": 1_900_000_000,
     }
     obligations = [_obligation(0), _obligation(1)]
+    build_contexts = []
+
+    def build_plan(*, context):
+        build_contexts.append(context)
+        return {"settlement_plan": {"obligations": obligations}}
+
     domain = build_vm_storefront_domain()
+    assert domain.settlement is not None
     domain = replace(
         domain,
-        settlement=replace(
-            domain.settlement,
-            build_plan=lambda **_kwargs: {
-                "settlement_plan": {"obligations": obligations}
-            },
-        ),
+        settlement=replace(domain.settlement, build_plan=build_plan),
     )
-    db = SQLiteClient(db_path=str(tmp_path / "injected-plan.db"), registry=build_vm_storefront_registry(domain))
-    db.load_negotiation_thread_row = AsyncMock(
-        return_value={
-            "negotiation_id": "neg-1",
-            "our_listing_id": "listing-1",
-            "terminal_state": "success",
-            "agreed_price": 42,
-            "buyer_principal": _BUYER.model_dump(mode="json"),
-            "buyer_escrow_proposal": proposal,
-            "provision_terms": _ACCEPTED_PROVISION,
-        }
+    db = SQLiteClient(
+        db_path=str(tmp_path / "injected-plan.db"),
+        registry=build_vm_storefront_registry(domain),
     )
-    db.load_listing = AsyncMock(
-        return_value={
-            "listing_id": "listing-1",
-            "offer_resource": {"gpu_model": "H200", "gpu_count": 1},
-            "max_duration_seconds": 3600,
-        }
+    thread_binding = await _persist_accepted_negotiation(
+        db,
+        negotiation_id="neg-1",
+        listing_id="listing-1",
+        proposal=proposal,
     )
     verify = AsyncMock(return_value=1)
     monkeypatch.setattr(
         "market_storefront.utils.escrow_verification.verify_escrow_for_settlement",
         verify,
-    )
-    assert domain.settlement is not None
-    monkeypatch.setattr(
-        "domains.vms.listings.reconciler.site_id_for_listing",
-        lambda *_args: "site-1",
     )
     monkeypatch.setattr(
         "market_storefront.utils.config.CHAINS",
@@ -269,9 +342,20 @@ async def test_prepare_pins_the_exact_verified_obligation(tmp_path, monkeypatch)
     assert prepared.obligations == tuple(obligations)
     assert prepared.local_principal == _SELLER
     assert prepared.mechanism_ref == "0xverified"
-    context = prepared.projection_context
-    assert context.obligation_ref == derive_obligation_ref("neg-1", 1, obligations[1])
-    assert context.obligation_index == 1
+    projection_context = prepared.projection_context
+    assert projection_context.obligation_ref == derive_obligation_ref(
+        "neg-1", 1, obligations[1]
+    )
+    assert projection_context.obligation_index == 1
+    assert prepared.fulfillment_input.thread_binding == thread_binding
+    assert len(build_contexts) == 1
+    build_context = build_contexts[0]
+    assert build_context.binding == thread_binding.binding
+    assert build_context.negotiation_id == thread_binding.negotiation_id
+    assert build_context.listing_id == thread_binding.listing_id
+    assert build_context.site_id == thread_binding.site_id
+    assert build_context.buyer_principal == _BUYER
+    assert build_context.seller_principal == _SELLER
     verify.assert_awaited_once()
     assert (
         prepared.fulfillment_input.domain_input["provision"].ssh_public_key
@@ -280,26 +364,19 @@ async def test_prepare_pins_the_exact_verified_obligation(tmp_path, monkeypatch)
 
 
 @pytest.mark.asyncio
-async def test_prepare_hosted_rejects_the_removed_legacy_start_route(db, monkeypatch):
-    del monkeypatch
-    db.load_negotiation_thread_row = AsyncMock(
-        return_value={
-            "negotiation_id": "neg-hosted",
-            "terminal_state": "success",
-            "agreed_price": 42,
-            "our_listing_id": "listing-hosted",
-            "buyer_principal": _BUYER.model_dump(mode="json"),
-            "buyer_escrow_proposal": {
-                "settlement_selection": {
-                    "mechanism": "fiat.stripe.v1",
-                    "option_id": "accepted-option",
-                    "expiration_unix": 1_900_000_000,
-                }
-            },
-            "provision_terms": _ACCEPTED_PROVISION,
-        }
+async def test_prepare_hosted_rejects_the_removed_legacy_start_route(db):
+    await _persist_accepted_negotiation(
+        db,
+        negotiation_id="neg-hosted",
+        listing_id="listing-hosted",
+        proposal={
+            "settlement_selection": {
+                "mechanism": "fiat.stripe.v1",
+                "option_id": "accepted-option",
+                "expiration_unix": 1_900_000_000,
+            }
+        },
     )
-    db.load_listing = AsyncMock(return_value={"listing_id": "listing-hosted"})
 
     with pytest.raises(
         ValueError,
@@ -318,31 +395,12 @@ async def test_prepare_hosted_rejects_the_removed_legacy_start_route(db, monkeyp
 
 
 @pytest.mark.asyncio
-async def test_prepare_rejects_missing_accepted_proposal_without_fallback(
-    db, monkeypatch
-):
-    db.load_negotiation_thread_row = AsyncMock(
-        return_value={
-            "negotiation_id": "neg-1",
-            "terminal_state": "success",
-            "agreed_price": 42,
-            "agreed_duration_seconds": 3600,
-            "our_listing_id": "listing-1",
-            "buyer_principal": _BUYER.model_dump(mode="json"),
-            "buyer_escrow_proposal": None,
-            "provision_terms": _ACCEPTED_PROVISION,
-        }
-    )
-    db.load_listing = AsyncMock(
-        return_value={
-            "listing_id": "listing-1",
-            "offer_resource": {},
-            "max_duration_seconds": 3600,
-        }
-    )
-    monkeypatch.setattr(
-        "market_storefront.utils.config.CHAINS",
-        {"anvil": SimpleNamespace(alkahest_address_config_path=None)},
+async def test_prepare_rejects_missing_accepted_proposal_without_fallback(db):
+    await _persist_accepted_negotiation(
+        db,
+        negotiation_id="neg-1",
+        listing_id="listing-1",
+        proposal=None,
     )
 
     with pytest.raises(ValueError, match="no persisted accepted escrow proposal"):
@@ -354,6 +412,39 @@ async def test_prepare_rejects_missing_accepted_proposal_without_fallback(
             mechanism_client=object(),
             chain_name="anvil",
             request={"ssh_public_key": "ssh-ed25519 AAAA"},
+            sqlite_client=db,
+        )
+
+
+@pytest.mark.asyncio
+async def test_prepare_rejects_contract_outside_the_accepted_thread_binding(
+    db,
+):
+    proposal = {
+        "chain_name": "anvil",
+        "escrow_address": "0x" + "11" * 20,
+        "fields": {"token": "0x" + "22" * 20},
+        "expiration_unix": 1_900_000_000,
+    }
+    await _persist_accepted_negotiation(
+        db,
+        negotiation_id="neg-1",
+        listing_id="listing-1",
+        proposal=proposal,
+    )
+    unregistered_domain = build_vm_storefront_domain()
+
+    with pytest.raises(
+        RuntimeError,
+        match="contract disagrees with accepted binding",
+    ):
+        await prepare_vm_settlement(
+            domain=unregistered_domain,
+            escrow_uid="0xverified",
+            negotiation_id="neg-1",
+            local_principal=_SELLER,
+            mechanism_client=object(),
+            chain_name="anvil",
             sqlite_client=db,
         )
 
@@ -442,7 +533,10 @@ def test_composition_rejects_repository_domain_mismatch_before_registration(
     )
     other_domain = build_vm_storefront_domain()
 
-    with pytest.raises(RuntimeError, match="exact market-domain contract object"):
+    with pytest.raises(
+        StorefrontDomainBindingError,
+        match="exact startup-owned object",
+    ):
         build_vm_settlement_composition(
             domain=other_domain,
             sqlite_client=db,

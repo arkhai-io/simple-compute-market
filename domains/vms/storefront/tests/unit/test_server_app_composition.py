@@ -172,24 +172,93 @@ async def test_lifespan_publishes_and_clears_exact_contract_without_cross_app_le
 
     first = build_vm_storefront_domain()
     second = build_vm_storefront_domain()
-    for domain in (first, second):
-        registry = _registry(domain)
-        registration = registry.resolve_mode("vm")
-        application = server.build_vm_storefront_app(registry=registry)
-        assert application.state.storefront_binding == registration.binding
-        async with application.router.lifespan_context(application):
-            assert application.state.market_domains[0].domain_identity == "compute.v1"
-            assert container.resolved_domain_registry is registry
-            assert container.resolved_sqlite_client.domain_registry is registry
-            assert container.resolved_listing_service.domain_registry is registry
-            assert container.resolved_listing_service.domain_binding == registration.binding
-            assert container.resolved_listing_service.market_domain is domain
-            assert container.resolved_listing_service.capacity_runtime is capacity_runtime
-            assert container.resolved_negotiation_runtime is built["negotiation_runtime"]
-            assert container.resolved_settlement_composition.domain is domain
-        assert container.resolved_domain_registry is None
-        assert container.resolved_sqlite_client is None
-        assert container.resolved_listing_service is None
-        assert container.resolved_settlement_composition is None
-        assert container.resolved_negotiation_runtime is None
-        assert container.resolved_negotiation_service is None
+    first_registry = _registry(first)
+    second_registry = _registry(second)
+    first_registration = first_registry.resolve_mode("vm")
+    second_registration = second_registry.resolve_mode("vm")
+    first_app = server.build_vm_storefront_app(registry=first_registry)
+    second_app = server.build_vm_storefront_app(registry=second_registry)
+
+    assert first_app.state.storefront_binding == first_registration.binding
+    assert second_app.state.storefront_binding == second_registration.binding
+
+    async with first_app.router.lifespan_context(first_app):
+        first_services = first_app.state.storefront_container
+        assert first_services.registry is first_registry
+        assert first_services.binding == first_registration.binding
+        assert first_services.domain is first
+        assert container.resolved_domain_registry is first_registry
+        assert container.resolved_sqlite_client is first_services.sqlite_client
+        assert container.resolved_listing_service is first_services.listing_service
+        assert (
+            container.resolved_settlement_composition
+            is first_services.settlement_composition
+        )
+        assert container.resolved_negotiation_runtime is first_services.negotiation_runtime
+        assert container.resolved_negotiation_service is first_services.negotiation_service
+        assert container.resolved_system_service is first_services.system_service
+
+        with pytest.raises(
+            RuntimeError,
+            match="already owned by a different storefront domain registry",
+        ):
+            async with second_app.router.lifespan_context(second_app):
+                pass
+
+        assert second_app.state.storefront_container is None
+        assert container.resolved_domain_registry is first_registry
+        assert container.resolved_sqlite_client is first_services.sqlite_client
+        assert container.resolved_listing_service is first_services.listing_service
+        assert (
+            container.resolved_settlement_composition
+            is first_services.settlement_composition
+        )
+        assert container.resolved_negotiation_runtime is first_services.negotiation_runtime
+        assert container.resolved_negotiation_service is first_services.negotiation_service
+        assert container.resolved_system_service is first_services.system_service
+
+    assert first_app.state.storefront_container is None
+    assert container.resolved_domain_registry is None
+    assert container.resolved_sqlite_client is None
+    assert container.resolved_listing_service is None
+    assert container.resolved_settlement_composition is None
+    assert container.resolved_negotiation_runtime is None
+    assert container.resolved_negotiation_service is None
+    assert container.resolved_marketplace_signer is None
+    assert container.resolved_alkahest_clients == {}
+    assert container.resolved_system_service is None
+    assert container.resolved_storefront_service is None
+
+    async with second_app.router.lifespan_context(second_app):
+        second_services = second_app.state.storefront_container
+        assert second_services.registry is second_registry
+        assert second_services.binding == second_registration.binding
+        assert second_services.domain is second
+        assert container.resolved_domain_registry is second_registry
+        assert container.resolved_sqlite_client is second_services.sqlite_client
+        assert container.resolved_listing_service is second_services.listing_service
+        assert (
+            container.resolved_settlement_composition
+            is second_services.settlement_composition
+        )
+        assert (
+            container.resolved_negotiation_runtime
+            is second_services.negotiation_runtime
+        )
+        assert (
+            container.resolved_negotiation_service
+            is second_services.negotiation_service
+        )
+        assert container.resolved_system_service is second_services.system_service
+
+    assert second_app.state.storefront_container is None
+    assert container.resolved_domain_registry is None
+    assert container.resolved_sqlite_client is None
+    assert container.resolved_listing_service is None
+    assert container.resolved_settlement_composition is None
+    assert container.resolved_negotiation_runtime is None
+    assert container.resolved_negotiation_service is None
+    assert container.resolved_marketplace_signer is None
+    assert container.resolved_alkahest_clients == {}
+    assert container.resolved_system_service is None
+    assert container.resolved_storefront_service is None

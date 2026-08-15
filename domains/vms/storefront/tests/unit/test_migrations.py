@@ -10,6 +10,11 @@ import json
 from datetime import datetime
 import pytest
 
+from core_storefront.domain_registry import (
+    StorefrontListingBinding,
+    StorefrontThreadBinding,
+    build_storefront_derivation_key,
+)
 from market_identity import Ed25519Signer
 
 from market_storefront.domain_runtime import build_vm_storefront_domain, build_vm_storefront_registry
@@ -151,18 +156,45 @@ def test_rename_migration_rejects_ambiguous_two_table_state(tmp_path):
 def test_restart_preserves_schema_and_all_persisted_identifiers(tmp_path) -> None:
     db_path = str(tmp_path / "pre-parameterization.db")
     domain = build_vm_storefront_domain()
+    registry = build_vm_storefront_registry(domain)
+    registration = registry.resolve_mode("vm")
+    assert registry.resolve(registration.binding) is domain
     seller = Ed25519Signer(b"\x31" * 32).identity
     buyer = Ed25519Signer(b"\x32" * 32).identity
-    client = SQLiteClient(db_path, registry=build_vm_storefront_registry(domain))
+    client = SQLiteClient(db_path, registry=registry)
     now = datetime.now().isoformat()
+    source = {
+        "kind": "compute.listing_source",
+        "schema_version": 1,
+        "payload": {
+            "site_id": "site-stable",
+            "resource_id": "resource-stable",
+            "gpu_count": 1,
+        },
+    }
+    listing_binding = StorefrontListingBinding.from_source_envelope(
+        listing_id="listing-stable",
+        site_id="site-stable",
+        binding=registration.binding,
+        derivation_key=build_storefront_derivation_key(
+            site_id="site-stable",
+            offering_mode=registration.binding.offering_mode,
+            binding=registration.binding,
+            source_identity=source,
+        ),
+        source_envelope=source,
+        last_reconciled_at=now,
+        physical_resource_id="resource-stable",
+    )
 
     asyncio.run(
-        client.upsert_listing(
-            listing_id="listing-stable",
+        client.upsert_listing_with_binding(
+            binding=listing_binding,
             status="open",
             created_at=now,
             updated_at=now,
             offer_resource={
+                "virtualization_type": "vm",
                 "resource_type": "compute",
                 "resource_id": "resource-stable",
                 "gpu_model": "H200",
@@ -176,6 +208,12 @@ def test_restart_preserves_schema_and_all_persisted_identifiers(tmp_path) -> Non
             seller_principal=seller,
         )
     )
+    thread_binding = StorefrontThreadBinding(
+        negotiation_id="negotiation-stable",
+        listing_id=listing_binding.listing_id,
+        site_id=listing_binding.site_id,
+        binding=registration.binding,
+    )
     asyncio.run(
         client.create_negotiation_thread(
             negotiation_id="negotiation-stable",
@@ -186,6 +224,7 @@ def test_restart_preserves_schema_and_all_persisted_identifiers(tmp_path) -> Non
             buyer_principal=buyer,
             seller_principal=seller,
             owner_id="seller",
+            binding=thread_binding,
         )
     )
     asyncio.run(
@@ -253,17 +292,28 @@ def test_restart_preserves_schema_and_all_persisted_identifiers(tmp_path) -> Non
             "WHERE name NOT LIKE 'sqlite_%' ORDER BY type, name"
         ).fetchall()
 
-    reopened = SQLiteClient(db_path, registry=build_vm_storefront_registry(domain))
+    reopened = SQLiteClient(db_path, registry=registry)
 
-    assert reopened.domain_registry.resolve_mode("vm").contract is domain
+    assert reopened.domain_registry is registry
+    assert reopened.domain_registry.resolve(registration.binding) is domain
     assert asyncio.run(
         reopened.load_listing(listing_id="listing-stable")
     )["listing_id"] == "listing-stable"
-    assert asyncio.run(
+    persisted_thread = asyncio.run(
         reopened.load_negotiation_thread_row(
             negotiation_id="negotiation-stable"
         )
-    )["negotiation_id"] == "negotiation-stable"
+    )
+    assert persisted_thread["negotiation_id"] == "negotiation-stable"
+    assert asyncio.run(
+        reopened.load_listing_binding(listing_id="listing-stable")
+    ) == listing_binding
+    assert asyncio.run(
+        reopened.load_thread_binding(negotiation_id="negotiation-stable")
+    ) == thread_binding
+    assert asyncio.run(reopened.list_storefront_domain_bindings()) == (
+        registration.binding,
+    )
     escrow = asyncio.run(reopened.load_escrow(escrow_uid="settlement-stable"))
     assert escrow["obligation_ref"] == "obligation-stable"
     assert escrow["fulfillment_uid"] == "fulfillment-stable"
@@ -279,12 +329,15 @@ def test_restart_preserves_schema_and_all_persisted_identifiers(tmp_path) -> Non
     assert schema_after == schema_before
 
 
-def test_settings_singleton_rejects_a_different_contract_object(
+def test_settings_singleton_rejects_a_different_registry_owner(
     tmp_path,
     monkeypatch,
 ) -> None:
-    first = build_vm_storefront_domain()
-    second = build_vm_storefront_domain()
+    domain = build_vm_storefront_domain()
+    first_registry = build_vm_storefront_registry(domain)
+    second_registry = build_vm_storefront_registry(domain)
+    assert first_registry is not second_registry
+    assert second_registry.resolve_mode("vm").contract is domain
     signer = Ed25519Signer(b"\x33" * 32)
     monkeypatch.setattr(
         sqlite_module.settings,
@@ -295,8 +348,12 @@ def test_settings_singleton_rejects_a_different_contract_object(
     monkeypatch.setattr(sqlite_module, "resolve_marketplace_signer", lambda: signer)
     monkeypatch.setattr(sqlite_module, "_sqlite_client", None)
 
-    resolved = sqlite_module.get_sqlite_client(registry=build_vm_storefront_registry(first))
+    resolved = sqlite_module.get_sqlite_client(registry=first_registry)
 
-    assert resolved.domain_registry.resolve_mode("vm").contract is first
-    with pytest.raises(RuntimeError, match="different market-domain contract object"):
-        sqlite_module.get_sqlite_client(registry=build_vm_storefront_registry(second))
+    assert resolved.domain_registry is first_registry
+    assert resolved.domain_registry.resolve_mode("vm").contract is domain
+    with pytest.raises(
+        RuntimeError,
+        match="different storefront domain registry object",
+    ):
+        sqlite_module.get_sqlite_client(registry=second_registry)

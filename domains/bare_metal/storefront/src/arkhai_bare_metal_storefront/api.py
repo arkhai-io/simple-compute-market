@@ -129,9 +129,9 @@ def _listing_response(
     raw = row.get("offer_resource")
     if isinstance(raw, str):
         raw = json.loads(raw)
-    listing = runtime.domain.codecs.listing(raw)
+    runtime.domain.codecs.listing(raw)
     normalized = dict(row)
-    normalized["offer_resource"] = listing.model_dump(mode="json", exclude_none=True)
+    normalized["offer_resource"] = raw
     return normalized
 
 

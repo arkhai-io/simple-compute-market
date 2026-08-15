@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import base64
+
+import pytest
 from market_core import (
     MARKET_DOMAIN_CONTRACT_VERSION,
     DomainIdentity,
@@ -8,8 +11,7 @@ from market_core import (
     ImmutableSettlementCapability,
     MarketDomainContract,
 )
-from market_identity import Identity
-import pytest
+from market_identity import Identity, IdentityScheme
 
 from core_storefront.domain_lifecycle import (
     StorefrontDomainLifecycleError,
@@ -59,8 +61,9 @@ def _binding(identity: str = "compute.v1") -> StorefrontDomainBinding:
     )
 
 
-def _principal(value: str) -> Identity:
-    return Identity(scheme="ed25519", identifier=value)
+def _principal(byte: int) -> Identity:
+    identifier = base64.urlsafe_b64encode(bytes([byte]) * 32).rstrip(b"=").decode()
+    return Identity(scheme=IdentityScheme.ED25519, identifier=identifier)
 
 
 def _settlement_context(identity: str = "compute.v1") -> StorefrontSettlementBuildContext:
@@ -72,8 +75,8 @@ def _settlement_context(identity: str = "compute.v1") -> StorefrontSettlementBui
         proposal={"kind": "proposal"},
         agreed_amount=5000,
         duration_seconds=3600,
-        buyer_principal=_principal("buyer"),
-        seller_principal=_principal("seller"),
+        buyer_principal=_principal(1),
+        seller_principal=_principal(2),
     )
 
 
@@ -86,7 +89,7 @@ def _fulfillment_context(identity: str = "bare_metal.v1") -> StorefrontFulfillme
             binding=_binding(identity),
         ),
         escrow_uid="escrow-1",
-        buyer_principal=_principal("buyer"),
+        buyer_principal=_principal(1),
         ports=StorefrontFulfillmentPorts(
             repository=object(),
             capacity_client=object(),
@@ -100,7 +103,7 @@ def test_prepared_fulfillment_input_freezes_domain_payload_and_redacts_ports():
     evidence_client = object()
     prepared = StorefrontSettlementFulfillmentInput(
         thread_binding=_fulfillment_context().thread_binding,
-        buyer_principal=_principal("buyer"),
+        buyer_principal=_principal(1),
         domain_input=raw,
         fulfillment_anchor="condition-1",
         evidence_client=evidence_client,

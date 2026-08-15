@@ -14,6 +14,7 @@ from market_storefront.services.vm_fulfillment_service import (
 )
 from market_storefront.domain_runtime import build_vm_storefront_domain, build_vm_storefront_registry
 from market_storefront.utils.sqlite_client import SQLiteClient
+from market_capacity_publication import CapacityBinding
 from market_identity import Ed25519Signer
 from market_negotiation_runtime import Acceptance, AgreementTerms, NegotiationTerms
 from market_storefront.negotiation_runtime import _place_capacity_hold
@@ -27,6 +28,8 @@ _SELLER = Ed25519Signer(b"\x62" * 32).identity
 async def _place_hold(
     repository,
     *,
+    capacity,
+    binding,
     negotiation_id,
     listing_id,
     order_dict,
@@ -45,7 +48,9 @@ async def _place_hold(
             uses_scalar_amount=True,
             buyer_principal=_BUYER,
             seller_principal=_SELLER,
+            binding=binding,
         ),
+        capacity_runtime=capacity,
     )
 
 class FakeCapacity:
@@ -55,12 +60,12 @@ class FakeCapacity:
         self.reserve_calls: list[dict] = []
         self.commit_calls: list[dict] = []
 
-    async def reserve(self, **kw):
-        self.reserve_calls.append(kw)
+    async def reserve(self, binding, **kw):
+        self.reserve_calls.append({"binding": binding, **kw})
         return self.reserve_result
 
-    async def commit(self, **kw):
-        self.commit_calls.append(kw)
+    async def commit(self, binding, **kw):
+        self.commit_calls.append({"binding": binding, **kw})
         if self.commit_error is not None:
             raise self.commit_error
 
@@ -78,10 +83,14 @@ def _future() -> str:
     return (datetime.now(timezone.utc) + timedelta(seconds=600)).isoformat()
 
 
+_BINDING = CapacityBinding("site-test", "vm", "pool-test")
+
+
 def _hold(**overrides) -> dict:
     base = {
         "capacity_reservation_id": "alloc-1",
         "resource_id": "res-1",
+        "site": _BINDING.site_id,
         "vm_host": "kvm1",
         "hold_expires_at": _future(),
     }
@@ -100,6 +109,7 @@ async def test_valid_hold_commits_before_provisioning():
 
     reserved = await _commit_capacity_hold(
         capacity=capacity,
+        binding=_BINDING,
         held_reservation=_hold(),
         escrow_uid="0xesc",
         duration_seconds=3600,
@@ -109,6 +119,7 @@ async def test_valid_hold_commits_before_provisioning():
     assert reserved["capacity_reservation_id"] == "alloc-1"
     assert capacity.reserve_calls == []  # no fresh reserve raced
     commit = capacity.commit_calls[0]
+    assert commit["binding"] == _BINDING
     assert commit["capacity_reservation_id"] == "alloc-1"
     assert commit["idempotency_ref"] == "0xesc"
     assert captured[0][1] == "capacity_hold_committed"
@@ -121,6 +132,7 @@ async def test_fresh_reservation_commits_before_provisioning():
 
     await _commit_fresh_reservation(
         capacity=capacity,
+        binding=_BINDING,
         reserved=_hold(),
         escrow_uid="0xesc",
         duration_seconds=3600,
@@ -130,6 +142,7 @@ async def test_fresh_reservation_commits_before_provisioning():
     commit = capacity.commit_calls[0]
     assert commit["capacity_reservation_id"] == "alloc-1"
     assert commit["resource_id"] == "res-1"
+    assert commit["binding"] == _BINDING
     assert commit["idempotency_ref"] == "0xesc"
     assert captured[0][1] == "capacity_reservation_committed"
 
@@ -142,6 +155,7 @@ async def test_fresh_reservation_commit_failure_is_not_ignored():
     with pytest.raises(RuntimeError, match="409 conflict"):
         await _commit_fresh_reservation(
             capacity=capacity,
+            binding=_BINDING,
             reserved=_hold(),
             escrow_uid="0xesc",
             duration_seconds=3600,
@@ -157,6 +171,7 @@ async def test_lapsed_hold_falls_back_to_fresh_reserve():
     past = (datetime.now(timezone.utc) - timedelta(seconds=1)).isoformat()
     assert await _commit_capacity_hold(
         capacity=capacity,
+        binding=_BINDING,
         held_reservation=_hold(hold_expires_at=past),
         escrow_uid="0xesc",
         duration_seconds=3600,
@@ -174,6 +189,7 @@ async def test_ledger_refusal_falls_back_to_fresh_reserve():
 
     assert await _commit_capacity_hold(
         capacity=capacity,
+        binding=_BINDING,
         held_reservation=_hold(),
         escrow_uid="0xesc",
         duration_seconds=3600,
@@ -187,6 +203,7 @@ async def test_no_hold_means_no_commit():
     _, stage_event = _events()
     assert await _commit_capacity_hold(
         capacity=capacity,
+        binding=_BINDING,
         held_reservation=None,
         escrow_uid="0xesc",
         duration_seconds=3600,
@@ -372,15 +389,20 @@ async def test_acceptance_places_and_records_the_hold(tmp_path):
 
     with patch(
         "market_storefront.negotiation_runtime.settings", _settings(900),
-    ), patch(
-        "market_storefront.negotiation_runtime.build_capacity_client",
-        return_value=capacity,
     ):
-        await _place_hold(db, negotiation_id="neg-1", listing_id="lst-1", order_dict=ORDER,)
+        await _place_hold(
+            db,
+            capacity=capacity,
+            binding=_BINDING,
+            negotiation_id="neg-1",
+            listing_id="lst-1",
+            order_dict=ORDER,
+        )
 
     reserve = capacity.reserve_calls[0]
     assert reserve["ttl_seconds"] == 900
     assert reserve["claim"]["gpu_model"] == "H200"
+    assert reserve["binding"] == _BINDING
     assert reserve["deal_ref"]["negotiation_id"] == "neg-1"
 
     hold = await db.load_capacity_hold(negotiation_id="neg-1")
@@ -397,21 +419,28 @@ async def test_acceptance_hold_pins_to_the_listings_mapped_site(tmp_path):
     from domains.vms.listings.reconciler import record_derived_listing
 
     db = SQLiteClient(db_path=str(tmp_path / "hold.db"), registry=build_vm_storefront_registry(build_vm_storefront_domain()))
+    binding = CapacityBinding("dc-mapped", "vm", "pool-mapped")
     record_derived_listing(
-        db.db_path, listing_id="lst-1", site_id="dc-mapped",
-        resource_id="res-1", gpu_count=2,
+        db.db_path, listing_id="lst-1", site_id=binding.site_id,
+        pool_id=binding.source_id, resource_id="res-1", gpu_count=2,
     )
-    capacity = FakeCapacity(reserve_result=_hold())
+    capacity = FakeCapacity(
+        reserve_result=_hold(site=binding.site_id),
+    )
 
     with patch(
         "market_storefront.negotiation_runtime.settings", _settings(900),
-    ), patch(
-        "market_storefront.negotiation_runtime.build_capacity_client",
-        return_value=capacity,
     ):
-        await _place_hold(db, negotiation_id="neg-mapped", listing_id="lst-1", order_dict=ORDER,)
+        await _place_hold(
+            db,
+            capacity=capacity,
+            binding=binding,
+            negotiation_id="neg-mapped",
+            listing_id="lst-1",
+            order_dict=ORDER,
+        )
 
-    assert capacity.reserve_calls[0]["site"] == "dc-mapped"
+    assert capacity.reserve_calls[0]["binding"] == binding
 
 
 @pytest.mark.asyncio
@@ -422,22 +451,30 @@ async def test_acceptance_survives_hold_refusal_and_zero_ttl(tmp_path):
     refused = FakeCapacity(reserve_result=None)
     with patch(
         "market_storefront.negotiation_runtime.settings", _settings(900),
-    ), patch(
-        "market_storefront.negotiation_runtime.build_capacity_client",
-        return_value=refused,
     ):
-        await _place_hold(db, negotiation_id="neg-2", listing_id="lst-1", order_dict=ORDER,)
+        await _place_hold(
+            db,
+            capacity=refused,
+            binding=_BINDING,
+            negotiation_id="neg-2",
+            listing_id="lst-1",
+            order_dict=ORDER,
+        )
     assert await db.load_capacity_hold(negotiation_id="neg-2") is None
 
     # ttl 0 disables the feature entirely.
     disabled = FakeCapacity(reserve_result=_hold())
     with patch(
         "market_storefront.negotiation_runtime.settings", _settings(0),
-    ), patch(
-        "market_storefront.negotiation_runtime.build_capacity_client",
-        return_value=disabled,
     ):
-        await _place_hold(db, negotiation_id="neg-3", listing_id="lst-1", order_dict=ORDER,)
+        await _place_hold(
+            db,
+            capacity=disabled,
+            binding=_BINDING,
+            negotiation_id="neg-3",
+            listing_id="lst-1",
+            order_dict=ORDER,
+        )
     assert disabled.reserve_calls == []
 
 
@@ -454,16 +491,25 @@ async def test_acceptance_hold_ttl_is_capped_by_the_listings_mapped_pool_prefere
     db = SQLiteClient(db_path=str(tmp_path / "hold.db"), registry=build_vm_storefront_registry(build_vm_storefront_domain()))
     capacity = FakeCapacity(reserve_result=_hold())
 
+    def pool_policy(repository, listing_id):
+        assert repository is db
+        assert listing_id == "lst-1"
+        return {"max_reservation_hold_seconds": 30}
+
     with patch(
         "market_storefront.negotiation_runtime.settings", _settings(900),
     ), patch(
-        "market_storefront.negotiation_runtime.build_capacity_client",
-        return_value=capacity,
-    ), patch(
         "market_storefront.negotiation_runtime.lookup_pool_policy_tags",
-        return_value={"max_reservation_hold_seconds": 30},
+        side_effect=pool_policy,
     ):
-        await _place_hold(db, negotiation_id="neg-capped", listing_id="lst-1", order_dict=ORDER,)
+        await _place_hold(
+            db,
+            capacity=capacity,
+            binding=_BINDING,
+            negotiation_id="neg-capped",
+            listing_id="lst-1",
+            order_dict=ORDER,
+        )
 
     assert capacity.reserve_calls[0]["ttl_seconds"] == 30.0
 
@@ -477,15 +523,24 @@ async def test_acceptance_hold_ttl_unchanged_when_no_pool_preference(tmp_path):
     db = SQLiteClient(db_path=str(tmp_path / "hold.db"), registry=build_vm_storefront_registry(build_vm_storefront_domain()))
     capacity = FakeCapacity(reserve_result=_hold())
 
+    def pool_policy(repository, listing_id):
+        assert repository is db
+        assert listing_id == "lst-1"
+        return {}
+
     with patch(
         "market_storefront.negotiation_runtime.settings", _settings(900),
     ), patch(
-        "market_storefront.negotiation_runtime.build_capacity_client",
-        return_value=capacity,
-    ), patch(
         "market_storefront.negotiation_runtime.lookup_pool_policy_tags",
-        return_value={},
+        side_effect=pool_policy,
     ):
-        await _place_hold(db, negotiation_id="neg-uncapped", listing_id="lst-1", order_dict=ORDER,)
+        await _place_hold(
+            db,
+            capacity=capacity,
+            binding=_BINDING,
+            negotiation_id="neg-uncapped",
+            listing_id="lst-1",
+            order_dict=ORDER,
+        )
 
     assert capacity.reserve_calls[0]["ttl_seconds"] == 900

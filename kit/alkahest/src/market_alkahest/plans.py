@@ -142,7 +142,14 @@ def escrow_terms_to_settlement_obligation(
     terms: EscrowTerms | dict[str, Any],
 ) -> SettlementObligation:
     """Wrap this kit's typed alkahest shape in the mechanism envelope."""
-    payload = terms.model_dump() if isinstance(terms, EscrowTerms) else terms
+    payload = (
+        terms.model_dump() if isinstance(terms, EscrowTerms) else dict(terms)
+    )
+    obligation_data = dict(payload.get("obligation_data") or {})
+    amount = obligation_data.get("amount")
+    if isinstance(amount, int) and not isinstance(amount, bool):
+        obligation_data["amount"] = str(amount)
+    payload["obligation_data"] = obligation_data
     return SettlementObligation.model_validate(payload)
 
 
@@ -162,11 +169,15 @@ def settlement_obligation_to_escrow_terms(
     )
     if ob.mechanism != ALKAHEST_MECHANISM:
         raise ValueError(f"not an {ALKAHEST_MECHANISM} obligation: {ob.mechanism!r}")
+    obligation_data = dict(ob.params.get("obligation_data") or {})
+    amount = obligation_data.get("amount")
+    if isinstance(amount, str) and amount.isdecimal():
+        obligation_data["amount"] = int(amount)
     return EscrowTerms(
         maker=ob.payer,
         chain_name=ob.params.get("chain_name"),
         escrow_contract=ob.params["escrow_contract"],
-        obligation_data=ob.params.get("obligation_data") or {},
+        obligation_data=obligation_data,
         expiration_unix=ob.expiration_unix,
     )
 
@@ -316,7 +327,7 @@ def split_settlement_obligation_into_intervals(
         obligation_data = params.get("obligation_data")
         if not isinstance(obligation_data, dict):
             raise ValueError("interval policy requires Alkahest obligation_data")
-        obligation_data["amount"] = allocation.amount
+        obligation_data["amount"] = str(allocation.amount)
         obligations.append(
             template.model_copy(
                 update={
@@ -351,7 +362,7 @@ def build_penalty_bond_obligation(
     obligation_data = params.get("obligation_data")
     if not isinstance(obligation_data, dict):
         raise ValueError("penalty bond requires Alkahest obligation_data")
-    obligation_data["amount"] = amount
+    obligation_data["amount"] = str(amount)
     return source.model_copy(
         update={
             "payer": "seller",

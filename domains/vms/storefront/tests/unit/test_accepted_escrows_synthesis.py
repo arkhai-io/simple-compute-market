@@ -21,6 +21,10 @@ import os
 import tempfile
 
 import pytest
+from core_storefront.domain_registry import (
+    StorefrontListingBinding,
+    build_storefront_derivation_key,
+)
 from market_identity import Identity
 
 from market_storefront.domain_runtime import build_vm_storefront_domain, build_vm_storefront_registry
@@ -177,17 +181,51 @@ def test_synthesize_returns_none_when_alkahest_unavailable(monkeypatch):
 
 def test_upsert_listing_stores_explicit_accepted_escrows(tmp_db_path):
     """Caller-supplied accepted_escrows is round-tripped."""
-    db = SQLiteClient(tmp_db_path, registry=build_vm_storefront_registry(build_vm_storefront_domain()))
+    domain = build_vm_storefront_domain()
+    registry = build_vm_storefront_registry(domain)
+    binding = registry.resolve_mode("vm").binding
+    assert registry.resolve(binding) is domain
+    db = SQLiteClient(tmp_db_path, registry=registry)
     explicit = [{
         "chain_name": "base_sepolia",
         "escrow_address": "0x" + "11" * 20,
         "literal_fields": {"token": "0x" + "22" * 20},
         "rates": [{"field": "amount", "per": "hour", "value": "999"}],
     }]
-    asyncio.run(db.upsert_listing(
-        listing_id="lst2", status="open",
+    source = {
+        "kind": "compute.listing_source",
+        "schema_version": 1,
+        "payload": {
+            "site_id": "site-1",
+            "pool_id": "pool-1",
+            "gpu_count": 1,
+        },
+    }
+    listing_binding = StorefrontListingBinding.from_source_envelope(
+        listing_id="lst2",
+        site_id="site-1",
+        binding=binding,
+        derivation_key=build_storefront_derivation_key(
+            site_id="site-1",
+            offering_mode=binding.offering_mode,
+            binding=binding,
+            source_identity=source,
+        ),
+        source_envelope=source,
+        last_reconciled_at="2026-08-15T00:00:00Z",
+        pool_id="pool-1",
+    )
+    asyncio.run(db.upsert_listing_with_binding(
+        binding=listing_binding, status="open",
         created_at="2026-01-01", updated_at="2026-01-01",
-        offer_resource={"gpu_model": "H200", "gpu_count": 1, "sla": 0.99, "region": "California, US"},
+        offer_resource={
+            "virtualization_type": "vm",
+            "pool_id": "pool-1",
+            "gpu_model": "H200",
+            "gpu_count": 1,
+            "sla": 0.99,
+            "region": "California, US",
+        },
         fulfillment_resource=None,
         max_duration_seconds=3600,
         storefront_url="http://seller.test",
@@ -199,6 +237,7 @@ def test_upsert_listing_stores_explicit_accepted_escrows(tmp_db_path):
     ))
     row = asyncio.run(db.load_listing(listing_id="lst2"))
     assert row["accepted_escrows"] == explicit
+    assert asyncio.run(db.load_listing_binding(listing_id="lst2")) == listing_binding
 
 
 def test_backfill_runs_on_schema_init_and_drops_legacy_column(
@@ -259,10 +298,15 @@ def test_backfill_runs_on_schema_init_and_drops_legacy_column(
     finally:
         conn.close()
 
-    # Open via SQLiteClient → schema init runs the backfill + DROP COLUMN.
+    # Open via the exact registry-owned VM binding. Schema init runs the
+    # backfill + DROP COLUMN before the client becomes available.
+    domain = build_vm_storefront_domain()
+    registry = build_vm_storefront_registry(domain)
+    binding = registry.resolve_mode("vm").binding
+    assert registry.resolve(binding) is domain
     db = SQLiteClient(
         tmp_db_path,
-        domain=build_vm_storefront_domain(),
+        registry=registry,
         local_listing_principal=Identity(
             scheme="ed25519",
             identifier="AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8",

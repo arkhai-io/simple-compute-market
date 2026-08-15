@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from typing import Any
 
 from core_storefront.stage_log import stage_event
@@ -67,14 +68,18 @@ def _make_registry_client():
     )
 
 
-def build_publication_runtime(sqlite_client: Any) -> PublicationRuntime[Listing]:
-    """Compose VM schema/persistence hooks onto one publication runtime."""
+def build_publication_runtime(
+    sqlite_client: Any,
+    *,
+    registry_client_factory: Callable[[], Any],
+) -> PublicationRuntime[Listing]:
+    """Compose VM schema/persistence hooks with the injected registry transport."""
     return PublicationRuntime(
         repository=sqlite_client,
         hooks=VmPublicationHooks(sqlite_client),
         enabled=settings.enable_registry_discovery,
         registry_urls=tuple(settings.registry.urls),
-        registry_client_factory=_make_registry_client,
+        registry_client_factory=registry_client_factory,
         listing_request_factory=ListingRequest,
         update_listing_request_factory=UpdateListingRequest,
         storefront_url=BASE_URL_OVERRIDE,
@@ -83,7 +88,9 @@ def build_publication_runtime(sqlite_client: Any) -> PublicationRuntime[Listing]
 
 
 async def _candidate(sqlite_client: Any, value: Listing | dict) -> PublicationCandidate[Listing]:
-    listing = value if isinstance(value, Listing) else Listing.model_validate(value)
+    listing = Listing.model_validate(
+        value.model_dump(mode="python") if isinstance(value, Listing) else value
+    )
     binding = await capacity_binding_for_listing(sqlite_client, listing.listing_id)
     return PublicationCandidate(listing.listing_id, binding, listing)
 
@@ -94,9 +101,10 @@ async def publish_order_to_registry(
     sqlite_client: Any,
 ) -> dict[str, Any]:
     """Publish a domain-validated, durably bound VM candidate."""
-    return await build_publication_runtime(sqlite_client).publish(
-        await _candidate(sqlite_client, order)
-    )
+    return await build_publication_runtime(
+        sqlite_client,
+        registry_client_factory=_make_registry_client,
+    ).publish(await _candidate(sqlite_client, order))
 
 
 async def close_order(
@@ -109,9 +117,10 @@ async def close_order(
     if not isinstance(listing_id, str) or not listing_id.strip():
         return {"status": "error", "message": "Missing listing_id for close_listing"}
     binding = await capacity_binding_for_listing(sqlite_client, listing_id)
-    return await build_publication_runtime(sqlite_client).close(
-        BoundListing(listing_id, binding)
-    )
+    return await build_publication_runtime(
+        sqlite_client,
+        registry_client_factory=_make_registry_client,
+    ).close(BoundListing(listing_id, binding))
 
 
 async def close_stale_compute_listings_after_capacity_change(
@@ -133,16 +142,19 @@ async def close_stale_compute_listings_after_capacity_change(
         site_pool_projection=site_pool_projection,
         site_capacity_buckets=site_capacity_buckets,
     )
-    bound = tuple(
-        BoundListing(
-            listing_id,
-            await capacity_binding_for_listing(sqlite_client, listing_id),
+    bound_items: list[BoundListing] = []
+    for listing_id in ids:
+        bound_items.append(
+            BoundListing(
+                listing_id,
+                await capacity_binding_for_listing(sqlite_client, listing_id),
+            )
         )
-        for listing_id in ids
-    )
-    result = await build_publication_runtime(sqlite_client).reconcile(
-        ReconciliationPlan(close=bound)
-    )
+    bound = tuple(bound_items)
+    result = await build_publication_runtime(
+        sqlite_client,
+        registry_client_factory=_make_registry_client,
+    ).reconcile(ReconciliationPlan(close=bound))
     closed = list(result["closed"])
     mark_derived_listings_closed(
         db_path,
@@ -178,9 +190,10 @@ async def reopen_available_compute_listings_after_capacity_change(
         if row is None:
             continue
         candidates.append(await _candidate(sqlite_client, row))
-    result = await build_publication_runtime(sqlite_client).reconcile(
-        ReconciliationPlan(reopen=tuple(candidates))
-    )
+    result = await build_publication_runtime(
+        sqlite_client,
+        registry_client_factory=_make_registry_client,
+    ).reconcile(ReconciliationPlan(reopen=tuple(candidates)))
     reopened = list(result["reopened"])
     mark_derived_listings_open(db_path, reopened)
     return reopened

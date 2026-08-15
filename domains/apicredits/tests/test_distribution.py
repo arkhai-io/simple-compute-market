@@ -78,12 +78,20 @@ def wheels(tmp_path_factory: pytest.TempPathFactory) -> dict[str, Path]:
             REPO / "kit" / "capacity-publication",
             "arkhai_kit_capacity_publication-*.whl",
         ),
+        "storefront_kit": (
+            REPO / "kit" / "storefront",
+            "arkhai_kit_storefront-*.whl",
+        ),
         "config": (REPO / "kit" / "config", "arkhai_kit_config-*.whl"),
         "site": (REPO / "kit" / "site", "arkhai_kit_site-*.whl"),
         "site_client": (REPO / "kit" / "site-client", "arkhai_kit_site_client-*.whl"),
         "settlement_runtime": (
             REPO / "kit" / "settlement-runtime",
             "arkhai_kit_settlement_runtime-*.whl",
+        ),
+        "resource_pools": (
+            REPO / "kit" / "resource-pools",
+            "arkhai_kit_resource_pools-*.whl",
         ),
         "negotiation_runtime": (
             REPO / "kit" / "negotiation-runtime",

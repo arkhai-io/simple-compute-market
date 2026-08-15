@@ -34,7 +34,7 @@ from domains.vms.listings.models import Listing
 from domains.vms.negotiation.policies import _amount_from_proposal
 from market_capacity_publication import CapacityRuntime
 from market_core import MarketDomainContract
-from market_identity import Signer
+from market_identity import Identity, Signer
 from market_settlement_runtime import (
     SettlementPublicationClause,
     compile_settlement_publication_clause,
@@ -734,12 +734,12 @@ class ListingService:
             await composition.runtime.bind_fulfillment(
                 str(obligation_ref),
                 payload.fulfillment_uid,
-                local_role="seller",
+                local_principal=composition.local_principal,
                 worker_id=worker_id,
             )
             checked = await composition.runtime.check(
                 obligation_ref=str(obligation_ref),
-                local_role="seller",
+                local_principal=composition.local_principal,
                 worker_id=worker_id,
             )
             if checked.status != "succeeded":
@@ -750,7 +750,7 @@ class ListingService:
                 }
             collected = await composition.runtime.collect(
                 obligation_ref=str(obligation_ref),
-                local_role="seller",
+                local_principal=composition.local_principal,
                 worker_id=worker_id,
             )
         except Exception as exc:
@@ -823,10 +823,25 @@ class ListingService:
                 ),
                 "listing_id": listing_id,
             }
+        persisted_obligation = await composition.repository.load_settlement_obligation(
+            str(obligation_ref)
+        )
+        if persisted_obligation is None:
+            return 409, {
+                "error": "Settlement obligation is not registered",
+                "detail": (
+                    f"Escrow {payload.escrow_uid} references an unknown canonical "
+                    "settlement obligation."
+                ),
+                "listing_id": listing_id,
+            }
+        payer_principal = Identity.model_validate(
+            persisted_obligation.get("payer_principal")
+        )
         try:
             reclaimed = await composition.runtime.reclaim(
                 obligation_ref=str(obligation_ref),
-                local_role="buyer",
+                local_principal=payer_principal,
                 worker_id=f"manual-reclaim:{listing_id}",
             )
         except Exception as exc:

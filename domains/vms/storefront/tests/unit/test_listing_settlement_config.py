@@ -10,15 +10,30 @@ from pydantic import ValidationError
 from market_storefront.domain_runtime import build_vm_storefront_domain, build_vm_storefront_registry
 from market_storefront.models.listing_models import VmCreateListingRequest
 from market_storefront.services.listing_service import ListingService
-from tests.fake_site import TEST_MARKETPLACE_SIGNER
+from tests.fake_site import TEST_MARKETPLACE_SIGNER, TEST_SITE_AUTHORITIES
+from tests.listing_service_fixtures import vm_listing_collaborators
 
 _DOMAIN = build_vm_storefront_domain()
+_REGISTRY = build_vm_storefront_registry(_DOMAIN)
+_COLLABORATORS = vm_listing_collaborators(
+    _REGISTRY,
+    signer=TEST_MARKETPLACE_SIGNER,
+    authorities=TEST_SITE_AUTHORITIES,
+)
+
+
+def _repository(**values):
+    return SimpleNamespace(
+        domain_registry=_REGISTRY,
+        market_domain=_DOMAIN,
+        **values,
+    )
 
 
 def test_vm_listing_request_rejects_removed_scalar_hosted_config() -> None:
     with pytest.raises(ValidationError, match="settlement_config"):
         VmCreateListingRequest(
-            offer={},
+            offer={"virtualization_type": "vm"},
             settlement_config={
                 "account_ref": "acct-seller",
                 "currency": "usd",
@@ -37,6 +52,7 @@ def test_clause_only_listing_request_is_a_valid_publication_input() -> None:
             "gpu_count": 1,
             "region": "California, US",
             "sla": 99.0,
+            "virtualization_type": "vm",
         },
         settlements=[
             SettlementPublicationClause(
@@ -53,9 +69,14 @@ def test_clause_only_listing_request_is_a_valid_publication_input() -> None:
         ],
     )
     service = ListingService(
-        domain=_DOMAIN,
-        sqlite_client=SimpleNamespace(market_domain=_DOMAIN),
+        registry=_COLLABORATORS.registry,
+        binding=_COLLABORATORS.binding,
+        domain=_COLLABORATORS.domain,
+        capacity_runtime=_COLLABORATORS.capacity_runtime,
+        sqlite_client=_repository(),
         marketplace_signer=TEST_MARKETPLACE_SIGNER,
+        alkahest_clients={},
+        settlement_composition_provider=lambda: object(),
     )
 
     _offer, accepted, options, _demands = service._parse_offer_and_escrows(request)
@@ -86,17 +107,20 @@ async def test_clause_only_create_persists_canonical_clause_before_publication(
         "rates": [{"field": "amount", "per": "hour", "value": "200"}],
         "params": {},
     }
-    db = SimpleNamespace(
-        market_domain=_DOMAIN,
+    db = _repository(
         upsert_listing=AsyncMock(),
     )
     composition = SimpleNamespace(
         publication_artifacts=AsyncMock(return_value=([], [option], ()))
     )
     service = ListingService(
-        domain=_DOMAIN,
+        registry=_COLLABORATORS.registry,
+        binding=_COLLABORATORS.binding,
+        domain=_COLLABORATORS.domain,
+        capacity_runtime=_COLLABORATORS.capacity_runtime,
         sqlite_client=db,
         marketplace_signer=TEST_MARKETPLACE_SIGNER,
+        alkahest_clients={},
         settlement_composition_provider=lambda: composition,
     )
     monkeypatch.setattr(
@@ -116,6 +140,7 @@ async def test_clause_only_create_persists_canonical_clause_before_publication(
             "gpu_count": 1,
             "region": "California, US",
             "sla": 99.0,
+            "virtualization_type": "vm",
         },
         settlements=[clause],
     )
@@ -138,13 +163,17 @@ async def test_clause_only_create_persists_canonical_clause_before_publication(
 @pytest.mark.asyncio
 async def test_direct_settlement_options_are_rejected() -> None:
     service = ListingService(
-        domain=_DOMAIN,
-        sqlite_client=SimpleNamespace(market_domain=_DOMAIN),
+        registry=_COLLABORATORS.registry,
+        binding=_COLLABORATORS.binding,
+        domain=_COLLABORATORS.domain,
+        capacity_runtime=_COLLABORATORS.capacity_runtime,
+        sqlite_client=_repository(),
         marketplace_signer=TEST_MARKETPLACE_SIGNER,
+        alkahest_clients={},
         settlement_composition_provider=lambda: object(),
     )
     request = VmCreateListingRequest(
-        offer={},
+        offer={"virtualization_type": "vm"},
         settlement_options=[
             {
                 "option_id": "direct",
@@ -176,9 +205,13 @@ async def test_registration_composition_receives_ordered_hosted_clauses() -> Non
         publication_artifacts=AsyncMock(return_value=([], [option], ())),
     )
     service = ListingService(
-        domain=_DOMAIN,
-        sqlite_client=SimpleNamespace(market_domain=_DOMAIN),
+        registry=_COLLABORATORS.registry,
+        binding=_COLLABORATORS.binding,
+        domain=_COLLABORATORS.domain,
+        capacity_runtime=_COLLABORATORS.capacity_runtime,
+        sqlite_client=_repository(),
         marketplace_signer=TEST_MARKETPLACE_SIGNER,
+        alkahest_clients={},
         settlement_composition_provider=lambda: composition,
     )
     clauses = [
@@ -194,7 +227,10 @@ async def test_registration_composition_receives_ordered_hosted_clauses() -> Non
             },
         )
     ]
-    request = VmCreateListingRequest(offer={}, settlements=clauses)
+    request = VmCreateListingRequest(
+        offer={"virtualization_type": "vm"},
+        settlements=clauses,
+    )
 
     accepted, options = await service._derive_settlement_artifacts(
         request,

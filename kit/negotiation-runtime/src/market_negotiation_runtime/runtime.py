@@ -262,7 +262,13 @@ class NegotiationRuntime:
                 listing_id=listing_id,
             )
 
-        proposal_wire = dict(proposal) if proposal is not None else None
+        proposal_wire = (
+            proposal.model_dump(mode="json")
+            if hasattr(proposal, "model_dump")
+            else dict(proposal)
+            if proposal is not None
+            else None
+        )
         opening_history = (
             NegotiationRound(
                 round_number=0,

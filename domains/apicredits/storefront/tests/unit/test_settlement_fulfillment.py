@@ -221,6 +221,7 @@ async def test_fulfillment_service_rejects_invalid_domain_listing(monkeypatch):
                     "kind": "api_credits.v1",
                     "service_name": " ",
                     "resource_id": "svc-quota",
+                    "capacity_site_id": "tokens",
                 },
             },
             quantity=3,

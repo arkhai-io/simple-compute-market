@@ -48,6 +48,7 @@ def prepare_vm_listing_binding(
         derivation_key=build_storefront_derivation_key(
             site_id=site_id,
             binding=registration.binding,
+            offering_mode=registration.binding.offering_mode,
             source_identity=source,
         ),
         source_envelope_json=canonical_source_envelope(source),

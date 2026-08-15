@@ -95,6 +95,8 @@ def _plan(**kwargs):
     )
     return {
         "settlement_plan": {
+            "buyer_principal": kwargs["buyer_principal"].model_dump(mode="json"),
+            "seller_principal": kwargs["seller_principal"].model_dump(mode="json"),
             "obligations": [
                 {
                     "payer": "seller",
@@ -283,7 +285,11 @@ async def test_settlement_is_verified_idempotently_without_fulfillment_claims(
     aggregate = await restarted.settlement_runtime.get_status(negotiation_id)
     expiration_unix = aggregate.obligations[1].obligation["expiration_unix"]
     obligations = SettlementPlan.model_validate(
-        _plan(proposal={"expiration_unix": expiration_unix})["settlement_plan"]
+        _plan(
+            proposal={"expiration_unix": expiration_unix},
+            buyer_principal=BUYER_SIGNER.identity,
+            seller_principal=SELLER_SIGNER.identity,
+        )["settlement_plan"]
     ).model_dump(mode="json")["obligations"]
     assert aggregate.status == "active"
     assert len(aggregate.obligations) == 2
@@ -543,7 +549,7 @@ async def test_http_fulfillment_restarts_on_recorded_site_and_redacts_result(
         "buyer_principal": BUYER_SIGNER.identity.model_dump(mode="json"),
     }
 
-    with TestClient(build_bare_metal_storefront_app(runtime=runtime)) as client:
+    with TestClient(_app(runtime)) as client:
         settled = client.post(
             f"/api/v1/settle/{ESCROW_UID}",
             json=settle_body,
@@ -589,7 +595,7 @@ async def test_http_fulfillment_restarts_on_recorded_site_and_redacts_result(
         capacity_client=restarted_capacity,
         fulfillment_client=_ProvisioningClient(torn_down=True),
     )
-    with TestClient(build_bare_metal_storefront_app(runtime=restarted)) as client:
+    with TestClient(_app(restarted)) as client:
         released = client.get(
             f"/api/v1/fulfillments/{negotiation_id}/status",
             headers=_headers(

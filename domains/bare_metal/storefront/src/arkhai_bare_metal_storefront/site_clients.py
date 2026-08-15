@@ -8,6 +8,8 @@ import sqlite3
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from typing import Any
+from urllib.parse import urlsplit
+
 from compute_provisioning import (
     ComputeProvisioningClient,
     FulfillmentAcceptanceResponse,
@@ -47,7 +49,13 @@ class BareMetalSiteBinding:
 def _authority_url(value: Any, *, site_id: str) -> str:
     if not isinstance(value, str):
         raise ValueError(f"site {site_id!r} authority_url must be a string")
-    parsed = urlsplit(value.strip())
+    try:
+        parsed = urlsplit(value.strip())
+    except ValueError:
+        raise ValueError(
+            f"site {site_id!r} authority_url must be an HTTP(S) origin "
+            "without credentials, query, or fragment"
+        ) from None
     if (
         parsed.scheme not in {"http", "https"}
         or not parsed.netloc

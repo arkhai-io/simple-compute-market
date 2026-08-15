@@ -8,9 +8,11 @@ from collections.abc import Mapping
 from typing import Any
 
 from arkhai_vms import DIMENSION_KEYS as _DIMENSION_COMPUTE_KEYS
-from core_storefront.domain_registry import (
+from core_storefront import (
     StorefrontDomainBinding,
     StorefrontDomainRegistry,
+    StorefrontSettlementBuildContext,
+    build_domain_settlement_artifacts,
 )
 from domains.vms.listings import (
     determine_strategy_from_order,
@@ -47,7 +49,7 @@ from market_negotiation_runtime import (
 from market_policy.negotiation_middleware import NegotiationDecision, NegotiationRound
 from market_capacity_publication import CapacityBinding, CapacityRuntime
 from market_storefront.services.capacity_client import capacity_binding_for_listing
-from market_storefront.utils.config import CHAINS, settings
+from market_storefront.utils.config import CHAINS, get_evm_wallet_address, settings
 
 logger = logging.getLogger(__name__)
 
@@ -127,11 +129,7 @@ def _decode_vm_terms(domain: MarketDomainContract, raw_terms: Any) -> Negotiatio
         else raw_terms
     )
     decoded = domain.codecs.message(raw)
-    wire = (
-        decoded.model_dump(mode="json")
-        if hasattr(decoded, "model_dump")
-        else dict(raw)
-    )
+    wire = dict(raw)
     return NegotiationTerms(
         decoded=decoded,
         wire=wire,
@@ -233,6 +231,8 @@ def build_vm_accepted_artifacts(
     buyer_principal: Identity,
     seller_principal: Identity,
     uses_scalar_amount: bool = True,
+    seller_wallet_address: str | None = None,
+    chain_config_paths: Mapping[str, str | None] | None = None,
     **_unused: Any,
 ) -> dict[str, Any]:
     """Materialize VM settlement artifacts from domain-owned proposal codecs."""
@@ -242,8 +242,12 @@ def build_vm_accepted_artifacts(
         agreed_amount=agreed_amount,
         duration_seconds=duration_seconds,
         uses_scalar_amount=uses_scalar_amount,
-        seller_wallet_address=None,
-        chain_config_paths=_chain_config_paths(),
+        seller_wallet_address=seller_wallet_address,
+        chain_config_paths=(
+            dict(chain_config_paths)
+            if chain_config_paths is not None
+            else _chain_config_paths()
+        ),
         heartbeat_interval_seconds=int(
             getattr(settings, "heartbeat_interval_seconds", 60)
         ),
@@ -274,6 +278,9 @@ def build_vm_accepted_artifacts(
 def _build_accepted_escrow_artifacts(
     *,
     domain: MarketDomainContract,
+    capacity_binding: CapacityBinding,
+    negotiation_id: str,
+    listing_id: str,
     proposal: Mapping[str, Any] | None,
     agreed_amount: int,
     duration_seconds: int,
@@ -281,25 +288,32 @@ def _build_accepted_escrow_artifacts(
     seller_principal: Identity,
     uses_scalar_amount: bool,
 ) -> dict[str, Any]:
-    settlement = domain.settlement
-    if settlement is None:
-        raise RuntimeError(
-            f"domain {domain.identity!s} has no settlement-plan capability"
-        )
-    artifacts = settlement.build_plan(
-        proposal=proposal,
-        agreed_amount=agreed_amount,
-        duration_seconds=duration_seconds,
-        buyer_principal=buyer_principal,
-        seller_principal=seller_principal,
-        uses_scalar_amount=uses_scalar_amount,
+    artifacts = build_domain_settlement_artifacts(
+        domain,
+        StorefrontSettlementBuildContext(
+            binding=StorefrontDomainBinding(
+                offering_mode=capacity_binding.offering_mode,
+                domain_identity=domain.identity,
+                contract_major=domain.contract_version.major,
+                contract_minor=domain.contract_version.minor,
+            ),
+            negotiation_id=negotiation_id,
+            listing_id=listing_id,
+            site_id=capacity_binding.site_id,
+            proposal=proposal,
+            agreed_amount=agreed_amount,
+            duration_seconds=duration_seconds,
+            buyer_principal=buyer_principal,
+            seller_principal=seller_principal,
+            uses_scalar_amount=uses_scalar_amount,
+            seller_wallet_address=get_evm_wallet_address() or None,
+            chain_config_paths=_chain_config_paths(),
+        ),
     )
-    if not isinstance(artifacts, dict):
-        raise TypeError(
-            f"domain {domain.identity!s} settlement-plan hook returned "
-            f"{type(artifacts).__name__}, expected dict"
-        )
-    return artifacts
+    return {
+        **dict(artifacts.supplemental),
+        "settlement_plan": dict(artifacts.settlement_plan),
+    }
 
 
 def _accepted_vm_service_terms(
@@ -420,6 +434,9 @@ def _accepted_hosted_artifacts(
 def _accepted_settlement_artifacts(
     *,
     domain: MarketDomainContract,
+    capacity_binding: CapacityBinding,
+    negotiation_id: str,
+    listing_id: str,
     proposal: Mapping[str, Any] | None,
     listing: Mapping[str, Any],
     agreed_amount: int,
@@ -461,6 +478,9 @@ def _accepted_settlement_artifacts(
         )
     return _build_accepted_escrow_artifacts(
         domain=domain,
+        capacity_binding=capacity_binding,
+        negotiation_id=negotiation_id,
+        listing_id=listing_id,
         proposal=proposal,
         agreed_amount=agreed_amount,
         duration_seconds=duration_seconds,
@@ -475,8 +495,13 @@ def _build_response_artifacts(
     acceptance: Acceptance,
     accepted: bool,
 ) -> Mapping[str, Any]:
+    if not isinstance(acceptance.binding, CapacityBinding):
+        raise RuntimeError("VM negotiation has no frozen capacity binding")
     if accepted:
         return _accepted_settlement_artifacts(
+            capacity_binding=acceptance.binding,
+            negotiation_id=acceptance.negotiation_id,
+            listing_id=acceptance.listing_id,
             domain=domain,
             proposal=acceptance.pinned_proposal,
             listing=acceptance.listing_record,
@@ -494,6 +519,9 @@ def _build_response_artifacts(
     if isinstance(proposal, Mapping):
         artifacts = _build_accepted_escrow_artifacts(
             domain=domain,
+            capacity_binding=acceptance.binding,
+            negotiation_id=acceptance.negotiation_id,
+            listing_id=acceptance.listing_id,
             proposal=proposal,
             agreed_amount=acceptance.agreed_amount,
             duration_seconds=acceptance.agreement.duration_seconds,

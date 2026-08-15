@@ -51,6 +51,24 @@ def test_terms_obligation_round_trip_is_lossless() -> None:
     back = settlement_obligation_to_escrow_terms(ob)
     assert back == terms
 
+def test_terms_obligation_uses_uint256_strings_in_mechanism_params() -> None:
+    amount = 150 * 10**18
+    ob = escrow_terms_to_settlement_obligation(
+        _terms(
+            obligation_data={
+                "arbiter": "0x" + "22" * 20,
+                "demand": "0x" + "cd" * 32,
+                "token": _TOKEN,
+                "amount": amount,
+            }
+        )
+    )
+
+    assert ob.model_dump(mode="json")["params"]["obligation_data"]["amount"] == str(
+        amount
+    )
+    assert settlement_obligation_to_escrow_terms(ob).obligation_data["amount"] == amount
+
 
 def test_seller_bond_round_trips_maker() -> None:
     terms = _terms(maker="seller")
@@ -155,7 +173,7 @@ def test_interval_obligations_preserve_abi_demand_and_direction() -> None:
         "0x1234",
     ]
     assert template.amount == 11
-    assert template.params["obligation_data"]["amount"] == 11
+    assert template.params["obligation_data"]["amount"] == "11"
 
 
 def test_interval_schedule_rejects_zero_value_obligations() -> None:
@@ -174,10 +192,10 @@ def test_penalty_bond_is_seller_funded_and_preserves_condition_bytes() -> None:
 
     assert (bond.payer, bond.claimant) == ("seller", "buyer")
     assert bond.amount == 700_000
-    assert bond.params["obligation_data"]["amount"] == 700_000
+    assert bond.params["obligation_data"]["amount"] == "700000"
     assert (
         bond.params["obligation_data"]["demand"]
         == payment.params["obligation_data"]["demand"]
     )
     assert payment.amount == 5_000_000
-    assert payment.params["obligation_data"]["amount"] == 5_000_000
+    assert payment.params["obligation_data"]["amount"] == "5000000"

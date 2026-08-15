@@ -57,6 +57,9 @@ def _build_vm_settlement_plan(
         duration_seconds=context.duration_seconds,
         buyer_principal=context.buyer_principal,
         seller_principal=context.seller_principal,
+        uses_scalar_amount=context.uses_scalar_amount,
+        seller_wallet_address=context.seller_wallet_address,
+        chain_config_paths=context.chain_config_paths,
     )
 
 

@@ -61,6 +61,8 @@ def build_bare_metal_settlement_plan(
             "accepted escrow produced an invalid settlement_plan",
         ) from exc
     canonical_plan = plan.model_dump(mode="json")
+    canonical_plan["buyer_principal"] = buyer_principal.model_dump(mode="json")
+    canonical_plan["seller_principal"] = seller_principal.model_dump(mode="json")
     for obligation in canonical_plan["obligations"]:
         obligation["payer_principal"] = buyer_principal.model_dump(mode="json")
         obligation["claimant_principal"] = seller_principal.model_dump(mode="json")

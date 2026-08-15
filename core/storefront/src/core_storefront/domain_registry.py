@@ -287,6 +287,29 @@ class StorefrontThreadBinding:
         _nonempty(self.listing_id, field="listing_id")
         _nonempty(self.site_id, field="site_id")
 
+
+def bind_fulfillment_context(
+    context: Mapping[str, object],
+    *,
+    thread_binding: StorefrontThreadBinding,
+) -> dict[str, object]:
+    """Copy the accepted thread binding into a domain fulfillment context."""
+
+    result = dict(context)
+    projection = {
+        "negotiation_id": thread_binding.negotiation_id,
+        "listing_id": thread_binding.listing_id,
+        "site_id": thread_binding.site_id,
+        **thread_binding.binding.as_record(),
+    }
+    existing = result.get("storefront_domain_binding")
+    if existing is not None and existing != projection:
+        raise StorefrontDomainBindingError(
+            "fulfillment context contains a conflicting domain binding"
+        )
+    result["storefront_domain_binding"] = projection
+    return result
+
 @dataclass(frozen=True)
 class PreparedStorefrontDomainArtifact:
     """Codec-validated canonical artifact ready for atomic persistence."""

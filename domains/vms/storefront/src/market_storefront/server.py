@@ -281,24 +281,29 @@ async def _start_vm_services(services: VmStorefrontServices) -> None:
             "storefront domain registry"
         )
     _container.resolved_domain_registry = services.registry
-    _container.resolved_sqlite_client = services.sqlite_client
-    _container.resolved_marketplace_signer = services.marketplace_signer
-    if settings.enable_registry_discovery:
-        get_registry_authorities()
-    initialize_administrator_identities(services.sqlite_client.db_path)
-    initialize_service_peer_identities(services.sqlite_client.db_path)
-    _container.resolved_alkahest_clients = services.alkahest_clients
-    _container.resolved_listing_service = services.listing_service
-    _container.resolved_negotiation_runtime = services.negotiation_runtime
-    _container.resolved_negotiation_service = services.negotiation_service
-    _container.resolved_system_service = services.system_service
-    _container.resolved_settlement_composition = services.settlement_composition
-    logger.info("[STARTUP] Singletons initialized")
-    await _run_startup_tasks(
-        registry=services.registry,
-        domain=services.domain,
-    )
-    logger.info("[STARTUP] Background tasks started")
+    try:
+        _container.resolved_sqlite_client = services.sqlite_client
+        _container.resolved_marketplace_signer = services.marketplace_signer
+        if settings.enable_registry_discovery:
+            get_registry_authorities()
+        initialize_administrator_identities(services.sqlite_client.db_path)
+        initialize_service_peer_identities(services.sqlite_client.db_path)
+        _container.resolved_alkahest_clients = services.alkahest_clients
+        _container.resolved_capacity_runtime = services.capacity_runtime
+        _container.resolved_listing_service = services.listing_service
+        _container.resolved_negotiation_runtime = services.negotiation_runtime
+        _container.resolved_negotiation_service = services.negotiation_service
+        _container.resolved_system_service = services.system_service
+        _container.resolved_settlement_composition = services.settlement_composition
+        logger.info("[STARTUP] Singletons initialized")
+        await _run_startup_tasks(
+            registry=services.registry,
+            domain=services.domain,
+        )
+        logger.info("[STARTUP] Background tasks started")
+    except BaseException:
+        _container.clear_lifespan_state(registry=services.registry)
+        raise
 
 
 async def _stop_vm_services(services: VmStorefrontServices) -> None:

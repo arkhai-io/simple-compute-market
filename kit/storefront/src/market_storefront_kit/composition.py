@@ -128,11 +128,16 @@ def build_storefront_lifespan(
                 "market-domain contract object"
             )
         application.state.storefront_container = container
+        started = False
         try:
             await _call_lifecycle(services.start, container)
+            started = True
             yield
         finally:
-            await _call_lifecycle(services.stop, container)
+            # A rejected start never acquired lifecycle ownership. Calling its
+            # stop hook could clear a different app's registry-owned container.
+            if started:
+                await _call_lifecycle(services.stop, container)
             application.state.storefront_container = None
 
     return lifespan

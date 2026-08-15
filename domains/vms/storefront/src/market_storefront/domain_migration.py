@@ -20,6 +20,7 @@ from typing import Any
 from core_storefront.domain_registry import (
     StorefrontDomainBinding,
     StorefrontListingBinding,
+    StorefrontThreadBinding,
     bind_fulfillment_context,
     build_storefront_derivation_key,
     canonical_source_envelope,
@@ -52,7 +53,8 @@ class LegacyStorefrontSelection:
         return StorefrontDomainBinding(
             offering_mode=self.offering_mode,
             domain_identity=self.domain_identity,
-            contract_version=self.contract_version,
+            contract_major=self.contract_version.major,
+            contract_minor=self.contract_version.minor,
         )
 
 
@@ -204,6 +206,7 @@ def _prepare_vm_bindings(
             binding=selection.binding,
             derivation_key=build_storefront_derivation_key(
                 site_id=site_id,
+                offering_mode=selection.offering_mode,
                 binding=selection.binding,
                 source_identity=source,
             ),
@@ -320,20 +323,26 @@ def _prepare_vm_bindings(
         ).fetchall():
             row = conn.execute(
                 """
-                SELECT site_id, offering_mode, domain_identity,
+                SELECT domain_listing_id, site_id, offering_mode, domain_identity,
                        contract_major, contract_minor
                 FROM negotiation_threads WHERE negotiation_id=?
                 """,
                 (negotiation_id,),
             ).fetchone()
-            if row is None or row[2] is None:
+            if row is None or row[3] is None:
                 raise StorefrontDomainMigrationError(
                     f"escrow {escrow_uid!r} has no accepted thread binding"
                 )
-            thread_binding = StorefrontDomainBinding(
-                offering_mode=str(row[1]),
-                domain_identity=DomainIdentity(str(row[2])),
-                contract_version=ContractVersion(int(row[3]), int(row[4])),
+            thread_binding = StorefrontThreadBinding(
+                negotiation_id=str(negotiation_id),
+                listing_id=str(row[0]),
+                site_id=str(row[1]),
+                binding=StorefrontDomainBinding(
+                    offering_mode=str(row[2]),
+                    domain_identity=DomainIdentity(str(row[3])),
+                    contract_major=int(row[4]),
+                    contract_minor=int(row[5]),
+                ),
             )
             context = _decode_object(
                 raw_context,
@@ -342,8 +351,7 @@ def _prepare_vm_bindings(
             )
             bound = bind_fulfillment_context(
                 context,
-                binding=thread_binding,
-                site_id=str(row[0]),
+                thread_binding=thread_binding,
             )
             conn.execute(
                 "UPDATE escrows SET fulfillment_context=? WHERE escrow_uid=?",

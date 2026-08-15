@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
@@ -9,8 +10,8 @@ from market_identity import Ed25519Signer
 from market_fulfillment import VersionedEnvelope
 import market_storefront.container as container
 from market_storefront.services import fulfillment_service
-from domains.vms.listings.reconciler import record_derived_listing
 from market_storefront.domain_runtime import build_vm_storefront_domain, build_vm_storefront_registry
+from market_storefront.publication_binding import prepare_vm_listing_binding
 from market_storefront.utils.sqlite_client import SQLiteClient
 from tests.fake_site import (
     FakeSite,
@@ -19,6 +20,8 @@ from tests.fake_site import (
     pump_events,
     site_capacity,
 )
+from tests.fulfillment_fixtures import make_vm_lifecycle_fixture
+from tests._settings_overrides import settings_overrides
 
 _TEST_STOREFRONT_SIGNER = TEST_MARKETPLACE_SIGNER
 _TEST_PROVISIONING_AUTHORITIES = TEST_SITE_AUTHORITIES
@@ -61,33 +64,46 @@ async def _seed_compute_pool(client: SQLiteClient) -> None:
     )
 
 
+async def _seed_bound_listing(
+    client: SQLiteClient,
+    *,
+    listing_id: str,
+    gpu_count: int,
+) -> None:
+    await client.upsert_listing_with_binding(
+        binding=prepare_vm_listing_binding(
+            listing_id=listing_id,
+            candidate={
+                "site_id": "default",
+                "pool_id": "pool-h200-1",
+                "gpu_count": gpu_count,
+            },
+        ),
+        status="open",
+        created_at="2026-01-01T00:00:00",
+        updated_at="2026-01-01T00:00:00",
+        offer_resource={
+            "resource_id": "pool-h200-1",
+            "gpu_model": "H200",
+            "gpu_count": gpu_count,
+            "region": "California, US",
+            "sla": 99.0,
+            "virtualization_type": "vm",
+        },
+        accepted_escrows=_compute_listing(gpu_count=gpu_count)["accepted_escrows"],
+        demands=[],
+        fulfillment_resource=None,
+        max_duration_seconds=3600,
+        storefront_url="http://seller",
+        seller_principal=_TEST_SELLER_PRINCIPAL,
+    )
+
+
 async def _seed_compute_listings(client: SQLiteClient, *, max_gpu_count: int) -> None:
     for gpu_count in range(1, max_gpu_count + 1):
-        listing_id = f"listing-{gpu_count}x"
-        await client.upsert_listing(
-            listing_id=listing_id,
-            status="open",
-            created_at="2026-01-01T00:00:00",
-            updated_at="2026-01-01T00:00:00",
-            offer_resource={
-                "resource_id": "pool-h200-1",
-                "gpu_model": "H200",
-                "gpu_count": gpu_count,
-                "region": "California, US",
-                "sla": 99.0,
-            },
-            accepted_escrows=_compute_listing(gpu_count=gpu_count)["accepted_escrows"],
-            demands=[],
-            fulfillment_resource=None,
-            max_duration_seconds=3600,
-            storefront_url="http://seller",
-            seller_principal=_TEST_SELLER_PRINCIPAL,
-        )
-        record_derived_listing(
-            client.db_path,
-            listing_id=listing_id,
-            site_id="default",
-            resource_id="pool-h200-1",
+        await _seed_bound_listing(
+            client,
+            listing_id=f"listing-{gpu_count}x",
             gpu_count=gpu_count,
         )
 
@@ -103,6 +119,7 @@ def _compute_listing(*, gpu_count: int = 1) -> dict:
             "gpu_count": gpu_count,
             "region": "California, US",
             "sla": 99.0,
+            "virtualization_type": "vm",
         },
         "accepted_escrows": [
             {
@@ -111,7 +128,9 @@ def _compute_listing(*, gpu_count: int = 1) -> dict:
                 "literal_fields": {
                     "token": "0x" + "22" * 20,
                 },
-                "rates": [{"amount": 100}],
+                "rates": [
+                    {"field": "amount", "per": "hour", "value": "100"},
+                ],
             }
         ],
     }
@@ -136,6 +155,7 @@ async def test_fulfill_compute_obligation_reports_error_when_onchain_fulfillment
             return registration
 
     await _seed_compute_pool(client)
+    await _seed_bound_listing(client, listing_id="listing-1", gpu_count=1)
     fake = FakeSite(deliverable_modes={"vm"})
     fake.add_resource(
         "pool-h200-1", 1,
@@ -159,7 +179,11 @@ async def test_fulfill_compute_obligation_reports_error_when_onchain_fulfillment
     )
     alkahest.oracle.request_arbitration = AsyncMock()
 
-    with site_capacity(fake, sqlite_client_factory=lambda: client):
+    with site_capacity(
+        fake,
+        sqlite_client_factory=lambda: client,
+        project_pool_modes=True,
+    ):
         result = await fulfillment_service.fulfill_compute_obligation(
             sqlite_client=client,
             client=alkahest,
@@ -229,7 +253,17 @@ async def test_reservation_closes_oversized_dynamic_listings(client, monkeypatch
     )
     monkeypatch.setattr(fulfillment_service, "_do_shutdown", AsyncMock())
 
-    with site_capacity(fake, sqlite_client_factory=lambda: client) as aggregate:
+    with (
+        settings_overrides(
+            enable_registry_discovery=False,
+            registry__urls=[],
+        ),
+        site_capacity(
+            fake,
+            sqlite_client_factory=lambda: client,
+            project_pool_modes=True,
+        ) as aggregate,
+    ):
         result = await fulfillment_service.fulfill_compute_obligation(
             sqlite_client=client,
             client=None,
@@ -369,12 +403,15 @@ async def test_do_provision_end_to_end_delivers_credentials_for_storage(
     FakeSite ledger. Confirms end to end -- real stored rows, not code
     inspection -- that credentials produced by the new fulfillment path
     reach the storefront's existing credential store correctly."""
-    from tests.fake_site import FakeSite, site_capacity
 
     await _seed_compute_pool(client)
-    await client.insert_escrow(
-        escrow_uid="escrow-e2e-1", negotiation_id="neg-e2e-1",
-        chain_name="anvil", escrow_address="0x" + "11" * 20,
+    await make_vm_lifecycle_fixture(
+        Path(client.db_path),
+        escrow_uid="escrow-e2e-1",
+        negotiation_id="neg-e2e-1",
+        listing_id="listing-1",
+        site_id="default",
+        pool_id="pool-h200-1",
     )
     fake = FakeSite(deliverable_modes={"vm"})
     fake.add_resource(
@@ -460,7 +497,11 @@ async def test_do_provision_end_to_end_delivers_credentials_for_storage(
         raising=False,
     )
 
-    with site_capacity(fake, sqlite_client_factory=lambda: client):
+    with site_capacity(
+        fake,
+        sqlite_client_factory=lambda: client,
+        project_pool_modes=True,
+    ):
         result = await fulfillment_service.fulfill_compute_obligation(
             sqlite_client=client,
             client=None,
@@ -504,12 +545,15 @@ async def test_do_provision_result_fetch_is_safe_to_repeat(client, monkeypatch):
     already guarantees the storage half; this confirms _do_provision's
     calling code doesn't do anything that would defeat that (e.g. calling
     schedule/begin a second time)."""
-    from tests.fake_site import FakeSite, site_capacity
 
     await _seed_compute_pool(client)
-    await client.insert_escrow(
-        escrow_uid="escrow-dup-1", negotiation_id="neg-dup-1",
-        chain_name="anvil", escrow_address="0x" + "11" * 20,
+    await make_vm_lifecycle_fixture(
+        Path(client.db_path),
+        escrow_uid="escrow-dup-1",
+        negotiation_id="neg-dup-1",
+        listing_id="listing-1",
+        site_id="default",
+        pool_id="pool-h200-1",
     )
     fake = FakeSite(deliverable_modes={"vm"})
     fake.add_resource(
@@ -582,7 +626,11 @@ async def test_do_provision_result_fetch_is_safe_to_repeat(client, monkeypatch):
         raising=False,
     )
 
-    with site_capacity(fake, sqlite_client_factory=lambda: client):
+    with site_capacity(
+        fake,
+        sqlite_client_factory=lambda: client,
+        project_pool_modes=True,
+    ):
         first = await fulfillment_service.fulfill_compute_obligation(
             sqlite_client=client,
             client=None, escrow_uid="escrow-dup-1", ssh_public_key="ssh-ed25519 AAAA",

@@ -18,7 +18,12 @@ from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from compute_provisioning import FulfillmentRequestBody, FulfillmentScheduleRequest
-from market_fulfillment import VersionedEnvelope
+from market_fulfillment import (
+    FULFILLMENT_RESULT_KIND,
+    FULFILLMENT_RESULT_SCHEMA_VERSION,
+    FulfillmentResultPayload,
+    VersionedEnvelope,
+)
 
 from market_storefront.services.capacity_client import (
     build_capacity_client,
@@ -465,7 +470,6 @@ async def _load_active_physical_result(
     fulfillment_id: str,
     reservation_id: str,
     site_id: str,
-    domain: Any,
 ) -> tuple[dict[str, Any], dict[str, Any] | None] | None:
     status = await fulfillment_client.get_fulfillment_status(
         fulfillment_id,
@@ -488,8 +492,37 @@ async def _load_active_physical_result(
         capacity_reservation_id=reservation_id,
         site_id=site_id,
     )
-    domain_result = (result_envelope.payload or {}).get("domain_result")
-    domain.codecs.result(domain_result)
+    if (
+        result_envelope.kind != FULFILLMENT_RESULT_KIND
+        or result_envelope.schema_version != FULFILLMENT_RESULT_SCHEMA_VERSION
+    ):
+        raise RuntimeError(
+            "physical fulfillment returned an unsupported result envelope"
+        )
+    try:
+        result_payload = FulfillmentResultPayload.model_validate(
+            result_envelope.payload
+        )
+    except (TypeError, ValueError) as exc:
+        raise RuntimeError(
+            "physical fulfillment returned a malformed result payload"
+        ) from exc
+    if (
+        result_payload.fulfillment_id != fulfillment_id
+        or result_payload.capacity_reservation_id != reservation_id
+        or result_payload.state != "active"
+    ):
+        raise RuntimeError(
+            "physical fulfillment result disagrees with active lifecycle"
+        )
+    domain_result = result_payload.domain_result
+    if (
+        domain_result is None
+        or domain_result.kind != "vm.fulfillment.result.v1"
+        or domain_result.schema_version != 1
+        or not isinstance(domain_result.payload, dict)
+    ):
+        raise RuntimeError("physical fulfillment returned an unsupported VM result")
     legacy = _fulfillment_result_to_legacy_shape(result_envelope)
     authentication = legacy.pop("authentication", None)
     await persist_escrow_fields_with_retry(
@@ -566,7 +599,7 @@ async def converge_escrow_once(
         fulfillment_id=escrow.get("fulfillment_id"),
         site_id=site_id,
     )
-    domain = sqlite_client.domain_registry.resolve(thread_binding.binding)
+    sqlite_client.domain_registry.resolve(thread_binding.binding)
     physical = await _load_active_physical_result(
         escrow_uid=escrow_uid,
         sqlite_client=sqlite_client,
@@ -574,7 +607,6 @@ async def converge_escrow_once(
         fulfillment_id=fulfillment_id,
         reservation_id=reservation_id,
         site_id=site_id,
-        domain=domain,
     )
     if physical is None:
         return False
@@ -648,7 +680,7 @@ async def resume_incomplete_fulfillments_once(
             await composition.runtime.bind_fulfillment(
                 obligation_ref,
                 fulfillment_ref,
-                local_role="seller",
+                local_principal=composition.local_principal,
             )
             await composition.worker.wake(obligation_ref)
 

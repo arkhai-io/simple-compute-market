@@ -76,12 +76,8 @@ from storefront_client import (
 from .publication_binding import record_vm_listing_binding
 from .cli_common import _resolve_db_path, resolve_storefront_url
 from .publication_wiring import (
-    BareMetalPublicationSourceCallbacks,
     VmPublicationSourceCallbacks,
-    build_bare_metal_publication_source_kwargs,
-    build_bare_metal_storefront_publication_selection,
-    build_storefront_publication_selection,
-    build_vm_publication_source_kwargs,
+    build_vm_storefront_publication_selection,
 )
 
 # ``utils.config`` initializes process-global Dynaconf state from the operator
@@ -285,11 +281,11 @@ def _site_capacity_buckets_sync() -> dict[str, list[dict[str, Any]]] | None:
     return buckets or None
 
 
-def _member_availability_sync() -> dict[tuple[str, str], int]:
+def _member_availability_sync() -> dict[tuple[str, str], int] | None:
     """Fetch exact site/resource availability for CLI publication."""
     snapshot = _capacity_snapshot_sync()
     if snapshot is None:
-        return {}
+        return None
     view: dict[tuple[str, str], int] = {}
     for row in snapshot:
         resource_id = row.get("resource_id")
@@ -756,45 +752,15 @@ def _vm_publication_source_callbacks(
     )
 
 
-def _bare_metal_publication_source_callbacks() -> BareMetalPublicationSourceCallbacks:
-    return BareMetalPublicationSourceCallbacks(
-        capacity_snapshot=_capacity_snapshot_sync,
-        close_listing=_close_order,
-        publish_existing_listing=_publish_existing_listing_to_registries,
-    )
-
-
-def _publication_source_kwargs() -> dict[str, Any]:
-    return build_vm_publication_source_kwargs(_vm_publication_source_callbacks())
-
-
-def _bare_metal_publication_source_kwargs() -> dict[str, Any]:
-    """Infrastructure callbacks for the bare-metal publication adapter."""
-    return build_bare_metal_publication_source_kwargs(
-        _bare_metal_publication_source_callbacks(),
-    )
-
-
 def _publication_source_selection(
     command_settlements: tuple[SettlementPublicationClause, ...] | None = None,
 ) -> PublicationSourceSelection:
-    """Build all sources from the configured frozen contribution registry."""
+    """Build the VM source from its exact frozen contribution registry."""
     from market_storefront.utils.config import storefront_domain_registry
 
-    return build_storefront_publication_selection(
-        registry=storefront_domain_registry(),
-        vm_callbacks=_vm_publication_source_callbacks(command_settlements),
-        bare_metal_callbacks=_bare_metal_publication_source_callbacks(),
-    )
-
-
-def _bare_metal_publication_source_selection() -> PublicationSourceSelection:
-    """Build the explicitly configured bare-metal-only registry selection."""
-    from market_storefront.utils.config import storefront_domain_registry
-
-    return build_bare_metal_storefront_publication_selection(
+    return build_vm_storefront_publication_selection(
         storefront_domain_registry(),
-        _bare_metal_publication_source_callbacks(),
+        _vm_publication_source_callbacks(command_settlements),
     )
 
 
