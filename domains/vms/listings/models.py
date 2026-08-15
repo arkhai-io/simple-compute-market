@@ -633,6 +633,7 @@ class Listing(BaseModel):
         """Parse resources from dicts to Resource types."""
         if not isinstance(data, dict):
             return data
+        data = dict(data)
 
         if "offer_resource" in data:
             data["offer_resource"] = ComputeDomainResource.parse_from_dict(

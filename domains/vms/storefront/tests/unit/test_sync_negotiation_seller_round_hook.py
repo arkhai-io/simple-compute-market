@@ -234,6 +234,32 @@ async def test_hosted_selection_is_persisted_and_materialized_as_plan(db):
         storefront_url="http://seller:8001",
         seller_principal=_SELLER,
     )
+    await db.upsert_resource(
+        resource_id="resource-hosted",
+        resource_type="compute.gpu",
+        resource_subtype=None,
+        unit="vm",
+        value=1,
+        state="available",
+        attributes={
+            "gpu_model": "H200",
+            "region": "California, US",
+            "vm_host": "kvm1",
+        },
+    )
+
+    from tests.fake_site import FakeSite, site_capacity
+
+    site = FakeSite()
+    site.add_resource(
+        "resource-hosted",
+        1,
+        attributes={
+            "gpu_model": "H200",
+            "region": "California, US",
+            "vm_host": "kvm1",
+        },
+    )
 
     async def hook(**_kwargs):
         return SellerRoundResult(
@@ -251,24 +277,25 @@ async def test_hosted_selection_is_persisted_and_materialized_as_plan(db):
             },
         )
 
-    response = await start_sync_negotiation(
-        sqlite_client=db,
-        our_listing_id="L-hosted",
-        buyer_principal=_BUYER,
-        seller_principal=_SELLER,
-        proposal={"settlement_selection": selection.model_dump()},
-        provision_terms=ProvisionTerms(
-            kind="compute.v1",
-            version=1,
-            payload={
-                "duration_seconds": 3600,
-                "ssh_public_key": "ssh-rsa AAAA",
-            },
-        ),
-        our_base_url="http://test-seller:8001",
-        their_agent_url="http://buyer:9000",
-        seller_round_hook=hook,
-    )
+    with site_capacity(site):
+        response = await start_sync_negotiation(
+            sqlite_client=db,
+            our_listing_id="L-hosted",
+            buyer_principal=_BUYER,
+            seller_principal=_SELLER,
+            proposal={"settlement_selection": selection.model_dump()},
+            provision_terms=ProvisionTerms(
+                kind="compute.v1",
+                version=1,
+                payload={
+                    "duration_seconds": 3600,
+                    "ssh_public_key": "ssh-rsa AAAA",
+                },
+            ),
+            our_base_url="http://test-seller:8001",
+            their_agent_url="http://buyer:9000",
+            seller_round_hook=hook,
+        )
 
     assert response["action"] == "accept"
     assert response["settlement_selection"] == selection.model_dump()
