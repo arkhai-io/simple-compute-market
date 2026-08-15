@@ -108,17 +108,21 @@ That cost is why bare metal has been a storefront skeleton and why API credits c
 Extracting that machinery into kit changes what adding a domain means. A Kubernetes-pod domain, an inference-token domain, or a model-training domain becomes codecs, a contract, and configuration rather than a fork of the VM storefront. The two domains delivered here are both the beneficiaries and the proof: bare metal because it has none of the machinery, API credits because it has a complete parallel copy, so composing them exercises both directions.
 
 **Current state.** Kit's layering discipline now includes
-`kit/settlement-runtime`: one stable per-obligation operation journal,
-conditional-escrow client port, servicing worker, and failure dispatcher are
-composed by VM and API-credit storefronts. Bare metal composes exact
-verified-plan registration and adoption but truthfully remains
-fulfillment-unavailable. `kit/policy`, `kit/identity`, `kit/fulfillment`,
-`kit/config`, and `kit/alkahest` likewise carry no domain vocabulary.
+`kit/settlement-runtime` and `kit/capacity-publication`. The settlement kit
+owns one stable per-obligation operation journal, conditional-escrow client
+port, servicing worker, and failure dispatcher. The capacity/publication kit
+owns exact site projections, event-driven reconciliation, registry fan-out,
+publication result recording, and close/reopen mechanics over injected
+schema-opaque candidate and binding hooks. VM and API-credit storefronts
+compose those runtimes rather than maintaining local copies; pool-declared
+offering mode and persisted selected-site binding remain authoritative through
+publication and recovery. Bare metal consumes the same seams without a
+domain-specific fallback.
 
-The remaining cross-cutting copies are synchronous negotiation, capacity,
-publication, negotiation watchdog, and chain-client construction. Those
-concerns still make a new storefront domain larger than its codecs, contract,
-configuration, and genuine domain actions.
+The remaining cross-cutting copies are synchronous negotiation, negotiation
+watchdog, and chain-client construction. `kit/policy`, `kit/identity`,
+`kit/fulfillment`, `kit/config`, and `kit/alkahest` likewise carry no domain
+vocabulary.
 
 Settlement assigns stable identity to every accepted-plan obligation, journals
 materialize/status/check/collect/reclaim attempts, persists opaque mechanism
@@ -139,7 +143,6 @@ The domain layer's own structure is better than the duplication suggests. All th
 |---|---|
 | No seam exists for kit-owned storefront runtime, and no rule prevents an extraction leaving copies behind | [`kit-storefront-composition-seam`](../../openspec/changes/kit-storefront-composition-seam/) |
 | The synchronous negotiation runtime is implemented twice and absent once | [`kit-owned-negotiation-runtime`](../../openspec/changes/kit-owned-negotiation-runtime/) |
-| The capacity client and publication runtime are implemented twice and absent once | [`kit-owned-capacity-and-publication`](../../openspec/changes/kit-owned-capacity-and-publication/) |
 | Bare metal has no deployable stack, no domain has an end-to-end deal path but VM, and API credits still reimplements rather than composes | [`bare-metal-and-credits-domain-stacks`](../../openspec/changes/bare-metal-and-credits-domain-stacks/) |
 
 A compute-dimension name leaking into every domain's capacity declaration is a real defect but too small to own a gap row here; it rides with [`capacity-resource-administration`](../../openspec/changes/capacity-resource-administration/), which already rewrites the code that causes it.

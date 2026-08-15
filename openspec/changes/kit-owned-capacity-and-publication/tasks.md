@@ -2,23 +2,23 @@
 
 ## 1. Compare before moving
 
-- [ ] 1.1 Re-verify the per-domain line counts and that bare metal still has no
+- [x] 1.1 Re-verify the per-domain line counts and that bare metal still has no
       implementation of these concerns.
-- [ ] 1.2 Compare the existing implementations concern by concern and record where they
+- [x] 1.2 Compare the existing implementations concern by concern and record where they
       already diverge. Two hand-maintained copies will have drifted; extraction forces a
       choice about which behavior is correct, and making it silently is how a refactor
       becomes a behavior change.
-- [ ] 1.3 Separate genuine domain specificity from unintended divergence. Differences in
+- [x] 1.3 Separate genuine domain specificity from unintended divergence. Differences in
       codecs and configuration go to the domain; differences in control flow are either
       domain-owned or a drift finding.
 
 ## 2. Extract onto the seam
 
-- [ ] 2.1 Move the mechanism into kit, leaving the domain to supply its contract,
+- [x] 2.1 Move the mechanism into kit, leaving the domain to supply its contract,
       configuration, and domain-specific semantics.
-- [ ] 2.2 Confirm the dependency direction: kit depends downward only. The moved code
+- [x] 2.2 Confirm the dependency direction: kit depends downward only. The moved code
       currently imports freely from its domain.
-- [ ] 2.3 Record the chosen behavior wherever the copies disagreed, with the reason.
+- [x] 2.3 Record the chosen behavior wherever the copies disagreed, with the reason.
 
 ## 3. Compose every domain
 
@@ -31,7 +31,7 @@
 
 ## 4. Packaging follow-through
 
-- [ ] 4.1 Update build targets and Dockerfile wheel-refresh entries.
+- [x] 4.1 Update build targets and Dockerfile wheel-refresh entries.
 - [ ] 4.2 Regenerate affected lockfiles and verify they contain no absolute paths.
 
 ## 5. Validation
@@ -50,20 +50,20 @@ Per `openspec/README.md#plan-closeout-requirements`.
 
 - [ ] 6.1 **Comment hygiene.** Run `make check-comment-hygiene`; read the moved modules'
       docstrings, which describe domain-local concerns.
-- [ ] 6.2 **Import placement.** Central rather than incidental: extraction changes import
+- [x] 6.2 **Import placement.** Central rather than incidental: extraction changes import
       direction, and a lazy import kept to dodge a cycle would hide a layering violation.
-- [ ] 6.3 **Documentation compliance.** Confirm the kit-ownership rule landed in
+- [x] 6.3 **Documentation compliance.** Confirm the kit-ownership rule landed in
       `openspec/specs/market-composition/spec.md`.
-- [ ] 6.4 **Narrative compression.** Compress completed-task notes to final behavior,
+- [x] 6.4 **Narrative compression.** Compress completed-task notes to final behavior,
       validation evidence, and promotion destinations; keep the drift comparisons, which
       the sibling extractions will want.
-- [ ] 6.5 **Roadmap currency.** Update Goal 4's current-state description and gap mapping
+- [x] 6.5 **Roadmap currency.** Update Goal 4's current-state description and gap mapping
       in `docs/development/ROADMAP.md`.
-- [ ] 6.6 **Promotion.** Complete the design-promotion record below.
+- [x] 6.6 **Promotion.** Complete the design-promotion record below.
 
 ## Design promotion record
 
 | Accepted decision | Permanent location |
 |---|---|
-| Kit-owned capacity client and publication runtime | `openspec/specs/market-composition/spec.md` |
-| Where the existing implementations diverged and which behavior was chosen | This change's `design.md` |
+| Kit-owned capacity client and publication runtime | `openspec/specs/market-composition/spec.md`; `docs/development/ARCHITECTURE.md` |
+| Where the existing implementations diverged and which behavior was chosen | `openspec/changes/kit-owned-capacity-and-publication/design.md`; final binding rules promoted to `docs/development/ARCHITECTURE.md` |

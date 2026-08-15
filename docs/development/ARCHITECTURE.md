@@ -136,6 +136,29 @@ accepted runs recover under immutable ownership.
 
 See the [marketplace identity contract](../../openspec/specs/marketplace-identity/spec.md) and its [architecture](../../openspec/specs/marketplace-identity/architecture.md).
 
+### Capacity and publication composition
+
+`arkhai-kit-capacity-publication` owns the storefront-side multi-site capacity
+source, exact site projections, capacity-event reconciliation loop, registry
+fan-out, durable publication result recording, and close-before-reopen
+lifecycle. A domain contributes only schema-opaque candidates and codecs plus
+hooks that resolve each listing's durable capacity binding.
+
+Every capacity-backed candidate carries
+`CapacityBinding(site_id, offering_mode, source_id)`. The site ID comes from
+trusted local composition, the offering mode must be declared by the selected
+Resource Pool and must equal the public offer's mode, and the opaque source ID
+identifies the pool, quota resource, or Physical Resource. Publication,
+reservation, commit, release, and restart recovery reload and compare that
+exact binding. An unknown site, missing mode, changed binding, or incomplete
+candidate fails closed; the runtime never invents a home site, scans other
+authorities after restart, or defaults an executor mode.
+
+VM and API-credit storefront roots inject their candidate derivation and
+binding codecs into the same runtime. The kit imports no VM, API-credit,
+bare-metal, provider, or deployed-service package, so another domain composes
+the lifecycle without copying it.
+
 ### Settlement configuration
 
 Marketplace roles configure peer settlement mechanisms through one typed `[Settlement]` root. Its duplicate-free `priority` list contains canonical mechanism IDs; registered `stripe` and `alkahest` subsections own their mechanism policy and public client inputs. Identity, wallet, and chains remain independent shared resources. Composition roots register installed mechanisms explicitly, inject only the signer or EVM resources each declares, and pass every resulting client into the single `market_settlement_runtime` lifecycle.

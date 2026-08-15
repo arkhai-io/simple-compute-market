@@ -270,6 +270,52 @@ A domain-owned storefront composition root MUST receive one immutable versioned 
 - **WHEN** the parameterized executable opens existing VM storefront state with the supported `compute.v1` contract
 - **THEN** no schema migration or carrier conversion is required and listing, negotiation, obligation, settlement, fulfillment, and operation identifiers retain their interpretation
 
+### Requirement: Kit-owned capacity and publication lifecycle
+
+The storefront-side multi-site capacity source, exact site projection,
+capacity-event reconciliation loop, registry publication, durable publication
+result recording, and close/reopen mechanics MUST be owned by one foundation
+kit. A composing domain MUST contribute only schema-opaque publication
+candidates, listing codecs, candidate reconciliation policy, and durable
+binding lookup hooks. The kit MUST NOT import a concrete domain, provider, or
+deployed service, and a composing domain MUST NOT retain a parallel capacity or
+publication lifecycle.
+
+Every capacity-backed publication candidate MUST carry one exact durable
+binding of trusted `site_id`, pool-declared `offering_mode`, and opaque
+domain-owned `source_id`. The public offer's mode MUST equal the binding's
+mode. Reservation, commit, release, close, reopen, and restart recovery MUST
+reload and compare the same binding and MUST NOT infer a home site, default an
+offering mode, choose an authority from response data, or fan out after a
+binding is recorded.
+
+#### Scenario: A domain publishes a capacity-backed candidate
+
+- **WHEN** the domain derives a schema-valid candidate from a trusted site
+  projection
+- **THEN** the kit publishes it only after the domain hook confirms that its
+  exact site, source, and advertised offering mode equal durable local state
+
+#### Scenario: Capacity changes after publication
+
+- **WHEN** a configured site emits a consuming, releasing, or mixed-direction
+  capacity delta
+- **THEN** the kit obtains exact site-keyed projections, asks the domain hooks
+  for the affected candidates, and executes deterministic close-before-reopen
+  reconciliation
+
+#### Scenario: Recovery loses an in-memory routing cache
+
+- **WHEN** commit, release, or fulfillment resumes after restart
+- **THEN** the effect is sent only to the site in the persisted binding, and a
+  missing or unconfigured binding fails closed without authority fan-out
+
+#### Scenario: A pool cannot deliver the advertised mode
+
+- **WHEN** a candidate's selected Resource Pool does not declare the candidate
+  offering mode or its listing codec projects another mode
+- **THEN** publication is rejected before registry or capacity effects
+
 ## Evidence
 
 - Import boundaries: `core/tests/unit/test_carrier_purity.py` and `domains/vms/storefront/tests/unit/test_architecture_imports.py`.
