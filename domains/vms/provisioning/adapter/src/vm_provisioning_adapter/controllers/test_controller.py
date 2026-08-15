@@ -279,6 +279,7 @@ async def evaluate_job(body: EvaluateJobRequest) -> EvaluateJobResponse:
     params = AnsibleJobParams(
         vm_host=body.host,
         vm_action=body.vm_action,
+        executor_kind="vm",
         vm_target=body.vm_target,
         ssh_pubkey=body.ssh_pubkey,
     )

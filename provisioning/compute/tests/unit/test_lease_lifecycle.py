@@ -14,6 +14,7 @@ class FakeSiteAuthority:
         self.reservations = {
             "alloc-1": {
                 "capacity_reservation_id": "alloc-1",
+                "executor_kind": "vm",
                 "state": "leased",
                 "lease_end_utc": datetime.now(timezone.utc).isoformat(),
             }
@@ -101,7 +102,7 @@ async def test_terminate_lease_uses_injected_ports_and_keeps_capacity_held():
     site = FakeSiteAuthority()
     executor = StubExecutorRelease()
     service = LeaseLifecycleService(
-        SimpleNamespace(), site, executor_release=executor, default_executor_kind="vm"
+        SimpleNamespace(), site, executor_release=executor
     )
 
     updated = await service.terminate_lease("alloc-1")

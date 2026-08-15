@@ -274,6 +274,7 @@ class KeysService:
         claim: dict[str, Any] = {"units": int(quantity)}
         if resource_id:
             claim["resource_id"] = resource_id
+        claim["executor_kind"] = "api_credits"
         reserved = self._ledger.reserve(claim=claim, deal_ref={"escrow_uid": escrow_uid})
         if reserved is None:
             raise IssuanceError(

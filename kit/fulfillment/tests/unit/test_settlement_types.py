@@ -32,6 +32,7 @@ def test_request_carries_capacity_reservation_id_not_legacy_allocation_or_agreem
 
 def test_generic_requirement_and_candidate_are_market_neutral():
     requirement = SettlementRequirement(
+        executor_kind="bare_metal",
         resource_kind="bare-metal-node",
         dimensions={"units": Decimal(1)},
         attributes={"architecture": "amd64"},
@@ -50,6 +51,7 @@ def test_generic_requirement_and_candidate_are_market_neutral():
 def test_settlement_resource_identifies_the_selected_physical_resource():
     resource = SettlementResource(
         settlement_resource_id="node-7",
+        executor_kind="bare_metal",
         pool_id="pool-a",
         resource_kind="bare-metal-node",
         provider="redfish",
@@ -60,11 +62,14 @@ def test_settlement_resource_identifies_the_selected_physical_resource():
 
 def test_dimensions_must_be_nonempty():
     with pytest.raises(ValueError):
-        SettlementRequirement(resource_kind="compute.gpu", dimensions={})
+        SettlementRequirement(
+            executor_kind="vm", resource_kind="compute.gpu", dimensions={}
+        )
 
 
 def test_dimensions_must_be_positive():
     with pytest.raises(ValueError):
         SettlementRequirement(
+            executor_kind="vm",
             resource_kind="compute.gpu", dimensions={"gpu_count": Decimal(0)}
         )

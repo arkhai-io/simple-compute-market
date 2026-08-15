@@ -47,6 +47,11 @@ from typing import Any, Mapping, Optional, Protocol, Sequence
 
 from sqlalchemy import func
 from sqlalchemy.orm import Session, sessionmaker
+from market_resource_pools import (
+    DEFAULT_POOL_ID,
+    ResourcePool,
+    pool_delivers_offering_mode,
+)
 
 from .db import (
     HELD_RESERVATION_STATES,
@@ -64,6 +69,7 @@ ALLOCATION_MODE_EXCLUSIVE = "exclusive"
 ALLOCATION_MODE_SHAREABLE = "shareable"
 PHYSICAL_HOST_ID_ATTR = "physical_host_id"
 VM_EXECUTOR_KIND = "vm"
+EXECUTOR_KIND_CLAIM_KEY = "executor_kind"
 
 
 def _executor_ref_for_resource(resource: CapacityBucket) -> dict[str, Any] | None:
@@ -85,6 +91,10 @@ def _executor_ref_for_resource(resource: CapacityBucket) -> dict[str, Any] | Non
 
 class CapacityConflictError(Exception):
     """Raised when a mutation references a row in an incompatible state."""
+
+
+class UndeclaredOfferingModeError(CapacityConflictError):
+    """Raised when a matching pool does not declare the requested mode."""
 
 
 def parse_utc(value: str | None) -> Optional[datetime]:
@@ -156,6 +166,25 @@ _DIMENSIONS_CLAIM_KEY = "dimensions"
 # legacy single-quantity claims all mean. Every pre-pass-1 caller speaks
 # only this one dimension, so it's what they mirror into/out of.
 PRIMARY_DIMENSION = "gpu_count"
+
+def _requested_executor_kind(
+    claim: Mapping[str, Any] | None,
+    *,
+    required: bool,
+) -> str | None:
+    raw = (claim or {}).get(EXECUTOR_KIND_CLAIM_KEY)
+    if raw is None:
+        if required:
+            raise ValueError(
+                f"capacity claim must include explicit {EXECUTOR_KIND_CLAIM_KEY}"
+            )
+        return None
+    if not isinstance(raw, str) or not raw.strip() or raw != raw.strip():
+        raise ValueError(
+            f"{EXECUTOR_KIND_CLAIM_KEY} must be a non-empty canonical string"
+        )
+    return raw
+
 
 
 def _requested_units(
@@ -479,6 +508,7 @@ def _split_claim_requirement(
         for key, expected in claim.items()
         if key not in unit_claim_keys
         and key != _DIMENSIONS_CLAIM_KEY
+        and key != EXECUTOR_KIND_CLAIM_KEY
         and key != "resource_type"
     }
     return claim.get("resource_type"), attributes
@@ -707,6 +737,7 @@ class CapacityLedgerService:
         expiry still reserves fresh, correctly.
         """
         requested = _requested_dimensions(claim, unit_claim_keys=self._unit_claim_keys)
+        requested_mode = _requested_executor_kind(claim, required=True)
         deal = dict(deal_ref or {})
         escrow_uid = deal.get("escrow_uid")
         window_start, window_end = _lease_window(
@@ -718,6 +749,10 @@ class CapacityLedgerService:
             if escrow_uid:
                 existing = self._find_reservation(db, escrow_uid=escrow_uid)
                 if existing is not None:
+                    if existing.executor_kind != requested_mode:
+                        raise CapacityConflictError(
+                            "executor_kind does not match the existing reservation"
+                        )
                     return self._reservation_payload_for_reserve(db, existing)
             match = self._find_candidate(db, claim, requested, window_start, window_end)
             if match is None:
@@ -738,11 +773,7 @@ class CapacityLedgerService:
                 escrow_uid=deal.get("escrow_uid"),
                 hold_expires_at=hold_expires_at,
                 executor_ref=_executor_ref_for_resource(resource),
-                executor_kind=(
-                    VM_EXECUTOR_KIND
-                    if (resource.attributes or {}).get("vm_host")
-                    else None
-                ),
+                executor_kind=requested_mode,
                 lease_start_utc=window_start.isoformat() if window_start else None,
                 lease_end_utc=window_end.isoformat() if window_end else None,
             )
@@ -773,6 +804,7 @@ class CapacityLedgerService:
             payload["capacity_reservation_id"] = reservation.capacity_reservation_id
             payload["settlement_resource_id"] = reservation.settlement_resource_id
             payload["hold_expires_at"] = hold_expires_at
+            payload["executor_kind"] = requested_mode
             return payload
 
     def assign_settlement_resource(
@@ -820,6 +852,21 @@ class CapacityLedgerService:
             raise CapacityConflictError(
                 f"reservation {capacity_reservation_id} is {reservation.state}; cannot assign settlement resource"
             )
+        destination = self._bucket_by_backing_resource(db, settlement_resource_id)
+        if destination is None or not destination.enabled:
+            raise CapacityConflictError(
+                f"settlement resource {settlement_resource_id!r} is unavailable"
+            )
+        requested_mode = reservation.executor_kind
+        if not requested_mode:
+            raise CapacityConflictError(
+                f"reservation {capacity_reservation_id} has no executor identity"
+            )
+        if not self._pool_declares_mode(db, destination, requested_mode):
+            raise UndeclaredOfferingModeError(
+                f"offering mode {requested_mode!r} is not declared by pool "
+                f"{destination.pool_id or DEFAULT_POOL_ID!r}"
+            )
         if (
             self._backing_resource_id(db, reservation.capacity_reservation_id)
             == settlement_resource_id
@@ -827,11 +874,6 @@ class CapacityLedgerService:
             if reservation.settlement_resource_id != settlement_resource_id:
                 reservation.settlement_resource_id = settlement_resource_id
             return self._reservation_payload(reservation)
-        destination = self._bucket_by_backing_resource(db, settlement_resource_id)
-        if destination is None or not destination.enabled:
-            raise CapacityConflictError(
-                f"settlement resource {settlement_resource_id!r} is unavailable"
-            )
         reservation_dims = _reservation_dimensions(reservation)
         held = self._held_dimensions(db, settlement_resource_id)
         capacity = _resource_capacity(destination)
@@ -897,6 +939,20 @@ class CapacityLedgerService:
         read this without opening a second session.
         """
         return self._backing_resource_id(db, capacity_reservation_id)
+
+    def backing_pool_id_in_session(
+        self,
+        db: Session,
+        capacity_reservation_id: str,
+    ) -> str | None:
+        """Return the current reservation debit pool inside ``db``."""
+        resource_id = self._backing_resource_id(db, capacity_reservation_id)
+        if resource_id is None:
+            return None
+        resource = self._bucket_by_backing_resource(db, resource_id)
+        if resource is None:
+            return None
+        return resource.pool_id or DEFAULT_POOL_ID
 
     def reservation_payload_in_session(
         self, reservation: CapacityReservation
@@ -1146,6 +1202,7 @@ class CapacityLedgerService:
         requested = _requested_dimensions(
             new_claim, unit_claim_keys=self._unit_claim_keys
         )
+        requested_mode = _requested_executor_kind(new_claim, required=True)
         deal = dict(deal_ref or {})
         window_start, window_end = _lease_window(
             lease_start_utc=lease_start_utc,
@@ -1200,11 +1257,7 @@ class CapacityLedgerService:
                 escrow_uid=deal.get("escrow_uid"),
                 hold_expires_at=hold_expires_at,
                 executor_ref=_executor_ref_for_resource(resource),
-                executor_kind=(
-                    VM_EXECUTOR_KIND
-                    if (resource.attributes or {}).get("vm_host")
-                    else None
-                ),
+                executor_kind=requested_mode,
                 lease_start_utc=window_start.isoformat() if window_start else None,
                 lease_end_utc=window_end.isoformat() if window_end else None,
             )
@@ -1717,6 +1770,22 @@ class CapacityLedgerService:
         """Legacy single-dimension accessor, kept for the primary mirror."""
         held = self._held_dimensions(db, resource_id, lease_start, lease_end)
         return int(held.get(PRIMARY_DIMENSION, Decimal(0)))
+    @staticmethod
+    def _pool_declares_mode(
+        db: Session,
+        resource: CapacityBucket,
+        requested_mode: str,
+    ) -> bool:
+        pool = db.get(ResourcePool, resource.pool_id or DEFAULT_POOL_ID)
+        return (
+            pool is not None
+            and pool.enabled
+            and pool_delivers_offering_mode(
+                pool.policy_tags or {},
+                requested_mode,
+            )
+        )
+
 
     def _find_candidate(
         self,
@@ -1735,18 +1804,13 @@ class CapacityLedgerService:
         required_resource_kind, required_attributes = _split_claim_requirement(
             claim, unit_claim_keys=self._unit_claim_keys
         )
+        requested_mode = _requested_executor_kind(claim, required=False)
+        undeclared_pools: set[str] = set()
         for resource in rows:
             attrs = resource.attributes or {}
             if any(
                 not isinstance(attrs.get(key), str) or not attrs[key].strip()
                 for key in self._required_attributes
-            ):
-                continue
-            if self._has_physical_host_conflict(
-                db,
-                resource,
-                lease_start,
-                lease_end,
             ):
                 continue
             capacity = _resource_capacity(resource)
@@ -1764,7 +1828,26 @@ class CapacityLedgerService:
                 required_attributes=required_attributes,
             ):
                 continue
+            if requested_mode is not None and not self._pool_declares_mode(
+                db,
+                resource,
+                requested_mode,
+            ):
+                undeclared_pools.add(resource.pool_id or DEFAULT_POOL_ID)
+                continue
+            if self._has_physical_host_conflict(
+                db,
+                resource,
+                lease_start,
+                lease_end,
+            ):
+                continue
             return resource, available
+        if requested_mode is not None and undeclared_pools:
+            pools = ", ".join(sorted(undeclared_pools))
+            raise UndeclaredOfferingModeError(
+                f"offering mode {requested_mode!r} is not declared by matching pool(s): {pools}"
+            )
         return None
 
     def _find_reservation(
@@ -2036,20 +2119,19 @@ class CapacityLedgerService:
         executor_target: str | None = None,
         executor_ref: Mapping[str, Any] | None = None,
     ) -> None:
-        # Captured before any mutation below: the retired vm_host column's
-        # self-heal source is now executor_ref itself (see
-        # _executor_ref_for_resource, set at reserve() time), not a
-        # separate field to derive executor_ref from.
-        existing_vm_host = (reservation.executor_ref or {}).get("vm_host")
-
+        if (
+            executor_kind is not None
+            and reservation.executor_kind is not None
+            and reservation.executor_kind != executor_kind
+        ):
+            raise CapacityConflictError(
+                f"reservation executor_kind is {reservation.executor_kind!r}, "
+                f"not {executor_kind!r}"
+            )
         if executor_kind is not None:
             reservation.executor_kind = executor_kind
-        elif existing_vm_host and not reservation.executor_kind:
-            reservation.executor_kind = VM_EXECUTOR_KIND
-
         if executor_target is not None:
             reservation.executor_target = executor_target
-
         if executor_ref is not None:
             reservation.executor_ref = dict(executor_ref)
 
@@ -2062,5 +2144,5 @@ class CapacityLedgerService:
         if release_job_id is None:
             return
         reservation.release_job_id = release_job_id
-        if reservation.executor_kind in (None, VM_EXECUTOR_KIND):
+        if reservation.executor_kind == VM_EXECUTOR_KIND:
             reservation.vm_remove_job_id = release_job_id

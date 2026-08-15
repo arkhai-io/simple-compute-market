@@ -558,28 +558,22 @@ async def client_and_queue(
         BARE_METAL_EXECUTOR_KIND,
         BareMetalReleaseExecutor,
     )
-    release_dispatcher = ExecutorReleaseDispatcher(
-        {
-            BARE_METAL_EXECUTOR_KIND: BareMetalReleaseExecutor(
-                release_delegate=bare_metal_operations_service.reclaim_access_for_reservation,
-            ),
-            VM_EXECUTOR_KIND: VmReleaseExecutor(
-                settlement_repository=SettlementRepository(),
-                session_factory=session_factory,
-                teardown_port=FulfillmentServiceTeardownPort(lambda: fulfillment_service),
-            ),
-        },
-        default_executor_kind=VM_EXECUTOR_KIND,
-    )
-    release_job_dispatcher = ReleaseJobDispatcher(
-        {
-            VM_EXECUTOR_KIND: VmFulfillmentReleaseJobPort(
-                teardown_port=FulfillmentServiceTeardownPort(lambda: fulfillment_service),
-            ),
-            BARE_METAL_EXECUTOR_KIND: job_service,
-        },
-        default_executor_kind=VM_EXECUTOR_KIND,
-    )
+    release_dispatcher = ExecutorReleaseDispatcher({
+        BARE_METAL_EXECUTOR_KIND: BareMetalReleaseExecutor(
+            release_delegate=bare_metal_operations_service.reclaim_access_for_reservation,
+        ),
+        VM_EXECUTOR_KIND: VmReleaseExecutor(
+            settlement_repository=SettlementRepository(),
+            session_factory=session_factory,
+            teardown_port=FulfillmentServiceTeardownPort(lambda: fulfillment_service),
+        ),
+    })
+    release_job_dispatcher = ReleaseJobDispatcher({
+        VM_EXECUTOR_KIND: VmFulfillmentReleaseJobPort(
+            teardown_port=FulfillmentServiceTeardownPort(lambda: fulfillment_service),
+        ),
+        BARE_METAL_EXECUTOR_KIND: job_service,
+    })
 
     from compute_provisioning.lease_lifecycle import LeaseLifecycleService
     from compute_provisioning_service.services.deal_event_sink import (

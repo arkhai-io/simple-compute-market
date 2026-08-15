@@ -206,18 +206,12 @@ def _lifecycle(
         }
         if release_delegate is not None:
             executors[VM_EXECUTOR_KIND] = DelegateReleaseExecutor(release_delegate)
-        executor_release = ExecutorReleaseDispatcher(
-            executors,
-            default_executor_kind=VM_EXECUTOR_KIND,
-        )
-    release_jobs = ReleaseJobDispatcher(
-        {
-            VM_EXECUTOR_KIND: VmFulfillmentReleaseJobPort(
-                teardown_port=FulfillmentServiceTeardownPort(lambda: fulfillment_service),
-            ),
-        },
-        default_executor_kind=VM_EXECUTOR_KIND,
-    )
+        executor_release = ExecutorReleaseDispatcher(executors)
+    release_jobs = ReleaseJobDispatcher({
+        VM_EXECUTOR_KIND: VmFulfillmentReleaseJobPort(
+            teardown_port=FulfillmentServiceTeardownPort(lambda: fulfillment_service),
+        ),
+    })
     settings = _settings(**settings_overrides)
     principal_authority = MagicMock()
     principal_authority.active_principals.return_value = TrustedIdentitySet(
@@ -627,17 +621,14 @@ async def test_unavailable_teardown_port_propagates_as_release_submit_error(
         def get_status(self, fulfillment_id: str):
             raise RuntimeError("fulfillment teardown port is not bound")
 
-    executor_release = ExecutorReleaseDispatcher(
-        {
-            BARE_METAL_EXECUTOR_KIND: BareMetalReleaseExecutor(),
-            VM_EXECUTOR_KIND: VmReleaseExecutor(
-                settlement_repository=SettlementRepository(),
-                session_factory=session_factory,
-                teardown_port=_UnboundTeardownPort(),
-            ),
-        },
-        default_executor_kind=VM_EXECUTOR_KIND,
-    )
+    executor_release = ExecutorReleaseDispatcher({
+        BARE_METAL_EXECUTOR_KIND: BareMetalReleaseExecutor(),
+        VM_EXECUTOR_KIND: VmReleaseExecutor(
+            settlement_repository=SettlementRepository(),
+            session_factory=session_factory,
+            teardown_port=_UnboundTeardownPort(),
+        ),
+    })
     svc = _lifecycle(session_factory, ledger, executor_release=executor_release)
     summary = await svc.force_check_leases()
 
@@ -672,19 +663,16 @@ async def test_unexpected_repository_failure_propagates_as_release_submit_error(
         def get(self, db, capacity_reservation_id):
             raise RuntimeError("settlement database unavailable")
 
-    executor_release = ExecutorReleaseDispatcher(
-        {
-            BARE_METAL_EXECUTOR_KIND: BareMetalReleaseExecutor(),
-            VM_EXECUTOR_KIND: VmReleaseExecutor(
-                settlement_repository=_BrokenSettlementRepository(),
-                session_factory=session_factory,
-                teardown_port=FulfillmentServiceTeardownPort(
-                    lambda: _fulfillment_service(session_factory)
-                ),
+    executor_release = ExecutorReleaseDispatcher({
+        BARE_METAL_EXECUTOR_KIND: BareMetalReleaseExecutor(),
+        VM_EXECUTOR_KIND: VmReleaseExecutor(
+            settlement_repository=_BrokenSettlementRepository(),
+            session_factory=session_factory,
+            teardown_port=FulfillmentServiceTeardownPort(
+                lambda: _fulfillment_service(session_factory)
             ),
-        },
-        default_executor_kind=VM_EXECUTOR_KIND,
-    )
+        ),
+    })
     svc = _lifecycle(session_factory, ledger, executor_release=executor_release)
     summary = await svc.force_check_leases()
 

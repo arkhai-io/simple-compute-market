@@ -771,7 +771,13 @@ def test_independent_sessions_serialize_fulfillment_acceptance_deterministically
     factory = sessionmaker(bind=engine)
     pools = ResourcePoolService(factory, {"ansible": _Handler()})
     pools.create_pool(
-        PoolCreate(id="pool-a", label="pool-a", provider="ansible", provider_config={})
+        PoolCreate(
+            id="pool-a",
+            label="pool-a",
+            provider="ansible",
+            policy_tags={"deliverable_modes": ["vm"]},
+            provider_config={},
+        )
     )
 
     repo = SettlementRepository()
@@ -782,10 +788,12 @@ def test_independent_sessions_serialize_fulfillment_acceptance_deterministically
                 capacity_reservation_id=capacity_reservation_id,
                 market="vms",
                 scheduling_requirements=SettlementRequirement(
+                    executor_kind="vm",
                     resource_kind="vm", dimensions={"gpu_count": 1}
                 ),
                 resource=SettlementResource(
                     settlement_resource_id=resource_id,
+                    executor_kind="vm",
                     pool_id="pool-a",
                     resource_kind="vm",
                     provider="ansible",

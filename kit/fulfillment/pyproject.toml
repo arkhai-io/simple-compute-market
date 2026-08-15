@@ -1,12 +1,12 @@
 [project]
 name = "arkhai-kit-fulfillment"
-version = "0.1.0"
+version = "0.2.0"
 license = "MIT"
 description = "Domain-neutral fulfillment scheduling and fulfillment lifecycle contracts: capacity settlement scheduling, deterministic placement policy, and shared opaque identifiers."
 requires-python = ">=3.12"
 dependencies = [
-    "arkhai-kit-site>=0.2.0",
-    "arkhai-kit-resource-pools>=0.1.0",
+    "arkhai-kit-site>=0.3.0",
+    "arkhai-kit-resource-pools>=0.2.0",
     "pydantic>=2.7",
     "sqlalchemy>=2.0",
     "uuid6>=2024.7.10",
@@ -18,6 +18,10 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/market_fulfillment"]
+
+[tool.uv.sources]
+arkhai-kit-site = { path = "../site", editable = true }
+arkhai-kit-resource-pools = { path = "../resource-pools", editable = true }
 
 [tool.pytest.ini_options]
 pythonpath = ["src"]

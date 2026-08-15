@@ -383,6 +383,7 @@ class TestTeardownPreparation:
             fulfillment_id=begin_result["fulfillment_id"],
             resource=SettlementResource(
                 settlement_resource_id=settlement_resource_id,
+                executor_kind="vm",
                 pool_id=pool_id,
                 resource_kind="compute.gpu",
                 provider="ansible",

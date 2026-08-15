@@ -1033,9 +1033,11 @@ class AdminController:
             if body.listing_id
             else None
         )
+        claim = dict(body.required_attributes or {})
+        claim["executor_kind"] = "vm"
         try:
             reserved = await self._capacity().reserve(
-                claim=body.required_attributes or None,
+                claim=claim,
                 deal_ref={
                     "listing_id": body.listing_id,
                     "escrow_uid": body.escrow_uid,

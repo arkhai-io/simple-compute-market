@@ -216,7 +216,9 @@ class TestBuildParams:
 class TestPlaybookSelection:
     def test_vm_actions_use_vm_playbook(self):
         svc = _make_service()
-        params = AnsibleJobParams(vm_host="kvm1", vm_action="create")
+        params = AnsibleJobParams(
+            vm_host="kvm1", vm_action="create", executor_kind="vm"
+        )
 
         assert svc._playbook_path_for_params(params) == Path("/playbooks/vm-operations.yaml")
 
@@ -225,6 +227,7 @@ class TestPlaybookSelection:
         params = AnsibleJobParams(
             vm_host="bm-node-1",
             vm_action=NODE_RECLAIM_ACCESS_ACTION,
+            executor_kind="bare_metal",
         )
 
         assert svc._playbook_path_for_params(params) == Path("/playbooks/node-access.yaml")

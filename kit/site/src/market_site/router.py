@@ -41,7 +41,11 @@ from .http_models import (
     ResourcePoolProjectionResponse,
     CapacityBucketProjectionResponse,
 )
-from .ledger import CapacityConflictError, CapacityLedgerService
+from .ledger import (
+    CapacityConflictError,
+    CapacityLedgerService,
+    UndeclaredOfferingModeError,
+)
 from .projections import SiteProjectionService
 
 logger = logging.getLogger(__name__)
@@ -183,6 +187,8 @@ def make_capacity_router(
                 lease_start_utc=body.lease_start_utc,
                 lease_duration_seconds=body.lease_duration_seconds,
             ))
+        except UndeclaredOfferingModeError as exc:
+            raise HTTPException(status_code=409, detail=str(exc))
         except ValueError as exc:
             raise HTTPException(status_code=422, detail=str(exc))
 
@@ -209,6 +215,8 @@ def make_capacity_router(
                 lease_start_utc=body.lease_start_utc,
                 lease_duration_seconds=body.lease_duration_seconds,
             )
+        except UndeclaredOfferingModeError as exc:
+            raise HTTPException(status_code=409, detail=str(exc))
         except ValueError as exc:
             raise HTTPException(status_code=422, detail=str(exc))
         if reservation is not None:

@@ -76,8 +76,6 @@ def _validate_executor(bundle_name: str, contribution: ExecutorAdapterContributi
 
 def compose_adapter_bundles(
     bundles: tuple[ExecutorAdapterBundle, ...] | list[ExecutorAdapterBundle],
-    *,
-    default_executor_kind: str | None = None,
 ) -> ComposedComputeAdapters:
     """Compose bundles and reject ambiguous registrations before startup."""
 
@@ -153,10 +151,7 @@ def compose_adapter_bundles(
 
     return ComposedComputeAdapters(
         executor_registry=ExecutorAdapterRegistry(adapters),
-        release_dispatcher=ExecutorReleaseDispatcher(
-            release_executors,
-            default_executor_kind=default_executor_kind,
-        ),
+        release_dispatcher=ExecutorReleaseDispatcher(release_executors),
         provider_registry=ProviderRegistry(providers),
         router_mounts=tuple(routers),
         readiness_checks=readiness_checks,
