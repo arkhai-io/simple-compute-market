@@ -259,7 +259,7 @@ pins = {
     "schema_version": 2,
     "settlement_config_schema_version": 1,
     "producer_release": {
-        "repository": "arkhai/hosted-settlement-service",
+        "repository": "arkhai-io/stripe-settlement-service",
         "release_version": "0.2.0",
         "api_version": "0.2.0",
         "schema_version": 5,
@@ -279,7 +279,7 @@ pins = {
         },
     },
     "consumer_release": {
-        "repository": "arkhai/simple-market-service",
+        "repository": "arkhai-io/simple-compute-market",
         "source_commit": consumer_commit,
         "wheels": consumer_wheels,
     },

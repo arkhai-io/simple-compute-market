@@ -149,7 +149,7 @@ prepare-hosted-compose: ## Verify production inputs and render a non-secret Comp
 	@test -n "$(HOSTED_MARKETPLACE_IMAGE_DIGEST)" || { echo "ERROR: missing HOSTED_MARKETPLACE_IMAGE_DIGEST"; exit 1; }
 	@test -f "$(HOSTED_MARKETPLACE_RELEASE_MANIFEST)" || { echo "ERROR: missing attested HOSTED_MARKETPLACE_RELEASE_MANIFEST"; exit 1; }
 	gh attestation verify "$(HOSTED_MARKETPLACE_RELEASE_MANIFEST)" \
-		--repo arkhai/simple-market-service
+		--repo arkhai-io/simple-compute-market
 	uv run --no-project --with 'eth-account>=0.13,<0.14' \
 		python scripts/prepare-hosted-compose.py \
 		--trust "$(HOSTED_RELEASE_TRUST)" \

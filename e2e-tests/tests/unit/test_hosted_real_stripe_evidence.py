@@ -45,21 +45,19 @@ MARKET_IMAGE = "sha256:" + "0" * 64
 def _identities() -> IdentityEvidence:
     return IdentityEvidence(
         marketplace=MarketplaceIdentityEvidence(
-            repository="arkhai/simple-market-service",
+            repository="arkhai-io/simple-compute-market",
             commit=COMMIT,
             workflow_run_id="654321",
             workflow_ref=".github/workflows/publish.yml@refs/tags/v0.2.0",
             manifest_sha256=MARKET_DIGEST,
             image_digest=MARKET_IMAGE,
-            image=(
-                "ghcr.io/arkhai/simple-market-service@" + MARKET_IMAGE
-            ),
+            image="ghcr.io/arkhai-io/simple-compute-market@" + MARKET_IMAGE,
             wheelhouse_sha256="sha256:" + "1" * 64,
             settlement_config_schema_sha256="sha256:" + "2" * 64,
             provenance_sha256="sha256:" + "3" * 64,
         ),
         hosted_release=HostedReleaseIdentityEvidence(
-            repository="arkhai/hosted-settlement-service",
+            repository="arkhai-io/stripe-settlement-service",
             source_commit=HOSTED_COMMIT,
             workflow_run_id="123456",
             workflow_ref=".github/workflows/release.yml@main",
@@ -128,7 +126,7 @@ def test_release_gate_binds_all_signed_and_observed_identities(tmp_path: Path) -
                 "HOSTED_MARKETPLACE_VERIFIED_ARTIFACT_WHEELHOUSE_SHA256=" + DIGEST,
                 "HOSTED_MARKETPLACE_VERIFIED_IMAGE=registry.example/marketplace@" + MARKET_IMAGE,
                 "HOSTED_MARKETPLACE_VERIFIED_MANIFEST_SHA256=" + MARKET_DIGEST,
-                "HOSTED_MARKETPLACE_VERIFIED_REPOSITORY=arkhai/simple-market-service",
+                "HOSTED_MARKETPLACE_VERIFIED_REPOSITORY=arkhai-io/simple-compute-market",
                 "HOSTED_MARKETPLACE_VERIFIED_SOURCE_COMMIT=" + COMMIT,
                 "HOSTED_MARKETPLACE_VERIFIED_WORKFLOW_REF=.github/workflows/publish.yml@refs/tags/v0.2.0",
                 "HOSTED_MARKETPLACE_VERIFIED_WORKFLOW_RUN_ID=654321",
@@ -137,7 +135,7 @@ def test_release_gate_binds_all_signed_and_observed_identities(tmp_path: Path) -
                 "HOSTED_SETTLEMENT_VERIFIED_CLIENT_WHEEL_SHA256=" + WHEEL,
                 "HOSTED_SETTLEMENT_VERIFIED_RELEASE_DIR=/verified/release",
                 "HOSTED_SETTLEMENT_VERIFIED_SOURCE_COMMIT=" + HOSTED_COMMIT,
-                "HOSTED_SETTLEMENT_VERIFIED_REPOSITORY=arkhai/hosted-settlement-service",
+                "HOSTED_SETTLEMENT_VERIFIED_REPOSITORY=arkhai-io/stripe-settlement-service",
                 "HOSTED_SETTLEMENT_VERIFIED_WORKFLOW_REF=.github/workflows/release.yml@main",
                 "HOSTED_SETTLEMENT_VERIFIED_MANIFEST_DIGEST=" + DIGEST,
                 "HOSTED_SETTLEMENT_VERIFIED_AUTHORITY_ID=hosted-authority",

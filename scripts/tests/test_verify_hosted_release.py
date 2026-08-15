@@ -175,7 +175,7 @@ def _stage_release(
             "sha256": "sha256:" + "cd" * 32,
         },
         "service_image": {
-            "reference": "ghcr.io/arkhai/hosted-settlement-service",
+            "reference": "ghcr.io/arkhai-io/stripe-settlement-service",
             "digest": image_digest,
         },
         "openapi": artifact("openapi-v0.2.0.json"),
@@ -187,7 +187,7 @@ def _stage_release(
         "sbom": artifact("sbom.spdx.json"),
         "provenance": artifact("provenance.intoto.json"),
         "build": {
-            "repository": "arkhai/hosted-settlement-service",
+            "repository": "arkhai-io/stripe-settlement-service",
             "workflow_ref": ".github/workflows/release.yml@refs/tags/v0.2.0",
             "source_commit": "12" * 20,
         },
@@ -225,7 +225,7 @@ def _stage_release(
         "manifest_sha256": _sha(manifest_path.read_bytes()),
         "authority_id": "release-authority",
         "authority_address": account.address.lower(),
-        "repository": "arkhai/hosted-settlement-service",
+        "repository": "arkhai-io/stripe-settlement-service",
         "workflow_ref": ".github/workflows/release.yml@refs/tags/v0.2.0",
         "source_commit": "12" * 20,
         "client_wheel": {
@@ -235,7 +235,7 @@ def _stage_release(
             "sha256": client_sha,
         },
         "service_image": {
-            "reference": "ghcr.io/arkhai/hosted-settlement-service",
+            "reference": "ghcr.io/arkhai-io/stripe-settlement-service",
             "digest": image_digest,
         },
     }
@@ -264,14 +264,14 @@ def _marketplace_args(root: Path) -> dict[str, Any]:
         json.dumps(
             {
                 "contract": "arkhai.marketplace-release.v1",
-                "repository": "arkhai/simple-market-service",
+                "repository": "arkhai-io/simple-compute-market",
                 "source_commit": "34" * 20,
                 "workflow_ref": (
                     ".github/workflows/release.yml@refs/tags/marketplace-v0.2.0"
                 ),
                 "workflow_run_id": "123456",
                 "service_image": {
-                    "reference": "ghcr.io/arkhai/simple-market-service",
+                    "reference": "ghcr.io/arkhai-io/simple-compute-market",
                     "digest": "sha256:" + "cd" * 32,
                 },
                 "artifacts": artifacts,
@@ -429,7 +429,7 @@ def test_compose_env_uses_exact_verified_release_identities(tmp_path: Path) -> N
         if line and not line.startswith("#")
     )
 
-    assert image == f"ghcr.io/arkhai/hosted-settlement-service@sha256:{'ab' * 32}"
+    assert image == f"ghcr.io/arkhai-io/stripe-settlement-service@sha256:{'ab' * 32}"
     assert values == {
         "HOSTED_MARKETPLACE_VERIFIED_ARTIFACT_PROVENANCE_SHA256": (
             "sha256:" + _sha(b"provenance")
@@ -441,12 +441,12 @@ def test_compose_env_uses_exact_verified_release_identities(tmp_path: Path) -> N
             "sha256:" + _sha(b"wheelhouse")
         ),
         "HOSTED_MARKETPLACE_VERIFIED_IMAGE": (
-            "ghcr.io/arkhai/simple-market-service@sha256:" + "cd" * 32
+            "ghcr.io/arkhai-io/simple-compute-market@sha256:" + "cd" * 32
         ),
         "HOSTED_MARKETPLACE_VERIFIED_MANIFEST_SHA256": marketplace_args[
             "marketplace_manifest_sha256"
         ],
-        "HOSTED_MARKETPLACE_VERIFIED_REPOSITORY": "arkhai/simple-market-service",
+        "HOSTED_MARKETPLACE_VERIFIED_REPOSITORY": "arkhai-io/simple-compute-market",
         "HOSTED_MARKETPLACE_VERIFIED_SOURCE_COMMIT": "34" * 20,
         "HOSTED_MARKETPLACE_VERIFIED_WORKFLOW_REF": (
             ".github/workflows/release.yml@refs/tags/marketplace-v0.2.0"
@@ -561,10 +561,10 @@ def test_floating_production_image_tag_is_rejected(tmp_path: Path) -> None:
         _verify(
             tmp_path,
             mutate_payload=lambda payload: payload["service_image"].__setitem__(
-                "reference", "ghcr.io/arkhai/hosted-settlement-service:latest"
+                "reference", "ghcr.io/arkhai-io/stripe-settlement-service:latest"
             ),
             mutate_trust=lambda trust: trust["service_image"].__setitem__(
-                "reference", "ghcr.io/arkhai/hosted-settlement-service:latest"
+                "reference", "ghcr.io/arkhai-io/stripe-settlement-service:latest"
             ),
         )
 

@@ -38,12 +38,12 @@ def _release(tmp_path: Path) -> tuple[Path, str]:
         json.dumps(
             {
                 "contract": "arkhai.marketplace-release.v1",
-                "repository": "arkhai/simple-market-service",
+                "repository": "arkhai-io/simple-compute-market",
                 "source_commit": COMMIT,
                 "workflow_ref": WORKFLOW_REF,
                 "workflow_run_id": RUN_ID,
                 "service_image": {
-                    "reference": "ghcr.io/arkhai/simple-market-service",
+                    "reference": "ghcr.io/arkhai-io/simple-compute-market",
                     "digest": IMAGE_DIGEST,
                 },
                 "artifacts": artifacts,
@@ -72,7 +72,7 @@ def test_exact_attested_marketplace_release_set_is_accepted(tmp_path: Path) -> N
 
     result = _verify(manifest, digest)
 
-    assert result["service_image_reference"] == "ghcr.io/arkhai/simple-market-service"
+    assert result["service_image_reference"] == "ghcr.io/arkhai-io/simple-compute-market"
     assert result["service_image_digest"] == IMAGE_DIGEST
     assert set(result["artifacts"]) == {
         "wheelhouse",

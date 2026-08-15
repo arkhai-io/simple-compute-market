@@ -95,7 +95,7 @@ class EvidenceValidationError(ValueError):
 
 @dataclass(frozen=True)
 class MarketplaceIdentityEvidence:
-    repository: Literal["arkhai/simple-market-service"]
+    repository: Literal["arkhai-io/simple-compute-market"]
     commit: str
     workflow_run_id: str
     workflow_ref: str
@@ -108,7 +108,7 @@ class MarketplaceIdentityEvidence:
 
 @dataclass(frozen=True)
 class HostedReleaseIdentityEvidence:
-    repository: Literal["arkhai/hosted-settlement-service"]
+    repository: Literal["arkhai-io/stripe-settlement-service"]
     source_commit: str
     workflow_run_id: str
     workflow_ref: str
@@ -328,11 +328,11 @@ def _validate_evidence(report: StripeTestEvidence) -> dict[str, object]:
     marketplace = identities.marketplace
     hosted = identities.hosted_release
     if (
-        marketplace.repository != "arkhai/simple-market-service"
+        marketplace.repository != "arkhai-io/simple-compute-market"
         or not _COMMIT.fullmatch(marketplace.commit)
         or not marketplace.workflow_run_id.isdigit()
         or not _WORKFLOW_REF.fullmatch(marketplace.workflow_ref)
-        or hosted.repository != "arkhai/hosted-settlement-service"
+        or hosted.repository != "arkhai-io/stripe-settlement-service"
         or not _COMMIT.fullmatch(hosted.source_commit)
         or not hosted.workflow_run_id.isdigit()
         or not _WORKFLOW_REF.fullmatch(hosted.workflow_ref)

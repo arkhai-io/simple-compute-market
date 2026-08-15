@@ -152,9 +152,8 @@ def test_ephemeral_container_inputs_use_shared_directory(
                 "identifier": "0x1fe2aa7fbaf5720f79a22a4ada4b8b37d4e0c008",
             }
         ]
-        assert (
-            parsed["Resources"]["settlement"][0]["mechanism_input"]["funding_profile"]
-            == "us_bank_transfer.v1"
+        assert parsed["pricing"]["settlements"][0]["mechanism_input"]["funding_profile"] == (
+            "us_bank_transfer.v1"
         )
     buyer_template = Path(__file__).resolve().parents[2] / "config" / "hosted-buyer.toml"
     credential = base64.urlsafe_b64encode(b"a" * 32).decode().rstrip("=")
@@ -187,7 +186,7 @@ def test_ephemeral_container_inputs_use_shared_directory(
         manifest_digest="sha256:" + ("2" * 64),
         release_authority_id="release-authority",
         release_authority_address="0x1fe2aa7fbaf5720f79a22a4ada4b8b37d4e0c008",
-        release_repository="arkhai/hosted-settlement-service",
+        release_repository="arkhai-io/stripe-settlement-service",
         release_workflow_ref=".github/workflows/release.yml@refs/tags/v0.2.0",
         release_source_commit="3" * 40,
         shared_directory=tmp_path,
@@ -214,7 +213,7 @@ def test_ephemeral_container_inputs_use_shared_directory(
             values["HOSTED_SETTLEMENT_RELEASE_AUTHORITY_ADDRESS"]
             == "0x1fe2aa7fbaf5720f79a22a4ada4b8b37d4e0c008"
         )
-        assert values["HOSTED_SETTLEMENT_RELEASE_REPOSITORY"] == "arkhai/hosted-settlement-service"
+        assert values["HOSTED_SETTLEMENT_RELEASE_REPOSITORY"] == "arkhai-io/stripe-settlement-service"
         assert (
             values["HOSTED_SETTLEMENT_RELEASE_WORKFLOW_REF"]
             == ".github/workflows/release.yml@refs/tags/v0.2.0"

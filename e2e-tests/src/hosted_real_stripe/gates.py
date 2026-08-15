@@ -153,7 +153,7 @@ def require_release_identity(
         or values.get("HOSTED_MARKETPLACE_VERIFIED_MANIFEST_SHA256")
         != marketplace_manifest_sha256
         or values.get("HOSTED_MARKETPLACE_VERIFIED_REPOSITORY")
-        != "arkhai/simple-market-service"
+        != "arkhai-io/simple-compute-market"
         or values.get("HOSTED_MARKETPLACE_VERIFIED_SOURCE_COMMIT") != marketplace_commit
         or values.get("HOSTED_MARKETPLACE_VERIFIED_WORKFLOW_REF")
         != marketplace_workflow_ref
@@ -184,7 +184,7 @@ def require_release_identity(
         )
     if values.get("HOSTED_SETTLEMENT_VERIFIED_SOURCE_COMMIT") != hosted_source_commit:
         raise ReleaseIdentityRejected("signed release source does not match the trusted commit")
-    if values.get("HOSTED_SETTLEMENT_VERIFIED_REPOSITORY") != "arkhai/hosted-settlement-service":
+    if values.get("HOSTED_SETTLEMENT_VERIFIED_REPOSITORY") != "arkhai-io/stripe-settlement-service":
         raise ReleaseIdentityRejected("signed release repository is not the hosted producer")
     if values.get("HOSTED_SETTLEMENT_VERIFIED_WORKFLOW_REF") != hosted_workflow_ref:
         raise ReleaseIdentityRejected("signed release workflow does not match the trusted workflow")

@@ -53,7 +53,7 @@
           "type": "object", "additionalProperties": false,
           "required": ["repository", "commit", "workflow_run_id", "workflow_ref", "manifest_sha256", "image_digest", "image", "wheelhouse_sha256", "settlement_config_schema_sha256", "provenance_sha256"],
           "properties": {
-            "repository": {"const": "arkhai/simple-market-service"}, "commit": {"$ref": "#/$defs/commit"},
+            "repository": {"const": "arkhai-io/simple-compute-market"}, "commit": {"$ref": "#/$defs/commit"},
             "workflow_run_id": {"type": "string", "pattern": "^[0-9]+$"}, "workflow_ref": {"type": "string", "minLength": 8, "maxLength": 256},
             "manifest_sha256": {"$ref": "#/$defs/digest"}, "image_digest": {"$ref": "#/$defs/digest"},
             "image": {"type": "string", "pattern": "^[a-z0-9][a-z0-9._/-]{2,255}@sha256:[0-9a-f]{64}$"},
@@ -64,7 +64,7 @@
           "type": "object", "additionalProperties": false,
           "required": ["repository", "source_commit", "workflow_run_id", "workflow_ref", "manifest_sha256", "client_wheel_sha256", "image_digest"],
           "properties": {
-            "repository": {"const": "arkhai/hosted-settlement-service"}, "source_commit": {"$ref": "#/$defs/commit"},
+            "repository": {"const": "arkhai-io/stripe-settlement-service"}, "source_commit": {"$ref": "#/$defs/commit"},
             "workflow_run_id": {"type": "string", "pattern": "^[0-9]+$"}, "workflow_ref": {"type": "string", "minLength": 8, "maxLength": 256},
             "manifest_sha256": {"$ref": "#/$defs/digest"}, "client_wheel_sha256": {"$ref": "#/$defs/digest"}, "image_digest": {"$ref": "#/$defs/digest"}
           }

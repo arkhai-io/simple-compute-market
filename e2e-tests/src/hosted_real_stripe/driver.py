@@ -22,7 +22,6 @@ from .browser import (
     BrowserPaymentResult,
     ChromiumCheckout,
     ChromiumUnavailable,
-    checkout_session_id,
 )
 from .evidence import (
     DiagnosticCode,
@@ -133,7 +132,7 @@ def run(args: argparse.Namespace) -> tuple[StripeTestEvidence, int]:
     run_identity = require_run_identity(args.run_identity)
     identities = IdentityEvidence(
         marketplace=MarketplaceIdentityEvidence(
-            repository="arkhai/simple-market-service",
+            repository="arkhai-io/simple-compute-market",
             commit=release.marketplace_commit,
             workflow_run_id=release.marketplace_workflow_run_id,
             workflow_ref=release.marketplace_workflow_ref,
@@ -145,7 +144,7 @@ def run(args: argparse.Namespace) -> tuple[StripeTestEvidence, int]:
             provenance_sha256=release.marketplace_provenance_sha256,
         ),
         hosted_release=HostedReleaseIdentityEvidence(
-            repository="arkhai/hosted-settlement-service",
+            repository="arkhai-io/stripe-settlement-service",
             source_commit=release.hosted_source_commit,
             workflow_run_id=release.hosted_workflow_run_id,
             workflow_ref=release.hosted_workflow_ref,
@@ -233,7 +232,7 @@ def run(args: argparse.Namespace) -> tuple[StripeTestEvidence, int]:
                     manifest_digest=release.hosted_manifest_digest,
                     release_authority_id=release.hosted_authority_id,
                     release_authority_address=release.hosted_authority_address,
-                    release_repository="arkhai/hosted-settlement-service",
+                    release_repository="arkhai-io/stripe-settlement-service",
                     release_workflow_ref=release.hosted_workflow_ref,
                     release_source_commit=release.hosted_source_commit,
                     base_path=args.hosted_service_env_base,
@@ -539,6 +538,7 @@ def _execute_scenario(
             stack.restart("worker")
 
     payment: BrowserPaymentResult | None = None
+    browser_outcome = _browser_outcome(scenario)
     if action_url is not None:
         execution.stage = "browser_checkout"
         if scenario == "missed_webhook":

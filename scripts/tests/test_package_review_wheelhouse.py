@@ -226,7 +226,7 @@ def _stage_root(
             "sha256": "sha256:" + "cd" * 32,
         },
         "service_image": {
-            "reference": "ghcr.io/arkhai/hosted-settlement-service",
+            "reference": "ghcr.io/arkhai-io/stripe-settlement-service",
             "digest": "sha256:" + "ab" * 32,
         },
         "openapi": artifact("openapi-v0.2.0.json"),
@@ -235,7 +235,7 @@ def _stage_root(
         "sbom": artifact("sbom.spdx.json"),
         "provenance": artifact("provenance.intoto.json"),
         "build": {
-            "repository": "arkhai/hosted-settlement-service",
+            "repository": "arkhai-io/stripe-settlement-service",
             "workflow_ref": workflow_ref,
             "source_commit": source_commit,
         },
@@ -271,7 +271,7 @@ def _stage_root(
         "manifest_sha256": hashlib.sha256(manifest_path.read_bytes()).hexdigest(),
         "authority_id": "release-authority",
         "authority_address": authority.address.lower(),
-        "repository": "arkhai/hosted-settlement-service",
+        "repository": "arkhai-io/stripe-settlement-service",
         "workflow_ref": workflow_ref,
         "source_commit": source_commit,
         "client_wheel": {
@@ -281,7 +281,7 @@ def _stage_root(
             "sha256": client_sha,
         },
         "service_image": {
-            "reference": "ghcr.io/arkhai/hosted-settlement-service",
+            "reference": "ghcr.io/arkhai-io/stripe-settlement-service",
             "digest": "sha256:" + "ab" * 32,
         },
     }
@@ -526,7 +526,7 @@ def test_wheelhouse_packages_external_release_inputs_and_portable_lock(
         "entry_point_metadata": False,
     }
     assert pins["consumer_release"] == {
-        "repository": "arkhai/simple-market-service",
+        "repository": "arkhai-io/simple-compute-market",
         "source_commit": "34" * 20,
         "wheels": {
             "arkhai_kit_identity-0.3.0-py3-none-any.whl": hashlib.sha256(

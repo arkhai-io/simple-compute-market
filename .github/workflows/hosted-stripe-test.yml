@@ -216,15 +216,15 @@ jobs:
         with:
           app-id: ${{ vars.HOSTED_RELEASE_APP_ID }}
           private-key: ${{ secrets.HOSTED_RELEASE_APP_PRIVATE_KEY }}
-          owner: arkhai
-          repositories: hosted-settlement-service
+          owner: arkhai-io
+          repositories: stripe-settlement-service
 
       - name: Download exact ordinary hosted production release
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
         with:
           name: ${{ env.HOSTED_RELEASE_ARTIFACT }}
           path: ${{ env.HOSTED_RELEASE_DIR }}
-          repository: arkhai/hosted-settlement-service
+          repository: arkhai-io/stripe-settlement-service
           run-id: ${{ env.HOSTED_RELEASE_RUN_ID }}
           github-token: ${{ steps.hosted-token.outputs.token }}
 
