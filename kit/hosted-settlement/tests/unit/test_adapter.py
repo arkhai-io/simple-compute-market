@@ -17,10 +17,14 @@ from hosted_settlement_client import (
     ExpectedAuthorities,
     FinancialState,
     FulfillmentPublicationResult,
+    FundingProfile,
+    FundingProfileReadiness,
     HostedSettlementAsyncClient,
     ManifestHealth,
+    NormalizedFundingState,
     OperationReceipt,
     OperationRequest,
+    PayerActionKind,
     Principal,
     canonical_json,
 )
@@ -69,26 +73,44 @@ class FakeClient:
         self.status_call: tuple[str, str] | None = None
         self.collect_call: tuple[str, OperationRequest] | None = None
         self.reclaim_call: tuple[str, OperationRequest] | None = None
+        self.escrow_result = self.escrow()
         self.health_result = ManifestHealth(
             ready=True,
             manifest_digest="sha256:" + "aa" * 32,
-            schema_version=4,
+            schema_version=5,
+            funding_profiles=tuple(
+                FundingProfileReadiness(
+                    profile=profile,
+                    ready=True,
+                    funding_deadline_seconds=3600,
+                    availability_delay_seconds=0,
+                )
+                for profile in FundingProfile
+            ),
             capabilities=tuple(sorted(REQUIRED_HOSTED_CAPABILITIES)),
         )
 
     @staticmethod
-    def escrow() -> EscrowResult:
-        return EscrowResult(
-            escrow_ref="escrow-public",
-            financial_state=FinancialState.AWAITING_PAYMENT,
-            condition_state=ConditionState.PENDING,
-            action=BuyerAction(
+    def escrow(**updates: Any) -> EscrowResult:
+        values: dict[str, Any] = {
+            "escrow_ref": "escrow-public",
+            "financial_state": FinancialState.AWAITING_PAYMENT,
+            "condition_state": ConditionState.PENDING,
+            "funding_profile": FundingProfile.CARD,
+            "funding_state": NormalizedFundingState.ACTION_REQUIRED,
+            "funding_reason": "payer_action_required",
+            "funding_deadline_unix": 2_000_000_100,
+            "action": BuyerAction(
+                kind=PayerActionKind.PAYMENT,
+                operation_ref="funding-action-1",
                 url="https://checkout.example/secret-session",
                 expires_at_unix=2_000_000_100,
             ),
-            condition_anchor="0x" + "66" * 32,
-            expiration_unix=2_000_003_600,
-        )
+            "condition_anchor": "0x" + "66" * 32,
+            "expiration_unix": 2_000_003_600,
+        }
+        values.update(updates)
+        return EscrowResult(**values)
 
     async def health(self, *, request_id: str) -> ManifestHealth:
         return self.health_result
@@ -100,6 +122,7 @@ class FakeClient:
             account_ref=account_ref,
             ready=True,
             capabilities=("transfers",),
+            funding_profiles=self.health_result.funding_profiles,
         )
 
     async def publish_fulfillment(self, request: Any) -> FulfillmentPublicationResult:
@@ -108,13 +131,14 @@ class FakeClient:
             request_id=request.request_id,
             attestation_uid="0x" + "99" * 32,
         )
+
     async def materialize(self, request: Any) -> EscrowResult:
         self.materialize_request = request
-        return self.escrow()
+        return self.escrow_result
 
     async def get_status(self, escrow_ref: str, *, request_id: str) -> EscrowResult:
         self.status_call = (escrow_ref, request_id)
-        return self.escrow()
+        return self.escrow_result
 
     async def collect(
         self, escrow_ref: str, request: OperationRequest
@@ -139,7 +163,40 @@ class FakeClient:
         )
 
 
-def _obligation(**updates: Any) -> dict[str, Any]:
+def _obligation(
+    *,
+    funding_profile: FundingProfile = FundingProfile.CARD,
+    include_authorization: bool = True,
+    legacy: bool = False,
+    **updates: Any,
+) -> dict[str, Any]:
+    params: dict[str, Any] = {
+        "account_ref": "account-1",
+        "payer_principal": BUYER.model_dump(mode="json"),
+        "claimant_principal": SELLER.model_dump(mode="json"),
+        "funds_flow": "separate_charges_transfers",
+        "condition": {
+            "protocol": "arkhai.condition.v1",
+            "condition_id": "condition-1",
+            "evaluator": {
+                "kind": "builtin.v1",
+                "version": "trivial.v1",
+                "params": {"kind": "trivial"},
+            },
+            "demand": {"encoding": "application/jcs+json", "value": True},
+        },
+    }
+    if legacy:
+        params.update(
+            {
+                "payment_method_types": ["card"],
+                "legacy_recovery": "hosted-card.v1",
+            }
+        )
+    else:
+        params["funding_profile"] = funding_profile.value
+        if include_authorization:
+            params["funding_authorization_ref"] = "funding-authorization-1"
     value = {
         "payer": "buyer",
         "claimant": "seller",
@@ -150,23 +207,7 @@ def _obligation(**updates: Any) -> dict[str, Any]:
         "expiration_unix": 2_000_003_600,
         "conditions": [],
         "mechanism": "fiat.stripe.v1",
-        "params": {
-            "account_ref": "account-1",
-            "payer_principal": BUYER.model_dump(mode="json"),
-            "claimant_principal": SELLER.model_dump(mode="json"),
-            "funds_flow": "separate_charges_transfers",
-            "payment_method_types": ["card"],
-            "condition": {
-                "protocol": "arkhai.condition.v1",
-                "condition_id": "condition-1",
-                "evaluator": {
-                    "kind": "builtin.v1",
-                    "version": "trivial.v1",
-                    "params": {"kind": "trivial"},
-                },
-                "demand": {"encoding": "application/jcs+json", "value": True},
-            },
-        },
+        "params": params,
     }
     value.update(updates)
     return value
@@ -245,10 +286,18 @@ async def test_adapter_publishes_only_a_stable_fulfillment_digest() -> None:
 
 
 @pytest.mark.asyncio
-async def test_adapter_produces_exact_released_client_requests() -> None:
+@pytest.mark.parametrize("funding_profile", tuple(FundingProfile))
+async def test_adapter_produces_exact_released_client_requests(
+    funding_profile: FundingProfile,
+) -> None:
     client = FakeClient()
+    client.escrow_result = client.escrow(funding_profile=funding_profile)
     adapter = HostedConditionalEscrowClient(client)  # type: ignore[arg-type]
-    obligation = _obligation()
+    obligation = _obligation(funding_profile=funding_profile)
+    accepted_obligation = _obligation(
+        funding_profile=funding_profile,
+        include_authorization=False,
+    )
 
     result = await adapter.materialize(
         obligation,
@@ -258,37 +307,44 @@ async def test_adapter_produces_exact_released_client_requests() -> None:
     assert result.status == "requires_action"
     assert result.mechanism_ref == "escrow-public"
     assert result.buyer_action == {
-        "kind": "redirect",
+        "kind": "payment",
         "expires_at_unix": 2_000_000_100,
     }
     assert client.materialize_request == CreateEscrowRequest(
         request_id="arkhai:settlement:obligation-1:materialize",
         obligation_ref="obligation-1",
         obligation_hash="0x"
-        + hashlib.sha256(canonical_json(obligation)).hexdigest(),
+        + hashlib.sha256(canonical_json(accepted_obligation)).hexdigest(),
         payer=Principal.model_validate(BUYER.model_dump(mode="json")),
         claimant=Principal.model_validate(SELLER.model_dump(mode="json")),
         account_ref="account-1",
         amount=1200,
         currency="usd",
         expiration_unix=2_000_003_600,
+        funding_profile=funding_profile,
+        funding_authorization_ref="funding-authorization-1",
+        marketplace_operation_id="obligation-1",
         condition=ConditionDescriptor.model_validate(
             obligation["params"]["condition"]
         ),
     )
 
-    await adapter.collect(
+    collected = await adapter.collect(
         obligation,
         mechanism_ref="escrow-public",
         fulfillment_ref="opaque-fulfillment",
         operation_ref="collect-1",
         mechanism_state={},
     )
-    await adapter.reclaim_expired(
+    reclaimed = await adapter.reclaim_expired(
         obligation,
         mechanism_ref="escrow-public",
         operation_ref="reclaim-1",
         mechanism_state={},
+    )
+    assert collected.receipt["funding_profile"] == funding_profile.value
+    assert reclaimed.receipt["funding_authorization_ref"] == (
+        "funding-authorization-1"
     )
     assert client.collect_call == (
         "escrow-public",
@@ -299,9 +355,8 @@ async def test_adapter_produces_exact_released_client_requests() -> None:
         OperationRequest(request_id="reclaim-1"),
     )
 
-
 @pytest.mark.asyncio
-async def test_runtime_never_persists_checkout_url(tmp_path) -> None:
+async def test_runtime_never_persists_transient_action_material(tmp_path) -> None:
     client = FakeClient()
     adapter = HostedConditionalEscrowClient(client)  # type: ignore[arg-type]
     repository = SettlementSQLiteRepository(str(tmp_path / "hosted.db"))
@@ -313,9 +368,17 @@ async def test_runtime_never_persists_checkout_url(tmp_path) -> None:
     record = (
         await runtime.register_plan(
             agreement_ref="agreement-1",
-            obligations=[_obligation()],
+            obligations=[_obligation(include_authorization=False)],
         )
     )[0]
+    await runtime.bind_mechanism_params(
+        record.obligation_ref,
+        {
+            "funding_profile": "card.v1",
+            "funding_authorization_ref": "funding-authorization-1",
+        },
+        local_principal=BUYER,
+    )
 
     await runtime.materialize(
         obligation_ref=record.obligation_ref,
@@ -326,10 +389,15 @@ async def test_runtime_never_persists_checkout_url(tmp_path) -> None:
     stored = await repository.load_settlement_obligation(record.obligation_ref)
     assert stored is not None
     assert stored["buyer_action"] == {
-        "kind": "redirect",
+        "kind": "payment",
         "expires_at_unix": 2_000_000_100,
     }
+    assert stored["mechanism_params"] == {
+        "funding_profile": "card.v1",
+        "funding_authorization_ref": "funding-authorization-1",
+    }
     assert "checkout.example" not in json.dumps(stored, sort_keys=True)
+    assert "bank_instructions" not in json.dumps(stored, sort_keys=True)
     assert (
         await adapter.get_buyer_action(
             "escrow-public",
@@ -358,8 +426,8 @@ async def test_readiness_fails_on_identity_capability_drift() -> None:
     ):
         await adapter.verify_contract_ready(
             expected_manifest_digest="sha256:" + "aa" * 32,
-            expected_contract_version="0.1.0",
-            expected_schema_version=4,
+            expected_contract_version="0.2.0",
+            expected_schema_version=5,
             required_capabilities=(),
             operation_ref="publication",
         )
@@ -406,3 +474,97 @@ async def test_adapter_rejects_invalid_hosted_obligation(
             _obligation(**updates),
             operation_ref="arkhai:settlement:obligation-1:materialize",
         )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("funding_state", "financial_state", "expected"),
+    [
+        (NormalizedFundingState.AWAITING_EXTERNAL, FinancialState.AWAITING_PAYMENT, "pending"),
+        (NormalizedFundingState.ACTION_REQUIRED, FinancialState.AWAITING_PAYMENT, "requires_action"),
+        (NormalizedFundingState.SUCCEEDED_UNAVAILABLE, FinancialState.FUNDED, "pending"),
+        (NormalizedFundingState.AVAILABLE, FinancialState.FUNDED, "ready"),
+        (NormalizedFundingState.RETURNED, FinancialState.FUNDED, "failed"),
+        (NormalizedFundingState.AMBIGUOUS, FinancialState.FUNDED, "manual_required"),
+        (NormalizedFundingState.TRANSFERRED, FinancialState.COLLECTED, "collected"),
+    ],
+)
+async def test_adapter_maps_authoritative_funding_states(
+    funding_state: NormalizedFundingState,
+    financial_state: FinancialState,
+    expected: str,
+) -> None:
+    client = FakeClient()
+    client.escrow_result = client.escrow(
+        funding_state=funding_state,
+        financial_state=financial_state,
+        action=(
+            client.escrow_result.action
+            if funding_state == NormalizedFundingState.ACTION_REQUIRED
+            else None
+        ),
+    )
+    adapter = HostedConditionalEscrowClient(client)  # type: ignore[arg-type]
+
+    status = await adapter.get_status(
+        _obligation(),
+        mechanism_ref="escrow-public",
+        operation_ref="status",
+        mechanism_state={},
+    )
+
+    assert status.status == expected
+    assert status.mechanism_state["funding_state"] == funding_state.value
+    assert status.receipt is not None
+    assert status.receipt["funding_reason"] == "payer_action_required"
+
+
+@pytest.mark.asyncio
+async def test_adapter_preserves_available_state_across_delayed_visibility() -> None:
+    client = FakeClient()
+    client.escrow_result = client.escrow(
+        funding_state=NormalizedFundingState.AWAITING_EXTERNAL,
+        action=None,
+    )
+    adapter = HostedConditionalEscrowClient(client)  # type: ignore[arg-type]
+    client.escrow_result = client.escrow(
+        funding_profile=FundingProfile.US_ACH_DEBIT,
+        funding_state=NormalizedFundingState.AWAITING_EXTERNAL,
+        action=None,
+    )
+
+    status = await adapter.get_status(
+        _obligation(funding_profile=FundingProfile.US_ACH_DEBIT),
+        mechanism_ref="escrow-public",
+        operation_ref="status",
+        mechanism_state={
+            "financial_state": FinancialState.FUNDED.value,
+            "funding_state": NormalizedFundingState.AVAILABLE.value,
+        },
+    )
+
+    assert status.status == "ready"
+
+
+@pytest.mark.asyncio
+async def test_legacy_card_decoder_is_recovery_only() -> None:
+    client = FakeClient()
+    adapter = HostedConditionalEscrowClient(client)  # type: ignore[arg-type]
+    legacy = _obligation(legacy=True)
+
+    with pytest.raises(ValueError, match="recovery-only"):
+        await adapter.materialize(
+            legacy,
+            operation_ref="arkhai:settlement:legacy-obligation:materialize",
+        )
+    status = await adapter.get_status(
+        legacy,
+        mechanism_ref="historical-settlement",
+        operation_ref="historical-status",
+        mechanism_state={"legacy_recovery": "hosted-card.v1"},
+    )
+
+    assert status.receipt is not None
+    assert status.receipt["legacy_recovery"] == "hosted-card.v1"
+    assert "funding_profile" not in status.receipt
+    assert "funding_authorization_ref" not in status.receipt
