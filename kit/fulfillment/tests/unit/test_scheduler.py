@@ -32,7 +32,7 @@ from market_fulfillment import (
     SettlementRequestMismatchError,
 )
 from market_resource_pools import PoolCreate, PoolUpdate, ResourcePoolService
-from market_resource_pools.db import Base as PoolsBase
+from market_resource_pools.db import Base as PoolsBase, DEFAULT_POOL_ID
 from market_site.db import Base as SiteBase
 from market_site.ledger import CapacityLedgerService
 
@@ -196,16 +196,17 @@ def test_round_robin_is_deterministic_within_pool(services):
 
 def test_explicit_resource_bypasses_policy_not_eligibility(services):
     pools, ledger, scheduler = services
-    _pool(pools, "pool-a", enabled=False)
+    _pool(pools, "pool-a")
     _resource(ledger, "r1", "pool-a")
     capacity_reservation_id = _reserve(ledger)
+    pools.disable_pool("pool-a")
     with pytest.raises(NoEligibleSettlementResourceError):
         scheduler.schedule_resource(_request(capacity_reservation_id, resource_id="r1"))
 
 
 def test_resource_without_pool_is_not_schedulable(services):
     pools, ledger, scheduler = services
-    _pool(pools, "pool-a")
+    _pool(pools, DEFAULT_POOL_ID)
     ledger.register_resource(resource_id="orphan", total_units=4, attributes={})
     capacity_reservation_id = _reserve(ledger)
     with pytest.raises(NoEligibleSettlementResourceError):
