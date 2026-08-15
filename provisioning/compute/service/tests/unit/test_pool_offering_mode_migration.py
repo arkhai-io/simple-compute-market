@@ -293,54 +293,76 @@ def test_conflicting_and_unproved_legacy_reservations_are_quarantined_by_state()
         assert terminal.failure_reason == "legacy_executor_identity_quarantined"
 
 
-def test_all_debit_evidence_is_combined_before_executor_backfill():
+def test_executor_backfill_combines_all_representable_durable_evidence():
     engine = _engine()
     with Session(engine) as db, db.begin():
-        db.add_all(
-            (
-                CapacityBucket(
-                    capacity_bucket_id="bucket-vm",
-                    backing_resource_id="resource-vm",
-                    pool_id=DEFAULT_POOL_ID,
-                    resource_type="compute.gpu",
-                    total_units=1,
-                    capacity={"gpu_count": 1},
-                    attributes={"vm_host": "kvm1"},
-                    enabled=True,
-                ),
-                CapacityBucket(
-                    capacity_bucket_id="bucket-bare-metal",
-                    backing_resource_id="resource-bare-metal",
-                    pool_id=DEFAULT_POOL_ID,
-                    resource_type="compute.host",
-                    total_units=1,
-                    capacity={"units": 1},
-                    attributes={
-                        "physical_host_id": "physical-1",
-                        "allocation_mode": "exclusive",
-                    },
-                    enabled=True,
-                ),
-                CapacityReservation(
-                    capacity_reservation_id="reservation-multidebit",
-                    units=1,
-                    dimensions={"units": 1},
-                    state="reserved",
-                    deal_ref={},
-                ),
+        db.add(
+            CapacityBucket(
+                capacity_bucket_id="bucket-multi-evidence",
+                backing_resource_id="resource-multi-evidence",
+                pool_id=DEFAULT_POOL_ID,
+                resource_type="compute.gpu",
+                total_units=1,
+                capacity={"gpu_count": 1},
+                attributes={"vm_host": "kvm1"},
+                enabled=True,
+            )
+        )
+        db.add(
+            CapacityReservation(
+                capacity_reservation_id="reservation-multi-evidence",
+                units=1,
+                dimensions={"gpu_count": 1},
+                state="reserved",
+                deal_ref={"market": "vms"},
+                executor_ref={"vm_host": "kvm1"},
+            )
+        )
+        db.add(
+            CapacityReservationDebit(
+                capacity_reservation_id="reservation-multi-evidence",
+                capacity_bucket_id="bucket-multi-evidence",
+                dimensions={"gpu_count": 1},
+            )
+        )
+        db.add(
+            SettlementRecord(
+                capacity_reservation_id="reservation-multi-evidence",
+                market="vms",
+                scheduling_requirements={
+                    "executor_kind": "vm",
+                    "resource_kind": "compute.gpu",
+                    "dimensions": {"gpu_count": "1"},
+                    "attributes": {},
+                },
+                settlement_resource_id="resource-multi-evidence",
+                pool_id=DEFAULT_POOL_ID,
+                provider="ansible",
+                resource_attributes={"vm_host": "kvm1"},
+                provider_metadata={},
+                state="assigned",
             )
         )
         db.add_all(
             (
-                CapacityReservationDebit(
-                    capacity_reservation_id="reservation-multidebit",
-                    capacity_bucket_id="bucket-vm",
-                    dimensions={"gpu_count": 1},
+                AnsibleJob(
+                    id="job-recorded-kind",
+                    status="queued",
+                    params={
+                        "executor_kind": "vm",
+                        "vm_action": "create",
+                    },
+                    capacity_reservation_id="reservation-multi-evidence",
+                    action_kind="provision",
+                    idempotency_key="provision-multi-evidence",
                 ),
-                CapacityReservationDebit(
-                    capacity_reservation_id="reservation-multidebit",
-                    capacity_bucket_id="bucket-bare-metal",
-                    dimensions={"units": 1},
+                AnsibleJob(
+                    id="job-vm-host",
+                    status="queued",
+                    params={"vm_host": "kvm1", "vm_action": "remove"},
+                    capacity_reservation_id="reservation-multi-evidence",
+                    action_kind="teardown",
+                    idempotency_key="teardown-multi-evidence",
                 ),
             )
         )
@@ -350,14 +372,18 @@ def test_all_debit_evidence_is_combined_before_executor_backfill():
     with Session(engine) as db:
         reservation = db.get(
             CapacityReservation,
-            "reservation-multidebit",
+            "reservation-multi-evidence",
         )
-        assert reservation.executor_kind is None
-        assert reservation.state == "unmanaged"
-        assert (
-            "conflicting evidence: bare_metal, vm"
-            in reservation.failure_message
+        settlement = db.get(
+            SettlementRecord,
+            "reservation-multi-evidence",
         )
+        jobs = db.query(AnsibleJob).order_by(AnsibleJob.id).all()
+        assert reservation.executor_kind == "vm"
+        assert reservation.state == "reserved"
+        assert settlement.scheduling_requirements["executor_kind"] == "vm"
+        assert [job.executor_kind for job in jobs] == ["vm", "vm"]
+        assert all(job.params["executor_kind"] == "vm" for job in jobs)
 
 
 def test_pool_mode_derivation_rejects_malformed_legacy_policy_tags():

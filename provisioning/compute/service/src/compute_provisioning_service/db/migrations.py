@@ -15,6 +15,7 @@ from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 
 from sqlalchemy import Engine, inspect, text
+from sqlalchemy.engine import Connection
 from sqlalchemy.orm import Session
 
 from compute_provisioning_service.db.models import AnsiblePoolConfig, Base, DEFAULT_POOL_ID, ResourcePool
@@ -125,8 +126,8 @@ def _record_migration(engine: Engine, migration_id: str) -> None:
         )
 
 
-def _table_exists(engine: Engine, table_name: str) -> bool:
-    return table_name in set(inspect(engine).get_table_names())
+def _table_exists(bind: Engine | Connection, table_name: str) -> bool:
+    return table_name in set(inspect(bind).get_table_names())
 
 
 def _column_exists(engine: Engine, table_name: str, column_name: str) -> bool:
@@ -524,7 +525,7 @@ def _apply_legacy_vm_lease_backfill(connection) -> None:
         SELECT vl.id AS lease_id, vl.allocation_id, vl.escrow_uid,
                vl.vm_host, vl.vm_target, vl.status, vl.create_job_id,
                vl.vm_remove_job_id, cr.capacity_reservation_id,
-               cr.executor_target, h.pool_id, rp.provider,
+               cr.executor_kind, cr.executor_target, h.pool_id, rp.provider,
                apc.playbook_path, apc.inventory_group, apc.extra_vars
         FROM vm_leases vl
         LEFT JOIN capacity_reservations cr
@@ -547,6 +548,19 @@ def _apply_legacy_vm_lease_backfill(connection) -> None:
         if reservation_id in seen_reservations:
             raise SchemaDriftError(f"duplicate legacy VM leases for reservation {reservation_id}")
         seen_reservations.add(reservation_id)
+        existing_executor_kind = row["executor_kind"]
+        if existing_executor_kind is not None and (
+            not isinstance(existing_executor_kind, str)
+            or (
+                existing_executor_kind.strip()
+                and existing_executor_kind.strip() != "vm"
+            )
+        ):
+            raise SchemaDriftError(
+                f"legacy VM lease {row['lease_id']} conflicts with reservation "
+                f"executor identity {existing_executor_kind!r}"
+            )
+
 
         extra_vars = row["extra_vars"] or {}
         if isinstance(extra_vars, str):
@@ -582,18 +596,69 @@ def _apply_legacy_vm_lease_backfill(connection) -> None:
 
     for draft in drafts:
         existing = connection.execute(text(
-            "SELECT capacity_reservation_id, state, settlement_resource_id, pool_id, provider, "
-            "resource_attributes, provider_metadata, teardown_provider_metadata, "
-            "prepared_teardown_operation "
+            "SELECT capacity_reservation_id, state, scheduling_requirements, "
+            "settlement_resource_id, pool_id, provider, resource_attributes, "
+            "provider_metadata, teardown_provider_metadata, prepared_teardown_operation "
             "FROM settlement_records WHERE capacity_reservation_id=:id"
         ), {"id": draft.capacity_reservation_id}).mappings().one_or_none()
+        requirements = {
+            "executor_kind": draft.executor_kind,
+            "resource_kind": "vm",
+        }
         if existing:
+            persisted_requirements = _normalize_json_column(
+                existing["scheduling_requirements"]
+            ) or {}
+            if not isinstance(persisted_requirements, dict):
+                raise SchemaDriftError(
+                    f"settlement aggregate for reservation "
+                    f"{draft.capacity_reservation_id} has invalid scheduling requirements"
+                )
+            persisted_executor_kind = persisted_requirements.get("executor_kind")
+            if persisted_executor_kind is not None and (
+                not isinstance(persisted_executor_kind, str)
+                or (
+                    persisted_executor_kind.strip()
+                    and persisted_executor_kind.strip() != draft.executor_kind
+                )
+            ):
+                raise SchemaDriftError(
+                    f"settlement aggregate for reservation "
+                    f"{draft.capacity_reservation_id} conflicts with VM executor identity"
+                )
             if _existing_settlement_row_conflicts(existing, draft) or _existing_provisioned_resources_conflict(
                 connection, draft.capacity_reservation_id, draft.provisioned_resource_id
             ):
                 raise SchemaDriftError(
                     f"conflicting settlement aggregate for reservation {draft.capacity_reservation_id}"
                 )
+            requirements.update(persisted_requirements)
+            requirements["executor_kind"] = draft.executor_kind
+
+        # A successfully compiled candidate is bounded evidence from the
+        # historical VM-lease table. Persist that exact identity on both
+        # records; never infer it later from a selected pool or resource.
+        connection.execute(
+            text(
+                "UPDATE capacity_reservations SET executor_kind=:executor_kind "
+                "WHERE capacity_reservation_id=:reservation_id"
+            ),
+            {
+                "executor_kind": draft.executor_kind,
+                "reservation_id": draft.capacity_reservation_id,
+            },
+        )
+        if existing:
+            connection.execute(
+                text(
+                    "UPDATE settlement_records SET scheduling_requirements=:requirements "
+                    "WHERE capacity_reservation_id=:reservation_id"
+                ),
+                {
+                    "requirements": json.dumps(requirements, sort_keys=True),
+                    "reservation_id": draft.capacity_reservation_id,
+                },
+            )
             continue
 
         connection.execute(text(
@@ -605,7 +670,7 @@ def _apply_legacy_vm_lease_backfill(connection) -> None:
                       :prepared_teardown,:metadata,:teardown_metadata,:state,0)"""
         ), {
             "rid": draft.capacity_reservation_id, "fid": draft.fulfillment_id,
-            "requirements": json.dumps({"resource_kind": "vm"}), "resource_id": draft.settlement_resource_id,
+            "requirements": json.dumps(requirements, sort_keys=True), "resource_id": draft.settlement_resource_id,
             "pool_id": draft.pool_id, "provider": draft.provider,
             "attributes": json.dumps(draft.resource_attributes),
             "prepared_teardown": json.dumps(draft.prepared_teardown_operation) if draft.prepared_teardown_operation is not None else None,
@@ -1202,10 +1267,10 @@ def _legacy_executor_evidence(
 
 def _derive_pool_deliverable_modes(connection) -> None:
     """Derive exact pool mode sets from registered provider configuration."""
-    if not _table_exists(connection.engine, "resource_pools"):
+    if not _table_exists(connection, "resource_pools"):
         return
     config_rows = {}
-    if _table_exists(connection.engine, "ansible_pool_configs"):
+    if _table_exists(connection, "ansible_pool_configs"):
         config_rows = {
             row["pool_id"]: row
             for row in connection.execute(
@@ -1257,7 +1322,7 @@ def _migrate_executor_identities_and_pool_modes(engine: Engine) -> None:
 
         job_rows: list[dict] = []
         job_evidence_by_reservation: dict[str, set[str]] = {}
-        if _table_exists(engine, "ansible_jobs"):
+        if _table_exists(connection, "ansible_jobs"):
             job_rows = list(
                 connection.execute(
                     text(
@@ -1281,8 +1346,8 @@ def _migrate_executor_identities_and_pool_modes(engine: Engine) -> None:
                 ).update(evidence)
 
         reservation_kinds: dict[str, str | None] = {}
-        if _table_exists(engine, "capacity_reservations"):
-            has_settlements = _table_exists(engine, "settlement_records")
+        if _table_exists(connection, "capacity_reservations"):
+            has_settlements = _table_exists(connection, "settlement_records")
             settlement_join = (
                 "LEFT JOIN settlement_records sr "
                 "ON sr.capacity_reservation_id=cr.capacity_reservation_id"
