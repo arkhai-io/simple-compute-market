@@ -47,6 +47,7 @@ VERIFY_HOSTED_RELEASE = uv run --no-project --with 'eth-account>=0.13,<0.14' \
 .PHONY: review-wheelhouse review-wheelhouse-scope build build-dev build-seller build-apicredits-service build-apicredits-storefront build-apicredits-sample-app test test-core test-provisioning test-provisioning-iac test-registry test-storefront test-vms-buyer test-apicredits test-apicredits-middleware test-kits dist dist-storefront-client dist-policy dist-compute-provisioning dist-compute-provisioning-service dist-kits dist-hosted-client verify-hosted-release dist-registry-client dist-registry dist-identity dist-core dist-arkhai-core-buyer dist-arkhai-core-storefront dist-alkahest dist-config dist-clean init init-prerequisites init-submodules init-zero-tier init-buyer init-storefront init-arkhai-core-registry push-runtime-artifacts push-images push-dev-images push-helm push-wheelhouse
 .PHONY: test-release-tooling test-deployment-packaging prepare-hosted-compose hosted-preflight hosted-compose-up hosted-compose-restart hosted-compose-clean hosted-stripe-test hosted-stripe-test-stop
 .PHONY: dist-arkhai-core-registry
+.PHONY: build-bare-metal-storefront
 
 # ---------------------------------------------------------------------------
 # Dist — build pure-Python wheels for internal packages before image builds.
@@ -318,7 +319,7 @@ test-kits:
 # (registry, storefront, provisioning) and the buyer CLI binary. `build-dev`
 # adds the test chain + integration-test image needed for the local e2e stack.
 build: init-prerequisites dist build-buyer
-	$(MAKE) -j3 build-registry build-storefront build-provisioning
+	$(MAKE) -j4 build-registry build-storefront build-bare-metal-storefront build-provisioning
 	$(MAKE) -j3 build-apicredits-service build-apicredits-storefront build-apicredits-sample-app
 
 build-dev: build build-dev-env build-test-image
@@ -328,7 +329,7 @@ build-dev: build build-dev-env build-test-image
 # consume via --find-links. Skips `build-registry` (sellers point at
 # someone else's registry).
 build-seller: init-prerequisites dist-kits dist-storefront-client dist-identity dist-core dist-arkhai-core-storefront dist-alkahest dist-config dist-policy dist-compute-provisioning dist-domains dist-compute-provisioning-service dist-registry-client ## Build only what a seller needs: storefront + provisioning images.
-	$(MAKE) -j2 build-storefront build-provisioning
+	$(MAKE) -j3 build-storefront build-bare-metal-storefront build-provisioning
 
 # Same as build-seller, but the provisioning image's in-container appuser
 # is built with the current host user's UID/GID. Required on hosts where
@@ -356,6 +357,11 @@ build-registry:
 
 build-storefront:
 	cd domains/vms/storefront && make build
+
+build-bare-metal-storefront:
+	docker build --ulimit nofile=65536:65536 \
+		-f domains/bare_metal/storefront/Dockerfile \
+		-t arkhai:bare-metal-storefront .
 
 build-provisioning:
 	cd provisioning/compute/service && make build
