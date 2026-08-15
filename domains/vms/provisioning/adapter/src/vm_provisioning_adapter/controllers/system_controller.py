@@ -84,11 +84,11 @@ class SystemController:
         ``storefront``
             Can the provisioning service reach the storefront's ``/health`` endpoint?
             Values: ``ok``, ``unreachable``, ``timeout``, ``unconfigured``, ``http_N``.
-
         ``storefront_auth``
-            Can the provisioning service authenticate to the storefront admin API?
-            Values: ``ok``, ``unauthorized``, ``unconfigured``, or mirrors
-            ``storefront`` when the storefront is not reachable.
+            Can the provisioning service authenticate as the configured service
+            peer and verify the pinned storefront response principal?
+
+
 
         ``lease_watchdog``
             Current watchdog scheduling state.
@@ -212,23 +212,6 @@ class SystemController:
         It never exposes prepared operations, provider payloads, or credentials.
         """
         result = await self._system_service.force_fulfillment_convergence()
-        if "error" in result:
-            raise HTTPException(status_code=503, detail=result["error"])
-        return result
-
-    @_system_router.post(
-        "/fulfillment-convergence/clear-claims",
-        summary="Free claimed settlement records so the next cycle re-reads them (admin)",
-    )
-    async def clear_fulfillment_convergence_claims(self) -> dict:
-        """Clear claim leases only — state and attempt counts are untouched.
-
-        A cycle that reads a still-running operation holds its claim for a lease
-        interval, so the cycle after it cannot re-read that record. This releases
-        those leases, which is what lets a caller advance convergence immediately
-        after making an operation finish rather than waiting for the lease.
-        """
-        result = await self._system_service.clear_fulfillment_claims()
         if "error" in result:
             raise HTTPException(status_code=503, detail=result["error"])
         return result

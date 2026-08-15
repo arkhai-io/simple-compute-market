@@ -1,3 +1,10 @@
+global:
+  registryIdentity:
+    authority: registry-a
+    principal:
+      scheme: eip191
+      identifier: "0x90f79bf6eb2c4f870365e785982e1f101e93b906"
+
 # Default values for registry.
 # These are overridden by the parent chart's registry: block in values.yaml.
 # Chain config, RPC URL, and registry contract addresses live in the parent's
@@ -7,7 +14,19 @@ image:
   repository: ""
   name: arkhai
   tag: registry
+  digest: ""
   pullPolicy: IfNotPresent
+
+# Registry responses are signed by a dedicated service principal. Only the
+# public principal and operator-managed Secret reference are chart values.
+identity:
+  authority: registry-a
+  principal:
+    scheme: eip191
+    identifier: "0x90f79bf6eb2c4f870365e785982e1f101e93b906"
+  credentialSecret:
+    name: arkhai-registry-identity
+    key: credential
 
 service:
   type: ClusterIP

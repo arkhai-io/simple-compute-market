@@ -46,5 +46,16 @@ def serve_cmd(
     run_serve(host=host, port=port, root_path=root_path)
 
 
+@app.command("publish")
+def publish_cmd() -> None:
+    """Publish one authenticated round from fresh trusted-site projections."""
+
+    import json
+
+    from .publication_cli import run_publication_once
+
+    typer.echo(json.dumps(run_publication_once(), sort_keys=True))
+
+
 if __name__ == "__main__":
     app()

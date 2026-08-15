@@ -30,6 +30,7 @@ from market_policy.negotiation_middleware import (
     NegotiationDecision,
     NegotiationRound,
     NegotiationStep,
+    register_negotiation_middleware,
     their_last_proposal,
 )
 
@@ -52,6 +53,7 @@ def extract_key_challenge(proposal: Any) -> dict[str, Any] | None:
     return raw if isinstance(raw, dict) else None
 
 
+@register_negotiation_middleware("answer_key_challenge")
 def answer_key_challenge(
     history: list[NegotiationRound],
     context: NegotiationContext,

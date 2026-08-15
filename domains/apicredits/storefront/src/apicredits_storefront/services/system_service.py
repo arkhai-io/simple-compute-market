@@ -36,7 +36,9 @@ class SystemService:
             checks["credits_service"] = await self._credits_service_check()
 
         configured = _container.configured_chain_names()
-        checks["alkahest"] = ",".join(sorted(configured)) if configured else "unconfigured"
+        checks["alkahest"] = (
+            ",".join(sorted(configured)) if configured else "unconfigured"
+        )
 
         def _check_is_healthy(key: str, value: str) -> bool:
             if value in ("ok", "unconfigured"):
@@ -51,10 +53,10 @@ class SystemService:
             "checks": checks,
         }
         if include_registry:
-            from apicredits_storefront.utils.config import settings
-
-            wallet = (settings.wallet.address or "").lower() or None
-            result["agent_id"] = wallet
+            signer = _container.resolved_marketplace_signer
+            result["principal"] = (
+                signer.identity.model_dump(mode="json") if signer else None
+            )
         return result
 
     async def _registry_check(self) -> str:

@@ -1,12 +1,14 @@
 [project]
 name = "arkhai-apicredits-domain"
-version = "0.1.0"
+version = "0.2.0"
 license = "MIT"
 description = "Shared API-credit domain models, policies, and market-domain contract."
 requires-python = ">=3.12"
 dependencies = [
     "arkhai-core>=0.2.0",
     "arkhai-kit-policy",
+    "arkhai-kit-alkahest>=0.2.0",
+    "arkhai-kit-identity==0.3.0",
     "httpx>=0.27",
     "pydantic>=2",
 ]
@@ -32,12 +34,12 @@ only-include = ["__init__.py"]
 "negotiation/__init__.py" = "domains/apicredits/negotiation/__init__.py"
 "negotiation/buyer_policies.py" = "domains/apicredits/negotiation/buyer_policies.py"
 "negotiation/policies.py" = "domains/apicredits/negotiation/policies.py"
-"negotiation/policy_sources.py" = "domains/apicredits/negotiation/policy_sources.py"
 "negotiation/storefront_round.py" = "domains/apicredits/negotiation/storefront_round.py"
 "negotiation/terms.py" = "domains/apicredits/negotiation/terms.py"
 "settlement/__init__.py" = "domains/apicredits/settlement/__init__.py"
 "settlement/credits_client.py" = "domains/apicredits/settlement/credits_client.py"
 "settlement/fulfillment.py" = "domains/apicredits/settlement/fulfillment.py"
+"settlement/issuance_evidence.py" = "domains/apicredits/settlement/issuance_evidence.py"
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

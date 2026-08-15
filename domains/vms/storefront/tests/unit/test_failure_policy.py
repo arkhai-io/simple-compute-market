@@ -4,23 +4,42 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
+from market_capacity_publication import CapacityBinding
+from market_identity import Ed25519Signer
 
-from market_storefront.utils.failure_policy import (
+from market_storefront.failure_actions import (
     FulfillmentFailureContext,
     apply_fulfillment_failure_policy,
 )
+from market_storefront.domain_runtime import build_vm_storefront_domain, build_vm_storefront_registry
 from market_storefront.utils.sqlite_client import SQLiteClient
+
+BUYER_PRINCIPAL = Ed25519Signer(b"\x51" * 32).identity
+BUYER_EVM_ADDRESS = "0x" + "bb" * 20
 
 
 @pytest.mark.asyncio
 async def test_failure_policy_releases_capacity_and_runs_webhook(tmp_path, monkeypatch):
-    from tests.fake_site import FakeSite, site_capacity
+    from tests.fake_site import FakeSite, capacity_runtime_over
 
-    db = SQLiteClient(db_path=str(tmp_path / "failure-policy.db"))
-    fake = FakeSite()
+    db = SQLiteClient(db_path=str(tmp_path / "failure-policy.db"), registry=build_vm_storefront_registry(build_vm_storefront_domain()))
+    fake = FakeSite(deliverable_modes={"vm"})
     fake.add_resource(
-        "gpu-host-1", 2,
+        "gpu-host-1",
+        2,
         attributes={"gpu_model": "H200", "region": "California, US", "vm_host": "kvm1"},
+    )
+    binding = CapacityBinding("site-test", "vm", "pool-test")
+    capacity = capacity_runtime_over(fake, site_name=binding.site_id)
+
+    async def resolve_capacity_binding(repository, listing_id):
+        assert repository is db
+        assert listing_id == "listing-1x"
+        return binding
+
+    monkeypatch.setattr(
+        "market_storefront.services.capacity_client.capacity_binding_for_listing",
+        resolve_capacity_binding,
     )
 
     async def fake_webhook(payload):
@@ -30,29 +49,35 @@ async def test_failure_policy_releases_capacity_and_runs_webhook(tmp_path, monke
         return {"action": "webhook", "status": "sent", "status_code": 204}
 
     monkeypatch.setattr(
-        "market_storefront.utils.failure_policy.configured_failure_actions",
+        "market_storefront.failure_actions._configured_failure_actions_source",
         lambda: ["release_capacity", "webhook"],
     )
     webhook = AsyncMock(side_effect=fake_webhook)
-    monkeypatch.setattr("market_storefront.utils.failure_policy._send_webhook", webhook)
+    monkeypatch.setattr("market_storefront.failure_actions._send_webhook", webhook)
 
-    with site_capacity(fake) as capacity:
-        reserved = await capacity.reserve(
-            claim={"resource_id": "gpu-host-1", "gpu_count": 1},
-            deal_ref={"listing_id": "listing-1x", "escrow_uid": "escrow-1"},
-        )
-        assert reserved is not None
+    reserved = await capacity.reserve(
+        binding,
+        claim={
+            "executor_kind": "vm",
+            "resource_id": "gpu-host-1",
+            "gpu_count": 1,
+        },
+        deal_ref={"listing_id": "listing-1x", "escrow_uid": "escrow-1"},
+    )
+    assert reserved is not None
 
-        result = await apply_fulfillment_failure_policy(
-            db,
-            FulfillmentFailureContext(
-                capacity_reservation_id=reserved["capacity_reservation_id"],
-                escrow_uid="escrow-1",
-                reason="provisioning_error",
-                message="host rejected request",
-                source="test",
-            ),
-        )
+    result = await apply_fulfillment_failure_policy(
+        db,
+        FulfillmentFailureContext(
+            listing_id="listing-1x",
+            capacity_reservation_id=reserved["capacity_reservation_id"],
+            escrow_uid="escrow-1",
+            reason="provisioning_error",
+            message="host rejected request",
+            source="test",
+        ),
+        capacity=capacity,
+    )
 
     assert result.state == "released"
     assert result.resource_id == "gpu-host-1"
@@ -87,7 +112,11 @@ async def test_failure_policy_refund_uses_escrow_codec_for_proposal(monkeypatch)
         async def load_negotiation_thread_row(self, *, negotiation_id):
             return {
                 "negotiation_id": negotiation_id,
-                "buyer": "0x" + "bb" * 20,
+                "buyer_principal": BUYER_PRINCIPAL.model_dump(mode="json"),
+                "buyer_evm_address": BUYER_EVM_ADDRESS,
+                "seller_principal": Ed25519Signer(b"\x52" * 32).identity.model_dump(
+                    mode="json"
+                ),
                 "buyer_escrow_proposal": {
                     "chain_name": "anvil",
                     "escrow_address": "0x" + "aa" * 20,
@@ -113,20 +142,28 @@ async def test_failure_policy_refund_uses_escrow_codec_for_proposal(monkeypatch)
     )
 
     monkeypatch.setattr(
-        "market_storefront.utils.failure_policy.configured_failure_actions",
+        "market_storefront.failure_actions._configured_failure_actions_source",
         lambda: ["refund"],
     )
     monkeypatch.setattr(
-        "market_storefront.utils.failure_policy.settings",
-        SimpleNamespace(wallet=SimpleNamespace(private_key="seller-pk", address="0xseller")),
+        "market_storefront.failure_actions.get_evm_wallet_private_key",
+        lambda: "seller-pk",
     )
     monkeypatch.setattr(
-        "market_storefront.utils.failure_policy.stage_event",
+        "market_storefront.failure_actions.get_evm_wallet_address",
+        lambda: "0x" + "dd" * 20,
+    )
+    monkeypatch.setattr(
+        "market_storefront.failure_actions.stage_event",
         lambda *args, **kwargs: None,
     )
     monkeypatch.setattr(
         "market_storefront.utils.config.CHAINS",
-        {"anvil": SimpleNamespace(rpc_url="http://rpc", alkahest_address_config_path="/addr.json")},
+        {
+            "anvil": SimpleNamespace(
+                rpc_url="http://rpc", alkahest_address_config_path="/addr.json"
+            )
+        },
     )
     monkeypatch.setattr(
         "market_alkahest.alkahest.materialize_escrow_terms_from_proposal",
@@ -159,7 +196,7 @@ async def test_failure_policy_refund_uses_escrow_codec_for_proposal(monkeypatch)
         private_key="seller-pk",
         rpc_url="http://rpc",
         obligation_data={"token": "0x" + "cc" * 20, "amount": 42},
-        to_address="0x" + "bb" * 20,
+        to_address=BUYER_EVM_ADDRESS,
     )
     assert db.listing_updates == [{"listing_id": "listing-1", "status": "refunded"}]
     assert db.escrow_updates == [{"escrow_uid": "escrow-1", "status": "refunded"}]

@@ -9,9 +9,13 @@ buyer and seller keeps its two roles' state separate.
 from __future__ import annotations
 
 import json
+import os
+from collections.abc import Callable, Mapping
+from typing import Any
 
+import tomllib
 import typer
-
+from dynaconf import Dynaconf
 from market_config.config_loader import (
     get_dotted,
     load_storefront_config,
@@ -21,9 +25,80 @@ from market_config.config_loader import (
     user_config_dir,
     write_user_config,
 )
+from market_config.settlement_migration import (
+    STOREFRONT_MIGRATION_COMMAND,
+    SettlementMigrationError,
+    format_migration_result,
+    migrate_settlement_config,
+    reject_legacy_settlement_path,
+)
+from market_settlement_runtime import SettlementPublicationClause, SettlementRole
 
+from market_storefront.publication_migration import (
+    format_publication_migration_result,
+    migrate_publication_config,
+    migrate_publication_csv,
+)
 
 config_app = typer.Typer(no_args_is_help=True)
+
+
+def _validate_settlement_candidate(
+    document: Mapping[str, Any], role: SettlementRole
+) -> None:
+    # Mechanism packages and the process-global storefront settings stay lazy:
+    # config path/help commands must not initialize operator configuration, and
+    # this validator must evaluate the supplied in-memory candidate instead.
+    from market_alkahest import create_alkahest_registration
+    from market_hosted_settlement import create_stripe_registration
+    from market_settlement_runtime import SettlementConfigurationRegistry
+
+    registry = SettlementConfigurationRegistry(
+        [create_alkahest_registration(), create_stripe_registration()]
+    )
+    registry.resolve(document.get("Settlement", {}), role=role)
+
+    from market_storefront.utils.config import settlement_publication_defaults
+
+    candidate = Dynaconf(environments=False, merge_enabled=False)
+    candidate.update(dict(document))
+    settlement_publication_defaults(candidate)
+
+
+def _seller_publication_clause_compiler(
+    document: Mapping[str, Any],
+) -> Callable[[Mapping[str, Any]], SettlementPublicationClause]:
+    from market_alkahest import create_alkahest_registration
+    from market_hosted_settlement import create_stripe_registration
+    from market_settlement_runtime import (
+        SettlementConfigurationRegistry,
+        compile_settlement_publication_clause,
+    )
+
+    registry = SettlementConfigurationRegistry(
+        [create_alkahest_registration(), create_stripe_registration()]
+    )
+    settlement = document.get("Settlement", document.get("settlement", {}))
+    if not isinstance(settlement, Mapping):
+        raise SettlementMigrationError("Settlement must be a table")
+    try:
+        resolved = registry.resolve(settlement, role="seller")
+    except (TypeError, ValueError) as exc:
+        raise SettlementMigrationError(
+            f"invalid seller settlement configuration: {exc}"
+        ) from exc
+
+    def compile_clause(
+        raw: Mapping[str, Any],
+    ) -> SettlementPublicationClause:
+        return compile_settlement_publication_clause(
+            raw,
+            registry=registry,
+            config=resolved,
+            role="seller",
+        )
+
+    return compile_clause
 
 
 @config_app.command("path")
@@ -41,7 +116,8 @@ def config_path() -> None:
 @config_app.command("show")
 def config_show(
     raw: bool = typer.Option(
-        False, "--raw",
+        False,
+        "--raw",
         help="Print the TOML file verbatim instead of the loaded mapping.",
     ),
 ) -> None:
@@ -59,8 +135,12 @@ def config_show(
 
 @config_app.command("set")
 def config_set(
-    key: str = typer.Argument(..., help="Dotted config key, e.g. 'port' or 'pricing.default_min_price'."),
-    value: str = typer.Argument(..., help="Value to assign (coerced to int/float/bool when possible)."),
+    key: str = typer.Argument(
+        ..., help="Dotted config key, e.g. 'port' or 'pricing.default_min_price'."
+    ),
+    value: str = typer.Argument(
+        ..., help="Value to assign (coerced to int/float/bool when possible)."
+    ),
 ) -> None:
     """Set a single value in the storefront's storefront.toml.
 
@@ -68,10 +148,15 @@ def config_set(
     float-looking strings → float, otherwise left as strings. Use quotes around
     strings that look numeric if you want to keep them as text.
     """
+    try:
+        reject_legacy_settlement_path(key, command=STOREFRONT_MIGRATION_COMMAND)
+    except SettlementMigrationError as exc:
+        typer.secho(str(exc), err=True, fg=typer.colors.RED)
+        raise typer.Exit(2) from exc
     coerced: object = value
     low = value.strip().lower()
     if low in ("true", "false"):
-        coerced = (low == "true")
+        coerced = low == "true"
     else:
         try:
             coerced = int(value)
@@ -90,7 +175,9 @@ def config_set(
 
 @config_app.command("get")
 def config_get(
-    key: str = typer.Argument(..., help="Dotted config key, e.g. 'port' or 'pricing.default_min_price'."),
+    key: str = typer.Argument(
+        ..., help="Dotted config key, e.g. 'port' or 'pricing.default_min_price'."
+    ),
 ) -> None:
     """Print the value of a single config key from the storefront's storefront.toml."""
     doc = load_storefront_config()
@@ -107,16 +194,178 @@ def config_get(
         typer.echo(str(val))
 
 
+@config_app.command("migrate")
+def config_migrate(
+    scope: str = typer.Option(..., "--scope", help="Configuration scope to migrate."),
+    check: bool = typer.Option(
+        False,
+        "--check",
+        help="Preview redacted settlement changes without writing.",
+    ),
+    write: bool = typer.Option(
+        False,
+        "--write",
+        help="Validate, back up, and atomically write the migrated file.",
+    ),
+    backup: bool = typer.Option(
+        False,
+        "--backup",
+        help="Create the required same-directory backup in write mode.",
+    ),
+    inventory: str | None = typer.Option(
+        None,
+        "--inventory",
+        help="Resource CSV to migrate when --scope publication is selected.",
+    ),
+    legacy_contribution: str | None = typer.Option(
+        None,
+        "--legacy-contribution",
+        help="Exact installed contribution owning the legacy storefront database.",
+    ),
+    legacy_offering_mode: str | None = typer.Option(
+        None,
+        "--legacy-offering-mode",
+        help="Exact pool offering mode asserted for every legacy row.",
+    ),
+    legacy_domain: str | None = typer.Option(
+        None,
+        "--legacy-domain",
+        help="Exact market domain identity asserted for every legacy row.",
+    ),
+    legacy_contract_version: str | None = typer.Option(
+        None,
+        "--legacy-contract-version",
+        help="Exact major.minor market-domain contract version.",
+    ),
+) -> None:
+    """Migrate settlement/publication config or one legacy storefront database."""
+
+    supported = {"settlement", "publication", "storefront-domains"}
+    if scope not in supported:
+        typer.secho(
+            "Supported scopes: settlement, publication, storefront-domains.",
+            err=True,
+            fg=typer.colors.RED,
+        )
+        raise typer.Exit(2)
+    legacy_values = (
+        legacy_contribution,
+        legacy_offering_mode,
+        legacy_domain,
+        legacy_contract_version,
+    )
+    if scope != "storefront-domains" and any(value is not None for value in legacy_values):
+        raise typer.BadParameter(
+            "--legacy-* assertions apply only to --scope storefront-domains"
+        )
+    if scope == "storefront-domains" and any(value is None for value in legacy_values):
+        raise typer.BadParameter(
+            "--scope storefront-domains requires --legacy-contribution, "
+            "--legacy-offering-mode, --legacy-domain, and "
+            "--legacy-contract-version"
+        )
+    if scope == "settlement" and inventory is not None:
+        raise typer.BadParameter("--inventory applies only to --scope publication")
+    if scope == "storefront-domains" and inventory is not None:
+        raise typer.BadParameter("--inventory applies only to --scope publication")
+    try:
+        if scope == "settlement":
+            result = migrate_settlement_config(
+                storefront_config_file(),
+                role="seller",
+                check=check,
+                write=write,
+                backup=backup,
+                environ=os.environ,
+                validator=_validate_settlement_candidate,
+            )
+            lines = format_migration_result(result)
+        elif scope == "publication":
+            if inventory is None:
+                result = migrate_publication_config(
+                    storefront_config_file(),
+                    check=check,
+                    write=write,
+                    backup=backup,
+                    validator=_validate_settlement_candidate,
+                )
+            else:
+                config_path = storefront_config_file()
+                config_document = tomllib.loads(
+                    config_path.read_text(encoding="utf-8")
+                )
+                result = migrate_publication_csv(
+                    inventory,
+                    storefront_config=config_document,
+                    check=check,
+                    write=write,
+                    backup=backup,
+                    clause_compiler=_seller_publication_clause_compiler(
+                        config_document
+                    ),
+                )
+            lines = format_publication_migration_result(result)
+        else:
+            from market_core import ContractVersion, DomainIdentity
+
+            from market_storefront.domain_migration import (
+                LegacyStorefrontSelection,
+                StorefrontDomainMigrationError,
+                migrate_storefront_domains,
+            )
+            from market_storefront.utils.config import settings
+
+            try:
+                major_text, minor_text = str(legacy_contract_version).split(".", 1)
+                version = ContractVersion(int(major_text), int(minor_text))
+            except (TypeError, ValueError) as exc:
+                raise typer.BadParameter(
+                    "--legacy-contract-version must be major.minor"
+                ) from exc
+            try:
+                result = migrate_storefront_domains(
+                    str(settings.db_path),
+                    selection=LegacyStorefrontSelection(
+                        contribution_id=str(legacy_contribution),
+                        offering_mode=str(legacy_offering_mode),
+                        domain_identity=DomainIdentity(str(legacy_domain)),
+                        contract_version=version,
+                    ),
+                    check=check,
+                    write=write,
+                    backup=backup,
+                )
+            except StorefrontDomainMigrationError as exc:
+                typer.secho(str(exc), err=True, fg=typer.colors.RED)
+                raise typer.Exit(1) from exc
+            lines = result.redacted_lines()
+    except SettlementMigrationError as exc:
+        typer.secho(str(exc), err=True, fg=typer.colors.RED)
+        raise typer.Exit(1) from exc
+    for line in lines:
+        typer.echo(line)
+
+
 _INIT_USER_TEMPLATE = """\
 # arkhai storefront config — see `market-storefront config path` for this
-# file's location. Every key is optional; the resolver falls back to
-# built-in defaults when a key is missing. Schema matches
-# domains/vms/storefront/src/market_storefront/settings.toml (top-level keys + named
-# sections; no [seller] prefix).
+# file's location. Schema matches
+# domains/vms/storefront/src/market_storefront/settings.toml (top-level keys +
+# named sections; no [seller] prefix).
+#
+# The public marketplace principal is required. Inject its matching private
+# signer only through ARKHAI_IDENTITY_CREDENTIAL; never write it here.
 
-# ---------------------------------------------------------------------------
-# Identity / on-chain
-# ---------------------------------------------------------------------------
+[identity.principal]
+# scheme = "ed25519"
+# identifier = "<unpadded-base64url-public-key>"
+
+# Stable public role bindings use ordered 1-2 principal rotation sets:
+# [identity.administrators.operator]
+# principals = [{ scheme = "ed25519", identifier = "<operator-public-key>" }]
+# [identity.service_peers.provisioning_default]
+# role = "service"
+# site_id = "default"
+# principals = [{ scheme = "ed25519", identifier = "<service-public-key>" }]
 
 # agent_id = "alice"                           # must be a valid Python identifier
 # agent_name = "Alice"                         # display name (any string)
@@ -140,9 +389,6 @@ _INIT_USER_TEMPLATE = """\
 # resources_csv_path = "/app/resources.csv"    # auto-seed inventory on first boot from this CSV.
                                                 # Mutually exclusive with resources_csv_inline.
 
-# admin_api_key = ""                           # protects /admin/* routes; the seller-stack
-                                                # provisioning container reads this from the same
-                                                # storefront.toml so the secret lives in one place.
 
 # ---------------------------------------------------------------------------
 # Discovery / lifecycle
@@ -162,21 +408,17 @@ _INIT_USER_TEMPLATE = """\
 # Shared sections (also used by the buyer-side `market` CLI)
 # ---------------------------------------------------------------------------
 
+# EVM-mechanism settings only. Omit [wallet] and every [chains.<name>] table
+# when this storefront advertises only fiat.stripe.v1.
 [wallet]
-# address = "0x0000000000000000000000000000000000000000"  # auto-derived from private_key when omitted
+# address = "0x0000000000000000000000000000000000000000"
 # private_key = "0x..."
-# ssh_public_key = "ssh-ed25519 AAAA... user@host"
 
-# One [chains.<name>] table per chain the storefront serves listings on.
-# Identity is the wallet (above); listings emit one accepted_escrows entry
-# per configured chain at publish time.
-
+# One [chains.<name>] table per Alkahest chain the storefront serves.
 [chains.ethereum_sepolia]
 # rpc_url = "https://sepolia.infura.io/v3/<project_id>"
-# chain_id = 11155111                          # optional; auto-fills for the canonical chain names
-                                                # (anvil | base_sepolia | ethereum_sepolia |
-                                                # ethereum_mainnet | filecoin_calibration).
-# alkahest_address_config_path = "/path/to/alkahest.json"  # required for anvil
+# chain_id = 11155111
+# alkahest_address_config_path = "/path/to/alkahest.json"
 
 # Add additional chains by uncommenting and customizing:
 # [chains.base_sepolia]
@@ -184,6 +426,12 @@ _INIT_USER_TEMPLATE = """\
 
 [registry]
 # urls = ["http://localhost:8080"]             # one or more indexer URLs; publishes fan out to each.
+# [registry.authorities."http://localhost:8080"]
+# authority = "registry"
+# principals = [
+#   { scheme = "ed25519", identifier = "<registry-public-key>" },
+# ]
+
 
 [registry.auth]
 # Free-form table of {url = "bearer-token"}. Keys must match urls above
@@ -203,6 +451,11 @@ _INIT_USER_TEMPLATE = """\
 # frp_server_addr = ""
 # frp_domain = ""
 # frp_dashboard_password = ""
+# Public response authority overlap for the provisioning service:
+# [provisioning.identity]
+# principals = [
+#   { scheme = "ed25519", identifier = "<service-public-key>" },
+# ]
 
 [fulfillment.failure_policy]
 # actions = ["release_capacity", "emit_event"] # valid actions: release_capacity, emit_event,
@@ -231,26 +484,28 @@ _INIT_USER_TEMPLATE = """\
 # buyer_model_path  = "domains/vms/negotiation/rl/models/arkhai_negotiator_buyer.pt"
 
 [pricing]
-# default_min_price = "1"                      # human / whole-token units (per-hour rate). The publish CLI
-                                                # scales by the token's on-chain decimals: "1" with USDC
-                                                # (6 decimals) = 1_000_000 base units = $1/hr. Fallback for
-                                                # blank `min_price` columns in resources.csv; also the
-                                                # negotiation floor for hidden-reserve listings.
-# default_token_address = "0x..."              # 0x ERC-20 address used when CSV row has no token column;
-                                                # also the demand-side token for the resource-imbalance policy
+# settlements = [                             # complete structured publication
+#   { mechanism = "fiat.stripe.v1", asset = "usd", rate = "2", per = "hour", mechanism_input = { funding_profile = "card.v1", interaction = "interactive", funds_flow = "separate_charges_transfers" } },
+#   { mechanism = "fiat.stripe.v1", asset = "usd", rate = "2", per = "hour", mechanism_input = { funding_profile = "us_bank_transfer.v1", interaction = "interactive", funds_flow = "separate_charges_transfers" } },
+#   { mechanism = "fiat.stripe.v1", asset = "usd", rate = "2", per = "hour", mechanism_input = { funding_profile = "us_ach_debit.v1", interaction = "interactive", funds_flow = "separate_charges_transfers" } },
+# ]
+# Per-resource or command clauses replace this list; fields are never merged.
+# default_min_price = "1"                      # negotiation floor when a resource row has no min_price;
+                                                # it never constructs a settlement option. Each settlement
+                                                # clause owns its explicit asset, decimal rate, and unit.
+# default_token_address = "0x..."              # demand-side token for the resource-imbalance policy only;
+                                                # it never supplies a settlement option asset or rate.
 # default_max_duration_seconds = 86400         # advertised lease ceiling; 0/unset = unlimited
-# publish_priceless = false                    # publish rows without a min_price as demand.amount=null
-                                                # (hidden reserve; buyer proposes; seller negotiates against
-                                                # default_min_price as the floor). Per-row min_price="0"
-                                                # publishes as demand.amount=0 (free / public-test offering),
-                                                # distinct from hidden reserve.
+# publish_priceless = false                    # allow rows without an explicit negotiation floor; settlement
+                                                # publication still requires complete typed clauses.
 """
 
 
 @config_app.command("init-user")
 def config_init_user(
     overwrite: bool = typer.Option(
-        False, "--overwrite",
+        False,
+        "--overwrite",
         help="Replace an existing storefront.toml instead of refusing.",
     ),
 ) -> None:
@@ -264,11 +519,14 @@ def config_init_user(
     if path.exists() and not overwrite:
         typer.secho(
             f"{path} already exists. Pass --overwrite to replace it.",
-            err=True, fg=typer.colors.RED,
+            err=True,
+            fg=typer.colors.RED,
         )
         raise typer.Exit(1)
 
     user_config_dir().mkdir(parents=True, exist_ok=True)
     path.write_text(_INIT_USER_TEMPLATE)
     typer.echo(f"Wrote {path}")
-    typer.echo("Edit it, or use `market-storefront config set <key> <value>` to populate.")
+    typer.echo(
+        "Edit it, or use `market-storefront config set <key> <value>` to populate."
+    )

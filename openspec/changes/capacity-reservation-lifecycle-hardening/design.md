@@ -74,46 +74,6 @@ elapsed and nothing references it, rather than trimming to a row count.
 A count-based cap is rejected because it makes retention depend on unrelated traffic: a
 busy period would evict rows a settlement record still needs.
 
-### Surgical operator release, and the scenario that would prove it
-
-Found while debugging the VM end-to-end suite (2026-08-12) and homed here rather than in
-`capacity-resource-administration`, which owns the operator surface for capacity
-*resources* — declaring what exists. This is an operation on a *reservation*, whose states
-and transitions this change already owns.
-
-`StorefrontClient.admin_release_one_reservation` posts to
-`POST /api/v1/admin/portfolio/resources/{resource_id}/release-reservation`. No storefront
-implements that route, so every call returns FastAPI's unmatched-route 404 — which its own
-docstring makes unreadable, since it promises "404 if the row doesn't exist". The client
-method has been annotated in place rather than removed, because it is public API.
-
-The capability is reachable today through `PATCH /portfolio/resources/{resource_id}` with
-`state=available`, which the fleet-wide release endpoint's docstring already recommends for
-single-row use. So nothing is blocked, and the argument for implementing the route is about
-the contract rather than the capability: a PATCH writes a state a caller has to know is the
-right one, whereas a release operation expresses the intent, can be idempotent on an
-already-available row, and can decline coherently when a row is in a state release does not
-apply to. That last part is what the PATCH cannot do — it will happily set
-`state=available` on a row whose workload is still running.
-
-The end-to-end scenario this needs is small and does not exist:
-
-- Reserve capacity against a known resource, then release *that* reservation through the
-  operator route and assert the row returns to `available` while a second reservation on a
-  different resource is untouched. Fleet-wide release cannot demonstrate that, because it
-  releases everything and so cannot distinguish "released the right one" from "released
-  them all".
-- Call it twice and assert the second call is idempotent rather than an error.
-- Call it on an `available` row and assert whatever this change decides that means — a
-  no-op release or a refusal — since that is the behaviour the missing route's docstring
-  asserted without an implementation to check it against.
-
-Worth stating why the scenario matters beyond coverage: the VM suite's teardown stages now
-drive release through lease expiry, which is the production path, and they reach the
-operator path only incidentally. An operator recovering one stuck reservation on a busy
-storefront is a distinct situation, and the fleet-wide sledgehammer is the only tool the
-suite currently exercises for it.
-
 ## Risks / Trade-offs
 
 - **[Migration converts timestamps incorrectly for rows written across a timezone or

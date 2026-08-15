@@ -30,7 +30,7 @@ import os
 import subprocess
 import tomllib
 from pathlib import Path
-from typing import TYPE_CHECKING, Callable, Optional
+from typing import TYPE_CHECKING, Any, Callable, Optional
 
 from sqlalchemy import text
 
@@ -59,6 +59,7 @@ def _read_version() -> str:
     """Return the service version string."""
     try:
         from importlib.metadata import version, PackageNotFoundError
+
         try:
             return version("arkhai-compute-provisioning-service")
         except PackageNotFoundError:
@@ -225,9 +226,7 @@ class SystemService:
                 else None
             )
             checks["job_processor"] = (
-                "ok"
-                if (job_queue is not None and job_queue.is_alive())
-                else "degraded"
+                "ok" if (job_queue is not None and job_queue.is_alive()) else "degraded"
             )
         except Exception:
             checks["job_processor"] = "degraded"
@@ -257,7 +256,7 @@ class SystemService:
                     host_count=host_count,
                 )
                 ssh_keys = collect_ssh_keys_from_hosts(enabled_hosts)
-            except Exception as exc:
+            except Exception:
                 inventory_info = InventoryInfo(
                     source="database",
                     path=str(self._settings.database_url),
@@ -281,7 +280,9 @@ class SystemService:
 
         return AnsibleReadinessResponse(
             ansible_version=ansible_version(),
-            ansible_mode=("mock" if "mock" in os.environ.get("ACTIVE_PROFILES", "") else "real"),
+            ansible_mode=(
+                "mock" if "mock" in os.environ.get("ACTIVE_PROFILES", "") else "real"
+            ),
             inventory=inventory_info,
             playbook=FileInfo(
                 path=str(playbook_path),
@@ -290,7 +291,6 @@ class SystemService:
             ),
             ssh_keys=ssh_keys,
         )
-
 
     async def get_status(self) -> dict:
         """Return a full diagnostic status dict for the system status endpoint.
@@ -305,26 +305,23 @@ class SystemService:
                 "status": "ok" | "degraded",
                 "checks": {
                     "storefront":      "ok" | "unreachable" | "timeout" | "unconfigured" | "http_N",
-                    "storefront_auth": "ok" | "unauthorized" | "unconfigured" | "http_N" | <error>,
+                    "storefront_auth": "ok" | "unauthorized" | "configuration_error" | "unconfigured" | "http_N",
                     "lease_watchdog":  "running" | "paused" | "disabled",
                 }
             }
 
-        Status rollup rules (what counts as healthy per check):
-          - storefront:      "ok" or "unconfigured"
-          - storefront_auth: "ok" or "unconfigured"
-          - lease_watchdog:  "running", "paused", or "disabled"
+        ``storefront_auth`` uses the provisioning service signer with explicit
+        role ``service`` and verifies the pinned storefront response principal.
         """
         from storefront_client import StorefrontClient, StorefrontClientError
+        from compute_provisioning_service.identity import resolve_identity_context
+        from market_identity import TrustedIdentitySet
 
         checks: dict[str, str] = {}
 
         storefront_url = str(
             getattr(self._settings, "storefront_url", "") or ""
         ).rstrip("/")
-        storefront_admin_key = str(
-            getattr(self._settings, "storefront_admin_key", "") or ""
-        )
 
         if not storefront_url:
             checks["storefront"] = "unconfigured"
@@ -333,11 +330,13 @@ class SystemService:
             # Reachability — GET /health via StorefrontClient (no admin key needed)
             try:
                 async with StorefrontClient(base_url=storefront_url) as sf:
-                    health = await sf.get_health()
+                    await sf.get_health()
                 # Any structured response (ok or degraded) means the storefront is reachable
                 checks["storefront"] = "ok"
             except StorefrontClientError as exc:
-                checks["storefront"] = f"http_{exc.status_code}" if exc.status_code else "error"
+                checks["storefront"] = (
+                    f"http_{exc.status_code}" if exc.status_code else "error"
+                )
             except Exception as exc:
                 name = type(exc).__name__
                 if "Connect" in name or "connection" in str(exc).lower():
@@ -347,27 +346,36 @@ class SystemService:
                 else:
                     checks["storefront"] = f"error: {name}"
 
-            # Auth — GET /api/v1/system/status with admin key
-            if not storefront_admin_key:
-                checks["storefront_auth"] = "unconfigured"
-            elif checks["storefront"] != "ok":
-                # Storefront not reachable — auth check is meaningless
+            if checks["storefront"] != "ok":
                 checks["storefront_auth"] = checks["storefront"]
             else:
                 try:
-                    async with StorefrontClient(
-                        base_url=storefront_url,
-                        admin_key=storefront_admin_key,
-                    ) as sf:
-                        await sf.get_system_status()
-                    checks["storefront_auth"] = "ok"
-                except StorefrontClientError as exc:
-                    if exc.status_code in (401, 403):
-                        checks["storefront_auth"] = "unauthorized"
-                    else:
-                        checks["storefront_auth"] = f"http_{exc.status_code}" if exc.status_code else "error"
-                except Exception as exc:
-                    checks["storefront_auth"] = f"error: {type(exc).__name__}"
+                    identity = resolve_identity_context(self._settings)
+                except RuntimeError:
+                    checks["storefront_auth"] = "configuration_error"
+                else:
+                    try:
+                        async with StorefrontClient(
+                            base_url=storefront_url,
+                            signer=identity.signer,
+                            caller_role="service",
+                            expected_publishers=TrustedIdentitySet(
+                                identities=(identity.storefront_principal,)
+                            ),
+                        ) as sf:
+                            await sf.get_system_status()
+                        checks["storefront_auth"] = "ok"
+                    except StorefrontClientError as exc:
+                        if exc.status_code in (401, 403):
+                            checks["storefront_auth"] = "unauthorized"
+                        else:
+                            checks["storefront_auth"] = (
+                                f"http_{exc.status_code}"
+                                if exc.status_code
+                                else "error"
+                            )
+                    except Exception as exc:
+                        checks["storefront_auth"] = f"error: {type(exc).__name__}"
 
         # Lease watchdog state
         if self._lease_lifecycle_service is None:
@@ -382,13 +390,17 @@ class SystemService:
         def _is_healthy(key: str, value: str) -> bool:
             """True when a check value is not a service degradation.
 
-            - storefront / storefront_auth: "ok" and "unconfigured" are healthy.
+            - storefront: "ok" and "unconfigured" are healthy.
               "unconfigured" means not yet pointed at a storefront — not a failure.
+            - storefront_auth: only a verified ``ok`` or an unconfigured
+              storefront is healthy.
             - lease_watchdog: "running", "paused", and "disabled" are all healthy.
               "paused" is an intentional operator/test action; "disabled" means
               the watchdog was not started (e.g. in test environments).
             """
-            if key in ("storefront", "storefront_auth"):
+            if key == "storefront":
+                return value in ("ok", "unconfigured")
+            if key == "storefront_auth":
                 return value in ("ok", "unconfigured")
             if key == "lease_watchdog":
                 return value in ("running", "paused", "disabled")
@@ -396,26 +408,12 @@ class SystemService:
 
         all_ok = all(_is_healthy(k, v) for k, v in checks.items())
         return {"status": "ok" if all_ok else "degraded", "checks": checks}
+
     async def force_fulfillment_convergence(self) -> dict:
         """Run one production fulfillment convergence cycle."""
         if self._fulfillment_convergence_watchdog is None:
             return {"error": "fulfillment_convergence_watchdog not initialised"}
         return await self._fulfillment_convergence_watchdog.run_cycle()
-
-    async def clear_fulfillment_claims(self) -> dict:
-        """Free every claimed settlement record so the next cycle re-reads it.
-
-        Exists because a claim lease outlives the cycle that took it. A caller who
-        has just made an operation finish cannot observe that by running another
-        cycle — the record is still leased — and waiting out the lease is the only
-        other way. That makes an end-to-end scenario wait on a timer for something
-        it caused, which is precisely what deliberate advance controls exist to
-        avoid. Also useful against a fulfillment an operator believes is stuck.
-        """
-        if self._fulfillment_convergence_watchdog is None:
-            return {"error": "fulfillment_convergence_watchdog not initialised"}
-        cleared = self._fulfillment_convergence_watchdog.clear_all_claims()
-        return {"cleared": int(cleared)}
 
     async def force_check_leases(self) -> dict:
         """Run one lease lifecycle cycle, bypassing the pause gate."""

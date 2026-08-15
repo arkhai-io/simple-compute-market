@@ -34,11 +34,11 @@ class AnsibleJobParams:
 
     vm_host: str
     vm_action: str
+    executor_kind: str
     vm_target: Optional[str] = None
 
     # Domain-neutral executor contract.  ``vm_*`` remains the compatibility
     # alias for the existing VM playbook, mock API, and persisted jobs.
-    executor_kind: str = "vm"
     executor_action: Optional[str] = None
     executor_target: Optional[str] = None
     executor_ref: Optional[dict[str, Any]] = None

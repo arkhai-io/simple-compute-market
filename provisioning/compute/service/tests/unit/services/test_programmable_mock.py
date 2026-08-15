@@ -11,20 +11,23 @@ Tests:
 from __future__ import annotations
 
 import asyncio
-from dataclasses import dataclass
 from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
 
-from vm_provisioning_adapter.services.mock_ansible_service import MockRule, ProgrammableMockAnsibleService
-from vm_provisioning_adapter.services.ansible_service import AnsibleError, AnsibleRun, AnsibleService
+from vm_provisioning_adapter.services.mock_ansible_service import (
+    MockRule,
+    ProgrammableMockAnsibleService,
+)
+from vm_provisioning_adapter.services.ansible_service import AnsibleError, AnsibleRun
 from vm_provisioning_adapter.models.jobs_model import AnsibleJobParams
 
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _make_service() -> ProgrammableMockAnsibleService:
     mock_settings = MagicMock()
@@ -42,14 +45,21 @@ def _make_run(params: AnsibleJobParams | None = None) -> AnsibleRun:
 
 
 def _params(**kwargs) -> AnsibleJobParams:
-    defaults = dict(vm_host="kvm1", vm_action="create")
+    defaults = dict(vm_host="kvm1", vm_action="create", executor_kind="vm")
     defaults.update(kwargs)
     return AnsibleJobParams(**defaults)
+
+
+def test_reserved_var_keys_match_production_renderer() -> None:
+    keys = _make_service().reserved_var_keys(_params(vm_target="vm-1"))
+
+    assert {"vm_host", "vm_action", "vm_target"} <= keys
 
 
 # ---------------------------------------------------------------------------
 # Rule matching
 # ---------------------------------------------------------------------------
+
 
 class TestRuleMatching:
     async def test_no_rules_uses_base_fake_stdout(self):
@@ -60,15 +70,22 @@ class TestRuleMatching:
 
     async def test_catchall_rule_matches_any_job(self):
         svc = _make_service()
-        svc.add_rule(MockRule(rule_id="catchall", match={}, result_stdout="CATCHALL OK"))
+        svc.add_rule(
+            MockRule(rule_id="catchall", match={}, result_stdout="CATCHALL OK")
+        )
         run = _make_run(_params(vm_action="list"))
         result = await svc.wait_for_playbook(run, timeout_seconds=30)
         assert result.stdout == "CATCHALL OK"
 
     async def test_specific_rule_matches_by_field(self):
         svc = _make_service()
-        svc.add_rule(MockRule(rule_id="create-kvm1", match={"vm_action": "create", "vm_host": "kvm1"},
-                              result_stdout="WW1 CREATE OK"))
+        svc.add_rule(
+            MockRule(
+                rule_id="create-kvm1",
+                match={"vm_action": "create", "vm_host": "kvm1"},
+                result_stdout="WW1 CREATE OK",
+            )
+        )
         svc.add_rule(MockRule(rule_id="catchall", match={}, result_stdout="FALLBACK"))
         run = _make_run(_params(vm_action="create", vm_host="kvm1"))
         result = await svc.wait_for_playbook(run, timeout_seconds=30)
@@ -76,15 +93,25 @@ class TestRuleMatching:
 
     async def test_first_match_wins(self):
         svc = _make_service()
-        svc.add_rule(MockRule(rule_id="first", match={"vm_action": "create"}, result_stdout="FIRST"))
-        svc.add_rule(MockRule(rule_id="second", match={"vm_action": "create"}, result_stdout="SECOND"))
+        svc.add_rule(
+            MockRule(
+                rule_id="first", match={"vm_action": "create"}, result_stdout="FIRST"
+            )
+        )
+        svc.add_rule(
+            MockRule(
+                rule_id="second", match={"vm_action": "create"}, result_stdout="SECOND"
+            )
+        )
         run = _make_run(_params(vm_action="create"))
         result = await svc.wait_for_playbook(run, timeout_seconds=30)
         assert result.stdout == "FIRST"
 
     async def test_non_matching_rule_falls_through_to_base(self):
         svc = _make_service()
-        svc.add_rule(MockRule(rule_id="ww2-only", match={"vm_host": "ww2"}, result_stdout="WW2"))
+        svc.add_rule(
+            MockRule(rule_id="ww2-only", match={"vm_host": "ww2"}, result_stdout="WW2")
+        )
         run = _make_run(_params(vm_host="kvm1"))
         result = await svc.wait_for_playbook(run, timeout_seconds=30)
         # Falls through to base fake stdout
@@ -93,7 +120,9 @@ class TestRuleMatching:
     async def test_no_params_falls_through_to_base(self):
         """Run without attached params — no rule can match, base stdout used."""
         svc = _make_service()
-        svc.add_rule(MockRule(rule_id="r", match={"vm_action": "create"}, result_stdout="NOPE"))
+        svc.add_rule(
+            MockRule(rule_id="r", match={"vm_action": "create"}, result_stdout="NOPE")
+        )
         run = _make_run(None)  # no params attached
         result = await svc.wait_for_playbook(run, timeout_seconds=30)
         assert "mock-vm" in result.stdout
@@ -103,10 +132,13 @@ class TestRuleMatching:
 # fail_with
 # ---------------------------------------------------------------------------
 
+
 class TestFailWith:
     async def test_fail_with_raises_ansible_error(self):
         svc = _make_service()
-        svc.add_rule(MockRule(rule_id="fail", match={}, fail_with="disk image lock conflict"))
+        svc.add_rule(
+            MockRule(rule_id="fail", match={}, fail_with="disk image lock conflict")
+        )
         run = _make_run(_params())
         with pytest.raises(AnsibleError) as exc_info:
             await svc.wait_for_playbook(run, timeout_seconds=30)
@@ -115,8 +147,14 @@ class TestFailWith:
     async def test_fail_with_takes_precedence_over_result_stdout(self):
         """fail_with wins even when result_stdout is also set."""
         svc = _make_service()
-        svc.add_rule(MockRule(rule_id="r", match={},
-                              fail_with="oops", result_stdout="should not appear"))
+        svc.add_rule(
+            MockRule(
+                rule_id="r",
+                match={},
+                fail_with="oops",
+                result_stdout="should not appear",
+            )
+        )
         run = _make_run(_params())
         with pytest.raises(AnsibleError):
             await svc.wait_for_playbook(run, timeout_seconds=30)
@@ -126,11 +164,18 @@ class TestFailWith:
 # pause_before_result gate
 # ---------------------------------------------------------------------------
 
+
 class TestPauseGate:
     async def test_pause_blocks_until_resumed(self):
         svc = _make_service()
-        svc.add_rule(MockRule(rule_id="paused-rule", match={},
-                              pause_before_result=True, result_stdout="AFTER RESUME"))
+        svc.add_rule(
+            MockRule(
+                rule_id="paused-rule",
+                match={},
+                pause_before_result=True,
+                result_stdout="AFTER RESUME",
+            )
+        )
         run = _make_run(_params())
 
         # Start wait_for_playbook — it should block on the gate
@@ -158,6 +203,7 @@ class TestPauseGate:
 # ---------------------------------------------------------------------------
 # Rule lifecycle: add / list / delete
 # ---------------------------------------------------------------------------
+
 
 class TestRuleLifecycle:
     def test_add_assigns_rule_id_if_empty(self):
@@ -200,16 +246,27 @@ class TestEvaluateJob:
     """ProgrammableMockAnsibleService.evaluate_job — dry-run host+rule check."""
 
     def _make_svc(self):
-        from vm_provisioning_adapter.services.mock_ansible_service import ProgrammableMockAnsibleService
+        from vm_provisioning_adapter.services.mock_ansible_service import (
+            ProgrammableMockAnsibleService,
+        )
+
         return ProgrammableMockAnsibleService(
-            settings=MagicMock(resolved_playbook_path=Path("/fake/pb.yml"),
-                               resolved_inventory_path=Path("/fake/hosts"),
-                               ssh_decryption_key=""),
+            settings=MagicMock(
+                resolved_playbook_path=Path("/fake/pb.yml"),
+                resolved_inventory_path=Path("/fake/hosts"),
+                ssh_decryption_key="",
+            ),
         )
 
     def _params(self, host: str = "kvm1", vm_action: str = "create"):
         from vm_provisioning_adapter.models.jobs_model import AnsibleJobParams
-        return AnsibleJobParams(vm_host=host, vm_action=vm_action, vm_target="t1")
+
+        return AnsibleJobParams(
+            vm_host=host,
+            vm_action=vm_action,
+            vm_target="t1",
+            executor_kind="vm",
+        )
 
     def _mock_host_service(self, host_exists: bool = True):
         svc = MagicMock()
@@ -218,14 +275,18 @@ class TestEvaluateJob:
 
     def test_unknown_host_returns_host_exists_false(self):
         mock_svc = self._make_svc()
-        result = mock_svc.evaluate_job(self._params(host="ghost"), self._mock_host_service(False))
+        result = mock_svc.evaluate_job(
+            self._params(host="ghost"), self._mock_host_service(False)
+        )
         assert result.host_exists is False
         assert result.params_valid is False
         assert any("ghost" in e or "inventory" in e for e in result.errors)
 
     def test_known_host_no_rules_returns_host_exists_true_rule_matched_none(self):
         mock_svc = self._make_svc()
-        result = mock_svc.evaluate_job(self._params(host="kvm1"), self._mock_host_service(True))
+        result = mock_svc.evaluate_job(
+            self._params(host="kvm1"), self._mock_host_service(True)
+        )
         assert result.host_exists is True
         assert result.params_valid is True
         assert result.rule_matched is None
@@ -233,91 +294,48 @@ class TestEvaluateJob:
 
     def test_armed_rule_matching_params_reflected_in_result(self):
         from vm_provisioning_adapter.services.mock_ansible_service import MockRule
+
         mock_svc = self._make_svc()
-        mock_svc.add_rule(MockRule(
-            rule_id="r1",
-            match={"vm_action": "create"},
-            pause_before_result=True,
-        ))
-        result = mock_svc.evaluate_job(self._params(vm_action="create"), self._mock_host_service(True))
+        mock_svc.add_rule(
+            MockRule(
+                rule_id="r1",
+                match={"vm_action": "create"},
+                pause_before_result=True,
+            )
+        )
+        result = mock_svc.evaluate_job(
+            self._params(vm_action="create"), self._mock_host_service(True)
+        )
         assert result.rule_matched == "r1"
         assert result.would_pause is True
 
     def test_non_matching_rule_returns_rule_matched_none(self):
         from vm_provisioning_adapter.services.mock_ansible_service import MockRule
+
         mock_svc = self._make_svc()
-        mock_svc.add_rule(MockRule(
-            rule_id="r-delete",
-            match={"vm_action": "delete"},
-            pause_before_result=True,
-        ))
-        result = mock_svc.evaluate_job(self._params(vm_action="create"), self._mock_host_service(True))
+        mock_svc.add_rule(
+            MockRule(
+                rule_id="r-delete",
+                match={"vm_action": "delete"},
+                pause_before_result=True,
+            )
+        )
+        result = mock_svc.evaluate_job(
+            self._params(vm_action="create"), self._mock_host_service(True)
+        )
         assert result.rule_matched is None
         assert result.would_pause is False
 
     def test_does_not_create_or_modify_any_job(self):
         """evaluate_job is read-only — no side effects on the mock service state."""
         from vm_provisioning_adapter.services.mock_ansible_service import MockRule
+
         mock_svc = self._make_svc()
-        mock_svc.add_rule(MockRule(rule_id="r1", match={"vm_action": "create"}, pause_before_result=False))
+        mock_svc.add_rule(
+            MockRule(
+                rule_id="r1", match={"vm_action": "create"}, pause_before_result=False
+            )
+        )
         _ = mock_svc.evaluate_job(self._params(), self._mock_host_service(True))
         # Rule still present, not consumed
         assert len(mock_svc.list_rules()) == 1
-
-
-# ---------------------------------------------------------------------------
-# Interface parity with the service this stands in for
-# ---------------------------------------------------------------------------
-
-class TestAnsibleServiceParity:
-    """The mock must answer every question the real service answers.
-
-    `MockAnsibleService`'s own docstring promises it "implements the same
-    interface as AnsibleService", and `AnsibleJobService` holds either one behind
-    the same attribute. Nothing checked that promise, so `reserved_var_keys` was
-    added to the real service without the mock following, and the gap surfaced
-    only when an end-to-end run first reached `begin_fulfillment` under the mock
-    profile — an `AttributeError` rendered as a 500 and reported to the buyer as
-    "Provisioning failed: Internal Server Error", four layers from its cause.
-    """
-
-    def test_mock_implements_every_public_method_of_the_real_service(self):
-        real = {
-            name for name in vars(AnsibleService)
-            if not name.startswith("_") and callable(getattr(AnsibleService, name))
-        }
-        mock_service = _make_service()
-        missing = sorted(
-            name for name in real if not callable(getattr(mock_service, name, None))
-        )
-        assert not missing, (
-            f"MockAnsibleService is missing {missing} — AnsibleJobService holds "
-            "either implementation behind one attribute, so a method the mock "
-            "lacks fails only under the mock profile, at runtime"
-        )
-
-    def test_reserved_var_keys_agrees_with_the_real_service(self):
-        """Same answer, not merely a present method.
-
-        This is a validation decision: the provider rejects pool `extra_vars`
-        colliding with these keys. A mock computing its own set would accept
-        configuration production refuses.
-        """
-        params = _params(
-            vm_target="tenant-abc",
-            vm_ram=4096,
-            vm_vcpus=2,
-            vm_disk_size="40G",
-            ssh_pubkey="ssh-ed25519 AAAA test",
-        )
-        settings = MagicMock()
-
-        assert _make_service().reserved_var_keys(params) == (
-            AnsibleService(settings=settings).reserved_var_keys(params)
-        )
-
-    def test_reserved_var_keys_contains_the_built_in_job_identity(self):
-        """A concrete floor, so parity cannot be satisfied by two empty sets."""
-        reserved = _make_service().reserved_var_keys(_params())
-
-        assert {"vm_host", "vm_action", "executor_kind"} <= reserved

@@ -18,6 +18,20 @@ def test_console_entry_point_is_installed() -> None:
     assert matching[0].value == "arkhai_bare_metal_storefront.cli:app"
 
 
+def test_storefront_contribution_entry_point_is_installed() -> None:
+    matching = [
+        entry_point
+        for entry_point in entry_points(group="market.storefront_contributions")
+        if entry_point.name == "bare_metal"
+    ]
+
+    assert len(matching) == 1
+    assert matching[0].value == (
+        "arkhai_bare_metal_storefront.contribution:"
+        "BARE_METAL_STOREFRONT_CONTRIBUTION"
+    )
+
+
 def test_version_command_uses_distribution_metadata() -> None:
     result = CliRunner().invoke(app, ["--version"])
 
@@ -46,8 +60,10 @@ def test_serve_command_delegates_process_options(monkeypatch) -> None:
     )
 
     assert result.exit_code == 0
-    assert calls == [{
-        "host": "127.0.0.1",
-        "port": 8123,
-        "root_path": "/seller/bare-metal",
-    }]
+    assert calls == [
+        {
+            "host": "127.0.0.1",
+            "port": 8123,
+            "root_path": "/seller/bare-metal",
+        }
+    ]

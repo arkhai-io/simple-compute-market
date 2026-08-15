@@ -27,6 +27,7 @@ from models.keys_model import (
     VerifyRequest,
 )
 from services.keys_service import (
+    FULFILLMENT_CONFLICT,
     INSUFFICIENT_CREDITS,
     KEY_NOT_FOUND,
     KEY_NOT_OWNED,
@@ -45,6 +46,7 @@ _ISSUANCE_STATUS = {
     KEY_NOT_OWNED: 403,
     KEY_REVOKED: 409,
     QUOTA_EXHAUSTED: 409,
+    FULFILLMENT_CONFLICT: 409,
 }
 
 
@@ -64,36 +66,55 @@ def make_keys_router(get_service: Callable[[], KeysService]) -> APIRouter:
         body: IssuanceRequest,
         service: KeysService = Depends(get_service),
     ) -> IssuanceResponse:
-        """Idempotent on ``escrow_uid`` — safe under storefront retry."""
+        """Commit or replay one immutable fulfillment grant."""
         try:
             result = service.issue(
-                escrow_uid=body.escrow_uid,
+                fulfillment_id=body.fulfillment_id,
+                obligation_ref=body.obligation_ref,
+                mechanism=body.mechanism,
+                owner_scheme=body.owner.scheme.value,
+                owner_id=body.owner.identifier,
+                service=body.service,
+                resource_id=body.resource_id,
                 quantity=body.quantity,
                 key_mode=body.key.mode,
                 key_id=body.key.key_id,
-                buyer_scheme=body.buyer.scheme if body.buyer else None,
-                buyer_id=body.buyer.id if body.buyer else None,
-                owner_scheme=body.owner.scheme if body.owner else None,
-                owner_id=body.owner.id if body.owner else None,
+                request_digest=body.request_digest,
                 capacity_reservation_id=body.capacity_reservation_id,
-                resource_id=body.resource_id,
             )
         except IssuanceError as exc:
             logger.info(
-                "[ISSUANCE] refused escrow=%s: %s (%s)",
-                body.escrow_uid, exc.reason, exc.message,
+                "[ISSUANCE] refused fulfillment=%s: %s",
+                body.fulfillment_id,
+                exc.reason,
             )
             return JSONResponse(
                 status_code=_ISSUANCE_STATUS.get(exc.reason, 409),
                 content={"error": exc.reason, "detail": exc.message},
             )
         except ValueError as exc:
-            raise HTTPException(status_code=422, detail=str(exc))
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
         logger.info(
-            "[ISSUANCE] escrow=%s key=%s quantity=%d already_issued=%s",
-            body.escrow_uid, result["key_id"], body.quantity,
+            "[ISSUANCE] fulfillment=%s key=%s quantity=%d replay=%s",
+            body.fulfillment_id,
+            result["key_id"],
+            body.quantity,
             result["already_issued"],
         )
+        return IssuanceResponse(**result)
+
+    @router.get(
+        "/issuance/{fulfillment_id}",
+        response_model=IssuanceResponse,
+        summary="Resolve a committed grant without bearer material",
+    )
+    def get_issuance(
+        fulfillment_id: str,
+        service: KeysService = Depends(get_service),
+    ) -> IssuanceResponse:
+        result = service.get_credit_issuance(fulfillment_id)
+        if result is None:
+            raise HTTPException(status_code=404, detail="issuance not found")
         return IssuanceResponse(**result)
 
     # ------------------------------------------------------------------
@@ -211,7 +232,9 @@ def make_keys_router(get_service: Callable[[], KeysService]) -> APIRouter:
     ) -> dict:
         try:
             key = service.adjust(
-                key_id=key_id, delta=body.delta, reason=body.reason,
+                key_id=key_id,
+                delta=body.delta,
+                reason=body.reason,
             )
         except ValueError as exc:
             raise HTTPException(status_code=409, detail=str(exc))

@@ -16,11 +16,8 @@ objects are registered by domain packages (the VM domain registers
 
 from __future__ import annotations
 
-from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Any, Optional
-
-from market_policy.catalogue import CatalogueBuilder, CatalogueItemTypeError
+from typing import Any, Callable, Optional, TypeAlias
 
 
 @dataclass(frozen=True)
@@ -45,19 +42,49 @@ class PolicyParam:
 
 
 @dataclass(frozen=True)
+class SettlementPreferenceCandidate:
+    """Immutable policy view of one already-constrained settlement choice."""
+
+    identity: str
+    position: int
+    chain_name: str
+    escrow_address: str
+    token_address: str | None
+    unit_price: int | None
+
+
+@dataclass(frozen=True)
+class SettlementPreferenceContext:
+    """Immutable listing context shared by every candidate in one decision."""
+
+    listing_id: str | None
+    chain_name: str
+    token_contract_filter: str | None
+
+
+SettlementPreferenceOutput: TypeAlias = str | tuple[str, ...] | None
+SettlementPreferenceHook: TypeAlias = Callable[
+    [tuple[SettlementPreferenceCandidate, ...], SettlementPreferenceContext],
+    SettlementPreferenceOutput,
+]
+
+
+@dataclass(frozen=True)
 class BuyerPolicy:
     """A named buyer negotiation policy.
 
     ``middlewares`` is the rest of the chain after the pinned-shape
     guard the loader prepends. ``compatible`` judges one listing
     ``accepted_escrows`` entry — tuple selection offers the policy only
-    formats it claims. ``derive_prices`` turns raw CLI parameter values
-    plus the candidate listings into the per-hour (initial, max) pair
-    in base units, or ``(None, None)`` when underivable or declined;
-    policies with no scalar notion may leave it None. It receives the
-    caller's canonical interactivity disposition as ``interactive=``
-    (core computes it from --yes + TTY; a policy never re-derives it
-    from the environment) and may prompt only when it is True.
+    formats it claims. ``prefer_settlement`` may select or rank only the
+    immutable, already-constrained candidates it receives; ``None`` preserves
+    balance and list-order fallback. ``derive_prices`` turns raw CLI parameter
+    values plus the candidate listings into the per-hour (initial, max) pair
+    in base units, or ``(None, None)`` when underivable or declined; policies
+    with no scalar notion may leave it None. It receives the caller's
+    canonical interactivity disposition as ``interactive=`` (core computes it
+    from --yes + TTY; a policy never re-derives it from the environment) and
+    may prompt only when it is True.
     """
 
     name: str
@@ -66,34 +93,35 @@ class BuyerPolicy:
     compatible: Callable[[dict[str, Any]], bool] = field(
         default=lambda entry: True,
     )
-    derive_prices: Callable[..., tuple[int | None, int | None]] | None = None
+    prefer_settlement: SettlementPreferenceHook | None = None
+    derive_prices: Optional[Callable[..., tuple[Optional[int], Optional[int]]]] = None
 
+
+_REGISTRY: dict[str, BuyerPolicy] = {}
 
 DEFAULT_BUYER_POLICY = "listed_price"
 
-#: Names a buyer policy catalogue in errors.
-BUYER_POLICY_KIND = "buyer policy"
+
+def register_buyer_policy(policy: BuyerPolicy) -> BuyerPolicy:
+    """Register a policy under its name (last registration wins)."""
+    _REGISTRY[policy.name] = policy
+    return policy
 
 
-def require_buyer_policy(name: str, item: object) -> None:
-    """Reject an offering that is not a :class:`BuyerPolicy`."""
-    if not isinstance(item, BuyerPolicy):
-        raise CatalogueItemTypeError(
-            f"{name!r} is {type(item).__name__}, not a BuyerPolicy"
-        )
+def get_buyer_policy(name: str) -> BuyerPolicy:
+    try:
+        return _REGISTRY[name]
+    except KeyError:
+        known = ", ".join(sorted(_REGISTRY)) or "<none registered>"
+        raise KeyError(
+            f"Unknown buyer policy {name!r}. Registered: {known}. "
+            f"Policies register on domain-package import — is the "
+            f"domain plugin installed?"
+        ) from None
 
 
-def buyer_policy_catalogue_builder() -> CatalogueBuilder[BuyerPolicy]:
-    """A builder that validates buyer policies and names them in errors.
-
-    Replaces a module-level registry whose registration was last-write-wins and
-    whose lookup failure told the reader to check whether a domain plugin was
-    installed — a domain reference inside the generic policy layer, and a guess
-    at the cause. A composed catalogue names what it was composed with.
-    """
-    return CatalogueBuilder[BuyerPolicy](
-        kind=BUYER_POLICY_KIND, validate=require_buyer_policy
-    )
+def buyer_policy_names() -> list[str]:
+    return sorted(_REGISTRY)
 
 
 def inject_policy_cli_params(fn: Any, policy: BuyerPolicy) -> Any:

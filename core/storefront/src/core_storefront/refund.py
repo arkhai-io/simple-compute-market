@@ -8,42 +8,49 @@ and returns either:
   - `("ok", {<transfer args>})` — safe to hand to transfer_erc20; or
   - `("error", status_code, {"error": "..."})` — caller should respond accordingly.
 
-Strict address-only wire format: ``payload["token"]`` must be a 0x
-address; ``payload["amount"]`` is an integer in base units. No symbol
-resolution and no human-decimal scaling happens here — the CLI / client
-that built the payload took care of both.
+Strict mechanism wire format: ``payload["buyer_principal"]`` is the exact
+authenticated marketplace buyer, ``payload["buyer_evm_address"]`` is the
+explicit EVM transfer destination, ``payload["token"]`` is a 0x address, and
+``payload["amount"]`` is an integer in base units. No identity or address is
+inferred from durable state.
 """
 
 from __future__ import annotations
 
 import json
 from typing import Any
+from market_identity import Identity
+
 
 
 ValidationResult = tuple  # ("ok", dict) | ("error", int, dict)
 
 
-def _validate_body(payload: dict, *, fallback_buyer: str | None = None) -> tuple[str, str]:
-    """Raise ValueError on bad body; otherwise return (listing_id, buyer_address).
-
-    ``fallback_buyer`` is the buyer address recorded on the listing — used
-    when the request body omits ``buyer_address``.
-    """
+def _validate_body(payload: dict[str, Any]) -> tuple[str, Identity, str]:
+    """Return the listing, exact buyer principal, and explicit EVM destination."""
     listing_id = payload.get("listing_id")
     if not isinstance(listing_id, str) or not listing_id.strip():
         raise ValueError("Request must include non-empty listing_id")
 
-    buyer_address = payload.get("buyer_address") or fallback_buyer
-    if not isinstance(buyer_address, str) or not buyer_address.strip():
-        raise ValueError(
-            "Request must include 'buyer_address' (0x-prefixed hex), or the "
-            "listing must have a recorded buyer."
-        )
-    buyer_address = buyer_address.strip()
-    if not (buyer_address.startswith("0x") and len(buyer_address) == 42):
-        raise ValueError("'buyer_address' must be a 0x-prefixed 20-byte hex address")
+    try:
+        buyer_principal = Identity.model_validate(payload.get("buyer_principal"))
+    except Exception as exc:
+        raise ValueError("Request must include a canonical buyer_principal") from exc
 
-    return listing_id.strip(), buyer_address
+    buyer_address = payload.get("buyer_evm_address")
+    if not isinstance(buyer_address, str):
+        raise ValueError("Request must include explicit buyer_evm_address")
+    buyer_address = buyer_address.strip()
+    if (
+        not buyer_address.startswith("0x")
+        or len(buyer_address) != 42
+        or any(char not in "0123456789abcdefABCDEF" for char in buyer_address[2:])
+    ):
+        raise ValueError(
+            "'buyer_evm_address' must be a 0x-prefixed 20-byte hex address"
+        )
+
+    return listing_id.strip(), buyer_principal, buyer_address
 
 
 def derive_refund_params(
@@ -66,16 +73,20 @@ def derive_refund_params(
 
     Returns ("ok", {params dict}) or ("error", status_code, body).
 
-    Params dict contains: listing_id, buyer_address, token_address,
-    amount_raw, token_meta, decimals, escrow_uid.
-
-    Raises ValueError for inputs the caller should surface as HTTP 400.
+    Params include the exact public ``buyer_principal`` and explicit
+    mechanism-only ``buyer_address`` transfer destination.
     """
-    fallback_buyer = (order or {}).get("buyer")
-    listing_id, buyer_address = _validate_body(payload, fallback_buyer=fallback_buyer)
+    listing_id, buyer_principal, buyer_address = _validate_body(payload)
 
     if not order:
         return ("error", 404, {"error": f"Listing {listing_id} not found on this agent"})
+
+    try:
+        recorded_buyer = Identity.model_validate(order.get("buyer_principal"))
+    except Exception as exc:
+        raise ValueError("Order is missing its canonical buyer_principal") from exc
+    if buyer_principal != recorded_buyer:
+        raise ValueError("buyer_principal does not match the order buyer")
 
     if order.get("status") == "refunded":
         return (
@@ -185,6 +196,7 @@ def derive_refund_params(
         "ok",
         {
             "listing_id": listing_id,
+            "buyer_principal": buyer_principal.model_dump(mode="json"),
             "buyer_address": buyer_address,
             "token_address": token_address,
             "token_meta": token_meta,

@@ -1,20 +1,8 @@
-"""Credits-service tables: keys, credit grants, and the consumption log.
+"""Credits authority persistence for keys, immutable grants, and consumption.
 
-The schema is the credit model from ARCHITECTURE.md, "API-credits market
-domain — Decisions": a key carries a balance
-(grants − consumption, maintained transactionally as a column for O(1)
-consume checks), grants are one-per-deal (``escrow_uid`` UNIQUE makes
-issuance idempotent under job retry; NULL for admin adjustments, which
-SQLite's UNIQUE treats as distinct), and consumption is an append-only
-log with per-key idempotency so middleware batch flushes never
-double-count.
-
-Bearer secrets are hashed at rest (`secret_hash`); ``owner_scheme`` /
-``owner_id`` is the scheme-tagged ownership claim ("wallet" in v1) that
-the negotiation guards consult and issuance re-checks authoritatively.
-
-The site-authority quota ledger tables ride ``market_site``'s own
-metadata — ``run_migrations`` creates both.
+Bearer secrets are hashed on key rows. Issuance grants snapshot every
+mutation-relevant public input under a unique fulfillment identity and digest;
+operator adjustments remain distinguishable by a null fulfillment identity.
 """
 
 from __future__ import annotations
@@ -43,13 +31,16 @@ class ApiKey(Base):
 
     key_id = Column(String, primary_key=True)
     secret_hash = Column(String, nullable=False)
-    owner_scheme = Column(String, nullable=True)   # "wallet" | "ed25519" | None (open top-up)
+    owner_scheme = Column(String, nullable=True)  # "eip191" | "ed25519" | None
     owner_id = Column(String, nullable=True)
     status = Column(String, nullable=False, default="active")  # active | revoked
     balance = Column(Integer, nullable=False, default=0)
     created_at = Column(DateTime(timezone=True), nullable=False, default=_utcnow)
     updated_at = Column(
-        DateTime(timezone=True), nullable=False, default=_utcnow, onupdate=_utcnow,
+        DateTime(timezone=True),
+        nullable=False,
+        default=_utcnow,
+        onupdate=_utcnow,
     )
 
 
@@ -58,9 +49,23 @@ class CreditGrant(Base):
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     key_id = Column(String, ForeignKey("api_keys.key_id"), nullable=False, index=True)
+    fulfillment_id = Column(String, nullable=True, unique=True)
+    obligation_ref = Column(String, nullable=True)
+    mechanism = Column(String, nullable=True)
+    service = Column(String, nullable=True)
+    resource_id = Column(String, nullable=True)
+    key_mode = Column(String, nullable=True)
+    key_target_id = Column(String, nullable=True)
+    owner_scheme = Column(String, nullable=True)
+    owner_id = Column(String, nullable=True)
+    request_digest = Column(String, nullable=True)
+    capacity_reservation_id = Column(String, nullable=True)
+    result_balance = Column(Integer, nullable=True)
     escrow_uid = Column(String, nullable=True, unique=True)
     quantity = Column(Integer, nullable=False)
-    reason = Column(String, nullable=False, default="issuance")  # issuance | admin_adjustment
+    reason = Column(
+        String, nullable=False, default="issuance"
+    )  # issuance | admin_adjustment
     granted_at = Column(DateTime(timezone=True), nullable=False, default=_utcnow)
 
 

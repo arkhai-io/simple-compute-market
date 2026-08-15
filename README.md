@@ -42,11 +42,14 @@ Pick the role you're standing up:
 A typical buy, once `buyer.toml` is in place:
 
 ```bash
-market listing list --gpu-model H200
-market buy --gpu-model H200 --duration-hours 1
+market listing list --resource 'gpu_model=H200'
+market buy --resource 'gpu_model=H200' --duration-hours 1
 ```
 
-The CLI handles negotiation rounds, creates the on-chain escrow, polls for provisioning, and prints the connection + tenant credentials when the VM is ready.
+The CLI compiles the resource query against the registry's advertised schema,
+selects a compatible advertised settlement option, negotiates, settles through
+the accepted mechanism, and prints the connection and tenant credentials when
+the VM is ready.
 
 Validation and issue-discovery docs:
 

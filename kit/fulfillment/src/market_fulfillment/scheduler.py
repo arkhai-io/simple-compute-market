@@ -19,7 +19,10 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Any
 
-from market_resource_pools import ResourcePoolService
+from market_resource_pools import (
+    ResourcePoolService,
+    pool_delivers_offering_mode,
+)
 from market_site import resource_satisfies_requirement
 from market_site.ledger import CapacityLedgerService
 
@@ -44,10 +47,14 @@ class MissingResourceKindError(SettlementRequestMismatchError):
     scheduler's configured ``default_resource_kind``."""
 
 
+class MissingExecutorKindError(SettlementRequestMismatchError):
+    """The reservation does not carry its explicitly requested offering mode."""
+
 def _resource_from_record(record: Any) -> SettlementResource:
     return SettlementResource(
         settlement_resource_id=record.settlement_resource_id,
         pool_id=record.pool_id,
+        executor_kind=record.scheduling_requirements.get("executor_kind"),
         resource_kind=record.scheduling_requirements.get("resource_kind"),
         provider=record.provider,
         attributes=dict(record.resource_attributes or {}),
@@ -92,7 +99,16 @@ class PhysicalSettlementScheduler:
             )
             requirement = self._requirement(reservation, request)
             existing = tx.get_assignment(request.capacity_reservation_id)
+            enabled_pools = {pool.id: pool for pool in tx.list_enabled_pools()}
             if existing is not None:
+                pool = enabled_pools.get(existing.pool_id)
+                if pool is None or not pool_delivers_offering_mode(
+                    pool.policy_tags, requirement.executor_kind
+                ):
+                    raise NoEligibleSettlementResourceError(
+                        f"pool {existing.pool_id!r} does not declare offering mode "
+                        f"{requirement.executor_kind!r}"
+                    )
                 record = tx.schedule_assignment(
                     capacity_reservation_id=request.capacity_reservation_id,
                     market=request.market, scheduling_requirements=requirement,
@@ -123,20 +139,17 @@ class PhysicalSettlementScheduler:
                     requirement.resource_kind, last_pool_id=updated_cursor.last_pool_id,
                     last_resource_by_pool=dict(updated_cursor.last_resource_by_pool),
                 )
-            # Unconditional: the ledger's own assignment is idempotent and takes a
-            # cheap path when the selected resource is the one the reservation is
-            # already debited against — it records the marker and moves no debit,
-            # emits no capacity event. Skipping the call in that case left
-            # `settlement_resource_id` NULL after a scheduling decision that did
-            # happen, so the reservation and the settlement record disagreed about
-            # a fact both are supposed to carry.
-            tx.rebind_capacity(
-                capacity_reservation_id=request.capacity_reservation_id,
-                settlement_resource_id=selected.resource_id,
-            )
+            if selected.resource_id != tx.backing_resource_id(request.capacity_reservation_id):
+                tx.rebind_capacity(
+                    capacity_reservation_id=request.capacity_reservation_id,
+                    settlement_resource_id=selected.resource_id,
+                )
             resource = SettlementResource(
-                settlement_resource_id=selected.resource_id, pool_id=selected.pool_id,
-                resource_kind=selected.resource_kind, provider=selected.provider,
+                settlement_resource_id=selected.resource_id,
+                pool_id=selected.pool_id,
+                executor_kind=requirement.executor_kind,
+                resource_kind=selected.resource_kind,
+                provider=selected.provider,
                 attributes=selected.attributes,
             )
             record = tx.schedule_assignment(
@@ -175,6 +188,11 @@ class PhysicalSettlementScheduler:
         self, reservation: dict[str, Any], request: PhysicalSettlementRequest
     ) -> SettlementRequirement:
         deal_ref = reservation.get("deal_ref") or {}
+        executor_kind = reservation.get("executor_kind")
+        if not executor_kind:
+            raise MissingExecutorKindError(
+                "capacity reservation has no explicit executor_kind"
+            )
         resource_kind = (
             deal_ref.get("resource_kind")
             or request.requirements.get("resource_kind")
@@ -221,6 +239,7 @@ class PhysicalSettlementScheduler:
             dimensions = reservation_dimensions
         return SettlementRequirement(
             resource_kind=resource_kind,
+            executor_kind=executor_kind,
             dimensions=dimensions,
             attributes=attributes,
         )
@@ -238,6 +257,10 @@ class PhysicalSettlementScheduler:
             pool_id = payload.pool_id
             pool = pools.get(pool_id)
             if pool is None:
+                continue
+            if not pool_delivers_offering_mode(
+                pool.policy_tags, requirement.executor_kind
+            ):
                 continue
             if not resource_satisfies_requirement(
                 resource=payload,

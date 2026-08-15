@@ -13,14 +13,21 @@ init: ## Install dependencies using uv
 
 reinit: ## Force-reinstall all internal wheel dependencies. Run make dist-* from the monorepo root first.
 	uv sync --dev --find-links $(DIST_DIR) \
+		--reinstall-package arkhai-apicredits-storefront \
 		--upgrade-package arkhai-core                 --reinstall-package arkhai-core \
 		--upgrade-package arkhai-apicredits-domain    --reinstall-package arkhai-apicredits-domain \
 		--upgrade-package arkhai-core-storefront      --reinstall-package arkhai-core-storefront \
 		--upgrade-package arkhai-core-registry-client --reinstall-package arkhai-core-registry-client \
+		--upgrade-package arkhai-kit-capacity-publication --reinstall-package arkhai-kit-capacity-publication \
 		--upgrade-package arkhai-kit-alkahest         --reinstall-package arkhai-kit-alkahest \
 		--upgrade-package arkhai-kit-config           --reinstall-package arkhai-kit-config \
 		--upgrade-package arkhai-kit-identity         --reinstall-package arkhai-kit-identity \
 		--upgrade-package arkhai-kit-policy           --reinstall-package arkhai-kit-policy \
+		--upgrade-package arkhai-kit-settlement-runtime --reinstall-package arkhai-kit-settlement-runtime \
+		--upgrade-package arkhai-kit-hosted-settlement --reinstall-package arkhai-kit-hosted-settlement \
+		--upgrade-package arkhai-hosted-settlement-client --reinstall-package arkhai-hosted-settlement-client \
+		--upgrade-package arkhai-kit-storefront      --reinstall-package arkhai-kit-storefront \
+		--upgrade-package arkhai-kit-negotiation-runtime --reinstall-package arkhai-kit-negotiation-runtime \
 		--upgrade-package arkhai-kit-site-client      --reinstall-package arkhai-kit-site-client
 
 test: reinit ## Run the test suite

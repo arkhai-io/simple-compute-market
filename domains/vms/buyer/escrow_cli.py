@@ -1,19 +1,14 @@
-"""`market escrow` — buyer-side escrow lifecycle commands.
+"""Raw Alkahest escrow inspection and mutation commands.
 
-Three verbs:
-  create   — stage 3 only: alkahest approve + escrow.create on-chain
-  reclaim  — post-expiration reclaim_expired via the matching escrow codec
-  show     — read-only EVM inspection via the matching escrow codec
-
-Refunds (post-claim manual return of tokens by the seller) live under
-`market-storefront escrow refund`. The full create+submit+poll
-composite lives at `market settle`.
+``market settlement alkahest escrow`` exposes create, reclaim, and show for
+operator-directed on-chain work. The normal buyer lifecycle remains
+``market buy`` / ``market settle`` and derives chain, token, decimals, and
+obligation identity from accepted state.
 """
 
 from __future__ import annotations
 
 import asyncio
-from pathlib import Path
 from types import SimpleNamespace
 from typing import Optional
 
@@ -33,7 +28,14 @@ def _resolve_escrow_uid_from_run(run_id: str) -> Optional[str]:
     escrow_uid logged by the buy_orchestrator."""
     from .run_log import read_run
 
-    events = read_run(run_id)
+    from .common import resolve_recovery_buyer_identity
+
+    identity = resolve_recovery_buyer_identity(run_id)
+    events = read_run(
+        run_id,
+        signer=identity.signer,
+        profile_id=identity.profile_id,
+    )
     if not events:
         return None
     for ev in reversed(events):
@@ -58,8 +60,10 @@ def _resolve_escrow_context_from_run(
         return None, None, None
     try:
         from .deal_helpers import load_deal_context
+        from .common import resolve_recovery_buyer_identity
 
-        deal = load_deal_context(run_id)
+        identity = resolve_recovery_buyer_identity(run_id)
+        deal = load_deal_context(run_id, signer=identity.signer)
     except Exception:
         return _resolve_escrow_uid_from_run(run_id), None, None
 
@@ -68,7 +72,8 @@ def _resolve_escrow_context_from_run(
     if isinstance(deal.accepted_escrow_terms, list) and deal.accepted_escrow_terms:
         terms = next(
             (
-                item for item in deal.accepted_escrow_terms
+                item
+                for item in deal.accepted_escrow_terms
                 if isinstance(item, dict) and item.get("maker") == "buyer"
             ),
             deal.accepted_escrow_terms[0],
@@ -154,7 +159,8 @@ async def _do_reclaim(
     prewarm_alkahest_address_config_cache(addr_config_path)
     alkahest_network = get_alkahest_network(chain_name)
     address_config = resolve_alkahest_address_config(
-        alkahest_network, config_path=addr_config_path,
+        alkahest_network,
+        config_path=addr_config_path,
     )
     client = AlkahestClient(
         private_key=private_key,
@@ -174,21 +180,26 @@ async def _do_reclaim(
 @escrow_app.command("reclaim")
 def reclaim_cmd(
     escrow_uid: Optional[str] = typer.Option(
-        None, "--escrow-uid", "-u",
+        None,
+        "--escrow-uid",
+        "-u",
         help="0x-prefixed escrow UID to reclaim. If omitted, --run is required.",
     ),
     run_id: Optional[str] = typer.Option(
-        None, "--run", "-r",
-        help="Buyer run id to look up the escrow_uid from "
-             "(see `market logs runs`).",
+        None,
+        "--run",
+        "-r",
+        help="Buyer run id to look up the escrow_uid from (see `market logs runs`).",
     ),
     chain_name: Optional[str] = typer.Option(
-        None, "--chain",
+        None,
+        "--chain",
         help="Which [chains.<name>] entry to reclaim on. Required when "
-             "more than one chain is configured.",
+        "more than one chain is configured.",
     ),
     private_key: Optional[str] = typer.Option(
-        None, "--buyer-priv-key",
+        None,
+        "--buyer-priv-key",
         help="Override buyer private key (default: wallet.private_key).",
     ),
 ) -> None:
@@ -205,7 +216,8 @@ def reclaim_cmd(
     if not escrow_uid and not run_id:
         typer.secho(
             "Pass --escrow-uid <uid> or --run <run_id>.",
-            err=True, fg=typer.colors.RED,
+            err=True,
+            fg=typer.colors.RED,
         )
         raise typer.Exit(2)
 
@@ -218,7 +230,8 @@ def reclaim_cmd(
         if not escrow_uid:
             typer.secho(
                 f"No escrow_uid found in run {run_id}. Pass --escrow-uid explicitly.",
-                err=True, fg=typer.colors.RED,
+                err=True,
+                fg=typer.colors.RED,
             )
             raise typer.Exit(3)
 
@@ -226,13 +239,17 @@ def reclaim_cmd(
     if not pk:
         typer.secho(
             "Missing wallet.private_key (or --buyer-priv-key).",
-            err=True, fg=typer.colors.RED,
+            err=True,
+            fg=typer.colors.RED,
         )
         raise typer.Exit(2)
 
     from .common import select_chain_for_listing
+
     chain_cfg = select_chain_for_listing(
-        listing=None, override=chain_name or run_chain_name, yes=False,
+        listing=None,
+        override=chain_name or run_chain_name,
+        yes=False,
     )
 
     header = Table.grid(padding=(0, 2))
@@ -243,26 +260,36 @@ def reclaim_cmd(
     if escrow_address:
         header.add_row("Escrow contract", escrow_address)
     header.add_row("RPC", chain_cfg.rpc_url)
-    console.print(Panel(header, title="market escrow reclaim", border_style="cyan"))
+    console.print(
+        Panel(
+            header,
+            title="market settlement alkahest escrow reclaim",
+            border_style="cyan",
+        )
+    )
 
     try:
-        escrow_kind, receipt = asyncio.run(_do_reclaim(
-            private_key=pk,
-            rpc_url=chain_cfg.rpc_url,
-            chain_name=chain_cfg.name,
-            addr_config_path=chain_cfg.alkahest_address_config_path,
-            escrow_uid=escrow_uid,
-            escrow_address=escrow_address,
-        ))
+        escrow_kind, receipt = asyncio.run(
+            _do_reclaim(
+                private_key=pk,
+                rpc_url=chain_cfg.rpc_url,
+                chain_name=chain_cfg.name,
+                addr_config_path=chain_cfg.alkahest_address_config_path,
+                escrow_uid=escrow_uid,
+                escrow_address=escrow_address,
+            )
+        )
     except Exception as exc:
         typer.secho(
             f"reclaim_expired failed on-chain: {exc}",
-            err=True, fg=typer.colors.RED,
+            err=True,
+            fg=typer.colors.RED,
         )
         typer.secho(
             "Most common cause: escrow expiration hasn't passed yet, "
             "or a fulfillment was already posted.",
-            err=True, fg=typer.colors.YELLOW,
+            err=True,
+            fg=typer.colors.YELLOW,
         )
         raise typer.Exit(1) from exc
 
@@ -278,42 +305,51 @@ def reclaim_cmd(
 @escrow_app.command("create")
 def create_cmd(
     run_id: str = typer.Option(
-        ..., "--run", "-r",
-        help="Buyer run-id from a prior `market negotiate` "
-             "(see `market logs runs`).",
+        ...,
+        "--run",
+        "-r",
+        help="Buyer run-id from a prior `market negotiate` (see `market logs runs`).",
     ),
     duration_hours: Optional[float] = typer.Option(
-        None, "--duration-hours", "-t",
+        None,
+        "--duration-hours",
+        "-t",
         help="Override the lease duration the escrow funds (hours, fractional ok). "
-             "Default: from the run-log if recorded.",
+        "Default: from the run-log if recorded.",
     ),
     expiration_seconds: int = typer.Option(
-        3600, "--expiration",
+        3600,
+        "--expiration",
         help="Escrow deadline (seconds from now) for the reclaim_expired "
-             "escape hatch. Default 1h.",
+        "escape hatch. Default 1h.",
     ),
     token_contract: Optional[str] = typer.Option(
-        None, "--token-contract",
+        None,
+        "--token-contract",
         help="Legacy ERC-20 token override for old run-logs without an "
-             "accepted escrow proposal. Current run-logs create from the "
-             "seller-accepted proposal.",
+        "accepted escrow proposal. Current run-logs create from the "
+        "seller-accepted proposal.",
     ),
     token_decimals: Optional[int] = typer.Option(
-        None, "--token-decimals",
+        None,
+        "--token-decimals",
         help="Legacy ERC-20 decimals override for old run-logs without an "
-             "accepted escrow proposal.",
+        "accepted escrow proposal.",
     ),
     chain_name_flag: Optional[str] = typer.Option(
-        None, "--chain",
+        None,
+        "--chain",
         help="Which [chains.<name>] entry to create the escrow on. Required "
-             "when more than one chain is configured.",
+        "when more than one chain is configured.",
     ),
     private_key: Optional[str] = typer.Option(
-        None, "--buyer-priv-key",
+        None,
+        "--buyer-priv-key",
         help="Override buyer private key (default: wallet.private_key).",
     ),
     buyer_address: Optional[str] = typer.Option(
-        None, "--buyer-address",
+        None,
+        "--buyer-address",
         help="Override buyer wallet address (default: derived from wallet.private_key).",
     ),
 ) -> None:
@@ -329,17 +365,22 @@ def create_cmd(
 
     from .deal_helpers import load_deal_context, open_run_log, resolve_chain_settings
     from .buy_orchestrator import AgreedTerms
-    from core_buyer.escrow_client import (
+    from .escrow_client import (
         make_buyer_payment_escrow_terms_fn,
         make_create_escrow_fn,
     )
-    from .common import chain_by_name, select_chain_for_listing
+    from .common import (
+        chain_by_name,
+        resolve_recovery_buyer_identity,
+        select_chain_for_listing,
+    )
 
-    deal = load_deal_context(run_id)
+    identity = resolve_recovery_buyer_identity(run_id)
+    signer = identity.signer
+    deal = load_deal_context(run_id, signer=signer)
     if deal.escrow_uid:
         typer.secho(
-            f"Run-log already records escrow_uid={deal.escrow_uid}. "
-            f"Nothing to do.",
+            f"Run-log already records escrow_uid={deal.escrow_uid}. Nothing to do.",
             fg=typer.colors.YELLOW,
         )
         return
@@ -363,21 +404,30 @@ def create_cmd(
         raw_chain = deal.accepted_escrow_proposal.get("chain_name")
         if isinstance(raw_chain, str) and raw_chain:
             proposal_chain = raw_chain
-    if deal.accepted_escrow_terms is not None or deal.accepted_escrow_proposal is not None:
+    if (
+        deal.accepted_escrow_terms is not None
+        or deal.accepted_escrow_proposal is not None
+    ):
         if not (chain_name_flag or proposal_chain):
             typer.secho(
                 "Accepted escrow proposal in run-log has no chain_name; pass --chain.",
-                err=True, fg=typer.colors.RED,
+                err=True,
+                fg=typer.colors.RED,
             )
             raise typer.Exit(2)
         chain_cfg = chain_by_name(chain_name_flag or proposal_chain)
         from .common import resolve_buyer_wallet
+
         _, resolved_private_key = resolve_buyer_wallet(
             override_addr=buyer_address,
             override_pk=private_key,
         )
         if not resolved_private_key:
-            typer.secho("Missing required config: wallet.private_key", err=True, fg=typer.colors.RED)
+            typer.secho(
+                "Missing required config: wallet.private_key",
+                err=True,
+                fg=typer.colors.RED,
+            )
             raise typer.Exit(2)
         chain = SimpleNamespace(
             buyer_private_key=resolved_private_key,
@@ -389,7 +439,9 @@ def create_cmd(
         )
     else:
         chain_cfg = select_chain_for_listing(
-            listing=None, override=chain_name_flag, yes=False,
+            listing=None,
+            override=chain_name_flag,
+            yes=False,
         )
         chain = resolve_chain_settings(
             buyer_address=buyer_address,
@@ -409,7 +461,11 @@ def create_cmd(
         else deal.duration_seconds
     )
 
-    log = open_run_log(run_id)
+    log = open_run_log(
+        run_id,
+        signer=signer,
+        profile_id=identity.profile_id,
+    )
 
     seller_wallet = deal.seller_wallet_address
     if not seller_wallet and deal.accepted_escrow_proposal is None:
@@ -441,15 +497,22 @@ def create_cmd(
     header.add_row("Agreed price", str(deal.agreed_amount))
     header.add_row("Duration (seconds)", str(effective_duration_seconds))
     if chain.token_contract:
-        header.add_row("Token", f"{chain.token_contract} (decimals={chain.token_decimals})")
-    console.print(Panel(header, title="market escrow create", border_style="cyan"))
+        header.add_row(
+            "Token", f"{chain.token_contract} (decimals={chain.token_decimals})"
+        )
+    console.print(
+        Panel(
+            header,
+            title="market settlement alkahest escrow create",
+            border_style="cyan",
+        )
+    )
 
     if deal.accepted_escrow_terms is not None:
         from market_alkahest.schemas import EscrowTerms
 
         escrow_terms_list = [
-            EscrowTerms.model_validate(item)
-            for item in deal.accepted_escrow_terms
+            EscrowTerms.model_validate(item) for item in deal.accepted_escrow_terms
         ]
     elif deal.accepted_escrow_proposal is not None:
         from market_alkahest.schemas import EscrowProposal
@@ -504,14 +567,16 @@ def create_cmd(
         log.event("escrow_create_failed", error=str(exc))
         typer.secho(
             f"escrow.create failed on-chain: {exc}",
-            err=True, fg=typer.colors.RED,
+            err=True,
+            fg=typer.colors.RED,
         )
         raise typer.Exit(4) from exc
     if not escrow_uids:
         log.event("escrow_create_failed", error="no uid returned")
         typer.secho(
             "escrow.create returned no uid — buyer terms list was empty.",
-            err=True, fg=typer.colors.RED,
+            err=True,
+            fg=typer.colors.RED,
         )
         raise typer.Exit(4)
     escrow_uid = escrow_uids[0]
@@ -529,23 +594,28 @@ def create_cmd(
 @escrow_app.command("show")
 def show_cmd(
     escrow_uid: Optional[str] = typer.Option(
-        None, "--escrow-uid", "-u",
+        None,
+        "--escrow-uid",
+        "-u",
         help="0x-prefixed escrow UID to inspect. If omitted, --run is required.",
     ),
     run_id: Optional[str] = typer.Option(
-        None, "--run", "-r",
-        help="Buyer run-id to look up the escrow_uid from "
-             "(see `market logs runs`).",
+        None,
+        "--run",
+        "-r",
+        help="Buyer run-id to look up the escrow_uid from (see `market logs runs`).",
     ),
     chain_name_flag: Optional[str] = typer.Option(
-        None, "--chain",
+        None,
+        "--chain",
         help="Which [chains.<name>] entry to read the escrow from. "
-             "Required when more than one chain is configured.",
+        "Required when more than one chain is configured.",
     ),
     escrow_address_flag: Optional[str] = typer.Option(
-        None, "--escrow-address",
+        None,
+        "--escrow-address",
         help="Escrow obligation contract address. Optional when --run captured "
-             "accepted escrow terms; otherwise the command tries registered codecs.",
+        "accepted escrow terms; otherwise the command tries registered codecs.",
     ),
 ) -> None:
     """Read an escrow attestation from chain state.
@@ -558,7 +628,8 @@ def show_cmd(
     if not escrow_uid and not run_id:
         typer.secho(
             "Pass --escrow-uid <uid> or --run <run_id>.",
-            err=True, fg=typer.colors.RED,
+            err=True,
+            fg=typer.colors.RED,
         )
         raise typer.Exit(2)
 
@@ -572,23 +643,29 @@ def show_cmd(
             typer.secho(
                 f"No escrow_uid recorded in run {run_id}. "
                 f"Pass --escrow-uid explicitly.",
-                err=True, fg=typer.colors.RED,
+                err=True,
+                fg=typer.colors.RED,
             )
             raise typer.Exit(3)
 
     from .common import select_chain_for_listing
+
     chain_cfg = select_chain_for_listing(
-        listing=None, override=chain_name_flag or run_chain_name, yes=False,
+        listing=None,
+        override=chain_name_flag or run_chain_name,
+        yes=False,
     )
     escrow_address = escrow_address_flag or run_escrow_address
     private_key = resolve_config_value(
-        override=None, toml_path="wallet.private_key",
+        override=None,
+        toml_path="wallet.private_key",
     )
     if not private_key:
         typer.secho(
             "Missing wallet.private_key in buyer.toml — alkahest_py "
             "requires a wallet key even for read-only inspection.",
-            err=True, fg=typer.colors.RED,
+            err=True,
+            fg=typer.colors.RED,
         )
         raise typer.Exit(2)
 
@@ -630,7 +707,8 @@ def show_cmd(
     except Exception as exc:
         typer.secho(
             f"alkahest get_obligation failed: {exc}",
-            err=True, fg=typer.colors.RED,
+            err=True,
+            fg=typer.colors.RED,
         )
         raise typer.Exit(4) from exc
 

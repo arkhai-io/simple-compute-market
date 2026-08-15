@@ -7,6 +7,19 @@ plugins and the core generic commands share them.
 """
 
 from __future__ import annotations
+from dataclasses import dataclass
+
+
+from market_identity import Identity, Signer, TrustedIdentitySet
+from registry_client import SyncRegistryClient
+
+
+@dataclass(frozen=True)
+class RegistryAuthority:
+    """Stable registry authority id and its ordered active signer set."""
+
+    authority: str
+    principals: TrustedIdentitySet
 
 
 def resolve_indexer_urls(*, override: str | None = None) -> list[str]:
@@ -23,42 +36,97 @@ def resolve_indexer_urls(*, override: str | None = None) -> list[str]:
     declarations a one-liner.
     """
     if override:
-        parts = [p.strip() for p in override.split(",") if p.strip()]
+        parts = [p.strip().rstrip("/") for p in override.split(",") if p.strip()]
         if parts:
             return parts
     from market_config.config_loader import get_dotted, load_user_config
+
     raw = get_dotted(load_user_config(), "registry.urls")
     if isinstance(raw, list) and raw:
-        cleaned = [str(u).strip() for u in raw if str(u).strip()]
+        cleaned = [str(u).strip().rstrip("/") for u in raw if str(u).strip()]
         if cleaned:
             return cleaned
     return ["http://localhost:8080"]
 
 
-def resolve_indexer_auth() -> dict[str, str]:
-    """Resolve per-registry bearer tokens from the buyer's TOML config.
+def resolve_registry_authorities(
+    registry_urls: list[str],
+) -> dict[str, RegistryAuthority]:
+    """Resolve exact URL-scoped stable authorities and active trust sets."""
 
-    Reads ``[registry.auth]``, a flat ``url → token`` table. URLs not
-    listed are queried unauthenticated. There is no CLI override —
-    credentials are config-only by design (avoids accidental shell-
-    history exposure on a multi-user box).
-    """
     from market_config.config_loader import get_dotted, load_user_config
+
+    raw = get_dotted(load_user_config(), "registry.authorities")
+    if not isinstance(raw, dict) or not raw:
+        raise RuntimeError("Missing required [registry.authorities] identity pins")
+    pins: dict[str, RegistryAuthority] = {}
+    for raw_url, raw_authority in raw.items():
+        if not isinstance(raw_url, str) or not raw_url.strip():
+            raise RuntimeError("[registry.authorities] contains an invalid URL key")
+        url = raw_url.strip().rstrip("/")
+        if url in pins:
+            raise RuntimeError(
+                f"[registry.authorities] contains duplicate normalized URL {url!r}"
+            )
+        try:
+            if not isinstance(raw_authority, dict) or set(raw_authority) != {
+                "authority",
+                "identities",
+            }:
+                raise ValueError(
+                    "authority entry must contain authority and identities"
+                )
+            authority = raw_authority["authority"]
+            if not isinstance(authority, str) or not authority.strip():
+                raise ValueError("authority must be nonempty text")
+            raw_identities = raw_authority["identities"]
+            if not isinstance(raw_identities, (list, tuple)):
+                raise ValueError("identities must be an array")
+            principals = TrustedIdentitySet(
+                identities=tuple(
+                    Identity.model_validate(identity) for identity in raw_identities
+                )
+            )
+            pins[url] = RegistryAuthority(
+                authority=authority.strip(),
+                principals=principals,
+            )
+        except (TypeError, ValueError) as exc:
+            raise RuntimeError(
+                f"[registry.authorities] contains an invalid authority for {url!r}"
+            ) from exc
+    expected_urls = {url.rstrip("/") for url in registry_urls}
+    configured_urls = set(pins)
+    if configured_urls != expected_urls:
+        missing = sorted(expected_urls - configured_urls)
+        extra = sorted(configured_urls - expected_urls)
+        raise RuntimeError(
+            "[registry.authorities] must exactly match registry.urls "
+            f"(missing={missing}, extra={extra})"
+        )
+    return pins
+
+
+def resolve_registry_api_keys() -> dict[str, str]:
+    """Resolve optional bearer authorization in addition to signed identity."""
+
+    from market_config.config_loader import get_dotted, load_user_config
+
     raw = get_dotted(load_user_config(), "registry.auth")
     if not isinstance(raw, dict):
         return {}
-    out: dict[str, str] = {}
-    for url, token in raw.items():
-        if isinstance(url, str) and isinstance(token, str) and url.strip() and token.strip():
-            out[url.strip()] = token.strip()
-    return out
+    return {
+        url.strip().rstrip("/"): token.strip()
+        for url, token in raw.items()
+        if isinstance(url, str)
+        and isinstance(token, str)
+        and url.strip()
+        and token.strip()
+    }
 
 
-#: Per-process cache of each registry's declared schema id. The value is
-#: the declared ``schema.id`` string, or None when the registry declares
-#: nothing (pre-identity deployment) or the spec fetch failed — both of
-#: which match any plugin, so they cache identically.
-_SCHEMA_ID_CACHE: dict[str, str | None] = {}
+#: Per-process cache of each pinned registry's declared schema id.
+_SCHEMA_ID_CACHE: dict[tuple[str, TrustedIdentitySet], str | None] = {}
 
 
 def reset_schema_id_cache() -> None:
@@ -69,40 +137,34 @@ def reset_schema_id_cache() -> None:
 def registry_schema_id(
     url: str,
     *,
+    signer: Signer,
+    registry_authority: RegistryAuthority,
     timeout: float | None = None,
     api_key: str | None = None,
 ) -> str | None:
-    """The schema id a registry declares in its ``/filter-spec``.
+    """Read a schema id through a signed, authority-pinned filter-spec request."""
 
-    Returns None when the registry declares no schema identity or the
-    spec cannot be fetched/parsed — lenient by design: an undeclared or
-    momentarily unreachable registry must not vanish from discovery
-    (the listings query itself will fail loudly if the registry is
-    truly down). Cached per process; the CLI is one-shot.
-    """
-    key = url.rstrip("/")
+    base_url = url.rstrip("/")
+    key = (base_url, registry_authority.principals)
     if key in _SCHEMA_ID_CACHE:
         return _SCHEMA_ID_CACHE[key]
-
-    import json
-    import urllib.request
-
-    declared: str | None = None
-    headers = {"Accept": "application/json"}
-    if api_key:
-        headers["Authorization"] = f"Bearer {api_key}"
-    req = urllib.request.Request(key + "/filter-spec", headers=headers)
     try:
-        with urllib.request.urlopen(
-            req, timeout=timeout if timeout and timeout > 0 else resolve_discovery_timeout(),
-        ) as resp:
-            body = json.loads(resp.read().decode("utf-8"))
-        schema = body.get("schema") if isinstance(body, dict) else None
-        if isinstance(schema, dict) and str(schema.get("id") or "").strip():
-            declared = str(schema["id"]).strip()
-    except Exception:  # noqa: BLE001 — lenient: treat as undeclared
+        with SyncRegistryClient(
+            base_url,
+            signer=signer,
+            caller_role="buyer",
+            expected_registries=registry_authority.principals,
+            registry_authority=registry_authority.authority,
+            timeout=(
+                timeout
+                if timeout is not None and timeout > 0
+                else resolve_discovery_timeout()
+            ),
+            api_key=api_key,
+        ) as client:
+            declared = client.get_filter_spec().schema_id
+    except Exception:
         declared = None
-
     _SCHEMA_ID_CACHE[key] = declared
     return declared
 
@@ -110,34 +172,32 @@ def registry_schema_id(
 def resolve_indexer_urls_for_schema(
     schema_id: str,
     *,
+    signer: Signer,
+    registry_authorities: dict[str, RegistryAuthority],
     override: str | None = None,
     timeout: float | None = None,
 ) -> list[str]:
-    """The configured registry URLs that serve ``schema_id``.
+    """Return registry URLs compatible with a schema through signed inspection."""
 
-    Resolves the registry list (CLI override > config > default), then
-    drops any registry whose ``/filter-spec`` *declares a different*
-    schema id. Registries declaring nothing — and registries whose spec
-    can't be fetched — are kept: only an explicit mismatch excludes,
-    so single-registry setups and pre-identity registries behave as
-    before. A dropped registry is reported on stderr so a buyer staring
-    at "no matches" can see why a configured registry wasn't asked.
-
-    A singleton list is returned without fetching anything: filtering
-    chooses *among* registries, and with one configured there is no
-    choice to make — dropping it would leave nothing to query, and the
-    lenient rule queries it regardless, so the spec fetch would be pure
-    overhead on the most common deployment.
-    """
     import sys
 
     urls = resolve_indexer_urls(override=override)
+    if set(registry_authorities) != set(urls):
+        raise RuntimeError(
+            "registry authority trust sets must exactly match registry URLs"
+        )
     if len(urls) <= 1:
         return urls
-    auth = resolve_indexer_auth()
+    api_keys = resolve_registry_api_keys()
     kept: list[str] = []
     for url in urls:
-        declared = registry_schema_id(url, timeout=timeout, api_key=auth.get(url))
+        declared = registry_schema_id(
+            url,
+            signer=signer,
+            registry_authority=registry_authorities[url],
+            timeout=timeout,
+            api_key=api_keys.get(url),
+        )
         if declared is not None and declared != schema_id:
             print(
                 f"[registry] skipping {url}: serves schema {declared!r}, "
@@ -160,6 +220,7 @@ def resolve_discovery_timeout(*, override: float | None = None) -> float:
     if override is not None and override > 0:
         return float(override)
     from market_config.config_loader import get_dotted, load_user_config
+
     raw = get_dotted(load_user_config(), "registry.discovery_timeout")
     try:
         v = float(raw)

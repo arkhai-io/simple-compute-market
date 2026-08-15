@@ -4,6 +4,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
+from market_resource_pools.db import Base as ResourcePoolBase, ResourcePool
 
 from market_site.db import Base
 from market_site.ledger import CapacityLedgerService
@@ -17,6 +18,17 @@ def _client():
         poolclass=StaticPool,
     )
     Base.metadata.create_all(engine)
+    ResourcePoolBase.metadata.create_all(engine)
+    with sessionmaker(bind=engine)() as db, db.begin():
+        db.add(
+            ResourcePool(
+                id="pool-a",
+                label="Pool A",
+                provider="test",
+                enabled=True,
+                policy_tags={"deliverable_modes": ["vm"]},
+            )
+        )
     ledger = CapacityLedgerService(sessionmaker(bind=engine))
     ledger.register_resource(
         resource_id="host-a",
@@ -35,7 +47,7 @@ def test_public_reservation_hides_private_accounting_identity():
     client = _client()
     response = client.post(
         "/api/v1/capacity/reservations",
-        json={"claim": {"units": 1}, "deal_ref": {}},
+        json={"claim": {"units": 1, "executor_kind": "vm"}, "deal_ref": {}},
     )
     assert response.status_code == 200
     reservation = response.json()["reservation"]

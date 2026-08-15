@@ -400,6 +400,7 @@ class AggregateCapacityClient:
         lease_start_utc: str | None = None,
         lease_end_utc: str | None = None,
         idempotency_ref: str | None = None,
+        site_id: str | None = None,
     ) -> None:
         """Commit at the owning site (cache-first, then the rest).
 
@@ -407,6 +408,15 @@ class AggregateCapacityClient:
         next is tried; if every site refuses, the last error propagates
         — a commit that lands nowhere must not look like success.
         """
+        if site_id is not None:
+            await self._sites[site_id].commit(
+                resource_id=resource_id,
+                capacity_reservation_id=capacity_reservation_id,
+                lease_start_utc=lease_start_utc,
+                lease_end_utc=lease_end_utc,
+                idempotency_ref=idempotency_ref,
+            )
+            return
         last_error: Exception | None = None
         for name in self._route_order(capacity_reservation_id):
             try:
@@ -431,6 +441,7 @@ class AggregateCapacityClient:
         *,
         capacity_reservation_id: str | None = None,
         deal_ref: Mapping[str, Any] | None = None,
+        site_id: str | None = None,
         **extra: Any,
     ) -> dict[str, Any] | None:
         """Release wherever the reservation lives; None if no site holds it.
@@ -438,6 +449,17 @@ class AggregateCapacityClient:
         ``extra`` passes through implementation-specific keywords (e.g.
         failure metadata) to sites that accept them.
         """
+        if site_id is not None:
+            released = await self._sites[site_id].release(
+                capacity_reservation_id=capacity_reservation_id,
+                deal_ref=deal_ref,
+                **extra,
+            )
+            if released is None:
+                return None
+            if capacity_reservation_id:
+                self._reservation_sites.pop(str(capacity_reservation_id), None)
+            return _tagged(site_id, released)
         for name in self._route_order(capacity_reservation_id):
             try:
                 released = await self._sites[name].release(
@@ -459,7 +481,14 @@ class AggregateCapacityClient:
         *,
         capacity_reservation_id: str,
         lease_end_utc: str,
+        site_id: str | None = None,
     ) -> dict[str, Any] | None:
+        if site_id is not None:
+            truncated = await self._sites[site_id].truncate_lease(
+                capacity_reservation_id=capacity_reservation_id,
+                lease_end_utc=lease_end_utc,
+            )
+            return _tagged(site_id, truncated) if truncated is not None else None
         for name in self._route_order(capacity_reservation_id):
             try:
                 truncated = await self._sites[name].truncate_lease(

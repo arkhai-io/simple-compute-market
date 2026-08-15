@@ -3,24 +3,37 @@
 # Leave empty ("") to use bare image names (matches local Docker builds).
 global:
   imageRepository: ""
+  registryIdentity:
+    authority: registry-a
+    principal:
+      scheme: eip191
+      identifier: "0x90f79bf6eb2c4f870365e785982e1f101e93b906"
+  provisioningIdentity:
+    scheme: eip191
+    identifier: "0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266"
+  integrationTests:
+    repository: ""
+    name: arkhai
+    tag: e2e-tests
+    digest: ""
+    pullPolicy: IfNotPresent
 
   # ---------------------------------------------------------------------------
-  # Chain / network configuration shared across all subcharts.
-  # rpc.host and rpc.port are the single source of truth for the Anvil node's
-  # in-cluster service coordinates.
+  # Optional chain/network configuration. Required only by explicitly selected
+  # EVM effects; hosted-only profiles omit this block and disable dev-env.
   # ---------------------------------------------------------------------------
   rpc:
+    enabled: true
     chainId: 31337
     host: "arkhai-node-operator-dev-env"
     port: 8545
-
   # ---------------------------------------------------------------------------
-  # Registry service coordinates shared across all subcharts.
-  # Defaults to the service name produced by the registry subchart under a
-  # release named "arkhai-node-operator".
+  # Registry service coordinates shared across all subcharts. Empty host
+  # derives the release-scoped Service name; set it only for an external
+  # registry.
   # ---------------------------------------------------------------------------
   registry:
-    host: "arkhai-node-operator-registry"
+    host: ""
     port: 8080
 
   # Provisioning service coordinates. Surfaced in globals so the
@@ -29,15 +42,6 @@ global:
   provisioning:
     host: "arkhai-node-operator-provisioning"
     port: 8081
-  # ---------------------------------------------------------------------------
-  # Admin API key — gates all /admin/* endpoints on the storefront.
-  # Rendered into each agent's storefront.toml as `admin_api_key` (top-level).
-  # Also injected into the per-agent secret profile consumed by test pods
-  # so the e2e suite can authenticate to admin-gated endpoints.
-  # In production, override with a strong random value.
-  # ---------------------------------------------------------------------------
-  adminApiKey: "test-api-key"
-
   # ---------------------------------------------------------------------------
   # Smoke-test Dynaconf profiles mounted into helm-test pods only. Runtime
   # Deployments keep their existing config paths.
@@ -107,6 +111,15 @@ registry:
     name: arkhai
     tag: registry
     pullPolicy: IfNotPresent
+    digest: ""
+  identity:
+    authority: registry-a
+    principal:
+      scheme: eip191
+      identifier: "0x90f79bf6eb2c4f870365e785982e1f101e93b906"
+    credentialSecret:
+      name: arkhai-registry-identity
+      key: credential
 
   service:
     type: NodePort
@@ -131,6 +144,8 @@ storefront:
     repository: ""
     name: arkhai
     tag: storefront
+    digest: ""
+    settlementConfigSchemaVersion: 1
     pullPolicy: IfNotPresent
 
   # Only sellers run a storefront; the `market` buyer CLI is a pure HTTP
@@ -144,20 +159,55 @@ storefront:
       component: seller
       agentId: ""        # pin after first registration; see charts/storefront/values.yaml
       autoRegister: true # set false once registered to prevent accidental re-registration
+      identity:
+        principal:
+          scheme: eip191
+          identifier: "0x3c44cdddb6a900fa2b585dd299e03d12fa4293bc"
+        credentialSecret:
+          name: arkhai-bob-identity
+          key: credential
+        servicePeers:
+          provisioning_default:
+            role: service
+            siteId: default
+            principals:
+              - scheme: eip191
+                identifier: "0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266"
+        administrators:
+          operator:
+            principals:
+              - scheme: eip191
+                identifier: "0x3c44cdddb6a900fa2b585dd299e03d12fa4293bc"
       secret:
-        createSecret: true
-        secretName: ""
-        privKey: "0x5de4111afa1a4b94908f83103eb1f1706367c2e68ca870fc3fb9a804cdab365a"
-        walletAddress: "0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC"
+        createSecret: false
+        secretName: arkhai-bob-runtime
+        configKey: storefront.secrets.toml
       config:
+        storefrontDomains:
+          - contribution: vms
+            offeringMode: vm
+            domainIdentity: compute.v1
+            contractVersion: "1.0"
+          - contribution: bare_metal
+            offeringMode: bare_metal
+            domainIdentity: bare_metal.v1
+            contractVersion: "1.0"
+        registryAuthority:
+          authority: registry-a
+          principals:
+            - scheme: eip191
+              identifier: "0x90f79bf6eb2c4f870365e785982e1f101e93b906"
         seller:
           agentId: bob
           dbPath: "./agent.db"
           logFilePath: "./logs/bob.log"
-          sshPublicKey: "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIDemoPublicKeyForComputeAccess bob@example.com"
           enableEventQueue: false
           provisioning:
             mode: "mock"
+            identity:
+              principals:
+                - scheme: eip191
+                  identifier: "0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266"
           negotiation:
             policies:
               - "has_matching_inventory_guard"
@@ -165,9 +215,11 @@ storefront:
               - "bisection"
           integrations:
             geminiApiKey: ""
-        chain:
-          name: "anvil"
-          alkahestAddressConfigPath: "/app/src/market_storefront/data/alkahest_anvil_addresses.json"
+        settlement:
+          schema_version: 1
+          priority: []
+        wallet: {}
+        chains: {}
 
 
 # ---------------------------------------------------------------------------
@@ -175,13 +227,14 @@ storefront:
 # ---------------------------------------------------------------------------
 provisioning:
   enabled: true
-  # Activate MockAnsibleService for dev/CI clusters — no real Ansible or KVM needed.
-  # Set to false (and configure sshKey, inventory, ansible paths) for production.
+  # Activate MockAnsibleService for dev/CI clusters. Production profiles keep
+  # these same Secret references and supply real operator-managed contents.
   mockMode: true
 
   server:
     image:
       repository: ""
+      digest: ""
       name: arkhai
       tag: compute-provisioning
       pullPolicy: IfNotPresent
@@ -191,15 +244,35 @@ provisioning:
     host: "0.0.0.0"
 
   sshKey:
-    createSecret: true
-    secretName: ""
-    sshPrivateKey: ""
+    createSecret: false
+    secretName: arkhai-provisioning-ssh
+
+  sshDecryptionKey:
+    createSecret: false
+    secretName: arkhai-provisioning-runtime
+
+  identity:
+    principal:
+      scheme: eip191
+      identifier: "0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266"
+    credentialSecret:
+      name: arkhai-provisioning-identity
+      key: credential
+
+  storefrontIdentity:
+    principals:
+      - scheme: eip191
+        identifier: "0x3c44cdddb6a900fa2b585dd299e03d12fa4293bc"
+
+  adminIdentity:
+    principals:
+      - scheme: eip191
+        identifier: "0x9965507d1a55bcc2695c58ba16fb37d819b0a4dc"
 
   storefront:
     url: ""          # empty -> http://{release}-storefront-bob:8001
     agentName: "bob"
     port: 8001
-    adminKey: ""     # empty -> inherits global.adminApiKey
 
   config:
     log_level: "info"
@@ -209,6 +282,7 @@ provisioning:
     lease_watchdog_enabled: true
     lease_watchdog_poll_interval_seconds: 60
     lease_watchdog_grace_period_seconds: 300
+    storefront_site_id: "default"
     enable_rate_limiting: false
     rate_limit_requests_per_minute: 30
 
@@ -235,6 +309,7 @@ integrationTests:
     name: arkhai
     tag: e2e-tests
     pullPolicy: IfNotPresent
+    digest: ""
 
 # ---------------------------------------------------------------------------
 # e2e-tests subchart
@@ -250,18 +325,10 @@ e2e-tests:
     repository: ""
     name: arkhai
     tag: e2e-tests
+    digest: ""
     pullPolicy: IfNotPresent
 
-  # Seller credentials for the agent this e2e run targets.
-  # Must match the deployed storefront agent's wallet.
-  # Defaults to the Anvil Hardhat account #2 (bob agent default).
-  seller:
-    privateKey:    "0x5de4111afa1a4b94908f83103eb1f1706367c2e68ca870fc3fb9a804cdab365a"
-    walletAddress: "0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC"
-    adminApiKey:   ""  # empty → inherits global.adminApiKey
-
-  # Buyer credentials for on-chain escrow creation (stage 07).
-  # Defaults to the Anvil Hardhat account #1.
-  buyer:
-    privateKey:    "0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d"
-    walletAddress: "0x70997970C51812dc3A010C7d01b50e0d17dc79C8"
+  # E2E credentials are supplied only by a pre-existing Secret. The chart
+  # carries no private key values even for deterministic local-chain profiles.
+  createSecret: false
+  secretName: arkhai-e2e-credentials

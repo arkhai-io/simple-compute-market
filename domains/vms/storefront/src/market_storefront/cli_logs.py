@@ -37,8 +37,15 @@ console = Console()
 
 @logs_app.command("show")
 def logs_show(
-    negotiation: Optional[str] = typer.Option(None, "--negotiation", "-n", help="Filter by negotiation ID (or prefix)"),
-    stage: Optional[str] = typer.Option(None, "--stage", "-s", help="Filter by stage (discovery, negotiation, settlement, provision, post_settlement)"),
+    negotiation: Optional[str] = typer.Option(
+        None, "--negotiation", "-n", help="Filter by negotiation ID (or prefix)"
+    ),
+    stage: Optional[str] = typer.Option(
+        None,
+        "--stage",
+        "-s",
+        help="Filter by stage (discovery, negotiation, settlement, provision, post_settlement)",
+    ),
     last: int = typer.Option(50, "--last", "-l", help="Show last N events"),
     db: Optional[str] = typer.Option(None, "--db", help="Agent SQLite DB path"),
     raw: bool = typer.Option(False, "--raw", help="Print raw JSON per line"),
@@ -46,7 +53,9 @@ def logs_show(
     """Show stage-boundary events from the agent's local log."""
     db_path = _resolve_db_path(db)
     if not db_path:
-        console.print("[red]Could not find agent DB. Use --db or set seller.db_path in config.toml.[/red]")
+        console.print(
+            "[red]Could not find agent DB. Use --db or set seller.db_path in config.toml.[/red]"
+        )
         raise typer.Exit(1)
 
     conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True, timeout=5)
@@ -70,7 +79,9 @@ def logs_show(
         rows = cur.execute(query, params).fetchall()
     except sqlite3.OperationalError as e:
         if "no such table" in str(e):
-            console.print("[yellow]No stage_events table yet — agent has not emitted any stage events.[/yellow]")
+            console.print(
+                "[yellow]No stage_events table yet — agent has not emitted any stage events.[/yellow]"
+            )
             raise typer.Exit(0)
         raise
     finally:
@@ -106,8 +117,17 @@ def logs_show(
     for row in rows:
         data = json.loads(row["data"])
         # Build a concise detail string from the interesting fields
-        skip_keys = {"ts", "stage", "event", "negotiation_id", "listing_id", "escrow_uid"}
-        details = {k: v for k, v in data.items() if k not in skip_keys and v is not None}
+        skip_keys = {
+            "ts",
+            "stage",
+            "event",
+            "negotiation_id",
+            "listing_id",
+            "escrow_uid",
+        }
+        details = {
+            k: v for k, v in data.items() if k not in skip_keys and v is not None
+        }
         detail_str = ", ".join(f"{k}={v}" for k, v in details.items())
         if len(detail_str) > 60:
             detail_str = detail_str[:57] + "..."
@@ -217,13 +237,17 @@ def _derive_stage(
 
 @logs_app.command("status")
 def deal_status(
-    negotiation_id: str = typer.Argument(help="Negotiation ID (or order ID to search by)"),
+    negotiation_id: str = typer.Argument(
+        help="Negotiation ID (or order ID to search by)"
+    ),
     db: Optional[str] = typer.Option(None, "--db", help="Agent SQLite DB path"),
 ):
     """Show the current stage and state of a deal/negotiation."""
     db_path = _resolve_db_path(db)
     if not db_path:
-        console.print("[red]Could not find agent DB. Use --db or set seller.db_path in config.toml.[/red]")
+        console.print(
+            "[red]Could not find agent DB. Use --db or set seller.db_path in config.toml.[/red]"
+        )
         raise typer.Exit(1)
 
     conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True, timeout=5)
@@ -246,7 +270,9 @@ def deal_status(
             neg_ids = [r[0] for r in rows]
 
         if not neg_ids:
-            console.print(f"[yellow]No negotiation found for '{negotiation_id}'.[/yellow]")
+            console.print(
+                f"[yellow]No negotiation found for '{negotiation_id}'.[/yellow]"
+            )
             raise typer.Exit(1)
 
         for nid in neg_ids:
@@ -263,21 +289,33 @@ def deal_status(
             color = stage_colors.get(info.get("stage", ""), "white")
 
             panel_lines = []
-            panel_lines.append(f"[bold]Stage:[/bold] [{color}]{info.get('stage', '?')}[/{color}]")
+            panel_lines.append(
+                f"[bold]Stage:[/bold] [{color}]{info.get('stage', '?')}[/{color}]"
+            )
             if info.get("detail"):
                 panel_lines.append(f"[bold]Detail:[/bold] {info['detail']}")
-            for key in ("our_listing_id", "their_listing_id", "order_status",
-                        "escrow_uid", "fulfillment_uid",
-                        "rounds", "terminal_state"):
+            for key in (
+                "our_listing_id",
+                "their_listing_id",
+                "order_status",
+                "escrow_uid",
+                "fulfillment_uid",
+                "rounds",
+                "terminal_state",
+            ):
                 val = info.get(key)
                 if val is not None:
                     panel_lines.append(f"[dim]{key}:[/dim] {val}")
 
-            console.print(Panel(
-                "\n".join(panel_lines),
-                title=f"[bold]Negotiation {nid[:20]}…[/bold]" if len(nid) > 20 else f"[bold]Negotiation {nid}[/bold]",
-                border_style=color,
-            ))
+            console.print(
+                Panel(
+                    "\n".join(panel_lines),
+                    title=f"[bold]Negotiation {nid[:20]}…[/bold]"
+                    if len(nid) > 20
+                    else f"[bold]Negotiation {nid}[/bold]",
+                    border_style=color,
+                )
+            )
 
             # Show stage events for this deal. Events fire throughout the
             # lifecycle; some land before a negotiation_id exists (discovery)
@@ -303,9 +341,15 @@ def deal_status(
                     for ev in events:
                         data = json.loads(ev[3])
                         skip = {"ts", "stage", "event", "negotiation_id"}
-                        details = {k: v for k, v in data.items() if k not in skip and v is not None}
+                        details = {
+                            k: v
+                            for k, v in data.items()
+                            if k not in skip and v is not None
+                        }
                         detail_str = ", ".join(f"{k}={v}" for k, v in details.items())
-                        console.print(f"  {ev[0][:19]}  [{stage_colors.get(ev[1], 'white')}]{ev[1]}.{ev[2]}[/]  {detail_str}")
+                        console.print(
+                            f"  {ev[0][:19]}  [{stage_colors.get(ev[1], 'white')}]{ev[1]}.{ev[2]}[/]  {detail_str}"
+                        )
             except sqlite3.OperationalError:
                 pass  # no stage_events table yet
 

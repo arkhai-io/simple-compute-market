@@ -4,11 +4,14 @@ from __future__ import annotations
 
 import json
 
+from types import SimpleNamespace
 import typer
 from typer.testing import CliRunner
 
 import core_buyer.cli as cli_mod
-from core_buyer.cli import build_app, parse_filter_options
+from core_buyer.cli import build_app
+from market_identity import Ed25519Signer, TrustedIdentitySet
+from core_buyer.registry_config import RegistryAuthority
 from market_core import (
     MARKET_DOMAIN_CONTRACT_VERSION,
     DomainCapability,
@@ -32,57 +35,108 @@ def _all_output(result) -> str:
 
 
 def _quiet_config(monkeypatch):
-    """Pin config-derived values so tests never read a real buyer.toml."""
-    monkeypatch.setattr(cli_mod, "resolve_indexer_auth", lambda: {})
+    """Pin identity/config values so tests never read user configuration."""
+    buyer = Ed25519Signer(b"\x01" * 32)
+    registry = Ed25519Signer(b"\x02" * 32)
+    monkeypatch.setattr(
+        cli_mod,
+        "_registry_identity_context",
+        lambda urls: (
+            buyer,
+            {
+                url: RegistryAuthority(
+                    authority="registry",
+                    principals=TrustedIdentitySet(identities=(registry.identity,)),
+                )
+                for url in urls
+            },
+            {},
+        ),
+    )
     monkeypatch.setattr(
         cli_mod, "resolve_discovery_timeout", lambda *, override=None: override or 5.0
     )
 
 
 # ---------------------------------------------------------------------------
-# No plugins: generic --filter passthrough, raw JSON, stubs for buy verbs
-# ---------------------------------------------------------------------------
+# No plugins: typed --resource query, raw JSON, stubs for buy verbs
 
 
-def test_generic_listing_list_passes_filters_and_prints_raw_json(monkeypatch):
+def test_generic_listing_list_passes_resource_query_and_prints_raw_json(monkeypatch):
     _quiet_config(monkeypatch)
     seen = {}
 
-    def fake_query(urls, timeout=30.0, *, filters=None, auth=None):
-        seen.update(urls=urls, timeout=timeout, filters=filters, auth=auth)
-        return [{"listing_id": "L1", "offer_resource": {"anything": 1}}]
+    def fake_query(
+        urls,
+        timeout=30.0,
+        *,
+        signer,
+        registry_authorities,
+        resource_query=None,
+        status="open",
+        limit=100,
+        offset=0,
+        api_keys=None,
+    ):
+        seen.update(
+            urls=urls,
+            timeout=timeout,
+            signer=signer,
+            registry_authorities=registry_authorities,
+            resource_query=resource_query,
+            limit=limit,
+            offset=offset,
+            api_keys=api_keys,
+        )
+        return [
+            {
+                "listing_id": "L1",
+                "offer_resource": {"anything": 1},
+                "source_registry_url": "http://reg.example",
+                "source_registry_authority": "registry",
+            }
+        ]
 
     monkeypatch.setattr(cli_mod, "query_registry_for_matches_multi", fake_query)
 
     result = runner.invoke(
         build_app(domains=[]),
         [
-            "listing", "list",
-            "-r", "http://reg.example/",
-            "--filter", "gpu_model=H200",
-            "-f", "region=eu",
-            "--limit", "7",
+            "listing",
+            "list",
+            "-r",
+            "http://reg.example/",
+            "--resource",
+            "gpu_model=H200 region=eu",
+            "--limit",
+            "7",
         ],
     )
-
     assert result.exit_code == 0, result.output
     assert seen["urls"] == ["http://reg.example"]
-    assert seen["filters"] == {
-        "limit": 7, "offset": 0, "gpu_model": "H200", "region": "eu",
-    }
+    assert seen["resource_query"] == "gpu_model=H200 region=eu"
+    assert seen["limit"] == 7
+    assert seen["offset"] == 0
     assert json.loads(result.output) == [
-        {"listing_id": "L1", "offer_resource": {"anything": 1}}
+        {
+            "listing_id": "L1",
+            "offer_resource": {"anything": 1},
+            "source_registry_url": "http://reg.example",
+            "source_registry_authority": "registry",
+        }
     ]
 
 
 def test_generic_listing_show_prints_raw_json(monkeypatch):
     _quiet_config(monkeypatch)
     monkeypatch.setattr(
-        cli_mod, "fetch_listing_dict_multi",
-        lambda urls, listing_id, timeout=30.0, *, auth=None: {"listing_id": listing_id},
+        cli_mod,
+        "fetch_listing_dict_multi",
+        lambda urls, listing_id, **_kwargs: {"listing_id": listing_id},
     )
     result = runner.invoke(
-        build_app(domains=[]), ["listing", "show", "L9", "-r", "http://reg.example"],
+        build_app(domains=[]),
+        ["listing", "show", "L9", "-r", "http://reg.example"],
     )
     assert result.exit_code == 0, result.output
     assert json.loads(result.output) == {"listing_id": "L9"}
@@ -91,11 +145,13 @@ def test_generic_listing_show_prints_raw_json(monkeypatch):
 def test_generic_listing_show_missing_listing_exits_nonzero(monkeypatch):
     _quiet_config(monkeypatch)
     monkeypatch.setattr(
-        cli_mod, "fetch_listing_dict_multi",
-        lambda urls, listing_id, timeout=30.0, *, auth=None: None,
+        cli_mod,
+        "fetch_listing_dict_multi",
+        lambda urls, listing_id, **_kwargs: None,
     )
     result = runner.invoke(
-        build_app(domains=[]), ["listing", "show", "L9", "-r", "http://reg.example"],
+        build_app(domains=[]),
+        ["listing", "show", "L9", "-r", "http://reg.example"],
     )
     assert result.exit_code == 1
 
@@ -103,7 +159,8 @@ def test_generic_listing_show_missing_listing_exits_nonzero(monkeypatch):
 def test_buy_without_plugin_is_a_helpful_stub():
     # Extra args must not produce a usage error; the stub owns the message.
     result = runner.invoke(
-        build_app(domains=[]), ["buy", "--gpu-model", "H200", "--max-price", "5"],
+        build_app(domains=[]),
+        ["buy", "--resource", "gpu_model=H200"],
     )
     assert result.exit_code == 2
     assert "buyer market domain" in _all_output(result)
@@ -121,6 +178,109 @@ def test_plugins_command_reports_empty():
     result = runner.invoke(build_app(domains=[]), ["plugins"])
     assert result.exit_code == 0
     assert "No buyer market domains installed" in _all_output(result)
+
+
+def test_profile_commands_are_available_without_domain_plugins(monkeypatch):
+    calls = []
+    public = {
+        "profile_id": "4a3de310-7e5a-4e1f-8f0a-716856cf56b8",
+        "name": "buyer",
+        "principal_history": [],
+        "selected": True,
+    }
+
+    class Service:
+        def create(self, **kwargs):
+            calls.append(("create", kwargs))
+            return SimpleNamespace(redacted=lambda: public | {"created": True})
+
+        def import_legacy(self, **kwargs):
+            calls.append(("import", kwargs))
+            return SimpleNamespace(redacted=lambda: public | {"already_imported": False})
+
+        def list_profiles(self):
+            return (public,)
+
+        def show(self, profile):
+            calls.append(("show", profile))
+            return public
+
+        def select(self, profile):
+            calls.append(("select", profile))
+            return public
+
+        def rotate(self, profile, **kwargs):
+            calls.append(("rotate", profile, kwargs))
+            return SimpleNamespace(redacted=lambda: public | {"created": False})
+
+        def retire_principal(self, profile, principal):
+            calls.append(("retire-principal", profile, principal))
+            return public | {"selected": False}
+
+        def retire(self, profile):
+            calls.append(("retire", profile))
+            return public | {"selected": False}
+
+        def delete(self, profile, **kwargs):
+            calls.append(("delete", profile, kwargs))
+            return SimpleNamespace(
+                redacted=lambda: {
+                    "profile_id": public["profile_id"],
+                    "deleted": True,
+                    "deleted_credential_references": [],
+                }
+            )
+
+    monkeypatch.setattr(cli_mod, "_profile_service", Service)
+    app = build_app(domains=[])
+    result = runner.invoke(app, ["profile", "list", "--json"])
+    assert result.exit_code == 0, result.output
+    assert json.loads(result.output) == [public]
+    result = runner.invoke(app, ["profile", "show", "buyer", "--json"])
+    assert result.exit_code == 0, result.output
+    assert calls[-1] == ("show", "buyer")
+    result = runner.invoke(app, ["profile", "select", "buyer", "--json"])
+    assert result.exit_code == 0, result.output
+    assert calls[-1] == ("select", "buyer")
+
+
+def test_profile_cli_json_and_errors_never_emit_secret_canary(monkeypatch):
+    canary = "PRIVATE-SEED-CANARY"
+
+    class Service:
+        def list_profiles(self):
+            return (
+                {
+                    "name": "buyer",
+                    "credential_reference": {
+                        "provider": "environment.v1",
+                        "reference": "c3329074edb493fd",
+                    },
+                },
+            )
+
+        def create(self, **_kwargs):
+            raise RuntimeError("credential reference c3329074edb493fd is unavailable")
+
+    monkeypatch.setattr(cli_mod, "_profile_service", Service)
+    app = build_app(domains=[])
+    listed = runner.invoke(app, ["profile", "list", "--json"])
+    assert listed.exit_code == 0
+    failed = runner.invoke(
+        app,
+        [
+            "profile",
+            "create",
+            "buyer",
+            "--provider",
+            "environment.v1",
+            "--reference",
+            "BUYER_SEED",
+        ],
+    )
+    assert failed.exit_code == 2
+    assert canary not in _all_output(listed)
+    assert canary not in _all_output(failed)
 
 
 # ---------------------------------------------------------------------------
@@ -142,7 +302,9 @@ def _vm_like_plugin() -> MarketDomainContract:
         def buy(max_price: float = typer.Option(..., "--max-price")) -> None:
             typer.echo(f"plugin buy at {max_price}")
 
-    normalize = lambda value: value
+    def normalize(value):
+        return value
+
     return MarketDomainContract(
         identity=DomainIdentity("vms.compute"),
         contract_version=MARKET_DOMAIN_CONTRACT_VERSION,
@@ -156,6 +318,7 @@ def _vm_like_plugin() -> MarketDomainContract:
         ),
         declared_capabilities=frozenset({DomainCapability.BUYER}),
         buyer=ImmutableBuyerCapability(
+            identity_injection_contract="core.resolved-buyer-identity.v1",
             register_commands=register,
             build_provision_terms=lambda **kwargs: kwargs,
             select_policy=lambda: object(),
@@ -166,7 +329,8 @@ def _vm_like_plugin() -> MarketDomainContract:
 
 def test_plugin_buy_replaces_stub():
     result = runner.invoke(
-        build_app(domains=[_vm_like_plugin()]), ["buy", "--max-price", "5"],
+        build_app(domains=[_vm_like_plugin()]),
+        ["buy", "--max-price", "5"],
     )
     assert result.exit_code == 0, result.output
     assert "plugin buy at 5.0" in result.output
@@ -195,22 +359,3 @@ def test_version_reports_core_and_plugins():
     assert result.exit_code == 0
     assert "arkhai-core-buyer" in result.output
     assert "vms.compute" in result.output
-
-
-# ---------------------------------------------------------------------------
-# --filter parsing
-# ---------------------------------------------------------------------------
-
-
-def test_parse_filter_options_roundtrip():
-    assert parse_filter_options(["a=1", "b = x=y "]) == {"a": "1", "b": "x=y"}
-    assert parse_filter_options(None) == {}
-
-
-def test_parse_filter_options_rejects_bad_input():
-    import pytest
-
-    with pytest.raises(typer.Exit):
-        parse_filter_options(["novalue"])
-    with pytest.raises(typer.Exit):
-        parse_filter_options(["=v"])

@@ -1,10 +1,11 @@
 [project]
 name = "arkhai-kit-site"
-version = "0.2.0"
+version = "0.3.0"
 license = "MIT"
 description = "Site-authority scaffold: capacity ledger, tables, and HTTP surface"
 requires-python = ">=3.12"
 dependencies = [
+    "arkhai-kit-resource-pools>=0.2.0",
     "fastapi>=0.115.0",
     "pydantic>=2.7",
     "sqlalchemy>=2.0",
@@ -16,6 +17,9 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/market_site"]
+
+[tool.uv]
+find-links = ["../../.dist"]
 
 [tool.pytest.ini_options]
 pythonpath = ["src"]

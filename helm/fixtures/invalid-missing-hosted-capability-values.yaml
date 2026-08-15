@@ -1,0 +1,53 @@
+storefront:
+  agents:
+    - name: missing-hosted-capability
+      identity:
+        principal:
+          scheme: ed25519
+          identifier: AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+        credentialSecret:
+          name: missing-capability-identity
+          key: credential
+      config:
+        storefrontDomains:
+          - contribution: vms
+            offeringMode: vm
+            domainIdentity: compute.v1
+            contractVersion: "1.0"
+        registryAuthority:
+          authority: registry-a
+          principals:
+            - scheme: eip191
+              identifier: "0x90f79bf6eb2c4f870365e785982e1f101e93b906"
+        settlement:
+          schema_version: 1
+          priority: ["fiat.stripe.v1"]
+          stripe:
+            enabled: true
+            base_url: https://hosted-settlement.example.test
+            authority:
+              principals:
+                - scheme: ed25519
+                  identifier: gTl3Dqh9F19Wo1Rmw0x-zMuNipG07jeiXfYPW4_Js5Q
+            expected_manifest_digest: sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+            expected_api_version: 0.2.0
+            expected_schema_version: 5
+            required_capabilities:
+              - scheme-tagged-identities.v1
+              - account-owner-admission.v1
+              - account-owner-rotation.v1
+              - account-owner-retirement.v1
+              - signer-injected-client.v1
+              - provider-neutral-seller-onboarding.v1
+              - conditional-escrow.v2
+              - stripe-connect-separate-charges-transfers.v2
+              - portable-attestation.v1
+              - eas-arbiter.v1
+              - payer-profile.v1
+              - funding-authorization.v1
+              - funding-profile.card.v1
+              - funding-profile.us_bank_transfer.v1
+              - funding-profile.us_ach_debit.v1
+              - normalized-funding-reversal.v1
+          alkahest:
+            enabled: false

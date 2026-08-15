@@ -1,0 +1,109 @@
+agent_id = "bob"
+port = 8001
+base_url = "http://bob-storefront:8001/"
+db_path = "/tmp/agent.db"
+log_file_path = "/tmp/bob.log"
+resources_csv_path = "/app/hosted-resources.csv"
+
+[[storefront_domains]]
+contribution = "vms"
+offering_mode = "vm"
+domain_identity = "compute.v1"
+contract_version = "1.0"
+
+
+[Identity.principal]
+scheme = "ed25519"
+identifier = "0EqyMnQrtKs6E2i9RhXk5tAiSrcaAWuvhSCjMsl3hzc"
+
+
+[Identity.service_peers.provisioning_default]
+role = "service"
+site_id = "default"
+principals = [{ scheme = "ed25519", identifier = "xoImN8fTEOxXYnvgC6JZ0lN0n0qvZERwz_vlOjX3MkI" }]
+
+[registry]
+urls = ["http://registry:8080", "http://registry-b:8080"]
+
+[registry.authorities."http://registry:8080"]
+authority = "registry-a"
+principals = [{ scheme = "ed25519", identifier = "NLTZBDFWy23PC-sKKUm3VZyUDSvLbb6MU6mzAnjjp0Y" }]
+
+[registry.authorities."http://registry-b:8080"]
+authority = "registry-b"
+principals = [{ scheme = "ed25519", identifier = "yFOtDwzSthmuqSzuxP1Wok1kmdWEznklfkXP2BObYKc" }]
+
+[capacity]
+poll_interval = 1
+hold_ttl_seconds = 900
+
+[provisioning]
+service_url = "http://provisioning:8081"
+mode = "mock"
+poll_interval = 1
+
+[provisioning.identity]
+principals = [{ scheme = "ed25519", identifier = "xoImN8fTEOxXYnvgC6JZ0lN0n0qvZERwz_vlOjX3MkI" }]
+
+[negotiation]
+policies = ["has_matching_inventory_guard", "escrow_shape_guard", "bisection"]
+
+[pricing]
+default_min_price = "100"
+default_token_address = ""
+default_max_duration_seconds = 0
+settlements = [
+  { mechanism = "fiat.stripe.v1", asset = "usd", rate = "100", per = "hour", mechanism_input = { funding_profile = "card.v1", interaction = "interactive", funds_flow = "separate_charges_transfers" } },
+  { mechanism = "fiat.stripe.v1", asset = "usd", rate = "100", per = "hour", mechanism_input = { funding_profile = "us_bank_transfer.v1", interaction = "interactive", funds_flow = "separate_charges_transfers" } },
+  { mechanism = "fiat.stripe.v1", asset = "usd", rate = "100", per = "hour", mechanism_input = { funding_profile = "us_ach_debit.v1", interaction = "interactive", funds_flow = "separate_charges_transfers" } },
+]
+
+[Settlement]
+schema_version = 1
+priority = ["fiat.stripe.v1"]
+
+[Settlement.stripe]
+enabled = true
+base_url = "http://127.0.0.1:8080"
+authority_id = "local-e2e-hosted-authority"
+environment = "local-e2e"
+expected_manifest_digest = "sha256:09d242232db26cc345d3805d0a49bfb5c7ce940959a6b878d296a2551dc21558"
+expected_api_version = "0.2.0"
+expected_schema_version = 5
+required_capabilities = [
+  "scheme-tagged-identities.v1",
+  "account-owner-admission.v1",
+  "account-owner-rotation.v1",
+  "account-owner-retirement.v1",
+  "signer-injected-client.v1",
+  "provider-neutral-seller-onboarding.v1",
+  "conditional-escrow.v2",
+  "stripe-connect-separate-charges-transfers.v2",
+  "portable-attestation.v1",
+  "eas-arbiter.v1",
+  "payer-profile.v1",
+  "funding-authorization.v1",
+  "funding-profile.card.v1",
+  "funding-profile.us_bank_transfer.v1",
+  "funding-profile.us_ach_debit.v1",
+  "normalized-funding-reversal.v1",
+  "operator-recovery-redaction.v1",
+]
+currency = "usd"
+country = "US"
+condition_profile = "vm-fulfillment"
+request_timeout_seconds = 10.0
+preflight_timeout_seconds = 5.0
+allow_insecure_loopback = true
+
+[Settlement.stripe.authority]
+principals = [{ scheme = "eip191", identifier = "0x5cbdd86a2fa8dc4bddd8a8f69dba48572eec07fb" }]
+
+[Settlement.stripe.condition_profiles.vm-fulfillment]
+condition_id = "vm-fulfillment"
+evaluator = { kind = "builtin.v1", version = "trivial.v1", resolver_id = "vm-portable", params = { kind = "trivial" } }
+demand = { encoding = "application/jcs+json", value = {} }
+
+[Settlement.stripe.resolvers.vm-portable]
+chain_name = "fiat.stripe.v1"
+evidence_mode = "portable-remote.v1"

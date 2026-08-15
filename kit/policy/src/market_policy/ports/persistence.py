@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 from typing import Any, Protocol
+from market_identity import Identity
+
 
 
 class NegotiationThreadPersistencePort(Protocol):
@@ -14,9 +16,15 @@ class NegotiationThreadPersistencePort(Protocol):
         their_listing_id: str,
         our_agent_id: str,
         their_agent_id: str,
+        buyer_principal: Identity,
+        seller_principal: Identity,
         owner_id: str,
         our_initial_price: int | str | float | None = None,
         our_strategy: str | None = None,
+        requested_duration_seconds: int | None = None,
+        requested_start_utc: str | None = None,
+        buyer_escrow_proposal: dict[str, Any] | None = None,
+        provision_terms: dict[str, Any] | None = None,
     ) -> None: ...
 
     async def get_thread_info(
@@ -37,7 +45,8 @@ class NegotiationThreadPersistencePort(Protocol):
         *,
         negotiation_id: str,
         round: int | None,
-        sender: str,
+        sender_principal: Identity,
+        sender_role: str,
         our_price: int | str | float | None,
         their_price: int | str | float | None,
         proposed_price: int | str | float | None,
@@ -68,15 +77,15 @@ class NegotiationThreadPersistencePort(Protocol):
         their_agent_id: str | None = None,
     ) -> dict[str, Any] | None: ...
 
-    async def get_active_negotiations_for_order(
+    async def get_active_negotiations_for_listing(
         self,
         *,
-        order_id: str,
+        listing_id: str,
     ) -> list[dict[str, Any]]: ...
 
-    async def cancel_negotiations_for_order(
+    async def cancel_negotiations_for_listing(
         self,
         *,
-        order_id: str,
+        listing_id: str,
         except_negotiation_id: str | None = None,
-    ) -> list[str]: ...
+    ) -> list[dict[str, Any]]: ...

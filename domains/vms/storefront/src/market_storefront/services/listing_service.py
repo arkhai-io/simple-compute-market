@@ -1,18 +1,16 @@
 """ListingService — synchronous listing lifecycle orchestrator.
 
 Each public method is a procedural sequence of steps directly against
-SQLite + the registry client. No policy layer for listing CRUD — the
-seller's intent (offer + accepted escrows + duration + paused flag) is
-the only input the storefront needs to act on.
-
-Startup validation: config prerequisites for escrow operations are checked
-at construction time so failures are visible immediately rather than per-call.
+SQLite + the registry client. Settlement prerequisites are observed per
+mechanism during publication so one unready mechanism does not prevent a
+ready peer from publishing.
 """
 
 from __future__ import annotations
 
 import logging
 import uuid
+from collections.abc import Callable
 from datetime import datetime
 from typing import Any
 
@@ -26,36 +24,92 @@ from core_storefront.models.listing_models import (
     ReclaimRequest,
     RefundRequest,
 )
+from core_storefront.domain_registry import (
+    StorefrontDomainBinding,
+    StorefrontDomainRegistry,
+)
 from core_storefront.stage_log import stage_event
-
-from market_storefront.listings.resources import parse_resource_from_dict
+from domains.vms.listings.resources import parse_resource_from_dict
+from domains.vms.listings.models import Listing
+from domains.vms.negotiation.policies import _amount_from_proposal
+from market_capacity_publication import CapacityRuntime
+from market_core import MarketDomainContract
+from market_identity import Identity, Signer
+from market_settlement_runtime import (
+    SettlementPublicationClause,
+    compile_settlement_publication_clause,
+)
+from market_storefront.negotiation_runtime import compute_round_zero_decision
 
 logger = logging.getLogger(__name__)
 
 
 class ListingService:
     def __init__(
-        self, *, sqlite_client, alkahest_clients: dict[str, Any] | None = None
+        self,
+        *,
+        registry: StorefrontDomainRegistry,
+        binding: StorefrontDomainBinding,
+        domain: MarketDomainContract,
+        capacity_runtime: CapacityRuntime,
+        sqlite_client: Any,
+        marketplace_signer: Signer,
+        alkahest_clients: dict[str, Any],
+        settlement_composition_provider: Callable[[], Any],
     ) -> None:
-        from market_storefront.utils.config import CHAINS, settings
+        from market_storefront.utils.config import (
+            CHAINS,
+            get_evm_wallet_private_key,
+        )
 
+        if getattr(sqlite_client, "domain_registry", None) is not registry:
+            raise RuntimeError(
+                "listing service and SQLite repository must share the exact "
+                "storefront domain registry object"
+            )
+        registration = registry.resolve_registration(binding)
+        if binding.offering_mode != "vm" or registration.contract is not domain:
+            raise RuntimeError(
+                "listing service requires the exact VM registry binding and domain"
+            )
+        if not callable(getattr(capacity_runtime, "client", None)):
+            raise TypeError("capacity_runtime must expose the kit client() contract")
+        if not callable(settlement_composition_provider):
+            raise TypeError("settlement_composition_provider must be callable")
+        self._registry = registry
+        self._binding = binding
+        self._domain = domain
+        self._capacity_runtime = capacity_runtime
         self._db = sqlite_client
-        self._alkahest_clients: dict[str, Any] = alkahest_clients or {}
+        self._marketplace_signer = marketplace_signer
+        self._alkahest_clients = alkahest_clients
+        self._settlement_composition_provider = settlement_composition_provider
 
-        priv_key = (settings.wallet.private_key or "").strip()
-        self._token_transfers_available: bool = bool(priv_key and CHAINS)
-        self._alkahest_available: bool = bool(self._alkahest_clients)
+        self._token_transfers_available = bool(
+            self._alkahest_clients and CHAINS and get_evm_wallet_private_key()
+        )
+        self._alkahest_available = bool(self._alkahest_clients)
 
-        if not self._token_transfers_available:
-            logger.warning(
-                "[STOREFRONT] Token transfer operations (refund) unavailable — "
-                "wallet.private_key and at least one [chains.<name>] entry must be set."
-            )
-        if not self._alkahest_available:
-            logger.warning(
-                "[STOREFRONT] On-chain escrow operations (claim, reclaim, arbitrate) unavailable — "
-                "wallet.private_key and at least one [chains.<name>] entry must be set."
-            )
+    @property
+    def domain_registry(self) -> StorefrontDomainRegistry:
+        """Return the frozen registry governing listing bindings."""
+        return self._registry
+
+    @property
+    def domain_binding(self) -> StorefrontDomainBinding:
+        """Return the exact VM binding governing new listings."""
+        return self._binding
+
+    @property
+    def market_domain(self) -> MarketDomainContract:
+        """Return the exact VM contract selected by the composition root."""
+        return self._domain
+
+    @property
+    def capacity_runtime(self) -> CapacityRuntime:
+        """Return the injected kit-owned capacity collaborator."""
+        return self._capacity_runtime
+
 
     async def _resolve_chain_for_escrow(
         self, escrow_uid: str
@@ -216,18 +270,79 @@ class ListingService:
             f"{type(amount_value).__name__}"
         )
 
+    def _compile_publication_clauses(
+        self,
+        request: CreateListingRequest,
+        *,
+        composition: Any | None = None,
+    ) -> tuple[SettlementPublicationClause, ...]:
+        raw_clauses = list(getattr(request, "settlements", ()))
+        if not raw_clauses:
+            return ()
+        active = composition or self._settlement_composition_provider()
+        if active is None:
+            raise RuntimeError("settlement composition is not initialized")
+        return tuple(
+            compile_settlement_publication_clause(
+                clause,
+                registry=active.configuration_registry,
+                config=active.settlement_config,
+                role="seller",
+            )
+            for clause in raw_clauses
+        )
+
+    async def _derive_settlement_artifacts(
+        self,
+        request: CreateListingRequest,
+        *,
+        clauses: tuple[SettlementPublicationClause, ...] | None = None,
+        composition: Any | None = None,
+    ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+        if request.settlement_options:
+            raise ValueError(
+                "settlement_options are derived from installed mechanism registrations"
+            )
+        composition = composition or self._settlement_composition_provider()
+        if composition is None:
+            raise RuntimeError("settlement composition is not initialized")
+        canonical_clauses = (
+            clauses
+            if clauses is not None
+            else self._compile_publication_clauses(request, composition=composition)
+        )
+        resources: dict[str, Any] = {
+            "accepted_escrows": list(request.accepted_escrows),
+            "claimant_principal": self._marketplace_signer.identity,
+        }
+        try:
+            accepted, options, _readiness = await composition.publication_artifacts(
+                resources,
+                clauses=list(canonical_clauses) or None,
+            )
+        except (RuntimeError, TypeError, ValueError) as exc:
+            raise ValueError(str(exc)) from exc
+        return accepted, options
+
     def _parse_offer_and_escrows(
         self, request: CreateListingRequest
-    ) -> tuple[Any, list[dict[str, Any]], list[dict[str, Any]]]:
-        from arkhai_vms.listing_models import ComputeResource
+    ) -> tuple[
+        Any,
+        list[dict[str, Any]],
+        list[dict[str, Any]],
+        list[dict[str, Any]],
+    ]:
+        from domains.vms.listings.models import ComputeResource
 
         try:
             normalized_offer = self._normalize_token_resource(request.offer)
-            from market_storefront.domain_runtime import (
-                get_market_domain_contract,
-            )
-
-            get_market_domain_contract().codecs.listing(normalized_offer)
+            offering_mode = normalized_offer.get("virtualization_type")
+            if offering_mode != self._binding.offering_mode:
+                raise ValueError(
+                    "offer_resource.virtualization_type must match the "
+                    f"selected offering mode {self._binding.offering_mode!r}"
+                )
+            self._domain.codecs.listing(normalized_offer)
             offer_resource = parse_resource_from_dict(normalized_offer)
         except Exception as exc:
             raise ValueError(f"Invalid offer resource: {exc}") from exc
@@ -236,16 +351,18 @@ class ListingService:
                 "Listing offer must be a compute resource (the buyer-as-maker "
                 "token-offer shape was removed with the demand_resource cutover)."
             )
-        if not request.accepted_escrows:
-            raise ValueError(
-                "accepted_escrows must be a non-empty list "
-                "of {chain_name, escrow_address, literal_fields, rates} entries."
-            )
+        if not request.accepted_escrows and not getattr(request, "settlements", ()):
+            raise ValueError("at least one settlement input is required")
         demands = [
             d.model_dump(mode="json") if hasattr(d, "model_dump") else dict(d)
             for d in (request.demands or [])
         ]
-        return offer_resource, list(request.accepted_escrows), demands
+        return (
+            offer_resource,
+            list(request.accepted_escrows),
+            [],
+            demands,
+        )
 
     async def create_listing(
         self, request: CreateListingRequest
@@ -258,20 +375,34 @@ class ListingService:
         ``POST /api/v1/listings/{id}/resume`` which clears the flag and runs
         the same ``publish_order_to_registry`` path.
         """
-        from arkhai_vms.listing_models import Listing
+        from domains.vms.listings.models import Listing
 
         from market_storefront.services.publication_service import (
             publish_order_to_registry,
         )
         from market_storefront.utils.config import BASE_URL_OVERRIDE
 
-        offer, accepted_escrows, demands = self._parse_offer_and_escrows(request)
+        composition = self._settlement_composition_provider()
+        canonical_clauses = self._compile_publication_clauses(
+            request,
+            composition=composition,
+        )
+        offer, _accepted_inputs, _settlement_inputs, demands = (
+            self._parse_offer_and_escrows(request)
+        )
+        accepted_escrows, settlement_options = await self._derive_settlement_artifacts(
+            request,
+            clauses=canonical_clauses,
+            composition=composition,
+        )
 
         listing = Listing(
             listing_id=str(uuid.uuid4()),
-            seller=BASE_URL_OVERRIDE,
+            storefront_url=BASE_URL_OVERRIDE,
+            seller_principal=self._marketplace_signer.identity,
             offer_resource=offer,
             accepted_escrows=accepted_escrows,
+            settlement_options=settlement_options,
             demands=demands,
             max_duration_seconds=request.max_duration_seconds,
             oracle_address=None,
@@ -288,10 +419,16 @@ class ListingService:
                 updated_at=now_iso,
                 offer_resource=listing_dict.get("offer_resource"),
                 accepted_escrows=listing_dict.get("accepted_escrows"),
+                settlement_options=listing_dict.get("settlement_options"),
+                publication_clauses=[
+                    clause.model_dump(mode="json", exclude_defaults=True)
+                    for clause in canonical_clauses
+                ],
                 demands=listing_dict.get("demands"),
                 fulfillment_resource=None,
                 max_duration_seconds=listing_dict.get("max_duration_seconds"),
-                seller=listing_dict.get("seller") or BASE_URL_OVERRIDE,
+                storefront_url=listing.storefront_url,
+                seller_principal=listing.seller_principal,
                 oracle_address=listing_dict.get("oracle_address"),
                 paused=bool(request.paused),
             )
@@ -306,7 +443,10 @@ class ListingService:
             )
             return CreateListingResponse(status="created", listing_id=listing_id)
 
-        publish_result = await publish_order_to_registry(listing_dict)
+        publish_result = await publish_order_to_registry(
+            listing_dict,
+            sqlite_client=self._db,
+        )
         return CreateListingResponse(
             status="created",
             listing_id=listing_id,
@@ -314,6 +454,54 @@ class ListingService:
                 "message", f"Listing {listing_id} ({publish_result.get('status')})"
             ),
         )
+
+    async def reconcile_settlement_options(
+        self,
+        listing_id: str,
+        *,
+        resources: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Refresh one listing's ready options without touching accepted Terms."""
+        from domains.vms.listings.models import Listing
+
+        from market_storefront.services.publication_service import (
+            publish_order_to_registry,
+        )
+
+        stored = await self._db.load_listing(listing_id=listing_id)
+        if stored is None:
+            raise ValueError(f"listing {listing_id!r} does not exist")
+        composition = self._settlement_composition_provider()
+        if composition is None:
+            raise RuntimeError("settlement composition is not initialized")
+        option_resources: dict[str, Any] = {
+            "accepted_escrows": list(stored.get("accepted_escrows") or ()),
+            "claimant_principal": self._marketplace_signer.identity,
+        }
+        if resources:
+            option_resources.update(resources)
+        persisted_clauses = list(stored.get("publication_clauses") or ())
+        (
+            accepted_escrows,
+            settlement_options,
+            _readiness,
+        ) = await composition.publication_artifacts(
+            option_resources,
+            clauses=persisted_clauses or None,
+        )
+        await self._db.update_listing(
+            listing_id=listing_id,
+            accepted_escrows=accepted_escrows,
+            settlement_options=settlement_options,
+        )
+        updated = {
+            **stored,
+            "accepted_escrows": accepted_escrows,
+            "settlement_options": settlement_options,
+        }
+        listing = Listing.model_validate(updated)
+        await publish_order_to_registry(listing, sqlite_client=self._db)
+        return listing.model_dump(mode="json")
 
     async def close_listing(self, listing_id: str) -> CloseListingResponse:
         """Mark the listing closed locally; if registry discovery is enabled,
@@ -325,7 +513,10 @@ class ListingService:
         """
         from market_storefront.services.publication_service import close_order
 
-        result = await close_order({"listing_id": listing_id})
+        result = await close_order(
+            {"listing_id": listing_id},
+            sqlite_client=self._db,
+        )
         return CloseListingResponse(
             status=result.get("status", "closed"),
             listing_id=listing_id,
@@ -339,24 +530,28 @@ class ListingService:
     ) -> EvaluateNegotiateResponse:
         """Dry-run the round-0 negotiation decision without creating a thread.
 
-        Loads the listing from SQLite, then delegates to
-        ``_compute_round_zero_decision`` — the same pure-compute function
-        used by ``start_sync_negotiation`` — so the result is identical to
-        what round 0 of a real negotiation would produce.
+        Loads the listing from SQLite, then delegates to the same VM policy
+        adapter used by round zero of a real negotiation.
 
         Raises ``ValueError`` if the listing doesn't exist or has no usable
         negotiation strategy. The controller converts these to HTTP 404.
         """
-        from arkhai_vms.listing_models import Listing
-        from market_policy.scalar_policies import _amount_from_proposal
-
-        from market_storefront.utils.sync_negotiation import (
-            _compute_round_zero_decision,
-        )
 
         row = await self._db.load_listing(listing_id=listing_id)
         if not row:
             raise ValueError(f"Listing {listing_id} not found")
+        listing_binding = await self._db.load_listing_binding(listing_id=listing_id)
+        if listing_binding is None:
+            raise ValueError(f"Listing {listing_id} has no durable domain binding")
+        if listing_binding.binding != self._binding:
+            raise ValueError(
+                f"Listing {listing_id} is not bound to the selected VM domain"
+            )
+        domain = self._registry.resolve(listing_binding.binding)
+        if domain is not self._domain:
+            raise RuntimeError(
+                "listing binding did not resolve to the startup-owned VM contract"
+            )
         listing = Listing.model_validate(row)
         their_amount_raw = _amount_from_proposal(proposal)
         if their_amount_raw is None:
@@ -370,10 +565,14 @@ class ListingService:
             direction,
             strategy_name,
             decision,
-        ) = await _compute_round_zero_decision(
-            sqlite_client=self._db,
+        ) = await compute_round_zero_decision(
+            repository=self._db,
+            registry=self._registry,
+            binding=listing_binding.binding,
+            domain=domain,
+            capacity_runtime=self._capacity_runtime,
             listing=listing,
-            their_proposal=proposal,
+            proposal=proposal,
             requested_duration_seconds=requested_duration_seconds,
         )
         decision_amount = _amount_from_proposal(decision.proposal)
@@ -425,7 +624,8 @@ class ListingService:
             order=order,
             payload={
                 "listing_id": listing_id,
-                "buyer_address": payload.buyer_address,
+                "buyer_principal": payload.buyer_principal.model_dump(mode="json"),
+                "buyer_evm_address": payload.buyer_evm_address,
                 "amount": payload.amount,
                 "token": payload.token,
             },
@@ -435,7 +635,10 @@ class ListingService:
             _, status, body = outcome
             return status, body
         params = outcome[1]
-        from market_storefront.utils.config import CHAINS, settings
+        from market_storefront.utils.config import (
+            CHAINS,
+            get_evm_wallet_private_key,
+        )
         from market_storefront.utils.token_transfer import transfer_erc20
 
         chain_name = self._resolve_chain_for_listing(order or {})
@@ -450,7 +653,7 @@ class ListingService:
             }
         try:
             result = await transfer_erc20(
-                private_key=settings.wallet.private_key.strip(),
+                private_key=get_evm_wallet_private_key(),
                 rpc_url=chain_cfg.rpc_url,
                 token_address=params["token_address"],
                 to_address=params["buyer_address"],
@@ -515,11 +718,40 @@ class ListingService:
                     "which is not currently configured."
                 ),
             }
+        composition = self._settlement_composition_provider()
+        obligation_ref = row.get("obligation_ref")
+        if composition is None or not obligation_ref:
+            return 409, {
+                "error": "Settlement obligation is not registered",
+                "detail": (
+                    f"Escrow {payload.escrow_uid} has no exact canonical obligation; "
+                    "resubmit the accepted settlement before collection."
+                ),
+                "listing_id": listing_id,
+            }
+        worker_id = f"manual-claim:{listing_id}"
         try:
-            collect_result = await codec.collect(
-                alkahest,
-                payload.escrow_uid,
+            await composition.runtime.bind_fulfillment(
+                str(obligation_ref),
                 payload.fulfillment_uid,
+                local_principal=composition.local_principal,
+                worker_id=worker_id,
+            )
+            checked = await composition.runtime.check(
+                obligation_ref=str(obligation_ref),
+                local_principal=composition.local_principal,
+                worker_id=worker_id,
+            )
+            if checked.status != "succeeded":
+                return 409, {
+                    "error": "Settlement conditions are not collectable",
+                    "detail": f"condition check status={checked.status}",
+                    "listing_id": listing_id,
+                }
+            collected = await composition.runtime.collect(
+                obligation_ref=str(obligation_ref),
+                local_principal=composition.local_principal,
+                worker_id=worker_id,
             )
         except Exception as exc:
             return 502, {
@@ -544,7 +776,7 @@ class ListingService:
             "escrow_uid": payload.escrow_uid,
             "fulfillment_uid": payload.fulfillment_uid,
             "escrow_kind": codec.kind,
-            "collect_result": str(collect_result),
+            "collect_result": str(collected.receipt),
         }
 
     async def reclaim(
@@ -580,13 +812,38 @@ class ListingService:
                     "which is not currently configured."
                 ),
             }
+        composition = self._settlement_composition_provider()
+        obligation_ref = row.get("obligation_ref")
+        if composition is None or not obligation_ref:
+            return 409, {
+                "error": "Settlement obligation is not registered",
+                "detail": (
+                    f"Escrow {payload.escrow_uid} has no exact canonical obligation; "
+                    "resubmit the accepted settlement before reclaim."
+                ),
+                "listing_id": listing_id,
+            }
+        persisted_obligation = await composition.repository.load_settlement_obligation(
+            str(obligation_ref)
+        )
+        if persisted_obligation is None:
+            return 409, {
+                "error": "Settlement obligation is not registered",
+                "detail": (
+                    f"Escrow {payload.escrow_uid} references an unknown canonical "
+                    "settlement obligation."
+                ),
+                "listing_id": listing_id,
+            }
+        payer_principal = Identity.model_validate(
+            persisted_obligation.get("payer_principal")
+        )
         try:
-            from market_alkahest.txlock import chain_tx_lock
-
-            async with chain_tx_lock(None):
-                reclaim_result = await codec.reclaim_expired(
-                    alkahest, payload.escrow_uid
-                )
+            reclaimed = await composition.runtime.reclaim(
+                obligation_ref=str(obligation_ref),
+                local_principal=payer_principal,
+                worker_id=f"manual-reclaim:{listing_id}",
+            )
         except Exception as exc:
             return 502, {
                 "error": "Escrow reclaim failed on-chain",
@@ -609,7 +866,7 @@ class ListingService:
             "listing_id": listing_id,
             "escrow_uid": payload.escrow_uid,
             "escrow_kind": codec.kind,
-            "reclaim_result": str(reclaim_result),
+            "reclaim_result": str(reclaimed.receipt),
         }
 
     async def arbitrate(

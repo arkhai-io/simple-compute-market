@@ -3,19 +3,56 @@ from __future__ import annotations
 import subprocess
 
 import pytest
+from core_storefront.publication_runner import (
+    PublicationCommandResult,
+    PublicationCycleResult,
+)
+from market_settlement_runtime import SettlementPublicationClause
+
+from tests.fixtures.publish import build_failed_resource, build_published_entry
 
 from .conftest import fake_chain
-from tests.fixtures.publish import build_published_entry, build_failed_resource
+
+
+def _publication_result(
+    *,
+    published: list[dict] | None = None,
+    failed: list[tuple[dict, str]] | None = None,
+    skipped: list[dict] | None = None,
+) -> PublicationCommandResult:
+    return PublicationCommandResult(
+        PublicationCycleResult(
+            closed={},
+            published=published or [],
+            failed=failed or [],
+            skipped=skipped or [],
+        )
+    )
 
 
 def _patch_publish_prereqs(monkeypatch, *, db_path: str = "/fake/agent.db") -> None:
-    monkeypatch.setattr("market_storefront.cli_publish._resolve_db_path", lambda _db: db_path)
-    monkeypatch.setattr("market_storefront.utils.config.CHAINS", {"anvil": fake_chain()})
+    monkeypatch.setattr(
+        "market_storefront.cli_publish._resolve_db_path", lambda _db: db_path
+    )
+    monkeypatch.setattr(
+        "market_storefront.utils.config.CHAINS", {"anvil": fake_chain()}
+    )
+    monkeypatch.setattr(
+        "market_storefront.utils.config.settlement_config_mapping",
+        lambda: {
+            "priority": ["alkahest.v1"],
+            "alkahest": {"enabled": True},
+        },
+    )
 
 
 def test_publish_exits_when_db_not_resolvable(monkeypatch, runner, app):
-    monkeypatch.setattr("market_storefront.cli_publish._resolve_db_path", lambda _db: None)
-    monkeypatch.setattr("market_storefront.utils.config.CHAINS", {"anvil": fake_chain()})
+    monkeypatch.setattr(
+        "market_storefront.cli_publish._resolve_db_path", lambda _db: None
+    )
+    monkeypatch.setattr(
+        "market_storefront.utils.config.CHAINS", {"anvil": fake_chain()}
+    )
 
     result = runner.invoke(app, ["publish"])
 
@@ -23,14 +60,48 @@ def test_publish_exits_when_db_not_resolvable(monkeypatch, runner, app):
     assert "db" in result.output.lower() or "db" in (result.stderr or "").lower()
 
 
-def test_publish_exits_when_no_chains_configured(monkeypatch, runner, app):
-    monkeypatch.setattr("market_storefront.cli_publish._resolve_db_path", lambda _db: "/fake/agent.db")
+def test_publish_allows_ready_stripe_when_alkahest_has_no_chains(
+    monkeypatch, runner, app
+):
+    stripe_clause = SettlementPublicationClause(
+        mechanism="fiat.stripe.v1",
+        asset="usd",
+        rate="2",
+        per="hour",
+        mechanism_input={
+            "funding_profile": "card.v1",
+            "interaction": "interactive",
+            "funds_flow": "separate_charges_transfers",
+        },
+    )
+    monkeypatch.setattr(
+        "market_storefront.cli_publish._resolve_db_path",
+        lambda _db: "/fake/agent.db",
+    )
     monkeypatch.setattr("market_storefront.utils.config.CHAINS", {})
+    monkeypatch.setattr(
+        "market_storefront.utils.config.settlement_config_mapping",
+        lambda: {
+            "priority": ["fiat.stripe.v1", "alkahest.v1"],
+            "stripe": {"enabled": True},
+            "alkahest": {"enabled": True},
+        },
+    )
+    monkeypatch.setattr(
+        "market_storefront.cli_publish._compile_publication_clauses",
+        lambda _values: (stripe_clause,),
+    )
+    monkeypatch.setattr(
+        "market_storefront.cli_publish._open_publication_keys", lambda _db: set()
+    )
+    monkeypatch.setattr(
+        "market_storefront.cli_publish._publish_command_round",
+        lambda **_kwargs: _publication_result(published=[build_published_entry()]),
+    )
 
-    result = runner.invoke(app, ["publish"])
+    result = runner.invoke(app, ["publish", "--settlement", "stripe"])
 
-    assert result.exit_code == 1
-    assert "chain" in result.output.lower() or "chain" in (result.stderr or "").lower()
+    assert result.exit_code == 0
 
 
 def test_publish_abort_all_exclusive_with_inventory(monkeypatch, tmp_path, runner, app):
@@ -41,7 +112,10 @@ def test_publish_abort_all_exclusive_with_inventory(monkeypatch, tmp_path, runne
     result = runner.invoke(app, ["publish", "--abort-all", "--inventory", str(csv)])
 
     assert result.exit_code != 0
-    assert "mutually exclusive" in result.output.lower() or "abort-all" in result.output.lower()
+    assert (
+        "mutually exclusive" in result.output.lower()
+        or "abort-all" in result.output.lower()
+    )
 
 
 def test_publish_abort_all_exclusive_with_watch(monkeypatch, runner, app):
@@ -50,12 +124,17 @@ def test_publish_abort_all_exclusive_with_watch(monkeypatch, runner, app):
     result = runner.invoke(app, ["publish", "--abort-all", "--watch"])
 
     assert result.exit_code != 0
-    assert "mutually exclusive" in result.output.lower() or "abort-all" in result.output.lower()
+    assert (
+        "mutually exclusive" in result.output.lower()
+        or "abort-all" in result.output.lower()
+    )
 
 
 def test_publish_abort_all_no_open_orders(monkeypatch, runner, app):
     _patch_publish_prereqs(monkeypatch)
-    monkeypatch.setattr("market_storefront.cli_publish._open_listing_ids", lambda _db: [])
+    monkeypatch.setattr(
+        "market_storefront.cli_publish._open_listing_ids", lambda _db: []
+    )
 
     result = runner.invoke(app, ["publish", "--abort-all"])
 
@@ -65,8 +144,13 @@ def test_publish_abort_all_no_open_orders(monkeypatch, runner, app):
 
 def test_publish_abort_all_all_succeed(monkeypatch, runner, app):
     _patch_publish_prereqs(monkeypatch)
-    monkeypatch.setattr("market_storefront.cli_publish._open_listing_ids", lambda _db: ["o1", "o2"])
-    monkeypatch.setattr("market_storefront.cli_publish._close_order", lambda _url, _oid, _key: {"status": "closed"})
+    monkeypatch.setattr(
+        "market_storefront.cli_publish._open_listing_ids", lambda _db: ["o1", "o2"]
+    )
+    monkeypatch.setattr(
+        "market_storefront.cli_publish._close_order",
+        lambda _url, _oid: {"status": "closed"},
+    )
 
     result = runner.invoke(app, ["publish", "--abort-all"])
 
@@ -76,9 +160,11 @@ def test_publish_abort_all_all_succeed(monkeypatch, runner, app):
 
 def test_publish_abort_all_some_fail(monkeypatch, runner, app):
     _patch_publish_prereqs(monkeypatch)
-    monkeypatch.setattr("market_storefront.cli_publish._open_listing_ids", lambda _db: ["o1", "o2"])
+    monkeypatch.setattr(
+        "market_storefront.cli_publish._open_listing_ids", lambda _db: ["o1", "o2"]
+    )
 
-    def fake_close(_url, oid, _key):
+    def fake_close(_url, oid):
         if oid == "o2":
             raise RuntimeError("network error")
         return {"status": "closed"}
@@ -93,7 +179,9 @@ def test_publish_abort_all_some_fail(monkeypatch, runner, app):
 def test_publish_inventory_file_not_found(monkeypatch, runner, app):
     _patch_publish_prereqs(monkeypatch)
 
-    result = runner.invoke(app, ["publish", "--inventory", "/nonexistent/resources.csv"])
+    result = runner.invoke(
+        app, ["publish", "--inventory", "/nonexistent/resources.csv"]
+    )
 
     assert result.exit_code != 0
     assert "not found" in result.output.lower() or "invalid" in result.output.lower()
@@ -106,28 +194,39 @@ def test_publish_inventory_import_failure(monkeypatch, tmp_path, runner, app):
 
     monkeypatch.setattr(
         "market_storefront.cli_publish._import_csv",
-        lambda _csv, _db: (_ for _ in ()).throw(subprocess.CalledProcessError(1, "python")),
+        lambda _csv, _db: (_ for _ in ()).throw(
+            subprocess.CalledProcessError(1, "python")
+        ),
     )
-    monkeypatch.setattr("market_storefront.cli_publish._publish_round", lambda **_kwargs: ([], [], []))
 
     result = runner.invoke(app, ["publish", "--inventory", str(csv)])
 
     assert result.exit_code == 2
 
 
-def test_publish_inventory_success_then_publishes_with_cli_args(monkeypatch, tmp_path, runner, app):
+def test_publish_inventory_success_then_publishes_with_cli_args(
+    monkeypatch, tmp_path, runner, app
+):
     _patch_publish_prereqs(monkeypatch, db_path="/fake/seller.db")
     csv = tmp_path / "resources.csv"
     csv.write_text("resource_id\n")
     imports: list[tuple[str, str | None]] = []
     publish_calls: list[dict] = []
 
-    monkeypatch.setattr("market_storefront.cli_publish._import_csv", lambda csv_path, db: imports.append((csv_path, db)))
-    monkeypatch.setattr("market_storefront.cli_publish._close_stale_publication_listings", lambda **_kwargs: {})
-    monkeypatch.setattr("market_storefront.cli_publish._open_publication_keys", lambda _db: {"already-open"})
     monkeypatch.setattr(
-        "market_storefront.cli_publish._publish_round",
-        lambda **kwargs: publish_calls.append(kwargs) or ([build_published_entry()], [], []),
+        "market_storefront.cli_publish._import_csv",
+        lambda csv_path, db: imports.append((csv_path, db)),
+    )
+    monkeypatch.setattr(
+        "market_storefront.cli_publish._open_publication_keys",
+        lambda _db: {"already-open"},
+    )
+    monkeypatch.setattr(
+        "market_storefront.cli_publish._publish_command_round",
+        lambda **kwargs: (
+            publish_calls.append(kwargs)
+            or _publication_result(published=[build_published_entry()])
+        ),
     )
 
     result = runner.invoke(
@@ -151,13 +250,20 @@ def test_publish_inventory_success_then_publishes_with_cli_args(monkeypatch, tmp
     assert publish_calls[0]["db_path"] == "/fake/seller.db"
     assert publish_calls[0]["default_max_duration_seconds"] == 120
     assert publish_calls[0]["skip_ids"] == {"already-open"}
+    assert "private_key" not in publish_calls[0]
+    assert "rpc_url" not in publish_calls[0]
+    assert "chain_id" not in publish_calls[0]
 
 
 def test_publish_oneshot_no_resources(monkeypatch, runner, app):
     _patch_publish_prereqs(monkeypatch)
-    monkeypatch.setattr("market_storefront.cli_publish._close_stale_publication_listings", lambda **_kwargs: {})
-    monkeypatch.setattr("market_storefront.cli_publish._open_publication_keys", lambda _db: set())
-    monkeypatch.setattr("market_storefront.cli_publish._publish_round", lambda **_kwargs: ([], [], []))
+    monkeypatch.setattr(
+        "market_storefront.cli_publish._open_publication_keys", lambda _db: set()
+    )
+    monkeypatch.setattr(
+        "market_storefront.cli_publish._publish_command_round",
+        lambda **_kwargs: _publication_result(),
+    )
 
     result = runner.invoke(app, ["publish"])
 
@@ -166,11 +272,12 @@ def test_publish_oneshot_no_resources(monkeypatch, runner, app):
 
 def test_publish_oneshot_all_published(monkeypatch, runner, app):
     _patch_publish_prereqs(monkeypatch)
-    monkeypatch.setattr("market_storefront.cli_publish._close_stale_publication_listings", lambda **_kwargs: {})
-    monkeypatch.setattr("market_storefront.cli_publish._open_publication_keys", lambda _db: set())
     monkeypatch.setattr(
-        "market_storefront.cli_publish._publish_round",
-        lambda **_kwargs: ([build_published_entry()], [], []),
+        "market_storefront.cli_publish._open_publication_keys", lambda _db: set()
+    )
+    monkeypatch.setattr(
+        "market_storefront.cli_publish._publish_command_round",
+        lambda **_kwargs: _publication_result(published=[build_published_entry()]),
     )
 
     result = runner.invoke(app, ["publish"])
@@ -180,9 +287,15 @@ def test_publish_oneshot_all_published(monkeypatch, runner, app):
 
 def test_publish_oneshot_all_failed(monkeypatch, runner, app):
     _patch_publish_prereqs(monkeypatch)
-    monkeypatch.setattr("market_storefront.cli_publish._close_stale_publication_listings", lambda **_kwargs: {})
-    monkeypatch.setattr("market_storefront.cli_publish._open_publication_keys", lambda _db: set())
-    monkeypatch.setattr("market_storefront.cli_publish._publish_round", lambda **_kwargs: ([], [(build_failed_resource(), "RPC error")], []))
+    monkeypatch.setattr(
+        "market_storefront.cli_publish._open_publication_keys", lambda _db: set()
+    )
+    monkeypatch.setattr(
+        "market_storefront.cli_publish._publish_command_round",
+        lambda **_kwargs: _publication_result(
+            failed=[(build_failed_resource(), "RPC error")]
+        ),
+    )
 
     result = runner.invoke(app, ["publish"])
 
@@ -192,8 +305,14 @@ def test_publish_oneshot_all_failed(monkeypatch, runner, app):
 def test_publish_watch_calls_run_watch_loop(monkeypatch, runner, app):
     _patch_publish_prereqs(monkeypatch)
     watch_calls: list[dict] = []
-    monkeypatch.setattr("market_storefront.cli_publish.run_watch_loop", lambda **kwargs: watch_calls.append(kwargs))
-    monkeypatch.setattr("market_storefront.cli_publish._publish_round", lambda **_kwargs: pytest.fail("_publish_round must not be called"))
+    monkeypatch.setattr(
+        "market_storefront.cli_publish.run_watch_loop",
+        lambda **kwargs: watch_calls.append(kwargs),
+    )
+    monkeypatch.setattr(
+        "market_storefront.cli_publish._publish_command_round",
+        lambda **_kwargs: pytest.fail("_publish_command_round must not be called"),
+    )
 
     result = runner.invoke(app, ["publish", "--watch", "--poll-interval", "5"])
 

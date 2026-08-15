@@ -16,22 +16,28 @@ import logging
 import sqlite3
 import uuid
 from datetime import datetime
+from collections.abc import Collection, Sequence
 from typing import Any
 
 from core_storefront.sqlite_client import (
     SQLiteClient as CoreSQLiteClient,
 )
-from core_storefront.sqlite_migrations import Migration
-
-from market_storefront.listings.host_csv_importer import upsert_hosts_from_csv
-from market_storefront.listings.reconciler import ensure_derived_compute_listings_table
-from market_storefront.listings.resource_csv_importer import (
+from core_storefront.domain_registry import StorefrontDomainRegistry
+from core_storefront.sqlite_migrations import MigrationLike
+from domains.vms.listings.host_csv_importer import upsert_hosts_from_csv
+from domains.vms.listings.reconciler import ensure_derived_compute_listings_table
+from domains.vms.listings.resource_csv_importer import (
+    SettlementClauseCompiler,
     upsert_resources_from_csv,
     upsert_resources_from_csv_content,
 )
+from market_hosted_settlement import HOSTED_SETTLEMENT_MIGRATIONS
+from market_settlement_runtime import settlement_migrations
+from market_identity import Identity
 
-from .config import settings
+from .config import BASE_URL_OVERRIDE, resolve_marketplace_signer, settings
 from .migrations import (  # noqa: F401 — re-exported (tests import via here)
+    VM_LEGACY_MIGRATION_INPUTS,
     VM_MIGRATIONS,
     synthesize_accepted_escrows_from_demand,
 )
@@ -41,9 +47,45 @@ logger = logging.getLogger(__name__)
 
 class SQLiteClient(CoreSQLiteClient):
     """Core market-state client + the VM domain's inventory tables."""
+    def __init__(
+        self,
+        db_path: str,
+        *,
+        registry: StorefrontDomainRegistry,
+        local_listing_principal: Identity | None = None,
+        expected_legacy_sellers: Collection[str] = (),
+        extra_migrations: Sequence[MigrationLike] = (),
+    ) -> None:
+        if not isinstance(registry, StorefrontDomainRegistry):
+            raise TypeError("registry must be a StorefrontDomainRegistry")
+        self._domain_registry = registry
+        super().__init__(
+            db_path,
+            local_listing_principal=local_listing_principal,
+            expected_legacy_sellers=expected_legacy_sellers,
+            extra_migrations=extra_migrations,
+            legacy_migration_inputs=VM_LEGACY_MIGRATION_INPUTS,
+        )
 
-    def _domain_migrations(self) -> tuple[Migration, ...]:
-        return VM_MIGRATIONS
+    @property
+    def domain_registry(self) -> StorefrontDomainRegistry:
+        """Return the immutable startup registry governing durable bindings."""
+
+        return self._domain_registry
+
+
+    _ESCROW_COLS = (
+        *CoreSQLiteClient._ESCROW_COLS,
+        "obligation_ref",
+        "obligation_index",
+    )
+
+    def _domain_migrations(self) -> tuple[MigrationLike, ...]:
+        return (
+            *settlement_migrations(),
+            *HOSTED_SETTLEMENT_MIGRATIONS,
+            *VM_MIGRATIONS,
+        )
 
     def _ensure_domain_tables(self, cur: sqlite3.Cursor) -> None:
         # Resources table (local source of truth across all resource types).
@@ -66,6 +108,7 @@ class SQLiteClient(CoreSQLiteClient):
               token TEXT,
               max_duration_seconds INTEGER,
               accepted_escrows TEXT,
+              settlements TEXT,
               created_at TEXT NOT NULL DEFAULT (STRFTIME('%Y-%m-%dT%H:%M:%fZ', 'now')),
               updated_at TEXT NOT NULL DEFAULT (STRFTIME('%Y-%m-%dT%H:%M:%fZ', 'now'))
             )
@@ -79,6 +122,7 @@ class SQLiteClient(CoreSQLiteClient):
             "ALTER TABLE resources ADD COLUMN token TEXT",
             "ALTER TABLE resources ADD COLUMN max_duration_seconds INTEGER",
             "ALTER TABLE resources ADD COLUMN accepted_escrows TEXT",
+            "ALTER TABLE resources ADD COLUMN settlements TEXT",
         ):
             try:
                 cur.execute(col_ddl)
@@ -213,28 +257,8 @@ class SQLiteClient(CoreSQLiteClient):
             """
         )
         ensure_derived_compute_listings_table(cur)
-        cur.execute(
-            """
-            CREATE TABLE IF NOT EXISTS derived_bare_metal_listings (
-              listing_id TEXT PRIMARY KEY,
-              machine_id TEXT NOT NULL,
-              physical_host_id TEXT NOT NULL,
-              status TEXT NOT NULL,
-              derivation_key TEXT NOT NULL UNIQUE,
-              last_reconciled_at TEXT NOT NULL DEFAULT (STRFTIME('%Y-%m-%dT%H:%M:%fZ', 'now'))
-            )
-            """
-        )
 
     def _ensure_domain_indexes(self, cur: sqlite3.Cursor) -> None:
-        cur.execute(
-            "CREATE INDEX IF NOT EXISTS idx_derived_bare_metal_listings_machine "
-            "ON derived_bare_metal_listings(machine_id)"
-        )
-        cur.execute(
-            "CREATE INDEX IF NOT EXISTS idx_derived_bare_metal_listings_status "
-            "ON derived_bare_metal_listings(status)"
-        )
         cur.execute(
             "CREATE INDEX IF NOT EXISTS idx_resources_resource_id ON resources(resource_id)"
         )
@@ -280,6 +304,7 @@ class SQLiteClient(CoreSQLiteClient):
         token: str | None = None,
         max_duration_seconds: int | None = None,
         accepted_escrows: list[dict[str, Any]] | None = None,
+        settlements: list[dict[str, Any]] | None = None,
     ) -> None:
         """Create or update a generic resource snapshot row.
 
@@ -316,9 +341,10 @@ class SQLiteClient(CoreSQLiteClient):
                     """
                     INSERT INTO resources(
                       resource_id, resource_type, resource_subtype, unit, value, state, attributes,
-                      min_price, token, max_duration_seconds, accepted_escrows, created_at, updated_at
+                      min_price, token, max_duration_seconds, accepted_escrows, settlements,
+                      created_at, updated_at
                     )
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     ON CONFLICT(resource_id) DO UPDATE SET
                       resource_type=excluded.resource_type,
                       resource_subtype=excluded.resource_subtype,
@@ -330,6 +356,7 @@ class SQLiteClient(CoreSQLiteClient):
                       token=excluded.token,
                       max_duration_seconds=excluded.max_duration_seconds,
                       accepted_escrows=excluded.accepted_escrows,
+                      settlements=excluded.settlements,
                       updated_at=excluded.updated_at
                     """,
                     (
@@ -346,6 +373,7 @@ class SQLiteClient(CoreSQLiteClient):
                         json.dumps(accepted_escrows)
                         if accepted_escrows is not None
                         else None,
+                        json.dumps(settlements) if settlements is not None else None,
                         now_iso,
                         now_iso,
                     ),
@@ -365,6 +393,9 @@ class SQLiteClient(CoreSQLiteClient):
                             json.dumps(accepted_escrows)
                             if accepted_escrows is not None
                             else None
+                        ),
+                        settlements_json=(
+                            json.dumps(settlements) if settlements is not None else None
                         ),
                         now_iso=now_iso,
                     )
@@ -401,7 +432,8 @@ class SQLiteClient(CoreSQLiteClient):
                 cur.execute(
                     f"""
                     SELECT resource_id, resource_type, resource_subtype, unit, value, state, attributes,
-                           min_price, token, max_duration_seconds, accepted_escrows, created_at, updated_at
+                           min_price, token, max_duration_seconds, accepted_escrows, settlements,
+                           created_at, updated_at
                     FROM resources
                     {where_clause}
                     ORDER BY updated_at DESC
@@ -422,6 +454,7 @@ class SQLiteClient(CoreSQLiteClient):
                     row_token,
                     row_max_duration_seconds,
                     row_accepted_escrows,
+                    row_settlements,
                     row_created_at,
                     row_updated_at,
                 ) in rows:
@@ -444,6 +477,14 @@ class SQLiteClient(CoreSQLiteClient):
                                 accepted = parsed_ae
                         except Exception:
                             accepted = None
+                    parsed_settlements: list[dict[str, Any]] | None = None
+                    if isinstance(row_settlements, str) and row_settlements.strip():
+                        try:
+                            value = json.loads(row_settlements)
+                            if isinstance(value, list):
+                                parsed_settlements = value
+                        except Exception:
+                            parsed_settlements = None
                     result.append(
                         {
                             "resource_id": row_resource_id,
@@ -457,6 +498,7 @@ class SQLiteClient(CoreSQLiteClient):
                             "token": row_token,
                             "max_duration_seconds": row_max_duration_seconds,
                             "accepted_escrows": accepted,
+                            "settlements": parsed_settlements,
                             "created_at": row_created_at,
                             "updated_at": row_updated_at,
                         }
@@ -476,8 +518,9 @@ class SQLiteClient(CoreSQLiteClient):
                 cur = conn.cursor()
                 cur.execute(
                     """
-                    SELECT resource_id, resource_type, resource_subtype, unit, value, state, attributes,
-                           min_price, token, max_duration_seconds, created_at, updated_at
+                    SELECT resource_id, resource_type, resource_subtype, unit, value,
+                           state, attributes, min_price, token, max_duration_seconds,
+                           accepted_escrows, settlements, created_at, updated_at
                     FROM resources
                     WHERE resource_id = ?
                     LIMIT 1
@@ -499,6 +542,8 @@ class SQLiteClient(CoreSQLiteClient):
                     row_min_price,
                     row_token,
                     row_max_duration_seconds,
+                    row_accepted_escrows,
+                    row_settlements,
                     row_created_at,
                     row_updated_at,
                 ) = row
@@ -510,7 +555,17 @@ class SQLiteClient(CoreSQLiteClient):
                             attrs = parsed
                     except Exception:
                         attrs = {}
-
+                accepted = (
+                    json.loads(row_accepted_escrows)
+                    if isinstance(row_accepted_escrows, str)
+                    and row_accepted_escrows.strip()
+                    else None
+                )
+                settlements = (
+                    json.loads(row_settlements)
+                    if isinstance(row_settlements, str) and row_settlements.strip()
+                    else None
+                )
                 return {
                     "resource_id": row_resource_id,
                     "resource_type": row_resource_type,
@@ -522,6 +577,8 @@ class SQLiteClient(CoreSQLiteClient):
                     "min_price": row_min_price,
                     "token": row_token,
                     "max_duration_seconds": row_max_duration_seconds,
+                    "accepted_escrows": accepted,
+                    "settlements": settlements,
                     "created_at": row_created_at,
                     "updated_at": row_updated_at,
                 }
@@ -556,6 +613,7 @@ class SQLiteClient(CoreSQLiteClient):
         csv_path: str,
         dry_run: bool = False,
         templates: dict[str, Any] | None = None,
+        settlement_compiler: SettlementClauseCompiler | None = None,
     ) -> dict[str, Any]:
         """Import resources from CSV file and upsert rows into the resources table."""
         report = await upsert_resources_from_csv(
@@ -563,6 +621,7 @@ class SQLiteClient(CoreSQLiteClient):
             sqlite_client=self,
             dry_run=dry_run,
             templates=templates,
+            settlement_compiler=settlement_compiler,
         )
         return report.to_dict()
 
@@ -573,6 +632,7 @@ class SQLiteClient(CoreSQLiteClient):
         source_label: str = "<inline>",
         dry_run: bool = False,
         templates: dict[str, Any] | None = None,
+        settlement_compiler: SettlementClauseCompiler | None = None,
     ) -> dict[str, Any]:
         """Import resources from a CSV string and upsert rows into the resources table.
 
@@ -586,6 +646,7 @@ class SQLiteClient(CoreSQLiteClient):
             sqlite_client=self,
             dry_run=dry_run,
             templates=templates,
+            settlement_compiler=settlement_compiler,
         )
         return report.to_dict()
 
@@ -632,7 +693,7 @@ class SQLiteClient(CoreSQLiteClient):
     @staticmethod
     def _host_row_to_dict(row: tuple) -> dict[str, Any]:
         d: dict[str, Any] = {}
-        for col, val in zip(SQLiteClient._HOST_COLUMNS, row):
+        for col, val in zip(SQLiteClient._HOST_COLUMNS, row, strict=True):
             d[col] = val
         # Normalize types: bools come back as 0/1 ints
         for bcol in ("static_ip", "datacenter_grade", "enabled"):
@@ -1066,6 +1127,7 @@ class SQLiteClient(CoreSQLiteClient):
         token: str | None,
         max_duration_seconds: int | None,
         accepted_escrows_json: str | None,
+        settlements_json: str | None,
         now_iso: str,
     ) -> str:
         attrs = attributes or {}
@@ -1126,9 +1188,9 @@ class SQLiteClient(CoreSQLiteClient):
             INSERT INTO compute_capacity_pools(
               pool_id, resource_type, gpu_model, region, sla, total_gpu_count,
               status, allocation_policy, min_price, token, max_duration_seconds,
-              accepted_escrows, created_at, updated_at
+              accepted_escrows, settlements, created_at, updated_at
             )
-            VALUES (?, 'compute.gpu', ?, ?, ?, ?, ?, 'first_fit', ?, ?, ?, ?, ?, ?)
+            VALUES (?, 'compute.gpu', ?, ?, ?, ?, ?, 'first_fit', ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(pool_id) DO UPDATE SET
               gpu_model=COALESCE(excluded.gpu_model, compute_capacity_pools.gpu_model),
               region=COALESCE(excluded.region, compute_capacity_pools.region),
@@ -1139,6 +1201,7 @@ class SQLiteClient(CoreSQLiteClient):
               token=COALESCE(excluded.token, compute_capacity_pools.token),
               max_duration_seconds=COALESCE(excluded.max_duration_seconds, compute_capacity_pools.max_duration_seconds),
               accepted_escrows=COALESCE(excluded.accepted_escrows, compute_capacity_pools.accepted_escrows),
+              settlements=COALESCE(excluded.settlements, compute_capacity_pools.settlements),
               updated_at=excluded.updated_at
             """,
             (
@@ -1152,11 +1215,67 @@ class SQLiteClient(CoreSQLiteClient):
                 token,
                 max_duration_seconds,
                 accepted_escrows_json,
+                settlements_json,
                 now_iso,
                 now_iso,
             ),
         )
         return pool_id
+
+    async def bind_escrow_obligation(
+        self,
+        *,
+        escrow_uid: str,
+        obligation_ref: str,
+        obligation_index: int,
+    ) -> dict[str, Any]:
+        """Persist the verified obligation identity without permitting rebinding."""
+        if not obligation_ref.strip():
+            raise ValueError("obligation_ref must not be empty")
+        if obligation_index < 0:
+            raise ValueError("obligation_index must be non-negative")
+
+        def _bind() -> None:
+            conn = sqlite3.connect(self.db_path)
+            try:
+                conn.execute("BEGIN IMMEDIATE")
+                row = conn.execute(
+                    "SELECT obligation_ref, obligation_index FROM escrows "
+                    "WHERE escrow_uid = ?",
+                    (escrow_uid,),
+                ).fetchone()
+                if row is None:
+                    raise ValueError(f"Unknown escrow {escrow_uid}")
+                existing_ref, existing_index = row
+                if existing_ref is not None and (
+                    str(existing_ref) != obligation_ref
+                    or int(existing_index) != obligation_index
+                ):
+                    raise ValueError(
+                        f"escrow {escrow_uid} is already bound to a different obligation"
+                    )
+                conn.execute(
+                    "UPDATE escrows SET obligation_ref = ?, obligation_index = ?, "
+                    "updated_at = ? WHERE escrow_uid = ?",
+                    (
+                        obligation_ref,
+                        obligation_index,
+                        datetime.now().isoformat(),
+                        escrow_uid,
+                    ),
+                )
+                conn.commit()
+            except Exception:
+                conn.rollback()
+                raise
+            finally:
+                conn.close()
+
+        await asyncio.to_thread(_bind)
+        row = await self.load_escrow(escrow_uid=escrow_uid)
+        if row is None:
+            raise RuntimeError(f"escrow {escrow_uid} disappeared after binding")
+        return row
 
     # ------------------------------------------------------------------
     # Capacity holds — two-phase reserve bookkeeping. The hold itself
@@ -1169,19 +1288,21 @@ class SQLiteClient(CoreSQLiteClient):
 _sqlite_client: SQLiteClient | None = None
 
 
-def get_sqlite_client() -> SQLiteClient:
-    """The process-wide client, addressing ``settings.db_path``.
-
-    Prefer a client the caller was given. This one resolves from configuration
-    rather than from composition, so a caller that already holds a unit of work
-    and reaches for this instead operates on a different database whenever the
-    two differ -- which is every test that seeds its own, and which produces a
-    write that reports success and changes nothing observable. The
-    listing-reconcile path takes its client as a parameter for exactly this
-    reason; other writers reached from a test still mutate the configured
-    database rather than a temporary one.
-    """
+def get_sqlite_client(*, registry: StorefrontDomainRegistry) -> SQLiteClient:
     global _sqlite_client
+    if not isinstance(registry, StorefrontDomainRegistry):
+        raise TypeError("registry must be a StorefrontDomainRegistry")
     if _sqlite_client is None:
-        _sqlite_client = SQLiteClient(db_path=settings.db_path)
+        signer = resolve_marketplace_signer()
+        _sqlite_client = SQLiteClient(
+            db_path=settings.db_path,
+            registry=registry,
+            local_listing_principal=signer.identity,
+            expected_legacy_sellers=(BASE_URL_OVERRIDE,),
+        )
+    elif _sqlite_client.domain_registry is not registry:
+        raise RuntimeError(
+            "SQLite client is already bound to a different storefront "
+            "domain registry object"
+        )
     return _sqlite_client

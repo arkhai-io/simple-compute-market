@@ -15,16 +15,16 @@ includes are optional — a fresh checkout with neither set loads only
 settings.toml.
 
 storefront_admin_key resolution:
-  The seller compose mounts the storefront's TOML at
-  /etc/arkhai/storefront.toml. When `storefront_admin_key` isn't
-  otherwise set, we read `admin_api_key` from there so the operator
-  writes the value in one place. Override via STOREFRONT_TOML_PATH if
-  your mount is elsewhere.
+  ``storefront_admin_key_file`` selects one exact role-scoped secret file.
+  Inline and file values are mutually exclusive. The historical mounted
+  storefront-TOML fallback remains for non-Compose deployments that have not
+  selected either explicit source.
 """
 
 from __future__ import annotations
 
 import os
+import stat
 import tomllib
 from pathlib import Path
 from typing import List
@@ -83,7 +83,29 @@ def _resolve_storefront_admin_key_from_mount() -> str:
     return ""
 
 
-if not str(_dynaconf.get("storefront_admin_key", "") or ""):
+def _read_admin_key_file(file_name: str) -> str:
+    path = Path(file_name)
+    try:
+        metadata = path.lstat()
+        if not stat.S_ISREG(metadata.st_mode):
+            raise RuntimeError("storefront_admin_key_file must be a regular file")
+        value = path.read_text(encoding="utf-8").strip()
+    except OSError as exc:
+        raise RuntimeError("storefront_admin_key_file cannot be read") from exc
+    if not value:
+        raise RuntimeError("storefront_admin_key_file is empty")
+    return value
+
+
+_inline_key = str(_dynaconf.get("storefront_admin_key", "") or "")
+_key_file = str(_dynaconf.get("storefront_admin_key_file", "") or "")
+if _inline_key and _key_file:
+    raise RuntimeError(
+        "storefront_admin_key and storefront_admin_key_file are mutually exclusive"
+    )
+if _key_file:
+    _dynaconf.set("storefront_admin_key", _read_admin_key_file(_key_file))
+elif not _inline_key:
     _fallback_key = _resolve_storefront_admin_key_from_mount()
     if _fallback_key:
         _dynaconf.set("storefront_admin_key", _fallback_key)

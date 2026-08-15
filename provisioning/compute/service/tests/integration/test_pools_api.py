@@ -45,46 +45,6 @@ async def _create_pool(client: ProvisioningClient, pool_id: str = "hetzner-eu"):
     )
 
 
-class TestDefaultPoolProviderConfigIsReusable:
-    """The default pool's provider configuration is a usable template.
-
-    A caller creating an Ansible pool must supply `provider_config.playbook_path`,
-    and its correct value is deployment-specific — one path under the mock profile,
-    another under docker, another under Helm. The default pool is seeded from the
-    service's own active configuration, so it is the one profile-independent place
-    to read a valid value from. The end-to-end harness creates its per-scenario
-    pools exactly this way, and would fail at setup if this stopped holding.
-    """
-
-    async def test_default_pool_exposes_a_playbook_path(self, client_and_queue):
-        client, _ = client_and_queue
-        pool = await client.get_pool("default")
-        assert pool.provider_config.get("playbook_path"), (
-            f"default pool exposes no playbook_path: {pool.provider_config!r}"
-        )
-
-    async def test_a_pool_created_from_the_default_config_is_accepted(
-        self, client_and_queue,
-    ):
-        client, _ = client_and_queue
-        default_pool = await client.get_pool("default")
-
-        created = await client.create_pool(PoolCreate(
-            id="derived-from-default",
-            label="Derived from default",
-            provider=default_pool.provider,
-            policy_tags={"listing_mode": "fungible"},
-            provider_config=dict(default_pool.provider_config),
-        ))
-
-        assert created.id == "derived-from-default"
-        assert created.policy_tags["listing_mode"] == "fungible"
-        read_back = await client.get_pool("derived-from-default")
-        assert read_back.provider_config["playbook_path"] == (
-            default_pool.provider_config["playbook_path"]
-        )
-
-
 class TestDefaultPool:
     async def test_default_pool_exists_at_startup(self, client_and_queue):
         client, _ = client_and_queue

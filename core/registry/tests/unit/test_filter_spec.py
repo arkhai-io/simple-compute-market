@@ -8,13 +8,13 @@ modes (duplicate filter names, malformed YAML).
 from __future__ import annotations
 
 import textwrap
+import time
 from pathlib import Path
 
 import pytest
 from pydantic import ValidationError
 
 from src.api.filter_spec import (
-    FilterSpec,
     compute_etag,
     load_filter_spec,
 )
@@ -106,6 +106,65 @@ def test_duplicate_filter_names_rejected(tmp_path: Path) -> None:
         load_filter_spec(path)
 
 
+def test_query_names_and_aliases_are_explicit_and_unique(tmp_path: Path) -> None:
+    path = _write(
+        tmp_path,
+        """
+        version: 1
+        listing_shape: {type: object}
+        filters:
+          - name: ram_gb_min
+            query_name: ram_gb
+            query_aliases: [ram_gb_min]
+            path: $.offer_resource.ram_gb
+            op: range
+            value_type: integer
+            alias_kind: lower_bound
+        """,
+    )
+    declaration = load_filter_spec(path).filters[0]
+    assert declaration.query_name == "ram_gb"
+    assert declaration.query_aliases == ["ram_gb_min"]
+
+
+@pytest.mark.parametrize(
+    ("declarations", "message"),
+    [
+        (
+            """
+            - {name: one, query_name: shared, path: $.one, op: in, value_type: string}
+            - {name: two, query_aliases: [shared], path: $.two, op: in, value_type: string}
+            """,
+            "duplicate query name in spec",
+        ),
+        (
+            """
+            - {name: one, query_name: one, query_aliases: [one], path: $.one, op: in, value_type: string}
+            """,
+            "duplicate query name on filter",
+        ),
+        (
+            """
+            - {name: one, query_name: 'not valid', path: $.one, op: in, value_type: string}
+            """,
+            "invalid query name on filter",
+        ),
+    ],
+)
+def test_invalid_query_vocabulary_is_rejected(
+    tmp_path: Path, declarations: str, message: str
+) -> None:
+    body = (
+        "version: 1\n"
+        "listing_shape: {type: object}\n"
+        "filters:\n"
+        + textwrap.indent(textwrap.dedent(declarations).strip(), "  ")
+    )
+    path = _write(tmp_path, body)
+    with pytest.raises(ValueError, match=message):
+        load_filter_spec(path)
+
+
 def test_unknown_op_rejected(tmp_path: Path) -> None:
     path = _write(
         tmp_path,
@@ -161,6 +220,9 @@ def test_repo_default_spec_loads() -> None:
     # Sanity: spec must cover the discovery axes the storefront used to
     # mirror, otherwise we've regressed query reach.
     assert {"gpu_model", "region", "ram_gb_min", "token"} <= names
+    by_name = {declaration.name: declaration for declaration in spec.filters}
+    assert by_name["ram_gb_min"].query_name == "ram_gb"
+    assert by_name["ram_gb_min"].query_aliases == ["ram_gb_min"]
     assert isinstance(spec.listing_shape, dict)
     assert spec.listing_shape.get("type") == "object"
     # The shipped spec declares its schema identity — buyer plugins match
@@ -276,9 +338,95 @@ def test_etag_changes_when_schema_identity_added(tmp_path: Path) -> None:
         compute_etag(load_filter_spec(_write(tmp_path, with_schema)))
 
 
-def test_etag_present_on_endpoint(monkeypatch, tmp_path: Path) -> None:
-    """ETag header on GET /filter-spec mirrors the body etag."""
+def _authenticated_filter_client(app, db_session):
     from fastapi.testclient import TestClient
+    from market_identity import (
+        Ed25519Signer,
+        RequestEnvelope,
+        TrustedIdentitySet,
+        canonical_body_hash,
+        sign_request,
+    )
+    from src.db.database import get_db
+
+    caller = Ed25519Signer(bytes(range(32)))
+    registry = Ed25519Signer(bytes(range(1, 33)))
+    app.state.registry_authority_signer = registry
+
+    def override_db():
+        yield db_session
+
+    app.dependency_overrides[get_db] = override_db
+    request = sign_request(
+        signer=caller,
+        envelope=RequestEnvelope(
+            role="buyer",
+            principal=caller.identity,
+            method="GET",
+            operation="filter.get",
+            resource="filter-spec",
+            request_id="filter-spec-unit",
+            timestamp=int(time.time()),
+            body_hash=canonical_body_hash({"query": []}),
+        ),
+    )
+    headers = {
+        "X-Market-Signature-Version": request.protocol,
+        "X-Market-Identity-Scheme": request.principal.scheme.value,
+        "X-Market-Identity-Identifier": request.principal.identifier,
+        "X-Market-Role": request.role,
+        "X-Market-Request-ID": request.request_id,
+        "X-Market-Timestamp": str(request.timestamp),
+        "X-Market-Signature": request.proof.value,
+    }
+    return TestClient(app), request, headers, TrustedIdentitySet(
+        identities=(registry.identity,)
+    )
+
+
+def _assert_signed_filter_response(response, request, registry_principals) -> None:
+    from market_identity import VerificationCode, canonical_body_hash, verify_response
+
+    scheme = response.headers["X-Market-Identity-Scheme"]
+    result = verify_response(
+        {
+            "protocol": response.headers["X-Market-Signature-Version"],
+            "role": response.headers["X-Market-Role"],
+            "principal": {
+                "scheme": scheme,
+                "identifier": response.headers["X-Market-Identity-Identifier"],
+            },
+            "method": request.method,
+            "operation": request.operation,
+            "resource": request.resource,
+            "request_id": response.headers["X-Market-Request-ID"],
+            "timestamp": int(response.headers["X-Market-Timestamp"]),
+            "status": response.status_code,
+            "body_hash": canonical_body_hash(response.json()),
+            "proof": {
+                "scheme": scheme,
+                "value": response.headers["X-Market-Signature"],
+            },
+        },
+        body=response.json(),
+        now=int(time.time()),
+        max_skew=300,
+        expected_role="registry",
+        expected_method=request.method,
+        expected_operation=request.operation,
+        expected_resource=request.resource,
+        expected_request_id=request.request_id,
+        expected_principals=registry_principals,
+    )
+    assert result.code == VerificationCode.VERIFIED
+
+
+def test_etag_present_on_endpoint(
+    monkeypatch,
+    tmp_path: Path,
+    db_session,
+) -> None:
+    """ETag header on GET /filter-spec mirrors the body etag."""
 
     path = _write(
         tmp_path,
@@ -297,10 +445,13 @@ def test_etag_present_on_endpoint(monkeypatch, tmp_path: Path) -> None:
     from fastapi import FastAPI
     app = FastAPI()
     app.include_router(fs_mod.router)
-    client = TestClient(app)
-
-    resp = client.get("/filter-spec")
+    client, request, headers, registry_principals = _authenticated_filter_client(
+        app,
+        db_session,
+    )
+    resp = client.get("/filter-spec", headers=headers)
     assert resp.status_code == 200
+    _assert_signed_filter_response(resp, request, registry_principals)
     body = resp.json()
     assert resp.headers["etag"].strip('"') == body["etag"]
     assert body["version"] == 1
@@ -308,8 +459,11 @@ def test_etag_present_on_endpoint(monkeypatch, tmp_path: Path) -> None:
     assert "schema" not in body  # spec declares none → key absent
 
 
-def test_endpoint_serves_schema_identity(monkeypatch, tmp_path: Path) -> None:
-    from fastapi.testclient import TestClient
+def test_endpoint_serves_schema_identity(
+    monkeypatch,
+    tmp_path: Path,
+    db_session,
+) -> None:
 
     path = _write(
         tmp_path,
@@ -331,7 +485,11 @@ def test_endpoint_serves_schema_identity(monkeypatch, tmp_path: Path) -> None:
     from fastapi import FastAPI
     app = FastAPI()
     app.include_router(fs_mod.router)
-    client = TestClient(app)
-
-    body = client.get("/filter-spec").json()
+    client, request, headers, registry_principals = _authenticated_filter_client(
+        app,
+        db_session,
+    )
+    response = client.get("/filter-spec", headers=headers)
+    _assert_signed_filter_response(response, request, registry_principals)
+    body = response.json()
     assert body["schema"] == {"id": "tokens.api", "version": 2}

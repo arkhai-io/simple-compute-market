@@ -224,5 +224,6 @@ deploy-base-sepolia/
 !.claude/skills/
 !.claude/skills/**
 
-# Downloaded CI evidence — see scripts/e2e-ci.sh / make e2e-logs.
-.e2e-logs/
+# Local assistant session exports
+omp-session-*.html
+pi-session-*.html

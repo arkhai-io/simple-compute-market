@@ -4,7 +4,7 @@ import logging
 from contextlib import asynccontextmanager
 
 import uvicorn
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from compute_provisioning.app import (
     ComputeProvisioningAppConfig,
@@ -17,11 +17,12 @@ from compute_provisioning.startup import (
     stop_compute_provisioning_runtime,
 )
 
+from market_identity import RotationRequest
 from compute_provisioning_service import app_runtime
 from compute_provisioning_service import container as _container_module
 from compute_provisioning_service.container import container
 from compute_provisioning_service.config import settings
-from compute_provisioning_service.middleware.auth import StorefrontAuthMiddleware
+from compute_provisioning_service.middleware.auth import ProvisioningAuthMiddleware
 from compute_provisioning_service.middleware.rate_limit import AgentRateLimitMiddleware
 from compute_provisioning_service.services.capacity_inventory import (
     load_capacity_pool_metadata,
@@ -71,12 +72,11 @@ async def lifespan(_: FastAPI):
 PROVISIONING_DESCRIPTION = (
     "Asynchronous VM provisioning for a multi-agent compute marketplace.\n\n"
     "## Authentication\n\n"
-    "The service is an internal dependency of a single storefront. When an\n"
-    "admin key is configured, every non-health request must present it:\n\n"
-    "```\nX-Admin-Key: <admin_api_key>\n```\n\n"
-    "This is the same shared secret the provisioning→storefront callback\n"
-    "uses, so the link can cross an untrusted network. `/health`, `/docs`,\n"
-    "and `/redoc` bypass authentication entirely.\n\n"
+    "Every non-health route uses the scheme-tagged marketplace request "
+    "signature v2 contract. Requests are body-bound to the configured "
+    "storefront principal and seller role; responses are signed by the "
+    "configured provisioning service principal. `/health`, `/docs`, and "
+    "`/redoc` remain open.\n\n"
     "## Job lifecycle\n\n"
     "```\n"
     "queued --> running --> succeeded\n"
@@ -190,8 +190,15 @@ app = build_compute_provisioning_app(
             },
         ),
         ComputeProvisioningMiddlewareMount(
-            StorefrontAuthMiddleware,
-            {"admin_key": str(settings.storefront_admin_key or "")},
+            ProvisioningAuthMiddleware,
+            {
+                "identity_provider": container.identity_context,
+                "replay_store_provider": container.provisioning_replay_store,
+                "principal_authority_provider": container.principal_authority,
+                "max_timestamp_skew": int(
+                    getattr(settings, "identity_max_timestamp_skew_seconds", 300)
+                ),
+            },
         ),
         ComputeProvisioningMiddlewareMount(
             CORSMiddleware,
@@ -219,6 +226,27 @@ app = build_compute_provisioning_app(
         ),
     ),
 )
+
+# Durable administrator-controlled caller-principal rotation.
+@app.post("/api/v1/identity/rotations/{role}")
+async def rotate_provisioning_principal(
+    role: str,
+    body: RotationRequest,
+    request: Request,
+):
+    from compute_provisioning_service.services.principal_authority import (
+        PrincipalRotationError,
+    )
+
+    try:
+        return container.principal_authority().rotate(
+            role,
+            body,
+            actor=request.state.marketplace_principal,
+        )
+    except PrincipalRotationError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
 
 # Test controller — only mounted when mock profile is active.
 # Never present in production or staging.

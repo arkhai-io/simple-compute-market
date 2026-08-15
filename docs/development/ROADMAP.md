@@ -54,8 +54,6 @@ The top of the stack does not. A buyer that names a resource shape disagreeing w
 
 Publication is where the shape is first lost. A listing's `offer_resource` carries GPU model, count, SLA, region, and pool identity only — vCPU, RAM, and disk are never published, though the projection's capacity map reaches the storefront and the listing model declares all three as optional fields. Because the registry's dimension filters fail closed on a missing field, a buyer filtering on RAM matches nothing at all today, despite the registry schema and buyer CLI both supporting it.
 
-The quantitative half of an agreed deal survives placement; the categorical half does not. Reserved dimensions are authoritative through scheduling, and scheduling may narrow within them but never widen. The attributes a reservation was admitted against — the region and hardware a buyer filtered on — are matched at admission and then discarded, and scheduling considers every enabled pool at the site with no attribute input, so a deal can be placed outside the terms it was sold under.
-
 Pricing is the binding constraint on negotiating the shape. Commercial resolution produces a single price per GPU model through a three-tier chain of storefront override, pool hint, and configured default; rates scale by duration only. Negotiation carries exactly one degree of freedom, a scalar amount moved by the concession middleware, so no seller policy can evaluate a counter-offer that changes RAM or disk — which is why a buyer naming any shape is rejected at round zero, deliberately and with the reason recorded in the guard itself. The seller's own feasibility check compares region and GPU model by equality and no quantitative dimension. Nothing consults the authoritative site until a hold is placed at terms acceptance, so an unservable shape surfaces after both parties have committed.
 
 | Open gap | Owned by |
@@ -67,7 +65,6 @@ Pricing is the binding constraint on negotiating the shape. Commercial resolutio
 | Buyer-facing requirement shape is flat and ambiguous; `offering_type` is conflated with the site-inventory `resource_type` discriminator; claim vocabulary is inconsistent across the codebase | [`structured-capacity-requirements`](../../openspec/changes/structured-capacity-requirements/) |
 | No negotiation round after the first can express a shape change, and reservation resizing has no caller | [`negotiation-driven-capacity-resize`](../../openspec/changes/negotiation-driven-capacity-resize/) |
 | The accepted VM shape does not reach the provisioning request, so a GPU-reserving listing can fulfill without a GPU | [`fix-vm-fulfillment-capacity-boundary`](../../openspec/changes/fix-vm-fulfillment-capacity-boundary/) |
-| Nothing re-checks an agreed deal's categorical requirements at scheduling time, so a deal can be fulfilled from a resource outside the region or hardware it was sold on | [`revalidate-deal-requirements-at-scheduling`](../../openspec/changes/revalidate-deal-requirements-at-scheduling/) |
 | Buyer-negotiated VM connectivity terms, currently operator-configured only | [`add-buyer-vm-connectivity-terms`](../../openspec/changes/add-buyer-vm-connectivity-terms/) |
 
 `negotiation-capacity-feasibility-probe` is a shared prerequisite rather than exclusively this goal's: charging for a held reservation also requires a buyer to learn feasibility before any hold, and therefore any charge, exists. Not every change belongs to a roadmap goal, and this one is listed here because this goal consumes it, not because it is owned by it.
@@ -78,30 +75,32 @@ Pricing is the binding constraint on negotiating the shape. Commercial resolutio
 
 **Value.** This decouples *how hardware is sold* from *how hardware is partitioned*. Today the listing form factor is a deployment boundary, so a site owner must physically dedicate hosts to VMs rather than bare metal rather than pods. Removing that lets one pool of hardware be offered concurrently as several form factors, priced independently, with the site authority arbitrating exclusivity between them — higher utilization and better price discovery without buying more hardware.
 
-**Current state.** The storefront-to-site direction is already one-to-many: a storefront aggregates several configured site clients, ranks them per request, routes each reservation to one authority, and persists the selected binding. A single provisioner can register VM and bare-metal adapters concurrently, and the site authority already resolves cross-mode conflicts over one physical resource. The buyer CLI already loads several market-domain contracts in one process, and the core carrier already validates a set of contracts and rejects duplicate identities.
+**Current state.** The common storefront shell now discovers installed domain
+contributions, applies explicit public registrations, and freezes an exact
+mode/domain/version registry. VM and bare-metal publication sources can share
+one process. Listings, negotiation threads, and fulfillment contexts carry
+immutable domain, offering-mode, selected-site, and provenance bindings;
+negotiation, settlement, fulfillment, result recovery, and teardown route from
+those records rather than payload guessing, installed order, or a VM default.
+Existing single-domain VM databases enter this schema only through the
+explicit, preview-first, backed-up transactional migration.
 
-The site-to-storefront direction is **not** many-to-many. A provisioning service binds to one storefront: it holds a single `storefront_url`, and a single shared `storefront_admin_key` both gates every inbound request and signs the outbound lifecycle callback, so two storefronts sharing one provisioner would share one secret with no isolation between them. The reverse channel's per-deal override for that URL exists in the event sink but no storefront ever populates it, so it always falls through to the global setting. Making one site serve several storefronts is part of this goal's work, not a property to build on.
+Resource Pools already declare exact deliverable offering modes. Capacity
+claims carry that mode through reservation, scheduling, and provider dispatch,
+and accepted records retain it when publication changes. The shared
+storefront-to-site clients pin mapped work to one trusted authority with no
+cross-site fallback. The registry catalogue can now receive the public
+`offer_resource.virtualization_type` projected from the frozen binding.
 
-The site models this correctly already. A capacity resource carries `publication_views` keyed by view identity — `bare_metal.v1`, `vm.ansible_pool_defaults.v1` — off one row per host identity, with a guard rejecting several capacity resources mapping to the same host, and `Cross-mode physical accounting` requires a shareable VM slice and an exclusive bare-metal claim on one host to conflict before executor work starts. One physical resource, several form-factor projections, is how inventory is already represented.
-
-The storefront cannot consume it. The VM storefront resolves its market-domain contract from a module-level singleton at five call sites; the bare-metal storefront is already domain-parameterized, carrying the contract as a runtime field, so the two roles disagree on how a contract arrives. No storefront table carries a domain discriminator.
-
-The site also does not bound what may be sold. Pool policy declares listing mode, region, SLA, pricing, and hold caps, but not which offering modes a pool can deliver; `executor_kind` is recorded on reservations but never validated, and at reserve time it is inferred from whether the matched resource carries a `vm_host` attribute rather than supplied by the caller. A request for capacity a pool cannot deliver is admitted, held, scheduled, and fails at provisioning.
-
-Discovery is closer than it looks. The registry's listing shape already constrains `virtualization_type` to `[bare_metal, vm, container]`, carries host-level fields alongside slice-level ones, and already exposes that field in its filter vocabulary — the catalogue is family-shaped. What is missing is that nothing publishes the field, the registry's declared identity names one domain (`vms.compute`), and bare metal has no buyer package at all.
-
-The direction is settled: several compute-family contracts hosted in one storefront process, rather than federating single-domain storefronts over one site. Federation would require several storefronts to share one site authority, and that relationship is one-to-one today. Both the bare-metal composition and the multi-domain topology proof recorded one-contract-per-process as a non-goal. Both are now reconciled: the first struck as a superseded scope fence, the second rewritten against current code — its topology is now one multi-domain storefront against two authorities, and its many-to-many storefront-to-authority axis was removed rather than deferred, since there are no plans to support it.
+Goal 3's shared storefront boundary is therefore implemented and promoted.
+Complete product acceptance still depends on the domain producers and topology
+proof below; the shell deliberately does not fake their missing behavior.
 
 | Open gap | Owned by |
 |---|---|
-| Pools do not declare which offering modes they can deliver, and nothing rejects a request for capacity a pool cannot serve | [`pool-declared-offering-modes`](../../openspec/changes/pool-declared-offering-modes/) |
-| The VM storefront resolves its contract from module scope, so it cannot be selected per record | [`storefront-domain-parameterization`](../../openspec/changes/storefront-domain-parameterization/) |
-| A storefront serves one market domain, forcing hardware to be partitioned by how it is sold | [`multi-domain-storefront-composition`](../../openspec/changes/multi-domain-storefront-composition/) |
-| Bare metal has no buyer package, and no registry identity admits a bare-metal buyer | [`bare-metal-buyer-domain`](../../openspec/changes/bare-metal-buyer-domain/) |
-| Listings do not publish their offering mode, so the registry's form-factor filter matches nothing | [`publish-multidimensional-listing-shape`](../../openspec/changes/publish-multidimensional-listing-shape/) |
-| Bare metal has no runnable seller storefront composition; the trusted per-resource projection and selected-site fulfillment routing it needs are incomplete | [`market-platform-bare-metal-10-storefront-composition`](../../openspec/changes/market-platform-bare-metal-10-storefront-composition/) |
-| Selected-authority ownership, cross-mode rejection, and executor strictness have never been exercised together across more than one authority | [`market-platform-compute-40-multi-domain-proof`](../../openspec/changes/market-platform-compute-40-multi-domain-proof/) |
-| Service-to-service identity is one shared secret that both gates inbound requests and signs outbound callbacks | [`service-identity-signing`](../../openspec/changes/service-identity-signing/) |
+| Bare metal has no runnable buyer package or admitted registry identity | [`bare-metal-buyer-domain`](../../openspec/changes/bare-metal-buyer-domain/) |
+| The bare-metal seller contribution still owes its real selected-site fulfillment/result/teardown hook | [`market-platform-bare-metal-10-storefront-composition`](../../openspec/changes/market-platform-bare-metal-10-storefront-composition/) |
+| One-process VM/bare-metal behavior across more than one authority needs live selected-authority, cross-mode, executor, teardown, and capacity-restoration evidence | [`market-platform-compute-40-multi-domain-proof`](../../openspec/changes/market-platform-compute-40-multi-domain-proof/) |
 
 ---
 
@@ -113,13 +112,46 @@ That cost is why bare metal has been a storefront skeleton and why API credits c
 
 Extracting that machinery into kit changes what adding a domain means. A Kubernetes-pod domain, an inference-token domain, or a model-training domain becomes codecs, a contract, and configuration rather than a fork of the VM storefront. The two domains delivered here are both the beneficiaries and the proof: bare metal because it has none of the machinery, API credits because it has a complete parallel copy, so composing them exercises both directions.
 
-**Current state.** Kit's layering discipline holds where kit has been reached: `kit/policy`, `kit/identity`, `kit/fulfillment`, `kit/config`, and `kit/alkahest` carry no domain vocabulary at all. The problem is the concerns that never reached it.
+**Current state.** Kit's layering discipline now includes `kit/storefront`,
+`kit/negotiation-runtime`, `kit/settlement-runtime`, and
+`kit/capacity-publication`. The storefront kit owns application/lifespan
+assembly, container construction, route and middleware contribution, Alkahest
+client construction, and the stale-negotiation watchdog; VM and API-credit
+storefronts contribute their domain routes and timing, while bare metal
+composes the shared watchdog and chain factory.
 
-Eight cross-cutting storefront concerns are implemented twice and absent once. Measured across the VM and API-credits storefronts: `sync_negotiation` 914 against 609 lines, `capacity_client` 556 against 217, `failure_policy` 392 against 182, `settlement_jobs` 368 against 274, `claims_runtime` 224 against 128, `publication_service` 215 against 193, `negotiation_watchdog` 138 against 110, `alkahest_service` 65 against 58. Bare metal has none of them, which is why its storefront is 1,930 lines against the VM storefront's 14,408 — not simpler, incomplete.
+The negotiation kit owns signed round ordering, canonical-principal and
+terminal-state guards, durable transcript recovery, and the acceptance
+chokepoint. VM and API-credit storefronts inject their listing resolution,
+codecs, seller policy, configuration, accepted-artifact construction, and
+persistence/effect hooks, so neither retains a lifecycle copy. The settlement
+kit owns one stable per-obligation operation journal, conditional-escrow client
+port, servicing worker, and failure dispatcher.
 
-Neither new domain is deployable or testable end to end. Bare metal has no stack definition, and no end-to-end scenario references either domain: every deal path the repository proves is a VM deal path.
+The capacity/publication kit owns exact site projections, event-driven
+reconciliation, registry fan-out, publication result recording, and
+close/reopen mechanics over injected schema-opaque candidate and binding hooks.
+VM and API-credit storefronts compose those runtimes rather than maintaining
+local copies; pool-declared offering mode and persisted selected-site binding
+remain authoritative through publication and recovery. Bare metal consumes the
+same seams without a domain-specific fallback, but truthfully remains
+fulfillment-unavailable. `kit/policy`, `kit/identity`, `kit/fulfillment`,
+`kit/config`, and `kit/alkahest` likewise carry no domain vocabulary.
 
-Operator lifecycle control over storefront background work is a ninth concern with the same shape, and it currently exists once. The VM storefront can hold its five timer loops idle independently of whether it is accepting business, and advance each loop one cycle on demand; the API-credits storefront runs equivalent loops — capacity-event polling, projection refresh, claims sweeping, fulfillment resumption — with no control over any of them. Its background work therefore cannot be paused, stepped, or observed the way the VM storefront's can, which is why the deterministic end-to-end methodology applies to VM scenarios only.
+The remaining Goal 4 work is deployable multi-domain adoption and end-to-end
+deal proof rather than another domain-local copy of these extracted
+lifecycles.
+
+Settlement assigns stable identity to every accepted-plan obligation, journals
+materialize/status/check/collect/reclaim attempts, persists opaque mechanism
+state across retry, preserves partial outcomes, and supports directional
+interval payments and seller penalty bonds. VM and API-credit roots use this
+runtime for exact verified-obligation adoption, fulfillment binding, and
+collection. Their connection details, credentials, capacity repair, refund,
+and issuance rollback remain at their real domain boundaries rather than
+becoming generic settlement state.
+
+API credits now composes hosted Stripe and Alkahest over the shared buyer transport, storefront route service, settlement runtime, credits authority, and portable evidence boundary. Its hosted-only Ed25519 path is locally implementable and packageable without a wallet or chain; provider-authentic acceptance remains external until the exact signed hosted release, protected Stripe inputs, and deployed resolver are available. Bare-metal release evidence remains separately dependent on its live selected-site provisioning prerequisites.
 
 The domain layer's own structure is better than the duplication suggests. All three domains follow one pattern — a base contract with a storefront-side extension — and all three pass the shared conformance suite, which works without assuming a repository layout. Only the directory conventions differ, and a composed domain is small enough that relocating them buys nothing.
 
@@ -127,17 +159,38 @@ The domain layer's own structure is better than the duplication suggests. All th
 
 | Open gap | Owned by |
 |---|---|
-| No seam exists for kit-owned storefront runtime, and no rule prevents an extraction leaving copies behind | [`kit-storefront-composition-seam`](../../openspec/changes/kit-storefront-composition-seam/) |
-| The synchronous negotiation runtime is implemented twice and absent once | [`kit-owned-negotiation-runtime`](../../openspec/changes/kit-owned-negotiation-runtime/) |
-| Settlement orchestration, claim servicing, and failure handling are implemented twice and absent once | [`kit-owned-settlement-runtime`](../../openspec/changes/kit-owned-settlement-runtime/) |
-| The capacity client and publication runtime are implemented twice and absent once | [`kit-owned-capacity-and-publication`](../../openspec/changes/kit-owned-capacity-and-publication/) |
-| Bare metal has no deployable stack, no domain has an end-to-end deal path but VM, and API credits still reimplements rather than composes | [`bare-metal-and-credits-domain-stacks`](../../openspec/changes/bare-metal-and-credits-domain-stacks/) |
-| Operator lifecycle control over background loops exists on the VM storefront only, so the API-credits storefront's timer work cannot be paused, stepped, or deterministically observed | [`kit-storefront-composition-seam`](../../openspec/changes/kit-storefront-composition-seam/) |
+| Provider-authentic API-credit hosted evidence still requires the exact signed producer release, protected Stripe inputs, and deployed resolver; bare-metal still requires live selected-site provisioning and access/teardown proof | [`add-api-credits-hosted-settlement`](../../openspec/changes/add-api-credits-hosted-settlement/), [`add-bare-metal-hosted-settlement`](../../openspec/changes/add-bare-metal-hosted-settlement/) |
 
-| Executor identity falls back implicitly to VM where durable identity is absent, which a growing set of executor kinds cannot tolerate | [`market-platform-compute-40-multi-domain-proof`](../../openspec/changes/market-platform-compute-40-multi-domain-proof/) |
-| Two named-item registries remain mutable module-level state populated by import order — the buyer's aggregation policies, a public extension point whose lookup also writes to the registry it reads, and the identity verifiers. The negotiation and buyer-policy registries are now composed catalogues; the reusable primitive they were built on is `market_policy.catalogue` | [`kit-storefront-composition-seam`](../../openspec/changes/kit-storefront-composition-seam/) |
+**Design promotion (2026-08-15).** `kit-storefront-composition-seam`,
+`kit-owned-negotiation-runtime`, and `kit-owned-capacity-and-publication` are now
+implemented by `kit/storefront`, `kit/negotiation-runtime`, and
+`kit/capacity-publication` and recorded permanently in the market composition,
+negotiation, and storefront-publication specifications and architecture. VM and
+API credits preserve their one-domain route and timing behavior through
+explicit storefront contributions, inject domain hooks into the shared
+negotiation lifecycle, and use the shared durable capacity/publication binding;
+bare metal composes the previously missing watchdog and chain factory and the
+same capacity seams. The remaining multi-domain, domain-stack, and hosted
+settlement adoption gaps build on these seams rather than reopening them.
+
+**Design promotion (2026-08-15, API-credit hosted adoption).** API credits now
+publishes independent mechanism-neutral options, uses the core hosted buyer
+transport and shared callback-driven storefront route service, derives one
+canonical principal-bound fulfillment/grant identity, and orders authoritative
+funding before exact-once issuance, signed portable evidence, condition
+evaluation, and collection. Credits-service request-digest grants and
+storefront private-result/evidence migrations make acknowledgement loss,
+restart, collection/reclaim races, and secret separation durable. These
+decisions are promoted to the API credits, buyer orchestration, storefront
+publication, market composition, settlement servicing, deployment state, and
+test compatibility specifications and repository architecture/deployment/test
+guides. Remaining signed-producer, protected Stripe, and live resolver evidence
+is recorded as external rather than replaced with local simulation.
 
 A compute-dimension name leaking into every domain's capacity declaration is a real defect but too small to own a gap row here; it rides with [`capacity-resource-administration`](../../openspec/changes/capacity-resource-administration/), which already rewrites the code that causes it.
+
+---|---|
+| Executor identity falls back implicitly to VM where durable identity is absent, which a growing set of executor kinds cannot tolerate | [`market-platform-compute-40-multi-domain-proof`](../../openspec/changes/market-platform-compute-40-multi-domain-proof/) |
 
 ---
 
@@ -161,6 +214,46 @@ Nothing else about a hold has changed. A reservation carries no rate, no funding
 | The shipped default granted unfunded exclusivity, and framed the safe value as a performance trade | [`default-no-pre-settlement-capacity-hold`](../../openspec/changes/default-no-pre-settlement-capacity-hold/) |
 
 Restoring a non-zero hold default is `billable-capacity-reservations`' own work: the posture above is a denial of capability that this goal exists to buy back.
+
+---
+
+## Buyer identity lifecycle status
+
+Buyer marketplace identity is now a core-owned durable profile rather than
+repeated domain-local `[Identity]` configuration. The XDG profile store keeps a
+stable random UUID, canonical principal history, redacted credential-provider
+references, lifecycle/selection, and opaque authority bindings. Fresh VM and
+API-credit work uses the selected primary; version-3 run recovery resolves the
+recorded retained principal. Installed buyer plugins must declare the shared
+resolved-identity injection contract.
+
+The implemented change mapping is
+[`add-persistent-buyer-profiles`](../../openspec/changes/add-persistent-buyer-profiles/).
+Remaining external operational evidence belongs to that change's unchecked
+verification tasks; it does not restore legacy identity precedence.
+
+---
+
+## Hosted settlement release status
+
+The common VM consumer supports exact hosted funding profiles `card.v1`,
+`us_bank_transfer.v1`, and `us_ach_debit.v1` through the released
+provider-neutral client. VM publication keeps ready profiles as distinct
+options; the persistent buyer profile owns its opaque authority/environment
+payer binding; exact post-acceptance purchase authorization is direct; escrow
+materialization, status, fulfillment, collection, and reclaim remain
+storefront-mediated through the shared settlement runtime. Historical
+card-only accepted state is recovery-only, and Alkahest remains an independent
+mechanism lane.
+
+Production activation and protected profile evidence still require the exact
+signed hosted manifest, service-image digest, provenance/SBOM, repository and
+workflow attestations, matching client/OpenAPI/conformance/schema-5 artifacts,
+and each selected Stripe test-mode rail/account/instrument/mandate/browser
+prerequisite. Local client/service wheels and unsigned contract artifacts do
+not satisfy those external release checks.
+
+API-credit and bare-metal are now separate adopters of the shared hosted transport, route service, configuration registry, and settlement runtime; neither imports VM lifecycle code. Bare metal ships an installed buyer contribution, a dedicated seller composition, trusted selected-site publication, funding-gated Capacity Reservation and fulfillment, portable lease-ready evidence, and independent teardown/recovery. Local deterministic delivery is complete under the permanent capability contracts. Production activation remains blocked only on the exact signed hosted release, protected Stripe rail prerequisites, and disposable live-host access/revocation/teardown evidence described above.
 
 ---
 

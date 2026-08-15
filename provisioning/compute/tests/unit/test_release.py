@@ -34,17 +34,14 @@ async def test_dispatcher_routes_by_executor_kind():
 
 
 @pytest.mark.asyncio
-async def test_dispatcher_uses_injected_default_executor_kind():
+async def test_dispatcher_does_not_default_missing_executor_kind():
     vm_executor = RecordingReleaseExecutor("vm-job")
-    dispatcher = ExecutorReleaseDispatcher(
-        {"vm": vm_executor},
-        default_executor_kind="vm",
-    )
+    dispatcher = ExecutorReleaseDispatcher({"vm": vm_executor})
 
     result = await dispatcher.submit_release({"capacity_reservation_id": "alloc-1"})
 
-    assert result == "vm-job"
-    assert vm_executor.reservations == [{"capacity_reservation_id": "alloc-1"}]
+    assert result is None
+    assert vm_executor.reservations == []
 
 
 @pytest.mark.asyncio
@@ -83,15 +80,13 @@ def test_release_job_dispatcher_routes_by_executor_kind():
     assert bare_metal_port.job_ids == ["job-1"]
 
 
-def test_release_job_dispatcher_uses_injected_default_executor_kind():
-    vm_job = object()
-    vm_port = RecordingReleaseJobPort(vm_job)
-    dispatcher = ReleaseJobDispatcher({"vm": vm_port}, default_executor_kind="vm")
+def test_release_job_dispatcher_does_not_default_missing_executor_kind():
+    vm_port = RecordingReleaseJobPort(object())
+    dispatcher = ReleaseJobDispatcher({"vm": vm_port})
 
-    result = dispatcher.get_job("job-1")
-
-    assert result is vm_job
-    assert vm_port.job_ids == ["job-1"]
+    with pytest.raises(LookupError):
+        dispatcher.get_job("job-1")
+    assert vm_port.job_ids == []
 
 
 def test_release_job_dispatcher_raises_lookup_error_for_unregistered_executor_kind():

@@ -1,3 +1,8 @@
+global:
+  provisioningIdentity:
+    scheme: eip191
+    identifier: "0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266"
+
 # Default values for the provisioning subchart.
 # These are overridden by the parent chart's provisioning: block.
 
@@ -28,69 +33,58 @@ server:
     repository: ""
     name: arkhai
     tag: compute-provisioning
+    digest: ""
     pullPolicy: IfNotPresent
   replicaCount: 1
   port: 8081
   type: ClusterIP
 
 # ---------------------------------------------------------------------------
-# SSH private key — used by Ansible to authenticate against hypervisors.
-#
-# The key is mounted as a Secret volume at /home/appuser/.ssh/id_ed25519.
-# This is the default key for path-type hosts that reference this path.
-#
-# createSecret: true  — chart creates a Secret from sshPrivateKey below.
-#                       Use only for dev/test; do not commit real keys.
-# createSecret: false — chart expects a pre-existing Secret named secretName.
-#                         kubectl create secret generic <n> \
-#                           --from-file=id_ed25519=~/.ssh/id_ed25519
+# Provisioning credentials are always operator-managed Kubernetes Secrets.
+# sshKey.secretName must expose `id_ed25519`; sshDecryptionKey.secretName must
+# expose `config-provisioning-secrets.yml`. The chart never accepts credential,
+# inventory, or callback-token contents as values.
 # ---------------------------------------------------------------------------
 sshKey:
-  createSecret: true
-  secretName: ""
-  sshPrivateKey: ""
+  createSecret: false
+  secretName: arkhai-provisioning-ssh
 
-# ---------------------------------------------------------------------------
-# Provisioning secrets — injected as a dynaconf config profile file mounted
-# at /app/config/config-provisioning-secrets.yml.
-#
-# sshDecryptionKey.key: Fernet key for embedded-type SSH keys in the DB.
-#   Required when any host is registered with ssh_key_type='embedded'.
-#   Generate:
-#     python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
-#
-# inventory.hostsIni: Ansible INI inventory content. Upserted into the hosts
-#   table on every pod startup (idempotent via seed_from_ini).
-#   Example:
-#     [kvm_hosts]
-#     kvm1  ansible_host=10.0.0.1  ansible_user=ubuntu  ansible_ssh_private_key_file=/home/appuser/.ssh/id_ed25519
-#
-# createSecret: true  — chart creates a Secret from the values below.
-# createSecret: false — chart expects a pre-existing Secret named secretName
-#                       containing a config-provisioning-secrets.yml key.
-# ---------------------------------------------------------------------------
 sshDecryptionKey:
-  createSecret: true
-  secretName: ""
-  key: ""
+  createSecret: false
+  secretName: arkhai-provisioning-runtime
 
-inventory:
-  hostsIni: ""
+# Marketplace service identity is public configuration; only the matching
+# signer credential is read from the referenced Kubernetes Secret.
+identity:
+  principal:
+    scheme: eip191
+    identifier: "0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266"
+  credentialSecret:
+    name: arkhai-provisioning-identity
+    key: credential
+
+# Exact storefront principals authorized for lifecycle callbacks.
+storefrontIdentity:
+  principals:
+    - scheme: eip191
+      identifier: "0x3c44cdddb6a900fa2b585dd299e03d12fa4293bc"
+
+# Exact operator principals authorized for provisioning admin routes.
+adminIdentity:
+  principals:
+    - scheme: eip191
+      identifier: "0x9965507d1a55bcc2695c58ba16fb37d819b0a4dc"
 
 # ---------------------------------------------------------------------------
 # Storefront callback target for the lease watchdog.
 #
 # The provisioning service owns the vm_leases table. When a lease expires, its
-# watchdog patches the seller storefront resource back to available through the
-# storefront admin API. url defaults to the umbrella chart's bob storefront
-# service name for the current release; override for non-standard topologies.
-# adminKey is rendered into the provisioning-secrets profile.
-# ---------------------------------------------------------------------------
+# watchdog patches the seller storefront resource back to available. The
+# callback credential is supplied inside the operator-managed runtime Secret.
 storefront:
   url: ""
   agentName: "bob"
   port: 8001
-  adminKey: ""
 
 # ---------------------------------------------------------------------------
 # Application config — rendered into a ConfigMap as config-production.yml
@@ -113,9 +107,8 @@ config:
   ansible_timeout_seconds: 1800
   default_vm_host: "kvm1"
 
-  # Golden image credentials (leave empty unless using golden mode)
+  # Golden image public settings. Credentials belong in the runtime Secret.
   golden_root_ssh_filename: ""
-  golden_root_ssh_password: ""
   golden_image_name: ""
   golden_gcs_bucket: ""
   golden_gcs_project: ""
@@ -123,12 +116,12 @@ config:
   # FRP tunneling
   frp_server_addr: ""
   frp_domain: ""
-  frp_dashboard_password: ""
 
   # Lease watchdog
   lease_watchdog_enabled: true
   lease_watchdog_poll_interval_seconds: 60
   lease_watchdog_grace_period_seconds: 300
+  storefront_site_id: "default"
   storefront_url: ""
 
   # Rate limiting

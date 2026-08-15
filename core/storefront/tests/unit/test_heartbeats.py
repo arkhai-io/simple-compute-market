@@ -3,12 +3,29 @@
 from __future__ import annotations
 
 import pytest
+from market_identity import Identity
+
 
 from core_storefront.heartbeats import (
     HeartbeatError,
     heartbeat_gap_seconds,
     record_heartbeat,
 )
+
+BUYER = Identity(scheme="eip191", identifier="0x" + "11" * 20)
+SELLER = Identity(scheme="eip191", identifier="0x" + "22" * 20)
+
+
+async def _record(store, *, deal_ref, sent_at_unix, now, max_skew_seconds=300):
+    return await record_heartbeat(
+        store,
+        deal_ref=deal_ref,
+        buyer_principal=BUYER,
+        seller_principal=SELLER,
+        sent_at_unix=sent_at_unix,
+        now=now,
+        max_skew_seconds=max_skew_seconds,
+    )
 
 
 class FakeStore:
@@ -25,8 +42,8 @@ class FakeStore:
 
 async def test_first_heartbeat_records():
     store = FakeStore()
-    rec = await record_heartbeat(
-        store, deal_ref="d1", signer="0xabc", sent_at_unix=1_000.0, now=1_001.0
+    rec = await _record(
+        store, deal_ref="d1", sent_at_unix=1_000.0, now=1_001.0
     )
     assert rec["payload"] == {}
     assert store.rows[0]["sent_at_unix"] == 1_000.0
@@ -35,27 +52,33 @@ async def test_first_heartbeat_records():
 
 async def test_monotonicity_rejects_replay_and_out_of_order():
     store = FakeStore()
-    await record_heartbeat(store, deal_ref="d1", signer="s", sent_at_unix=1_000.0, now=1_000.0)
+    await _record(store, deal_ref="d1", sent_at_unix=1_000.0, now=1_000.0)
     with pytest.raises(HeartbeatError) as exc:
-        await record_heartbeat(store, deal_ref="d1", signer="s", sent_at_unix=1_000.0, now=1_001.0)
+        await _record(store, deal_ref="d1", sent_at_unix=1_000.0, now=1_001.0)
     assert exc.value.status_code == 409
     with pytest.raises(HeartbeatError):
-        await record_heartbeat(store, deal_ref="d1", signer="s", sent_at_unix=999.0, now=1_001.0)
+        await _record(store, deal_ref="d1", sent_at_unix=999.0, now=1_001.0)
     # A different deal is unaffected.
-    await record_heartbeat(store, deal_ref="d2", signer="s", sent_at_unix=999.0, now=1_001.0)
+    await _record(store, deal_ref="d2", sent_at_unix=999.0, now=1_001.0)
 
 
 async def test_skew_window_bounds_both_directions():
     store = FakeStore()
     with pytest.raises(HeartbeatError) as exc:
-        await record_heartbeat(
-            store, deal_ref="d1", signer="s", sent_at_unix=400.0, now=1_000.0,
+        await _record(
+            store,
+            deal_ref="d1",
+            sent_at_unix=400.0,
+            now=1_000.0,
             max_skew_seconds=300,
         )
     assert exc.value.status_code == 400
     with pytest.raises(HeartbeatError):
-        await record_heartbeat(
-            store, deal_ref="d1", signer="s", sent_at_unix=1_400.0, now=1_000.0,
+        await _record(
+            store,
+            deal_ref="d1",
+            sent_at_unix=1_400.0,
+            now=1_000.0,
             max_skew_seconds=300,
         )
 

@@ -116,22 +116,18 @@ pool_definitions_path = ""
 # into this real Ansible pool. Override the inventory group where needed.
 default_pool_inventory_group = "kvm_hosts"
 
-# Lease watchdog
-# Polls vm_leases for expired leases, submits a check Ansible job to confirm
-# VM cleanup, then patches the storefront resource back to 'available'.
-# The storefront_url and storefront_admin_key are global — one provisioning
-# service serves one storefront. The admin key should be injected via a
-# secrets profile (provisioning-secrets) in production.
+# Storefront callback and marketplace service boundary. The service signer
+# authenticates outbound callbacks and signs inbound acknowledgements. The
+# exact storefront principal authenticates inbound requests and signed callback
+# responses. Signing material is supplied only through
+# ARKHAI_IDENTITY_CREDENTIAL.
 lease_watchdog_enabled = true
 lease_watchdog_poll_interval_seconds = 60
 lease_watchdog_grace_period_seconds = 300
 capacity_reservation_watchdog_enabled = true
 capacity_reservation_watchdog_poll_interval_seconds = 60
 storefront_url = ""
-# Shared secret with the storefront. Dual purpose: signs the outbound
-# lease-watchdog callback to the storefront, and gates every inbound request
-# (the storefront presents it as X-Admin-Key). Empty = auth disabled (dev only).
-storefront_admin_key = ""
+storefront_site_id = ""
 
 # Durable fulfillment recovery and provider convergence. Defaults for these
 # live in config/config.yml, not here -- see that file's comment header.
@@ -143,3 +139,16 @@ storefront_admin_key = ""
 #   fulfillment_convergence_backoff_multiplier
 #   fulfillment_convergence_backoff_max_seconds
 #   fulfillment_convergence_backoff_jitter_fraction
+
+
+[identity]
+scheme = ""
+identifier = ""
+
+[storefront_identity]
+scheme = ""
+identifier = ""
+
+[admin_identity]
+scheme = ""
+identifier = ""

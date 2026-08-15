@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import uuid
 from typing import Optional
 from unittest.mock import patch
 
@@ -12,6 +13,11 @@ from market_policy.buyer_policy import (
     BuyerPolicy,
     PolicyParam,
     inject_policy_cli_params,
+)
+from identity_helpers import (
+    BUYER_SIGNER,
+    seller_principals,
+    signed_response_headers,
 )
 
 runner = CliRunner()
@@ -32,7 +38,8 @@ def _app_with(policy: BuyerPolicy) -> typer.Typer:
 
 def test_policy_params_become_flags_and_land_in_kwargs():
     policy = BuyerPolicy(
-        name="t", middlewares=("listed_price",),
+        name="t",
+        middlewares=("listed_price",),
         cli_params=(
             PolicyParam(name="initial_price", help="opening"),
             PolicyParam(name="budget", annotation=Optional[float], help="opaque"),
@@ -55,7 +62,8 @@ def test_escape_hatch_collects_repeated_pairs():
     policy = BuyerPolicy(name="t", middlewares=("listed_price",))
     app = _app_with(policy)
     result = runner.invoke(
-        app, ["--policy-param", "a=1", "-P", "b=two"],
+        app,
+        ["--policy-param", "a=1", "-P", "b=two"],
     )
     assert result.exit_code == 0, result.output
     assert "('policy_param', ['a=1', 'b=two'])" in result.output
@@ -67,8 +75,12 @@ def test_assembled_buy_and_negotiate_surface_the_default_policy_flags():
     for verb in ("buy", "negotiate"):
         result = runner.invoke(app, [verb, "--help"])
         assert result.exit_code == 0, result.output
-        for flag in ("--initial-price", "--max-price", "--price-markup",
-                     "--policy-param"):
+        for flag in (
+            "--initial-price",
+            "--max-price",
+            "--price-markup",
+            "--policy-param",
+        ):
             assert flag in result.output, f"{verb} missing {flag}"
 
 
@@ -79,8 +91,6 @@ def test_negotiate_with_seller_delivers_policy_params_to_the_chain():
 
     from domains.vms.buyer.buyer_client import negotiate_with_seller
     from domains.vms.buyer.tests.test_buyer_client import (
-        _BUYER_ADDR,
-        _BUYER_PK,
         _MockResponse,
         _escrow_proposal,
         _provision,
@@ -97,11 +107,17 @@ def test_negotiate_with_seller_delivers_policy_params_to_the_chain():
         ), context
 
     def fake_urlopen(req, timeout=None):
-        return _MockResponse(status=200, text=json.dumps({
+        body = {
             "negotiation_id": "neg-1",
             "action": "accept",
             "proposal": {"fields": {"amount": 100}},
-        }))
+            "accepted_provision_terms": _provision(3600).model_dump(mode="json"),
+        }
+        return _MockResponse(
+            status=200,
+            text=json.dumps(body),
+            headers=signed_response_headers(req, body),
+        )
 
     with patch(
         "core_buyer.negotiation_client.urllib.request.urlopen",
@@ -109,8 +125,9 @@ def test_negotiate_with_seller_delivers_policy_params_to_the_chain():
     ):
         negotiate_with_seller(
             seller_url="http://seller:8001",
-            buyer_address=_BUYER_ADDR,
-            buyer_private_key=_BUYER_PK,
+            principal=BUYER_SIGNER.identity,
+            signer=BUYER_SIGNER,
+            resolve_seller_principals=seller_principals,
             listing_id="lst-1",
             initial_price=50,
             max_price=100,
@@ -125,24 +142,39 @@ def test_negotiate_with_seller_delivers_policy_params_to_the_chain():
 
 
 def test_resume_point_carries_the_recorded_policy(tmp_path, monkeypatch):
-    import json
-
     from core_buyer import deal_helpers, run_log
+    from core_buyer.run_log import RunLog
 
     monkeypatch.setattr(run_log, "runs_dir", lambda: tmp_path)
-    run_file = tmp_path / "run-1.jsonl"
-    events = [
-        {"event": "run_started", "run_id": "run-1",
-         "seller_url": "http://s:8001", "listing_id": "lst-1",
-         "policy": "bisection"},
-        {"event": "negotiation_round", "round": 0,
-         "our_message": {"proposal": {"fields": {"amount": 50}}},
-         "their_reply": {"negotiation_id": "neg-1", "action": "counter",
-                          "proposal": {"fields": {"amount": 80}}}},
-    ]
-    run_file.write_text("\n".join(json.dumps(e) for e in events) + "\n")
-
-    point = deal_helpers.load_negotiation_resume_point("run-1")
+    trust = seller_principals()
+    log = RunLog.start(
+        profile_id=uuid.UUID("11111111-1111-4111-8111-111111111111"),
+        principal=BUYER_SIGNER.identity,
+        seller_url="http://s:8001",
+        listing_id="lst-1",
+        publisher_id="publisher-1",
+        publisher_principals=trust.model_dump(mode="json"),
+        source_registry_url="http://registry:8080",
+        source_registry_authority="registry",
+        policy="bisection",
+        initial_price=50,
+        max_price=100,
+    )
+    log.event(
+        "negotiation_round",
+        round=0,
+        our_message={"proposal": {"fields": {"amount": 50}}},
+        their_reply={
+            "negotiation_id": "neg-1",
+            "action": "counter",
+            "proposal": {"fields": {"amount": 80}},
+        },
+    )
+    point = deal_helpers.load_negotiation_resume_point(
+        log.run_id,
+        signer=BUYER_SIGNER,
+        refresh_publisher_principals=lambda *_: trust,
+    )
     assert point.policy == "bisection"
 
 
@@ -150,14 +182,14 @@ def test_unknown_configured_policy_errors_instead_of_substituting():
     """A typo'd policy name must not silently become some other policy."""
     import pytest
 
-    from domains.vms.buyer.buyer_client import _load_buyer_chain
+    from domains.vms.buyer.buyer_client import load_buyer_chain
 
     with patch(
         "core_buyer.buyer_config.resolve_config_value",
         return_value="haggle-3000",
     ):
         with pytest.raises(RuntimeError, match="haggle-3000"):
-            _load_buyer_chain()
+            load_buyer_chain()
 
 
 def test_round_0_exit_never_contacts_the_seller():
@@ -167,7 +199,8 @@ def test_round_0_exit_never_contacts_the_seller():
 
     from domains.vms.buyer.buyer_client import negotiate_with_seller
     from domains.vms.buyer.tests.test_buyer_client import (
-        _BUYER_ADDR, _BUYER_PK, _escrow_proposal, _provision,
+        _escrow_proposal,
+        _provision,
     )
 
     def refusing(history, context):
@@ -178,9 +211,12 @@ def test_round_0_exit_never_contacts_the_seller():
     ) as urlopen:
         outcome = negotiate_with_seller(
             seller_url="http://seller:8001",
-            buyer_address=_BUYER_ADDR, buyer_private_key=_BUYER_PK,
+            principal=BUYER_SIGNER.identity,
+            signer=BUYER_SIGNER,
+            resolve_seller_principals=seller_principals,
             listing_id="lst-1",
-            initial_price=50, max_price=100,
+            initial_price=50,
+            max_price=100,
             provision_terms=_provision(3600),
             escrow_proposal=_escrow_proposal(),
             chain=[refusing],
@@ -205,8 +241,10 @@ def test_chain_exhaustion_errors_and_releases_the_seller():
 
     from domains.vms.buyer.buyer_client import negotiate_with_seller
     from domains.vms.buyer.tests.test_buyer_client import (
-        _BUYER_ADDR, _BUYER_PK, _MockResponse, _escrow_proposal,
-        _provision, _seller_proposal,
+        _MockResponse,
+        _escrow_proposal,
+        _provision,
+        _seller_proposal,
     )
 
     def opens_then_passes(history, context):
@@ -221,11 +259,17 @@ def test_chain_exhaustion_errors_and_releases_the_seller():
 
     def fake_urlopen(req, timeout=None):
         posted_bodies.append(json.loads(req.data.decode("utf-8")))
-        return _MockResponse(status=200, text=json.dumps({
+        body = {
             "negotiation_id": "neg-1",
             "action": "counter",
             "proposal": _seller_proposal(80),
-        }))
+            "accepted_provision_terms": _provision(3600).model_dump(mode="json"),
+        }
+        return _MockResponse(
+            status=200,
+            text=json.dumps(body),
+            headers=signed_response_headers(req, body),
+        )
 
     with patch(
         "core_buyer.negotiation_client.urllib.request.urlopen",
@@ -234,9 +278,12 @@ def test_chain_exhaustion_errors_and_releases_the_seller():
         with pytest.raises(NegotiationChainExhausted):
             negotiate_with_seller(
                 seller_url="http://seller:8001",
-                buyer_address=_BUYER_ADDR, buyer_private_key=_BUYER_PK,
+                principal=BUYER_SIGNER.identity,
+                signer=BUYER_SIGNER,
+                resolve_seller_principals=seller_principals,
                 listing_id="lst-1",
-                initial_price=50, max_price=100,
+                initial_price=50,
+                max_price=100,
                 provision_terms=_provision(3600),
                 escrow_proposal=_escrow_proposal(),
                 chain=[opens_then_passes],

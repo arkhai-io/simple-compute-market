@@ -5,3 +5,32 @@
 include:
   - compose.dev.yml
   - domains/apicredits/compose.yml
+
+services:
+  api-credits-registry:
+    environment:
+      - REGISTRY_AUTHORITY_ID=api-credits-registry
+      - REGISTRY_AUTHORITY_SCHEME=ed25519
+      - REGISTRY_AUTHORITY_IDENTIFIER=skkdlQKuKGMKK6yy4MdFEP_N0yjDNP8-E5PnWy0x59w
+      - REGISTRY_AUTHORITY_CREDENTIAL_FILE=/run/secrets/arkhai/registry-identity/credential
+    volumes:
+      - ${APICREDITS_REGISTRY_IDENTITY_CREDENTIAL_FILE:?set API-credits registry signer credential file}:/run/secrets/arkhai/registry-identity/credential:ro
+  credits-storefront:
+    env_file:
+      - ${APICREDITS_IDENTITY_ENV_FILE:?set API-credits signer credential environment file}
+      - ${APICREDITS_EVM_WALLET_ENV_FILE:?set API-credits EVM wallet environment file}
+  credits-buyer-cli:
+    image: ${APICREDITS_BUYER_IMAGE:-arkhai:e2e-tests}
+    profiles: [buyer]
+    user: "${APICREDITS_BUYER_UID:-1000}:${APICREDITS_BUYER_GID:-1000}"
+    entrypoint: ["market"]
+    command: ["profile", "show"]
+    environment:
+      XDG_CONFIG_HOME: /etc
+      XDG_DATA_HOME: /var/lib/arkhai-buyer
+      XDG_STATE_HOME: /var/lib/arkhai-buyer-state
+    volumes:
+      - ${APICREDITS_BUYER_CONFIG_PATH:?set buyer public config path}:/etc/arkhai/config.toml:ro
+      - ${APICREDITS_BUYER_PROFILE_DIR:?set persistent buyer profile directory}:/var/lib/arkhai-buyer/arkhai/buyer:rw
+      - ${APICREDITS_BUYER_STATE_DIR:?set persistent buyer run-state directory}:/var/lib/arkhai-buyer-state/arkhai:rw
+      - ${APICREDITS_BUYER_CREDENTIAL_FILE:?set strict buyer credential file}:/run/secrets/arkhai/buyer-credential:ro

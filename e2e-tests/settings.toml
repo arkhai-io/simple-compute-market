@@ -26,6 +26,7 @@ api_url            = ""
 [default.buyer]
 api_url           = ""
 base_url_override = ""
+marketplace_credential = ""  # exact profile-provider secret, independent of wallet
 private_key       = ""
 wallet_address    = ""
 chain_rpc_url     = ""   # RPC URL for on-chain escrow creation; falls back to rpc.url
@@ -67,3 +68,18 @@ registry_url    = ""   # second registry, api_credits schema
 service_url     = ""   # credits service (keys/credits/quota)
 storefront_url  = ""   # credits seller storefront
 
+
+# ---------------------------------------------------------------------------
+# Bare-metal release-qualified topology
+# ---------------------------------------------------------------------------
+[default.bare_metal]
+registry_url = ""
+buyer_credential_environment = "ARKHAI_E2E_BARE_METAL_MARKETPLACE_CREDENTIAL"
+# Exact public `market bare-metal buy` arguments. Supply duration, one SSH
+# public key, settlement selection, and JSON/non-interactive flags. Seller-owned
+# site/resource/executor/provider fields and secret/private-key flags are rejected.
+buy_args = ""
+deal_timeout_seconds = 900
+teardown_timeout_seconds = 300
+poll_interval_seconds = 2
+terminal_teardown_status = "released"

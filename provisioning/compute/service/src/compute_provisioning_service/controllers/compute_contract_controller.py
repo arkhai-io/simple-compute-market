@@ -40,10 +40,15 @@ def _lease_view(reservation: dict[str, Any]) -> LeaseView:
 
     raw_state = str(reservation.get("state"))
     executor_ref = dict(reservation.get("executor_ref") or {})
+    executor_kind = reservation.get("executor_kind")
+    if not executor_kind:
+        raise ExecutorMismatchError(
+            "reservation has no explicit executor identity"
+        )
     return LeaseView(
         capacity_reservation_id=str(reservation["capacity_reservation_id"]),
         deal_ref=dict(reservation.get("deal_ref") or {"escrow_uid": reservation.get("escrow_uid")}),
-        executor_kind=str(reservation.get("executor_kind") or "vm"),
+        executor_kind=str(executor_kind),
         executor_target=str(
             reservation.get("executor_target")
             or reservation.get("vm_target")

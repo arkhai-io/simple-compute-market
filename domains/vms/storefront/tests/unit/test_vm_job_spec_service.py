@@ -27,7 +27,11 @@ def _order(**offer_overrides):
     return {
         "listing_id": "lst-1",
         "status": "open",
-        "seller": "http://seller:8001",
+        "storefront_url": "http://seller:8001",
+        "seller_principal": {
+            "scheme": "eip191",
+            "identifier": "0x2222222222222222222222222222222222222222",
+        },
         "offer_resource": offer_resource,
         "accepted_escrows": [],
     }
@@ -43,7 +47,7 @@ def test_resource_type_constant_matches_the_actual_registered_gpu_resource_type(
     constant must equal what ComputeGpuResourceAdapter actually
     registers, or the claim would reject every real VM resource that
     exists."""
-    from market_storefront.listings.resources import ComputeGpuResourceAdapter
+    from domains.vms.listings.resources import ComputeGpuResourceAdapter
 
     assert _VM_RESOURCE_TYPE == ComputeGpuResourceAdapter().resource_type
 

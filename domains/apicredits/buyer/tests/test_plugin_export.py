@@ -21,6 +21,10 @@ def test_domain_is_well_formed_without_compute_capability():
     assert domain.identity == "api_credits.v1"
     assert domain.has_capability(DomainCapability.BUYER)
     assert not domain.has_capability(DomainCapability.COMPUTE_PROVISIONING)
+    assert (
+        domain.buyer.identity_injection_contract
+        == "core.resolved-buyer-identity.v1"
+    )
     assert domain.compute_provisioning is None
 
 
@@ -35,21 +39,25 @@ def test_assembled_app_exposes_credits_group_only():
     assert result.exit_code == 0, result.output
     for name in ("buy", "negotiate", "settle", "listing"):
         assert name in result.output, f"missing credits command {name!r}"
+    assert "profile" in result.output
 
 
 def test_buy_surface_has_quantity_key_and_scalar_price_flags():
     result = runner.invoke(app, ["credits", "buy", "--help"])
     assert result.exit_code == 0, result.output
-    for flag in ("--quantity", "--new-key", "--key-id", "--service-name",
-                 "--initial-price", "--max-price"):
+    for flag in (
+        "--quantity", "--new-key", "--key-id", "--resource",
+        "--initial-price", "--max-price",
+    ):
         assert flag in result.output, f"missing flag {flag!r}"
 
 
-def test_listing_surface_is_token_rendering_not_generic_fallback():
+def test_listing_surface_uses_typed_resource_query():
     result = runner.invoke(app, ["credits", "listing", "list", "--help"])
     assert result.exit_code == 0, result.output
-    assert "--service-name" in result.output
-    assert "--filter" in result.output
+    assert "--resource" in result.output
+    assert "--service-name" not in result.output
+    assert "--filter" not in result.output
 
 
 def test_version_reports_domain_contract():

@@ -4,15 +4,24 @@ import sqlite3
 
 import pytest
 from core_storefront.sqlite_client import SQLiteClient as CoreSQLiteClient
+from market_settlement_runtime import settlement_migrations
+from market_identity import Ed25519Signer
 
 from arkhai_bare_metal_storefront.sqlite_client import SQLiteClient
 
 
-MIGRATION_IDS = (
+SETTLEMENT_MIGRATION_IDS = tuple(migration.id for migration in settlement_migrations())
+BARE_METAL_MIGRATION_IDS = (
     "bare-metal-storefront-0001-agreement-payloads",
     "bare-metal-storefront-0002-derived-publications",
     "bare-metal-storefront-0003-operator-state",
+    "bare-metal-storefront-0004-selected-site-bindings",
+    "bare-metal-storefront-0005-fulfillment-lifecycle",
+    "bare-metal-storefront-0006-common-domain-bindings",
+    "bare-metal-storefront-0007-selected-site-immutability",
+    "bare-metal-storefront-0008-hosted-physical-lifecycle",
 )
+MIGRATION_IDS = (*SETTLEMENT_MIGRATION_IDS, *BARE_METAL_MIGRATION_IDS)
 
 
 @pytest.mark.asyncio
@@ -27,7 +36,8 @@ async def test_bare_metal_migration_upgrades_existing_core_database(tmp_path) ->
         offer_resource={"kind": "legacy"},
         fulfillment_resource=None,
         max_duration_seconds=None,
-        seller="seller",
+        storefront_url="http://seller:8000",
+        seller_principal=Ed25519Signer(bytes.fromhex("22" * 32)).identity,
     )
     del core
 
@@ -36,12 +46,14 @@ async def test_bare_metal_migration_upgrades_existing_core_database(tmp_path) ->
 
     conn = sqlite3.connect(path)
     try:
-        table = conn.execute(
-            "SELECT name FROM sqlite_master WHERE type='table' "
-            "AND name='bare_metal_agreement_payloads'",
-        ).fetchone()
+        tables = {
+            row[0]
+            for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")
+        }
+        placeholders = ", ".join("?" for _ in MIGRATION_IDS)
         applied = conn.execute(
-            "SELECT id FROM schema_migrations WHERE id IN (?, ?, ?) ORDER BY id",
+            f"SELECT id FROM schema_migrations "
+            f"WHERE id IN ({placeholders}) ORDER BY id",
             MIGRATION_IDS,
         ).fetchall()
         derived_columns = {
@@ -60,8 +72,11 @@ async def test_bare_metal_migration_upgrades_existing_core_database(tmp_path) ->
     finally:
         conn.close()
 
-    assert table == ("bare_metal_agreement_payloads",)
-    assert applied == [(migration_id,) for migration_id in MIGRATION_IDS]
+    assert "bare_metal_agreement_payloads" not in tables
+    assert "storefront_domain_artifacts" in tables
+    assert {"settlement_obligations", "settlement_operations"} <= tables
+    assert "bare_metal_hosted_lifecycle" in tables
+    assert applied == [(migration_id,) for migration_id in sorted(MIGRATION_IDS)]
     assert {
         "site_id",
         "physical_resource_id",

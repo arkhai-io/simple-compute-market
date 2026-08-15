@@ -1,11 +1,8 @@
-"""VM-domain schema migrations and legacy demand synthesis.
+"""VM-domain schema migrations and explicit legacy demand synthesis.
 
-The migration engine plus the domain-neutral market-state migrations
-live in ``core_storefront.sqlite_migrations``; this module keeps the
-compute-flavored ones (pools, allocations, derived listings) and the
-config-coupled ``accepted_escrows`` synthesizer, which it registers
-with core so the shared escrows/listings migration can backfill
-legacy ``demand_resource`` rows.
+The migration engine plus domain-neutral market-state migrations live in
+``core_storefront.sqlite_migrations``.  This module supplies VM-owned
+migrations and the legacy converter as an explicit per-database input.
 """
 
 from __future__ import annotations
@@ -16,12 +13,12 @@ import sqlite3
 from typing import Any
 
 from core_storefront.sqlite_migrations import (  # noqa: F401 — re-exported
+    LegacyMigrationInputs,
     Migration,
     _add_column_if_missing,
     _column_exists,
     _table_exists,
     apply_schema_migrations,
-    set_accepted_escrows_synthesizer,
 )
 
 logger = logging.getLogger(__name__)
@@ -101,10 +98,9 @@ def synthesize_accepted_escrows_from_demand(
     return entries or None
 
 
-# The shared escrows/listings migration backfills legacy rows through
-# this hook; registration happens at import (the SQLite client module
-# imports this one before any client is constructed).
-set_accepted_escrows_synthesizer(synthesize_accepted_escrows_from_demand)
+VM_LEGACY_MIGRATION_INPUTS = LegacyMigrationInputs(
+    accepted_escrows_synthesizer=synthesize_accepted_escrows_from_demand
+)
 
 
 def _migrate_compute_allocation_callback_metadata(conn: sqlite3.Connection) -> None:
@@ -148,6 +144,7 @@ def _migrate_compute_inventory_pools(conn: sqlite3.Connection) -> None:
           token TEXT,
           max_duration_seconds INTEGER,
           accepted_escrows TEXT,
+          settlements TEXT,
           created_at TEXT NOT NULL DEFAULT (STRFTIME('%Y-%m-%dT%H:%M:%fZ', 'now')),
           updated_at TEXT NOT NULL DEFAULT (STRFTIME('%Y-%m-%dT%H:%M:%fZ', 'now'))
         )
@@ -250,8 +247,11 @@ def _backfill_compute_pools(conn: sqlite3.Connection) -> None:
         total = 0
         for row in pool_rows:
             row_attrs = _resource_attrs(row[4])
+            raw_gpu_count: Any = (
+                row[2] if row[2] is not None else row_attrs.get("gpu_count", 1)
+            )
             try:
-                gpu_count = int(row[2] if row[2] is not None else row_attrs.get("gpu_count", 1))
+                gpu_count = int(raw_gpu_count)
             except (TypeError, ValueError):
                 gpu_count = 0
             total += max(gpu_count, 0)
@@ -385,6 +385,88 @@ def _migrate_rename_compute_capacity_pools(conn: sqlite3.Connection) -> None:
     conn.execute("ALTER TABLE compute_inventory_pools RENAME TO compute_capacity_pools")
 
 
+def _migrate_escrow_settlement_identity(conn: sqlite3.Connection) -> None:
+    """Bind the public escrow row to its exact canonical obligation."""
+    _add_column_if_missing(conn, "escrows", "obligation_ref", "TEXT")
+    _add_column_if_missing(conn, "escrows", "obligation_index", "INTEGER")
+    if _table_exists(conn, "settlement_obligations"):
+        ambiguous = conn.execute(
+            """
+            SELECT e.escrow_uid
+            FROM escrows e
+            JOIN settlement_obligations o
+              ON o.agreement_ref = e.negotiation_id
+             AND o.mechanism_ref = e.escrow_uid
+            GROUP BY e.escrow_uid
+            HAVING COUNT(*) != 1
+            LIMIT 1
+            """
+        ).fetchone()
+        if ambiguous is not None:
+            raise RuntimeError(
+                f"escrow has ambiguous canonical settlement obligations: {ambiguous[0]}"
+            )
+        conflicting = conn.execute(
+            """
+            SELECT e.escrow_uid
+            FROM escrows e
+            JOIN settlement_obligations o
+              ON o.agreement_ref = e.negotiation_id
+             AND o.mechanism_ref = e.escrow_uid
+            WHERE e.obligation_ref IS NOT NULL
+              AND (
+                e.obligation_ref != o.obligation_ref
+                OR e.obligation_index != o.obligation_index
+              )
+            LIMIT 1
+            """
+        ).fetchone()
+        if conflicting is not None:
+            raise RuntimeError(
+                "escrow conflicts with canonical settlement obligation: "
+                f"{conflicting[0]}"
+            )
+        conn.execute(
+            """
+            UPDATE escrows
+            SET obligation_ref = (
+                  SELECT o.obligation_ref
+                  FROM settlement_obligations o
+                  WHERE o.agreement_ref = escrows.negotiation_id
+                    AND o.mechanism_ref = escrows.escrow_uid
+                ),
+                obligation_index = (
+                  SELECT o.obligation_index
+                  FROM settlement_obligations o
+                  WHERE o.agreement_ref = escrows.negotiation_id
+                    AND o.mechanism_ref = escrows.escrow_uid
+                )
+            WHERE obligation_ref IS NULL
+              AND (
+                SELECT COUNT(*)
+                FROM settlement_obligations o
+                WHERE o.agreement_ref = escrows.negotiation_id
+                  AND o.mechanism_ref = escrows.escrow_uid
+              ) = 1
+            """
+        )
+    conn.execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_escrows_obligation_ref "
+        "ON escrows(obligation_ref) WHERE obligation_ref IS NOT NULL"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_escrows_negotiation_obligation "
+        "ON escrows(negotiation_id, obligation_index)"
+    )
+
+
+def _migrate_resource_settlement_clauses(conn: sqlite3.Connection) -> None:
+    """Persist complete structured publication clauses on resources and pools."""
+
+    _add_column_if_missing(conn, "resources", "settlements", "TEXT")
+    _add_column_if_missing(conn, "compute_capacity_pools", "settlements", "TEXT")
+
+
 VM_MIGRATIONS: tuple[Migration, ...] = (
     Migration(
         "20260604_001_compute_allocation_callback_metadata",
@@ -409,5 +491,13 @@ VM_MIGRATIONS: tuple[Migration, ...] = (
     Migration(
         "20260716_008_rename_compute_capacity_pools",
         _migrate_rename_compute_capacity_pools,
+    ),
+    Migration(
+        "20260810_009_escrow_settlement_identity",
+        _migrate_escrow_settlement_identity,
+    ),
+    Migration(
+        "20260813_010_resource_settlement_clauses",
+        _migrate_resource_settlement_clauses,
     ),
 )

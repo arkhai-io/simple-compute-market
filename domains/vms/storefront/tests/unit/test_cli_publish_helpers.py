@@ -4,7 +4,7 @@ The `--watch` mode's correctness hinges on these two functions:
 
 - `_open_order_resource_ids(db)` — returns the set of resource_ids that
   currently have an open sell order, so `--watch` can skip them.
-- `_publish_round(...)` — given a `skip_ids`, publishes one order per
+- `_publish_command_round(...)` — given a `skip_ids`, publishes one listing per
   available resource NOT in the skip set.
 
 Testing these against a real SQLite schema catches the most likely
@@ -16,108 +16,61 @@ from __future__ import annotations
 
 import json
 import sqlite3
+from typing import ClassVar
 from unittest.mock import patch
 
 import pytest
-from market_alkahest.token import ERC20TokenMetadata
+from core_storefront.domain_registry import (
+    StorefrontListingBinding,
+    build_storefront_derivation_key,
+)
+from core_storefront.sqlite_migrations import (
+    migrate_storefront_domain_bindings_schema,
+)
+from domains.vms.listings.reconciler import (
+    listing_resource_key,
+)
+from market_identity import Ed25519Signer, TrustedIdentitySet
+from market_settlement_runtime import SettlementPublicationClause
 
 from market_storefront import cli_publish
 from market_storefront.cli_publish import (
     _available_resources,
-    _bare_metal_publication_source_selection,
     _open_listing_ids,
     _open_listing_resource_keys,
     _open_order_resource_ids,
     _publication_adapters,
     _publication_source_selection,
-    _publish_round,
     _site_pool_projection_sync,
     _stale_open_listing_ids,
 )
-from market_storefront.listings.reconciler import (
-    ensure_derived_compute_listings_table,
-    listing_resource_key,
-    record_derived_listing,
+from market_storefront.domain_runtime import (
+    build_vm_storefront_domain,
+    build_vm_storefront_registry,
 )
 from tests._settings_overrides import settings_overrides
-from tests.fixtures.publish import validate_failed_resource, validate_published_entry
 
-_MOCK_ADDRESS = "0x9fe46736679d2d9a65f0992f2272de9f3c7fa6e0"
-_WALLET_ADDRESS = "0x1111111111111111111111111111111111111111"
-_USDC_ADDRESS = "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48"
-_TOKEN_DECIMALS = {
-    _MOCK_ADDRESS.lower(): ("MOCK", 0),
-    _USDC_ADDRESS.lower(): ("USDC", 6),
-}
+_SITE_SIGNER = Ed25519Signer(b"\x51" * 32)
+_SITE_AUTHORITIES = TrustedIdentitySet(
+    identities=(Ed25519Signer(b"\x52" * 32).identity,)
+)
+_VM_DOMAIN = build_vm_storefront_domain()
+_VM_REGISTRY = build_vm_storefront_registry(_VM_DOMAIN)
+_VM_BINDING = _VM_REGISTRY.resolve_mode("vm").binding
 
 
 @pytest.fixture(autouse=True)
-def _stub_resolve_token(monkeypatch):
-    """Replace chain-RPC token resolution with a static map for tests.
-
-    The publish path now eth_calls ``symbol()``/``decimals()`` for every
-    token address it sees. Unit tests don't have an RPC, so we stub the
-    resolver to return canned metadata for the two addresses these tests
-    use. Also injects a synthetic [chains.anvil] entry + stubs the alkahest
-    escrow-address lookup so the per-chain accepted_escrows iteration
-    produces at least one row.
-    """
-
-    def fake_resolve(
-        address: str, *, rpc_url: str, chain_id: int, refresh: bool = False
-    ):
-        key = address.lower()
-        if key not in _TOKEN_DECIMALS:
-            from market_alkahest.token import TokenResolutionError
-
-            raise TokenResolutionError(f"untested address: {address}")
-        sym, dec = _TOKEN_DECIMALS[key]
-        return ERC20TokenMetadata(
-            symbol=sym,
-            contract_address=address.lower(),
-            decimals=dec,
-            chain_id=chain_id,
-        )
-
-    monkeypatch.setattr(
-        "market_storefront.cli_publish.resolve_token",
-        fake_resolve,
-        raising=False,
-    )
-    # cli_publish imports resolve_token lazily inside _publish_round, so
-    # patch the source module too.
-    monkeypatch.setattr(
-        "market_alkahest.token.resolve_token",
-        fake_resolve,
-    )
-    from market_alkahest import alkahest as alkahest_mod
-
-    monkeypatch.setattr(
-        alkahest_mod,
-        "get_erc20_escrow_obligation_default",
-        lambda chain_name, *, config_path=None: "0x" + "cd" * 20,
-    )
-    monkeypatch.setattr(
-        alkahest_mod,
-        "get_recipient_arbiter",
-        lambda chain_name, *, config_path=None: "0x" + "ab" * 20,
-    )
-    from market_config.config_loader import ChainConfig
-
+def _site_projection_identity(monkeypatch):
     from market_storefront.utils import config as agent_config
 
     monkeypatch.setattr(
-        agent_config,
-        "CHAINS",
-        {
-            "anvil": ChainConfig(
-                name="anvil",
-                rpc_url="http://localhost:8545",
-                chain_id=31337,
-                alkahest_address_config_path=None,
-            ),
-        },
-        raising=False,
+        agent_config, "resolve_marketplace_signer", lambda: _SITE_SIGNER
+    )
+    monkeypatch.setattr(
+        agent_config, "get_provisioning_authorities", lambda: _SITE_AUTHORITIES
+    )
+    monkeypatch.setattr(
+        cli_publish, "_site_topology_sync", lambda: ("site-a", 1)
     )
 
 
@@ -139,6 +92,8 @@ def _init_db(path: str) -> None:
                 min_price TEXT,
                 token TEXT,
                 max_duration_seconds INTEGER,
+                accepted_escrows TEXT,
+                settlements TEXT,
                 created_at TEXT DEFAULT CURRENT_TIMESTAMP,
                 updated_at TEXT DEFAULT CURRENT_TIMESTAMP
             );
@@ -149,6 +104,9 @@ def _init_db(path: str) -> None:
                 demand_resource TEXT,
                 created_at TEXT DEFAULT CURRENT_TIMESTAMP,
                 updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+            );
+            CREATE TABLE negotiation_threads (
+                negotiation_id TEXT PRIMARY KEY
             );
             CREATE TABLE compute_allocations (
                 allocation_id TEXT PRIMARY KEY,
@@ -163,6 +121,7 @@ def _init_db(path: str) -> None:
             );
             """
         )
+        migrate_storefront_domain_bindings_schema(conn)
         conn.commit()
     finally:
         conn.close()
@@ -222,41 +181,65 @@ def _insert_allocation(
 
 
 def _insert_order(
-    path: str, order_id: str, status: str, resource_id: str | None
+    path: str,
+    order_id: str,
+    status: str,
+    resource_id: str | None,
+    *,
+    gpu_count: int = 1,
 ) -> None:
     offer = {
         "gpu_model": "RTX 4090",
-        "gpu_count": 1,
+        "gpu_count": gpu_count,
         "sla": 95.0,
         "region": "New York, US",
     }
     if resource_id:
         offer["resource_id"] = resource_id
+    source = {
+        "kind": "compute.listing_source",
+        "schema_version": 1,
+        "payload": {
+            "site_id": "site-a",
+            "resource_id": resource_id,
+            "gpu_count": gpu_count,
+        },
+    }
+    binding = StorefrontListingBinding.from_source_envelope(
+        listing_id=order_id,
+        site_id="site-a",
+        binding=_VM_BINDING,
+        derivation_key=build_storefront_derivation_key(
+            site_id="site-a",
+            offering_mode=_VM_BINDING.offering_mode,
+            binding=_VM_BINDING,
+            source_identity=source,
+        ),
+        source_envelope=source,
+        last_reconciled_at="2026-08-15T00:00:00Z",
+        physical_resource_id=resource_id,
+    )
+    values = binding.as_record()
     conn = sqlite3.connect(path)
     try:
+        conn.execute("PRAGMA foreign_keys = ON")
         conn.execute(
             "INSERT INTO listings (listing_id, status, offer_resource) VALUES (?, ?, ?)",
             (order_id, status, json.dumps(offer)),
         )
+        conn.execute(
+            """
+            INSERT INTO storefront_listing_bindings(
+              listing_id, site_id, pool_id, physical_resource_id,
+              offering_mode, domain_identity, contract_major, contract_minor,
+              derivation_key, source_envelope_json, last_reconciled_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            tuple(values.values()),
+        )
         conn.commit()
     finally:
         conn.close()
-
-
-def _round_kwargs(**overrides):
-    """Common _publish_round kwargs; tests override specific keys."""
-    base = dict(
-        base_url="http://agent",
-        wallet_address=_WALLET_ADDRESS,
-        private_key=None,
-        default_min_price="100",
-        default_token_address=_MOCK_ADDRESS,
-        default_max_duration_seconds=None,
-        rpc_url="http://rpc",
-        chain_id=1,
-    )
-    base.update(overrides)
-    return base
 
 
 # ---------------------------------------------------------------------------
@@ -299,123 +282,17 @@ def test_open_listing_resource_keys_include_gpu_slice(tmp_path):
     db = str(tmp_path / "agent.db")
     _init_db(db)
     _insert_order(db, "o1", "open", "compute-001")
-    _insert_order(db, "o2", "open", "compute-002")
-    conn = sqlite3.connect(db)
-    try:
-        conn.execute(
-            "UPDATE listings SET offer_resource = ? WHERE listing_id = ?",
-            (
-                json.dumps(
-                    {
-                        "resource_id": "compute-002",
-                        "gpu_model": "RTX 4090",
-                        "gpu_count": 2,
-                        "sla": 95.0,
-                        "region": "New York, US",
-                    }
-                ),
-                "o2",
-            ),
-        )
-        conn.commit()
-    finally:
-        conn.close()
+    _insert_order(db, "o2", "open", "compute-002", gpu_count=2)
 
     assert _open_listing_resource_keys(db) == {
-        listing_resource_key("default", "compute-001", 1),
-        listing_resource_key("default", "compute-002", 2),
+        listing_resource_key("site-a", "compute-001", 1),
+        listing_resource_key("site-a", "compute-002", 2),
     }
 
 
 # ---------------------------------------------------------------------------
-# _publish_round
+# _publish_command_round
 # ---------------------------------------------------------------------------
-
-
-def test_publish_round_skips_covered_resources(tmp_path, monkeypatch):
-    """The core --watch invariant: never publish a duplicate order for a
-    resource that already has an open one."""
-    db = str(tmp_path / "agent.db")
-    _init_db(db)
-    _insert_resource(
-        db,
-        "compute-001",
-        "available",
-        {"gpu_model": "RTX 4090", "sla": 95.0, "region": "New York, US"},
-    )
-    _insert_resource(
-        db,
-        "compute-002",
-        "available",
-        {"gpu_model": "RTX 4090", "sla": 95.0, "region": "New York, US"},
-    )
-
-    calls: list[dict] = []
-
-    def fake_publish(
-        agent_url,
-        offer,
-        accepted_escrows,
-        demands,
-        max_duration_seconds,
-        wallet_address,
-        private_key,
-    ):
-        calls.append(
-            {
-                "offer": offer,
-                "accepted_escrows": accepted_escrows,
-                "demands": demands,
-            }
-        )
-        rid = offer["resource_id"]
-        return {"status": "created", "listing_id": f"listing-for-{rid}"}
-
-    monkeypatch.setattr("market_storefront.cli_publish._publish_offer", fake_publish)
-
-    published, failed, skipped = _publish_round(
-        db_path=db,
-        skip_ids={"compute-001"},
-        **_round_kwargs(),
-    )
-
-    assert len(published) == 1, f"Expected exactly one publish, got {published}"
-    assert len(skipped) == 1, f"Expected one skipped, got {skipped}"
-    assert skipped[0]["resource_id"] == "compute-001"
-    assert published[0]["resource"]["resource_id"] == "compute-002"
-    assert not failed
-    assert calls[0]["offer"]["resource_id"] == "compute-002"
-    validate_published_entry(published[0])
-    entry = calls[0]["accepted_escrows"][0]
-    assert entry["literal_fields"] == {"token": _MOCK_ADDRESS}
-    assert calls[0]["demands"][0]["demand_data"] == {"recipient": _WALLET_ADDRESS}
-    assert entry["rates"] == [{"field": "amount", "per": "hour", "value": "100"}]
-
-
-def test_publish_round_publishes_all_when_skip_ids_empty(tmp_path, monkeypatch):
-    db = str(tmp_path / "agent.db")
-    _init_db(db)
-    _insert_resource(
-        db,
-        "compute-001",
-        "available",
-        {"gpu_model": "RTX 4090", "sla": 95.0, "region": "New York, US"},
-    )
-
-    monkeypatch.setattr(
-        "market_storefront.cli_publish._publish_offer",
-        lambda *a, **k: {"status": "created", "listing_id": "o1"},
-    )
-
-    published, failed, skipped = _publish_round(
-        db_path=db,
-        skip_ids=None,
-        **_round_kwargs(),
-    )
-    assert len(published) == 1
-    assert not failed
-    assert not skipped
-    validate_published_entry(published[0])
 
 
 def test_available_resources_derives_slices_from_gpu_capacity(tmp_path):
@@ -433,7 +310,7 @@ def test_available_resources_derives_slices_from_gpu_capacity(tmp_path):
 
     assert [r["gpu_count"] for r in rows] == [1, 2, 3, 4]
     assert {r["resource_key"] for r in rows} == {
-        listing_resource_key("default", "compute-4x", n) for n in (1, 2, 3, 4)
+        listing_resource_key("site-a", "compute-4x", n) for n in (1, 2, 3, 4)
     }
 
 
@@ -454,7 +331,7 @@ def test_available_resources_closes_oversized_slices_when_capacity_held(
     monkeypatch.setattr(
         cli_publish,
         "_member_availability_sync",
-        lambda: {(None, "compute-4x"): 2, ("default", "compute-4x"): 2},
+        lambda: {("site-a", "compute-4x"): 2},
     )
 
     rows = _available_resources(db)
@@ -521,83 +398,42 @@ class TestPoolHintResolutionSettings:
         assert settings.gpu_pricing_defaults_by_model["H100"].min_price == "5.00"
         assert settings.gpu_pricing_defaults_by_model["A100"].min_price == "3.00"
 
+    def test_command_clauses_replace_per_model_settlement_defaults(self):
+        model_default = {
+            "mechanism": "fiat.stripe.v1",
+            "asset": "usd",
+            "rate": "2",
+            "per": "hour",
+            "mechanism_input": {
+                "funding_profile": "card.v1",
+                "interaction": "interactive",
+                "funds_flow": "separate_charges_transfers",
+            },
+        }
+        command_clause = SettlementPublicationClause(
+            mechanism="alkahest.v1",
+            asset="0x" + "12" * 20,
+            rate="3",
+            per="hour",
+            mechanism_input={
+                "chain": "base_sepolia",
+                "escrow_kind": "erc20_escrow_obligation_default",
+            },
+        )
+        with settings_overrides(
+            **{
+                "pricing.defaults": {"gpu": {"H100": {"settlements": [model_default]}}},
+            }
+        ):
+            settings = cli_publish._pool_hint_resolution_settings((command_clause,))
+
+        assert settings.gpu_pricing_defaults_by_model["H100"].settlements == [
+            command_clause.model_dump(mode="json", exclude_defaults=True)
+        ]
+
     def test_no_configured_gpu_defaults_is_an_empty_mapping_not_an_error(self):
         settings = cli_publish._pool_hint_resolution_settings()
         assert settings.gpu_pricing_defaults_by_model == {}
-
-
-def test_publish_round_publishes_one_listing_per_available_slice(tmp_path, monkeypatch):
-    db = str(tmp_path / "agent.db")
-    _init_db(db)
-    _insert_resource(
-        db,
-        "compute-4x",
-        "available",
-        {"gpu_model": "RTX 4090", "sla": 95.0, "region": "NY"},
-        gpu_count=4,
-    )
-
-    calls: list[dict] = []
-
-    def fake_publish(agent_url, offer, accepted_escrows, *a, **k):
-        calls.append(offer)
-        return {
-            "status": "created",
-            "listing_id": f"l-{offer['resource_id']}-{offer['gpu_count']}x",
-        }
-
-    monkeypatch.setattr("market_storefront.cli_publish._publish_offer", fake_publish)
-
-    published, failed, skipped = _publish_round(db_path=db, **_round_kwargs())
-
-    assert [c["gpu_count"] for c in calls] == [1, 2, 3, 4]
-    assert len(published) == 4
-    assert not failed
-    assert not skipped
-    for entry in published:
-        validate_published_entry(entry)
-
-    conn = sqlite3.connect(db)
-    try:
-        rows = conn.execute(
-            """
-            SELECT listing_id, resource_id, gpu_count, status, derivation_key
-            FROM derived_compute_listings
-            ORDER BY gpu_count
-            """
-        ).fetchall()
-    finally:
-        conn.close()
-    assert rows == [
-        (
-            "l-compute-4x-1x",
-            "compute-4x",
-            1,
-            "open",
-            listing_resource_key("default", "compute-4x", 1),
-        ),
-        (
-            "l-compute-4x-2x",
-            "compute-4x",
-            2,
-            "open",
-            listing_resource_key("default", "compute-4x", 2),
-        ),
-        (
-            "l-compute-4x-3x",
-            "compute-4x",
-            3,
-            "open",
-            listing_resource_key("default", "compute-4x", 3),
-        ),
-        (
-            "l-compute-4x-4x",
-            "compute-4x",
-            4,
-            "open",
-            listing_resource_key("default", "compute-4x", 4),
-        ),
-    ]
 
 
 def test_stale_open_listing_ids_finds_slices_above_available_capacity(
@@ -613,31 +449,17 @@ def test_stale_open_listing_ids_finds_slices_above_available_capacity(
         gpu_count=4,
     )
     for gpu_count in (1, 2, 3, 4):
-        _insert_order(db, f"listing-{gpu_count}x", "open", "compute-4x")
-        conn = sqlite3.connect(db)
-        try:
-            conn.execute(
-                "UPDATE listings SET offer_resource = ? WHERE listing_id = ?",
-                (
-                    json.dumps(
-                        {
-                            "resource_id": "compute-4x",
-                            "gpu_model": "RTX 4090",
-                            "gpu_count": gpu_count,
-                            "sla": 95.0,
-                            "region": "NY",
-                        }
-                    ),
-                    f"listing-{gpu_count}x",
-                ),
-            )
-            conn.commit()
-        finally:
-            conn.close()
+        _insert_order(
+            db,
+            f"listing-{gpu_count}x",
+            "open",
+            "compute-4x",
+            gpu_count=gpu_count,
+        )
     monkeypatch.setattr(
         cli_publish,
         "_member_availability_sync",
-        lambda: {(None, "compute-4x"): 2, ("default", "compute-4x"): 2},
+        lambda: {("site-a", "compute-4x"): 2},
     )
 
     assert _stale_open_listing_ids(db) == ["listing-3x", "listing-4x"]
@@ -647,201 +469,31 @@ def test_stale_open_listing_ids_finds_slices_above_available_capacity(
     assert _stale_open_listing_ids(db) == []
 
 
-def test_publish_round_reopens_existing_derived_listing_id(tmp_path, monkeypatch):
-    db = str(tmp_path / "agent.db")
-    _init_db(db)
-    _insert_resource(
-        db,
-        "compute-4x",
-        "available",
-        {"gpu_model": "RTX 4090", "sla": 95.0, "region": "NY"},
-        gpu_count=4,
-    )
-    _insert_order(db, "listing-3x-old", "closed", "compute-4x")
-    conn = sqlite3.connect(db)
-    try:
-        conn.execute(
-            "UPDATE listings SET offer_resource = ? WHERE listing_id = ?",
-            (
-                json.dumps(
-                    {
-                        "resource_id": "compute-4x",
-                        "gpu_model": "RTX 4090",
-                        "gpu_count": 3,
-                        "sla": 95.0,
-                        "region": "NY",
-                    }
-                ),
-                "listing-3x-old",
-            ),
-        )
-        ensure_derived_compute_listings_table(conn)
-        conn.commit()
-    finally:
-        conn.close()
-    record_derived_listing(
-        db,
-        listing_id="listing-3x-old",
-        site_id="default",
-        resource_id="compute-4x",
-        gpu_count=3,
-        status="closed",
-    )
-
-    created: list[dict] = []
-    monkeypatch.setattr(
-        "market_storefront.cli_publish._publish_offer",
-        lambda agent_url, offer, accepted_escrows, *a, **k: (
-            created.append(offer)
-            or {"status": "created", "listing_id": f"new-{offer['gpu_count']}x"}
-        ),
-    )
-
-    with settings_overrides(enable_registry_discovery=False):
-        published, failed, skipped = _publish_round(
-            db_path=db,
-            skip_ids={
-                listing_resource_key("default", "compute-4x", 1),
-                listing_resource_key("default", "compute-4x", 2),
-                listing_resource_key("default", "compute-4x", 4),
-            },
-            **_round_kwargs(),
-        )
-
-    assert not failed
-    assert [p["response"]["listing_id"] for p in published] == ["listing-3x-old"]
-    assert created == []
-    assert len(skipped) == 3
-    validate_published_entry(published[0])
-    conn = sqlite3.connect(db)
-    try:
-        status = conn.execute(
-            "SELECT status FROM listings WHERE listing_id = 'listing-3x-old'"
-        ).fetchone()[0]
-        derived_status = conn.execute(
-            "SELECT status FROM derived_compute_listings WHERE derivation_key = ?",
-            (listing_resource_key("default", "compute-4x", 3),),
-        ).fetchone()[0]
-    finally:
-        conn.close()
-    assert status == "open"
-    assert derived_status == "open"
-
-
 def test_vm_publish_adapters_do_not_include_bare_metal() -> None:
     assert [adapter.name for adapter in _publication_adapters()] == ["vms"]
 
 
-def test_publication_selection_can_compose_bare_metal(monkeypatch) -> None:
-    def fake_build_source(name, **_kwargs):
-        from core_storefront.publication_sources import PublicationSource
+def test_publication_selection_uses_configured_vm_registry(monkeypatch) -> None:
+    from core_storefront.publication_runner import PublicationSourceSelection
 
-        return PublicationSource(
-            name=name,
-            open_keys=lambda _db: set(),
-            close_stale=lambda _db, _url, _key: [],
-            available_candidates=lambda _db: [],
-            skip_keys=lambda _candidate: set(),
-            offer_resource=lambda candidate: candidate,
-            record_published=lambda *_args: None,
-            reopen_existing=lambda *_args: None,
-            reopen_error_label="reopen fake",
-        )
-
+    registry = object()
+    observed = []
     monkeypatch.setattr(
-        "core_storefront.publication_runner.build_publication_source",
-        fake_build_source,
+        "market_storefront.utils.config.storefront_domain_registry",
+        lambda: registry,
+    )
+    monkeypatch.setattr(
+        cli_publish,
+        "build_vm_storefront_publication_selection",
+        lambda candidate, callbacks: (
+            observed.append((candidate, callbacks))
+            or PublicationSourceSelection(sources=())
+        ),
     )
 
-    assert [
-        source.name
-        for source in _bare_metal_publication_source_selection().build_sources()
-    ] == ["bare_metal"]
-    assert [
-        source.name
-        for source in _publication_source_selection(
-            ("vms", "bare_metal")
-        ).build_sources()
-    ] == ["vms", "bare_metal"]
-
-
-def test_publish_round_normalizes_zero_duration_to_unlimited(tmp_path, monkeypatch):
-    db = str(tmp_path / "agent.db")
-    _init_db(db)
-    _insert_resource(
-        db,
-        "compute-001",
-        "available",
-        {"gpu_model": "RTX 4090", "sla": 95.0, "region": "New York, US"},
-    )
-
-    calls: list[int | None] = []
-
-    def fake_publish(
-        agent_url,
-        offer,
-        accepted_escrows,
-        demands,
-        max_duration_seconds,
-        wallet_address,
-        private_key,
-    ):
-        calls.append(max_duration_seconds)
-        return {"status": "created", "listing_id": "o1"}
-
-    monkeypatch.setattr("market_storefront.cli_publish._publish_offer", fake_publish)
-
-    published, failed, skipped = _publish_round(
-        db_path=db,
-        skip_ids=None,
-        **_round_kwargs(default_max_duration_seconds=0),
-    )
-
-    assert len(published) == 1
-    assert not failed
-    assert not skipped
-    assert calls == [None]
-    validate_published_entry(published[0])
-
-
-def test_publish_round_preserves_positive_row_duration(tmp_path, monkeypatch):
-    db = str(tmp_path / "agent.db")
-    _init_db(db)
-    _insert_resource(
-        db,
-        "compute-001",
-        "available",
-        {"gpu_model": "RTX 4090", "sla": 95.0, "region": "New York, US"},
-        max_duration_seconds=3600,
-    )
-
-    calls: list[int | None] = []
-
-    def fake_publish(
-        agent_url,
-        offer,
-        accepted_escrows,
-        demands,
-        max_duration_seconds,
-        wallet_address,
-        private_key,
-    ):
-        calls.append(max_duration_seconds)
-        return {"status": "created", "listing_id": "o1"}
-
-    monkeypatch.setattr("market_storefront.cli_publish._publish_offer", fake_publish)
-
-    published, failed, skipped = _publish_round(
-        db_path=db,
-        skip_ids=None,
-        **_round_kwargs(default_max_duration_seconds=0),
-    )
-
-    assert len(published) == 1
-    assert not failed
-    assert not skipped
-    assert calls == [3600]
-    validate_published_entry(published[0])
+    assert _publication_source_selection().source_names == ()
+    assert observed[0][0] is registry
+    assert observed[0][1].__class__.__name__ == "VmPublicationSourceCallbacks"
 
 
 def test_open_order_ids_returns_only_open(tmp_path):
@@ -855,359 +507,76 @@ def test_open_order_ids_returns_only_open(tmp_path):
     assert set(_open_listing_ids(db)) == {"o1", "o3"}
 
 
-def test_publish_round_per_row_pricing_overrides_default(tmp_path, monkeypatch):
-    """Row-level min_price/token win over the [seller.pricing] defaults."""
-    db = str(tmp_path / "agent.db")
-    _init_db(db)
-    _insert_resource(
-        db,
-        "compute-cheap",
-        "available",
-        {"gpu_model": "RTX 4090", "sla": 95.0, "region": "NY"},
-        min_price="40",
-        token=_USDC_ADDRESS,
-    )
-    _insert_resource(
-        db,
-        "compute-default",
-        "available",
-        {"gpu_model": "RTX 4090", "sla": 95.0, "region": "NY"},
-    )
-
-    calls: list[dict] = []
-    monkeypatch.setattr(
-        "market_storefront.cli_publish._publish_offer",
-        lambda agent_url, offer, accepted_escrows, *a, **k: (
-            calls.append({"offer": offer, "accepted_escrows": accepted_escrows})
-            or {"status": "created", "listing_id": f"l-{offer['resource_id']}"}
-        ),
-    )
-
-    published, failed, _ = _publish_round(db_path=db, **_round_kwargs())
-
-    by_rid = {c["offer"]["resource_id"]: c["accepted_escrows"][0] for c in calls}
-    assert by_rid["compute-cheap"]["literal_fields"]["token"] == _USDC_ADDRESS
-    assert by_rid["compute-cheap"]["rates"][0]["value"] == "40000000"
-    assert by_rid["compute-default"]["literal_fields"]["token"] == _MOCK_ADDRESS
-    assert by_rid["compute-default"]["rates"][0]["value"] == "100"
-    assert len(published) == 2
-    assert not failed
-    for entry in published:
-        validate_published_entry(entry)
-
-
-def test_publish_round_skips_resources_without_pricing(tmp_path, monkeypatch):
-    """Row has no min_price and no default → reported as failed, skipping
-    publish entirely. No HTTP call for that resource."""
-    db = str(tmp_path / "agent.db")
-    _init_db(db)
-    _insert_resource(
-        db,
-        "compute-priced",
-        "available",
-        {"gpu_model": "RTX 4090", "sla": 95.0, "region": "NY"},
-        min_price="50",
-        token=_MOCK_ADDRESS,
-    )
-    _insert_resource(
-        db,
-        "compute-noprice",
-        "available",
-        {"gpu_model": "RTX 4090", "sla": 95.0, "region": "NY"},
-    )
-
-    calls: list[dict] = []
-    monkeypatch.setattr(
-        "market_storefront.cli_publish._publish_offer",
-        lambda agent_url, offer, accepted_escrows, *a, **k: (
-            calls.append({"offer": offer, "accepted_escrows": accepted_escrows})
-            or {"status": "created", "listing_id": f"l-{offer['resource_id']}"}
-        ),
-    )
-
-    published, failed, _ = _publish_round(
-        db_path=db,
-        **_round_kwargs(default_min_price=None),
-    )
-
-    assert [c["offer"]["resource_id"] for c in calls] == ["compute-priced"]
-    assert len(published) == 1
-    assert len(failed) == 1
-    assert failed[0][0]["resource_id"] == "compute-noprice"
-    assert "min_price" in failed[0][1]
-    validate_published_entry(published[0])
-    validate_failed_resource(failed[0])
-
-
-def test_publish_round_priceless_publishes_with_empty_rates(tmp_path, monkeypatch):
-    """publish_priceless=True publishes rows without a min_price as
-    empty ``rates`` (hidden reserve) — distinct from a single ``"0"``
-    rate (free)."""
-    db = str(tmp_path / "agent.db")
-    _init_db(db)
-    _insert_resource(
-        db,
-        "compute-noprice",
-        "available",
-        {"gpu_model": "RTX 4090", "sla": 95.0, "region": "NY"},
-    )
-
-    calls: list[dict] = []
-    monkeypatch.setattr(
-        "market_storefront.cli_publish._publish_offer",
-        lambda agent_url, offer, accepted_escrows, *a, **k: (
-            calls.append({"offer": offer, "accepted_escrows": accepted_escrows})
-            or {"status": "created", "listing_id": f"l-{offer['resource_id']}"}
-        ),
-    )
-
-    published, failed, _ = _publish_round(
-        db_path=db,
-        publish_priceless=True,
-        **_round_kwargs(default_min_price=None),
-    )
-
-    assert len(published) == 1
-    assert len(failed) == 0
-    entry = calls[0]["accepted_escrows"][0]
-    assert entry["rates"] == []
-    assert entry["literal_fields"]["token"] == _MOCK_ADDRESS
-    validate_published_entry(published[0])
-
-
-def test_publish_round_explicit_zero_publishes_as_free(tmp_path, monkeypatch):
-    """A row with min_price="0" publishes with rate value "0" (explicit
-    free offering) — distinct semantically from empty ``rates`` (hidden
-    reserve). The default_min_price does NOT override an explicit 0."""
-    db = str(tmp_path / "agent.db")
-    _init_db(db)
-    _insert_resource(
-        db,
-        "compute-free",
-        "available",
-        {"gpu_model": "RTX 4090", "sla": 95.0, "region": "NY"},
-        min_price="0",
-        token=_MOCK_ADDRESS,
-    )
-
-    calls: list[dict] = []
-    monkeypatch.setattr(
-        "market_storefront.cli_publish._publish_offer",
-        lambda agent_url, offer, accepted_escrows, *a, **k: (
-            calls.append({"offer": offer, "accepted_escrows": accepted_escrows})
-            or {"status": "created", "listing_id": f"l-{offer['resource_id']}"}
-        ),
-    )
-
-    published, failed, _ = _publish_round(
-        db_path=db,
-        **_round_kwargs(default_min_price="500"),
-    )
-
-    assert len(published) == 1
-    assert len(failed) == 0
-    assert calls[0]["accepted_escrows"][0]["rates"][0]["value"] == "0"
-    validate_published_entry(published[0])
-
-
-def test_publish_round_priceless_off_still_skips(tmp_path, monkeypatch):
-    db = str(tmp_path / "agent.db")
-    _init_db(db)
-    _insert_resource(
-        db,
-        "compute-noprice",
-        "available",
-        {"gpu_model": "RTX 4090", "sla": 95.0, "region": "NY"},
-    )
-    monkeypatch.setattr(
-        "market_storefront.cli_publish._publish_offer",
-        lambda *a, **k: {"status": "created"},
-    )
-    published, failed, _ = _publish_round(
-        db_path=db,
-        **_round_kwargs(default_min_price=None),
-    )
-    assert len(published) == 0
-    assert len(failed) == 1
-    assert "publish_priceless" in failed[0][1]
-    validate_failed_resource(failed[0])
-
-
-def test_publish_round_priceless_message_mentions_opt_in(tmp_path, monkeypatch):
-    db = str(tmp_path / "agent.db")
-    _init_db(db)
-    _insert_resource(
-        db,
-        "compute-noprice",
-        "available",
-        {"gpu_model": "RTX 4090", "sla": 95.0, "region": "NY"},
-    )
-    monkeypatch.setattr(
-        "market_storefront.cli_publish._publish_offer",
-        lambda *a, **k: {"status": "created"},
-    )
-    _, failed, _ = _publish_round(
-        db_path=db,
-        **_round_kwargs(default_min_price=None),
-    )
-    assert "publish_priceless" in failed[0][1]
-    validate_failed_resource(failed[0])
-
-
-def test_publish_round_ignores_leased_resources(tmp_path, monkeypatch):
-    """Only `state='available'` resources get offered."""
-    db = str(tmp_path / "agent.db")
-    _init_db(db)
-    _insert_resource(
-        db,
-        "compute-001",
-        "leased",
-        {"gpu_model": "RTX 4090", "sla": 95.0, "region": "New York, US"},
-    )
-
-    def fake_publish(*a, **k):
-        pytest.fail("Should not publish a leased resource")
-
-    monkeypatch.setattr("market_storefront.cli_publish._publish_offer", fake_publish)
-    published, failed, skipped = _publish_round(db_path=db, **_round_kwargs())
-    assert not published and not failed and not skipped
-
-
-def test_publish_round_rejects_non_address_token(tmp_path, monkeypatch):
-    """Symbol shorthand in the CSV token column fails the row clearly."""
-    db = str(tmp_path / "agent.db")
-    _init_db(db)
-    _insert_resource(
-        db,
-        "compute-001",
-        "available",
-        {"gpu_model": "RTX 4090", "sla": 95.0, "region": "NY"},
-        min_price="50",
-        token="USDC",
-    )
-
-    monkeypatch.setattr(
-        "market_storefront.cli_publish._publish_offer",
-        lambda *a, **k: pytest.fail("should not publish a bad row"),
-    )
-    _, failed, _ = _publish_round(db_path=db, **_round_kwargs())
-    assert len(failed) == 1
-    assert "0x" in failed[0][1]
-    validate_failed_resource(failed[0])
-
-
-def test_publish_round_missing_token_with_no_default(tmp_path, monkeypatch):
-    """No CSV token, no default_token_address → skip with helpful message."""
-    db = str(tmp_path / "agent.db")
-    _init_db(db)
-    _insert_resource(
-        db,
-        "compute-001",
-        "available",
-        {"gpu_model": "RTX 4090", "sla": 95.0, "region": "NY"},
-        min_price="50",
-    )
-
-    monkeypatch.setattr(
-        "market_storefront.cli_publish._publish_offer",
-        lambda *a, **k: pytest.fail("should not publish"),
-    )
-    _, failed, _ = _publish_round(
-        db_path=db,
-        **_round_kwargs(default_token_address=None),
-    )
-    assert len(failed) == 1
-    assert "token" in failed[0][1]
-    validate_failed_resource(failed[0])
-
-
 # ---------------------------------------------------------------------------
 # _site_pool_projection_sync -- CLI's own synchronous projection fetch
 # ---------------------------------------------------------------------------
 
 
-class _FakeResponse:
-    def __init__(self, json_data, status_code=200):
-        self._json_data = json_data
-        self.status_code = status_code
+class _FakeSiteCapacityClient:
+    """Async site-client double matching the signed projection API."""
 
-    def raise_for_status(self):
-        if self.status_code >= 400:
-            raise RuntimeError(f"HTTP {self.status_code}")
+    _outcomes_by_url: ClassVar[dict[str, object]] = {}
 
-    def json(self):
-        return self._json_data
+    def __init__(
+        self,
+        base_url,
+        signer,
+        expected_authorities,
+        *,
+        timeout,
+    ):
+        assert signer is _SITE_SIGNER
+        assert expected_authorities == _SITE_AUTHORITIES
+        assert timeout == 10
+        self.base_url = base_url
 
-
-class _FakeHttpxClient:
-    """Stands in for httpx.Client: supports the `with ... as http` usage
-    and routes .get(url) to a per-test-configured outcome by URL prefix."""
-
-    _responses_by_prefix: dict[str, object] = {}
-
-    def __init__(self, *args, **kwargs):
-        pass
-
-    def __enter__(self):
-        return self
-
-    def __exit__(self, *exc):
-        return False
-
-    def get(self, url, headers=None):
-        for prefix, outcome in self._responses_by_prefix.items():
-            if url.startswith(prefix):
-                if isinstance(outcome, Exception):
-                    raise outcome
-                return outcome
-        raise AssertionError(f"unexpected URL in test: {url}")
+    async def resource_pool_projection(self):
+        outcome = self._outcomes_by_url[self.base_url]
+        if isinstance(outcome, Exception):
+            raise outcome
+        assert callable(outcome)
+        return outcome()
 
 
-def _fake_httpx_client_class(responses_by_prefix):
+def _fake_site_capacity_client_class(outcomes_by_url):
     return type(
-        "_FakeHttpxClient",
-        (_FakeHttpxClient,),
-        {"_responses_by_prefix": responses_by_prefix},
+        "_ConfiguredFakeSiteCapacityClient",
+        (_FakeSiteCapacityClient,),
+        {"_outcomes_by_url": outcomes_by_url},
     )
 
 
 class TestSitePoolProjectionSync:
     def test_one_site_succeeds(self):
         rows = [{"resource_pool_id": "gpu-pool", "resources": []}]
-        fake_client = _fake_httpx_client_class(
-            {
-                "http://site-a": _FakeResponse({"resource_pools": rows}),
-            }
+        fake_client = _fake_site_capacity_client_class(
+            {"http://site-a": lambda: {"resource_pools": rows}}
         )
         with (
             settings_overrides(**{"capacity.sites": {"site-a": "http://site-a"}}),
-            patch("httpx.Client", fake_client),
+            patch("market_site_client.SiteCapacityClient", fake_client),
         ):
             result = _site_pool_projection_sync()
         assert result == {"site-a": rows}
 
     def test_successful_empty_resource_pools_is_kept_not_dropped(self):
-        """A site that answers with genuinely zero pools must still be
-        present in the result as an empty list -- same distinction that
-        matters for the server-side site_pool_projection()."""
-        fake_client = _fake_httpx_client_class(
-            {
-                "http://site-a": _FakeResponse({"resource_pools": []}),
-            }
+        """An authoritative empty projection remains distinguishable from failure."""
+        fake_client = _fake_site_capacity_client_class(
+            {"http://site-a": lambda: {"resource_pools": []}}
         )
         with (
             settings_overrides(**{"capacity.sites": {"site-a": "http://site-a"}}),
-            patch("httpx.Client", fake_client),
+            patch("market_site_client.SiteCapacityClient", fake_client),
         ):
             result = _site_pool_projection_sync()
         assert result == {"site-a": []}
 
     def test_one_site_fails_others_still_reported(self):
         rows_b = [{"resource_pool_id": "gpu-pool-b", "resources": []}]
-        fake_client = _fake_httpx_client_class(
+        fake_client = _fake_site_capacity_client_class(
             {
                 "http://site-a": RuntimeError("connection refused"),
-                "http://site-b": _FakeResponse({"resource_pools": rows_b}),
+                "http://site-b": lambda: {"resource_pools": rows_b},
             }
         )
         with (
@@ -1216,24 +585,22 @@ class TestSitePoolProjectionSync:
                     "capacity.sites": {
                         "site-a": "http://site-a",
                         "site-b": "http://site-b",
-                    },
+                    }
                 }
             ),
-            patch("httpx.Client", fake_client),
+            patch("market_site_client.SiteCapacityClient", fake_client),
         ):
             result = _site_pool_projection_sync()
         assert result == {"site-b": rows_b}
         assert "site-a" not in result
 
     def test_all_sites_fail_returns_none(self):
-        fake_client = _fake_httpx_client_class(
-            {
-                "http://site-a": RuntimeError("connection refused"),
-            }
+        fake_client = _fake_site_capacity_client_class(
+            {"http://site-a": RuntimeError("connection refused")}
         )
         with (
             settings_overrides(**{"capacity.sites": {"site-a": "http://site-a"}}),
-            patch("httpx.Client", fake_client),
+            patch("market_site_client.SiteCapacityClient", fake_client),
         ):
             result = _site_pool_projection_sync()
         assert result is None
@@ -1249,15 +616,13 @@ class TestSitePoolProjectionSync:
             result = _site_pool_projection_sync()
         assert result is None
 
-    def test_http_error_status_treated_as_failure(self):
-        fake_client = _fake_httpx_client_class(
-            {
-                "http://site-a": _FakeResponse({}, status_code=500),
-            }
+    def test_projection_client_error_is_treated_as_failure(self):
+        fake_client = _fake_site_capacity_client_class(
+            {"http://site-a": RuntimeError("HTTP 500")}
         )
         with (
             settings_overrides(**{"capacity.sites": {"site-a": "http://site-a"}}),
-            patch("httpx.Client", fake_client),
+            patch("market_site_client.SiteCapacityClient", fake_client),
         ):
             result = _site_pool_projection_sync()
         assert result is None
@@ -1270,10 +635,8 @@ class TestSitePoolProjectionIfEnabled:
 
     def test_flag_enabled_fetches(self):
         rows = [{"resource_pool_id": "gpu-pool", "resources": []}]
-        fake_client = _fake_httpx_client_class(
-            {
-                "http://site-a": _FakeResponse({"resource_pools": rows}),
-            }
+        fake_client = _fake_site_capacity_client_class(
+            {"http://site-a": lambda: {"resource_pools": rows}}
         )
         with (
             settings_overrides(
@@ -1282,7 +645,7 @@ class TestSitePoolProjectionIfEnabled:
                     "capacity.sites": {"site-a": "http://site-a"},
                 }
             ),
-            patch("httpx.Client", fake_client),
+            patch("market_site_client.SiteCapacityClient", fake_client),
         ):
             result = cli_publish._site_pool_projection_if_enabled()
         assert result == {"site-a": rows}

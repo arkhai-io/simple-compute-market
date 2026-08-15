@@ -10,9 +10,6 @@
 #   4. This file
 # ---------------------------------------------------------------------------
 
-# Identity
-agent_id        = ""        # must be a Python identifier; empty → "root_agent"
-agent_name      = ""        # display name; falls back to agent_id
 
 # HTTP server
 port            = 8000
@@ -32,12 +29,11 @@ db_path         = "./src/market_storefront/data/storefront/agent.db"
 log_file_path   = ""
 log_level       = "INFO"
 
+
 # Resource auto-seeding — inline content wins over path
 resources_csv_inline = ""
 resources_csv_path   = ""
 
-# Admin API key — protects /admin/* routes. Empty means unprotected (local dev).
-admin_api_key   = ""
 
 # Registry discovery (seller-side)
 enable_registry_discovery = true
@@ -59,40 +55,50 @@ claims_sweep_interval = 30
 # Advertised buyer-heartbeat cadence (seconds) echoed by the deals
 # endpoint; gating collection on heartbeats is lifecycle policy (I.5).
 heartbeat_interval_seconds = 60
-# Oracle-gated collection (lifecycle work item I.5): publish listings
-# whose escrow demand is TrustedOracleArbiter(trusted_oracle_address) so
-# collection waits for a third party both sides trust to arbitrate()
-# true — assumed at end of lease unless a dispute is raised. The
-# storefront's own wallet is rejected as the oracle: the party
-# collecting cannot also be the party deciding collection. Buyer
-# heartbeats (cadence above) are the dispute evidence.
-oracle_gated_listings = false
-trusted_oracle_address = ""
-# Interruptible / spot collection: publish listings whose escrow demand
-# routes through ERC20Splitter. The buyer escrows the max amount; on
-# interruption, the refund authority declares the seller/refund split.
-# Empty interruptible_oracle_address means this storefront's wallet,
-# which is intentional for the current trusted-seller MVP.
-interruptible_listings = false
-interruptible_oracle_address = ""
 default_vm_host               = "kvm1"
+# Installed storefront contributions are public, version-pinned assertions.
+# Deployment overlays may replace this array with VM + bare-metal or one exact
+# registration; private keys, provider settings, and authority credentials do
+# not belong here.
+[[storefront_domains]]
+contribution = "vms"
+offering_mode = "vm"
+domain_identity = "compute.v1"
+contract_version = "1.0"
+# Marketplace identity (public). Signing material is supplied only through
+# the ARKHAI_IDENTITY_CREDENTIAL secret environment variable.
+[Identity.principal]
+scheme     = ""
+identifier = ""
 
-[wallet]
-# Sensitive — populated by Secret overlay in k8s, by local file otherwise.
-address        = ""
-private_key    = ""
-ssh_public_key = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIDemoPublicKeyForComputeAccess demo@example"
+# Every provisioning callback peer is an explicit public trust binding.
+# Configure one table per stable peer; site_id must be a configured
+# [capacity.sites] key (or "default" for the single-site form).
+# [Identity.service_peers.provisioning_default]
+# role = "service"
+# site_id = "default"
+# principals = [{ scheme = "ed25519", identifier = "<public-key-base64url>" }]
 
-# [chains.<name>] tables — one per chain the operator wants to transact
-# on. The operator provides these via storefront.toml; no defaults ship
-# here (the storefront refuses to start with zero configured chains, so
-# the absent-key state has a clear error path). Each entry supports:
-#   rpc_url                       (required)
-#   chain_id                      (optional, defaults to KNOWN_CHAIN_IDS lookup by name)
-#   alkahest_address_config_path  (optional, anvil-style file deployments only)
-# Listings advertise their accepted chains via
-# accepted_escrows[].chain_name tuples; the runtime dispatches to the
-# matching [chains.<name>] entry when settling.
+# Stable administrator subjects use the same scheme-tagged public principals.
+# [Identity.administrators.operator]
+# principals = [{ scheme = "ed25519", identifier = "<public-key-base64url>" }]
+
+
+[Settlement]
+schema_version = 1
+priority = []
+
+# Mechanism subsections are intentionally absent from new defaults. Operators
+# add [Settlement.stripe] and/or [Settlement.alkahest] explicitly; generated
+# role configuration supplies every typed field and the exact capability pins.
+# Hosted consumer configuration contains only public client/trust policy.
+# Provider, webhook, database, migration, EAS, and RPC service configuration is
+# authority-owned and is rejected from [Settlement.stripe].
+
+# [Wallet] and [Chains.<name>] are optional EVM resources supplied by operator
+# overlays. A storefront that only advertises fiat.stripe.v1 leaves them absent.
+# Private wallet material belongs only in storefront.secrets.toml. Alkahest
+# requires Wallet.address plus a selected Chains entry with rpc_url and chain_id.
 
 [registry]
 # Leave empty by default. Any user-supplied list at a higher overlay
@@ -106,6 +112,10 @@ discovery_timeout = 5.0
 [registry.auth]
 # Free-form table of {url = "bearer-token"} pairs for private registries.
 # Empty by default; populate via storefront.secrets.toml.
+
+[registry.authorities]
+# Public URL → stable registry authority name plus canonical response-signing
+# principals. Keys must exactly match [registry].urls after URL normalization.
 
 [gateway]
 # Path prefix when behind a reverse proxy (e.g. "/storefront"). Empty for direct.
@@ -121,9 +131,9 @@ root_path = ""
 # With no table, authority_url becomes the single site "default"
 # (and itself defaults to provisioning.service_url — that process
 # hosts the site authority). The first site is the storefront's home
-# site: local CSV inventory mirrors there. Authentication rides
-# admin_api_key, and capacity deltas arrive by polling each
-# authority's versioned event feed.
+# site: local CSV inventory mirrors there. Every site client uses the
+# storefront signer and pins the site's configured public authority identity;
+# capacity deltas arrive by polling each authority's versioned event feed.
 # placement orders sites for reserves: "fill_first" (configuration
 # order — pack a site before touching the next) or "most_available"
 # (spread to the site with the most free units).
@@ -172,6 +182,11 @@ frp_server_addr        = ""
 frp_domain             = ""
 frp_dashboard_password = ""
 
+[provisioning.identity]
+# Ordered old/new public response trust pins for provisioning HTTP calls.
+# Private material belongs only to the provisioning service's own Secret.
+principals = []
+
 [fulfillment.failure_policy]
 # Actions applied when provisioning/fulfillment fails. `release_capacity`
 # repairs local inventory/listings; `emit_event` writes to stage_events/SSE;
@@ -199,6 +214,9 @@ buyer_model_path   = "domains/vms/negotiation/rl/models/arkhai_negotiator_buyer.
 extra_policy_paths = []
 
 [pricing]
+# Structured settlement option defaults. Each entry is one complete clause;
+# inventory-row or command clauses replace this list rather than merging fields.
+settlements = []
 default_min_price            = ""
 default_token_address        = ""
 default_max_duration_seconds = 0   # 0 means unlimited
@@ -206,7 +224,7 @@ publish_priceless            = false
 # Whether a resource pool's own projected `sla` hint
 # is consulted at all when resolving a listing's advertised SLA (the
 # middle tier of a storefront override > pool hint > this default
-# precedence chain -- see market_storefront.listings.pool_descriptors).
+# precedence chain -- see domains.vms.listings.pool_descriptors).
 # Off by default: publishing a site's self-reported SLA claim is new
 # capability a storefront operator must opt into, not something already
 # trusted today.
@@ -217,7 +235,7 @@ default_sla                  = 0.0
 
 # Per-GPU-model pricing defaults (tier 1 of the
 # storefront-override > pool-hint > this-default precedence chain --
-# see market_storefront.listings.pricing_resolution). Structured to mirror
+# see domains.vms.listings.pricing_resolution). Structured to mirror
 # the structured-capacity-requirements change's own family-grouped
 # requirement shape, reserving room for non-GPU families (cpu/memory/
 # storage) once that change's vocabulary has landed and a pricing

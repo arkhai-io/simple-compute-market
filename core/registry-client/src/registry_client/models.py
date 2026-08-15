@@ -13,6 +13,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
+from market_identity import Identity, TrustedIdentitySet
+
 
 # ---------------------------------------------------------------------------
 # Shared / primitive models
@@ -36,7 +38,9 @@ class HTTPValidationError:
 
     @classmethod
     def from_dict(cls, d: dict) -> "HTTPValidationError":
-        return cls(detail=[ValidationErrorDetail.from_dict(e) for e in d.get("detail", [])])
+        return cls(
+            detail=[ValidationErrorDetail.from_dict(e) for e in d.get("detail", [])]
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -70,19 +74,28 @@ class HealthResponse:
 
 @dataclass
 class PublisherIdentity:
-    """A publisher's signing identity — a ``(scheme, identifier)`` pair."""
+    """One lifecycle binding between a stable publisher and a principal."""
 
-    scheme: str
-    identifier: str
+    principal: Identity
+    status: str
+    active_until: str | None = None
+    retired_at: str | None = None
+    disabled_at: str | None = None
 
     @classmethod
     def from_dict(cls, d: dict) -> "PublisherIdentity":
-        return cls(scheme=d.get("scheme", ""), identifier=d.get("identifier", ""))
+        return cls(
+            principal=Identity.model_validate(d["principal"]),
+            status=str(d["status"]),
+            active_until=d.get("active_until"),
+            retired_at=d.get("retired_at"),
+            disabled_at=d.get("disabled_at"),
+        )
 
 
 @dataclass
 class Publisher:
-    """A listing-owning principal, returned by GET /publishers/{id}."""
+    """A stable listing owner with explicit principal lifecycle bindings."""
 
     publisher_id: int | None = None
     storefront_url: str | None = None
@@ -96,7 +109,9 @@ class Publisher:
         return cls(
             publisher_id=d.get("publisher_id"),
             storefront_url=d.get("storefront_url"),
-            identities=[PublisherIdentity.from_dict(i) for i in d.get("identities", [])],
+            identities=[
+                PublisherIdentity.from_dict(i) for i in d.get("identities", [])
+            ],
             created_at=d.get("created_at"),
             extra={k: v for k, v in d.items() if k not in known},
         )
@@ -174,6 +189,7 @@ class ListingRequest:
 
     offer: dict[str, Any]
     accepted_escrows: list[dict[str, Any]]
+    settlement_options: list[dict[str, Any]] = field(default_factory=list)
     demands: list[dict[str, Any]] = field(default_factory=list)
     max_duration_seconds: int | None = None
     listing_id: str = field(default_factory=lambda: __import__("uuid").uuid4().hex)
@@ -184,6 +200,7 @@ class ListingRequest:
             "listing_id": self.listing_id,
             "offer_resource": self.offer,
             "accepted_escrows": self.accepted_escrows,
+            "settlement_options": self.settlement_options,
             "demands": self.demands,
             "max_duration_seconds": self.max_duration_seconds,
             "storefront_url": self.storefront_url,
@@ -202,38 +219,90 @@ class ListingSummary:
     id: str | int | None = None
     status: str | None = None
     publisher_id: int | None = None
+    publisher_principals: TrustedIdentitySet | None = None
     storefront_url: str | None = None
     offer: dict[str, Any] = field(default_factory=dict)
     accepted_escrows: list[dict[str, Any]] = field(default_factory=list)
+    settlement_options: list[dict[str, Any]] = field(default_factory=list)
     demands: list[dict[str, Any]] = field(default_factory=list)
     max_duration_seconds: int | None = None
     created_at: str | int | None = None
+    updated_at: str | int | None = None
     extra: dict[str, Any] = field(default_factory=dict)
 
     @classmethod
     def from_dict(cls, d: dict) -> "ListingSummary":
         known = {
-            "listing_id", "publisher_id", "storefront_url",
-            "offer_resource", "accepted_escrows", "max_duration_seconds",
-            "demands", "created_at", "updated_at", "status",
-            "id", "offer", "maxDurationSeconds", "createdAt",
+            "listing_id",
+            "publisher_id",
+            "publisher_principals",
+            "publisher_principal",
+            "storefront_url",
+            "offer_resource",
+            "accepted_escrows",
+            "settlement_options",
+            "max_duration_seconds",
+            "demands",
+            "created_at",
+            "updated_at",
+            "status",
+            "id",
+            "offer",
+            "maxDurationSeconds",
+            "createdAt",
         }
         listing_id = d.get("listing_id") or d.get("id")
         offer = d.get("offer") or d.get("offer_resource") or {}
         accepted_escrows = d.get("accepted_escrows") or []
+        settlement_options = d.get("settlement_options") or []
         demands = d.get("demands") or []
+        if d.get("publisher_principals") is None:
+            raise ValueError("publisher_principals is required")
         return cls(
             id=listing_id,
             status=d.get("status"),
             publisher_id=d.get("publisher_id"),
+            publisher_principals=TrustedIdentitySet(
+                identities=tuple(
+                    Identity.model_validate(identity)
+                    for identity in d["publisher_principals"]["identities"]
+                )
+            ),
             storefront_url=d.get("storefront_url"),
             offer=offer,
             accepted_escrows=accepted_escrows,
+            settlement_options=settlement_options,
             demands=demands,
-            max_duration_seconds=d.get("max_duration_seconds") or d.get("maxDurationSeconds"),
+            max_duration_seconds=d.get("max_duration_seconds")
+            or d.get("maxDurationSeconds"),
             created_at=d.get("created_at") or d.get("createdAt"),
+            updated_at=d.get("updated_at"),
             extra={k: v for k, v in d.items() if k not in known},
         )
+
+    def to_dict(self) -> dict[str, Any]:
+        data = dict(self.extra)
+        data.update(
+            {
+                "listing_id": self.id,
+                "publisher_id": self.publisher_id,
+                "publisher_principals": (
+                    self.publisher_principals.model_dump(mode="json")
+                    if self.publisher_principals is not None
+                    else None
+                ),
+                "storefront_url": self.storefront_url,
+                "offer_resource": self.offer,
+                "accepted_escrows": self.accepted_escrows,
+                "settlement_options": self.settlement_options,
+                "demands": self.demands,
+                "max_duration_seconds": self.max_duration_seconds,
+                "status": self.status,
+                "created_at": self.created_at,
+                "updated_at": self.updated_at,
+            }
+        )
+        return data
 
 
 @dataclass
@@ -266,26 +335,12 @@ class ListingListResponse:
 
 @dataclass
 class UpdateListingRequest:
-    """Request body for PUT /listings/{listing_id}.
-
-    Constructs the signed body that the registry route expects. Auth fields
-    (signature, timestamp) are embedded when ``private_key`` is supplied. The
-    signature covers the ``listing_id`` (passed to :meth:`to_dict`), matching
-    the registry's owner-scoped verification against the listing's publisher
-    identity.
-    """
+    """Body fields for an authenticated PUT /listings/{listing_id}."""
 
     updates: dict[str, Any]
-    private_key: str | None = None
 
-    def to_dict(self, listing_id: str) -> dict:
-        from registry_client.auth import build_auth_headers
-        body = dict(self.updates)
-        if self.private_key:
-            auth = build_auth_headers(self.private_key, "update_listing", listing_id)
-            body["signature"] = auth["X-Signature"]
-            body["timestamp"] = int(auth["X-Timestamp"])
-        return body
+    def to_dict(self) -> dict:
+        return dict(self.updates)
 
 
 # ---------------------------------------------------------------------------
@@ -305,7 +360,9 @@ class SystemStatsResponse:
     @classmethod
     def from_dict(cls, d: dict) -> "SystemStatsResponse":
         obs_raw = d.get("orders_by_status", {})
-        obs = {k: int(v) for k, v in obs_raw.items()} if isinstance(obs_raw, dict) else {}
+        obs = (
+            {k: int(v) for k, v in obs_raw.items()} if isinstance(obs_raw, dict) else {}
+        )
         known = {"publisher_count", "order_count", "orders_by_status"}
         return cls(
             publisher_count=int(d.get("publisher_count", 0)),
@@ -322,6 +379,7 @@ class ValidatePublishRequest:
     listing_id: str
     offer_resource: dict
     accepted_escrows: list[dict]
+    settlement_options: list[dict] = field(default_factory=list)
     max_duration_seconds: int | None = None
     storefront_url: str = ""
 
@@ -331,6 +389,7 @@ class ValidatePublishRequest:
             "storefront_url": self.storefront_url,
             "offer_resource": self.offer_resource,
             "accepted_escrows": self.accepted_escrows,
+            "settlement_options": self.settlement_options,
         }
         if self.max_duration_seconds is not None:
             d["max_duration_seconds"] = self.max_duration_seconds
@@ -382,18 +441,26 @@ class ValidatePublishResponse:
     listing_id: str
     offer_resource_type: str | None = None
     accepted_escrows_count: int = 0
+    settlement_options_count: int = 0
     errors: list = field(default_factory=list)
     extra: dict = field(default_factory=dict)
 
     @classmethod
     def from_dict(cls, d: dict) -> "ValidatePublishResponse":
-        known = {"valid", "listing_id", "offer_resource_type",
-                 "accepted_escrows_count", "errors"}
+        known = {
+            "valid",
+            "listing_id",
+            "offer_resource_type",
+            "accepted_escrows_count",
+            "settlement_options_count",
+            "errors",
+        }
         return cls(
             valid=bool(d.get("valid", False)),
             listing_id=d.get("listing_id", ""),
             offer_resource_type=d.get("offer_resource_type"),
             accepted_escrows_count=int(d.get("accepted_escrows_count", 0)),
+            settlement_options_count=int(d.get("settlement_options_count", 0)),
             errors=list(d.get("errors", [])),
             extra={k: v for k, v in d.items() if k not in known},
         )

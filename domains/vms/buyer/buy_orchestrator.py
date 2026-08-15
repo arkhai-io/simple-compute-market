@@ -33,10 +33,10 @@ from core_buyer.orchestration import (  # noqa: F401 — re-exports
     DEFAULT_SETTLEMENT_POLL_INTERVAL,
     DEFAULT_SETTLEMENT_TIMEOUT,
     BuildEscrowProposalFn,
-    _looks_like_propagation_lag,
+    RevalidateSettlementFn,
     _signed_json,
     poll_settlement_status,
-    submit_settlement,
+    submit_settlement_request,
     wait_for_settlement,
 )
 from core_buyer.orchestration import AgreedTerms as CoreAgreedTerms
@@ -46,9 +46,15 @@ from core_buyer.orchestration import (
 )
 from core_buyer.policy_surface import extract_seller_min_price  # noqa: F401
 from arkhai_vms import VmProvisionTerms
-from core_buyer.escrow_client import BuildEscrowTermsFn, CreateEscrowFn
-
-from .buyer_client import _sign  # noqa: F401 — re-export for service_cli/tests
+from market_alkahest.schemas import EscrowProposal, EscrowTerms
+from .escrow_client import (
+    BuildEscrowTermsFn,
+    CreateEscrowFn,
+    accepted_proposal_recipient,
+    encode_escrow_proposal,
+    looks_like_propagation_lag,
+    make_alkahest_settlement_payload_fn,
+)
 
 
 @dataclass
@@ -58,12 +64,13 @@ class AgreedTerms:
     Passed to the optional ``confirm_settlement`` callback so the user
     can review what they're about to commit to before any chain write.
     """
+
     seller_url: str
     seller_wallet_address: str
     negotiation_id: str
     listing_id: str
-    agreed_amount: int                # base units, absolute payment total
-    duration_seconds: int           # buyer's lease ask (negotiation init)
+    agreed_amount: int  # base units, absolute payment total
+    duration_seconds: int  # buyer's lease ask (negotiation init)
 
 
 def make_legacy_negotiate_hook(
@@ -75,6 +82,7 @@ def make_legacy_negotiate_hook(
     max_negotiation_rounds: int,
     derive_prices: Optional[Callable[[dict[str, Any]], tuple[int, int]]],
     chain: Optional[list[Any]],
+    revalidate_settlement: RevalidateSettlementFn | None = None,
 ) -> NegotiateFn:
     """Build the compute-instantiated negotiate hook over the core stage."""
     return _core_make_negotiate_hook(
@@ -83,9 +91,14 @@ def make_legacy_negotiate_hook(
         provision=provision,
         unit_count=float(provision.duration_seconds) / 3600.0,
         build_escrow_proposal=build_escrow_proposal,
+        encode_escrow_proposal=encode_escrow_proposal,
+        decode_provision_terms=VmProvisionTerms.model_validate,
+        decode_escrow_proposal=EscrowProposal.model_validate,
+        decode_escrow_terms=EscrowTerms.model_validate,
         max_negotiation_rounds=max_negotiation_rounds,
         derive_prices=derive_prices,
         chain=chain,
+        revalidate_settlement=revalidate_settlement,
     )
 
 
@@ -93,6 +106,7 @@ def make_legacy_settle_hook(
     *,
     config: "BuyConfig",
     provision: VmProvisionTerms,
+    buyer_evm_address: str,
     build_escrow_terms: BuildEscrowTermsFn,
     create_escrow: CreateEscrowFn,
     confirm_settlement: Optional[Callable[["AgreedTerms", dict[str, Any]], bool]],
@@ -103,6 +117,7 @@ def make_legacy_settle_hook(
     """Build the compute-instantiated settlement hook over the core stage."""
     adapted_confirm: Optional[Callable[[CoreAgreedTerms, dict[str, Any]], bool]] = None
     if confirm_settlement is not None:
+
         def adapted_confirm(core_terms: CoreAgreedTerms, match: dict[str, Any]) -> bool:
             return confirm_settlement(
                 AgreedTerms(
@@ -120,9 +135,15 @@ def make_legacy_settle_hook(
         config=config,
         unit_count=float(provision.duration_seconds) / 3600.0,
         duration_seconds=provision.duration_seconds,
-        ssh_public_key=provision.ssh_public_key,
         build_escrow_terms=build_escrow_terms,
         create_escrow=create_escrow,
+        settlement_recipient=accepted_proposal_recipient,
+        build_settlement_payload=make_alkahest_settlement_payload_fn(
+            buyer_evm_address=buyer_evm_address,
+            ssh_public_key=provision.ssh_public_key,
+        ),
+        settlement_submit_max_attempts=6,
+        settlement_submit_retryable=looks_like_propagation_lag,
         confirm_settlement=adapted_confirm,
         settlement_poll_interval=settlement_poll_interval,
         settlement_total_timeout=settlement_total_timeout,

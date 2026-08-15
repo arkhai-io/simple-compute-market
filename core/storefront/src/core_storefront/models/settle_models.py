@@ -1,24 +1,19 @@
 """HTTP request/response models for the Settle controller."""
+
 from __future__ import annotations
 
 from typing import Any
+from market_identity import Identity
 
-from pydantic import BaseModel, Field
+
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class SettleRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     negotiation_id: str
-    # Domain payload: the VM domain delivers against it; token deals
-    # send "" (their deliverable is keyed by the negotiation's terms).
-    ssh_public_key: str = ""
-    buyer_address: str
-    chain_name: str = Field(
-        description=(
-            "Chain name from the accepted escrow proposal — the storefront "
-            "uses it to pick the matching AlkahestClient out of its "
-            "per-chain dispatch table."
-        ),
-    )
+    buyer_principal: Identity
 
 
 class SettleResponse(BaseModel):
@@ -29,7 +24,10 @@ class SettleResponse(BaseModel):
     is the legacy ephemeral executor-job identity and is always ``None``
     for a fulfillment that went through the durable path instead.
     """
+
     escrow_uid: str
+    buyer_principal: Identity
+    seller_principal: Identity
     status: str
     provisioning_job_id: str | None = None
     fulfillment_id: str | None = None
@@ -42,7 +40,10 @@ class SettleStatusResponse(BaseModel):
     See ``SettleResponse`` for the ``fulfillment_id``/``provisioning_job_id``
     distinction.
     """
+
     escrow_uid: str
+    buyer_principal: Identity
+    seller_principal: Identity
     status: str
     provisioning_job_id: str | None = None
     fulfillment_id: str | None = None
@@ -54,6 +55,7 @@ class SettleStatusResponse(BaseModel):
 # Admin dry-run models
 # ---------------------------------------------------------------------------
 
+
 class VerifyEscrowRequest(BaseModel):
     """Body for POST /api/v1/admin/settle/{escrow_uid}/verify.
 
@@ -61,7 +63,12 @@ class VerifyEscrowRequest(BaseModel):
     chain and confirms it matches. No DB writes. Used by e2e stage 7b to
     test getRecordFromChain in isolation before committing to settle.
     """
-    seller_wallet: str = Field(description="Expected seller wallet address (recipient on-chain)")
+
+    model_config = ConfigDict(extra="forbid")
+
+    seller_wallet: str = Field(
+        description="Expected seller wallet address (recipient on-chain)"
+    )
     agreed_price: int = Field(
         description=(
             "Expected absolute payment amount in base units of the payment "
@@ -70,8 +77,12 @@ class VerifyEscrowRequest(BaseModel):
             "a rate)."
         ),
     )
-    agreed_duration_seconds: int = Field(description="Expected lease duration in seconds")
-    listing_id: str = Field(description="Listing ID — used to extract token contract from DB")
+    agreed_duration_seconds: int = Field(
+        description="Expected lease duration in seconds"
+    )
+    listing_id: str = Field(
+        description="Listing ID — used to extract token contract from DB"
+    )
     chain_name: str = Field(
         description=(
             "Chain name to dispatch the on-chain read on. The storefront "
@@ -82,6 +93,7 @@ class VerifyEscrowRequest(BaseModel):
 
 class VerifyEscrowResponse(BaseModel):
     """Response for POST /api/v1/admin/settle/{escrow_uid}/verify."""
+
     valid: bool
     escrow_uid: str
     reason: str | None = None
@@ -95,13 +107,21 @@ class EvaluateSettleRequest(BaseModel):
     writes (read-only inventory lookup). Used by e2e stage 8a to test
     doWork in isolation.
     """
-    listing_id: str = Field(description="Listing ID — used to extract compute attributes for host matching")
-    ssh_public_key: str = Field(default="", description="SSH public key to inject into the VM")
+
+    model_config = ConfigDict(extra="forbid")
+
+    listing_id: str = Field(
+        description="Listing ID — used to extract compute attributes for host matching"
+    )
+    ssh_public_key: str = Field(
+        default="", description="SSH public key to inject into the VM"
+    )
     duration_seconds: int = Field(default=3600, description="Lease duration in seconds")
 
 
 class EvaluateSettleResponse(BaseModel):
     """Response for POST /api/v1/admin/settle/{escrow_uid}/evaluate."""
+
     would_submit: bool
     escrow_uid: str
     vm_host: str | None = None
@@ -123,6 +143,7 @@ class SettleWaitResponse(BaseModel):
     ``fulfillment_id`` is that path's durable identity and is the field a
     caller should prefer once available.
     """
+
     ready: bool
     status: str
     provisioning_job_id: str | None = None

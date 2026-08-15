@@ -45,37 +45,132 @@ from typing import Any
 import httpx
 import pytest
 import pytest_asyncio
+from market_identity import (
+    AuthenticatedRequest,
+    Ed25519Signer,
+    Identity,
+    ResponseEnvelope,
+    SignatureProof,
+    TrustedIdentitySet,
+    VerificationCode,
+    canonical_body_hash,
+    sign_response,
+    verify_request,
+)
 
 from registry_client import RegistryClient
 from registry_client.models import ListingRequest
 
 # ---------------------------------------------------------------------------
-# Constants — Hardhat/Anvil deterministic key pair (account index 2)
+# Canonical identity-v2 fixtures
 # ---------------------------------------------------------------------------
 
-AGENT_PRIVATE_KEY  = "0x5de4111afa1a4b94908f83103eb1f1706367c2e68ca870fc3fb9a804cdab365a"
-AGENT_CANONICAL_ID = "eip155:31337:0x21df544947ba3e8b3c32561399e88b52dc8b2823:2"
+SELLER_SIGNER = Ed25519Signer(bytes.fromhex("21" * 32))
+REGISTRY_SIGNER = Ed25519Signer(bytes.fromhex("42" * 32))
+REGISTRY_TRUST = TrustedIdentitySet(identities=(REGISTRY_SIGNER.identity,))
+REGISTRY_AUTHORITY = "registry.test"
+
+SIGNATURE_VERSION_HEADER = "X-Market-Signature-Version"
+IDENTITY_SCHEME_HEADER = "X-Market-Identity-Scheme"
+IDENTITY_IDENTIFIER_HEADER = "X-Market-Identity-Identifier"
+ROLE_HEADER = "X-Market-Role"
+REQUEST_ID_HEADER = "X-Market-Request-ID"
+TIMESTAMP_HEADER = "X-Market-Timestamp"
+SIGNATURE_HEADER = "X-Market-Signature"
 
 
 # ---------------------------------------------------------------------------
 # MockTransport helpers
 # ---------------------------------------------------------------------------
 
-class _CapturingTransport(httpx.AsyncBaseTransport):
-    """Records the most recent request; returns a configurable canned response."""
+def _signed_response(
+    request: httpx.Request,
+    *,
+    signer: Ed25519Signer,
+    status_code: int,
+    body: dict[str, Any],
+) -> httpx.Response:
+    authenticated = sign_response(
+        signer=signer,
+        envelope=ResponseEnvelope(
+            role="registry",
+            principal=signer.identity,
+            method=request.method,
+            operation="listing.publish",
+            resource="listings",
+            request_id=request.headers[REQUEST_ID_HEADER],
+            timestamp=int(request.headers[TIMESTAMP_HEADER]),
+            status=status_code,
+            body_hash=canonical_body_hash(body),
+        ),
+    )
+    headers = {
+        SIGNATURE_VERSION_HEADER: authenticated.protocol,
+        IDENTITY_SCHEME_HEADER: authenticated.principal.scheme.value,
+        IDENTITY_IDENTIFIER_HEADER: authenticated.principal.identifier,
+        ROLE_HEADER: authenticated.role,
+        REQUEST_ID_HEADER: authenticated.request_id,
+        TIMESTAMP_HEADER: str(authenticated.timestamp),
+        SIGNATURE_HEADER: authenticated.proof.value,
+    }
+    return httpx.Response(
+        status_code,
+        json=body,
+        headers=headers,
+        request=request,
+    )
 
-    def __init__(self, status_code: int = 201, body: dict | None = None) -> None:
+
+def _request_envelope(
+    request: httpx.Request,
+    body: dict[str, Any],
+) -> AuthenticatedRequest:
+    scheme = request.headers[IDENTITY_SCHEME_HEADER]
+    return AuthenticatedRequest(
+        protocol=request.headers[SIGNATURE_VERSION_HEADER],
+        role=request.headers[ROLE_HEADER],
+        principal=Identity(
+            scheme=scheme,
+            identifier=request.headers[IDENTITY_IDENTIFIER_HEADER],
+        ),
+        method=request.method,
+        operation="listing.publish",
+        resource="listings",
+        request_id=request.headers[REQUEST_ID_HEADER],
+        timestamp=int(request.headers[TIMESTAMP_HEADER]),
+        body_hash=canonical_body_hash(body),
+        proof=SignatureProof(
+            scheme=scheme,
+            value=request.headers[SIGNATURE_HEADER],
+        ),
+    )
+
+
+class _CapturingTransport(httpx.AsyncBaseTransport):
+    """Records the signed request and response."""
+
+    def __init__(
+        self,
+        *,
+        response_signer: Ed25519Signer,
+        status_code: int = 201,
+        body: dict[str, Any] | None = None,
+    ) -> None:
         self.last_request: httpx.Request | None = None
+        self.last_response: httpx.Response | None = None
+        self._response_signer = response_signer
         self._status_code = status_code
-        self._body = body or {}
+        self._body = {} if body is None else body
 
     async def handle_async_request(self, request: httpx.Request) -> httpx.Response:
         self.last_request = request
-        return httpx.Response(
-            self._status_code,
-            json=self._body,
-            headers={"content-type": "application/json"},
+        self.last_response = _signed_response(
+            request,
+            signer=self._response_signer,
+            status_code=self._status_code,
+            body=self._body,
         )
+        return self.last_response
 
     @property
     def last_request_body(self) -> dict[str, Any]:
@@ -90,12 +185,20 @@ class _CapturingTransport(httpx.AsyncBaseTransport):
 
 @pytest_asyncio.fixture
 async def capturing_client():
-    """RegistryClient wired to a capturing MockTransport.
-
-    Yields (client, transport) so tests can inspect what was sent.
-    """
-    transport = _CapturingTransport(status_code=201, body={"listing_id": "captured"})
-    async with RegistryClient("http://test", transport=transport) as client:
+    """Yield a RegistryClient and transport with both v2 directions signed."""
+    transport = _CapturingTransport(
+        response_signer=REGISTRY_SIGNER,
+        status_code=201,
+        body={"listing_id": "captured"},
+    )
+    async with RegistryClient(
+        "http://test",
+        signer=SELLER_SIGNER,
+        caller_role="seller",
+        expected_registries=REGISTRY_TRUST,
+        registry_authority=REGISTRY_AUTHORITY,
+        transport=transport,
+    ) as client:
         yield client, transport
 
 
@@ -211,7 +314,7 @@ class TestPublishListingWireFormat:
     This catches:
     - URL path renames (e.g. /agents/{id}/listings → /agents/{id}/orders)
     - Method signature changes (e.g. publish_listing argument reordering)
-    - Auth mechanism changes (signature absent / wrong field name in body)
+    - Auth mechanism changes (v2 envelope absent / wrong header or body binding)
     - Body field renames that survive ListingRequest construction but fail at
       the wire layer
     """
@@ -225,7 +328,7 @@ class TestPublishListingWireFormat:
             accepted_escrows=[{"chain_name": "anvil", "escrow_address": "0x" + "11" * 20, "literal_fields": {"token": "0x" + "22" * 20}, "rates": [{"field": "amount", "per": "hour", "value": "10000"}]}],
             max_duration_seconds=3600,
         )
-        await client.publish_listing(req, private_key=AGENT_PRIVATE_KEY)
+        await client.publish_listing(req)
 
         assert transport.last_request_path == "/listings", (
             f"publish_listing posted to {transport.last_request_path!r}, "
@@ -233,21 +336,25 @@ class TestPublishListingWireFormat:
             "URL path has changed — update the registry-client wheel or storefront."
         )
 
-    async def test_body_contains_signing_identity(self, capturing_client):
-        """Request body must carry the publishing identity (scheme + identifier)."""
+    async def test_headers_identify_canonical_ed25519_signer(self, capturing_client):
+        """Authentication headers must carry the seller's canonical identity."""
         client, transport = capturing_client
         req = ListingRequest(listing_id=uuid.uuid4().hex, offer={}, accepted_escrows=[])
-        await client.publish_listing(req, private_key=AGENT_PRIVATE_KEY)
-        body = transport.last_request_body
-        assert body.get("scheme") == "eip191"
-        assert isinstance(body.get("identifier"), str) and body["identifier"].startswith("0x")
+        await client.publish_listing(req)
+
+        assert transport.last_request is not None
+        headers = transport.last_request.headers
+        assert headers[IDENTITY_SCHEME_HEADER] == "ed25519"
+        assert headers[IDENTITY_SCHEME_HEADER] == SELLER_SIGNER.identity.scheme.value
+        assert headers[IDENTITY_IDENTIFIER_HEADER] == SELLER_SIGNER.identity.identifier
+        assert headers[ROLE_HEADER] == "seller"
 
     async def test_body_contains_listing_id(self, capturing_client):
         """Request body must include listing_id."""
         client, transport = capturing_client
         listing_id = uuid.uuid4().hex
         req = ListingRequest(listing_id=listing_id, offer={}, accepted_escrows=[{"chain_name": "anvil", "escrow_address": "0x" + "11" * 20}])
-        await client.publish_listing(req, private_key=AGENT_PRIVATE_KEY)
+        await client.publish_listing(req)
         assert transport.last_request_body.get("listing_id") == listing_id
 
     async def test_body_contains_offer_resource(self, capturing_client):
@@ -255,7 +362,7 @@ class TestPublishListingWireFormat:
         client, transport = capturing_client
         offer = {"gpu_model": "RTX4090", "gpu_count": 2, "sla": 95.0, "region": "NY"}
         req = ListingRequest(listing_id=uuid.uuid4().hex, offer=offer, accepted_escrows=[{"chain_name": "anvil", "escrow_address": "0x" + "11" * 20}])
-        await client.publish_listing(req, private_key=AGENT_PRIVATE_KEY)
+        await client.publish_listing(req)
         body = transport.last_request_body
         assert "offer_resource" in body, (
             f"'offer_resource' absent from request body. Keys present: {list(body)}"
@@ -272,7 +379,7 @@ class TestPublishListingWireFormat:
             "rates": [{"field": "amount", "per": "hour", "value": "8000"}],
         }]
         req = ListingRequest(listing_id=uuid.uuid4().hex, offer={}, accepted_escrows=entries)
-        await client.publish_listing(req, private_key=AGENT_PRIVATE_KEY)
+        await client.publish_listing(req)
         body = transport.last_request_body
         assert "accepted_escrows" in body, (
             f"'accepted_escrows' absent from request body. Keys present: {list(body)}"
@@ -288,32 +395,67 @@ class TestPublishListingWireFormat:
             accepted_escrows=[{"chain_name": "anvil", "escrow_address": "0x" + "11" * 20}],
             max_duration_seconds=7200,
         )
-        await client.publish_listing(req, private_key=AGENT_PRIVATE_KEY)
+        await client.publish_listing(req)
         body = transport.last_request_body
         assert "max_duration_seconds" in body, (
             f"'max_duration_seconds' absent from request body. Keys present: {list(body)}"
         )
         assert body["max_duration_seconds"] == 7200
 
-    async def test_body_contains_eip191_signature(self, capturing_client):
-        """Request body must include signature and timestamp for registry auth.
-
-        The registry verifies EIP-191 signatures embedded in the request body
-        (not in HTTP headers).  Both fields must be present and non-empty.
-        """
+    async def test_v2_authentication_envelope_binds_exact_body(self, capturing_client):
+        """Request headers carry a verifiable v2 envelope bound to the exact body."""
         client, transport = capturing_client
         req = ListingRequest(listing_id=uuid.uuid4().hex, offer={}, accepted_escrows=[])
-        await client.publish_listing(req, private_key=AGENT_PRIVATE_KEY)
+        await client.publish_listing(req, request_id="request-one")
+
+        assert transport.last_request is not None
+        assert transport.last_response is not None
         body = transport.last_request_body
-        assert "signature" in body, (
-            f"'signature' absent from request body. Keys present: {list(body)}. "
-            "The registry verifies EIP-191 signatures from the body, not headers."
+        headers = transport.last_request.headers
+        assert headers[SIGNATURE_VERSION_HEADER] == (
+            "arkhai.market-request-signature.v2"
         )
-        assert "timestamp" in body, (
-            f"'timestamp' absent from request body. Keys present: {list(body)}"
+        assert headers[REQUEST_ID_HEADER] == "request-one"
+        assert headers[TIMESTAMP_HEADER].isdigit()
+        assert headers[SIGNATURE_HEADER]
+        assert {"scheme", "identifier", "signature", "timestamp"}.isdisjoint(body)
+
+        envelope = _request_envelope(transport.last_request, body)
+        trusted_seller = TrustedIdentitySet(identities=(SELLER_SIGNER.identity,))
+        verified = verify_request(
+            envelope,
+            body=body,
+            now=envelope.timestamp,
+            max_skew=300,
+            expected_role="seller",
+            expected_method="POST",
+            expected_operation="listing.publish",
+            expected_resource="listings",
+            expected_principals=trusted_seller,
         )
-        sig = body["signature"]
-        # sign_eip191 returns bare hex (no 0x prefix) via bytes.hex()
-        assert isinstance(sig, str) and len(sig) >= 130, (
-            f"signature looks wrong: {sig!r}. Expected 130+ char hex string."
+        assert verified.code == VerificationCode.VERIFIED
+
+        tampered = verify_request(
+            envelope,
+            body={**body, "listing_id": "tampered"},
+            now=envelope.timestamp,
+            max_skew=300,
+            expected_role="seller",
+            expected_method="POST",
+            expected_operation="listing.publish",
+            expected_resource="listings",
+            expected_principals=trusted_seller,
         )
+        assert tampered.code == VerificationCode.BODY_HASH_MISMATCH
+
+        response_headers = transport.last_response.headers
+        assert response_headers[SIGNATURE_VERSION_HEADER] == (
+            "arkhai.market-response-signature.v2"
+        )
+        assert response_headers[IDENTITY_SCHEME_HEADER] == (
+            REGISTRY_SIGNER.identity.scheme.value
+        )
+        assert response_headers[IDENTITY_IDENTIFIER_HEADER] == (
+            REGISTRY_SIGNER.identity.identifier
+        )
+        assert response_headers[ROLE_HEADER] == "registry"

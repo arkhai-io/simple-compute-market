@@ -1,0 +1,137 @@
+global:
+  rpc:
+    enabled: true
+    chainId: 31337
+    host: arkhai-node-operator-dev-env
+    port: 8545
+  integrationTests:
+    digest: sha256:4444444444444444444444444444444444444444444444444444444444444444
+  registryIdentity:
+    authority: registry-a
+    principal:
+      scheme: eip191
+      identifier: "0x90f79bf6eb2c4f870365e785982e1f101e93b906"
+  provisioningIdentity:
+    scheme: eip191
+    identifier: "0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266"
+
+registry:
+  image:
+    digest: sha256:1111111111111111111111111111111111111111111111111111111111111111
+  identity:
+    authority: registry-a
+    principal:
+      scheme: eip191
+      identifier: "0x90f79bf6eb2c4f870365e785982e1f101e93b906"
+    credentialSecret:
+      name: evm-registry-identity
+      key: credential
+
+provisioning:
+  server:
+    image:
+      digest: sha256:2222222222222222222222222222222222222222222222222222222222222222
+  identity:
+    principal:
+      scheme: eip191
+      identifier: "0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266"
+    credentialSecret:
+      name: evm-provisioning-identity
+      key: credential
+  storefrontIdentity:
+    principals:
+      - scheme: eip191
+        identifier: "0x3c44cdddb6a900fa2b585dd299e03d12fa4293bc"
+  adminIdentity:
+    principals:
+      - scheme: eip191
+        identifier: "0x9965507d1a55bcc2695c58ba16fb37d819b0a4dc"
+  storefront:
+    agentName: evm-bob
+
+e2e-tests:
+  enabled: false
+  createSecret: false
+  secretName: arkhai-e2e-credentials
+
+storefront:
+  image:
+    digest: sha256:3333333333333333333333333333333333333333333333333333333333333333
+  agents:
+    - name: evm-bob
+      port: 8001
+      component: seller
+      autoRegister: false
+      identity:
+        principal:
+          scheme: eip191
+          identifier: "0x3c44cdddb6a900fa2b585dd299e03d12fa4293bc"
+        credentialSecret:
+          name: evm-bob-marketplace-identity
+          key: credential
+        servicePeers:
+          provisioning_default:
+            role: service
+            siteId: default
+            principals:
+              - scheme: eip191
+                identifier: "0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266"
+        administrators:
+          operator:
+            principals:
+              - scheme: eip191
+                identifier: "0x3c44cdddb6a900fa2b585dd299e03d12fa4293bc"
+      secret:
+        createSecret: false
+        secretName: evm-bob-runtime
+        configKey: storefront.secrets.toml
+      config:
+        storefrontDomains:
+          - contribution: vms
+            offeringMode: vm
+            domainIdentity: compute.v1
+            contractVersion: "1.0"
+          - contribution: bare_metal
+            offeringMode: bare_metal
+            domainIdentity: bare_metal.v1
+            contractVersion: "1.0"
+        registryAuthority:
+          authority: registry-a
+          principals:
+            - scheme: eip191
+              identifier: "0x90f79bf6eb2c4f870365e785982e1f101e93b906"
+        seller:
+          agentId: evm-bob
+          dbPath: /var/lib/arkhai/agent.db
+          logFilePath: ./logs/evm-bob.log
+          resourcesCsvPath: /app/src/market_storefront/data/kvm1-machine.csv
+          enableEventQueue: false
+          provisioning:
+            mode: mock
+            identity:
+              principals:
+                - scheme: eip191
+                  identifier: "0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266"
+          negotiation:
+            policies:
+              - has_matching_inventory_guard
+              - escrow_shape_guard
+              - bisection
+          integrations: {}
+        settlement:
+          schema_version: 1
+          priority: ["alkahest.v1"]
+          alkahest:
+            enabled: true
+            address_config_path: /app/src/market_storefront/data/alkahest_anvil_addresses.json
+            oracle_gated: false
+            trusted_oracle_addresses: []
+            interruptible: false
+            interruptible_oracle_addresses: []
+        wallet:
+          address: "0x3c44cdddb6a900fa2b585dd299e03d12fa4293bc"
+          ssh_public_key: "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIDemoPublicKeyForComputeAccess bob@example.com"
+        chains:
+          anvil:
+            rpc_url: http://arkhai-node-operator-dev-env:8545
+            chain_id: 31337

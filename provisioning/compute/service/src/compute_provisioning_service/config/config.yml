@@ -13,7 +13,8 @@
 #   golden_root_ssh_filename, golden_root_ssh_password, golden_image_name
 #   golden_gcs_bucket, golden_gcs_project
 #   frp_server_addr, frp_domain, frp_dashboard_password
-#   storefront_url, storefront_admin_key
+#   storefront_url, storefront_site_id
+#   identity.{scheme,identifier}, storefront_identity.{scheme,identifier}, admin_identity.{scheme,identifier}
 #   enable_rate_limiting, rate_limit_requests_per_minute, log_level
 # ---------------------------------------------------------------------------
 

@@ -1,0 +1,240 @@
+name: Release marketplace consumer
+
+on:
+  push:
+    tags:
+      - marketplace-v*
+
+permissions:
+  contents: write
+  packages: write
+  id-token: write
+  attestations: write
+
+jobs:
+  release:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    env:
+      HOSTED_RELEASE_TAG: v0.2.0
+      HOSTED_RELEASE_REPOSITORY: arkhai-io/stripe-settlement-service
+      IMAGE_REPOSITORY: ghcr.io/arkhai-io/simple-compute-market
+      RELEASE_DIR: marketplace-release
+    steps:
+      - name: Checkout immutable tag
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+
+      - name: Set up Python and uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          version: 0.8.13
+          python-version: 3.13.7
+          enable-cache: true
+
+      - name: Download exact hosted producer release
+        env:
+          GH_TOKEN: ${{ secrets.HOSTED_RELEASE_TOKEN }}
+        run: |
+          set -euo pipefail
+          test -n "$GH_TOKEN"
+          mkdir -p .hosted-release
+          gh release download "$HOSTED_RELEASE_TAG" \
+            --repo "$HOSTED_RELEASE_REPOSITORY" \
+            --dir .hosted-release
+
+      - name: Verify and build exact marketplace wheel set
+        run: |
+          set -euo pipefail
+          make dist-clean
+          make dist HOSTED_RELEASE_DIR="$GITHUB_WORKSPACE/.hosted-release"
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to the GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+
+      - name: Build and push immutable storefront image
+        id: image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: domains/vms/storefront/Dockerfile
+          platforms: linux/amd64
+          push: true
+          build-args: |
+            DIST_FINGERPRINT=${{ github.sha }}
+            GAR_STG_READER_KEY=${{ secrets.GAR_STG_READER_KEY }}
+          tags: |
+            ${{ env.IMAGE_REPOSITORY }}:${{ github.ref_name }}
+            ${{ env.IMAGE_REPOSITORY }}:sha-${{ github.sha }}
+
+      - name: Build immutable consumer release artifacts
+        env:
+          IMAGE_DIGEST: ${{ steps.image.outputs.digest }}
+          WORKFLOW_REF: ${{ github.workflow_ref }}
+        run: |
+          set -euo pipefail
+          mkdir -p "$RELEASE_DIR"
+          SOURCE_DATE_EPOCH="$(git show -s --format=%ct HEAD)"
+          tar --sort=name --mtime="@$SOURCE_DATE_EPOCH" \
+            --owner=0 --group=0 --numeric-owner \
+            -czf "$RELEASE_DIR/marketplace-wheelhouse.tar.gz" .dist
+          uv run --project kit/hosted-settlement --no-sources --no-dev \
+            --find-links "$GITHUB_WORKSPACE/.dist" python - <<'PY'
+          import json
+          from pathlib import Path
+          from market_hosted_settlement import StripeSettlementConfig
+
+          Path("marketplace-release/settlement-config-schema.json").write_text(
+              json.dumps(
+                  StripeSettlementConfig.model_json_schema(),
+                  separators=(",", ":"),
+                  sort_keys=True,
+              )
+              + "\n",
+              encoding="utf-8",
+          )
+          PY
+          python - <<'PY'
+          import hashlib
+          import json
+          import os
+          from pathlib import Path
+
+          release = Path(os.environ["RELEASE_DIR"])
+          source_commit = os.environ["GITHUB_SHA"]
+          image_digest = os.environ["IMAGE_DIGEST"]
+          image_repository = os.environ["IMAGE_REPOSITORY"]
+          workflow_ref = os.environ["WORKFLOW_REF"]
+          run_id = os.environ["GITHUB_RUN_ID"]
+
+          provenance = {
+              "_type": "https://in-toto.io/Statement/v1",
+              "subject": [
+                  {
+                      "name": image_repository,
+                      "digest": {"sha256": image_digest.removeprefix("sha256:")},
+                  },
+                  {
+                      "name": "git+https://github.com/arkhai-io/simple-compute-market",
+                      "digest": {"sha1": source_commit},
+                  },
+              ],
+              "predicateType": "https://slsa.dev/provenance/v1",
+              "predicate": {
+                  "buildDefinition": {
+                      "buildType": "https://github.com/Attestations/GitHubActionsWorkflow@v1",
+                      "externalParameters": {
+                          "workflow": workflow_ref,
+                          "ref": os.environ["GITHUB_REF"],
+                      },
+                      "internalParameters": {},
+                      "resolvedDependencies": [],
+                  },
+                  "runDetails": {
+                      "builder": {
+                          "id": "https://github.com/arkhai-io/simple-compute-market/actions/runs/"
+                          + run_id
+                      },
+                      "metadata": {"invocationId": run_id},
+                      "byproducts": [],
+                  },
+              },
+          }
+          (release / "provenance.intoto.json").write_text(
+              json.dumps(provenance, separators=(",", ":"), sort_keys=True) + "\n",
+              encoding="utf-8",
+          )
+
+          def identity(filename: str) -> dict[str, str]:
+              data = (release / filename).read_bytes()
+              return {
+                  "filename": filename,
+                  "sha256": "sha256:" + hashlib.sha256(data).hexdigest(),
+              }
+
+          manifest = {
+              "contract": "arkhai.marketplace-release.v1",
+              "repository": "arkhai-io/simple-compute-market",
+              "source_commit": source_commit,
+              "workflow_ref": workflow_ref,
+              "workflow_run_id": run_id,
+              "service_image": {
+                  "reference": image_repository,
+                  "digest": image_digest,
+              },
+              "artifacts": {
+                  "wheelhouse": identity("marketplace-wheelhouse.tar.gz"),
+                  "settlement_config_schema": identity("settlement-config-schema.json"),
+                  "provenance": identity("provenance.intoto.json"),
+              },
+          }
+          (release / "marketplace-release-manifest.json").write_text(
+              json.dumps(manifest, separators=(",", ":"), sort_keys=True) + "\n",
+              encoding="utf-8",
+          )
+          PY
+          MANIFEST_SHA256="sha256:$(sha256sum "$RELEASE_DIR/marketplace-release-manifest.json" | cut -d' ' -f1)"
+          python scripts/verify-marketplace-release.py \
+            --manifest "$RELEASE_DIR/marketplace-release-manifest.json" \
+            --manifest-sha256 "$MANIFEST_SHA256" \
+            --source-commit "$GITHUB_SHA" \
+            --workflow-ref "$WORKFLOW_REF" \
+            --workflow-run-id "$GITHUB_RUN_ID" \
+            --image-digest "$IMAGE_DIGEST"
+          printf 'manifest_sha256=%s\n' "$MANIFEST_SHA256" >> "$GITHUB_OUTPUT"
+        id: release-artifacts
+
+      - name: Attest consumer release files
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: marketplace-release/*
+
+      - name: Attest pushed image manifest
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-name: ${{ env.IMAGE_REPOSITORY }}
+          subject-digest: ${{ steps.image.outputs.digest }}
+          push-to-registry: true
+
+      - name: Upload immutable consumer artifact set
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: marketplace-release-${{ github.ref_name }}
+          path: marketplace-release/*
+          if-no-files-found: error
+          retention-days: 90
+
+      - name: Publish GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh release create "$GITHUB_REF_NAME" marketplace-release/* \
+            --repo "$GITHUB_REPOSITORY" \
+            --verify-tag \
+            --title "$GITHUB_REF_NAME" \
+            --generate-notes
+
+      - name: Record immutable consumer coordinates
+        env:
+          IMAGE_DIGEST: ${{ steps.image.outputs.digest }}
+          MANIFEST_SHA256: ${{ steps.release-artifacts.outputs.manifest_sha256 }}
+        run: |
+          {
+            echo '### Marketplace consumer release'
+            echo
+            echo "- source commit: \`$GITHUB_SHA\`"
+            echo "- workflow ref: \`${{ github.workflow_ref }}\`"
+            echo "- workflow run ID: \`$GITHUB_RUN_ID\`"
+            echo "- image: \`$IMAGE_REPOSITORY@$IMAGE_DIGEST\`"
+            echo "- manifest: \`$MANIFEST_SHA256\`"
+            echo "- artifact: \`marketplace-release-$GITHUB_REF_NAME\`"
+          } >> "$GITHUB_STEP_SUMMARY"

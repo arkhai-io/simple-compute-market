@@ -1,16 +1,13 @@
-# Bob (seller) — local docker-compose stack.
-# Anvil default account #2; deterministic vanity contract addresses.
-# DO NOT use these keys on any public network.
-#
-# Mounted into the bob-storefront container at /etc/arkhai/storefront.toml.
-# XDG_CONFIG_HOME=/etc tells dynaconf to look here.
+# Bob (seller) local Compose profile. Public marketplace identity and EVM
+# mechanism address are configuration; signing credentials are injected by
+# Compose Secrets through ARKHAI_IDENTITY_CREDENTIAL and
+# STOREFRONT_WALLET__PRIVATE_KEY.
 
 agent_id            = "bob"
 port                = 8001
 base_url            = "http://bob-storefront:8001/"
 db_path             = "./src/market_storefront/data/storefront/agent.db"
 log_file_path       = "./logs/bob.log"
-admin_api_key       = "test-api-key"
 # Seed the resources table from this CSV on startup when the table is empty.
 # The bundled kvm1-machine.csv is the local dev inventory. Bind-mounted into
 # the container at /app/resources.csv by `make deploy-storefront`.
@@ -18,26 +15,50 @@ admin_api_key       = "test-api-key"
 # the CSV content is delivered through the agent Secret, not a file path.
 resources_csv_path  = "/app/resources.csv"
 
-# Timer-loop intervals, shortened for this stack only. A scenario pauses the
-# storefront and then advances each loop deliberately, and a pause is observed
-# when a loop next reaches its gate — which it can only do at the end of an
-# interval. The shipped defaults (60s watchdog, 30s sweeps) would make a
-# scenario wait that long before it could assert anything. Shortening them here
-# changes nothing about what a loop does, only how soon it notices it has been
-# asked to stop. Production keeps the shipped values.
-negotiation_watchdog_interval     = 2
-claims_sweep_interval             = 2
-fulfillment_resume_sweep_interval = 2
+[[storefront_domains]]
+contribution = "vms"
+offering_mode = "vm"
+domain_identity = "compute.v1"
+contract_version = "1.0"
 
-[wallet]
+[[storefront_domains]]
+contribution = "bare_metal"
+offering_mode = "bare_metal"
+domain_identity = "bare_metal.v1"
+contract_version = "1.0"
+
+
+[Identity.principal]
+scheme = "eip191"
+identifier = "0x3c44cdddb6a900fa2b585dd299e03d12fa4293bc"
+
+[Identity.administrators.operator]
+principal = { scheme = "eip191", identifier = "0x3c44cdddb6a900fa2b585dd299e03d12fa4293bc" }
+
+[Identity.service_peers.provisioning_default]
+role = "service"
+site_id = "default"
+principal = { scheme = "eip191", identifier = "0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266" }
+
+[Settlement]
+schema_version = 1
+priority = ["alkahest.v1"]
+
+[Settlement.alkahest]
+enabled = true
+address_config_path = "/app/src/market_storefront/data/alkahest_anvil_addresses.json"
+oracle_gated = false
+trusted_oracle_addresses = []
+interruptible = false
+interruptible_oracle_addresses = []
+
+[Wallet]
 address     = "0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC"
-private_key = "0x5de4111afa1a4b94908f83103eb1f1706367c2e68ca870fc3fb9a804cdab365a"
 ssh_public_key = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIDemoPublicKeyForComputeAccess bob@example.com"
 
-[chains.anvil]
+[Chains.anvil]
 rpc_url = "ws://anvil:8545"
 chain_id = 31337
-alkahest_address_config_path = "/app/src/market_storefront/data/alkahest_anvil_addresses.json"
 
 [registry]
 # Two registry instances: ``registry`` is the public one,
@@ -48,11 +69,20 @@ alkahest_address_config_path = "/app/src/market_storefront/data/alkahest_anvil_a
 # fall back to single-public-registry behaviour.
 urls                      = ["http://registry:8080", "http://registry-b:8080"]
 
-# Per-registry bearer token. The matching key was seeded into
-# registry-b at startup via REGISTRY_BOOTSTRAP_API_KEY in compose.
-# Public registries (no entry here) get no Authorization header.
-[registry.auth]
-"http://registry-b:8080"  = "test-buyer-token"
+[registry.authorities."http://registry:8080"]
+authority = "registry"
+principals = [
+  { scheme = "eip191", identifier = "0x90f79bf6eb2c4f870365e785982e1f101e93b906" },
+]
+
+[registry.authorities."http://registry-b:8080"]
+authority = "registry-b"
+principals = [
+  { scheme = "eip191", identifier = "0x15d34aaf54267db7d7c367839aaf71a00a2c6a65" },
+]
+
+# The private registry bearer token belongs in the mounted
+# storefront.secrets.toml under [registry.auth].
 
 # The site authority is hosted by the provisioning service
 # (authority_url defaults to provisioning.service_url). Poll fast —
@@ -76,6 +106,11 @@ mode        = "http"
 # storefront sees job completion quickly without waiting the 15s production default.
 poll_interval = 1
 
+[provisioning.identity]
+principals = [
+  { scheme = "eip191", identifier = "0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266" },
+]
+
 [negotiation]
 # Ordered policies run per round. Guards short-circuit with
 # `reject`/`exit` when their preconditions fail; the terminal policy
@@ -85,6 +120,9 @@ poll_interval = 1
 policies = ["has_matching_inventory_guard", "escrow_shape_guard", "bisection"]
 
 [pricing]
+settlements = [
+  { mechanism = "alkahest.v1", asset = "0x9fe46736679d2d9a65f0992f2272de9f3c7fa6e0", rate = "100", per = "hour", mechanism_input = { chain = "anvil", escrow_kind = "erc20_escrow_obligation_default" } },
+]
 # Defaults applied to inventory rows that don't carry their own
 # min_price/token/max_duration_seconds. Per-row CSV columns override.
 # default_max_duration_seconds = 0 (or omitted) means "unlimited".

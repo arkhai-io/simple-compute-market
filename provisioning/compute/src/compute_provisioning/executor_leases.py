@@ -119,7 +119,7 @@ class ExecutorLeaseService:
     ) -> dict[str, Any]:
         """Update generic lease-tail metadata for this executor kind."""
         self.get_lease(lease_id)
-        executor_kind = update.executor_kind or self._executor_kind
+        executor_kind = update.executor_kind
         if (
             self._executor_kind is not None
             and executor_kind is not None

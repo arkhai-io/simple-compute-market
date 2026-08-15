@@ -3,13 +3,12 @@
 from __future__ import annotations
 
 import uuid
-from collections.abc import Callable
-from typing import Any
+from typing import Any, Callable
 
 from arkhai_vms import DIMENSION_KEYS as _DIMENSION_COMPUTE_KEYS
-from arkhai_vms.listing_models import Listing
+from domains.vms.listings import extract_compute_from_order
+from domains.vms.listings.models import Listing
 
-from market_storefront.listings import extract_compute_from_order
 
 _REQUIRED_COMPUTE_KEYS = (
     "pool_id",
@@ -26,6 +25,7 @@ _REQUIRED_COMPUTE_KEYS = (
 # claim's resource_type constraint would reject every resource that
 # exists.
 _VM_RESOURCE_TYPE = "compute.gpu"
+_VM_EXECUTOR_KIND = "vm"
 
 # _DIMENSION_COMPUTE_KEYS (gpu_count/vcpu_count/ram_gb/disk_gb) comes from
 # arkhai_vms.compute_requirements -- the same shared vocabulary the
@@ -66,9 +66,11 @@ def compute_capacity_claim_from_order(
     """
     if not order_dict:
         raise ValueError("Cannot build a capacity claim without a settlement order.")
-    capacity_claim: dict[str, Any] = {}
+    capacity_claim: dict[str, Any] = {
+        "executor_kind": _VM_EXECUTOR_KIND,
+        "resource_type": _VM_RESOURCE_TYPE,
+    }
     dimensions: dict[str, Any] = {}
-    capacity_claim["resource_type"] = _VM_RESOURCE_TYPE
     compute_resource = extract_compute_from_order(order_dict)
     if hasattr(compute_resource, "model_dump"):
         compute_resource = compute_resource.model_dump()
@@ -105,17 +107,7 @@ async def build_provisioning_job_spec(
     capacity: Any,
     vm_target_factory: Callable[[], str] | None = None,
 ) -> dict[str, Any] | None:
-    """Probe the capacity ledger (read-only) and build a VM job spec.
-
-    `probe` is the one route on the capacity boundary that still returns
-    placement identity: `/probe` returns the ledger's match payload verbatim,
-    while `/reservations` strips `resource_id`, `pool_id`, `member_id`, and
-    `vm_host` because a reservation commits to no placement. So the two
-    dereferences below work, but only because that asymmetry exists. Anything
-    durable must key on `capacity_reservation_id` instead -- a probe match is a
-    read of the moment, and the resource it names may not be the one scheduling
-    later selects.
-    """
+    """Probe the capacity ledger (read-only) and build a VM job spec."""
     capacity_claim = compute_capacity_claim_from_order(order_dict)
     selected = await capacity.probe(claim=capacity_claim)
     if not selected:

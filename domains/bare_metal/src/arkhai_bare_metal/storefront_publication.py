@@ -23,7 +23,7 @@ def bare_metal_listing_candidates(
     candidates: list[dict[str, Any]] = []
     labels = site_labels_by_id or {}
     for projection in projections:
-        if not projection.complete:
+        if not projection.complete or projection.stale:
             continue
         for resource in projection.resources:
             listings = available_bare_metal_listings(
@@ -39,20 +39,22 @@ def bare_metal_listing_candidates(
                 site_id=projection.site_id,
                 physical_resource_id=resource.physical_resource_id,
             )
-            candidates.append({
-                "derivation_key": derivation_key,
-                "site_id": projection.site_id,
-                "projection_revision": projection.revision,
-                "projection_digest": projection.digest,
-                "physical_resource_id": resource.physical_resource_id,
-                "machine_id": listing.machine_id,
-                "physical_host_id": listing.physical_host_id,
-                "offer_resource": listing.model_dump(
-                    mode="json",
-                    exclude_none=True,
-                ),
-                "listing": listing,
-            })
+            candidates.append(
+                {
+                    "derivation_key": derivation_key,
+                    "site_id": projection.site_id,
+                    "projection_revision": projection.revision,
+                    "projection_digest": projection.digest,
+                    "physical_resource_id": resource.physical_resource_id,
+                    "machine_id": listing.machine_id,
+                    "physical_host_id": listing.physical_host_id,
+                    "offer_resource": listing.model_dump(
+                        mode="json",
+                        exclude_none=True,
+                    ),
+                    "listing": listing,
+                }
+            )
     return candidates
 
 
@@ -245,8 +247,9 @@ def reopen_derived_bare_metal_listing_if_present(
     accepted_escrows: list[dict[str, Any]],
     demands: list[dict[str, Any]],
     max_duration_seconds: int | None,
-    private_key: str | None,
     publish_existing_listing: Any,
+    settlement_options: list[dict[str, Any]] | None = None,
+    publication_clauses: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any] | None:
     """Reopen a tracked listing through caller-supplied publication."""
     derived = load_derived_bare_metal_listing(
@@ -266,13 +269,16 @@ def reopen_derived_bare_metal_listing_if_present(
             UPDATE listings
             SET status = 'open', paused = 0,
                 updated_at = STRFTIME('%Y-%m-%dT%H:%M:%fZ', 'now'),
-                offer_resource = ?, accepted_escrows = ?, demands = ?,
-                max_duration_seconds = ?, seller = ?
+                offer_resource = ?, accepted_escrows = ?,
+                settlement_options = ?, publication_clauses = ?, demands = ?,
+                max_duration_seconds = ?, storefront_url = ?
             WHERE listing_id = ?
             """,
             (
                 json.dumps(offer),
                 json.dumps(accepted_escrows),
+                json.dumps(settlement_options or []),
+                json.dumps(publication_clauses or []),
                 json.dumps(demands),
                 max_duration_seconds,
                 base_url,
@@ -293,10 +299,11 @@ def reopen_derived_bare_metal_listing_if_present(
         listing_id=listing_id,
         offer=offer,
         accepted_escrows=accepted_escrows,
+        settlement_options=settlement_options or [],
+        publication_clauses=publication_clauses or [],
         demands=demands,
         max_duration_seconds=max_duration_seconds,
         storefront_url=base_url,
-        private_key=private_key,
     )
 
 

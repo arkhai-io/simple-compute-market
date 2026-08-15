@@ -12,7 +12,7 @@ from fastapi.responses import StreamingResponse
 from fastapi_utils.cbv import cbv
 
 import apicredits_storefront.container as _container
-from apicredits_storefront.middleware.admin_auth import require_admin_key
+from apicredits_storefront.middleware.admin_auth import require_admin_principal
 from apicredits_storefront.server import is_globally_paused
 from core_storefront.models.system_models import (
     HealthResponse,
@@ -38,13 +38,19 @@ class SystemController:
     async def health_bare(self) -> HealthResponse:
         return HealthResponse(**(await self._svc.get_health()))
 
-    @router.get("/api/v1/system/health", response_model=HealthResponse,
-                summary="Versioned health alias")
+    @router.get(
+        "/api/v1/system/health",
+        response_model=HealthResponse,
+        summary="Versioned health alias",
+    )
     async def health_versioned(self) -> HealthResponse:
         return HealthResponse(**(await self._svc.get_health()))
 
-    @router.get("/api/v1/system/status", response_model=HealthResponse,
-                summary="Full diagnostic status")
+    @router.get(
+        "/api/v1/system/status",
+        response_model=HealthResponse,
+        summary="Full diagnostic status",
+    )
     async def system_status(self) -> HealthResponse:
         body = await self._svc.get_health(include_registry=True)
         body["paused"] = is_globally_paused()
@@ -53,7 +59,7 @@ class SystemController:
     @router.get(
         "/api/v1/system/events",
         summary="Stage event log",
-        dependencies=[Depends(require_admin_key)],
+        dependencies=[Depends(require_admin_principal)],
     )
     async def stream_events(
         self,
@@ -73,20 +79,23 @@ class SystemController:
                 pass
 
         if not stream:
-            rows, truncated = await self._db.list_stage_events_page(
-                after_id=since_id, limit=limit,
-                stage=stage, listing_id=listing_id, negotiation_id=negotiation_id,
+            rows = await self._db.list_stage_events(
+                after_id=since_id,
+                limit=limit,
+                stage=stage,
+                listing_id=listing_id,
+                negotiation_id=negotiation_id,
             )
-            return StageEventResponse(
-                events=rows, count=len(rows), truncated=truncated,
-            )
+            return StageEventResponse(events=rows, count=len(rows))
 
         async def _generate():
             cursor = since_id
             while True:
                 rows = await self._db.list_stage_events(
-                    after_id=cursor, limit=50,
-                    stage=stage, listing_id=listing_id,
+                    after_id=cursor,
+                    limit=50,
+                    stage=stage,
+                    listing_id=listing_id,
                     negotiation_id=negotiation_id,
                 )
                 for row in rows:

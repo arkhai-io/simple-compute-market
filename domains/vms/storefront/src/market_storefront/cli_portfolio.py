@@ -16,12 +16,14 @@ portfolio_app = typer.Typer(no_args_is_help=True)
 def portfolio_import_csv(
     csv_path: str = typer.Argument(..., help="Path to CSV file to import."),
     db_path: str | None = typer.Option(
-        None, "--db-path",
+        None,
+        "--db-path",
         help="Override the target SQLite DB path "
-             "(default: seller.db_path from config.toml).",
+        "(default: seller.db_path from config.toml).",
     ),
     dry_run: bool = typer.Option(
-        False, "--dry-run",
+        False,
+        "--dry-run",
         help="Validate and report without writing to DB.",
     ),
 ) -> None:
@@ -38,8 +40,7 @@ def portfolio_import_csv(
         raise typer.BadParameter(f"CSV file not found: {csv_path}")
 
     if not db_path:
-        if settings.db_path:
-            db_path = settings.db_path
+        db_path = str(settings.get("db_path", "") or "").strip() or None
 
     script = STOREFRONT_ROOT / "scripts" / "import_resources_csv.py"
     if not script.exists():

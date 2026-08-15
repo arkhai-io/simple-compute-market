@@ -6,6 +6,7 @@ from datetime import datetime
 from typing import Any, Literal
 
 from pydantic import BaseModel, Field, model_validator
+from market_core.schemas import SettlementOption, SettlementSelection
 
 from .provision_terms import VM_PROVISION_KIND, VmProvisionTerms
 
@@ -18,6 +19,7 @@ class VmListing(BaseModel):
         description="Compute slice payload offered by the seller.",
     )
     accepted_escrows: list[dict[str, Any]] = Field(default_factory=list)
+    settlement_options: list[SettlementOption] | None = None
     demands: list[dict[str, Any]] = Field(default_factory=list)
     max_duration_seconds: int | None = Field(default=None, ge=1)
 
@@ -49,6 +51,7 @@ class VmMessage(BaseModel):
     ssh_public_key: str = Field(default="")
     start_utc: str | None = None
     compute_resource: dict[str, Any] | None = None
+    settlement_selection: SettlementSelection | None = None
 
     @model_validator(mode="before")
     @classmethod
@@ -72,6 +75,7 @@ class VmTerms(BaseModel):
     ssh_public_key: str
     start_utc: str | None = None
     compute_resource: dict[str, Any] | None = None
+    settlement_selection: SettlementSelection | None = None
     listing_ref: str | None = None
 
     @model_validator(mode="before")

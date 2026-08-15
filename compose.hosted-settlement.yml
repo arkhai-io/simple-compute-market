@@ -1,0 +1,98 @@
+# Optional hosted-settlement overlay. All image and command selectors are
+# generated after signed release verification; ordinary Compose targets omit it.
+x-hosted-service: &hosted-service
+  image: ${HOSTED_SETTLEMENT_VERIFIED_IMAGE:?run the selected hosted preflight}
+  profiles: [hosted-production, hosted-stripe-test]
+  env_file:
+    - path: ${HOSTED_SETTLEMENT_ENV_FILE:?set hosted service Secret environment file}
+      required: true
+  environment:
+    HOSTED_VERIFIED_PRODUCTION_MANIFEST_DIGEST: ${HOSTED_SETTLEMENT_VERIFIED_MANIFEST_DIGEST:?run the selected hosted preflight}
+  read_only: true
+  security_opt:
+    - no-new-privileges:true
+  tmpfs:
+    - /tmp:size=16m,mode=1777
+
+
+services:
+  hosted-settlement-migrate:
+    <<: *hosted-service
+    command: ["hosted-settlement-migrate"]
+    restart: "no"
+    volumes:
+      - hosted-settlement-data:/var/lib/hosted-settlement
+      - type: bind
+        source: ${HOSTED_SETTLEMENT_VERIFIED_RELEASE_DIR:?run the selected hosted preflight}
+        target: /opt/hosted-settlement/release
+        read_only: true
+
+
+  hosted-settlement-api:
+    <<: *hosted-service
+    command: ["hosted-settlement-api", "--host", "0.0.0.0", "--port", "8080"]
+    depends_on:
+      hosted-settlement-migrate:
+        condition: service_completed_successfully
+    ports:
+      - "127.0.0.1:${HOSTED_SETTLEMENT_HOST_PORT:-18080}:8080"
+      - "127.0.0.1:${HOSTED_STOREFRONT_HOST_PORT:-18081}:8001"
+    networks:
+      default:
+        aliases: [bob-storefront]
+    restart: unless-stopped
+    volumes:
+      - hosted-settlement-data:/var/lib/hosted-settlement
+      - type: bind
+        source: ${HOSTED_SETTLEMENT_VERIFIED_RELEASE_DIR:?run the selected hosted preflight}
+        target: /opt/hosted-settlement/release
+        read_only: true
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import json,os,urllib.request; p=json.load(urllib.request.urlopen('http://127.0.0.1:8080/health/ready',timeout=2)); required={'scheme-tagged-identities.v1','account-owner-admission.v1','account-owner-rotation.v1','account-owner-retirement.v1','signer-injected-client.v1','provider-neutral-seller-onboarding.v1','conditional-escrow.v2','stripe-connect-separate-charges-transfers.v2','portable-attestation.v1','eas-arbiter.v1','payer-profile.v1','funding-authorization.v1','funding-profile.card.v1','funding-profile.us_bank_transfer.v1','funding-profile.us_ach_debit.v1','normalized-funding-reversal.v1','operator-recovery-redaction.v1'}; profiles={'card.v1','us_bank_transfer.v1','us_ach_debit.v1'}; observed={v.get('funding_profile') for v in p.get('funding_profiles',[])}; assert p.get('ready') and p.get('manifest_digest')==os.environ['HOSTED_VERIFIED_PRODUCTION_MANIFEST_DIGEST'] and p.get('api_version')=='0.2.0' and p.get('schema_version')==5 and set(p.get('capabilities',[]))==required and observed==profiles and p.get('payer_profile_protocol')=='arkhai.payer-profile.v1' and p.get('funding_authorization_protocol')=='arkhai.funding-authorization.v1' and p.get('funding_profile_protocol')=='arkhai.funding-profile.v1'\""]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+      start_period: 10s
+
+  hosted-settlement-worker:
+    <<: *hosted-service
+    command: ["hosted-settlement-worker", "--interval-seconds", "${HOSTED_SETTLEMENT_WORKER_INTERVAL:-5}"]
+    depends_on:
+      hosted-settlement-api:
+        condition: service_healthy
+    restart: unless-stopped
+    volumes:
+      - hosted-settlement-data:/var/lib/hosted-settlement
+      - type: bind
+        source: ${HOSTED_SETTLEMENT_VERIFIED_RELEASE_DIR:?run the selected hosted preflight}
+        target: /opt/hosted-settlement/release
+        read_only: true
+    networks: [default]
+
+
+  provisioning:
+    profiles: [hosted-production, hosted-stripe-test]
+    environment:
+      PROVISIONING_INVENTORY_INI: |-
+        [kvm_hosts]
+        kvm1 ansible_host=127.0.0.1 ansible_user=stub gpus=1 gpu_model=H100
+
+  bob-storefront:
+    profiles: [hosted-production, hosted-stripe-test]
+    image: ${HOSTED_MARKETPLACE_VERIFIED_IMAGE:?run the selected marketplace release preflight}
+    environment:
+      STOREFRONT_CLAIMS_SWEEP_INTERVAL: ${HOSTED_STOREFRONT_SERVICING_INTERVAL_SECONDS:-30}
+    depends_on:
+      hosted-settlement-api:
+        condition: service_healthy
+    ports: !reset []
+    network_mode: service:hosted-settlement-api
+    env_file:
+      - path: ${VMS_BOB_IDENTITY_ENV_FILE:?set signer credential environment file}
+        required: true
+    volumes:
+      - ${VMS_BOB_STRIPE_STOREFRONT_CONFIG:?set generated release-pinned storefront config}:/etc/arkhai/storefront.toml:ro
+      - ${PWD}/e2e-tests/config/hosted-resources.csv:/app/hosted-resources.csv:ro
+
+volumes:
+  hosted-settlement-data:

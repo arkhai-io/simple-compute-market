@@ -33,26 +33,17 @@ import logging
 from importlib import resources
 
 import pytest
+
 from market_alkahest.alkahest import (
     get_alkahest_network,
     get_recipient_arbiter,
     resolve_alkahest_address_config,
 )
-
 from src.settings import settings
 from tests.e2e.roles.scenarios.vms.conftest import (
     DealState,
     delete_mock_rules_if_present,
     require_state,
-    advance_storefront,
-    pause_storefront,
-)
-from tests.e2e.roles.scenarios.vms.host_registry import (
-    E2E_BUY_HOST,
-    E2E_BUY_POOL_ID,
-    E2E_HOST_GPU_COUNT,
-    provision_e2e_executor,
-    refresh_storefront_projections,
 )
 
 log = logging.getLogger(__name__)
@@ -61,8 +52,8 @@ pytestmark = pytest.mark.e2e_buy
 
 # ---------------------------------------------------------------------------
 # Offer / demand spec — distinct from the full-deal suite so the two can
-# share a stack: a different resource_id and gpu_model mean discovery
-# (filtered by --gpu-model below) returns only this listing.
+# share a stack: a different resource_id and gpu_model mean the typed resource
+# query below returns only this listing.
 # ---------------------------------------------------------------------------
 
 BUY_RESOURCE_ID = "compute-e2e-buy-001"
@@ -83,38 +74,42 @@ _ALKAHEST_ADDRESSES_PATH = str(
     resources.files("market_storefront.data").joinpath("alkahest_anvil_addresses.json")
 )
 _ALKAHEST_CFG = resolve_alkahest_address_config(
-    get_alkahest_network("anvil"), config_path=_ALKAHEST_ADDRESSES_PATH,
+    get_alkahest_network("anvil"),
+    config_path=_ALKAHEST_ADDRESSES_PATH,
 )
-ACCEPTED_ESCROWS = [{
-    "chain_name": "anvil",
-    "escrow_address": str(
-        _ALKAHEST_CFG.erc20_addresses.escrow_obligation_default
-    ).lower(),
-    "literal_fields": {"token": DEMAND_TOKEN_ADDRESS},
-    "rates": [{"field": "amount", "per": "hour", "value": str(DEMAND_AMOUNT)}],
-}]
+ACCEPTED_ESCROWS = [
+    {
+        "chain_name": "anvil",
+        "escrow_address": str(_ALKAHEST_CFG.erc20_addresses.escrow_obligation_default).lower(),
+        "literal_fields": {"token": DEMAND_TOKEN_ADDRESS},
+        "rates": [{"field": "amount", "per": "hour", "value": str(DEMAND_AMOUNT)}],
+    }
+]
 
 
 def _recipient_demands(seller_wallet: str) -> list[dict]:
-    return [{
-        "chain_name": "anvil",
-        "arbiter": get_recipient_arbiter(
-            "anvil", config_path=_ALKAHEST_ADDRESSES_PATH,
-        ).lower(),
-        "demand_data": {"recipient": seller_wallet.lower()},
-    }]
+    return [
+        {
+            "chain_name": "anvil",
+            "arbiter": get_recipient_arbiter(
+                "anvil",
+                config_path=_ALKAHEST_ADDRESSES_PATH,
+            ).lower(),
+            "demand_data": {"recipient": seller_wallet.lower()},
+        }
+    ]
 
 
 DURATION_HOURS = 1
-BUYER_INITIAL_PRICE = 7_000     # below the seller floor (10_000) — forces a round-0 counter
-BUYER_MAX_PRICE = 12_000        # above floor — buyer accepts the seller's first counter
+BUYER_INITIAL_PRICE = 7_000  # below the seller floor (10_000) — forces a round-0 counter
+BUYER_MAX_PRICE = 12_000  # above floor — buyer accepts the seller's first counter
 BUY_RULE_ID = "e2e-buy-create"  # non-pausing mock rule: create job returns immediately
 
 BUY_RESOURCE_CSV = (
     "resource_id,resource_type,resource_subtype,unit,value,state,min_price,token,"
     "max_duration_seconds,attribute.gpu_model,attribute.sla,attribute.region,attribute.vm_host\n"
     f"{BUY_RESOURCE_ID},compute.gpu,rtx4090,count,1,available,10000,{DEMAND_TOKEN_ADDRESS},,"
-    f"{BUY_GPU_MODEL},90.0,\"California, US\",kvm1\n"
+    f'{BUY_GPU_MODEL},90.0,"California, US",kvm1\n'
 )
 
 _REGISTRY_A = str(settings.REGISTRY.API_URL or "http://registry:8080")
@@ -124,23 +119,6 @@ _REGISTRY_A = str(settings.REGISTRY.API_URL or "http://registry:8080")
 # Phase B0 — readiness
 # ===========================================================================
 
-
-class TestStage00_LifecyclePause:
-    def test_00_pauses_the_storefront_loops(self, storefront_admin_client):
-        """Hold the storefront's timer loops idle for the rest of this scenario.
-
-        A named stage rather than a fixture because every later assertion depends
-        on it: with the loops running, a listing status read after a reserve races
-        the capacity poller's next cycle, and a defect that reorders two writes
-        shows up as an intermittent failure instead of a reproducible one.
-
-        Trading is unaffected — this pauses the loops, not the storefront's
-        willingness to negotiate — so the deal stages below still work. Loops are
-        held, not stopped: nothing is torn down and no cycle is cut in half. Work
-        a loop would have done is requested explicitly from here on, through
-        `advance_storefront`.
-        """
-        pause_storefront(storefront_admin_client)
 
 class TestStageB0_Readiness:
     def test_b0_services_ready_for_buy(
@@ -176,6 +154,7 @@ class TestStageB0_Readiness:
 # Phase B1 — resource seed
 # ===========================================================================
 
+
 class TestStageB1_ResourceSeed:
     def test_b1_imports_buy_resource_inventory(
         self, storefront_admin_client, deal_state: DealState
@@ -194,66 +173,9 @@ class TestStageB1_ResourceSeed:
 
 
 # ===========================================================================
-# Phase B1a — executor host registry + projection sync
-# ===========================================================================
-
-class TestStageB1a_ExecutorHostRegistry:
-    def test_b1a_registers_executor_host_and_syncs_projection(
-        self, provisioning_client, storefront_admin_client,
-        site_capacity_admin_client, deal_state: DealState,
-    ):
-        """Register the executor host the seeded buy resource sits on.
-
-        The site authority projects capacity by iterating host rows. With no host
-        registered the projection is empty, so B4's negotiation is refused with
-        `no_matching_inventory` even though discovery found the listing —
-        the failure lands three stages from its cause.
-
-        Registered through the admin API rather than a mounted inventory file:
-        `inventory_path` is docker-compose-specific while the canonical Helm
-        deployment supplies inventory as an inline secret, and a mount is shared
-        state no scenario declares. The storefront is then told to pull
-        projections immediately and the pull is asserted, rather than sleeping
-        out the poller interval.
-        """
-        require_state(deal_state, "_resources_seeded")
-
-        # The host is executor identity; the capacity declaration is what `probe`,
-        # `reserve`, and the seller's inventory guard match against, and only a
-        # declaration creates one. With the host alone, B4's negotiation is refused
-        # `no_matching_inventory` even though discovery found the listing. The
-        # declared attributes mirror this scenario's listing, since the guard
-        # compares region and gpu_model by equality.
-        host = provision_e2e_executor(
-            provisioning_client,
-            site_capacity_admin_client,
-            host=E2E_BUY_HOST,
-            pool_id=E2E_BUY_POOL_ID,
-            resource_id=BUY_RESOURCE_ID,
-            sellable_units=1,
-            attributes={
-                "gpu_model": BUY_GPU_MODEL,
-                "region": "California, US",
-                "sla": "90.0",
-            },
-        )
-        assert host.name == E2E_BUY_HOST
-        assert (host.gpu_count or 0) >= E2E_HOST_GPU_COUNT, (
-            f"executor host {E2E_BUY_HOST} reports {host.gpu_count} GPU(s); "
-            f"scenarios reserve up to {E2E_HOST_GPU_COUNT}"
-        )
-
-        sites = refresh_storefront_projections(storefront_admin_client)
-
-        deal_state._executor_host_registered = True
-        log.info(
-            "[B1a] Executor host %s registered (gpus=%s); projections confirmed for %s",
-            E2E_BUY_HOST, host.gpu_count, sorted(sites),
-        )
-
-# ===========================================================================
 # Phase B2 — create + publish listing (so discovery can find it)
 # ===========================================================================
+
 
 class TestStageB2_PublishListing:
     def test_b2_create_and_publish_listing(
@@ -298,10 +220,9 @@ class TestStageB2_PublishListing:
 # Phase B3 — arm provisioning (non-pausing: the one-shot buy runs to ready)
 # ===========================================================================
 
+
 class TestStageB3_ArmProvisioning:
-    def test_b3_arm_create_rule_no_pause(
-        self, provisioning_test_client, deal_state: DealState
-    ):
+    def test_b3_arm_create_rule_no_pause(self, provisioning_test_client, deal_state: DealState):
         """Arm a mock create rule that returns tenant creds without pausing.
 
         Unlike the staged full-deal suite (which pauses the create job to
@@ -338,37 +259,45 @@ class TestStageB3_ArmProvisioning:
 # Phase B4 — the one-shot `market buy`
 # ===========================================================================
 
+
 class TestStageB4_MarketBuy:
-    def test_b4_market_buy_reaches_ready(
-        self, buyer_cli, deal_state: DealState
-    ):
+    def test_b4_market_buy_reaches_ready(self, buyer_cli, deal_state: DealState):
         """`market buy` discovers, negotiates, escrows, settles, polls → ready.
 
-        Pure discovery (no --seller): the buyer resolves the seller from the
-        registry-advertised storefront_url and reaches it over the network.
-        Filtering by --gpu-model returns only this suite's listing.
+        Pure discovery (no seller override): the buyer resolves the seller from
+        the registry-advertised storefront URL and reaches it over the network.
+        The typed resource query returns only this suite's listing, and the
+        settlement clause selects its advertised Alkahest token option.
 
-        Explicit prices + --token-contract mirror the full-deal suite:
-        initial 7000 (below the 10000 seller floor → round-0 counter), max
-        12000 (above floor → buyer accepts the seller's first counter).
+        Explicit negotiation prices mirror the full-deal suite: initial 7000
+        (below the 10000 seller floor → round-0 counter), max 12000 (above the
+        floor → buyer accepts the seller's first counter).
         """
         require_state(deal_state, "seller_listing_id", "provisioning_gate_armed")
 
         run = buyer_cli.run(
             [
                 "buy",
-                "--gpu-model", BUY_GPU_MODEL,
-                "--initial-price", str(BUYER_INITIAL_PRICE),
-                "--max-price", str(BUYER_MAX_PRICE),
-                "--token-contract", DEMAND_TOKEN_ADDRESS,
-                "--token-decimals", "0",
-                "--duration-hours", str(DURATION_HOURS),
-                "--chain", "anvil",
-                "--max-matches", "5",
-                "--max-rounds", "10",
-                "--poll-interval", "1.0",
-                "--settlement-timeout", "300",
-                "--expiration", "3600",
+                "--resource",
+                f'gpu_model="{BUY_GPU_MODEL}"',
+                "--settlement",
+                f"mechanism=alkahest.v1 asset={DEMAND_TOKEN_ADDRESS}",
+                "--initial-price",
+                str(BUYER_INITIAL_PRICE),
+                "--max-price",
+                str(BUYER_MAX_PRICE),
+                "--duration-hours",
+                str(DURATION_HOURS),
+                "--max-matches",
+                "5",
+                "--max-rounds",
+                "10",
+                "--poll-interval",
+                "1.0",
+                "--settlement-timeout",
+                "300",
+                "--expiration",
+                "3600",
                 "--yes",
             ],
             timeout=300.0,
@@ -382,11 +311,11 @@ class TestStageB4_MarketBuy:
 
         events = run.read_events()
         terminal = next(
-            (e for e in reversed(events) if e.get("event") == "run_ended"), None,
+            (e for e in reversed(events) if e.get("event") == "run_ended"),
+            None,
         )
         assert terminal is not None, (
-            f"Buy run-log missing run_ended. events tail: "
-            f"{[e.get('event') for e in events[-6:]]}"
+            f"Buy run-log missing run_ended. events tail: {[e.get('event') for e in events[-6:]]}"
         )
         assert terminal.get("status") == "ready", (
             f"Expected run_ended.status=ready, got {terminal.get('status')!r}. "
@@ -411,13 +340,17 @@ class TestStageB4_MarketBuy:
         deal_state.settlement_status = "ready"
         log.info(
             "[B4] `market buy` run=%s reached ready: escrow=%s negotiation=%s fulfillment=%s",
-            run.run_id, escrow_uid, neg_id, terminal.get("fulfillment_uid"),
+            run.run_id,
+            escrow_uid,
+            neg_id,
+            terminal.get("fulfillment_uid"),
         )
 
 
 # ===========================================================================
 # Phase B5 — seller-side + provisioning lease cross-checks
 # ===========================================================================
+
 
 class TestStageB5_SellerAndLease:
     def test_b5_seller_state_and_lease_registered(
@@ -431,22 +364,25 @@ class TestStageB5_SellerAndLease:
         primary escrow is ``ready`` with a fulfillment_uid, and the
         provisioning service registered a lease for the escrow.
         """
-        require_state(deal_state, "real_escrow_uid", "negotiation_id",
-                      "seller_listing_id", "settlement_status")
+        require_state(
+            deal_state,
+            "real_escrow_uid",
+            "negotiation_id",
+            "seller_listing_id",
+            "settlement_status",
+        )
 
-        advance_storefront(storefront_admin_client, "capacity-events")
         listing = storefront_admin_client.get_listing(deal_state.seller_listing_id)
         assert listing.status == "closed", (
             f"Expected listing to close while capacity is held, got {listing.status!r}"
         )
 
         detail = storefront_admin_client.get_negotiation(
-            deal_state.seller_listing_id, deal_state.negotiation_id,
+            deal_state.seller_listing_id,
+            deal_state.negotiation_id,
         )
         primary = next((e for e in (detail.escrows or []) if e["is_primary"]), None)
-        assert primary is not None, (
-            f"No primary escrow on the negotiation: {detail.escrows!r}"
-        )
+        assert primary is not None, f"No primary escrow on the negotiation: {detail.escrows!r}"
         assert primary["escrow_uid"] == deal_state.real_escrow_uid, (
             f"Primary escrow_uid mismatch: endpoint={primary['escrow_uid']!r} "
             f"buy={deal_state.real_escrow_uid!r}"
@@ -454,26 +390,17 @@ class TestStageB5_SellerAndLease:
         assert primary["status"] == "ready", (
             f"Expected primary escrow status=ready, got {primary['status']!r}"
         )
-        assert primary["fulfillment_uid"], (
-            f"Primary escrow missing fulfillment_uid: {primary!r}"
-        )
+        assert primary["fulfillment_uid"], f"Primary escrow missing fulfillment_uid: {primary!r}"
 
         # DealLease resolves where the lease lives: a site-ledger
         # reservation (remote-capacity mode) or a vm_leases row (embedded).
         from tests.e2e.roles.scenarios.vms.conftest import DealLease
+
         lease = DealLease(provisioning_client, deal_state.real_escrow_uid).refresh()
         assert lease.get("escrow_uid") == deal_state.real_escrow_uid
-        assert lease.get("vm_host") == E2E_BUY_HOST, (
-            f"Lease bound to unexpected executor {lease.get('vm_host')!r}; "
-            f"expected {E2E_BUY_HOST!r}. Lease: {lease}"
-        )
-        assert lease.get("settlement_resource_id") == BUY_RESOURCE_ID, (
-            f"Scheduling bound this deal to {lease.get('settlement_resource_id')!r}, "
-            f"not the resource it was sold as ({BUY_RESOURCE_ID!r}). Lease: {lease}\n"
-            "A different resource here is not a test problem: scheduling considers "
-            "every enabled resource at the site and re-applies no attribute from the "
-            "admitted claim, so it may place a deal outside the region or hardware it "
-            "was negotiated for. That gap is real and separately owned."
+        assert lease.get("resource_id") == BUY_RESOURCE_ID, (
+            f"Lease bound to unexpected resource {lease.get('resource_id')!r}; "
+            f"expected {BUY_RESOURCE_ID!r}. Lease: {lease}"
         )
         assert lease.get("status") in ("active", "pending"), (
             f"Expected active/pending lease, got {lease.get('status')!r}: {lease}"
@@ -481,5 +408,8 @@ class TestStageB5_SellerAndLease:
         deal_state.reserved_resource_id = BUY_RESOURCE_ID
         log.info(
             "[B5] Seller listing=%s; primary escrow ready (fulfillment=%s); lease=%s status=%s",
-            listing.status, primary["fulfillment_uid"], lease.get("id"), lease.get("status"),
+            listing.status,
+            primary["fulfillment_uid"],
+            lease.get("id"),
+            lease.get("status"),
         )

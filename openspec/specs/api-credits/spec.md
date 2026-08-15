@@ -77,3 +77,39 @@ An API gate MUST parse bearer credentials as `<key_id>.<secret>`, verify them th
 #### Scenario: Consumption request is retried
 - **WHEN** a middleware repeats consumption for one key with the same idempotency key
 - **THEN** the credits service charges the balance at most once
+
+### Requirement: Hosted settlement grants are principal-bound and exact once
+
+An accepted hosted API-credit obligation MUST bind the named service, positive
+quantity, key mode and optional key ID, canonical buyer and claimant
+principals, exact amount and currency, funding profile, expiry, and issuance
+condition. The credits authority MUST grant under the deterministic
+mechanism-neutral fulfillment identity derived from the obligation, and one
+fulfillment identity MUST map to one immutable request digest and one grant.
+The marketplace storefront MUST NOT issue before authoritative hosted funding.
+
+#### Scenario: Hosted issuance acknowledgement is lost
+- **WHEN** the authority commits a grant but its response is lost
+- **THEN** the storefront retrieves that grant by fulfillment identity and does not reserve quota, create a key, or increase balance again
+
+#### Scenario: Existing key belongs to another marketplace principal
+- **WHEN** a hosted top-up targets a key owned by a different canonical principal
+- **THEN** the credits authority rejects the issuance without changing quota or balance
+
+### Requirement: Hosted issuance evidence is signed, portable, and secret-free
+
+After an exact-once grant commits, the storefront MUST publish a canonical
+seller-signed evidence body binding the accepted obligation, fulfillment and
+grant identities, service, quantity, key mode/key ID, canonical owner and
+claimant, credits-authority attestation, and request/evidence digests. The
+configured portable resolver MUST authenticate callers and return that evidence
+by digest. Evidence, public settlement state, logs, and hosted payloads MUST NOT
+contain the bearer secret, raw API credential, or provider data.
+
+#### Scenario: Evidence resolves for the accepted condition
+- **WHEN** the hosted condition evaluator retrieves the signed evidence digest
+- **THEN** signature, signer, schema/capability, freshness, condition anchor, owner, service, quantity, key target, and fulfillment identity all match before collection
+
+#### Scenario: Issuance fails before grant commit
+- **WHEN** funding is authoritative but the credits authority has no committed grant
+- **THEN** no evidence is published, no collection occurs, and eligible reclaim remains available after the accepted deadline

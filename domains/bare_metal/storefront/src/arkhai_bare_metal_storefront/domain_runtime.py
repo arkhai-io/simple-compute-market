@@ -6,9 +6,11 @@ from dataclasses import replace
 
 from arkhai_bare_metal.domain_runtime import market_domain
 from core_storefront.escrow_verification import verify_escrow_for_settlement
+from core_storefront import StorefrontSettlementBuildContext
 from market_core import (
     DomainCapability,
     ImmutableSettlementCapability,
+    ImmutableFulfillmentCapability,
     ImmutableStorefrontCapability,
     MarketDomainContract,
     validate_domain_contract,
@@ -16,6 +18,22 @@ from market_core import (
 
 from .negotiation import default_seller_round_hook
 from .settlement import build_bare_metal_settlement_plan
+from .fulfillment_service import fulfill_bare_metal
+
+
+def _build_settlement_from_context(
+    *,
+    context: StorefrontSettlementBuildContext,
+) -> dict[str, object]:
+    return build_bare_metal_settlement_plan(
+        proposal=context.proposal,
+        agreed_amount=context.agreed_amount,
+        duration_seconds=context.duration_seconds,
+        buyer_principal=context.buyer_principal,
+        seller_principal=context.seller_principal,
+        seller_wallet_address=context.seller_wallet_address,
+        chain_config_paths=context.chain_config_paths,
+    )
 
 
 def _build_market_domain_contract() -> MarketDomainContract:
@@ -29,6 +47,7 @@ def _build_market_domain_contract() -> MarketDomainContract:
                 | {
                     DomainCapability.STOREFRONT,
                     DomainCapability.SETTLEMENT,
+                    DomainCapability.FULFILLMENT,
                 }
             ),
             storefront=ImmutableStorefrontCapability(
@@ -36,7 +55,10 @@ def _build_market_domain_contract() -> MarketDomainContract:
             ),
             settlement=ImmutableSettlementCapability(
                 verify=verify_escrow_for_settlement,
-                build_plan=build_bare_metal_settlement_plan,
+                build_plan=_build_settlement_from_context,
+            ),
+            fulfillment=ImmutableFulfillmentCapability(
+                fulfill=fulfill_bare_metal,
             ),
         ),
     )

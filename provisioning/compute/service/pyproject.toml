@@ -1,15 +1,16 @@
 [project]
 name = "arkhai-compute-provisioning-service"
-version = "0.1.0"
+version = "0.2.0"
 license = "MIT"
 description = "Deployable cross-domain compute provisioning service"
 requires-python = ">=3.12"
 dependencies = [
-    "arkhai-kit-site>=0.2.0",
-    "arkhai-kit-resource-pools>=0.1.0",
-    "arkhai-kit-fulfillment>=0.1.0",
-    "arkhai-compute-provisioning>=0.5.0",
-    "arkhai-core-storefront-client>=0.11.0",
+    "arkhai-kit-site>=0.3.0",
+    "arkhai-kit-resource-pools>=0.2.0",
+    "arkhai-kit-fulfillment>=0.2.0",
+    "arkhai-compute-provisioning>=0.6.0",
+    "arkhai-core-storefront-client==0.17.0",
+    "arkhai-kit-identity==0.3.0",
     "dynaconf>=3.0.0",
     "fastapi>=0.115.0",
     "uvicorn[standard]>=0.34.0",
@@ -52,9 +53,12 @@ asyncio_mode = "auto"
 
 [dependency-groups]
 dev = [
-    "arkhai-vms-provisioning-adapter>=0.1.0",
+    "arkhai-vms-provisioning-adapter>=0.2.0",
     "arkhai-bare-metal-provisioning-adapter>=0.1.0",
-    "arkhai-kit-site-client>=0.1.0",
+    "arkhai-kit-site-client>=0.2.0",
     "pytest>=9.0.2",
     "pytest-asyncio>=0.23",
 ]
+
+[tool.uv]
+find-links = ["../../../.dist"]

@@ -2,9 +2,9 @@
 
 The buyer doesn't run a storefront or any HTTP server. They pick a
 seller, open a negotiation via HTTP, loop round-by-round until the
-thread ends, and return the outcome. Every request is signed by the
-buyer's wallet so the seller can verify without any prior
-registration.
+thread ends, and return the outcome. Every request is authenticated by the
+buyer's injected marketplace signer so the seller can authorize the complete
+principal without requiring a chain wallet.
 
 Public API:
     negotiate_with_seller(...) -> NegotiationOutcome
@@ -30,25 +30,42 @@ import logging
 import time
 import urllib.error
 import urllib.request
-from collections.abc import Callable, Iterable
+import uuid
+from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Callable, Optional
 
-from market_alkahest.schemas import EscrowProposal, EscrowTerms
-from market_core.schemas import ProvisionTerms, SettlementPlan
-from market_policy import NegotiationCatalogue
 from market_policy.negotiation_middleware import (
     NegotiationChainExhausted,
     NegotiationContext,
     NegotiationMiddleware,
     NegotiationRound,
+    load_negotiation_chain,
     normalize_policies_by_escrow_kind_config,
     run_negotiation_chain,
 )
 from market_policy.scalar_policies import make_escrow_kind_dispatch_middleware
+from market_core.schemas import (
+    SettlementOption,
+    SettlementPlan,
+    SettlementSelection,
+)
+from market_identity import (
+    EMPTY_BODY,
+    AuthenticatedResponse,
+    Identity,
+    RequestEnvelope,
+    Signer,
+    TrustedIdentitySet,
+    canonical_body_hash,
+    sign_request,
+    verify_response,
+)
+
 
 DEFAULT_MAX_ROUNDS = 10
 logger = logging.getLogger(__name__)
+_RL_POLICY_NAMES = {"rl", "erc20_rl", "native_token_rl", "erc1155_rl"}
 
 DEFAULT_CHAIN_GUARDS: tuple[str, ...] = ("buyer_escrow_shape_guard",)
 
@@ -56,32 +73,43 @@ DEFAULT_CHAIN_GUARDS: tuple[str, ...] = ("buyer_escrow_shape_guard",)
 #: accepted-escrows synthesizer) so the chain loader can trigger
 #: self-registration of optional middlewares the core cannot import —
 #: today the VM plugin's torch RL strategy. Best-effort by contract.
+_RL_MIDDLEWARE_REGISTRAR: Callable[[], None] | None = None
 
 
-def _compose_catalogue(requested_policies: Iterable[str]) -> NegotiationCatalogue:
-    """Compose this buyer invocation's policy catalogue.
-
-    Composed per call rather than cached at module scope. The buyer CLI is a
-    short-lived process that loads a chain once or twice, and a cached catalogue
-    would be built before the configuration that selects its policies is read.
-
-    Discovery is fatal on a broken plugin, so a domain that advertises policies
-    it cannot supply fails here rather than yielding a catalogue missing names
-    the configuration goes on to request.
-    """
-    from .negotiation_composition import compose_buyer_negotiation_catalogue
-    from .plugins import discover_domains
-
-    return compose_buyer_negotiation_catalogue(
-        discover_domains(), requested_policies=requested_policies
-    )
+def set_rl_middleware_registrar(fn: Callable[[], None] | None) -> None:
+    global _RL_MIDDLEWARE_REGISTRAR
+    _RL_MIDDLEWARE_REGISTRAR = fn
 
 
-def _load_buyer_chain(
+def _maybe_register_rl_middleware() -> None:
+    """Trigger self-registration of the RL middleware, if a domain
+    package installed a registrar. Best-effort — if the strategy's
+    dependencies aren't installed, the chain loader raises its own
+    actionable KeyError pointing at the extras."""
+    if _RL_MIDDLEWARE_REGISTRAR is None:
+        return
+    try:
+        _RL_MIDDLEWARE_REGISTRAR()
+    except Exception:
+        pass
+
+
+def _policy_names_need_rl(policy_names: list[str]) -> bool:
+    return any(name in _RL_POLICY_NAMES for name in policy_names)
+
+
+def _policy_map_needs_rl(policies_by_kind: dict[str, list[str]]) -> bool:
+    return any(_policy_names_need_rl(names) for names in policies_by_kind.values())
+
+
+def load_buyer_chain(
     *,
     policies: Any = None,
     policy_mode: str | None = None,
     default_guards: tuple[str, ...] = DEFAULT_CHAIN_GUARDS,
+    chain_config_paths: (
+        Mapping[str, str | None] | Callable[[], Mapping[str, str | None]] | None
+    ) = None,
 ) -> list[NegotiationMiddleware]:
     """Load the buyer's negotiation chain.
 
@@ -89,8 +117,7 @@ def _load_buyer_chain(
     in `buyer.toml`), uses the explicit ordered list. Otherwise the
     chain is `[*default_guards, *policy.middlewares]` — the default
     guards open with the shape guard, which vetoes if the seller
-    silently mutates a buyer-pinned field of the EscrowProposal (token
-    swap, expiration push, escrow contract swap); a schema plugin may
+    silently mutates a buyer-pinned opaque proposal field; a schema plugin may
     extend them (the API-credits plugin inserts its key-challenge
     pass-through); the policy is `policy_mode` if set, else the one
     buyer.toml `[negotiation] policy` names (default `listed_price`).
@@ -99,24 +126,16 @@ def _load_buyer_chain(
     """
     policies_by_kind = normalize_policies_by_escrow_kind_config(policies)
     if policies_by_kind:
-        try:
-            from .buyer_config import buyer_chains
-
-            chains = buyer_chains()
-        except Exception:
-            chains = {}
-        chain_config_paths = {
-            name: chain.alkahest_address_config_path for name, chain in chains.items()
-        }
-        requested = {*default_guards}
-        for chain in policies_by_kind.values():
-            requested.update(str(name).strip() for name in chain if str(name).strip())
-        catalogue = _compose_catalogue(requested)
-        return catalogue.resolve(list(default_guards)) + [
+        if _policy_map_needs_rl(policies_by_kind):
+            _maybe_register_rl_middleware()
+        resolved_paths = (
+            chain_config_paths() if callable(chain_config_paths) else chain_config_paths
+        )
+        config_paths = dict(resolved_paths or {})
+        return load_negotiation_chain(list(default_guards)) + [
             make_escrow_kind_dispatch_middleware(
                 policies_by_kind,
-                resolve=catalogue.resolve,
-                chain_config_paths=chain_config_paths,
+                chain_config_paths=config_paths,
             )
         ]
 
@@ -137,10 +156,25 @@ def _load_buyer_chain(
         except KeyError as exc:
             raise RuntimeError(str(exc)) from exc
         names = [*default_guards, *policy.middlewares]
-    return _compose_catalogue(names).resolve(names)
+    if _policy_names_need_rl(names):
+        _maybe_register_rl_middleware()
+    return load_negotiation_chain(names)
 
 
 DEFAULT_TIMEOUT_SECONDS = 30.0
+
+
+def _dump_payload(value: Any, *, mode: str | None = None) -> dict[str, Any]:
+    """Serialize a core-facing opaque payload without importing its schema."""
+    if isinstance(value, dict):
+        return dict(value)
+    model_dump = getattr(value, "model_dump", None)
+    if callable(model_dump):
+        kwargs = {"mode": mode} if mode is not None else {}
+        dumped = model_dump(**kwargs)
+        if isinstance(dumped, dict):
+            return dumped
+    raise TypeError("settlement payload must be a dictionary or model-dumpable value")
 
 
 @dataclass
@@ -163,17 +197,17 @@ class NegotiationOutcome:
     """
 
     status: str  # "agreed" | "exited"
-    negotiation_id: str | None  # None only if /new itself failed
-    agreed_amount: int | None = None
-    unit_count: float | None = None
-    reason: str | None = None  # populated on exit
+    negotiation_id: Optional[str]  # None only if /new itself failed
+    agreed_amount: Optional[int] = None
+    unit_count: Optional[float] = None
+    reason: Optional[str] = None  # populated on exit
     rounds: int = 0
-    accepted_provision_terms: ProvisionTerms | None = None
-    accepted_escrow_proposal: EscrowProposal | None = None
-    settlement_plan: SettlementPlan | None = None
-    # LEGACY mirror of the plan's alkahest obligations; kept while old
-    # run-log readers exist. Leaves with the client-wheel wire bump.
-    accepted_escrow_terms: list[EscrowTerms] | None = None
+    accepted_provision_terms: Any | None = None
+    accepted_escrow_proposal: Any | None = None
+    settlement_selection: Optional[SettlementSelection] = None
+    settlement_plan: Optional[SettlementPlan] = None
+    # Legacy mechanism-specific terms remain opaque at the core boundary.
+    accepted_escrow_terms: Optional[list[Any]] = None
 
     def to_dict(self) -> dict[str, Any]:
         d: dict[str, Any] = {"status": self.status, "rounds": self.rounds}
@@ -186,121 +220,394 @@ class NegotiationOutcome:
         if self.reason is not None:
             d["reason"] = self.reason
         if self.accepted_provision_terms is not None:
-            d["accepted_provision_terms"] = self.accepted_provision_terms.model_dump()
+            d["accepted_provision_terms"] = _dump_payload(self.accepted_provision_terms)
         if self.accepted_escrow_proposal is not None:
-            d["accepted_escrow_proposal"] = self.accepted_escrow_proposal.model_dump()
+            d["accepted_escrow_proposal"] = _dump_payload(self.accepted_escrow_proposal)
+        if self.settlement_selection is not None:
+            d["settlement_selection"] = self.settlement_selection.model_dump()
         if self.settlement_plan is not None:
             d["settlement_plan"] = self.settlement_plan.model_dump()
         if self.accepted_escrow_terms is not None:
             d["accepted_escrow_terms"] = [
-                term.model_dump() for term in self.accepted_escrow_terms
+                _dump_payload(term) for term in self.accepted_escrow_terms
             ]
         return d
 
 
-def _parse_accepted_terms_from_reply(
+def parse_accepted_terms_from_reply(
     reply: dict[str, Any],
+    *,
+    decode_provision_terms: Callable[[dict[str, Any]], Any] | None = None,
+    decode_escrow_proposal: Callable[[dict[str, Any]], Any] | None = None,
+    decode_escrow_terms: Callable[[dict[str, Any]], Any] | None = None,
 ) -> tuple[
-    ProvisionTerms | None,
-    EscrowProposal | None,
-    SettlementPlan | None,
-    list[EscrowTerms] | None,
+    Any | None,
+    Any | None,
+    Optional[SettlementSelection],
+    Optional[SettlementPlan],
+    Optional[list[Any]],
 ]:
-    """Extract the seller's echoed accepted terms from a negotiate reply.
+    """Extract the seller's accepted state from a negotiate reply.
 
-    Returns all-None if the seller didn't include them — happens on
-    exit/reject paths or against legacy sellers that haven't shipped the
-    new fields yet. ``settlement_plan`` is preferred from the wire;
-    against pre-plan sellers it is coerced from the flat
-    ``accepted_escrow_terms`` mirror (the carrier's legacy coercion), so
-    downstream code sees a plan either way.
+    Returns all-None on exit/reject paths.  The authoritative
+    ``settlement_plan`` is never synthesized from another field.
     """
     raw_prov = reply.get("accepted_provision_terms")
     raw_esc = reply.get("accepted_escrow_proposal")
+    raw_selection = reply.get("settlement_selection")
     raw_plan = reply.get("settlement_plan")
     raw_terms = reply.get("accepted_escrow_terms")
     prov = (
-        ProvisionTerms.model_validate(raw_prov) if isinstance(raw_prov, dict) else None
-    )
-    esc = EscrowProposal.model_validate(raw_esc) if isinstance(raw_esc, dict) else None
-    terms = (
-        [EscrowTerms.model_validate(item) for item in raw_terms]
-        if isinstance(raw_terms, list)
+        decode_provision_terms(dict(raw_prov))
+        if isinstance(raw_prov, dict) and decode_provision_terms is not None
+        else dict(raw_prov)
+        if isinstance(raw_prov, dict)
         else None
     )
-    plan: SettlementPlan | None = None
+    esc = (
+        decode_escrow_proposal(dict(raw_esc))
+        if isinstance(raw_esc, dict) and decode_escrow_proposal is not None
+        else dict(raw_esc)
+        if isinstance(raw_esc, dict)
+        else None
+    )
+    selection = (
+        SettlementSelection.model_validate(raw_selection)
+        if isinstance(raw_selection, dict)
+        else None
+    )
+    if isinstance(raw_terms, list):
+        if not all(isinstance(item, dict) for item in raw_terms):
+            raise ValueError("accepted_escrow_terms must contain objects")
+        raw_term_dicts = [dict(item) for item in raw_terms]
+    else:
+        raw_term_dicts = None
+    terms = (
+        [
+            decode_escrow_terms(term) if decode_escrow_terms is not None else term
+            for term in raw_term_dicts
+        ]
+        if raw_term_dicts is not None
+        else None
+    )
+    plan: Optional[SettlementPlan] = None
     if isinstance(raw_plan, dict):
         plan = SettlementPlan.model_validate(raw_plan)
-    elif terms is not None:
-        plan = SettlementPlan.model_validate([t.model_dump() for t in terms])
-    return prov, esc, plan, terms
+    return prov, esc, selection, plan, terms
 
 
-def _sign(message: str, private_key: str) -> tuple[str, int]:
-    """Produce (X-Signature hex, X-Timestamp int) for a given canonical message.
-
-    Mirrors the seller's _check_buyer_signature verification: timestamp
-    is appended to the message, and the full string is EIP-191 signed.
-    """
-    from eth_account import Account
-    from eth_account.messages import encode_defunct
-
-    ts = int(time.time())
-    signed_message = f"{message}:{ts}"
-    msg_hash = encode_defunct(text=signed_message)
-    sig = Account.sign_message(msg_hash, private_key).signature.hex()
-    if not sig.startswith("0x"):
-        sig = "0x" + sig
-    return sig, ts
+def _validate_selection_echo(
+    actual: SettlementSelection | None,
+    expected: SettlementSelection,
+) -> None:
+    if actual is None:
+        raise RuntimeError(
+            "seller accept state omitted the buyer-selected settlement option"
+        )
+    if actual != expected:
+        raise RuntimeError(
+            "seller settlement_selection differs from the buyer-selected "
+            "advertised option"
+        )
 
 
-def _post(
-    url: str,
-    body: dict[str, Any],
+def _validate_accepted_provision_terms(
+    actual: Any | None,
+    expected: Any | None,
+) -> None:
+    if actual is None or expected is None:
+        return
+    if _dump_payload(actual, mode="json") != _dump_payload(expected, mode="json"):
+        raise RuntimeError(
+            "seller accepted_provision_terms differ from the buyer-requested terms"
+        )
+
+
+def _validated_party(
+    value: Any,
     *,
-    signature: str,
-    timestamp: int,
-    identity_scheme: str = "eip191",
-    identity_identifier: str | None = None,
-    timeout: float = DEFAULT_TIMEOUT_SECONDS,
-) -> dict[str, Any]:
-    """Signed POST with JSON body. Raises RuntimeError on non-2xx.
+    field: str,
+) -> Identity:
+    try:
+        return Identity.model_validate(value)
+    except (TypeError, ValueError) as exc:
+        raise RuntimeError(f"seller accept state has invalid {field}") from exc
 
-    Emits ``X-Identity-Scheme`` + ``X-Identity`` so storefronts that have
-    adopted the pluggable-identity dispatch (Phase 2) can route by scheme.
-    Storefronts that haven't yet ignore the headers — back-compat is preserved.
-    """
-    data = json.dumps(body).encode("utf-8")
-    headers = {
-        "Content-Type": "application/json",
-        "Accept": "application/json",
-        "X-Signature": signature,
-        "X-Timestamp": str(timestamp),
-        "X-Identity-Scheme": identity_scheme,
-    }
-    if identity_identifier:
-        headers["X-Identity"] = identity_identifier
-    req = urllib.request.Request(
-        url,
-        data=data,
-        headers=headers,
-        method="POST",
+
+def _validate_settlement_acceptance(
+    *,
+    reply: Mapping[str, Any],
+    selection: SettlementSelection | None,
+    plan: SettlementPlan | None,
+    expected_selection: SettlementSelection,
+    advertised_option: SettlementOption | None,
+    agreed_amount: int,
+    expected_plan: SettlementPlan | None,
+    buyer_principal: Identity,
+    trusted_seller_principals: TrustedIdentitySet,
+) -> None:
+    """Correlate a signed terminal reply with the buyer's exact commitment."""
+
+    _validate_selection_echo(selection, expected_selection)
+    if plan is None:
+        raise RuntimeError("seller accept state omitted the settlement_plan")
+
+    reply_buyer = _validated_party(
+        reply.get("buyer_principal"),
+        field="buyer_principal",
     )
+    reply_seller = _validated_party(
+        reply.get("seller_principal"),
+        field="seller_principal",
+    )
+    if reply_buyer != buyer_principal:
+        raise RuntimeError("seller accept state substituted the buyer principal")
+    if reply_seller not in trusted_seller_principals:
+        raise RuntimeError("seller accept state names an untrusted seller principal")
+
+    plan_buyer = _validated_party(
+        plan.buyer_principal,
+        field="settlement_plan.buyer_principal",
+    )
+    plan_seller = _validated_party(
+        plan.seller_principal,
+        field="settlement_plan.seller_principal",
+    )
+    if plan_buyer != buyer_principal or plan_seller != reply_seller:
+        raise RuntimeError("seller settlement_plan substituted an accepted party")
+    if len(plan.obligations) != 1:
+        raise RuntimeError(
+            "seller settlement_plan does not describe exactly one selected obligation"
+        )
+
+    obligation = plan.obligations[0]
+    if obligation.payer != "buyer" or obligation.claimant != "seller":
+        raise RuntimeError("seller settlement_plan changed payer/claimant semantics")
+    payer_principal = _validated_party(
+        obligation.payer_principal,
+        field="settlement_plan.obligations[0].payer_principal",
+    )
+    claimant_principal = _validated_party(
+        obligation.claimant_principal,
+        field="settlement_plan.obligations[0].claimant_principal",
+    )
+    if payer_principal != buyer_principal or claimant_principal != reply_seller:
+        raise RuntimeError(
+            "seller settlement_plan obligation substituted an accepted party"
+        )
+    if obligation.mechanism != expected_selection.mechanism:
+        raise RuntimeError(
+            "seller settlement_plan mechanism differs from the selected option"
+        )
+    if obligation.amount != agreed_amount:
+        raise RuntimeError(
+            "seller settlement_plan amount differs from the negotiated amount"
+        )
+    if obligation.expiration_unix != expected_selection.expiration_unix:
+        raise RuntimeError(
+            "seller settlement_plan expiry differs from the buyer selection"
+        )
+
+    if advertised_option is None and expected_plan is None:
+        raise RuntimeError(
+            "buyer acceptance state omitted the advertised settlement semantics"
+        )
+    if expected_plan is not None:
+        if len(expected_plan.obligations) != 1:
+            raise RuntimeError(
+                "persisted accepted settlement plan is not a single obligation"
+            )
+        expected_obligation = expected_plan.obligations[0].model_copy(
+            update={"amount": agreed_amount}
+        )
+        expected_semantic_plan = expected_plan.model_copy(
+            update={"obligations": [expected_obligation]}
+        )
+        if plan != expected_semantic_plan:
+            raise RuntimeError(
+                "seller settlement_plan semantics differ from persisted accepted terms"
+            )
+        return
+    assert advertised_option is not None
+    if (
+        advertised_option.option_id != expected_selection.option_id
+        or advertised_option.mechanism != expected_selection.mechanism
+    ):
+        raise RuntimeError(
+            "buyer settlement selection does not identify the advertised option"
+        )
+    if obligation.asset != advertised_option.asset:
+        raise RuntimeError(
+            "seller settlement_plan asset differs from the advertised option"
+        )
+    expected_params = dict(advertised_option.params)
+    expected_params["payer_principal"] = buyer_principal.model_dump(mode="json")
+    expected_params["claimant_principal"] = reply_seller.model_dump(mode="json")
+    if obligation.params != expected_params:
+        raise RuntimeError(
+            "seller settlement_plan params differ from the advertised option"
+        )
+    condition = advertised_option.params.get("condition")
+    expected_conditions = [dict(condition)] if isinstance(condition, Mapping) else []
+    if obligation.conditions != expected_conditions or plan.service_terms:
+        raise RuntimeError(
+            "seller settlement_plan semantics differ from the advertised option"
+        )
+
+
+_SIGNATURE_VERSION_HEADER = "X-Market-Signature-Version"
+_IDENTITY_SCHEME_HEADER = "X-Market-Identity-Scheme"
+_IDENTITY_IDENTIFIER_HEADER = "X-Market-Identity-Identifier"
+_ROLE_HEADER = "X-Market-Role"
+_REQUEST_ID_HEADER = "X-Market-Request-ID"
+_TIMESTAMP_HEADER = "X-Market-Timestamp"
+_SIGNATURE_HEADER = "X-Market-Signature"
+_MAX_RESPONSE_SKEW = 300
+
+
+def _header(headers: Mapping[str, str] | Any, name: str) -> str | None:
+    value = headers.get(name) if headers is not None else None
+    if value is not None:
+        return str(value)
+    if headers is None:
+        return None
+    lowered = name.lower()
+    for key, candidate in headers.items():
+        if str(key).lower() == lowered:
+            return str(candidate)
+    return None
+
+
+def _authenticated_json(
+    url: str,
+    body: dict[str, Any] | None,
+    *,
+    signer: Signer,
+    principal: Identity,
+    method: str,
+    operation: str,
+    resource: str,
+    expected_response_principals: TrustedIdentitySet,
+    timeout: float = DEFAULT_TIMEOUT_SECONDS,
+    request_id: str | None = None,
+    timestamp: int | None = None,
+    expected_response_role: str = "seller",
+) -> dict[str, Any]:
+    """Send one v2-authenticated JSON request and verify a pinned response."""
+
+    if signer.identity != principal:
+        raise ValueError("buyer signer identity does not match request principal")
+    if not isinstance(expected_response_principals, TrustedIdentitySet):
+        raise ValueError("a pinned response principal set is required")
+    request_id = request_id or uuid.uuid4().hex
+    timestamp = int(time.time()) if timestamp is None else timestamp
+    body_value: Any = EMPTY_BODY if body is None else body
+    authenticated = sign_request(
+        signer=signer,
+        envelope=RequestEnvelope(
+            role="buyer",
+            principal=principal,
+            method=method,
+            operation=operation,
+            resource=resource,
+            request_id=request_id,
+            timestamp=timestamp,
+            body_hash=canonical_body_hash(body_value),
+        ),
+    )
+    headers = {
+        "Accept": "application/json",
+        _SIGNATURE_VERSION_HEADER: authenticated.protocol,
+        _IDENTITY_SCHEME_HEADER: authenticated.principal.scheme.value,
+        _IDENTITY_IDENTIFIER_HEADER: authenticated.principal.identifier,
+        _ROLE_HEADER: authenticated.role,
+        _REQUEST_ID_HEADER: authenticated.request_id,
+        _TIMESTAMP_HEADER: str(authenticated.timestamp),
+        _SIGNATURE_HEADER: authenticated.proof.value,
+    }
+    data = None
+    if body is not None:
+        headers["Content-Type"] = "application/json"
+        data = json.dumps(
+            body,
+            separators=(",", ":"),
+            sort_keys=True,
+            ensure_ascii=False,
+        ).encode("utf-8")
+    req = urllib.request.Request(url, data=data, headers=headers, method=method)
     try:
         with urllib.request.urlopen(req, timeout=timeout) as resp:
             text = resp.read().decode("utf-8")
+            response_headers = getattr(resp, "headers", None)
+            response_status = int(getattr(resp, "status", 200))
     except urllib.error.HTTPError as exc:
-        detail = exc.read().decode("utf-8", errors="replace") if exc.fp else str(exc)
-        raise RuntimeError(f"POST {url} -> HTTP {exc.code}: {detail[:500]}") from exc
+        text = exc.read().decode("utf-8", errors="replace")
+        response_headers = getattr(exc, "headers", None)
+        response_status = int(exc.code)
     except Exception as exc:
-        raise RuntimeError(f"POST {url} failed: {exc}") from exc
+        raise RuntimeError(f"{method} {url} failed: {exc}") from exc
 
-    if not text:
-        return {}
+    if text:
+        try:
+            payload = json.loads(text)
+        except ValueError as exc:
+            raise RuntimeError(
+                f"{method} {url} returned non-JSON: {text[:200]!r}"
+            ) from exc
+    else:
+        payload = {}
+
     try:
-        return json.loads(text)
-    except ValueError as exc:
-        raise RuntimeError(f"POST {url} returned non-JSON: {text[:200]!r}") from exc
+        signed_response = AuthenticatedResponse.model_validate(
+            {
+                "protocol": _header(response_headers, _SIGNATURE_VERSION_HEADER),
+                "role": _header(response_headers, _ROLE_HEADER),
+                "principal": {
+                    "scheme": _header(response_headers, _IDENTITY_SCHEME_HEADER),
+                    "identifier": _header(
+                        response_headers, _IDENTITY_IDENTIFIER_HEADER
+                    ),
+                },
+                "method": method,
+                "operation": operation,
+                "resource": resource,
+                "request_id": _header(response_headers, _REQUEST_ID_HEADER),
+                "timestamp": int(_header(response_headers, _TIMESTAMP_HEADER) or ""),
+                "status": response_status,
+                "body_hash": canonical_body_hash(payload if text else EMPTY_BODY),
+                "proof": {
+                    "scheme": _header(response_headers, _IDENTITY_SCHEME_HEADER),
+                    "value": _header(response_headers, _SIGNATURE_HEADER),
+                },
+            }
+        )
+    except (TypeError, ValueError) as exc:
+        raise RuntimeError(
+            f"{method} {url} returned malformed or legacy response authentication"
+        ) from exc
+    verification = verify_response(
+        signed_response,
+        body=payload if text else EMPTY_BODY,
+        now=int(time.time()),
+        max_skew=_MAX_RESPONSE_SKEW,
+        expected_role=expected_response_role,
+        expected_principals=expected_response_principals,
+        expected_method=method,
+        expected_operation=operation,
+        expected_resource=resource,
+        expected_request_id=request_id,
+    )
+    if not verification.verified:
+        raise RuntimeError(
+            f"{method} {url} response authentication failed: {verification.code.value}"
+        )
+    if not 200 <= response_status < 300:
+        raise RuntimeError(
+            f"{method} {url} -> authenticated HTTP {response_status}: {text[:500]}"
+        )
+    if not isinstance(payload, dict):
+        raise RuntimeError(f"{method} {url} returned non-object JSON")
+    return payload
 
 
 @dataclass
@@ -318,25 +625,36 @@ class ResumeState:
     transcript: list[NegotiationRound]
     last_seller_proposal: dict | None
     rounds_completed: int
+    accepted_provision_terms: dict[str, Any] | None = None
+    settlement_plan: dict[str, Any] | None = None
+    accepted_escrow_proposal: dict[str, Any] | None = None
+    settlement_selection: dict[str, Any] | None = None
+    accepted_escrow_terms: list[dict[str, Any]] | None = None
 
 
 def negotiate_with_seller(
     *,
     seller_url: str,
-    buyer_address: str,
-    buyer_private_key: str,
+    principal: Identity,
+    signer: Signer,
     listing_id: str,
+    resolve_seller_principals: Callable[[], TrustedIdentitySet],
     initial_price: float,
     max_price: float,
-    unit_count: float | None = None,
-    provision_terms: ProvisionTerms | None = None,
-    escrow_proposal: EscrowProposal | None = None,
+    unit_count: Optional[float] = None,
+    provision_terms: Any | None = None,
+    escrow_proposal: Any | None = None,
+    encode_escrow_proposal: Callable[[Any], dict[str, Any]] | None = None,
+    decode_provision_terms: Callable[[dict[str, Any]], Any] | None = None,
+    decode_escrow_proposal: Callable[[dict[str, Any]], Any] | None = None,
+    decode_escrow_terms: Callable[[dict[str, Any]], Any] | None = None,
+    settlement_selection: Optional[SettlementSelection] = None,
     max_rounds: int = DEFAULT_MAX_ROUNDS,
-    on_round: Callable[[int, dict, dict], None] | None = None,
-    chain: list[NegotiationMiddleware] | None = None,
+    on_round: Optional[Callable[[int, dict, dict], None]] = None,
+    chain: Optional[list[NegotiationMiddleware]] = None,
     default_guards: tuple[str, ...] = DEFAULT_CHAIN_GUARDS,
-    resume: ResumeState | None = None,
-    policy_params: dict[str, Any] | None = None,
+    resume: Optional[ResumeState] = None,
+    policy_params: Optional[dict[str, Any]] = None,
 ) -> NegotiationOutcome:
     """Run a synchronous negotiation with one seller, round-by-round.
 
@@ -372,18 +690,76 @@ def negotiate_with_seller(
     can use the agreed (not local-proposed) values.
     """
     seller_url = seller_url.rstrip("/")
+    if signer.identity != principal:
+        raise ValueError("buyer signer identity does not match negotiation principal")
     transcript: list[NegotiationRound] = []
     # Captured from the seller's round-0 response and threaded forward.
     # The seller commits to these at /negotiate/new (they're persisted on
     # the negotiation thread); subsequent rounds don't re-echo them.
-    accepted_prov: ProvisionTerms | None = None
-    accepted_esc: EscrowProposal | None = None
-    accepted_plan: SettlementPlan | None = None
-    accepted_terms: list[EscrowTerms] | None = None
+    accepted_prov: Any | None = None
+    accepted_esc: Any | None = None
+    accepted_selection: Optional[SettlementSelection] = None
+    accepted_plan: Optional[SettlementPlan] = None
+    accepted_terms: Optional[list[Any]] = None
+
+    def _parse_reply(
+        reply_payload: dict[str, Any],
+    ) -> tuple[
+        Any | None,
+        Any | None,
+        SettlementSelection | None,
+        SettlementPlan | None,
+        list[Any] | None,
+    ]:
+        return parse_accepted_terms_from_reply(
+            reply_payload,
+            decode_provision_terms=decode_provision_terms,
+            decode_escrow_proposal=decode_escrow_proposal,
+            decode_escrow_terms=decode_escrow_terms,
+        )
+
+    negotiation_policy_params = dict(policy_params or {})
+    raw_advertised_option = negotiation_policy_params.pop(
+        "_selected_settlement_option",
+        None,
+    )
+    advertised_option = (
+        SettlementOption.model_validate(raw_advertised_option)
+        if raw_advertised_option is not None
+        else None
+    )
+    expected_selection = settlement_selection
+
+    if resume is not None:
+        (
+            accepted_prov,
+            accepted_esc,
+            accepted_selection,
+            accepted_plan,
+            accepted_terms,
+        ) = _parse_reply(
+            {
+                "settlement_plan": resume.settlement_plan,
+                "accepted_provision_terms": resume.accepted_provision_terms,
+                "accepted_escrow_proposal": resume.accepted_escrow_proposal,
+                "settlement_selection": resume.settlement_selection,
+                "accepted_escrow_terms": resume.accepted_escrow_terms,
+            }
+        )
+        expected_selection = accepted_selection
+    if advertised_option is not None and expected_selection is not None:
+        if (
+            advertised_option.option_id != expected_selection.option_id
+            or advertised_option.mechanism != expected_selection.mechanism
+        ):
+            raise RuntimeError(
+                "buyer settlement selection does not identify the advertised option"
+            )
+
     if resume is not None:
         unit_count = None  # absolute bounds; the prior run fixed the totals
     if chain is None:
-        chain = _load_buyer_chain(default_guards=default_guards)
+        chain = load_buyer_chain(default_guards=default_guards)
 
     # Pinned proposal: the buyer's first-round proposal — every field
     # set here is a buyer commitment the seller may not mutate. Used by
@@ -396,6 +772,7 @@ def negotiate_with_seller(
         v = (p.get("fields") or {}).get("amount")
         return int(v) if v is not None else None
 
+    neg_id: str | None
     if resume is not None:
         # Resume mode: skip /api/v1/negotiate/new and the first counter exchange.
         # We trust the run-log's recorded transcript and the seller's last
@@ -426,10 +803,10 @@ def negotiate_with_seller(
                 "(the schema-tagged payload describing what the seller "
                 "will provision)"
             )
-        if escrow_proposal is None:
+        if (escrow_proposal is None) == (settlement_selection is None):
             raise RuntimeError(
-                "escrow_proposal is required for fresh negotiations "
-                "(chain_name + escrow_address + fields + expiration_unix)"
+                "exactly one of escrow_proposal or settlement_selection is "
+                "required for fresh negotiations"
             )
         # Translate per-unit bounds → absolute amounts (× unit_count).
         # Listings broadcast per-unit rates; once the unit count is
@@ -448,26 +825,30 @@ def negotiate_with_seller(
         # on an empty history and pin its proposal. Whether and where an
         # opening amount lands in the fields is the configured policy's
         # compatibility knowledge, not this loop's.
-        base_proposal = {
-            "chain_name": escrow_proposal.chain_name,
-            "escrow_address": escrow_proposal.escrow_address,
-            "fields": dict(escrow_proposal.fields or {}),
-            "literal_fields": dict(
-                escrow_proposal.literal_fields or escrow_proposal.fields or {}
-            ),
-            "rates": [
-                r.model_dump() if hasattr(r, "model_dump") else dict(r)
-                for r in (escrow_proposal.rates or [])
-            ],
-            "demand": (
-                escrow_proposal.demand.model_dump()
-                if hasattr(escrow_proposal.demand, "model_dump")
-                else dict(escrow_proposal.demand)
-                if escrow_proposal.demand is not None
-                else None
-            ),
-            "expiration_unix": escrow_proposal.expiration_unix,
-        }
+        if settlement_selection is not None:
+            base_proposal = {
+                "settlement_selection": settlement_selection.model_dump(),
+                "fields": {},
+            }
+        else:
+            assert escrow_proposal is not None
+            if encode_escrow_proposal is None:
+                raise RuntimeError(
+                    "the selected settlement mechanism must inject an "
+                    "escrow proposal encoder"
+                )
+            base_proposal = encode_escrow_proposal(escrow_proposal)
+        if expected_selection is None and advertised_option is not None:
+            raw_expiration = base_proposal.get("expiration_unix")
+            if isinstance(raw_expiration, bool) or not isinstance(raw_expiration, int):
+                raise RuntimeError(
+                    "selected advertised settlement option has no pinned expiry"
+                )
+            expected_selection = SettlementSelection(
+                mechanism=advertised_option.mechanism,
+                option_id=advertised_option.option_id,
+                expiration_unix=raw_expiration,
+            )
         opening = run_negotiation_chain(
             chain,
             [],
@@ -477,7 +858,7 @@ def negotiate_with_seller(
                 our_opening_amount=initial_amount,
                 our_escrow_proposal=base_proposal,
                 max_rounds=max_rounds,
-                intermediate=dict(policy_params or {}),
+                intermediate=negotiation_policy_params,
             ),
         )
         # The decision is honored, not second-guessed: a chain that
@@ -501,36 +882,67 @@ def negotiate_with_seller(
 
         new_body = {
             "listing_id": listing_id,
-            "buyer_address": buyer_address,
-            "provision_terms": provision_terms.model_dump(),
+            "buyer_principal": principal.model_dump(mode="json"),
+            "provision_terms": _dump_payload(provision_terms, mode="json"),
             "proposal": pinned_proposal,
         }
-        sig, ts = _sign(f"negotiate_new:{listing_id}", buyer_private_key)
-        reply = _post(
+        trusted_seller_principals = resolve_seller_principals()
+        reply = _authenticated_json(
             f"{seller_url}/api/v1/negotiate/new",
             new_body,
-            signature=sig,
-            timestamp=ts,
-            identity_identifier=buyer_address,
+            signer=signer,
+            principal=principal,
+            method="POST",
+            operation="negotiate_new",
+            resource=listing_id,
+            expected_response_principals=trusted_seller_principals,
         )
+
+        raw_neg_id = reply.get("negotiation_id")
+        neg_id = raw_neg_id if isinstance(raw_neg_id, str) and raw_neg_id else None
+        seller_action = reply.get("action")
+        (
+            accepted_prov,
+            accepted_esc,
+            accepted_selection,
+            accepted_plan,
+            accepted_terms,
+        ) = _parse_reply(reply)
+        if seller_action in {"counter", "accept"} and accepted_prov is None:
+            raise RuntimeError(
+                "seller negotiation reply omitted accepted_provision_terms"
+            )
+        _validate_accepted_provision_terms(accepted_prov, provision_terms)
+        if expected_selection is not None and seller_action in {"counter", "accept"}:
+            _validate_selection_echo(accepted_selection, expected_selection)
+        agreed_amount = _amount(reply.get("proposal"))
+        if agreed_amount is None:
+            agreed_amount = initial_amount
+        if seller_action in {"counter", "accept"} and expected_selection is not None:
+            _validate_settlement_acceptance(
+                reply=reply,
+                selection=accepted_selection,
+                plan=accepted_plan,
+                expected_selection=expected_selection,
+                advertised_option=advertised_option,
+                expected_plan=None,
+                agreed_amount=agreed_amount,
+                buyer_principal=principal,
+                trusted_seller_principals=trusted_seller_principals,
+            )
         if on_round:
             on_round(0, new_body, reply)
-
-        neg_id = reply.get("negotiation_id")
-        seller_action = reply.get("action")
-        accepted_prov, accepted_esc, accepted_plan, accepted_terms = (
-            _parse_accepted_terms_from_reply(reply)
-        )
 
         if seller_action == "accept":
             return NegotiationOutcome(
                 status="agreed",
                 negotiation_id=neg_id,
-                agreed_amount=_amount(reply.get("proposal")) or initial_amount,
+                agreed_amount=agreed_amount,
                 unit_count=unit_count,
                 rounds=0,
                 accepted_provision_terms=accepted_prov,
                 accepted_escrow_proposal=accepted_esc,
+                settlement_selection=accepted_selection,
                 settlement_plan=accepted_plan,
                 accepted_escrow_terms=accepted_terms,
             )
@@ -611,7 +1023,7 @@ def negotiate_with_seller(
             our_escrow_proposal=pinned_proposal,
             available_resources={},
             max_rounds=max_rounds,
-            intermediate=dict(policy_params or {}),
+            intermediate=negotiation_policy_params,
         )
         try:
             next_move = run_negotiation_chain(chain, round_history, ctx)
@@ -620,17 +1032,19 @@ def negotiate_with_seller(
             # Release it with a protocol-level exit before erroring, so
             # the seller isn't left holding state until a watchdog.
             try:
-                sig, ts = _sign(f"negotiate_continue:{neg_id}", buyer_private_key)
-                _post(
+                _authenticated_json(
                     f"{seller_url}/api/v1/negotiate/{neg_id}",
                     {
                         "action": "exit",
                         "reason": "buyer_chain_no_decision",
-                        "buyer_address": buyer_address,
+                        "buyer_principal": principal.model_dump(mode="json"),
                     },
-                    signature=sig,
-                    timestamp=ts,
-                    identity_identifier=buyer_address,
+                    signer=signer,
+                    principal=principal,
+                    method="POST",
+                    operation="negotiate_continue",
+                    resource=neg_id,
+                    expected_response_principals=resolve_seller_principals(),
                 )
             except Exception as notify_exc:
                 logger.warning(
@@ -641,7 +1055,7 @@ def negotiate_with_seller(
 
         body: dict[str, Any] = {
             "action": next_move.action,
-            "buyer_address": buyer_address,
+            "buyer_principal": principal.model_dump(mode="json"),
         }
         if next_move.action in ("counter", "accept"):
             if next_move.proposal is None:
@@ -652,20 +1066,23 @@ def negotiate_with_seller(
         elif next_move.action in ("exit", "reject"):
             body["reason"] = next_move.reason or "buyer_exit"
 
-        sig, ts = _sign(f"negotiate_continue:{neg_id}", buyer_private_key)
-        reply = _post(
+        trusted_seller_principals = resolve_seller_principals()
+        reply = _authenticated_json(
             f"{seller_url}/api/v1/negotiate/{neg_id}",
             body,
-            signature=sig,
-            timestamp=ts,
-            identity_identifier=buyer_address,
+            signer=signer,
+            principal=principal,
+            method="POST",
+            operation="negotiate_continue",
+            resource=neg_id,
+            expected_response_principals=trusted_seller_principals,
         )
-        if on_round:
-            on_round(round_idx, body, reply)
 
         # If our chain rejected (shape guard veto), the buyer terminates
         # locally without trusting any seller reply.
         if next_move.action == "reject":
+            if on_round:
+                on_round(round_idx, body, reply)
             return NegotiationOutcome(
                 status="exited",
                 negotiation_id=neg_id,
@@ -679,23 +1096,58 @@ def negotiate_with_seller(
         if next_move.action == "accept":
             # We told the seller we accept; their reply should echo accept.
             if reply.get("action") == "accept":
-                reply_prov, reply_esc, reply_plan, reply_terms = (
-                    _parse_accepted_terms_from_reply(reply)
-                )
+                (
+                    reply_prov,
+                    reply_esc,
+                    reply_selection,
+                    reply_plan,
+                    reply_terms,
+                ) = _parse_reply(reply)
+                _validate_accepted_provision_terms(reply_prov, accepted_prov)
+                agreed_amount = _amount(reply.get("proposal"))
+                if agreed_amount is None:
+                    agreed_amount = _amount(next_move.proposal)
+                if expected_selection is not None:
+                    if agreed_amount is None:
+                        raise RuntimeError(
+                            "seller accept state omitted the negotiated amount"
+                        )
+                    _validate_settlement_acceptance(
+                        reply=reply,
+                        selection=reply_selection,
+                        plan=reply_plan,
+                        expected_selection=expected_selection,
+                        advertised_option=advertised_option,
+                        agreed_amount=agreed_amount,
+                        expected_plan=accepted_plan if resume is not None else None,
+                        buyer_principal=principal,
+                        trusted_seller_principals=trusted_seller_principals,
+                    )
+                if on_round:
+                    on_round(round_idx, body, reply)
                 return NegotiationOutcome(
                     status="agreed",
                     negotiation_id=neg_id,
-                    agreed_amount=(
-                        _amount(reply.get("proposal")) or _amount(next_move.proposal)
-                    ),
+                    agreed_amount=agreed_amount,
                     unit_count=unit_count,
                     rounds=round_idx,
                     accepted_provision_terms=reply_prov or accepted_prov,
                     accepted_escrow_proposal=reply_esc or accepted_esc,
-                    settlement_plan=reply_plan or accepted_plan,
+                    settlement_selection=(
+                        reply_selection
+                        if expected_selection is not None
+                        else reply_selection or accepted_selection
+                    ),
+                    settlement_plan=(
+                        reply_plan
+                        if expected_selection is not None
+                        else reply_plan or accepted_plan
+                    ),
                     accepted_escrow_terms=reply_terms or accepted_terms,
                 )
             # Non-accept reply to our accept is anomalous but treat as terminal.
+            if on_round:
+                on_round(round_idx, body, reply)
             return NegotiationOutcome(
                 status="exited",
                 negotiation_id=neg_id,
@@ -704,6 +1156,8 @@ def negotiate_with_seller(
                 rounds=round_idx,
             )
         if next_move.action == "exit":
+            if on_round:
+                on_round(round_idx, body, reply)
             return NegotiationOutcome(
                 status="exited",
                 negotiation_id=neg_id,
@@ -738,23 +1192,58 @@ def negotiate_with_seller(
 
         seller_action = reply.get("action")
         if seller_action == "accept":
-            reply_prov, reply_esc, reply_plan, reply_terms = (
-                _parse_accepted_terms_from_reply(reply)
-            )
+            (
+                reply_prov,
+                reply_esc,
+                reply_selection,
+                reply_plan,
+                reply_terms,
+            ) = _parse_reply(reply)
+            _validate_accepted_provision_terms(reply_prov, accepted_prov)
+            agreed_amount = _amount(seller_reply_proposal)
+            if agreed_amount is None:
+                agreed_amount = _amount(next_move.proposal)
+            if expected_selection is not None:
+                if agreed_amount is None:
+                    raise RuntimeError(
+                        "seller accept state omitted the negotiated amount"
+                    )
+                _validate_settlement_acceptance(
+                    reply=reply,
+                    selection=reply_selection,
+                    plan=reply_plan,
+                    expected_selection=expected_selection,
+                    advertised_option=advertised_option,
+                    expected_plan=accepted_plan if resume is not None else None,
+                    agreed_amount=agreed_amount,
+                    buyer_principal=principal,
+                    trusted_seller_principals=trusted_seller_principals,
+                )
+            if on_round:
+                on_round(round_idx, body, reply)
             return NegotiationOutcome(
                 status="agreed",
                 negotiation_id=neg_id,
-                agreed_amount=(
-                    _amount(seller_reply_proposal) or _amount(next_move.proposal)
-                ),
+                agreed_amount=agreed_amount,
                 unit_count=unit_count,
                 rounds=round_idx,
                 accepted_provision_terms=reply_prov or accepted_prov,
                 accepted_escrow_proposal=reply_esc or accepted_esc,
-                settlement_plan=reply_plan or accepted_plan,
+                settlement_selection=(
+                    reply_selection
+                    if expected_selection is not None
+                    else reply_selection or accepted_selection
+                ),
+                settlement_plan=(
+                    reply_plan
+                    if expected_selection is not None
+                    else reply_plan or accepted_plan
+                ),
                 accepted_escrow_terms=reply_terms or accepted_terms,
             )
         if seller_action in ("exit", "reject"):
+            if on_round:
+                on_round(round_idx, body, reply)
             return NegotiationOutcome(
                 status="exited",
                 negotiation_id=neg_id,
@@ -766,6 +1255,8 @@ def negotiate_with_seller(
             raise RuntimeError(
                 f"Unexpected seller action mid-negotiation: {seller_action!r}"
             )
+        if on_round:
+            on_round(round_idx, body, reply)
 
         round_idx += 1
 

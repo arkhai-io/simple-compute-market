@@ -3,14 +3,14 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
+from collections.abc import Awaitable, Callable
 from datetime import datetime, timezone
-from typing import Any, Awaitable, Callable
-
-from core_storefront.stage_log import stage_event
+from functools import partial
+from typing import Any
 
 from alkahest_py import AlkahestClient
-
 from compute_provisioning import (
     ComputeProvisioningClient,
     ComputeProvisioningJobError,
@@ -20,7 +20,14 @@ from compute_provisioning import (
     LeaseRegistration,
     LeaseTermination,
 )
+from core_storefront.stage_log import stage_event
 from market_fulfillment import VersionedEnvelope
+
+from market_storefront.services.capacity_client import (
+    build_capacity_client,
+    build_capacity_runtime,
+    build_fulfillment_client,
+)
 from market_storefront.services.vm_fulfillment_service import (
     fulfill_vm_obligation,
     persist_escrow_fields_with_retry,
@@ -28,13 +35,12 @@ from market_storefront.services.vm_fulfillment_service import (
 from market_storefront.services.vm_job_spec_service import (
     build_provisioning_job_spec as _vm_build_provisioning_job_spec,
 )
-
-from market_storefront.utils.config import CHAINS, settings, BASE_URL_OVERRIDE
-from market_storefront.services.capacity_client import (
-    build_capacity_client,
-    build_fulfillment_client,
+from market_storefront.utils.config import (
+    BASE_URL_OVERRIDE,
+    CHAINS,
+    get_provisioning_authorities,
+    settings,
 )
-from market_storefront.utils.sqlite_client import get_sqlite_client
 
 logger = logging.getLogger(__name__)
 
@@ -44,9 +50,9 @@ logger = logging.getLogger(__name__)
 _VM_MARKET = "vms"
 
 
-
 async def _do_provision(
     ssh_public_key: str,
+    sqlite_client: Any,
     *,
     vm_host: str | None,
     vm_target: str,
@@ -70,26 +76,64 @@ async def _do_provision(
     ``fulfillment_id`` but before polling starts, mirroring the legacy job-id
     hook this replaces.
     """
+    escrow = await sqlite_client.load_escrow(escrow_uid=escrow_uid)
+    if escrow is None or not escrow.get("negotiation_id"):
+        raise RuntimeError(
+            f"escrow {escrow_uid!r} has no accepted negotiation binding"
+        )
+    thread_binding = await sqlite_client.load_thread_binding(
+        negotiation_id=str(escrow["negotiation_id"])
+    )
+    sqlite_client.domain_registry.resolve(thread_binding.binding)
+    raw_context = escrow.get("fulfillment_context")
+    if isinstance(raw_context, str):
+        try:
+            context = json.loads(raw_context)
+        except json.JSONDecodeError as exc:
+            raise RuntimeError("stored fulfillment context is malformed") from exc
+    elif isinstance(raw_context, dict):
+        context = dict(raw_context)
+    elif raw_context is None:
+        context = {}
+    else:
+        raise RuntimeError("stored fulfillment context must be an object")
+    bound_context = sqlite_client.bind_fulfillment_context(
+        context,
+        thread_binding=thread_binding,
+    )
+    await sqlite_client.update_escrow(
+        escrow_uid=escrow_uid,
+        fulfillment_context=json.dumps(
+            bound_context,
+            sort_keys=True,
+            separators=(",", ":"),
+        ),
+    )
+    site_id = thread_binding.site_id
     fulfillment_client = build_fulfillment_client(
-        build_capacity_client(lambda: get_sqlite_client())
+        build_capacity_client(lambda: sqlite_client)
     )
 
     scheduled = await fulfillment_client.schedule_resource(
         FulfillmentScheduleRequest(
             capacity_reservation_id=capacity_reservation_id,
             market=_VM_MARKET,
-        )
+        ),
+        site_id=site_id,
     )
     if escrow_uid:
         await persist_escrow_fields_with_retry(
-            get_sqlite_client,
+            lambda: sqlite_client,
             escrow_uid=escrow_uid,
             capacity_reservation_id=capacity_reservation_id,
             settlement_resource_id=scheduled.settlement_resource_id,
         )
 
     connectivity = _connectivity_settings_from_storefront_config()
-    request_payload: dict[str, Any] = {"vm_target": vm_target, "ssh_pubkey": ssh_public_key}
+    request_payload: dict[str, Any] = {
+        "vm_target": vm_target,
+        "ssh_pubkey": ssh_public_key,
+    }
     if connectivity:
         request_payload["connectivity"] = connectivity
 
@@ -102,7 +146,8 @@ async def _do_provision(
                 schema_version=1,
                 payload=request_payload,
             ),
-        )
+        ),
+        site_id=site_id,
     )
 
     if on_job_submitted is not None:
@@ -123,6 +168,7 @@ async def _do_provision(
         capacity_reservation_id=capacity_reservation_id,
         timeout=timeout,
         poll_interval=poll_interval,
+        site_id=site_id,
     )
     if status.state == "failed":
         raise ComputeProvisioningJobError(
@@ -130,7 +176,9 @@ async def _do_provision(
         )
 
     envelope = await fulfillment_client.get_fulfillment_result(
-        accepted.fulfillment_id, capacity_reservation_id=capacity_reservation_id,
+        accepted.fulfillment_id,
+        capacity_reservation_id=capacity_reservation_id,
+        site_id=site_id,
     )
     return _fulfillment_result_to_legacy_shape(envelope)
 
@@ -145,7 +193,9 @@ def _connectivity_settings_from_storefront_config() -> dict[str, Any] | None:
     provisioning = settings.provisioning
     frp_server_addr = getattr(provisioning, "frp_server_addr", None) or None
     frp_domain = getattr(provisioning, "frp_domain", None) or None
-    frp_dashboard_password = getattr(provisioning, "frp_dashboard_password", None) or None
+    frp_dashboard_password = (
+        getattr(provisioning, "frp_dashboard_password", None) or None
+    )
     if not (frp_server_addr or frp_domain or frp_dashboard_password):
         return None
     return {
@@ -162,6 +212,7 @@ async def _poll_fulfillment_until_terminal(
     capacity_reservation_id: str,
     timeout: float,
     poll_interval: float,
+    site_id: str,
 ) -> Any:
     """Poll ``get_fulfillment_status`` until ``active``/``failed`` or timeout.
 
@@ -173,7 +224,9 @@ async def _poll_fulfillment_until_terminal(
     deadline = loop.time() + timeout
     while True:
         status = await fulfillment_client.get_fulfillment_status(
-            fulfillment_id, capacity_reservation_id=capacity_reservation_id,
+            fulfillment_id,
+            capacity_reservation_id=capacity_reservation_id,
+            site_id=site_id,
         )
         if status.state in ("active", "failed"):
             return status
@@ -228,7 +281,6 @@ def _fulfillment_result_to_legacy_shape(envelope: VersionedEnvelope) -> dict[str
     return result
 
 
-
 async def _do_shutdown(lease_end_utc: str, *, vm_host: str, vm_target: str) -> dict:
     """Schedule VM expiry via the provisioning service.
 
@@ -253,9 +305,9 @@ async def _build_provisioning_job_spec(
     order_dict: dict | None,
     ssh_public_key: str,
     duration_seconds: int,
-    sqlite_client: Any | None = None,
+    sqlite_client: Any,
 ) -> dict | None:
-    db = sqlite_client or get_sqlite_client()
+    db = sqlite_client
     return await _vm_build_provisioning_job_spec(
         order_dict=order_dict,
         ssh_public_key=ssh_public_key,
@@ -266,6 +318,7 @@ async def _build_provisioning_job_spec(
 
 async def _apply_fulfillment_failure_policy_adapter(
     *,
+    sqlite_client: Any,
     capacity_reservation_id: str | None,
     escrow_uid: str,
     listing_id: str | None,
@@ -274,13 +327,13 @@ async def _apply_fulfillment_failure_policy_adapter(
     message: str,
     source: str,
 ) -> None:
-    from market_storefront.utils.failure_policy import (
+    from market_storefront.failure_actions import (
         FulfillmentFailureContext,
         apply_fulfillment_failure_policy,
     )
 
     await apply_fulfillment_failure_policy(
-        get_sqlite_client(),
+        sqlite_client,
         FulfillmentFailureContext(
             capacity_reservation_id=capacity_reservation_id,
             escrow_uid=escrow_uid,
@@ -292,7 +345,22 @@ async def _apply_fulfillment_failure_policy_adapter(
         ),
         # In remote-capacity mode the hold lives in the site ledger; the
         # policy's release_capacity action must go back through the client.
-        capacity=build_capacity_client(lambda: get_sqlite_client()),
+        capacity=build_capacity_runtime(lambda: sqlite_client),
+    )
+
+
+def _provisioning_client(*, timeout: float) -> ComputeProvisioningClient:
+    from market_storefront import container
+
+    signer = container.resolved_marketplace_signer
+    if signer is None:
+        raise RuntimeError("storefront marketplace signer is unavailable")
+    return ComputeProvisioningClient(
+        settings.provisioning.service_url,
+        signer=signer,
+        caller_role="seller",
+        expected_authorities=get_provisioning_authorities(),
+        timeout=timeout,
     )
 
 
@@ -317,23 +385,21 @@ async def _register_vm_lease_with_settings(
     lease_end_dt = datetime.strptime(lease_end_utc, "%Y-%m-%d %H:%M").replace(
         tzinfo=timezone.utc,
     )
-    async with ComputeProvisioningClient(
-        settings.provisioning.service_url,
-        admin_key=settings.admin_api_key,
-        timeout=10,
-    ) as client:
-        await client.register_lease(LeaseRegistration(
-            capacity_reservation_id=capacity_reservation_id or resource_id,
-            deal_ref={"escrow_uid": escrow_uid},
-            executor_kind="vm",
-            executor_target=vm_target,
-            lease_start_utc=(
-                datetime.fromisoformat(lease_start_utc.replace("Z", "+00:00"))
-                if lease_start_utc
-                else None
-            ),
-            lease_end_utc=lease_end_dt,
-        ))
+    async with _provisioning_client(timeout=10) as client:
+        await client.register_lease(
+            LeaseRegistration(
+                capacity_reservation_id=capacity_reservation_id or resource_id,
+                deal_ref={"escrow_uid": escrow_uid},
+                executor_kind="vm",
+                executor_target=vm_target,
+                lease_start_utc=(
+                    datetime.fromisoformat(lease_start_utc.replace("Z", "+00:00"))
+                    if lease_start_utc
+                    else None
+                ),
+                lease_end_utc=lease_end_dt,
+            )
+        )
 
 
 async def terminate_vm_lease(
@@ -355,11 +421,7 @@ async def terminate_vm_lease(
     rather than needing to add provisioning-service surface area for it
     later. See `openspec/specs/vm-storefront-fulfillment/spec.md`.
     """
-    async with ComputeProvisioningClient(
-        settings.provisioning.service_url,
-        admin_key=settings.admin_api_key,
-        timeout=10,
-    ) as client:
+    async with _provisioning_client(timeout=10) as client:
         await client.terminate_lease(
             capacity_reservation_id,
             LeaseTermination(reason=reason),
@@ -367,6 +429,7 @@ async def terminate_vm_lease(
 
 
 async def fulfill_compute_obligation(
+    sqlite_client: Any,
     client: AlkahestClient | None,
     escrow_uid: str,
     ssh_public_key: str,
@@ -377,6 +440,7 @@ async def fulfill_compute_obligation(
     seller_order_id: str | None = None,
     negotiation_id: str | None = None,
     site_id: str | None = None,
+    settlement_mechanism: str = "alkahest.v1",
 ):
     """Provision compute and fulfill the obligation. Falls back to simulated flow if no client.
 
@@ -394,11 +458,13 @@ async def fulfill_compute_obligation(
     """
     held_reservation: dict | None = None
     if negotiation_id:
-        db = get_sqlite_client()
+        db = sqlite_client
         hold = await db.load_capacity_hold(negotiation_id=negotiation_id)
         if hold:
             held_reservation = dict(hold.get("payload") or {})
-            held_reservation.setdefault("capacity_reservation_id", hold.get("capacity_reservation_id"))
+            held_reservation.setdefault(
+                "capacity_reservation_id", hold.get("capacity_reservation_id")
+            )
             # Consume-once: whether the commit lands or falls back to a
             # fresh reserve, this hold row's job is done.
             await db.delete_capacity_hold(negotiation_id=negotiation_id)
@@ -412,17 +478,19 @@ async def fulfill_compute_obligation(
         start_utc=start_utc,
         listing_id=listing_id,
         seller_order_id=seller_order_id,
+        settlement_mechanism=settlement_mechanism,
         chain_configs=CHAINS,
         base_url=BASE_URL_OVERRIDE,
-        get_sqlite_client=get_sqlite_client,
-        # Late-bound factory: tests monkeypatch this module's
-        # get_sqlite_client, and the capacity client must follow it.
-        capacity=build_capacity_client(lambda: get_sqlite_client()),
+        get_sqlite_client=lambda: sqlite_client,
+        capacity=build_capacity_runtime(lambda: sqlite_client),
         stage_event=stage_event,
-        provision_vm=_do_provision,
+        provision_vm=partial(_do_provision, sqlite_client=sqlite_client),
         schedule_shutdown=_do_shutdown,
         register_lease=_register_vm_lease_with_settings,
-        apply_failure_policy=_apply_fulfillment_failure_policy_adapter,
+        apply_failure_policy=partial(
+            _apply_fulfillment_failure_policy_adapter,
+            sqlite_client=sqlite_client,
+        ),
         held_reservation=held_reservation,
         site_id=site_id,
     )

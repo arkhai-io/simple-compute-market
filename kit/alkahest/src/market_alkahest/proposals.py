@@ -3,7 +3,7 @@
 Turns negotiated ``EscrowProposal``s into the accepted-escrow response
 artifacts (settlement plan + legacy flat terms) and builds the buyer's
 round-0 proposal from a listing's ``accepted_escrows`` entry. Shared by
-every scalar-escrow domain (moved here from ``market_storefront.settlement``
+every scalar-escrow domain (moved here from ``domains.vms.settlement``
 when the API-credits domain became the second consumer).
 """
 
@@ -154,7 +154,7 @@ def accepted_escrow_artifacts_from_proposal(
     )
     fields = dict(proposal_model.fields or {})
     if uses_scalar_amount:
-        fields["amount"] = int(agreed_amount)
+        fields["amount"] = str(agreed_amount)
     accepted = EscrowProposal(
         chain_name=proposal_model.chain_name,
         escrow_address=proposal_model.escrow_address,
@@ -165,7 +165,7 @@ def accepted_escrow_artifacts_from_proposal(
         expiration_unix=proposal_model.expiration_unix,
     )
 
-    accepted_payload = accepted.model_dump()
+    accepted_payload = accepted.model_dump(mode="json")
     if accepted_payload.get("demands") is None:
         accepted_payload.pop("demands", None)
     out: dict[str, Any] = {
@@ -201,13 +201,20 @@ def accepted_escrow_artifacts_from_proposal(
             addr_config_path=(chain_config_paths or {}).get(accepted.chain_name),
             service_terms=service_terms,
         )
-        out["settlement_plan"] = plan.model_dump()
-        # LEGACY mirror of the plan's alkahest obligations, kept for
-        # buyers that predate the settlement-plan carrier. Leaves with
-        # the client-wheel wire bump.
-        out["accepted_escrow_terms"] = [
-            terms.model_dump() for terms in escrow_terms_from_settlement_plan(plan)
-        ]
+        out["settlement_plan"] = plan.model_dump(mode="json")
+        # Legacy escrow terms remain part of the signed JSON response until
+        # the client wire carrier is retired. Keep uint256 fields in their
+        # canonical decimal-string form at that boundary.
+        accepted_terms: list[dict[str, Any]] = []
+        for terms in escrow_terms_from_settlement_plan(plan):
+            payload = terms.model_dump(mode="json")
+            obligation_data = dict(payload.get("obligation_data") or {})
+            amount = obligation_data.get("amount")
+            if isinstance(amount, int) and not isinstance(amount, bool):
+                obligation_data["amount"] = str(amount)
+            payload["obligation_data"] = obligation_data
+            accepted_terms.append(payload)
+        out["accepted_escrow_terms"] = accepted_terms
     except Exception as exc:
         out["accepted_escrow_terms_error"] = str(exc)
     return out

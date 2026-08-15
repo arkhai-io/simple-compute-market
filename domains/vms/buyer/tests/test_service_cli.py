@@ -4,45 +4,55 @@ from __future__ import annotations
 
 from unittest.mock import patch
 
-from eth_account import Account
-from eth_account.messages import encode_defunct
+from market_identity import Ed25519Signer, TrustedIdentitySet
 
 from domains.vms.buyer import service_cli
 
-BUYER_KEY = "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80"
-BUYER_ADDR = Account.from_key(BUYER_KEY).address
-ESCROW = "0x" + "ab" * 32
+SIGNER = Ed25519Signer(b"\x31" * 32)
+SELLER = Ed25519Signer(b"\x32" * 32).identity
+DEAL_REF = "deal-123"
 
 
-def test_heartbeat_signature_matches_seller_canonical_format():
-    """The signed message must be deal_heartbeat:<uid>:<ts> — the exact
-    string core_storefront.auth reconstructs on the seller side."""
+def test_heartbeat_uses_v2_body_bound_principals_and_refreshes_response_trust():
     captured = {}
+    refreshes = 0
 
-    def fake_post(url, body, *, signature, timestamp, **kw):
-        captured.update(url=url, body=body, signature=signature, timestamp=timestamp)
-        return {"heartbeat_count": 1, "next_expected_by_unix": timestamp + 60}
+    def resolve_seller_principals():
+        nonlocal refreshes
+        refreshes += 1
+        return TrustedIdentitySet(identities=(SELLER,))
 
-    with patch("domains.vms.buyer.buyer_client._post", side_effect=fake_post):
+    def fake_signed_json(url, body, **kwargs):
+        captured.update(url=url, body=body, kwargs=kwargs)
+        kwargs["resolve_response_principals"]()
+        return {"heartbeat_count": 1, "next_expected_by_unix": 60}
+
+    with patch(
+        "core_buyer.orchestration._signed_json",
+        side_effect=fake_signed_json,
+    ):
         ack = service_cli.send_heartbeat(
             seller_url="http://seller:8001/",
-            escrow_uid=ESCROW,
-            buyer_address=BUYER_ADDR,
-            buyer_private_key=BUYER_KEY,
+            deal_ref=DEAL_REF,
+            principal=SIGNER.identity,
+            signer=SIGNER,
+            seller_principal=SELLER,
+            resolve_seller_principals=resolve_seller_principals,
         )
 
     assert ack["heartbeat_count"] == 1
-    assert captured["url"] == f"http://seller:8001/api/v1/deals/{ESCROW}/heartbeat"
-    assert captured["body"]["buyer_address"] == BUYER_ADDR
-    assert captured["body"]["payload"] == {
-        "schema": "vms.heartbeat.v1", "status": "healthy",
-    }
-
-    message = f"deal_heartbeat:{ESCROW}:{captured['timestamp']}"
-    recovered = Account.recover_message(
-        encode_defunct(text=message), signature=captured["signature"]
+    assert captured["url"] == f"http://seller:8001/api/v1/deals/{DEAL_REF}/heartbeat"
+    assert captured["body"]["buyer_principal"] == SIGNER.identity.model_dump(
+        mode="json"
     )
-    assert recovered == BUYER_ADDR
+    assert captured["body"]["seller_principal"] == SELLER.model_dump(mode="json")
+    assert captured["body"]["payload"] == {
+        "schema": "vms.heartbeat.v1",
+        "status": "healthy",
+    }
+    assert captured["kwargs"]["operation"] == "deal_heartbeat"
+    assert captured["kwargs"]["resource"] == DEAL_REF
+    assert refreshes == 1
 
 
 def test_expiration_extraction_prefers_settlement_plan():
