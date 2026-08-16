@@ -19,20 +19,23 @@ from unittest.mock import AsyncMock, patch
 import httpx
 import pytest
 import pytest_asyncio
-from fastapi import FastAPI
-from market_identity import Ed25519Signer, TrustedIdentitySet
-from storefront_client.client import StorefrontClient, StorefrontClientError
 from core_storefront.site_projections import (
     ProjectionCache,
     ProjectionIdentity,
     ProjectionState,
 )
+from fastapi import FastAPI
+from market_identity import Ed25519Signer, TrustedIdentitySet
+from storefront_client.client import StorefrontClient, StorefrontClientError
 
 import market_storefront.container as _container
 from market_storefront.controllers.listings_controller import router as listings_router
+from market_storefront.domain_runtime import (
+    build_vm_storefront_domain,
+    build_vm_storefront_registry,
+)
 from market_storefront.middleware import admin_identity as _admin_identity
 from market_storefront.middleware.seller_auth import listing_lifecycle_middleware
-from market_storefront.domain_runtime import build_vm_storefront_domain, build_vm_storefront_registry
 from market_storefront.publication_binding import prepare_vm_listing_binding
 from market_storefront.services import site_projection_cache
 from market_storefront.utils.sqlite_client import SQLiteClient
@@ -503,6 +506,11 @@ _OFFER = {
     "region": "California, US",
     "virtualization_type": "vm",
 }
+_CAPACITY_SOURCE = {
+    "site_id": _HOME_SITE,
+    "resource_id": _OFFER["resource_id"],
+    "gpu_count": _OFFER["gpu_count"],
+}
 # Stub accepted_escrows for API-contract tests. Address-correctness is the
 # storefront's concern at negotiate time; at listing-create time the
 # storefront just stores what it's told.
@@ -784,9 +792,10 @@ class TestCreateListing:
         self, seller_auth_full_client
     ):
         """Valid request creates a listing and returns a listing_id."""
-        c, _ = seller_auth_full_client
+        c, db = seller_auth_full_client
         result = await c.create_listing(
             offer=_OFFER,
+            capacity_source=_CAPACITY_SOURCE,
             accepted_escrows=_ACCEPTED_ESCROWS,
             paused=True,
         )
@@ -797,6 +806,11 @@ class TestCreateListing:
             result.listing_id if hasattr(result, "listing_id") else result["listing_id"]
         )
         assert listing_id, "listing_id must be non-empty"
+        binding = await db.load_listing_binding(listing_id=listing_id)
+        assert binding is not None
+        assert binding.site_id == _HOME_SITE
+        assert binding.physical_resource_id == _OFFER["resource_id"]
+        assert binding.binding.offering_mode == "vm"
 
     async def test_rejects_offer_with_neither_pool_id_nor_resource_id(
         self,
@@ -812,6 +826,7 @@ class TestCreateListing:
         with pytest.raises(StorefrontClientError) as exc_info:
             await c.create_listing(
                 offer=offer_without_identity,
+                capacity_source=_CAPACITY_SOURCE,
                 accepted_escrows=_ACCEPTED_ESCROWS,
                 paused=True,
             )
@@ -824,6 +839,7 @@ class TestCreateListing:
         assert "pool_id" not in _OFFER  # confirms this case is what's exercised
         result = await c.create_listing(
             offer=_OFFER,
+            capacity_source=_CAPACITY_SOURCE,
             accepted_escrows=_ACCEPTED_ESCROWS,
             paused=True,
         )
@@ -831,6 +847,24 @@ class TestCreateListing:
             result.listing_id if hasattr(result, "listing_id") else result["listing_id"]
         )
         assert listing_id, "listing_id must be non-empty"
+
+    async def test_rejects_capacity_source_that_disagrees_with_offer(
+        self,
+        seller_auth_full_client,
+    ):
+        c, _ = seller_auth_full_client
+        with pytest.raises(StorefrontClientError) as exc_info:
+            await c.create_listing(
+                offer=_OFFER,
+                capacity_source={
+                    **_CAPACITY_SOURCE,
+                    "resource_id": "other-resource",
+                },
+                accepted_escrows=_ACCEPTED_ESCROWS,
+                paused=True,
+            )
+        assert "400" in str(exc_info.value)
+        assert "must match the offer resource" in str(exc_info.value)
 
     async def test_listing_persisted_in_db(self, seller_auth_full_client):
         """Created listing returns a non-None listing_id in the response.
@@ -843,6 +877,7 @@ class TestCreateListing:
         c, _ = seller_auth_full_client
         result = await c.create_listing(
             offer=_OFFER,
+            capacity_source=_CAPACITY_SOURCE,
             accepted_escrows=_ACCEPTED_ESCROWS,
             paused=True,
         )
@@ -868,6 +903,7 @@ class TestCreateListing:
         c, _ = seller_auth_full_client
         result = await c.create_listing(
             offer=_OFFER,
+            capacity_source=_CAPACITY_SOURCE,
             accepted_escrows=_ACCEPTED_ESCROWS,
             paused=True,
         )
@@ -891,6 +927,7 @@ class TestCreateListing:
         # If the double-wrap bug is present this raises StorefrontClientError with '500'
         result = await c.create_listing(
             offer=_OFFER,
+            capacity_source=_CAPACITY_SOURCE,
             accepted_escrows=_ACCEPTED_ESCROWS,
             paused=True,
         )

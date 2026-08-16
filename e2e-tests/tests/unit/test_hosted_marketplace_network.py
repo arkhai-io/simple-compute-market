@@ -47,6 +47,7 @@ def test_protected_listing_declares_vm_offering_mode() -> None:
     marketplace = object.__new__(NetworkMarketplacePort)
     marketplace.seller = Seller()
     marketplace._resource_id = "resource-1"
+    marketplace._site_id = "default"
     marketplace._funding_profile = network.FundingProfile.CARD
     marketplace._interaction = network.FundingMode.INTERACTIVE
 
@@ -57,6 +58,11 @@ def test_protected_listing_declares_vm_offering_mode() -> None:
         **network._OFFER,
         "resource_id": "resource-1",
         "virtualization_type": "vm",
+    }
+    assert captured["capacity_source"] == {
+        "site_id": "default",
+        "resource_id": "resource-1",
+        "gpu_count": 1,
     }
 
 def test_primary_registry_authority_uses_advertised_url_not_runtime_endpoint() -> None:

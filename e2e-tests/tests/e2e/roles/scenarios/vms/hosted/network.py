@@ -247,6 +247,10 @@ class NetworkMarketplacePort:
             _required("HOSTED_SETTLEMENT_E2E_ADMIN_IDENTITY_CREDENTIAL"),
         )
         self._resource_id = f"{_RESOURCE_ID_PREFIX}-{uuid.uuid4().hex[:12]}"
+        capacity_sites = self.storefront_config.get("Capacity", {}).get("sites", {})
+        if not isinstance(capacity_sites, dict) or not capacity_sites:
+            raise RuntimeError("hosted storefront config requires a capacity site")
+        self._site_id = next(iter(capacity_sites))
         self._host_id = self._resource_id
         with SyncProvisioningClient(
             self.provisioning_url,
@@ -457,6 +461,11 @@ class NetworkMarketplacePort:
     def create_and_publish_listing(self) -> ListingSnapshot:
         created = self.seller.create_listing(
             offer={**_OFFER, "resource_id": self._resource_id},
+            capacity_source={
+                "site_id": self._site_id,
+                "resource_id": self._resource_id,
+                "gpu_count": 1,
+            },
             settlements=[
                 {
                     "mechanism": "fiat.stripe.v1",

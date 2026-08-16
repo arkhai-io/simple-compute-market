@@ -6,7 +6,24 @@ from typing import Any
 
 from core_storefront.models.listing_models import CreateListingRequest
 from market_settlement_runtime import SettlementPublicationClause
-from pydantic import Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator
+
+
+class VmCapacitySource(BaseModel):
+    """Trusted capacity provenance bound atomically to a VM listing."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    site_id: str = Field(min_length=1)
+    pool_id: str | None = Field(default=None, min_length=1)
+    resource_id: str | None = Field(default=None, min_length=1)
+    gpu_count: int = Field(default=1, ge=1)
+
+    @model_validator(mode="after")
+    def require_capacity_identity(self) -> VmCapacitySource:
+        if self.pool_id is None and self.resource_id is None:
+            raise ValueError("capacity source requires pool_id or resource_id")
+        return self
 
 
 
@@ -17,6 +34,12 @@ class VmCreateListingRequest(CreateListingRequest):
     settlements: list[SettlementPublicationClause] = Field(
         default_factory=list,
         description="Typed settlement clauses compiled into public options.",
+    )
+    capacity_source: VmCapacitySource = Field(
+        description=(
+            "Trusted site and pool or Physical Resource provenance persisted "
+            "with the listing before publication."
+        ),
     )
 
     @model_validator(mode="before")

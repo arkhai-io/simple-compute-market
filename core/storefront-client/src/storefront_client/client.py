@@ -1245,6 +1245,7 @@ class StorefrontClient(_StorefrontClientBase):
         self,
         *,
         offer: dict[str, Any],
+        capacity_source: dict[str, Any],
         accepted_escrows: list[dict[str, Any]] | None = None,
         settlements: list[dict[str, Any]] | None = None,
         settlement_options: list[dict[str, Any]] | None = None,
@@ -1257,6 +1258,7 @@ class StorefrontClient(_StorefrontClientBase):
         """Create a listing through the seller-authenticated v2 contract."""
         body = {
             "offer": offer,
+            "capacity_source": capacity_source,
             "accepted_escrows": accepted_escrows or [],
             "settlements": settlements or [],
             "settlement_options": settlement_options or [],
@@ -2490,6 +2492,7 @@ class SyncStorefrontClient(_StorefrontClientBase):
         self,
         *,
         offer: dict[str, Any],
+        capacity_source: dict[str, Any],
         accepted_escrows: list[dict[str, Any]] | None = None,
         settlements: list[dict[str, Any]] | None = None,
         settlement_options: list[dict[str, Any]] | None = None,
@@ -2502,6 +2505,7 @@ class SyncStorefrontClient(_StorefrontClientBase):
         """Create a listing through the seller-authenticated v2 contract."""
         body = {
             "offer": offer,
+            "capacity_source": capacity_source,
             "accepted_escrows": accepted_escrows or [],
             "settlements": settlements or [],
             "settlement_options": settlement_options or [],

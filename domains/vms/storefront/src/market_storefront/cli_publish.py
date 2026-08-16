@@ -18,8 +18,8 @@ Assumes the seller agent is already running (mirror of `market buy`).
 """
 
 from __future__ import annotations
-import asyncio
 
+import asyncio
 import json
 import logging
 import sqlite3
@@ -73,8 +73,8 @@ from storefront_client import (
     SyncStorefrontClient,
 )
 
-from .publication_binding import record_vm_listing_binding
 from .cli_common import _resolve_db_path, resolve_storefront_url
+from .publication_binding import record_vm_listing_binding
 from .publication_wiring import (
     VmPublicationSourceCallbacks,
     build_vm_storefront_publication_selection,
@@ -466,6 +466,7 @@ def _open_order_resource_ids(db_path: str) -> set[str]:
 def _publish_offer(
     agent_url: str,
     offer: dict,
+    capacity_source: dict[str, Any],
     accepted_escrows: list[dict],
     demands: list[dict],
     max_duration_seconds: int | None,
@@ -485,6 +486,7 @@ def _publish_offer(
         try:
             resp = client.create_listing(
                 offer=offer,
+                capacity_source=capacity_source,
                 accepted_escrows=accepted_escrows,
                 settlements=settlements,
                 demands=demands,
@@ -979,7 +981,7 @@ def _publish_command_round(
     """Publish one listing per available slice from complete settlement clauses."""
 
     listing_clauses: dict[int, list[dict[str, Any]]] = {}
-
+    listing_capacity_sources: dict[int, dict[str, Any]] = {}
     def build_payload(
         adapter: PublicationSource,
         candidate: dict[str, Any],
@@ -1015,6 +1017,12 @@ def _publish_command_round(
         listing_clauses[id(offer)] = [
             clause.model_dump(mode="json", exclude_defaults=True) for clause in clauses
         ]
+        listing_capacity_sources[id(offer)] = {
+            "site_id": candidate.get("site_id"),
+            "pool_id": candidate.get("pool_id"),
+            "resource_id": candidate.get("resource_id"),
+            "gpu_count": candidate.get("gpu_count") or 1,
+        }
         raw_max_duration = (
             pricing_resource.get("max_duration_seconds")
             if pricing_resource.get("max_duration_seconds") is not None
@@ -1032,6 +1040,7 @@ def _publish_command_round(
             return _publish_offer(
                 base_url,
                 offer,
+                listing_capacity_sources.pop(id(offer)),
                 accepted_escrows,
                 demands,
                 max_duration_seconds,

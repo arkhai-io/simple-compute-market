@@ -390,6 +390,21 @@ binding is recorded.
 - **THEN** the kit publishes it only after the domain hook confirms that its
   exact site, source, and advertised offering mode equal durable local state
 
+#### Scenario: An authenticated seller creates a capacity-backed listing
+
+- **WHEN** the seller submits a schema-valid public offer with its exact
+  trusted site and pool or Physical Resource source
+- **THEN** the storefront verifies that the source identity, GPU quantity,
+  configured site, and offering mode match the offer and atomically persists
+  the listing and immutable binding before registry publication
+
+#### Scenario: Seller source provenance disagrees with the offer
+
+- **WHEN** the submitted site is unconfigured or the source pool, Physical
+  Resource, GPU quantity, or offering mode differs from the public offer
+- **THEN** listing creation fails before local listing persistence or registry
+  publication
+
 #### Scenario: Capacity changes after publication
 
 - **WHEN** a configured site emits a consuming, releasing, or mixed-direction

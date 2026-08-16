@@ -116,6 +116,12 @@ carries one exact `CapacityBinding(site_id, offering_mode, source_id)` whose
 mode is declared by the selected Resource Pool and matches the public offer.
 Commit, release, fulfillment, and restart use the recorded site and never
 default a mode or fan out to another authority.
+Seller-authenticated creation carries the capacity source separately from the
+public resource. The storefront checks that source against the configured site
+topology and the parsed offer, then writes the listing projection and immutable
+binding in one SQLite transaction before publishing. This prevents a visible
+listing from existing without the authority route required by negotiation,
+reservation, fulfillment, and recovery.
 
 Settlement servicing keeps a domain-neutral
 `StorefrontSettlementFulfillmentInput` with the accepted thread binding, buyer

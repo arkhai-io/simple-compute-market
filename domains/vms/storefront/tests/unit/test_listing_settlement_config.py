@@ -7,7 +7,10 @@ import pytest
 from market_settlement_runtime import SettlementPublicationClause
 from pydantic import ValidationError
 
-from market_storefront.domain_runtime import build_vm_storefront_domain, build_vm_storefront_registry
+from market_storefront.domain_runtime import (
+    build_vm_storefront_domain,
+    build_vm_storefront_registry,
+)
 from market_storefront.models.listing_models import VmCreateListingRequest
 from market_storefront.services.listing_service import ListingService
 from tests.fake_site import TEST_MARKETPLACE_SIGNER, TEST_SITE_AUTHORITIES
@@ -20,6 +23,12 @@ _COLLABORATORS = vm_listing_collaborators(
     signer=TEST_MARKETPLACE_SIGNER,
     authorities=TEST_SITE_AUTHORITIES,
 )
+_CAPACITY_SOURCE = {
+    "site_id": "site-test",
+    "resource_id": "resource-1",
+    "gpu_count": 1,
+}
+
 
 
 def _repository(**values):
@@ -54,6 +63,7 @@ def test_clause_only_listing_request_is_a_valid_publication_input() -> None:
             "sla": 99.0,
             "virtualization_type": "vm",
         },
+        capacity_source=_CAPACITY_SOURCE,
         settlements=[
             SettlementPublicationClause(
                 mechanism="fiat.stripe.v1",
@@ -108,7 +118,7 @@ async def test_clause_only_create_persists_canonical_clause_before_publication(
         "params": {},
     }
     db = _repository(
-        upsert_listing=AsyncMock(),
+        upsert_listing_with_binding=AsyncMock(),
     )
     composition = SimpleNamespace(
         publication_artifacts=AsyncMock(return_value=([], [option], ()))
@@ -142,6 +152,7 @@ async def test_clause_only_create_persists_canonical_clause_before_publication(
             "sla": 99.0,
             "virtualization_type": "vm",
         },
+        capacity_source=_CAPACITY_SOURCE,
         settlements=[clause],
     )
 
@@ -155,9 +166,9 @@ async def test_clause_only_create_persists_canonical_clause_before_publication(
         },
         clauses=[clause],
     )
-    assert db.upsert_listing.await_args.kwargs["publication_clauses"] == [
-        clause.model_dump(mode="json", exclude_defaults=True)
-    ]
+    assert db.upsert_listing_with_binding.await_args.kwargs[
+        "publication_clauses"
+    ] == [clause.model_dump(mode="json", exclude_defaults=True)]
 
 
 @pytest.mark.asyncio
@@ -174,6 +185,7 @@ async def test_direct_settlement_options_are_rejected() -> None:
     )
     request = VmCreateListingRequest(
         offer={"virtualization_type": "vm"},
+        capacity_source=_CAPACITY_SOURCE,
         settlement_options=[
             {
                 "option_id": "direct",
@@ -229,6 +241,7 @@ async def test_registration_composition_receives_ordered_hosted_clauses() -> Non
     ]
     request = VmCreateListingRequest(
         offer={"virtualization_type": "vm"},
+        capacity_source=_CAPACITY_SOURCE,
         settlements=clauses,
     )
 

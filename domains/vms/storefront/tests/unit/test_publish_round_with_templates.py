@@ -17,7 +17,6 @@ from market_storefront.domain_runtime import (
 )
 from market_storefront.utils.sqlite_client import SQLiteClient
 
-
 _VM_REGISTRY = build_vm_storefront_registry(build_vm_storefront_domain())
 
 
@@ -93,6 +92,7 @@ def _run_round(db_path: str, command_settlements, monkeypatch):
     def publish_offer(
         agent_url,
         offer,
+        capacity_source,
         accepted_escrows,
         demands,
         max_duration_seconds,
@@ -119,6 +119,7 @@ def _run_round(db_path: str, command_settlements, monkeypatch):
         published_payloads.append(
             {
                 "agent_url": agent_url,
+                "capacity_source": capacity_source,
                 "offer": offer,
                 "accepted_escrows": accepted_escrows,
                 "demands": demands,
@@ -225,6 +226,12 @@ def test_resource_settlements_replace_command_settlements(tmp_path, monkeypatch)
 
     assert not result.failed
     assert len(result.published) == 1
+    assert payloads[0]["capacity_source"] == {
+        "site_id": "site-a",
+        "pool_id": "compute-resource-clauses",
+        "resource_id": "compute-resource-clauses",
+        "gpu_count": 1,
+    }
     assert [clause["mechanism"] for clause in payloads[0]["settlements"]] == [
         "fiat.stripe.v1"
     ]

@@ -14,6 +14,10 @@ from collections.abc import Callable
 from datetime import datetime
 from typing import Any
 
+from core_storefront.domain_registry import (
+    StorefrontDomainBinding,
+    StorefrontDomainRegistry,
+)
 from core_storefront.models.listing_models import (
     ArbitrateRequest,
     ClaimRequest,
@@ -24,22 +28,21 @@ from core_storefront.models.listing_models import (
     ReclaimRequest,
     RefundRequest,
 )
-from core_storefront.domain_registry import (
-    StorefrontDomainBinding,
-    StorefrontDomainRegistry,
-)
 from core_storefront.stage_log import stage_event
-from domains.vms.listings.resources import parse_resource_from_dict
 from domains.vms.listings.models import Listing
+from domains.vms.listings.resources import parse_resource_from_dict
 from domains.vms.negotiation.policies import _amount_from_proposal
-from market_capacity_publication import CapacityRuntime
+from market_capacity_publication import CapacityBinding, CapacityRuntime
 from market_core import MarketDomainContract
 from market_identity import Identity, Signer
 from market_settlement_runtime import (
     SettlementPublicationClause,
     compile_settlement_publication_clause,
 )
+
+from market_storefront.models.listing_models import VmCreateListingRequest
 from market_storefront.negotiation_runtime import compute_round_zero_decision
+from market_storefront.publication_binding import prepare_vm_listing_binding
 
 logger = logging.getLogger(__name__)
 
@@ -325,7 +328,7 @@ class ListingService:
         return accepted, options
 
     def _parse_offer_and_escrows(
-        self, request: CreateListingRequest
+        self, request: VmCreateListingRequest
     ) -> tuple[
         Any,
         list[dict[str, Any]],
@@ -365,7 +368,7 @@ class ListingService:
         )
 
     async def create_listing(
-        self, request: CreateListingRequest
+        self, request: VmCreateListingRequest
     ) -> CreateListingResponse:
         """Validate the seller's create request, mint a listing_id, write the
         local row, and (unless paused) publish to the registry.
@@ -410,10 +413,36 @@ class ListingService:
         listing_dict = listing.model_dump(mode="json")
         listing_id = listing.listing_id
 
+        capacity_source = request.capacity_source.model_dump(mode="json")
+        if (
+            capacity_source["pool_id"] != offer.pool_id
+            or capacity_source["resource_id"] != offer.resource_id
+            or capacity_source["gpu_count"] != offer.gpu_count
+        ):
+            raise ValueError(
+                "capacity source identity and gpu_count must match the offer resource"
+            )
+        source_id = capacity_source["pool_id"] or capacity_source["resource_id"]
+        self._capacity_runtime.require_binding(
+            CapacityBinding(
+                site_id=capacity_source["site_id"],
+                offering_mode=self._binding.offering_mode,
+                source_id=source_id,
+            )
+        )
+        binding = prepare_vm_listing_binding(
+            listing_id=listing_id,
+            candidate=capacity_source,
+        )
+        if binding.binding != self._binding:
+            raise RuntimeError(
+                "listing capacity source did not resolve to the startup-owned VM domain"
+            )
+
         now_iso = datetime.now().isoformat()
         try:
-            await self._db.upsert_listing(
-                listing_id=listing_id,
+            await self._db.upsert_listing_with_binding(
+                binding=binding,
                 status="open",
                 created_at=now_iso,
                 updated_at=now_iso,
@@ -433,7 +462,11 @@ class ListingService:
                 paused=bool(request.paused),
             )
         except Exception as exc:
-            logger.error("[LISTINGS] upsert_listing %s failed: %s", listing_id, exc)
+            logger.error(
+                "[LISTINGS] upsert_listing_with_binding %s failed: %s",
+                listing_id,
+                exc,
+            )
             raise
 
         if request.paused:

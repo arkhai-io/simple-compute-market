@@ -63,6 +63,11 @@ async with StorefrontClient(
 ) as client:
     created = await client.create_listing(
         offer={...},
+        capacity_source={
+            "site_id": "site-a",
+            "resource_id": "resource-1",
+            "gpu_count": 1,
+        },
         accepted_escrows=[...],
         request_id="publish-20260811-1",
     )
