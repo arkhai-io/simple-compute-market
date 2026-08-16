@@ -1,5 +1,6 @@
 from __future__ import annotations
 from types import SimpleNamespace
+import json
 
 from arkhai_bare_metal import (
     BareMetalResourceProjection,
@@ -118,6 +119,7 @@ def test_one_shot_publication_builds_registry_from_runtime_domain(monkeypatch):
     selection = object()
     closed = []
     captured = {}
+    summary_resource = _projection().resources[0]
 
     monkeypatch.setattr(
         publication_cli, "build_runtime_from_environment", lambda: runtime
@@ -145,7 +147,12 @@ def test_one_shot_publication_builds_registry_from_runtime_domain(monkeypatch):
         publication_cli,
         "run_bare_metal_publication",
         lambda value, **_kwargs: (
-            SimpleNamespace(closed=[], published=[], failed=[], skipped=[])
+            SimpleNamespace(
+                closed=[],
+                published=[{"resource": summary_resource}],
+                failed=[],
+                skipped=[],
+            )
             if value is selection
             else None
         ),
@@ -160,11 +167,13 @@ def test_one_shot_publication_builds_registry_from_runtime_domain(monkeypatch):
     }.items():
         monkeypatch.setenv(name, value)
 
-    assert publication_cli.run_publication_once() == {
+    output = publication_cli.run_publication_once()
+    assert output == {
         "closed": [],
-        "published": [],
+        "published": [{"resource": summary_resource.model_dump(mode="json")}],
         "failed": [],
         "skipped": [],
     }
+    json.dumps(output)
     assert captured == {"domain": domain}
     assert closed == [True]

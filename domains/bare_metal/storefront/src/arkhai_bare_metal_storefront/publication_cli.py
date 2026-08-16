@@ -21,6 +21,7 @@ from core_storefront.publication_command import (
 )
 from market_identity import Identity, TrustedIdentitySet
 from market_settlement_runtime import SettlementPublicationClause
+from pydantic_core import to_jsonable_python
 from registry_client import ListingRequest, SyncRegistryClient, UpdateListingRequest
 
 from .publication import (
@@ -240,12 +241,14 @@ def run_publication_once() -> dict[str, Any]:
                 publish_offer=publish_offer,
             ),
         )
-        return {
-            "closed": result.closed,
-            "published": result.published,
-            "failed": result.failed,
-            "skipped": result.skipped,
-        }
+        return to_jsonable_python(
+            {
+                "closed": result.closed,
+                "published": result.published,
+                "failed": result.failed,
+                "skipped": result.skipped,
+            }
+        )
     finally:
         client.close()
 
