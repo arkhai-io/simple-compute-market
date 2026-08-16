@@ -72,6 +72,15 @@ def _safe_projection(projection: dict[str, Any]) -> dict[str, Any]:
     return safe
 
 
+def _validate_hosted_option_binding(
+    listing: BareMetalListing,
+    *,
+    physical_host_id: str | None,
+) -> None:
+    if listing.physical_host_id != physical_host_id:
+        raise typer.BadParameter("hosted option conflicts with trusted listing")
+
+
 def _recovered_deal(
     run_id: str,
     config_path: str | None,
@@ -217,11 +226,10 @@ def buy_bare_metal(
     )
     validate_buyer_selection(demand=demand, advertised_options=options)
     trusted_listing = BareMetalListing.model_validate(listing.offer)
-    if (
-        trusted_listing.site_id != facts.site_id
-        or trusted_listing.physical_host_id != facts.physical_resource_id
-    ):
-        raise typer.BadParameter("hosted option conflicts with trusted listing")
+    _validate_hosted_option_binding(
+        trusted_listing,
+        physical_host_id=facts.physical_host_id,
+    )
     run_log = RunLog.start(
         profile_id=identity.profile_id,
         principal=identity.principal,

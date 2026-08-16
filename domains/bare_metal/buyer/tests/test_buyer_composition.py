@@ -4,10 +4,16 @@ from pathlib import Path
 import json
 
 import pytest
-from arkhai_bare_metal_buyer.cli import _json, _safe_projection
+import typer
+from arkhai_bare_metal_buyer.cli import (
+    _json,
+    _safe_projection,
+    _validate_hosted_option_binding,
+)
 from arkhai_bare_metal_buyer.config import load_bare_metal_buyer_config
 from arkhai_bare_metal_buyer.plugin import domain
 from market_core import DomainCapability
+from arkhai_bare_metal import BareMetalListing
 
 from arkhai_bare_metal_buyer.fulfillment import BareMetalFulfillmentTransport
 from market_identity import IdentityScheme, TrustedIdentitySet, create_signer
@@ -129,3 +135,21 @@ def test_json_output_serializes_nested_wire_models(capsys) -> None:
     assert json.loads(capsys.readouterr().out) == {
         "results": [{"value": "ready"}],
     }
+
+
+def test_hosted_option_binding_compares_physical_host_identity() -> None:
+    listing = BareMetalListing(
+        machine_id="machine-1",
+        physical_host_id="physical-host-1",
+        access_methods=["ssh"],
+    )
+
+    _validate_hosted_option_binding(
+        listing,
+        physical_host_id="physical-host-1",
+    )
+    with pytest.raises(typer.BadParameter, match="conflicts with trusted listing"):
+        _validate_hosted_option_binding(
+            listing,
+            physical_host_id="different-host",
+        )
