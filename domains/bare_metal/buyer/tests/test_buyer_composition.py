@@ -5,10 +5,12 @@ import json
 
 import pytest
 import typer
+from typer.testing import CliRunner
 from arkhai_bare_metal_buyer.cli import (
     _json,
     _safe_projection,
     _validate_hosted_option_binding,
+    register_commands,
 )
 from arkhai_bare_metal_buyer.config import load_bare_metal_buyer_config
 from arkhai_bare_metal_buyer.plugin import domain
@@ -68,6 +70,19 @@ def test_plugin_declares_real_buyer_capability() -> None:
     assert DomainCapability.BUYER in contract.declared_capabilities
     assert contract.buyer is not None
     assert contract.buyer.register_commands is not None
+
+
+def test_hosted_payer_commands_are_available() -> None:
+    app = typer.Typer()
+    register_commands(app)
+
+    result = CliRunner().invoke(
+        app,
+        ["settlement", "stripe", "payer", "--help"],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert "create" in result.output
 
 
 def test_physical_transport_uses_signed_buyer_routes(monkeypatch) -> None:

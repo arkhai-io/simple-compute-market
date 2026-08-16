@@ -26,12 +26,19 @@ from core_buyer import (
     HostedSettlementTransport,
     resolve_buyer_action_policy,
 )
+from core_buyer.profile_service import BuyerProfileService
 from core_buyer.deal_helpers import (
     load_deal_context,
     open_run_log,
     settlement_acceptance_fields,
 )
-from core_buyer.negotiation_client import negotiate_with_seller
+from market_hosted_settlement import (
+    FundingMode,
+    FundingSelection,
+    PayerCommandContext,
+    create_stripe_command_group,
+    payer_command_context_from_config,
+)
 from core_buyer.run_log import RunLog
 from market_core.schemas import SettlementOption, SettlementPlan, SettlementSelection
 from market_hosted_settlement import FundingMode, FundingSelection
@@ -46,10 +53,14 @@ from .config import (
     registry_client,
 )
 from .fulfillment import BareMetalFulfillmentTransport
-from .funding import prepare_funding_authorization
+from .funding import prepare_funding_authorization, stripe_config_from_user_config
 
 bare_metal_app = typer.Typer(
     no_args_is_help=True, help="Discover and settle trusted bare-metal listings."
+)
+settlement_app = typer.Typer(
+    no_args_is_help=True,
+    help="Mechanism-owned settlement utilities.",
 )
 
 
@@ -340,6 +351,27 @@ def _handle_action(action: dict[str, Any], requested: str | None) -> None:
     ).handle(action)
 
 
+def _dispatch_payer_action(action: Any, requested: str | None) -> None:
+    _handle_action(
+        action.model_dump(mode="json", exclude_none=True),
+        requested,
+    )
+
+
+def _payer_command_context() -> PayerCommandContext:
+    return payer_command_context_from_config(
+        stripe_config_from_user_config(),
+        profiles=BuyerProfileService(),
+        dispatch_action=_dispatch_payer_action,
+    )
+
+
+settlement_app.add_typer(
+    create_stripe_command_group(_payer_command_context),
+    name="stripe",
+)
+
+
 def _start_or_resume(
     *,
     run_id: str,
@@ -559,3 +591,4 @@ def register_commands(app: object) -> None:
 
     add_typer = getattr(app, "add_typer")
     add_typer(bare_metal_app, name="bare-metal")
+    add_typer(settlement_app, name="settlement")
