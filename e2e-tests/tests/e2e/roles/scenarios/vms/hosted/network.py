@@ -128,6 +128,16 @@ def _primary_registry_authority(config: dict[str, Any]) -> dict[str, Any]:
         raise RuntimeError("buyer configuration has no primary registry authority")
     return authority
 
+def _capacity_site_id(config: dict[str, Any]) -> str:
+    capacity = config.get("capacity")
+    sites = capacity.get("sites") if isinstance(capacity, dict) else None
+    if not isinstance(sites, dict) or not sites:
+        raise RuntimeError("hosted storefront config requires a capacity site")
+    site_id = next(iter(sites))
+    if not isinstance(site_id, str) or not site_id:
+        raise RuntimeError("hosted storefront capacity site identity is malformed")
+    return site_id
+
 
 def _option(listing, funding_profile: str) -> dict[str, Any]:
     options = listing.extra.get("settlement_options", [])
@@ -247,10 +257,7 @@ class NetworkMarketplacePort:
             _required("HOSTED_SETTLEMENT_E2E_ADMIN_IDENTITY_CREDENTIAL"),
         )
         self._resource_id = f"{_RESOURCE_ID_PREFIX}-{uuid.uuid4().hex[:12]}"
-        capacity_sites = self.storefront_config.get("Capacity", {}).get("sites", {})
-        if not isinstance(capacity_sites, dict) or not capacity_sites:
-            raise RuntimeError("hosted storefront config requires a capacity site")
-        self._site_id = next(iter(capacity_sites))
+        self._site_id = _capacity_site_id(self.storefront_config)
         self._host_id = self._resource_id
         with SyncProvisioningClient(
             self.provisioning_url,

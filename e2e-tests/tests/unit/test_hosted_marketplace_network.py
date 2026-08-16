@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 from types import SimpleNamespace
+
 import pytest
 
 from tests.e2e.roles.scenarios.vms.hosted import network
 from tests.e2e.roles.scenarios.vms.hosted.network import (
     NetworkMarketplacePort,
+    _capacity_site_id,
     _primary_registry_authority,
 )
 
@@ -21,6 +23,12 @@ def test_interactive_payer_fixture_is_a_successful_lifecycle_response() -> None:
     assert response["available"] is True
     assert response["saved_instrument_ready"] is True
 
+
+
+def test_capacity_site_uses_storefront_config_vocabulary() -> None:
+    assert _capacity_site_id(
+        {"capacity": {"sites": {"default": "http://provisioning:8081"}}}
+    ) == "default"
 
 
 def test_protected_listing_declares_vm_offering_mode() -> None:
