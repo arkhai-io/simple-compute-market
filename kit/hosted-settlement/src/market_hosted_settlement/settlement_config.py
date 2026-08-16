@@ -7,7 +7,7 @@ import inspect
 import json
 import re
 import uuid
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Annotated, Any, Literal
@@ -20,7 +20,12 @@ from hosted_settlement_client import (
     FundingProfile,
     HostedSettlementAsyncClient,
 )
-from market_core.schemas import SettlementOption, compute_rate_total
+from market_core.schemas import (
+    SettlementOption,
+    compute_rate_total,
+    compute_rate_unit_total,
+    rate_scales_by_time,
+)
 from market_identity import Identity, TrustedIdentitySet
 from market_settlement_runtime import (
     AcceptedObligationArtifacts,
@@ -31,6 +36,8 @@ from market_settlement_runtime import (
     QueryValueType,
     ReadinessBlocker,
     SettlementClauseField,
+    SettlementConfig,
+    SettlementConfigurationRegistry,
     SettlementRole,
     SettlementPublicationClause,
 )
@@ -984,27 +991,42 @@ def stripe_accepted_obligation_builder(
     """Rebuild the one canonical hosted obligation from a selected option.
 
     The domain supplies acceptance inputs through ``context`` —
-    ``buyer_principal`` / ``seller_principal``, ``expiration_unix``,
-    ``duration_seconds``, and ``domain_param_keys`` naming the option params
-    it owns (dropped before mechanism validation). Everything
-    obligation-shaped stays here.
+    ``buyer_principal`` / ``seller_principal``, ``expiration_unix``, the
+    rate's scaling input (``duration_seconds`` for time-unit rates,
+    ``unit_quantity`` for counted-unit rates — the rate itself decides),
+    and ``domain_param_keys`` naming the option params it owns (dropped
+    before mechanism validation). Everything obligation-shaped stays here.
     """
 
     StripeSettlementConfig.model_validate(section)
     selected = SettlementOption.model_validate(option)
     buyer = _principal_json(context.get("buyer_principal"))
     seller = _principal_json(context.get("seller_principal"))
-    duration_seconds = int(context.get("duration_seconds") or 0)
-    if duration_seconds <= 0:
-        raise ValueError("hosted acceptance requires a positive duration")
     expiration_unix = int(context.get("expiration_unix") or 0)
     if expiration_unix <= 0:
         raise ValueError("hosted acceptance requires an expiration")
     if not selected.rates:
         raise ValueError("hosted option advertises no rate")
-    amount = compute_rate_total(selected.rates[0], duration_seconds)
+    rate = selected.rates[0]
+    if rate_scales_by_time(rate):
+        duration_seconds = int(context.get("duration_seconds") or 0)
+        if duration_seconds <= 0:
+            raise ValueError("hosted acceptance requires a positive duration")
+        amount = compute_rate_total(rate, duration_seconds)
+    else:
+        unit_quantity = context.get("unit_quantity")
+        if (
+            isinstance(unit_quantity, bool)
+            or not isinstance(unit_quantity, int)
+            or unit_quantity < 1
+        ):
+            raise ValueError(
+                "hosted acceptance requires a positive unit quantity for a"
+                " counted rate"
+            )
+        amount = compute_rate_unit_total(rate, unit_quantity)
     if amount <= 0:
-        raise ValueError("trusted duration-scaled hosted amount must be positive")
+        raise ValueError("trusted scaled hosted amount must be positive")
     params = dict(selected.params)
     for key in context.get("domain_param_keys", ()):
         params.pop(key, None)
@@ -1125,6 +1147,35 @@ def create_stripe_registration(*, command_group: Any | None = None) -> Mechanism
     )
 
 
+def default_hosted_selection_dispatch() -> dict[
+    str, Callable[[Mapping[str, Any], Mapping[str, Any]], AcceptedObligationArtifacts]
+]:
+    """Hosted-only accepted-obligation dispatch for runtimes composed without
+    settlement config.
+
+    Selection acceptance works from listing data alone, so a legacy
+    deployment keeps accepting hosted selections exactly as before; the
+    validation-only section carries no deployment state.
+    """
+
+    registry = SettlementConfigurationRegistry((create_stripe_registration(),))
+    config = SettlementConfig(mechanisms={STRIPE_CONFIG_KEY: StripeSettlementConfig()})
+
+    def build(
+        option: Mapping[str, Any],
+        context: Mapping[str, Any],
+    ) -> AcceptedObligationArtifacts:
+        return registry.build_accepted_obligation(
+            MECHANISM,
+            option,
+            config,
+            role="seller",
+            context=context,
+        )
+
+    return {MECHANISM: build}
+
+
 __all__ = [
     "REQUIRED_STRIPE_CAPABILITIES",
     "STRIPE_CONFIG_KEY",
@@ -1144,4 +1195,5 @@ __all__ = [
     "stripe_preflight",
     "validate_stripe_publication_input",
     "create_stripe_registration",
+    "default_hosted_selection_dispatch",
 ]

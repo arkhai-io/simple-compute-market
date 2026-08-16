@@ -11,7 +11,11 @@ from market_settlement_runtime import (
     SettlementConfigurationRegistry,
 )
 
-from market_hosted_settlement import MECHANISM, create_stripe_registration
+from market_hosted_settlement import (
+    MECHANISM,
+    create_stripe_registration,
+    default_hosted_selection_dispatch,
+)
 
 from test_settlement_config import _condition, _config, _identity
 
@@ -114,6 +118,67 @@ def test_builder_rejects_pre_authorized_funding() -> None:
             role="seller",
             context=_context(),
         )
+
+
+def _counted_option(**param_overrides: Any) -> dict[str, Any]:
+    option = _option(bare_metal=None, **param_overrides)
+    rates = [{"field": "amount", "per": "credit", "value": "100"}]
+    option["rates"] = rates
+    option["option_id"] = derive_settlement_option_id(
+        mechanism=MECHANISM,
+        asset="usd",
+        rates=[RateValue.model_validate(rate) for rate in rates],
+        params=option["params"],
+    )
+    return option
+
+
+def test_builder_scales_a_counted_rate_by_unit_quantity() -> None:
+    registry, config = _registry_config()
+    built = registry.build_accepted_obligation(
+        MECHANISM,
+        _counted_option(),
+        config,
+        role="seller",
+        context=_context(duration_seconds=0, unit_quantity=7, domain_param_keys=()),
+    )
+    assert built.amount == 700
+    assert built.obligation["amount"] == 700
+
+
+def test_builder_requires_a_unit_quantity_for_counted_rates() -> None:
+    registry, config = _registry_config()
+    for bad_quantity in (None, 0, -3, True, "7"):
+        with pytest.raises(ValueError, match="unit quantity"):
+            registry.build_accepted_obligation(
+                MECHANISM,
+                _counted_option(),
+                config,
+                role="seller",
+                context=_context(
+                    unit_quantity=bad_quantity, domain_param_keys=()
+                ),
+            )
+
+
+def test_time_rates_scale_by_duration_even_with_a_quantity_present() -> None:
+    registry, config = _registry_config()
+    built = registry.build_accepted_obligation(
+        MECHANISM,
+        _option(),
+        config,
+        role="seller",
+        context=_context(unit_quantity=9),
+    )
+    assert built.amount == 250
+
+
+def test_default_dispatch_builds_through_the_kit_registration() -> None:
+    dispatch = default_hosted_selection_dispatch()
+    assert set(dispatch) == {MECHANISM}
+    built = dispatch[MECHANISM](_option(), _context())
+    assert built.amount == 250
+    assert built.obligation["mechanism"] == MECHANISM
 
 
 def test_builder_requires_positive_duration_and_expiration() -> None:

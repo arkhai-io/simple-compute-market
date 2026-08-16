@@ -17,8 +17,8 @@ from market_alkahest import create_alkahest_registration
 from market_contact_exchange import create_contact_exchange_registration
 from market_core.schemas import SettlementOption
 from market_hosted_settlement import (
-    StripeSettlementConfig,
     create_stripe_registration,
+    default_hosted_selection_dispatch,
 )
 from market_settlement_runtime import (
     MechanismReadiness,
@@ -219,31 +219,6 @@ class BareMetalStorefrontSettlementComposition:
 
             dispatch[mechanism_id] = build
         return dispatch
-
-
-def default_hosted_selection_dispatch() -> dict[
-    str, Callable[[Mapping[str, Any], Mapping[str, Any]], Any]
-]:
-    """Hosted-only dispatch for runtimes composed without settlement config.
-
-    Selection acceptance works from listing data alone, so a legacy
-    deployment keeps accepting hosted selections exactly as before; the
-    validation-only section carries no deployment state.
-    """
-
-    registry = SettlementConfigurationRegistry((create_stripe_registration(),))
-    config = SettlementConfig(mechanisms={"stripe": StripeSettlementConfig()})
-
-    def build(option: Mapping[str, Any], context: Mapping[str, Any]) -> Any:
-        return registry.build_accepted_obligation(
-            HOSTED_MECHANISM,
-            option,
-            config,
-            role="seller",
-            context=context,
-        )
-
-    return {HOSTED_MECHANISM: build}
 
 
 __all__ = [

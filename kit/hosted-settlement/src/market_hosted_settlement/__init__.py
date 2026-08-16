@@ -66,6 +66,7 @@ from .settlement_config import (
     StripeResolverConfig,
     StripeSettlementConfig,
     create_stripe_registration,
+    default_hosted_selection_dispatch,
     stripe_accepted_obligation_builder,
     stripe_contract_fingerprint,
 )
@@ -117,6 +118,7 @@ __all__ = [
     "authorization_journal_path",
     "canonical_json",
     "create_stripe_registration",
+    "default_hosted_selection_dispatch",
     "create_stripe_command_group",
     "instrument_list_projection",
     "instrument_projection",
