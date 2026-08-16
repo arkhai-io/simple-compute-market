@@ -210,6 +210,23 @@ class SettlementRuntime:
         )
         return await self._load(obligation_ref)
 
+    async def defer_fulfillment(
+        self,
+        obligation_ref: str,
+        *,
+        local_principal: Identity,
+        worker_id: str,
+    ) -> None:
+        """Release a fulfillment lease while asynchronous work remains pending."""
+        record = await self._load(obligation_ref)
+        self._require_principal(record, local_principal, "claimant")
+        await self._finish(
+            record,
+            "fulfill",
+            worker_id,
+            state="pending",
+        )
+
     async def retry_fulfillment(
         self,
         obligation_ref: str,

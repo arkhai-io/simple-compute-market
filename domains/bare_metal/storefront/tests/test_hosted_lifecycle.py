@@ -19,11 +19,15 @@ SELLER = Ed25519Signer(bytes.fromhex("22" * 32)).identity
 class FakeRuntime:
     def __init__(self, *, reservation_status: str = "pending") -> None:
         self.fulfillment_reservations = 0
+        self.fulfillment_deferrals = 0
         self.reservation_status = reservation_status
 
     async def reserve_fulfillment(self, *args, **kwargs):
         self.fulfillment_reservations += 1
         return SimpleNamespace(status=self.reservation_status)
+
+    async def defer_fulfillment(self, *args, **kwargs):
+        self.fulfillment_deferrals += 1
 
 
 class NoPhysicalEffects:
@@ -241,6 +245,40 @@ async def test_busy_fulfillment_reservation_resumes_without_duplicate_physical_e
 
     assert resumed == funded
     assert runtime.fulfillment_reservations == 1
+    assert physical.calls == 0
+
+
+@pytest.mark.asyncio
+async def test_pending_physical_fulfillment_defers_poll_without_error(
+    monkeypatch,
+) -> None:
+    funded = record(mechanism="fiat.stripe.v1", mechanism_status="ready")
+    db = FakeLifecycleDb(funded)
+    runtime = FakeRuntime()
+    physical = NoPhysicalEffects()
+    callbacks = BareMetalHostedLifecycleCallbacks(
+        db=db,
+        runtime=runtime,
+        local_principal=SELLER,
+        capacity_client=physical,
+        fulfillment_client=physical,
+        publish_evidence=physical,
+    )
+
+    async def pending_access(*args, **kwargs):
+        return SimpleNamespace(public_result=None)
+
+    monkeypatch.setattr(
+        BareMetalHostedLifecycleCallbacks,
+        "_ensure_access_ready",
+        pending_access,
+    )
+
+    returned = await callbacks.fulfill(funded, "worker-a")
+
+    assert returned == funded
+    assert runtime.fulfillment_reservations == 1
+    assert runtime.fulfillment_deferrals == 1
     assert physical.calls == 0
 
 

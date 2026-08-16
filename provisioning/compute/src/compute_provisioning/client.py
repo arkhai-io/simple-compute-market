@@ -80,6 +80,7 @@ class ProvisioningRouteContract:
     pattern: re.Pattern[str]
     operation: str
     body_resource: str | None = None
+    optional_body_resource: bool = False
     path_resource: str | tuple[str, ...] | None = None
 
     def match(self, method: str, path: str, body: Any) -> str | None:
@@ -94,6 +95,8 @@ class ProvisioningRouteContract:
                     f"{self.operation} requires a JSON object request body"
                 )
             resource = body.get(self.body_resource)
+            if resource is None and self.optional_body_resource:
+                return ""
             if not isinstance(resource, str) or not resource:
                 raise ValueError(
                     f"{self.operation} requires body.{self.body_resource}"
@@ -224,7 +227,13 @@ PROVISIONING_ROUTE_CONTRACTS = (
     ProvisioningRouteContract("POST", re.compile(r"/api/v1/capacity/probe"), "capacity_probe"),
     ProvisioningRouteContract("POST", re.compile(r"/api/v1/capacity/reservations"), "capacity_reserve"),
     ProvisioningRouteContract("POST", re.compile(r"/api/v1/capacity/reservations/(?P<reservation_id>[^/]+)/commit"), "capacity_commit", path_resource="reservation_id"),
-    ProvisioningRouteContract("POST", re.compile(r"/api/v1/capacity/releases"), "capacity_release"),
+    ProvisioningRouteContract(
+        "POST",
+        re.compile(r"/api/v1/capacity/releases"),
+        "capacity_release",
+        body_resource="capacity_reservation_id",
+        optional_body_resource=True,
+    ),
     ProvisioningRouteContract("POST", re.compile(r"/api/v1/capacity/reservations/(?P<reservation_id>[^/]+)/truncate-lease"), "capacity_truncate_lease", path_resource="reservation_id"),
     ProvisioningRouteContract("GET", re.compile(r"/api/v1/capacity/reservations"), "capacity_reservations_list"),
     ProvisioningRouteContract("GET", re.compile(r"/api/v1/capacity/reservations/(?P<reservation_id>[^/]+)"), "capacity_reservation_get", path_resource="reservation_id"),

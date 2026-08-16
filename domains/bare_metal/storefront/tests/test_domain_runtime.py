@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from types import SimpleNamespace
+import pytest
 import arkhai_bare_metal_storefront.domain_runtime as domain_runtime
 from arkhai_bare_metal.schema import BARE_METAL_SCHEMA_KIND, BareMetalMessage
 from market_core import DomainCapability, validate_domain_contract
@@ -13,6 +15,10 @@ from market_identity import Ed25519Signer
 from arkhai_bare_metal_storefront.domain_runtime import (
     BARE_METAL_STOREFRONT_DOMAIN,
     get_market_domain_contract,
+)
+from arkhai_bare_metal_storefront.runtime import (
+    _portable_evidence_reference,
+    _publish_portable_evidence_reference,
 )
 
 
@@ -53,6 +59,89 @@ def test_storefront_contract_retains_bare_metal_codecs() -> None:
     assert isinstance(message, BareMetalMessage)
     assert message.duration_seconds == 3600
 
+
+def test_portable_evidence_reference_uses_accepted_resolver_and_uid() -> None:
+    lifecycle = SimpleNamespace(
+        accepted_binding=SimpleNamespace(
+            option=SimpleNamespace(
+                option=SimpleNamespace(
+                    params={
+                        "condition": {
+                            "evaluator": {"resolver_id": "bare-metal-portable"}
+                        }
+                    }
+                )
+            )
+        )
+    )
+
+    assert _portable_evidence_reference(
+        lifecycle,
+        "0x" + "ab" * 32,
+    ) == (
+        '{"kind":"portable-remote.v1","resolver_id":"bare-metal-portable",'
+        '"uid":"0x' + "ab" * 32 + '"}'
+    )
+
+
+@pytest.mark.asyncio
+async def test_portable_evidence_is_published_before_reference_is_encoded() -> None:
+    lifecycle = SimpleNamespace(
+        accepted_binding=SimpleNamespace(
+            option=SimpleNamespace(
+                option=SimpleNamespace(
+                    params={
+                        "condition": {
+                            "evaluator": {"resolver_id": "bare-metal-portable"}
+                        }
+                    }
+                )
+            )
+        )
+    )
+    evidence = SimpleNamespace(
+        condition_anchor="0x" + "cd" * 32,
+        canonical_json=lambda: '{"kind":"bare-metal.lease-ready-evidence.v1"}',
+    )
+    calls = []
+
+    async def publish_fulfillment(**kwargs):
+        calls.append(kwargs)
+        return "0x" + "ef" * 32
+
+    reference = await _publish_portable_evidence_reference(
+        lifecycle,
+        evidence,
+        SimpleNamespace(publish_fulfillment=publish_fulfillment),
+    )
+
+    assert calls == [
+        {
+            "condition_anchor": "0x" + "cd" * 32,
+            "evidence": '{"kind":"bare-metal.lease-ready-evidence.v1"}',
+        }
+    ]
+    assert reference == (
+        '{"kind":"portable-remote.v1","resolver_id":"bare-metal-portable",'
+        '"uid":"0x' + "ef" * 32 + '"}'
+    )
+
+
+def test_portable_evidence_reference_requires_accepted_resolver() -> None:
+    lifecycle = SimpleNamespace(
+        accepted_binding=SimpleNamespace(
+            option=SimpleNamespace(
+                option=SimpleNamespace(params={"condition": {"evaluator": {}}})
+            )
+        )
+    )
+
+    try:
+        _portable_evidence_reference(lifecycle, "sha256:" + "ab" * 32)
+    except RuntimeError as exc:
+        assert str(exc) == "hosted evidence resolver is unavailable"
+    else:
+        raise AssertionError("missing resolver was accepted")
 
 
 def test_settlement_hook_consumes_common_context(monkeypatch) -> None:

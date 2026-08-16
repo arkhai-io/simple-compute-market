@@ -590,12 +590,23 @@ async def test_fulfillment_lease_excludes_duplicate_vm_provisioning(repository) 
     )
     assert first.status == "pending"
     assert duplicate.status == "busy"
+    await runtime.defer_fulfillment(
+        record.obligation_ref,
+        local_principal=SELLER,
+        worker_id="vm-a",
+    )
+    resumed = await runtime.reserve_fulfillment(
+        record.obligation_ref,
+        local_principal=SELLER,
+        worker_id="vm-b",
+    )
+    assert resumed.status == "pending"
 
     completed = await runtime.complete_fulfillment(
         record.obligation_ref,
         "portable-fulfillment-ref",
         local_principal=SELLER,
-        worker_id="vm-a",
+        worker_id="vm-b",
     )
     replayed = await runtime.reserve_fulfillment(
         record.obligation_ref,

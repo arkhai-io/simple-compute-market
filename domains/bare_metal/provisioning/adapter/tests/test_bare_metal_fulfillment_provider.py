@@ -38,12 +38,20 @@ class FakeJobs:
                 status="succeeded",
                 error=None,
                 result={
-                    "tenant_user": "buyer",
+                    "tenant_user": None,
                     "host": "203.0.113.25",
-                    "port": "2222",
+                    "ssh_port": None,
                     "timestamp": "2030-01-01T00:00:01Z",
                     "result_message": "access granted",
                     "authentication": {"private_key": "must-not-escape"},
+                    "ansible_result": {
+                        "action": "node_grant_access",
+                        "host": "203.0.113.25",
+                        "port": 2222,
+                        "ssh_user": "buyer",
+                        "status": "success",
+                        "timestamp": "2030-01-01T00:00:01Z",
+                    },
                 },
             ),
             "job-teardown": SimpleNamespace(
@@ -161,7 +169,13 @@ async def test_selected_resource_drives_idempotent_grant_result_and_teardown():
     torn_down = await provider.dispatch_teardown(teardown)
     reservation, teardown_contract = operations.teardown[0]
     assert reservation["executor_target"] == "machine-1"
-    assert reservation["executor_ref"]["physical_host_id"] == "physical-host-1"
+    assert reservation["executor_ref"] == {
+        "physical_host_id": "physical-host-1",
+        "ssh_public_key": "ssh-ed25519 buyer",
+        "access_method": "ssh",
+        "ssh_user": "arkhai-e726d1da85038f5c",
+    }
+    assert reservation["access_ref"] == lease.access_ref
     assert teardown_contract.idempotency_key == "reservation-1:reclaim-access"
     assert torn_down.provider_metadata["current_job_id"] == "job-teardown"
 

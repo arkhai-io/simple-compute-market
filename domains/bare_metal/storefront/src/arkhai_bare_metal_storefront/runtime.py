@@ -15,7 +15,12 @@ from core_storefront.identity_config import IdentityConfig, resolve_storefront_s
 from market_identity import Identity, IdentityScheme, Signer, TrustedIdentitySet
 from core_storefront.escrow_verification import verify_escrow_for_settlement
 from market_core import MarketDomainContract, validate_domain_contract
-from market_settlement_runtime import SettlementRuntime, SettlementSQLiteRepository
+from market_hosted_settlement import PortableRemoteFulfillmentRef, canonical_json
+from market_settlement_runtime import (
+    SettlementRuntime,
+    SettlementServicingWorker,
+    SettlementSQLiteRepository,
+)
 from market_storefront_kit import (
     AlkahestChain,
     AlkahestClientPolicy,
@@ -45,6 +50,36 @@ from .settlement_composition import (
 )
 
 
+def _portable_evidence_reference(
+    lifecycle: Any,
+    attestation_uid: str,
+) -> str:
+    condition = lifecycle.accepted_binding.option.option.params.get("condition")
+    evaluator = condition.get("evaluator") if isinstance(condition, Mapping) else None
+    resolver_id = (
+        evaluator.get("resolver_id") if isinstance(evaluator, Mapping) else None
+    )
+    if not isinstance(resolver_id, str) or not resolver_id:
+        raise RuntimeError("hosted evidence resolver is unavailable")
+    fulfillment = PortableRemoteFulfillmentRef(
+        resolver_id=resolver_id,
+        uid=attestation_uid,
+    )
+    return canonical_json(fulfillment.model_dump(mode="json")).decode()
+
+
+async def _publish_portable_evidence_reference(
+    lifecycle: Any,
+    evidence: Any,
+    publisher: Any,
+) -> str:
+    attestation_uid = await publisher.publish_fulfillment(
+        condition_anchor=evidence.condition_anchor,
+        evidence=evidence.canonical_json(),
+    )
+    return _portable_evidence_reference(lifecycle, attestation_uid)
+
+
 logger = logging.getLogger(__name__)
 
 
@@ -67,6 +102,10 @@ class BareMetalStorefrontRuntime:
         default=None,
         repr=False,
     )
+    settlement_worker: SettlementServicingWorker | None = field(
+        default=None,
+        repr=False,
+    )
     plan_builder: Callable[..., dict[str, Any]] = build_bare_metal_settlement_plan
     site_bindings: tuple[BareMetalSiteBinding, ...] = ()
     capacity_client: Any | None = field(default=None, repr=False)
@@ -75,6 +114,7 @@ class BareMetalStorefrontRuntime:
     chain_config_paths: Mapping[str, str | None] = field(default_factory=dict)
     escrow_verifier: Callable[..., Awaitable[int]] = verify_escrow_for_settlement
     settlement_repository: SettlementSQLiteRepository = field(init=False, repr=False)
+    settlement_clients: Mapping[str, Any] = field(init=False, repr=False)
     settlement_runtime: SettlementRuntime = field(init=False, repr=False)
 
     def __post_init__(self) -> None:
@@ -88,6 +128,7 @@ class BareMetalStorefrontRuntime:
             else {}
         )
         object.__setattr__(self, "settlement_repository", repository)
+        object.__setattr__(self, "settlement_clients", clients)
         object.__setattr__(
             self,
             "settlement_runtime",
@@ -372,10 +413,16 @@ def build_runtime_from_environment(
     ):
 
         async def publish_evidence(evidence: Any) -> str:
-            return (
-                storefront_url
-                + "/api/v1/evidence/bare-metal/"
-                + str(evidence.evidence_digest).removeprefix("sha256:")
+            lifecycle = await db.load_bare_metal_hosted_lifecycle(
+                obligation_ref=evidence.obligation_ref
+            )
+            if lifecycle is None:
+                raise RuntimeError("hosted evidence lifecycle is unavailable")
+            publisher = runtime.settlement_clients["fiat.stripe.v1"]
+            return await _publish_portable_evidence_reference(
+                lifecycle,
+                evidence,
+                publisher,
             )
 
         lifecycle = BareMetalHostedLifecycleCallbacks(
@@ -386,9 +433,38 @@ def build_runtime_from_environment(
             fulfillment_client=fulfillment_client,
             publish_evidence=publish_evidence,
         )
+        callbacks = lifecycle_domain_callbacks(db=db, lifecycle=lifecycle)
+        object.__setattr__(runtime, "hosted_domain_callbacks", callbacks)
+
+        async def on_ready(record: Any, worker_id: str) -> None:
+            await callbacks.fulfill(record, worker_id)
+
+        async def on_terminal(
+            record: Any,
+            state: str,
+            reason: str | None,
+        ) -> None:
+            if state != "collected":
+                await callbacks.cleanup(
+                    record.agreement_ref,
+                    reason or state,
+                )
+
         object.__setattr__(
             runtime,
-            "hosted_domain_callbacks",
-            lifecycle_domain_callbacks(db=db, lifecycle=lifecycle),
+            "settlement_worker",
+            SettlementServicingWorker(
+                runtime.settlement_runtime,
+                runtime.settlement_repository,
+                worker_id=f"bare-metal-storefront:{identity_config.principal.identifier}",
+                interval_seconds=float(
+                    os.environ.get(
+                        "BARE_METAL_SETTLEMENT_SERVICING_INTERVAL_SECONDS",
+                        "30",
+                    )
+                ),
+                on_ready=on_ready,
+                on_terminal=on_terminal,
+            ),
         )
     return runtime

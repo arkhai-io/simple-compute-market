@@ -12,6 +12,7 @@ from arkhai_bare_metal import (
     BareMetalMaterialization,
     NODE_GRANT_ACCESS_ACTION,
     NODE_RECLAIM_ACCESS_ACTION,
+    bare_metal_executor_ref,
     materialization_to_lease_create,
 )
 from compute_provisioning.contracts import ExecutorActionEnvelope
@@ -325,10 +326,11 @@ class BareMetalFulfillmentProvider(FulfillmentProvider):
                     "capacity_reservation_id": operation.capacity_reservation_id,
                     lease.settlement_identity_kind: lease.settlement_identity,
                     "executor_target": lease.machine_id,
-                    "executor_ref": {
-                        "physical_host_id": lease.physical_host_id,
-                        "access_ref": lease.access_ref,
-                    },
+                    "access_ref": lease.access_ref,
+                    "executor_ref": bare_metal_executor_ref(
+                        lease.physical_host_id,
+                        access_ref=lease.access_ref,
+                    ),
                 },
                 contract=contract,
             )
@@ -398,6 +400,21 @@ class BareMetalFulfillmentProvider(FulfillmentProvider):
             raise CredentialFetchFailedError(str(exc)) from exc
 
         result = job.result if isinstance(job.result, dict) else {}
+        operation_result = result.get("ansible_result")
+        if not isinstance(operation_result, dict):
+            operation_result = result
+        ssh_user = operation_result.get("ssh_user")
+        if not isinstance(ssh_user, str) or not ssh_user.strip():
+            ssh_user = result.get("tenant_user")
+        host = operation_result.get("host")
+        if not isinstance(host, str) or not host.strip():
+            host = result.get("host")
+        port = operation_result.get("port")
+        if port is None:
+            port = result.get("port", result.get("ssh_port"))
+        timestamp = operation_result.get("timestamp")
+        if not isinstance(timestamp, str):
+            timestamp = result.get("timestamp")
         details = {
             key: result[key]
             for key in ("result_message", "note")
@@ -407,32 +424,20 @@ class BareMetalFulfillmentProvider(FulfillmentProvider):
             action=NODE_GRANT_ACCESS_ACTION,
             machine_id=metadata.machine_id,
             physical_host_id=metadata.physical_host_id,
-            ssh_user=(
-                result.get("tenant_user")
-                if isinstance(result.get("tenant_user"), str)
-                else None
-            ),
+            ssh_user=ssh_user if isinstance(ssh_user, str) else None,
             escrow_uid=metadata.escrow_uid,
             settlement_obligation_ref=metadata.settlement_obligation_ref,
             access_grant_ref=metadata.create_job_id,
-            host=(
-                result.get("host")
-                if isinstance(result.get("host"), str) and result["host"].strip()
-                else None
-            ),
+            host=host if isinstance(host, str) and host.strip() else None,
             port=(
-                int(result["port"])
-                if not isinstance(result.get("port"), bool)
-                and isinstance(result.get("port"), (int, str))
-                and str(result["port"]).isdigit()
+                int(port)
+                if not isinstance(port, bool)
+                and isinstance(port, (int, str))
+                and str(port).isdigit()
                 else None
             ),
             lease_expires_at=metadata.lease_end_utc,
-            timestamp=(
-                result.get("timestamp")
-                if isinstance(result.get("timestamp"), str)
-                else None
-            ),
+            timestamp=timestamp if isinstance(timestamp, str) else None,
             status="success",
             details=details or None,
         )

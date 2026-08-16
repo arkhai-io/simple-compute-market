@@ -23,7 +23,6 @@ from market_identity import (
 from pydantic import ValidationError
 
 from compute_provisioning import (
-    COMPUTE_PROVISIONING_CONTRACT_VERSION,
     ComputeProvisioningClient,
     PROVISIONING_ROUTE_CONTRACTS,
     canonical_provisioning_request_body,
@@ -398,6 +397,24 @@ def test_operator_capacity_routes_preserve_distinct_seller_and_admin_roles():
         assert routes[operation].allowed_roles == ("seller", "admin")
     assert routes["capacity_reserve"].allowed_roles == ("seller",)
     assert routes["provisioning_system_status"].allowed_roles == ("admin",)
+
+@pytest.mark.parametrize(
+    ("body", "expected_resource"),
+    [
+        ({"deal_ref": {"settlement_obligation_ref": "obligation-1"}}, ""),
+        ({"capacity_reservation_id": "reservation-1"}, "reservation-1"),
+    ],
+)
+def test_capacity_release_route_allows_optional_reservation_hint(
+    body: dict[str, object],
+    expected_resource: str,
+) -> None:
+    assert resolve_provisioning_route(
+        "POST",
+        "/api/v1/capacity/releases",
+        body,
+    ) == ("capacity_release", expected_resource)
+
 
 def test_capacity_queries_are_canonical_body_bound():
     assert canonical_provisioning_request_body(

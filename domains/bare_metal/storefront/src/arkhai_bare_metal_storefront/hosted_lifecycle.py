@@ -156,14 +156,32 @@ class BareMetalHostedLifecycleCallbacks:
             local_principal=self.local_principal,
             worker_id=worker_id,
         )
-        if reserved.status in {"busy", "succeeded"}:
-            return await self._settlement_record(record.obligation_ref)
+        if reserved.status == "busy":
+            return record
+        if reserved.status == "succeeded":
+            lifecycle = await self.db.load_bare_metal_hosted_lifecycle(
+                obligation_ref=record.obligation_ref
+            )
+            if lifecycle is not None and lifecycle.fulfillment_id is not None:
+                await self._sync_fulfillment_projection(
+                    record=record,
+                    lifecycle=lifecycle,
+                    state=(
+                        "active"
+                        if lifecycle.public_result is not None
+                        else "dispatching"
+                    ),
+                )
+            return record
         try:
             lifecycle = await self._ensure_access_ready(record)
             if lifecycle.public_result is None:
-                raise BareMetalHostedLifecycleError(
-                    "selected-site fulfillment is not access-ready"
+                await self.runtime.defer_fulfillment(
+                    record.obligation_ref,
+                    local_principal=self.local_principal,
+                    worker_id=worker_id,
                 )
+                return record
             if not record.condition_anchor:
                 raise BareMetalHostedLifecycleError(
                     "hosted authority returned no immutable condition anchor"
@@ -616,7 +634,10 @@ class BareMetalHostedLifecycleCallbacks:
                     "selected resource resolved to an unexpected executor"
                 )
             publication = scheduled.attributes.get("bare_metal_publication")
-            if not isinstance(publication, dict) or publication.get("enabled") is not True:
+            if (
+                not isinstance(publication, dict)
+                or publication.get("enabled") is not True
+            ):
                 raise BareMetalHostedLifecycleError(
                     "scheduled resource has no enabled bare-metal publication"
                 )
@@ -716,9 +737,20 @@ class BareMetalHostedLifecycleCallbacks:
                     physical_state="physical_failed",
                     failure_reason=remote.failure_reason or remote.failure_message,
                 )
+                await self._sync_fulfillment_projection(
+                    record=record,
+                    lifecycle=lifecycle,
+                    state="failed",
+                    failure_reason=remote.failure_reason or remote.failure_message,
+                )
                 raise BareMetalHostedLifecycleError(
                     "bare-metal fulfillment failed before access readiness"
                 )
+            await self._sync_fulfillment_projection(
+                record=record,
+                lifecycle=lifecycle,
+                state=str(remote.state),
+            )
             return lifecycle
         result_envelope = await self.fulfillment_client.get_fulfillment_result(
             fulfillment_id,
@@ -772,10 +804,46 @@ class BareMetalHostedLifecycleCallbacks:
             access_ready_at=ready_at,
             expires_at=access.lease_expires_at,
         )
-        return await self.db.advance_bare_metal_hosted_lifecycle(
+        lifecycle = await self.db.advance_bare_metal_hosted_lifecycle(
             obligation_ref=record.obligation_ref,
             physical_state="access_ready",
             public_result=public_result,
+        )
+        await self._sync_fulfillment_projection(
+            record=record,
+            lifecycle=lifecycle,
+            state="active",
+        )
+        return lifecycle
+
+    async def _sync_fulfillment_projection(
+        self,
+        *,
+        record: SettlementObligationRecord,
+        lifecycle: BareMetalHostedLifecycle,
+        state: str,
+        failure_reason: str | None = None,
+    ) -> None:
+        """Expose one hosted fulfillment through the buyer-safe physical API."""
+
+        reservation_id = lifecycle.capacity_reservation_id
+        fulfillment_id = lifecycle.fulfillment_id
+        if reservation_id is None or fulfillment_id is None:
+            return
+        binding = lifecycle.accepted_binding
+        await self.db.ensure_bare_metal_fulfillment_lifecycle(
+            negotiation_id=binding.negotiation_id,
+            escrow_uid=record.obligation_ref,
+            site_id=binding.option.facts.site_id,
+            physical_resource_id=binding.option.facts.physical_resource_id,
+        )
+        await self.db.update_bare_metal_fulfillment_lifecycle(
+            negotiation_id=binding.negotiation_id,
+            state=state,
+            capacity_reservation_id=reservation_id,
+            settlement_resource_id=lifecycle.settlement_resource_id,
+            fulfillment_id=fulfillment_id,
+            failure_reason=failure_reason,
         )
 
     async def _teardown(self, obligation_ref: str) -> None:
@@ -851,15 +919,6 @@ class BareMetalHostedLifecycleCallbacks:
             obligation_ref=obligation_ref,
             teardown_state="released",
         )
-
-    async def _settlement_record(
-        self,
-        obligation_ref: str,
-    ) -> SettlementObligationRecord:
-        row = await self.db.load_settlement_obligation(obligation_ref)
-        if row is None:
-            raise BareMetalHostedLifecycleError("settlement obligation is unavailable")
-        return SettlementObligationRecord.model_validate(row)
 
     @staticmethod
     def _public_status(

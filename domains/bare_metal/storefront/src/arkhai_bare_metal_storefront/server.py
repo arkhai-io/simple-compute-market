@@ -58,6 +58,9 @@ async def _start_runtime(runtime: BareMetalStorefrontRuntime) -> None:
             emit_stage_event=stage_event,
         )
     )
+    if runtime.settlement_worker is not None:
+        asyncio.create_task(runtime.settlement_worker.run())
+
 
 def build_bare_metal_storefront_registry(
     *,
@@ -74,7 +77,6 @@ def build_bare_metal_storefront_registry(
             ),
         )
     )
-
 
 
 def build_bare_metal_storefront_app(
@@ -106,6 +108,7 @@ def build_bare_metal_storefront_app(
                 "bare-metal runtime must carry the exact registered domain contract"
             )
         return selected_runtime
+
     service_hooks = StorefrontServiceHooks(
         build=build_services,
         start=_start_runtime,
