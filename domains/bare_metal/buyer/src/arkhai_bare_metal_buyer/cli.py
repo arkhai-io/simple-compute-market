@@ -465,7 +465,7 @@ def start_hosted(
         automatic_funding=automatic_funding,
         action=action,
     )
-    _json(_safe_projection(hosted.status(settlement_ref)))
+    _json(_safe_projection(hosted.status(settlement_ref=settlement_ref)))
 
 
 @bare_metal_app.command("complete")
@@ -534,7 +534,9 @@ def hosted_status(
         raise typer.BadParameter("run has no started hosted settlement")
     _json(
         {
-            "settlement": _safe_projection(hosted.status(deal.settlement_ref)),
+            "settlement": _safe_projection(
+                hosted.status(settlement_ref=deal.settlement_ref)
+            ),
             "fulfillment": fulfillment.status(deal.negotiation_id),
         }
     )
@@ -583,7 +585,7 @@ def reclaim_hosted(
     deal, _, hosted, _ = _recovered_transports(run_id, config)
     if deal.settlement_ref is None:
         raise typer.BadParameter("run has no started hosted settlement")
-    _json(_safe_projection(hosted.reclaim(deal.settlement_ref)))
+    _json(_safe_projection(hosted.reclaim(settlement_ref=deal.settlement_ref)))
 
 
 def register_commands(app: object) -> None:
