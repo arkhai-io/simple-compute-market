@@ -22,6 +22,43 @@ def test_interactive_payer_fixture_is_a_successful_lifecycle_response() -> None:
     assert response["saved_instrument_ready"] is True
 
 
+
+def test_protected_listing_declares_vm_offering_mode() -> None:
+    captured: dict[str, object] = {}
+
+    class Seller:
+        def create_listing(self, **kwargs):
+            captured.update(kwargs)
+            return SimpleNamespace(listing_id="listing-1")
+
+        def get_listing(self, _listing_id: str):
+            return SimpleNamespace(
+                extra={
+                    "settlement_options": [
+                        {
+                            "mechanism": "fiat.stripe.v1",
+                            "params": {"funding_profile": "card.v1"},
+                            "option_id": "option-1",
+                        }
+                    ]
+                }
+            )
+
+    marketplace = object.__new__(NetworkMarketplacePort)
+    marketplace.seller = Seller()
+    marketplace._resource_id = "resource-1"
+    marketplace._funding_profile = network.FundingProfile.CARD
+    marketplace._interaction = network.FundingMode.INTERACTIVE
+
+    snapshot = marketplace.create_and_publish_listing()
+
+    assert snapshot.listing_id == "listing-1"
+    assert captured["offer"] == {
+        **network._OFFER,
+        "resource_id": "resource-1",
+        "virtualization_type": "vm",
+    }
+
 def test_primary_registry_authority_uses_advertised_url_not_runtime_endpoint() -> None:
     authority = _primary_registry_authority(
         {

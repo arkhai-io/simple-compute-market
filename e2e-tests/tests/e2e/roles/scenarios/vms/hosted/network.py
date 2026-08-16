@@ -61,6 +61,7 @@ _OFFER = {
     "gpu_count": 1,
     "sla": 99.9,
     "region": "local",
+    "virtualization_type": "vm",
 }
 
 
