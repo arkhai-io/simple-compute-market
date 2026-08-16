@@ -87,11 +87,44 @@ portions after the corresponding `consume-expanded-stripe-funding` tasks.
       provisioning arm still requires credentials). Evidence: bare-metal
       domain 73, storefront 99 (6 new dispatch tests incl. non-scalar accept,
       uncomposed-mechanism/tampered-option/proposed-amount rejections), buyer 4.
-- [ ] 3.3 Replace the api-credits branches.
-- [ ] 3.4 Replace the VM branches, sequenced after the touching
-      `consume-expanded-stripe-funding` tasks land.
-- [ ] 3.5 Closeout, promoting the no-per-domain-conditional rule to
-      `openspec/specs/market-composition/spec.md`.
+- [x] 3.3 Api-credits branches replaced. One kit refinement forced by the
+      domain: api-credits rates are counted-unit (`per="credit"`), so the
+      mechanism gained count scaling — `compute_rate_unit_total` /
+      `rate_scales_by_time` in `market_core.schemas`, and the stripe
+      builder picks its scaling input (`duration_seconds` vs
+      `unit_quantity`) from the rate itself, keeping rate arithmetic
+      opaque inside the mechanism. `_hosted_policy_state` admits any
+      dispatched mechanism, `_accepted_selection_artifacts` builds
+      through the composition's `accepted_obligation_dispatch()` (kit
+      `default_hosted_selection_dispatch` — moved from bare metal to
+      `kit/hosted-settlement` as the one shared definition — for
+      runtimes composed without settlement config), and
+      `load_api_credit_hosted_agreement` rebuild-verifies against the
+      same builder, deleting the domain's duplicate quantity-pricing
+      arithmetic. Evidence: apicredits storefront 76 (5 new dispatch
+      tests incl. non-scalar amountless accept with merged mechanism
+      service terms, uncomposed-mechanism and tampered-amount
+      rejections, composition dispatch surface); core 91 (4 new rate
+      helpers); kit/hosted-settlement 153 (4 new: counted-rate build,
+      quantity requirement, time-rate precedence, kit default dispatch);
+      bare-metal storefront 111 re-pointed and green.
+- [x] 3.4 VM branches replaced on the same template:
+      `_accepted_selection_artifacts` dispatches through
+      `VmSettlementComposition.accepted_obligation_dispatch()`, the
+      duration-scaled amount is now held to the trusted build
+      (previously taken as given), and the domain keeps only `vm.v1`
+      service terms. `load_hosted_agreement` deliberately keeps its
+      field-level checks: legacy card obligations
+      (`payment_method_types`) are recovery-only and cannot be rebuilt
+      through the builder. Evidence: VM storefront 1093 passed (3 new
+      dispatch tests; 1 pre-existing `offering_mode` failure on main,
+      unrelated); the round-hook suite's legacy-option rejection now
+      pins the dispatch path.
+- [x] 3.5 Closeout: hygiene clean; imports module-level; ROADMAP Goal 6
+      narrative and gap row updated (pre-terms dispatch complete in all
+      three storefront domains); the no-per-domain-conditional rule is
+      already the `market-composition` spec delta of this change;
+      promotion rows below.
 
 ## 4. Deal-identity convergence
 
@@ -130,3 +163,5 @@ portions after the corresponding `consume-expanded-stripe-funding` tasks.
 | Buyer acceptance validates the funded obligation strictly against the advertised option but does not compare seller `service_terms`, which carry negotiation-established service context the option cannot predict | `openspec/specs/buyer-orchestration/spec.md` (promote at synchronization) |
 | Scalar participation is a registration declaration carried to counterparties through the option shape (an `amount` rate ⇔ bargained through `fields.amount`), with `build_option` enforcing coherence; non-scalar selections negotiate take-it-or-leave-it and order as priceless | `openspec/specs/negotiation-protocol/spec.md` and `openspec/specs/settlement-configuration/spec.md` (promote at synchronization) |
 | Accepted obligations are constructed by the registration (`accepted_obligation_builder` → `AcceptedObligationArtifacts` with scalar-coherent amount and mechanism-namespaced service terms); domains resolve the mechanism once from the selection and keep only domain semantics, keyed on option shape rather than mechanism ID | `openspec/specs/market-composition/spec.md` (promote at synchronization) |
+| Rate arithmetic is mechanism-owned: the rate's own unit decides its scaling input — time units scale by the negotiated duration, counted units by the negotiated unit quantity (`compute_rate_unit_total`), both carried in the acceptance context | `openspec/specs/settlement-configuration/spec.md` (promote at synchronization) |
+| Legacy hosted card obligations are recovery-only: reload paths that admit them keep field-level verification, since a builder rebuild cannot reproduce their pre-profile params | `openspec/specs/market-composition/spec.md` (promote at synchronization) |

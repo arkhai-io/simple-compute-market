@@ -88,6 +88,28 @@ treats its listings as priceless — all three fallback paths already existed in
 machinery. An unmatched selection stays scalar so the invalid-selection rejection
 fires instead of an exact-accept shortcut.
 
+### The rate decides its own scaling input
+
+Api-credits priced counted units (`per="credit"`) while the mechanism's
+accepted-obligation builder only scaled by duration. Rather than letting the
+domain keep its own quantity arithmetic beside the builder, the scaling choice
+lives with the rate: `PER_UNIT_SECONDS` units scale by the context's
+`duration_seconds`, any other unit is a counted unit scaled by the context's
+`unit_quantity` (`compute_rate_unit_total` in core, guarded to uint256).
+Domains pass what they know — bare metal and VMs a duration, api-credits a
+credit quantity — and never multiply rates themselves. The domain's amount
+check reduces to `agreed_amount == built.amount` for scalar mechanisms and
+`agreed_amount == 0` for declining ones.
+
+### The hosted default dispatch is kit-owned
+
+`default_hosted_selection_dispatch` (hosted-only accepted-obligation dispatch
+for runtimes composed without a settlement config) moved from the bare-metal
+storefront into `kit/hosted-settlement`: it contains zero domain semantics, and
+three domains now need it. Legacy card obligations stay recovery-only — the VM
+agreement reload keeps its field-level verification because a builder rebuild
+cannot reproduce pre-profile (`payment_method_types`) params.
+
 ### Identity convergence is additive
 
 Every deal gains a `settlement_obligations` record; for Alkahest, `escrow_uid` is
