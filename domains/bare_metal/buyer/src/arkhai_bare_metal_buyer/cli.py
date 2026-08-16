@@ -26,6 +26,7 @@ from core_buyer import (
     HostedSettlementTransport,
     resolve_buyer_action_policy,
 )
+from core_buyer.negotiation_client import negotiate_with_seller
 from core_buyer.profile_service import BuyerProfileService
 from core_buyer.deal_helpers import (
     load_deal_context,
@@ -41,7 +42,6 @@ from market_hosted_settlement import (
 )
 from core_buyer.run_log import RunLog
 from market_core.schemas import SettlementOption, SettlementPlan, SettlementSelection
-from market_hosted_settlement import FundingMode, FundingSelection
 from market_identity import TrustedIdentitySet
 from pydantic_core import to_jsonable_python
 from market_settlement_runtime import derive_obligation_ref
