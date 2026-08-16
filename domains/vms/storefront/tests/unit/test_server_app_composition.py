@@ -127,6 +127,7 @@ async def test_lifespan_publishes_and_clears_exact_contract_without_cross_app_le
         registry,
         binding,
         capacity_runtime: object,
+        accepted_obligation_dispatch: object = None,
     ):
         registration = registry.resolve_registration(binding)
         assert registry is built["registry"]
@@ -159,7 +160,10 @@ async def test_lifespan_publishes_and_clears_exact_contract_without_cross_app_le
         return listing_service
 
     def fake_settlement_composition(*, domain, **_kwargs):
-        composition = SimpleNamespace(domain=domain)
+        composition = SimpleNamespace(
+            domain=domain,
+            accepted_obligation_dispatch=lambda: {},
+        )
         built["settlement_composition"] = composition
         return composition
 

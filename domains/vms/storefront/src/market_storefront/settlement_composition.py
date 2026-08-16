@@ -96,6 +96,34 @@ class VmSettlementComposition:
             resources=self.mechanism_resources,
         )
 
+    def accepted_obligation_dispatch(
+        self,
+    ) -> dict[str, Callable[[Mapping[str, Any], Mapping[str, Any]], Any]]:
+        """Curried registry dispatch for every enabled obligation-building mechanism."""
+
+        dispatch: dict[str, Callable[[Mapping[str, Any], Mapping[str, Any]], Any]] = {}
+        for mechanism_id in self.settlement_config.priority:
+            registration = self.configuration_registry.registration(mechanism_id)
+            if registration.accepted_obligation_builder is None:
+                continue
+
+            def build(
+                option: Mapping[str, Any],
+                context: Mapping[str, Any],
+                *,
+                _mechanism_id: str = mechanism_id,
+            ) -> Any:
+                return self.configuration_registry.build_accepted_obligation(
+                    _mechanism_id,
+                    option,
+                    self.settlement_config,
+                    role="seller",
+                    context=context,
+                )
+
+            dispatch[mechanism_id] = build
+        return dispatch
+
     async def publication_artifacts(
         self,
         resources: Mapping[str, Any],
