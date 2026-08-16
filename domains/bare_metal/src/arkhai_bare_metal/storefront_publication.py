@@ -46,6 +46,7 @@ def bare_metal_listing_candidates(
                     "projection_revision": projection.revision,
                     "projection_digest": projection.digest,
                     "physical_resource_id": resource.physical_resource_id,
+                    "pool_id": resource.pool_id,
                     "machine_id": listing.machine_id,
                     "physical_host_id": listing.physical_host_id,
                     "offer_resource": listing.model_dump(

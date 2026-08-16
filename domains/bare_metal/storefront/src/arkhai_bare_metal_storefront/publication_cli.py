@@ -7,6 +7,7 @@ import json
 import os
 import uuid
 from datetime import datetime, timezone
+from decimal import Decimal, InvalidOperation
 from typing import Any
 
 from arkhai_bare_metal import (
@@ -66,6 +67,29 @@ def _registry(runtime: BareMetalStorefrontRuntime) -> SyncRegistryClient:
     )
 
 
+def _whole_resource_available(row: dict[str, Any]) -> bool:
+    capacity = row.get("capacity")
+    available = row.get("available")
+    if not row.get("enabled", True):
+        return False
+    if not isinstance(capacity, dict) or not isinstance(available, dict):
+        return row.get("state") == "available"
+    compared = False
+    for key, raw_total in capacity.items():
+        try:
+            total = Decimal(str(raw_total))
+            remaining = Decimal(str(available.get(key, 0)))
+        except (InvalidOperation, TypeError, ValueError):
+            return False
+        if not total.is_finite() or not remaining.is_finite() or total < 0:
+            return False
+        if total > 0:
+            compared = True
+            if remaining < total:
+                return False
+    return compared
+
+
 def _projections(
     runtime: BareMetalStorefrontRuntime,
 ) -> tuple[TrustedBareMetalProjection, ...]:
@@ -85,22 +109,20 @@ def _projections(
         attributes = (
             row.get("attributes") if isinstance(row.get("attributes"), dict) else {}
         )
+        publication = attributes.get("bare_metal_publication")
+        if not isinstance(publication, dict) or not publication.get("enabled", False):
+            continue
         grouped[site_id].append(
             BareMetalResourceProjection(
                 physical_resource_id=resource_id,
-                physical_host_id=str(
-                    row.get("physical_host_id")
-                    or attributes.get("physical_host_id")
-                    or resource_id
-                ),
-                machine_id=str(
-                    row.get("machine_id") or attributes.get("machine_id") or resource_id
-                ),
-                available=bool(row.get("available", row.get("state") == "available")),
-                allocation_mode="exclusive",
-                access_methods=list(row.get("access_methods") or ["ssh"]),
+                pool_id=str(row.get("pool_id") or "") or None,
+                physical_host_id=str(publication.get("physical_host_id") or ""),
+                machine_id=str(publication.get("machine_id") or ""),
+                available=_whole_resource_available(row),
+                allocation_mode=publication.get("allocation_mode", "exclusive"),
+                access_methods=list(publication.get("access_methods") or []),
                 capacity=dict(row.get("capacity") or {}),
-                capabilities=dict(row.get("capabilities") or attributes),
+                capabilities=dict(publication.get("capabilities") or {}),
             )
         )
     return tuple(
@@ -173,10 +195,12 @@ def run_publication_once() -> dict[str, Any]:
         close_listing=close_listing,
         publish_existing_listing=publish_existing_listing,
     )
+    publication_candidates: dict[int, dict[str, Any]] = {}
 
     def build_payload(
-        _source: Any, candidate: dict[str, Any], _offer: dict[str, Any]
+        _source: Any, candidate: dict[str, Any], offer: dict[str, Any]
     ) -> Any:
+        publication_candidates[id(offer)] = candidate
         return asyncio.run(
             runtime.settlement_composition.publication_payload(
                 candidate=candidate,
@@ -198,6 +222,9 @@ def run_publication_once() -> dict[str, Any]:
         settlement_options: list[dict[str, Any]] | None = None,
         publication_clauses: list[dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
+        candidate = publication_candidates.pop(id(offer), None)
+        if candidate is None:
+            raise RuntimeError("publication candidate binding is unavailable")
         listing_id = uuid.uuid4().hex
         request = ListingRequest(
             listing_id=listing_id,
@@ -211,12 +238,14 @@ def run_publication_once() -> dict[str, Any]:
         client.publish_listing(request)
         raw_listing = dict(offer)
         raw_listing.pop("virtualization_type", None)
+        raw_listing["max_duration_seconds"] = duration
+        now = datetime.now(timezone.utc).isoformat()
         asyncio.run(
             runtime.db.upsert_bare_metal_listing(
                 listing_id=listing_id,
                 status="open",
-                created_at=datetime.now(timezone.utc).isoformat(),
-                updated_at=datetime.now(timezone.utc).isoformat(),
+                created_at=now,
+                updated_at=now,
                 seller_principal=runtime.seller_principal,
                 storefront_url=runtime.storefront_url,
                 listing=BareMetalListing.model_validate(raw_listing),
@@ -224,7 +253,9 @@ def run_publication_once() -> dict[str, Any]:
                 settlement_options=settlement_options or [],
                 publication_clauses=publication_clauses or [],
                 demands=published_demands,
-                max_duration_seconds=duration,
+                site_id=str(candidate["site_id"]),
+                pool_id=str(candidate["pool_id"]),
+                physical_resource_id=str(candidate["physical_resource_id"]),
             )
         )
         return {"status": "published", "listing_id": listing_id}

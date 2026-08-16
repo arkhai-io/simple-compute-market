@@ -30,6 +30,7 @@ def _projection():
         resources=[
             BareMetalResourceProjection(
                 physical_resource_id="resource-1",
+                pool_id="pool-1",
                 physical_host_id="physical-host-1",
                 machine_id="machine-1",
                 available=True,
@@ -40,6 +41,47 @@ def _projection():
             ),
         ],
     )
+
+
+def test_projections_use_allowlisted_bare_metal_publication_metadata():
+    class CapacityClient:
+        async def snapshot(self):
+            return [
+                {
+                    "site": "site-a",
+                    "resource_id": "resource-1",
+                    "pool_id": "pool-1",
+                    "capacity": {"gpu_count": 1, "units": 1},
+                    "available": {"gpu_count": 1, "units": 0},
+                    "enabled": True,
+                    "attributes": {
+                        "vm_host": "private-executor-alias",
+                        "bare_metal_publication": {
+                            "enabled": True,
+                            "physical_host_id": "physical-host-1",
+                            "machine_id": "machine-1",
+                            "allocation_mode": "exclusive",
+                            "access_methods": ["ssh"],
+                            "capabilities": {"gpu_model": "H200"},
+                        },
+                    },
+                },
+            ]
+
+    projections = publication_cli._projections(
+        SimpleNamespace(
+            capacity_client=CapacityClient(),
+            site_bindings=(SimpleNamespace(site_id="site-a"),),
+        )
+    )
+
+    resource = projections[0].resources[0]
+    assert resource.pool_id == "pool-1"
+    assert resource.physical_resource_id == "resource-1"
+    assert resource.physical_host_id == "physical-host-1"
+    assert resource.machine_id == "machine-1"
+    assert resource.capabilities == {"gpu_model": "H200"}
+    assert resource.available is False
 
 
 def _selection():
