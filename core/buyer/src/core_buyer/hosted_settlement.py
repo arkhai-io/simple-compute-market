@@ -162,6 +162,7 @@ class HostedSettlementTransport:
 def make_hosted_settle_hook(
     *,
     config: BuyConfig,
+    mechanism: str,
     prepare_authorization: Callable[[str, Mapping[str, Any]], Any],
     poll_interval: float,
     total_timeout: float,
@@ -179,8 +180,10 @@ def make_hosted_settle_hook(
         if outcome is None or match is None or outcome.settlement_plan is None:
             raise ValueError("hosted settlement requires an accepted settlement plan")
         obligations = outcome.settlement_plan.obligations
-        if len(obligations) != 1 or obligations[0].mechanism != "fiat.stripe.v1":
-            raise ValueError("hosted settlement requires one fiat.stripe.v1 obligation")
+        if len(obligations) != 1 or obligations[0].mechanism != mechanism:
+            raise ValueError(
+                f"hosted settlement requires one {mechanism} obligation"
+            )
         obligation = obligations[0].model_dump(mode="json")
         if confirm is not None and not confirm(int(obligation["amount"]), match):
             return BuyResult(

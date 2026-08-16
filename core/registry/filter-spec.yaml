@@ -215,6 +215,22 @@ filters:
   # friendly — a seller with no escrows has no conflict to assert.
   - {name: token_exclude,              path: "$.accepted_escrows[*].literal_fields.token",    op: not_in, value_type: string,  on_missing: pass}
 
+  # Mechanism filter: option-aware projection (the resolution of the
+  # generic-mechanism question, decided with the introduction-market
+  # profile) — ``?mechanism=in:[fiat.stripe.v1]`` matches listings that
+  # advertise at least one option under a named mechanism.
+  # `on_missing: pass` keeps escrow-carrier legacy listings visible to
+  # mechanism-agnostic buyers.
+  - {name: mechanism,                  path: "$.settlement_options[*].mechanism",     op: in,     value_type: string,  on_missing: pass}
+
+  # Option-aware payment-token filters: settlement options embed their
+  # Alkahest escrow template under ``params.accepted_escrow``, so
+  # option-only listings answer the same token questions the
+  # accepted_escrows projections above answer for escrow-carrier
+  # listings.
+  - {name: option_token,               path: "$.settlement_options[*].params.accepted_escrow.literal_fields.token", op: in,     value_type: string, on_missing: pass}
+  - {name: option_token_exclude,       path: "$.settlement_options[*].params.accepted_escrow.literal_fields.token", op: not_in, value_type: string, on_missing: pass}
+
   # Oracle-presence filter: ``?has_oracle=exists:true`` matches listings
   # with a non-null oracle_address. Pure presence check — value of the
   # field is irrelevant.

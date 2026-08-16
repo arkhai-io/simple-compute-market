@@ -178,6 +178,8 @@ Rollback at any section boundary is a code revert; no destructive schema step.
 - Do registration-owned negotiation hooks subsume the domain's
   `amount_from_proposal`, or compose with it (mechanism extracts, domain adjusts)?
   Leaning compose, since api-credits multiplies by quantity.
-- Whether the registry gains a generic `mechanism` filter or only option-aware token
-  filters; decide with the registry operator profile in
-  `contact-exchange-settlement-mechanism`.
+- ~~Whether the registry gains a generic `mechanism` filter or only option-aware
+  token filters~~ — resolved with the introduction-market profile: both, as
+  missing-tolerant option-aware projections (`mechanism` over
+  `$.settlement_options[*].mechanism`, token filters over the option-embedded
+  escrow template), keeping escrow-carrier legacy listings visible.

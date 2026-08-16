@@ -564,7 +564,9 @@ def validate_alkahest_publication_input(
     return AlkahestPublicationInput.model_validate(value)
 
 
-def create_alkahest_registration() -> MechanismRegistration:
+def create_alkahest_registration(
+    *, command_group: Any | None = None
+) -> MechanismRegistration:
     """Return the explicit common-contract registration for Alkahest."""
 
     return MechanismRegistration(
@@ -577,6 +579,7 @@ def create_alkahest_registration() -> MechanismRegistration:
         client_factory=alkahest_client_factory,
         option_builder=alkahest_option_builder,
         settlement_verifier=verify_escrow_for_settlement,
+        command_group=command_group,
         clause_fields=(
             SettlementClauseField(
                 descriptor=FieldDescriptor(

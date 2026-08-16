@@ -152,6 +152,7 @@ def test_shared_settle_hook_returns_domain_result_and_private_credentials(
             principal=signer.identity,
             signer=signer,
         ),
+        mechanism="fiat.stripe.v1",
         prepare_authorization=lambda _ref, _obligation: SimpleNamespace(
             funding_authorization_ref="funding-auth-safe-1",
             funding_profile=SimpleNamespace(value="card.v1"),

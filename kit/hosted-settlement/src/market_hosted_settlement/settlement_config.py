@@ -21,9 +21,11 @@ from hosted_settlement_client import (
     HostedSettlementAsyncClient,
 )
 from market_core.schemas import (
+    RateValue,
     SettlementOption,
     compute_rate_total,
     compute_rate_unit_total,
+    derive_settlement_option_id,
     rate_scales_by_time,
 )
 from market_identity import Identity, TrustedIdentitySet
@@ -847,21 +849,17 @@ def stripe_option_builder(
         "contract_fingerprint": expected_fingerprint,
         "condition": condition.model_dump(mode="json"),
     }
-    identity_payload = {
+    option = {
+        "option_id": derive_settlement_option_id(
+            mechanism=MECHANISM,
+            asset=clause.asset,
+            rates=[RateValue.model_validate(item) for item in rates],
+            params=params,
+        ),
         "mechanism": MECHANISM,
         "asset": clause.asset,
         "rates": rates,
         "params": params,
-    }
-    encoded = json.dumps(
-        identity_payload,
-        ensure_ascii=False,
-        separators=(",", ":"),
-        sort_keys=True,
-    ).encode()
-    option = {
-        "option_id": hashlib.sha256(encoded).hexdigest(),
-        **identity_payload,
     }
     return {"accepted_escrows": [], "settlement_options": [option]}
 

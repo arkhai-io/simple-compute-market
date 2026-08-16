@@ -47,7 +47,12 @@ from domains.apicredits.negotiation import (
 )
 from market_alkahest.proposals import escrow_proposal_from_accepted_entry
 from market_alkahest.schemas import EscrowProposal, EscrowTerms
-from market_hosted_settlement import FundingMode, FundingProfile, FundingSelection
+from market_hosted_settlement import (
+    MECHANISM as HOSTED_MECHANISM,
+    FundingMode,
+    FundingProfile,
+    FundingSelection,
+)
 
 from .cli_helpers import resolve_prices_from_matches
 from .common import resolve_config_value
@@ -803,6 +808,7 @@ def register(credits_app: typer.Typer) -> None:
                 hosted_confirm = _confirm_hosted
             settle_hook = make_hosted_settle_hook(
                 config=config,
+                mechanism=HOSTED_MECHANISM,
                 prepare_authorization=lambda obligation_ref, obligation: (
                     prepare_hosted_funding_authorization(
                         buyer_profile_id=str(identity.profile_id),

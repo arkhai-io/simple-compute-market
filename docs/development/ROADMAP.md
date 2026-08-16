@@ -225,11 +225,12 @@ Restoring a non-zero hold default is `billable-capacity-reservations`' own work:
 
 A third mechanism now exists: `contact-exchange.v1` completes a deal by durable, authenticated introduction — rateless options, a scalar-declining registration, one non-financial obligation, a persisted reveal surface (`/api/v1/introductions`), and a loose-listing discovery profile — composed end-to-end on bare metal. All three storefront domains now dispatch exact-selection acceptance through the registration's accepted-obligation builder with no per-mechanism arm: the mechanism resolves once from the selection, rate arithmetic (duration-scaled and counted-unit alike) lives inside the mechanism, and each domain keeps only its own service terms and scaling input. Scalar participation is a declinable registration capability carried to counterparties through the option shape.
 
-Mechanism awareness still leaks at the remaining edges. Deal identity is dual rather than neutral: Alkahest deals still live only in the `escrows` table behind the escrow-uid route family. The Alkahest-shaped carriers remain core-owned with a handful of residual consumers, the main compute discovery filters project only `accepted_escrows`, and a few mechanism literals are hard-coded on servicing surfaces outside composition roots.
+Deal identity is convergent: every deal — Alkahest included — has a `settlement_obligations` record keyed by `obligation_ref` with the mechanism's own identifier as `mechanism_ref` (legacy escrows are backfilled at startup), and every mechanism surface's status projection exposes the neutral ref. Settlement verification is a registration hook, the Alkahest-shaped carriers are kit-owned (core keeps tombstoned aliases only for the wire models it still types), the main compute discovery filters project settlement options (generic mechanism filter plus option-embedded token filters), and the pre-terms mechanism literals are gone — the buyer hosted transport takes its mechanism from the composing CLI, seller CLIs mount mechanism command groups from registrations, and option identities derive through the shared helper.
+
+What deliberately remains: the `escrows` table and the `/api/v1/settle/{escrow_uid}` route family serve as the Alkahest mechanism surface (retirement needs deployment evidence), hosted-specific servicing gates guard hosted's own surfaces, and pre-plan legacy escrow rows keep only their mechanism-surface identity.
 
 | Open gap | Owned by |
 |---|---|
-| Deal-identity convergence, Alkahest vocabulary ownership, option-aware compute discovery filters, and residual mechanism literals | [`finish-settlement-mechanism-neutrality`](../../openspec/changes/finish-settlement-mechanism-neutrality/) |
 | Cross-domain contact-exchange composition beyond bare metal; contact-payload retention automation | [`contact-exchange-settlement-mechanism`](../../openspec/changes/contact-exchange-settlement-mechanism/) |
 
 ---

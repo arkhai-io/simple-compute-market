@@ -191,12 +191,35 @@ portions after the corresponding `consume-expanded-stripe-funding` tasks.
 
 ## 6. Discovery filters and residual literals
 
-- [ ] 6.1 Option-aware registry filters (token, and the mechanism-filter decision
-      recorded in `design.md`'s open question).
-- [ ] 6.2 Remove residual literals: buyer hosted transport `"fiat.stripe.v1"`
-      (`core/buyer/src/core_buyer/hosted_settlement.py:182`), static seller CLI
-      mechanism mounts, Stripe's inline option-ID hash → `derive_settlement_option_id`.
-- [ ] 6.3 Closeout.
+- [x] 6.1 The main compute filter-spec gained option-aware projections:
+      a generic `mechanism` filter (`$.settlement_options[*].mechanism`,
+      resolving the open question the introduction-market profile
+      settled — option-aware projections, missing-tolerant) and
+      `option_token` / `option_token_exclude` over the embedded
+      `params.accepted_escrow.literal_fields.token`, so option-only
+      listings answer the same token questions the `accepted_escrows`
+      projections answer for escrow-carrier listings. Evidence: registry
+      unit suite 95 (4 new: filter declarations, option-aware mechanism
+      matching with escrow-only listings passing, embedded-escrow token
+      in/exclude, missing-tolerance for rateless options).
+- [x] 6.2 Residual literals removed: `make_hosted_settle_hook` takes the
+      mechanism from its composing caller (VM and api-credits buyer CLIs
+      pass the kit's `MECHANISM`; core_buyer names no mechanism); the VM
+      seller CLI mounts mechanism command groups by iterating
+      registrations (`create_alkahest_registration` gained the
+      `command_group` parameter Stripe's factory already had; mount
+      names come from `registration.config_key`); Stripe's option
+      builder derives its option identity through
+      `derive_settlement_option_id` (byte-identical encoding, so
+      published option IDs are unchanged — pinned by the existing
+      hosted option tests). Evidence: core/buyer 105, VM buyer 196,
+      apicredits buyer 17, bare-metal buyer 9, kit/hosted-settlement
+      153, kit/alkahest 179; all three storefront suites green.
+- [x] 6.3 Closeout: hygiene clean; ROADMAP Goal 6 updated to the
+      completed state; hosted-specific servicing-surface gates (worker
+      `on_ready`, hosted route availability checks) deliberately remain
+      — they guard each mechanism's own surface, not a pre-terms
+      decision; promotion row below.
 
 ## Design promotion record
 
@@ -209,3 +232,4 @@ portions after the corresponding `consume-expanded-stripe-funding` tasks.
 | Legacy hosted card obligations are recovery-only: reload paths that admit them keep field-level verification, since a builder rebuild cannot reproduce their pre-profile params | `openspec/specs/market-composition/spec.md` (promote at synchronization) |
 | Settlement verification is a registration hook (`settlement_verifier`); mechanism-specific call signatures stay at the mechanism's surface, but ownership lives on the registration | `openspec/specs/settlement-configuration/spec.md` (promote at synchronization) |
 | Alkahest-shaped carriers are kit-owned; core keeps tombstoned verbatim aliases only for the wire models it still types, because core cannot import a mechanism kit | `openspec/specs/market-composition/spec.md` (promote at synchronization) |
+| Discovery filters project settlement options with missing-tolerant semantics: a generic option-aware `mechanism` filter plus token filters over the option-embedded escrow template | `openspec/specs/registry-discovery/spec.md` (promote at synchronization) |
