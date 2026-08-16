@@ -517,7 +517,7 @@ class BareMetalHostedLifecycleCallbacks:
         }
         claim = {
             "dimensions": {"units": 1},
-            "offering_mode": facts.executor_kind,
+            "executor_kind": facts.executor_kind,
         }
         if facts.resource_selection == "specific":
             claim["resource_id"] = facts.physical_resource_id

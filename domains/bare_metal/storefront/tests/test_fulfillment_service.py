@@ -277,7 +277,7 @@ async def test_selected_site_lifecycle_is_idempotent_and_restores_capacity() -> 
     assert capacity.reserves[0]["claim"] == {
         "resource_id": "resource-a",
         "dimensions": {"units": 1},
-        "offering_mode": "bare_metal",
+        "executor_kind": "bare_metal",
     }
     assert len(fulfillment.schedules) == 1
     assert fulfillment.schedules[0].resource_id == "resource-a"
