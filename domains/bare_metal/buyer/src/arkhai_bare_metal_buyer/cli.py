@@ -312,7 +312,7 @@ def buy_bare_metal(
         negotiation_id=outcome.negotiation_id,
         agreed_amount=outcome.agreed_amount,
         accepted_provision_terms=(
-            outcome.accepted_provision_terms.model_dump(mode="json")
+            to_jsonable_python(outcome.accepted_provision_terms)
             if outcome.accepted_provision_terms is not None
             else None
         ),
