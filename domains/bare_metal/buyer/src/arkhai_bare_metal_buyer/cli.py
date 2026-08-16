@@ -262,6 +262,7 @@ def buy_bare_metal(
             ssh_public_key=ssh_public_key,
         ),
         settlement_selection=selection,
+        policy_params={"_selected_settlement_option": selected.model_dump(mode="json")},
         max_rounds=buyer_config.default_max_rounds,
     )
     if outcome.status != "agreed" or outcome.negotiation_id is None:
