@@ -7,6 +7,7 @@ provider integrations live in separate packages that depend on this package.
 
 from __future__ import annotations
 
+import hashlib
 from datetime import datetime
 from typing import Any, Literal
 
@@ -458,6 +459,13 @@ def materialization_to_lease_create(
         access_ref.setdefault("ssh_public_key", materialization.ssh_public_key)
     if materialization.access_method:
         access_ref.setdefault("access_method", materialization.access_method)
+    settlement_identity = str(
+        materialization.settlement_obligation_ref or materialization.escrow_uid
+    )
+    access_ref.setdefault(
+        "ssh_user",
+        f"arkhai-{hashlib.sha256(settlement_identity.encode('utf-8')).hexdigest()[:16]}",
+    )
     return BareMetalLeaseCreate(
         capacity_reservation_id=capacity_reservation_id,
         escrow_uid=materialization.escrow_uid,

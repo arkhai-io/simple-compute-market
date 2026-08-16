@@ -159,11 +159,12 @@ class FakeCapacity:
 
 
 class FakeFulfillment:
-    def __init__(self) -> None:
+    def __init__(self, *, begin_failures: int = 0) -> None:
         self.phase = "create"
         self.schedules = []
         self.begins = []
         self.teardowns = []
+        self.begin_failures = begin_failures
 
     async def schedule_resource(self, request):
         self.schedules.append(request)
@@ -173,13 +174,19 @@ class FakeFulfillment:
             resource_kind="compute.bare-metal",
             provider="bare_metal.ansible",
             attributes={
-                "machine_id": "machine-a",
-                "physical_host_id": "host-a",
+                "bare_metal_publication": {
+                    "enabled": True,
+                    "machine_id": "machine-a",
+                    "physical_host_id": "host-a",
+                }
             },
         )
 
     async def begin_fulfillment(self, body):
         self.begins.append(body)
+        if self.begin_failures:
+            self.begin_failures -= 1
+            raise RuntimeError("controlled failure after materialization")
         return SimpleNamespace(
             fulfillment_id="fulfillment-a",
             capacity_reservation_id="reservation-a",
@@ -281,6 +288,9 @@ async def test_selected_site_lifecycle_is_idempotent_and_restores_capacity() -> 
     }
     assert len(fulfillment.schedules) == 1
     assert fulfillment.schedules[0].resource_id == "resource-a"
+    assert fulfillment.schedules[0].requirements == {
+        "resource_kind": "compute.bare-metal"
+    }
     assert len(fulfillment.begins) == 1
     assert fulfillment.begins[0].fulfillment_request.payload["machine_id"] == "machine-a"
 
@@ -314,6 +324,38 @@ async def test_selected_site_lifecycle_is_idempotent_and_restores_capacity() -> 
     ]
     assert "reservation-a" not in capacity.reservation_sites
     assert len(fulfillment.teardowns) == 1
+
+
+@pytest.mark.asyncio
+async def test_begin_retry_reuses_immutable_materialization() -> None:
+    db = FakeDb()
+    capacity = FakeCapacity()
+    fulfillment = FakeFulfillment(begin_failures=1)
+    service = BareMetalFulfillmentService(
+        db=db,
+        capacity_client=capacity,
+        fulfillment_client=fulfillment,
+    )
+
+    with pytest.raises(RuntimeError, match="controlled failure"):
+        await service.begin(
+            negotiation_id="neg-a",
+            escrow_uid="escrow-a",
+            buyer_principal=BUYER,
+        )
+    recorded = db.materialization
+
+    retried = await service.begin(
+        negotiation_id="neg-a",
+        escrow_uid="escrow-a",
+        buyer_principal=BUYER,
+    )
+
+    assert retried["fulfillment_id"] == "fulfillment-a"
+    assert db.materialization == recorded
+    assert len(capacity.reserves) == 1
+    assert len(fulfillment.schedules) == 1
+    assert len(fulfillment.begins) == 2
 
 
 @pytest.mark.asyncio

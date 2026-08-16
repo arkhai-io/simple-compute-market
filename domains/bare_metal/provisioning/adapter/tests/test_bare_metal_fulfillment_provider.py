@@ -65,8 +65,11 @@ def _resource() -> SettlementResource:
         resource_kind="compute.bare-metal",
         provider="bare_metal.ansible",
         attributes={
-            "machine_id": "machine-1",
-            "physical_host_id": "physical-host-1",
+            "bare_metal_publication": {
+                "enabled": True,
+                "machine_id": "machine-1",
+                "physical_host_id": "physical-host-1",
+            }
         },
     )
 

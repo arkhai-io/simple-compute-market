@@ -491,6 +491,12 @@ class BareMetalHostedLifecycleCallbacks:
             raise BareMetalHostedLifecycleError(
                 "accepted bare-metal hosted lifecycle is unavailable"
             )
+        if lifecycle.physical_state in {"access_ready", "evidence_published"}:
+            if lifecycle.public_result is None:
+                raise BareMetalHostedLifecycleError(
+                    "access-ready bare-metal lifecycle has no public result"
+                )
+            return lifecycle
         binding = lifecycle.accepted_binding
         context, terms = await self._validate_accepted_authority(binding)
         if (
@@ -505,10 +511,11 @@ class BareMetalHostedLifecycleCallbacks:
             raise BareMetalHostedLifecycleError(
                 "funded obligation conflicts with accepted bare-metal authority"
             )
-        lifecycle = await self.db.advance_bare_metal_hosted_lifecycle(
-            obligation_ref=record.obligation_ref,
-            physical_state="funded",
-        )
+        if lifecycle.physical_state == "accepted":
+            lifecycle = await self.db.advance_bare_metal_hosted_lifecycle(
+                obligation_ref=record.obligation_ref,
+                physical_state="funded",
+            )
         facts = binding.option.facts
         reservation_id = lifecycle.capacity_reservation_id
         deal_ref = {
@@ -586,12 +593,13 @@ class BareMetalHostedLifecycleCallbacks:
             )
         settlement_resource_id = lifecycle.settlement_resource_id
         scheduled = None
+        scheduled_publication = None
         if settlement_resource_id is None:
             scheduled = await self.fulfillment_client.schedule_resource(
                 FulfillmentScheduleRequest(
                     capacity_reservation_id=reservation_id,
                     market="bare_metal",
-                    requirements={"offering_mode": facts.executor_kind},
+                    requirements={"resource_kind": "compute.bare-metal"},
                     resource_id=(
                         facts.physical_resource_id
                         if facts.resource_selection == "specific"
@@ -607,9 +615,15 @@ class BareMetalHostedLifecycleCallbacks:
                 raise BareMetalHostedLifecycleError(
                     "selected resource resolved to an unexpected executor"
                 )
+            publication = scheduled.attributes.get("bare_metal_publication")
+            if not isinstance(publication, dict) or publication.get("enabled") is not True:
+                raise BareMetalHostedLifecycleError(
+                    "scheduled resource has no enabled bare-metal publication"
+                )
+            scheduled_publication = publication
             if facts.resource_selection == "specific" and (
-                scheduled.attributes.get("physical_host_id") != facts.physical_host_id
-                or scheduled.attributes.get("machine_id") != context.get("machine_id")
+                publication.get("physical_host_id") != facts.physical_host_id
+                or publication.get("machine_id") != context.get("machine_id")
             ):
                 raise BareMetalHostedLifecycleError(
                     "scheduler changed accepted Physical Resource"
@@ -623,13 +637,13 @@ class BareMetalHostedLifecycleCallbacks:
         fulfillment_id = lifecycle.fulfillment_id
         if fulfillment_id is None:
             machine_id = (
-                str(scheduled.attributes.get("machine_id"))
-                if scheduled is not None
+                str(scheduled_publication.get("machine_id"))
+                if scheduled_publication is not None
                 else str(context["machine_id"])
             )
             physical_host_id = (
-                str(scheduled.attributes.get("physical_host_id"))
-                if scheduled is not None
+                str(scheduled_publication.get("physical_host_id"))
+                if scheduled_publication is not None
                 else str(context["physical_host_id"])
             )
             if facts.resource_selection == "specific" and (
@@ -639,12 +653,21 @@ class BareMetalHostedLifecycleCallbacks:
                 raise BareMetalHostedLifecycleError(
                     "scheduled executor conflicts with accepted resource"
                 )
-            materialization = BareMetalMaterialization(
+            materialization = await self.db.load_bare_metal_materialization(
+                negotiation_id=binding.negotiation_id
+            )
+            materialization_start = (
+                materialization.lease_start_utc
+                if materialization is not None
+                else lease_start
+            )
+            expected_materialization = BareMetalMaterialization(
                 settlement_obligation_ref=binding.obligation_ref,
                 machine_id=machine_id,
                 physical_host_id=physical_host_id,
-                lease_start_utc=lease_start,
-                lease_end_utc=lease_end,
+                lease_start_utc=materialization_start,
+                lease_end_utc=materialization_start
+                + timedelta(seconds=terms.duration_seconds),
                 access_method=terms.access_method,
                 ssh_public_key=terms.ssh_public_key,
                 access_ref=terms.access_ref,
@@ -653,10 +676,16 @@ class BareMetalHostedLifecycleCallbacks:
                     "fulfillment_identity": lifecycle.fulfillment_identity,
                 },
             )
-            await self.db.save_bare_metal_materialization(
-                negotiation_id=binding.negotiation_id,
-                materialization=materialization,
-            )
+            if materialization is None:
+                materialization = expected_materialization
+                await self.db.save_bare_metal_materialization(
+                    negotiation_id=binding.negotiation_id,
+                    materialization=materialization,
+                )
+            elif materialization != expected_materialization:
+                raise BareMetalHostedLifecycleError(
+                    "recorded materialization conflicts with accepted resource"
+                )
             accepted = await self.fulfillment_client.begin_fulfillment(
                 FulfillmentRequestBody(
                     capacity_reservation_id=reservation_id,

@@ -118,7 +118,12 @@ class BareMetalFulfillmentProvider(FulfillmentProvider):
 
     @staticmethod
     def _resource_value(resource: SettlementResource, field: str) -> str:
-        value = resource.attributes.get(field)
+        publication = resource.attributes.get("bare_metal_publication")
+        if not isinstance(publication, dict) or publication.get("enabled") is not True:
+            raise ProviderConfigInvalidError(
+                "selected bare-metal resource has no enabled publication view"
+            )
+        value = publication.get(field)
         if not isinstance(value, str) or not value.strip():
             raise ProviderConfigInvalidError(
                 f"selected bare-metal resource requires a non-empty {field} attribute"

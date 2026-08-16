@@ -191,7 +191,7 @@ class BareMetalFulfillmentService:
                 FulfillmentScheduleRequest(
                     capacity_reservation_id=str(reservation_id),
                     market="bare_metal",
-                    requirements={"offering_mode": "bare_metal"},
+                    requirements={"resource_kind": "compute.bare-metal"},
                     resource_id=str(context["physical_resource_id"]),
                 )
             )
@@ -206,10 +206,12 @@ class BareMetalFulfillmentService:
                 raise BareMetalFulfillmentError(
                     "selected bare-metal resource resolved to an unexpected executor"
                 )
+            publication = scheduled.attributes.get("bare_metal_publication")
             if (
-                scheduled.attributes.get("machine_id") != terms.machine_id
-                or scheduled.attributes.get("physical_host_id")
-                != terms.physical_host_id
+                not isinstance(publication, dict)
+                or publication.get("enabled") is not True
+                or publication.get("machine_id") != terms.machine_id
+                or publication.get("physical_host_id") != terms.physical_host_id
             ):
                 raise BareMetalFulfillmentError(
                     "scheduled resource conflicts with accepted bare-metal terms"
@@ -221,13 +223,21 @@ class BareMetalFulfillmentService:
                 settlement_resource_id=settlement_resource_id,
             )
 
-        now = datetime.now(timezone.utc)
-        materialization = BareMetalMaterialization(
+        materialization = await self.db.load_bare_metal_materialization(
+            negotiation_id=negotiation_id
+        )
+        materialization_start = (
+            materialization.lease_start_utc
+            if materialization is not None
+            else datetime.now(timezone.utc)
+        )
+        expected_materialization = BareMetalMaterialization(
             escrow_uid=escrow_uid,
             machine_id=terms.machine_id,
             physical_host_id=terms.physical_host_id,
-            lease_start_utc=now,
-            lease_end_utc=now + timedelta(seconds=terms.duration_seconds),
+            lease_start_utc=materialization_start,
+            lease_end_utc=materialization_start
+            + timedelta(seconds=terms.duration_seconds),
             access_method=terms.access_method,
             ssh_public_key=terms.ssh_public_key,
             access_ref=terms.access_ref,
@@ -236,10 +246,16 @@ class BareMetalFulfillmentService:
                 "settlement_resource_id": settlement_resource_id,
             },
         )
-        await self.db.save_bare_metal_materialization(
-            negotiation_id=negotiation_id,
-            materialization=materialization,
-        )
+        if materialization is None:
+            materialization = expected_materialization
+            await self.db.save_bare_metal_materialization(
+                negotiation_id=negotiation_id,
+                materialization=materialization,
+            )
+        elif materialization != expected_materialization:
+            raise BareMetalFulfillmentError(
+                "recorded materialization conflicts with accepted bare-metal terms"
+            )
         accepted = await self.fulfillment_client.begin_fulfillment(
             FulfillmentRequestBody(
                 capacity_reservation_id=str(reservation_id),
