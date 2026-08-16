@@ -13,7 +13,7 @@ from typing import Any
 
 from core_storefront.identity_config import IdentityConfig, resolve_storefront_signer
 from market_identity import Identity, IdentityScheme, Signer, TrustedIdentitySet
-from core_storefront.escrow_verification import verify_escrow_for_settlement
+from market_alkahest import create_alkahest_registration
 from market_core import MarketDomainContract, validate_domain_contract
 from market_hosted_settlement import PortableRemoteFulfillmentRef, canonical_json
 from market_settlement_runtime import (
@@ -113,7 +113,9 @@ class BareMetalStorefrontRuntime:
     fulfillment_client: Any | None = field(default=None, repr=False)
     chain_clients: Mapping[str, Any] = field(default_factory=dict)
     chain_config_paths: Mapping[str, str | None] = field(default_factory=dict)
-    escrow_verifier: Callable[..., Awaitable[int]] = verify_escrow_for_settlement
+    escrow_verifier: Callable[..., Awaitable[int]] = field(
+        default_factory=lambda: create_alkahest_registration().settlement_verifier
+    )
     settlement_repository: SettlementSQLiteRepository = field(init=False, repr=False)
     settlement_clients: Mapping[str, Any] = field(init=False, repr=False)
     settlement_runtime: SettlementRuntime = field(init=False, repr=False)

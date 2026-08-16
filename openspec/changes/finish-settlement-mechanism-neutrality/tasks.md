@@ -158,15 +158,36 @@ portions after the corresponding `consume-expanded-stripe-funding` tasks.
 
 ## 5. Alkahest vocabulary and verification hook
 
-- [ ] 5.1 Registration-owned verification hook; Alkahest escrow verification moves
-      behind it and out of `core_storefront.escrow_verification`'s injected-function
-      shape.
-- [ ] 5.2 Move `AcceptedEscrow`/`EscrowProposal`/`EscrowDemand`/`accepted_*`
-      accessors to `kit/alkahest` (single definition, core re-exports then
-      tombstones); `RateValue`, `SettlementOption`, `compute_rate_total` stay core.
-      Repoint the residual consumers (`escrow_verification`, `refund`,
-      VM `cli_publish`).
-- [ ] 5.3 Closeout.
+- [x] 5.1 `MechanismRegistration.settlement_verifier` added;
+      `verify_escrow_for_settlement` moved verbatim from
+      `core_storefront.escrow_verification` into
+      `market_alkahest.escrow_verification` (function-local soft imports
+      of the kit's own codecs hoisted to a module-level `_codecs`
+      attribute so the established `market_alkahest.alkahest` patch seam
+      survives) and installed on `create_alkahest_registration()`. All
+      three domain contracts now wire
+      `verify=create_alkahest_registration().settlement_verifier`; the
+      bare-metal runtime's default `escrow_verifier` resolves from the
+      registration; the VM `utils/escrow_verification` shim re-exports
+      from the kit; the core module is deleted. Evidence: kit/alkahest
+      179 (new pin: the registration owns the verifier), VM storefront
+      1093, bare-metal 113, apicredits 76.
+- [x] 5.2 The kit's verbatim carrier copies are the single definition.
+      One reality the draft missed, recorded in `design.md`: core cannot
+      import a mechanism kit, so "core re-exports" is realized as
+      tombstoned transitional aliases — an ownership note now marks the
+      core block, kept only for the wire models core still types
+      (negotiation/listing carriers), to be retired with a contract
+      change. The named residual accessor consumers are repointed:
+      `escrow_verification` (moved into the kit), core `refund` (lazy
+      accessor import → `market_alkahest.schemas`, matching
+      `token_transfer`'s existing soft-dep pattern), VM `cli_publish`
+      (`accepted_token_address` → kit; `primary_rate_value` stays core
+      as the mechanism-neutral price lens). `RateValue`,
+      `SettlementOption`, `compute_rate_total` stay core as designed.
+- [x] 5.3 Closeout: hygiene clean; core/storefront 148, core 91,
+      kit/settlement-runtime 78, core/buyer 105 all green; design
+      decision recorded; promotion row below.
 
 ## 6. Discovery filters and residual literals
 
@@ -186,3 +207,5 @@ portions after the corresponding `consume-expanded-stripe-funding` tasks.
 | Accepted obligations are constructed by the registration (`accepted_obligation_builder` → `AcceptedObligationArtifacts` with scalar-coherent amount and mechanism-namespaced service terms); domains resolve the mechanism once from the selection and keep only domain semantics, keyed on option shape rather than mechanism ID | `openspec/specs/market-composition/spec.md` (promote at synchronization) |
 | Rate arithmetic is mechanism-owned: the rate's own unit decides its scaling input — time units scale by the negotiated duration, counted units by the negotiated unit quantity (`compute_rate_unit_total`), both carried in the acceptance context | `openspec/specs/settlement-configuration/spec.md` (promote at synchronization) |
 | Legacy hosted card obligations are recovery-only: reload paths that admit them keep field-level verification, since a builder rebuild cannot reproduce their pre-profile params | `openspec/specs/market-composition/spec.md` (promote at synchronization) |
+| Settlement verification is a registration hook (`settlement_verifier`); mechanism-specific call signatures stay at the mechanism's surface, but ownership lives on the registration | `openspec/specs/settlement-configuration/spec.md` (promote at synchronization) |
+| Alkahest-shaped carriers are kit-owned; core keeps tombstoned verbatim aliases only for the wire models it still types, because core cannot import a mechanism kit | `openspec/specs/market-composition/spec.md` (promote at synchronization) |

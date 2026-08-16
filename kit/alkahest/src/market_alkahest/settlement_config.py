@@ -25,6 +25,7 @@ from market_settlement_runtime import (
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from .claim_hooks import AlkahestConditionalEscrowClient
+from .escrow_verification import verify_escrow_for_settlement
 
 ALKAHEST_MECHANISM_ID = "alkahest.v1"
 ALKAHEST_CONFIG_KEY = "alkahest"
@@ -575,6 +576,7 @@ def create_alkahest_registration() -> MechanismRegistration:
         preflight=alkahest_preflight,
         client_factory=alkahest_client_factory,
         option_builder=alkahest_option_builder,
+        settlement_verifier=verify_escrow_for_settlement,
         clause_fields=(
             SettlementClauseField(
                 descriptor=FieldDescriptor(

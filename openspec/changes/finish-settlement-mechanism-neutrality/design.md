@@ -129,6 +129,18 @@ cross-mechanism vocabulary, and only `AcceptedEscrow` / `EscrowProposal` /
 `EscrowDemand` / `accepted_*` accessors — consumed by three residual core sites —
 move. The verbatim duplicates in `kit/alkahest` become the single definition.
 
+### Core cannot re-export the kit's carriers
+
+The draft said "core re-exports then tombstones", but the dependency
+arrow points the other way: `market_alkahest` depends on `market_core`,
+so core cannot import the kit to re-export the moved carriers. The
+realized shape: the kit's verbatim copies are the single authoritative
+definition, the residual accessor consumers repoint to the kit (core's
+`refund` uses the same lazy soft-import pattern `token_transfer` already
+established), and core's copies stay as tombstoned transitional aliases
+solely for the wire models core still types (negotiation and listing
+carriers) until a contract change retires them.
+
 ### The defect is verified before it is designed around
 
 The buyer-side `service_terms` rejection contradicts the VM hosted seller's emitted

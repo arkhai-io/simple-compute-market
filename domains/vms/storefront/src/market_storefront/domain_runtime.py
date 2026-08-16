@@ -16,7 +16,7 @@ from core_storefront.domain_registry import (
     StorefrontDomainRegistration,
     StorefrontDomainRegistry,
 )
-from core_storefront.escrow_verification import verify_escrow_for_settlement
+from market_alkahest import create_alkahest_registration
 from domains.vms.negotiation.storefront_round import default_seller_round_hook
 from market_core import (
     DomainCapability,
@@ -133,7 +133,7 @@ def build_vm_storefront_domain() -> MarketDomainContract:
                 run_negotiation_policy=default_seller_round_hook,
             ),
             settlement=ImmutableSettlementCapability(
-                verify=verify_escrow_for_settlement,
+                verify=create_alkahest_registration().settlement_verifier,
                 build_plan=_build_vm_settlement_plan,
             ),
             fulfillment=ImmutableFulfillmentCapability(

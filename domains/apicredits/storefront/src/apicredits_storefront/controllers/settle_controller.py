@@ -61,7 +61,7 @@ class SettleController:
         body: ApiCreditsSettleRequest,
         request: Request,
     ) -> Any:
-        from core_storefront.escrow_verification import EscrowVerificationError
+        from market_alkahest.escrow_verification import EscrowVerificationError
 
         signer = _container.resolved_marketplace_signer
         if signer is None:

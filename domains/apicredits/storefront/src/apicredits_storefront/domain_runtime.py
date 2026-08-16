@@ -29,7 +29,7 @@ def _build_market_domain_contract() -> MarketDomainContract:
     from apicredits_storefront.negotiation_runtime import (
         build_api_credit_accepted_artifacts,
     )
-    from core_storefront.escrow_verification import verify_escrow_for_settlement
+    from market_alkahest import create_alkahest_registration
     from domains.apicredits.domain_runtime import market_domain
     from domains.apicredits.negotiation.storefront_round import (
         default_seller_round_hook,
@@ -53,7 +53,7 @@ def _build_market_domain_contract() -> MarketDomainContract:
                 publish=publish_order_to_registry,
             ),
             settlement=ImmutableSettlementCapability(
-                verify=verify_escrow_for_settlement,
+                verify=create_alkahest_registration().settlement_verifier,
                 build_plan=build_api_credit_accepted_artifacts,
             ),
             fulfillment=ImmutableFulfillmentCapability(
@@ -109,7 +109,7 @@ async def prepare_api_credit_settlement(
     """Verify and snapshot the exact durationless API-credit obligation."""
     if request is None:
         raise ValueError("settlement request is required")
-    from core_storefront.escrow_verification import verify_escrow_for_settlement
+    from market_alkahest.escrow_verification import verify_escrow_for_settlement
     from market_core.schemas import EscrowProposal
     from market_settlement_runtime import PreparedSettlement
 

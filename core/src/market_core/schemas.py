@@ -633,6 +633,16 @@ def compute_rate_unit_total(rate: RateValue, unit_count: int) -> int:
 # round-trip through SQLite or the wire); these accessors operate on
 # either a Pydantic model OR a dict so the only change at the call site
 # is the accessor name.
+#
+# Ownership note: the Alkahest-shaped carriers below (AcceptedEscrow,
+# EscrowProposal, EscrowDemand, and the accepted_* accessors) have their
+# single authoritative definition in ``market_alkahest.schemas`` — core
+# cannot import the mechanism kit, so these stay as verbatim transitional
+# aliases only for the wire models core still types (negotiation and
+# listing carriers), to be retired with a contract change. New consumers
+# import from the kit. ``RateValue``, ``SettlementOption``,
+# ``compute_rate_total`` and ``primary_rate_value`` are mechanism-neutral
+# and deliberately stay core.
 
 
 def primary_rate_value(accepted_or_proposal: Any) -> int | None:
