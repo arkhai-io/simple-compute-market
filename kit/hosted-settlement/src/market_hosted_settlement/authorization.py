@@ -65,6 +65,7 @@ class _AcceptedAuthorizationParams(AuthorizationModel):
         max_length=256,
         pattern=r"^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
     )
+    payer_principal: Principal
     claimant_principal: Principal
     funds_flow: Literal["separate_charges_transfers"]
     country: Literal["US"]
@@ -186,9 +187,14 @@ def derive_accepted_funding_authorization(
     )
     payer = Identity.model_validate(obligation.get("payer_principal"))
     seller = Identity.model_validate(obligation.get("claimant_principal"))
+    params_payer = Identity.model_validate(
+        params.payer_principal.model_dump(mode="json")
+    )
     params_seller = Identity.model_validate(
         params.claimant_principal.model_dump(mode="json")
     )
+    if params_payer != payer:
+        raise ValueError("accepted hosted payer principal is inconsistent")
     if params_seller != seller:
         raise ValueError("accepted hosted claimant principal is inconsistent")
     return AcceptedFundingAuthorization(

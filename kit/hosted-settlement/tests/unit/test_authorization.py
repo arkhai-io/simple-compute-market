@@ -28,7 +28,6 @@ from market_hosted_settlement import (
     StripeSettlementConfig,
     stripe_contract_fingerprint,
     payer_compatibility_context,
-    authorization_input_fingerprint,
     derive_accepted_funding_authorization,
 )
 from market_identity import (
@@ -71,6 +70,9 @@ def _obligation(profile: FundingProfile = FundingProfile.CARD) -> dict:
         "params": {
             "account_ref": "seller-account",
             "authority_id": "authority-main",
+            "payer_principal": MarketplaceSignerAdapter(SIGNER).principal.model_dump(
+                mode="json"
+            ),
             "claimant_principal": MarketplaceSignerAdapter(
                 Ed25519Signer(bytes(reversed(range(32))))
             ).principal.model_dump(mode="json"),
@@ -176,6 +178,19 @@ def test_derivation_uses_marketplace_obligation_hash_and_safe_receipt() -> None:
     assert accepted.authority_id == "authority-main"
     assert accepted.environment == "production"
     assert accepted.country == "US"
+
+
+def test_derivation_rejects_inconsistent_payer_parameter() -> None:
+    obligation = _obligation()
+    obligation["params"]["payer_principal"] = MarketplaceSignerAdapter(
+        Ed25519Signer(b"\x44" * 32)
+    ).principal.model_dump(mode="json")
+
+    with pytest.raises(ValueError, match="payer principal is inconsistent"):
+        derive_accepted_funding_authorization(
+            obligation_ref="a" * 64,
+            obligation=obligation,
+        )
 
 
 @pytest.mark.asyncio
