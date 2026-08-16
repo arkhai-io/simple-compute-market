@@ -663,7 +663,7 @@ async def test_readiness_fails_on_identity_capability_drift() -> None:
     ):
         await adapter.verify_contract_ready(
             expected_manifest_digest="sha256:" + "aa" * 32,
-            expected_contract_version="0.2.0",
+            expected_contract_version="0.2.1",
             expected_schema_version=5,
             required_capabilities=(),
             operation_ref="publication",

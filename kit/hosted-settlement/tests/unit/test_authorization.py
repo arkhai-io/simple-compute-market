@@ -116,7 +116,7 @@ class Client:
         return SimpleNamespace(
             ready=True,
             manifest_digest="sha256:" + "ab" * 32,
-            api_version="0.2.0",
+            api_version="0.2.1",
             schema_version=5,
             payer_profile_protocol="arkhai.payer-profile.v1",
             funding_authorization_protocol="arkhai.funding-authorization.v1",

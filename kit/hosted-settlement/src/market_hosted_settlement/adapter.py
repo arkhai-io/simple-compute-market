@@ -49,6 +49,7 @@ REQUIRED_HOSTED_CAPABILITIES = frozenset(
         "account-owner-admission.v1",
         "account-owner-rotation.v1",
         "account-owner-retirement.v1",
+        "operator-recovery-redaction.v1",
         "provider-neutral-seller-onboarding.v1",
         "scheme-tagged-identities.v1",
         "signer-injected-client.v1",
