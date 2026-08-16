@@ -146,10 +146,13 @@ def test_unavailable_generation_closes_nothing(db):
     candidate = bare_metal_listing_candidates([_projection()])[0]
     _insert_open_listing(db, candidate)
 
-    assert stale_open_bare_metal_listing_ids(
-        db,
-        [_projection(complete=False)],
-    ) == []
+    assert (
+        stale_open_bare_metal_listing_ids(
+            db,
+            [_projection(complete=False)],
+        )
+        == []
+    )
 
 
 def test_authoritative_empty_generation_closes_site_listings(db):
@@ -167,11 +170,20 @@ def test_authoritative_empty_generation_closes_site_listings(db):
     closed = close_stale_bare_metal_listings(
         db_path=db,
         projections=[empty],
-        close_listing=lambda listing_id: calls.append(listing_id) or {"status": "closed"},
+        close_listing=lambda listing_id: (
+            calls.append(listing_id) or {"status": "closed"}
+        ),
     )
 
     assert closed == ["listing-1"]
     assert calls == ["listing-1"]
+    assert (
+        load_derived_bare_metal_listing(
+            db,
+            derivation_key=candidate["derivation_key"],
+        )["listing_status"]
+        == "closed"
+    )
 
 
 def test_complete_generation_does_not_close_other_trusted_site(db):

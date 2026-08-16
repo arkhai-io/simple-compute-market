@@ -234,6 +234,15 @@ def mark_derived_bare_metal_listings_closed(
             """,
             tuple(listing_ids),
         )
+        conn.execute(
+            f"""
+            UPDATE listings
+            SET status = 'closed',
+                updated_at = STRFTIME('%Y-%m-%dT%H:%M:%fZ', 'now')
+            WHERE listing_id IN ({placeholders})
+            """,
+            tuple(listing_ids),
+        )
         conn.commit()
     finally:
         conn.close()
