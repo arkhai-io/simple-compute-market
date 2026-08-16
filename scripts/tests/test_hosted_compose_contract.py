@@ -49,6 +49,10 @@ def test_compose_contains_only_ordinary_hosted_roles() -> None:
     assert 'command: ["hosted-settlement-migrate"]' in COMPOSE
     assert 'command: ["hosted-settlement-api"' in COMPOSE
     assert 'command: ["hosted-settlement-worker"' in COMPOSE
+    worker = COMPOSE.split("  hosted-settlement-worker:", 1)[1].split(
+        "\n  provisioning:", 1
+    )[0]
+    assert 'test: ["CMD", "python", "-c", "import os; os.kill(1, 0)"]' in worker
 
 
 def test_compose_has_no_source_or_editable_sibling_mount() -> None:

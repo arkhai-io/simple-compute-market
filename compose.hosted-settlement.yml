@@ -57,6 +57,12 @@ services:
   hosted-settlement-worker:
     <<: *hosted-service
     command: ["hosted-settlement-worker", "--interval-seconds", "${HOSTED_SETTLEMENT_WORKER_INTERVAL:-5}"]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import os; os.kill(1, 0)"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+      start_period: 10s
     depends_on:
       hosted-settlement-api:
         condition: service_healthy

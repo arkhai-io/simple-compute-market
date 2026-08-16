@@ -7,6 +7,7 @@ import pytest
 import market_storefront.container as container
 import market_storefront.server as server
 import market_storefront.services.capacity_client as capacity_client_module
+import market_storefront.startup as startup
 from market_storefront.domain_runtime import (
     build_vm_storefront_domain,
     build_vm_storefront_registry,
@@ -17,6 +18,50 @@ def _registry(domain):
     registry = build_vm_storefront_registry(domain)
     assert registry.resolve_mode("vm").contract is domain
     return registry
+
+
+def test_startup_registry_accepts_runtime_bound_negotiation_callback(
+    monkeypatch,
+) -> None:
+    class Runtime:
+        async def continue_negotiation(self, **_kwargs):
+            return {}
+
+    domain = object()
+    registry = SimpleNamespace(
+        registration_for_contract=lambda selected: SimpleNamespace(
+            contract=selected
+        )
+    )
+    sqlite_client = SimpleNamespace(domain_registry=registry)
+    runtime = Runtime()
+    monkeypatch.setattr(container, "resolved_domain_registry", registry)
+    monkeypatch.setattr(container, "resolved_sqlite_client", sqlite_client)
+    monkeypatch.setattr(
+        container,
+        "resolved_listing_service",
+        SimpleNamespace(domain_registry=registry),
+    )
+    monkeypatch.setattr(container, "resolved_negotiation_runtime", runtime)
+    monkeypatch.setattr(
+        container,
+        "resolved_negotiation_service",
+        SimpleNamespace(_continue_negotiation=runtime.continue_negotiation),
+    )
+    monkeypatch.setattr(
+        container,
+        "resolved_settlement_composition",
+        SimpleNamespace(domain=domain),
+    )
+
+    assert startup._assert_startup_registry(registry, domain) is sqlite_client
+
+    other_runtime = Runtime()
+    container.resolved_negotiation_service = SimpleNamespace(
+        _continue_negotiation=other_runtime.continue_negotiation
+    )
+    with pytest.raises(RuntimeError, match="app-selected negotiation runtime"):
+        startup._assert_startup_registry(registry, domain)
 
 
 def test_server_uses_shared_storefront_app_shell() -> None:

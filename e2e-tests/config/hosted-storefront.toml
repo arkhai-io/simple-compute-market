@@ -37,6 +37,9 @@ principals = [{ scheme = "ed25519", identifier = "yFOtDwzSthmuqSzuxP1Wok1kmdWEzn
 poll_interval = 1
 hold_ttl_seconds = 900
 
+[capacity.sites]
+default = "http://provisioning:8081"
+
 [provisioning]
 service_url = "http://provisioning:8081"
 mode = "mock"

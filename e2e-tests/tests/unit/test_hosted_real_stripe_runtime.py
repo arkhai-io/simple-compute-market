@@ -199,6 +199,9 @@ def test_ephemeral_container_inputs_use_shared_directory(
         assert parsed["pricing"]["settlements"][0]["mechanism_input"]["funding_profile"] == (
             "us_bank_transfer.v1"
         )
+        assert parsed["capacity"]["sites"] == {
+            "default": "http://provisioning:8081"
+        }
     buyer_template = Path(__file__).resolve().parents[2] / "config" / "hosted-buyer.toml"
     credential = base64.urlsafe_b64encode(b"a" * 32).decode().rstrip("=")
     monkeypatch.setenv("HOSTED_SETTLEMENT_E2E_BUYER_IDENTITY_CREDENTIAL", credential)

@@ -269,13 +269,13 @@ def _assert_startup_registry(registry: Any, domain: MarketDomainContract) -> Any
     listing_service = _container.resolved_listing_service
     negotiation_service = _container.resolved_negotiation_service
     settlement_composition = _container.resolved_settlement_composition
+    negotiation_runtime = _container.resolved_negotiation_runtime
     callback = getattr(negotiation_service, "_continue_negotiation", None)
-    callback_registry = getattr(callback, "keywords", {}).get("registry")
+    callback_runtime = getattr(callback, "__self__", None)
     collaborators = (
         ("container", _container.resolved_domain_registry),
         ("SQLite repository", getattr(sqlite_client, "domain_registry", None)),
         ("listing service", getattr(listing_service, "domain_registry", None)),
-        ("negotiation callback", callback_registry),
     )
     for label, collaborator_registry in collaborators:
         if collaborator_registry is not registry:
@@ -283,6 +283,11 @@ def _assert_startup_registry(registry: Any, domain: MarketDomainContract) -> Any
                 f"{label} is not bound to the app-selected storefront "
                 "domain registry object"
             )
+    if callback_runtime is not negotiation_runtime:
+        raise RuntimeError(
+            "negotiation callback is not bound to the app-selected "
+            "negotiation runtime object"
+        )
     if registry.registration_for_contract(domain).contract is not domain:
         raise RuntimeError("settlement domain is not the startup-owned contract")
     if getattr(settlement_composition, "domain", None) is not domain:
