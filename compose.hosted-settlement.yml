@@ -58,7 +58,7 @@ services:
     <<: *hosted-service
     command: ["hosted-settlement-worker", "--interval-seconds", "${HOSTED_SETTLEMENT_WORKER_INTERVAL:-5}"]
     healthcheck:
-      test: ["CMD", "python", "-c", "import os; os.kill(1, 0)"]
+      test: ["CMD", "python", "-c", "__import__('os').kill(1,0)"]
       interval: 5s
       timeout: 3s
       retries: 12
