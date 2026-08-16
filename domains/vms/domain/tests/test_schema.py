@@ -90,4 +90,11 @@ def test_vm_provision_normalization_accepts_wire_and_durable_shapes() -> None:
     assert normalize_vm_provision_terms(
         {"kind": "compute.v1", "version": 1, "payload": payload}
     ).payload == payload
+    assert normalize_vm_provision_terms(
+        {
+            "kind": "compute.v1",
+            **payload,
+            "settlement_selection": None,
+        }
+    ).payload == payload
 
