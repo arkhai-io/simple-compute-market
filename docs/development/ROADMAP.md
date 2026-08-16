@@ -246,14 +246,41 @@ storefront-mediated through the shared settlement runtime. Historical
 card-only accepted state is recovery-only, and Alkahest remains an independent
 mechanism lane.
 
-Production activation and protected profile evidence still require the exact
-signed hosted manifest, service-image digest, provenance/SBOM, repository and
-workflow attestations, matching client/OpenAPI/conformance/schema-5 artifacts,
-and each selected Stripe test-mode rail/account/instrument/mandate/browser
-prerequisite. Local client/service wheels and unsigned contract artifacts do
-not satisfy those external release checks.
+The independently signed hosted `v0.2.1` producer release, manifest, client
+wheel, service image, API/schema/conformance artifacts, SBOM/provenance,
+repository/workflow identity, and source commit have been verified. Production
+activation still requires role-scoped credentials and readiness for each
+selected Stripe account, rail, instrument or mandate, browser action, webhook,
+and condition resolver; local provider fixtures cannot establish those claims.
 
-API-credit and bare-metal are now separate adopters of the shared hosted transport, route service, configuration registry, and settlement runtime; neither imports VM lifecycle code. Bare metal ships an installed buyer contribution, a dedicated seller composition, trusted selected-site publication, funding-gated Capacity Reservation and fulfillment, portable lease-ready evidence, and independent teardown/recovery. Local deterministic delivery is complete under the permanent capability contracts. Production activation remains blocked only on the exact signed hosted release, protected Stripe rail prerequisites, and disposable live-host access/revocation/teardown evidence described above.
+The protected three-profile provider matrix is not complete. Three signed card
+runs reached the real ready connected account and verified loopback webhook,
+then reported `payer_profile_unavailable`. That diagnostic means the protected
+marketplace lifecycle subprocess exited while constructing the buyer-side payer
+fixture—loading the ephemeral durable buyer profile, creating or reusing the
+authority-scoped hosted payer profile through the released client, and
+persisting its opaque binding—before it returned a successful fixture result.
+It is not a Stripe funding decline and no payment was attempted. The current
+sanitized report intentionally discards child stderr, so it does not yet
+distinguish profile-store/signing/configuration failure from a released-client
+or hosted-authority rejection. The next qualification work is to add an
+allowlisted stage-specific initialization diagnostic, rerun one interactive
+card collection lane to identify and correct the exact prerequisite, then run
+saved-card/off-session fallback, bank-transfer, ACH success/failure/return,
+collection/reclaim, restart, and loss cases.
+
+API-credit and bare-metal are separate adopters of the shared hosted transport,
+route service, configuration registry, and settlement runtime; neither imports
+VM lifecycle code. Bare metal ships an installed buyer contribution, dedicated
+seller composition, trusted selected-site publication, funding-gated Capacity
+Reservation and fulfillment, portable lease-ready evidence, and independent
+teardown/recovery. One release-qualified `us_bank_transfer.v1` whole-host lane
+has proved authoritative Stripe funding and collection, portable condition
+evidence, authenticated SSH access, key revocation and failed subsequent
+access, teardown, Capacity Reservation release, and capacity republication.
+Card, ACH, automatic-fallback, and failure/recovery whole-host lanes remain
+unqualified until the protected payer-profile blocker and remaining provider
+matrix are resolved.
 
 ---
 

@@ -5,6 +5,24 @@ compute, and SSH into the leased VM.
 
 For the seller side see [`seller-quickstart.md`](./seller-quickstart.md).
 
+## Supported settlement methods
+
+The buyer supports two independent settlement mechanisms:
+
+| Mechanism | Buyer payment choices | Buyer requirements |
+|---|---|---|
+| Hosted Stripe fiat (`fiat.stripe.v1`) | `card.v1`; US/USD push transfer through `us_bank_transfer.v1`; US/USD ACH Direct Debit through `us_ach_debit.v1` | A durable marketplace profile, an opaque payer binding for the selected hosted authority/environment, and any transient payment or setup action. No wallet, chain, RPC, gas, or token balance. |
+| Alkahest (`alkahest.v1`) | The exact chain/asset/escrow option advertised by the listing | An EVM wallet, RPC-backed chain configuration, gas, and the advertised asset. |
+
+Cards may be interactive or use an explicitly selected saved instrument and
+per-purchase authorization. Any off-session authentication requirement returns
+to the interactive action flow. Push bank transfer remains
+purchase-interactive; ACH may be interactive or use a ready saved bank
+instrument and mandate. A listing is selectable only when it advertises that
+exact profile and the configured authority reports it ready. See
+[`ROADMAP.md`](./development/ROADMAP.md#hosted-settlement-release-status) for
+current external release-qualification status.
+
 ## Prerequisites
 
 - Linux or macOS (Windows: WSL).

@@ -13,6 +13,21 @@ SSH access instead of VM slices, see
 To sell request quota for an OpenAI-compatible vLLM server instead, see the
 [`vLLM API-credits cookbook`](./cookbooks/vllm-apicredits-seller.md).
 
+## Supported settlement methods
+
+A VM storefront can publish independent Alkahest and hosted Stripe options on
+the same listing. Hosted fiat uses `fiat.stripe.v1` with one exact profile per
+option: `card.v1`, US/USD push `us_bank_transfer.v1`, or US/USD
+`us_ach_debit.v1`. It may publish only the profiles for which the hosted
+authority, seller account, country/currency policy, condition resolver, signed
+release, and funding window are ready. One unavailable rail does not suppress
+the others, and the accepted deal never falls back to a different mechanism or
+profile. See the
+[`buyer quickstart`](./buyer-quickstart.md#supported-settlement-methods) for the
+buyer-side payment flow and
+[`ROADMAP.md`](./development/ROADMAP.md#hosted-settlement-release-status) for
+current external qualification status.
+
 ## Prerequisites
 
 - A canonical public marketplace identity and matching signing material

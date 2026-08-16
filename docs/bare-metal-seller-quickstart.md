@@ -12,6 +12,16 @@ Physical Resource may back VM and bare-metal offers only when both listings
 use the same stable physical-host identity and their Resource Pools explicitly
 declare the relevant `deliverable_modes`.
 
+Whole-host listings may publish Alkahest and hosted Stripe fiat as independent
+settlement alternatives. Hosted options use one exact `card.v1`, US/USD
+`us_bank_transfer.v1`, or US/USD `us_ach_debit.v1` profile; slow or interactive
+payment never reserves, allocates, or provisions the host before authoritative
+funding. See the
+[`buyer quickstart`](./buyer-quickstart.md#supported-settlement-methods) for
+payment behavior and
+[`ROADMAP.md`](./development/ROADMAP.md#hosted-settlement-release-status) for
+the distinction between shipped support and completed external qualification.
+
 ## Prerequisites
 
 - Docker/Podman with Compose v2 on a Linux host.
