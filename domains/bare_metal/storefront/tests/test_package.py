@@ -36,7 +36,7 @@ def test_version_command_uses_distribution_metadata() -> None:
     result = CliRunner().invoke(app, ["--version"])
 
     assert result.exit_code == 0
-    assert result.stdout == "bare-metal-storefront version 0.2.0\n"
+    assert result.stdout == "bare-metal-storefront version 0.2.1\n"
 
 
 def test_serve_command_delegates_process_options(monkeypatch) -> None:

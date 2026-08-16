@@ -92,6 +92,7 @@ def _validate(plan: SettlementPlan) -> None:
         expected_plan=None,
         buyer_principal=_BUYER,
         trusted_seller_principals=TrustedIdentitySet(identities=(_SELLER,)),
+        validate_advertised_plan=None,
     )
 
 
@@ -184,6 +185,7 @@ def test_accepts_amountless_introduction_plan() -> None:
         expected_plan=None,
         buyer_principal=_BUYER,
         trusted_seller_principals=TrustedIdentitySet(identities=(_SELLER,)),
+        validate_advertised_plan=None,
     )
 
 
