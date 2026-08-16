@@ -490,7 +490,7 @@ def complete_hosted(
         action=action,
     )
     settlement = hosted.wait(
-        settlement_ref,
+        settlement_ref=settlement_ref,
         poll_interval=poll_interval,
         total_timeout=timeout,
         on_action=lambda value: _handle_action(dict(value), action),
