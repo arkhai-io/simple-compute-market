@@ -11,7 +11,9 @@ from typing import Any, Literal, Mapping
 
 from market_core.schemas import (
     SettlementOption,
+    SettlementPlan,
     SettlementSelection,
+    compute_rate_total,
     derive_settlement_option_id,
 )
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
@@ -407,6 +409,74 @@ def validate_buyer_selection(
     return hosted
 
 
+def validate_accepted_hosted_plan(
+    *,
+    plan: SettlementPlan | Mapping[str, Any],
+    listing_id: str,
+    option: BareMetalHostedOption,
+    demand: BareMetalBuyerDemand,
+    buyer_principal: CanonicalPrincipal,
+    seller_principal: CanonicalPrincipal,
+    seller_terms: BaseModel | Mapping[str, Any],
+) -> SettlementPlan:
+    """Validate the exact financial and physical semantics accepted by a seller."""
+
+    accepted = SettlementPlan.model_validate(plan)
+    buyer = buyer_principal.model_dump(mode="json")
+    seller = seller_principal.model_dump(mode="json")
+    if accepted.buyer_principal != buyer or accepted.seller_principal != seller:
+        raise ValueError("accepted bare-metal plan substituted a marketplace party")
+    if option.claimant_principal != seller_principal:
+        raise ValueError("accepted bare-metal claimant does not match the seller")
+    if len(accepted.obligations) != 1:
+        raise ValueError("accepted bare-metal plan must contain one obligation")
+
+    obligation = accepted.obligations[0]
+    expected_amount = compute_rate_total(
+        option.option.rates[0],
+        demand.duration_seconds,
+    )
+    if (
+        obligation.payer != "buyer"
+        or obligation.claimant != "seller"
+        or obligation.payer_principal != buyer
+        or obligation.claimant_principal != seller
+        or obligation.mechanism != option.option.mechanism
+        or obligation.asset != option.option.asset
+        or obligation.amount != expected_amount
+        or obligation.expiration_unix != demand.settlement.expiration_unix
+    ):
+        raise ValueError("accepted bare-metal obligation changed advertised semantics")
+
+    expected_params = dict(option.option.params)
+    expected_params.pop("bare_metal", None)
+    expected_params["payer_principal"] = buyer
+    expected_params["claimant_principal"] = seller
+    condition = expected_params.get("condition")
+    expected_conditions = [dict(condition)] if isinstance(condition, Mapping) else []
+    if (
+        obligation.params != expected_params
+        or obligation.conditions != expected_conditions
+    ):
+        raise ValueError("accepted bare-metal obligation changed hosted semantics")
+
+    if isinstance(seller_terms, BaseModel):
+        terms = seller_terms.model_dump(mode="json", exclude_none=True)
+    else:
+        terms = dict(seller_terms)
+    expected_service_terms = {
+        "bare_metal.v1": {
+            "listing_id": listing_id,
+            "option_id": option.option.option_id,
+            "option_facts": option.facts.model_dump(mode="json", exclude_none=True),
+            "provision_terms": terms,
+        }
+    }
+    if accepted.service_terms != expected_service_terms:
+        raise ValueError("accepted bare-metal plan changed physical service terms")
+    return accepted
+
+
 def derive_accepted_hosted_binding(
     *,
     agreement_ref: str,
@@ -483,5 +553,6 @@ __all__ = [
     "canonical_bare_metal_json",
     "decode_bare_metal_hosted_option_facts",
     "derive_accepted_hosted_binding",
+    "validate_accepted_hosted_plan",
     "validate_buyer_selection",
 ]

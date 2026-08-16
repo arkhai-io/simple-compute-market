@@ -345,6 +345,7 @@ def _validate_settlement_acceptance(
     expected_plan: SettlementPlan | None,
     buyer_principal: Identity,
     trusted_seller_principals: TrustedIdentitySet,
+    validate_advertised_plan: Callable[[SettlementPlan], None] | None,
 ) -> None:
     """Correlate a signed terminal reply with the buyer's exact commitment."""
 
@@ -440,6 +441,9 @@ def _validate_settlement_acceptance(
         raise RuntimeError(
             "seller settlement_plan asset differs from the advertised option"
         )
+    if validate_advertised_plan is not None:
+        validate_advertised_plan(plan)
+        return
     expected_params = dict(advertised_option.params)
     expected_params["payer_principal"] = buyer_principal.model_dump(mode="json")
     expected_params["claimant_principal"] = reply_seller.model_dump(mode="json")
@@ -655,6 +659,7 @@ def negotiate_with_seller(
     default_guards: tuple[str, ...] = DEFAULT_CHAIN_GUARDS,
     resume: Optional[ResumeState] = None,
     policy_params: Optional[dict[str, Any]] = None,
+    validate_advertised_plan: Callable[[SettlementPlan], None] | None = None,
 ) -> NegotiationOutcome:
     """Run a synchronous negotiation with one seller, round-by-round.
 
@@ -683,6 +688,11 @@ def negotiate_with_seller(
 
     `on_round(round_idx, our_msg, their_reply)` is an optional observer
     hook (for CLI rendering, testing).
+
+    `validate_advertised_plan` may validate a domain projection that intentionally
+    moves domain-only option fields into service terms. Universal party, amount,
+    asset, mechanism, and expiry checks always run first; the callback owns the
+    remaining obligation params, conditions, and service-term correspondence.
 
     Synchronous everything: the seller responds in-line on each POST.
     Returns a NegotiationOutcome describing how it ended; the seller's
@@ -929,6 +939,7 @@ def negotiate_with_seller(
                 agreed_amount=agreed_amount,
                 buyer_principal=principal,
                 trusted_seller_principals=trusted_seller_principals,
+                validate_advertised_plan=validate_advertised_plan,
             )
         if on_round:
             on_round(0, new_body, reply)
@@ -1122,6 +1133,7 @@ def negotiate_with_seller(
                         expected_plan=accepted_plan if resume is not None else None,
                         buyer_principal=principal,
                         trusted_seller_principals=trusted_seller_principals,
+                        validate_advertised_plan=validate_advertised_plan,
                     )
                 if on_round:
                     on_round(round_idx, body, reply)
@@ -1218,6 +1230,7 @@ def negotiate_with_seller(
                     agreed_amount=agreed_amount,
                     buyer_principal=principal,
                     trusted_seller_principals=trusted_seller_principals,
+                    validate_advertised_plan=validate_advertised_plan,
                 )
             if on_round:
                 on_round(round_idx, body, reply)

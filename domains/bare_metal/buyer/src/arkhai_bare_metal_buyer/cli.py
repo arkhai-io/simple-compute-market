@@ -14,8 +14,11 @@ import typer
 from arkhai_bare_metal import (
     BareMetalBuyerDemand,
     BareMetalListing,
+    BareMetalTerms,
+    CanonicalPrincipal,
     decode_bare_metal_hosted_option_facts,
     make_bare_metal_provision_terms,
+    validate_accepted_hosted_plan,
     validate_buyer_selection,
 )
 from core_buyer import (
@@ -224,11 +227,19 @@ def buy_bare_metal(
         settlement=selection,
         allow_off_session=selected.params.get("interaction") == "saved_instrument",
     )
-    validate_buyer_selection(demand=demand, advertised_options=options)
+    hosted_option = validate_buyer_selection(demand=demand, advertised_options=options)
     trusted_listing = BareMetalListing.model_validate(listing.offer)
     _validate_hosted_option_binding(
         trusted_listing,
         physical_host_id=facts.physical_host_id,
+    )
+    accepted_terms = BareMetalTerms(
+        machine_id=trusted_listing.machine_id,
+        physical_host_id=trusted_listing.physical_host_id,
+        duration_seconds=demand.duration_seconds,
+        access_method=demand.access_method,
+        ssh_public_key=demand.ssh_public_key,
+        listing_ref=listing_id,
     )
     run_log = RunLog.start(
         profile_id=identity.profile_id,
@@ -263,6 +274,17 @@ def buy_bare_metal(
         ),
         settlement_selection=selection,
         policy_params={"_selected_settlement_option": selected.model_dump(mode="json")},
+        validate_advertised_plan=lambda plan: validate_accepted_hosted_plan(
+            plan=plan,
+            listing_id=listing_id,
+            option=hosted_option,
+            demand=demand,
+            buyer_principal=CanonicalPrincipal.model_validate(
+                identity.principal.model_dump(mode="json")
+            ),
+            seller_principal=CanonicalPrincipal.model_validate(plan.seller_principal),
+            seller_terms=accepted_terms,
+        ),
         max_rounds=buyer_config.default_max_rounds,
     )
     if outcome.status != "agreed" or outcome.negotiation_id is None:

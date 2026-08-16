@@ -7,14 +7,18 @@ import pytest
 from arkhai_bare_metal import (
     BareMetalBuyerDemand,
     BareMetalHostedOptionFacts,
+    BareMetalHostedOption,
     CanonicalPrincipal,
     bind_bare_metal_hosted_option,
     derive_accepted_hosted_binding,
+    validate_accepted_hosted_plan,
     validate_buyer_selection,
 )
 from market_core.schemas import (
     RateValue,
+    SettlementObligation,
     SettlementOption,
+    SettlementPlan,
     SettlementSelection,
     derive_settlement_option_id,
 )
@@ -82,6 +86,85 @@ def _demand(option: SettlementOption) -> BareMetalBuyerDemand:
             expiration_unix=int(FUNDING_DEADLINE.timestamp()),
         ),
     )
+
+
+def _accepted_plan(
+    option: BareMetalHostedOption,
+    demand: BareMetalBuyerDemand,
+    seller_terms: dict,
+) -> SettlementPlan:
+    params = dict(option.option.params)
+    params.pop("bare_metal")
+    params["payer_principal"] = BUYER.model_dump(mode="json")
+    params["claimant_principal"] = SELLER.model_dump(mode="json")
+    return SettlementPlan(
+        buyer_principal=BUYER.model_dump(mode="json"),
+        seller_principal=SELLER.model_dump(mode="json"),
+        service_terms={
+            "bare_metal.v1": {
+                "listing_id": "listing-a",
+                "option_id": option.option.option_id,
+                "option_facts": option.facts.model_dump(mode="json", exclude_none=True),
+                "provision_terms": seller_terms,
+            }
+        },
+        obligations=[
+            SettlementObligation(
+                payer="buyer",
+                claimant="seller",
+                payer_principal=BUYER.model_dump(mode="json"),
+                claimant_principal=SELLER.model_dump(mode="json"),
+                amount=1200,
+                asset="usd",
+                expiration_unix=demand.settlement.expiration_unix,
+                conditions=[dict(params["condition"])],
+                mechanism="fiat.stripe.v1",
+                params=params,
+            )
+        ],
+    )
+
+
+def test_accepted_plan_preserves_financial_and_physical_semantics() -> None:
+    option = bind_bare_metal_hosted_option(_base_option(), facts=_facts())
+    demand = _demand(option.option)
+    seller_terms = {"kind": "bare_metal.v1", "machine_id": "machine-a"}
+    plan = _accepted_plan(option, demand, seller_terms)
+
+    assert (
+        validate_accepted_hosted_plan(
+            plan=plan,
+            listing_id="listing-a",
+            option=option,
+            demand=demand,
+            buyer_principal=BUYER,
+            seller_principal=SELLER,
+            seller_terms=seller_terms,
+        )
+        == plan
+    )
+
+    mutated = plan.model_copy(
+        update={
+            "service_terms": {
+                **plan.service_terms,
+                "bare_metal.v1": {
+                    **plan.service_terms["bare_metal.v1"],
+                    "listing_id": "substituted",
+                },
+            }
+        }
+    )
+    with pytest.raises(ValueError, match="physical service terms"):
+        validate_accepted_hosted_plan(
+            plan=mutated,
+            listing_id="listing-a",
+            option=option,
+            demand=demand,
+            buyer_principal=BUYER,
+            seller_principal=SELLER,
+            seller_terms=seller_terms,
+        )
 
 
 def test_binding_is_deterministic_and_preserves_trusted_resource() -> None:

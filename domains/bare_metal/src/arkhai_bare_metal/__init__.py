@@ -23,6 +23,7 @@ from .hosted_contract import (
     derive_accepted_hosted_binding,
     decode_bare_metal_hosted_option_facts,
     validate_buyer_selection,
+    validate_accepted_hosted_plan,
 )
 from .hosted_publication import (
     BareMetalHostedPublicationPolicy,
@@ -132,6 +133,7 @@ __all__ = [
     "mark_derived_bare_metal_listings_closed",
     "derive_accepted_hosted_binding",
     "decode_bare_metal_hosted_option_facts",
+    "validate_accepted_hosted_plan",
     "derive_bare_metal_fulfillment_identity",
     "make_bare_metal_provision_terms",
     "materialization_to_lease_create",

@@ -270,6 +270,60 @@ def test_round_0_hosted_selection_is_pinned_and_returned(mock_urlopen):
 
 
 @patch("core_buyer.negotiation_client.urllib.request.urlopen")
+def test_round_0_delegates_domain_plan_semantics_after_universal_checks(
+    mock_urlopen,
+):
+    base = _hosted_option()
+    params = {**base.params, "domain_binding": {"resource": "resource-1"}}
+    option = SettlementOption(
+        option_id=derive_settlement_option_id(
+            mechanism=base.mechanism,
+            asset=base.asset,
+            rates=base.rates,
+            params=params,
+        ),
+        mechanism=base.mechanism,
+        asset=base.asset,
+        rates=base.rates,
+        params=params,
+    )
+    selection = SettlementSelection(
+        mechanism=option.mechanism,
+        option_id=option.option_id,
+        expiration_unix=1_800_000_000,
+    )
+    reply = _hosted_accept_reply(
+        negotiation_id="neg-domain",
+        selection=selection,
+        option=option,
+        amount=50,
+    )
+    reply["settlement_plan"]["obligations"][0]["params"].pop("domain_binding")
+    reply["settlement_plan"]["service_terms"] = {
+        "domain.v1": {"resource": "resource-1"}
+    }
+    mock_urlopen.side_effect = _urlopen_fake([reply])
+    validated = []
+
+    outcome = negotiate_with_seller(
+        seller_url="http://seller:8001",
+        principal=BUYER_SIGNER.identity,
+        signer=BUYER_SIGNER,
+        resolve_seller_principals=seller_principals,
+        listing_id="seller-1",
+        initial_price=50,
+        max_price=100,
+        provision_terms=_provision(3600),
+        settlement_selection=selection,
+        policy_params={"_selected_settlement_option": option.model_dump(mode="json")},
+        validate_advertised_plan=lambda plan: validated.append(plan),
+    )
+
+    assert outcome.status == "agreed"
+    assert validated == [outcome.settlement_plan]
+
+
+@patch("core_buyer.negotiation_client.urllib.request.urlopen")
 def test_round_0_rejects_signed_seller_selection_substitution(mock_urlopen):
     option = _hosted_option()
     selection = SettlementSelection(

@@ -32,7 +32,7 @@ from core_buyer.negotiation_client import (
     parse_accepted_terms_from_reply as _core_parse_accepted_terms_from_reply,
 )
 from market_alkahest.schemas import EscrowProposal, EscrowTerms
-from market_core.schemas import SettlementSelection
+from market_core.schemas import SettlementPlan, SettlementSelection
 from market_policy.negotiation_middleware import NegotiationMiddleware
 from market_identity import Identity, Signer, TrustedIdentitySet
 
@@ -140,6 +140,7 @@ def negotiate_with_seller(
     resume: Optional[ResumeState] = None,
     policy_params: Optional[dict[str, Any]] = None,
     resolve_seller_principals: Callable[[], TrustedIdentitySet],
+    validate_advertised_plan: Callable[[SettlementPlan], None] | None = None,
 ) -> NegotiationOutcome:
     """Run a synchronous negotiation with one seller, round-by-round.
 
@@ -192,6 +193,7 @@ def negotiate_with_seller(
         chain=chain,
         resume=resume,
         policy_params=policy_params,
+        validate_advertised_plan=validate_advertised_plan,
         resolve_seller_principals=resolve_seller_principals,
     )
     values = {
