@@ -46,12 +46,14 @@ class BareMetalSettlementService:
         negotiation_id: str,
         buyer_principal: Identity,
         seller_principal: Identity,
+        obligation_ref: str | None = None,
     ) -> BareMetalSettleResponse:
         return BareMetalSettleResponse(
             escrow_uid=escrow_uid,
             negotiation_id=negotiation_id,
             buyer_principal=buyer_principal,
             seller_principal=seller_principal,
+            obligation_ref=obligation_ref,
         )
 
     async def _owned_thread(
@@ -180,6 +182,7 @@ class BareMetalSettlementService:
                     seller_principal=Identity.model_validate(
                         thread["seller_principal"],
                     ),
+                    obligation_ref=adopted[0].obligation_ref,
                 )
             if any(record.mechanism_ref == escrow_uid for record in records):
                 raise SettlementRequestError(
@@ -275,6 +278,7 @@ class BareMetalSettlementService:
             negotiation_id=request.negotiation_id,
             buyer_principal=buyer_principal,
             seller_principal=Identity.model_validate(thread["seller_principal"]),
+            obligation_ref=records[matched_index].obligation_ref,
         )
 
     async def status(
@@ -319,4 +323,5 @@ class BareMetalSettlementService:
                 ))["seller_principal"],
             ),
             status=str(escrow["status"]),
+            obligation_ref=adopted[0].obligation_ref,
         )

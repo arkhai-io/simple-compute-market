@@ -128,12 +128,33 @@ portions after the corresponding `consume-expanded-stripe-funding` tasks.
 
 ## 4. Deal-identity convergence
 
-- [ ] 4.1 Write the Alkahest `settlement_obligations` record at the same commit point
-      as the `escrows` insert, with `escrow_uid` as `mechanism_ref`; idempotent
-      backfill for existing rows.
-- [ ] 4.2 Point cross-mechanism status/reporting at `obligation_ref`.
-- [ ] 4.3 Closeout, promoting the universal-identity vocabulary to
-      `docs/development/ARCHITECTURE.md#shared-vocabulary-and-identities`.
+- [x] 4.1 The live settle-start paths already write the record at the escrow
+      commit flow in all three domains (`SettlementJobCoordinator` runs
+      `register_plan` + `adopt(mechanism_ref=escrow_uid)` before
+      `reserve_start`; bare metal adopts inline), so the substance was the
+      backfill: `core_storefront.escrow_identity.
+      backfill_escrow_obligation_records` re-registers the accepted plan
+      from the negotiation thread and adopts the escrow uid for every
+      `escrows` row with no `settlement_obligations` record, wired at
+      startup in all three storefronts. Adopted-only records carry no
+      `fulfillment_ref`, so the servicing sweep never touches them —
+      lifecycle stays with the legacy mechanism surface; identity is
+      neutral. Pre-plan rows (no persisted settlement plan) are skipped
+      with a log line: their identity cannot be derived. Evidence:
+      bare-metal `test_escrow_identity_backfill.py` (record created with
+      `mechanism_ref == escrow_uid`, second run 0, planless row skipped).
+- [x] 4.2 Alkahest status projections now expose the neutral identity:
+      `obligation_ref` added to `SettleStatusResponse`, the VM and
+      api-credits settle serializers, and the bare-metal settle/status
+      responses — cross-mechanism tooling correlates by `obligation_ref`
+      from every mechanism surface (the VM deals-heartbeat fallback
+      already resolved records by `mechanism_ref`). Evidence: bare-metal
+      storefront 113 (settle idempotency test now pins the exposed ref),
+      VM 1093, apicredits 76, core/storefront 148.
+- [x] 4.3 Closeout: universal-identity vocabulary promoted to
+      `docs/development/ARCHITECTURE.md#shared-vocabulary-and-identities`
+      (`obligation_ref` paragraph beside the `fulfillment_uid` note);
+      hygiene clean.
 
 ## 5. Alkahest vocabulary and verification hook
 

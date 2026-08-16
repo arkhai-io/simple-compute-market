@@ -372,6 +372,7 @@ def serialize_api_credit_settlement(row: dict[str, Any]) -> dict[str, Any]:
         "updated_at": row.get("updated_at"),
     }
     for field in (
+        "obligation_ref",
         "fulfillment_uid",
         "chain_name",
         "escrow_address",

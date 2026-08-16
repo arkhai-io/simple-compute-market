@@ -640,6 +640,7 @@ def serialize_settlement_job(row: Mapping[str, Any]) -> dict[str, Any]:
         "updated_at": row.get("updated_at"),
     }
     for field in (
+        "obligation_ref",
         "fulfillment_uid",
         "fulfillment_id",
         "chain_name",

@@ -163,6 +163,7 @@ class BareMetalSettleResponse(BaseModel):
     negotiation_id: str
     buyer_principal: Identity
     seller_principal: Identity
+    obligation_ref: str | None = None
     status: Literal["settlement_verified"] = "settlement_verified"
     fulfillment_available: Literal[True] = True
 
@@ -173,4 +174,5 @@ class BareMetalSettleStatusResponse(BaseModel):
     status: str
     buyer_principal: Identity
     seller_principal: Identity
+    obligation_ref: str | None = None
     fulfillment_available: Literal[True] = True

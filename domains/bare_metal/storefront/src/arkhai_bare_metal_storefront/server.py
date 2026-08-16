@@ -9,6 +9,7 @@ from importlib import import_module
 from typing import Any
 
 from core_storefront.app_composition import StorefrontAppConfig
+from core_storefront.escrow_identity import backfill_escrow_obligation_records
 from core_storefront.domain_registry import (
     StorefrontDomainRegistry,
     StorefrontDomainRegistration,
@@ -58,6 +59,12 @@ async def _start_runtime(runtime: BareMetalStorefrontRuntime) -> None:
             emit_stage_event=stage_event,
         )
     )
+    if runtime.settlement_runtime is not None:
+        await backfill_escrow_obligation_records(
+            sqlite_client=runtime.db,
+            settlement_runtime=runtime.settlement_runtime,
+            local_principal=runtime.seller_principal,
+        )
     if runtime.settlement_worker is not None:
         asyncio.create_task(runtime.settlement_worker.run())
 

@@ -2909,6 +2909,45 @@ class SQLiteClient:
 
         await asyncio.to_thread(_update)
 
+    async def list_escrows_missing_obligation_records(
+        self, *, limit: int = 500
+    ) -> list[dict[str, Any]]:
+        """Return escrows with no mechanism-neutral settlement_obligations record.
+
+        The join is by ``mechanism_ref`` — the mechanism-issued escrow uid is
+        the neutral record's mechanism identifier — so this is the exact
+        backfill worklist for legacy Alkahest deals.
+        """
+
+        def _load() -> list[dict[str, Any]]:
+            conn = sqlite3.connect(self.db_path)
+            try:
+                has_obligations = conn.execute(
+                    "SELECT name FROM sqlite_master"
+                    " WHERE type='table' AND name='settlement_obligations'"
+                ).fetchone()
+                if not has_obligations:
+                    return []
+                rows = conn.execute(
+                    """
+                    SELECT e.escrow_uid, e.negotiation_id
+                    FROM escrows e
+                    LEFT JOIN settlement_obligations o
+                      ON o.mechanism_ref = e.escrow_uid
+                    WHERE o.obligation_ref IS NULL
+                    ORDER BY e.created_at ASC
+                    LIMIT ?
+                    """,
+                    (limit,),
+                ).fetchall()
+                return [
+                    {"escrow_uid": row[0], "negotiation_id": row[1]} for row in rows
+                ]
+            finally:
+                conn.close()
+
+        return await asyncio.to_thread(_load)
+
     async def list_incomplete_primary_escrows(
         self, *, limit: int = 50
     ) -> list[dict[str, Any]]:
