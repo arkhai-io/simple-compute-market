@@ -33,6 +33,7 @@ from core_buyer.run_log import RunLog
 from market_core.schemas import SettlementOption, SettlementPlan, SettlementSelection
 from market_hosted_settlement import FundingMode, FundingSelection
 from market_identity import TrustedIdentitySet
+from pydantic_core import to_jsonable_python
 from market_settlement_runtime import derive_obligation_ref
 
 from .config import (
@@ -52,9 +53,13 @@ bare_metal_app = typer.Typer(
 def _json(value: Any) -> None:
     if hasattr(value, "to_dict"):
         value = value.to_dict()
-    elif hasattr(value, "model_dump"):
-        value = value.model_dump(mode="json")
-    typer.echo(json.dumps(value, ensure_ascii=True, sort_keys=True))
+    typer.echo(
+        json.dumps(
+            to_jsonable_python(value),
+            ensure_ascii=True,
+            sort_keys=True,
+        )
+    )
 
 
 def _safe_projection(projection: dict[str, Any]) -> dict[str, Any]:

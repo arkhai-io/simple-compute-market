@@ -1,15 +1,17 @@
 from __future__ import annotations
 
 from pathlib import Path
+import json
 
 import pytest
-from arkhai_bare_metal_buyer.cli import _safe_projection
+from arkhai_bare_metal_buyer.cli import _json, _safe_projection
 from arkhai_bare_metal_buyer.config import load_bare_metal_buyer_config
 from arkhai_bare_metal_buyer.plugin import domain
 from market_core import DomainCapability
 
 from arkhai_bare_metal_buyer.fulfillment import BareMetalFulfillmentTransport
 from market_identity import IdentityScheme, TrustedIdentitySet, create_signer
+from pydantic import BaseModel
 
 PRINCIPAL = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
 
@@ -62,7 +64,6 @@ def test_plugin_declares_real_buyer_capability() -> None:
     assert contract.buyer.register_commands is not None
 
 
-
 def test_physical_transport_uses_signed_buyer_routes(monkeypatch) -> None:
     calls = []
 
@@ -76,9 +77,7 @@ def test_physical_transport_uses_signed_buyer_routes(monkeypatch) -> None:
     )
     signer = create_signer(IdentityScheme.ED25519, bytes(range(32)))
     trust = TrustedIdentitySet(
-        identities=(
-            create_signer(IdentityScheme.ED25519, bytes([1]) * 32).identity,
-        )
+        identities=(create_signer(IdentityScheme.ED25519, bytes([1]) * 32).identity,)
     )
     transport = BareMetalFulfillmentTransport(
         seller_url="https://seller.example/",
@@ -115,3 +114,18 @@ def test_physical_transport_uses_signed_buyer_routes(monkeypatch) -> None:
         ),
     ]
     assert all(body is None for _url, body, _kwargs in calls)
+
+
+def test_json_output_serializes_nested_wire_models(capsys) -> None:
+    class NestedWireModel(BaseModel):
+        value: str
+
+    class WireResponse:
+        def to_dict(self):
+            return {"results": [NestedWireModel(value="ready")]}
+
+    _json(WireResponse())
+
+    assert json.loads(capsys.readouterr().out) == {
+        "results": [{"value": "ready"}],
+    }
