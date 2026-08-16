@@ -3,11 +3,10 @@
 from __future__ import annotations
 
 import logging
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from typing import Any
 
-from domains.apicredits.listings import checked_credit_total, selected_unit_price
 from domains.apicredits.settlement import (
     ApiCreditsIssuanceEvidenceBodyV1,
     CreditIssuanceRequest,
@@ -21,11 +20,18 @@ from market_alkahest import (
     create_alkahest_registration,
 )
 from market_core import MarketDomainContract
-from market_core.schemas import SettlementOption, SettlementPlan, SettlementSelection
+from market_core.schemas import (
+    SettlementObligation,
+    SettlementOption,
+    SettlementPlan,
+    SettlementSelection,
+)
 from market_hosted_settlement import (
     ConditionDescriptor,
     FundingProfile,
+    StripeSettlementConfig,
     create_stripe_registration,
+    stripe_accepted_obligation_builder,
 )
 from market_identity import Identity, Signer, TrustedIdentitySet
 from market_settlement_runtime import (
@@ -102,6 +108,34 @@ class ApiCreditsSettlementComposition:
             role="seller",
             resources=self.mechanism_resources,
         )
+
+    def accepted_obligation_dispatch(
+        self,
+    ) -> dict[str, Callable[[Mapping[str, Any], Mapping[str, Any]], Any]]:
+        """Curried registry dispatch for every enabled obligation-building mechanism."""
+
+        dispatch: dict[str, Callable[[Mapping[str, Any], Mapping[str, Any]], Any]] = {}
+        for mechanism_id in self.settlement_config.priority:
+            registration = self.configuration_registry.registration(mechanism_id)
+            if registration.accepted_obligation_builder is None:
+                continue
+
+            def build(
+                option: Mapping[str, Any],
+                context: Mapping[str, Any],
+                *,
+                _mechanism_id: str = mechanism_id,
+            ) -> Any:
+                return self.configuration_registry.build_accepted_obligation(
+                    _mechanism_id,
+                    option,
+                    self.settlement_config,
+                    role="seller",
+                    context=context,
+                )
+
+            dispatch[mechanism_id] = build
+        return dispatch
 
     async def publication_artifacts(
         self,
@@ -279,34 +313,33 @@ async def load_api_credit_hosted_agreement(
     option = matches[0]
     if selection.expiration_unix != obligation.get("expiration_unix"):
         raise ValueError("hosted expiry does not match accepted selection")
-    expected_amount = checked_credit_total(
-        selected_unit_price(order, selection), quantity
-    )
-    if (
-        obligation.get("amount") != expected_amount
-        or thread.get("agreed_price") != expected_amount
-    ):
+    # The accepted plan and this reload verify against one definition: the
+    # mechanism's own accepted-obligation builder rebuilds the canonical
+    # obligation from the trusted option, and the persisted record must
+    # match it exactly.
+    try:
+        rebuilt = stripe_accepted_obligation_builder(
+            StripeSettlementConfig(),
+            option.model_dump(mode="json"),
+            {
+                "buyer_principal": buyer.model_dump(mode="json"),
+                "seller_principal": seller.model_dump(mode="json"),
+                "expiration_unix": selection.expiration_unix,
+                "unit_quantity": quantity,
+                "domain_param_keys": (),
+            },
+        )
+    except (TypeError, ValueError) as exc:
+        raise ValueError(
+            "accepted hosted option cannot rebuild its exact obligation"
+        ) from exc
+    expected_obligation = SettlementObligation.model_validate(
+        rebuilt.obligation
+    ).model_dump(mode="json")
+    if obligation != expected_obligation:
+        raise ValueError("hosted obligation does not match its trusted rebuild")
+    if thread.get("agreed_price") != rebuilt.amount:
         raise ValueError("hosted amount does not match exact quantity pricing")
-    expected_buyer = buyer.model_dump(mode="json")
-    expected_seller = seller.model_dump(mode="json")
-    if obligation.get("payer_principal") != expected_buyer:
-        raise ValueError("hosted obligation payer principal mismatch")
-    if obligation.get("claimant_principal") != expected_seller:
-        raise ValueError("hosted obligation claimant principal mismatch")
-    params = _mapping(obligation.get("params"))
-    for field in (
-        "funding_profile",
-        "authority_id",
-        "environment",
-        "account_ref",
-        "country",
-        "interaction",
-        "funds_flow",
-        "contract_fingerprint",
-        "condition",
-    ):
-        if params.get(field) != option.params.get(field):
-            raise ValueError(f"hosted obligation {field} changed after acceptance")
     resource = _mapping(order.get("offer_resource"))
     service = str(resource.get("service_name") or "")
     resource_id = str(resource.get("resource_id") or "")
