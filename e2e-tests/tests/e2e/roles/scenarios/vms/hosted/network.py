@@ -140,7 +140,9 @@ def _capacity_site_id(config: dict[str, Any]) -> str:
 
 
 def _option(listing, funding_profile: str) -> dict[str, Any]:
-    options = listing.extra.get("settlement_options", [])
+    options = getattr(listing, "settlement_options", None)
+    if options is None:
+        options = listing.extra.get("settlement_options", [])
     hosted = [
         item
         for item in options

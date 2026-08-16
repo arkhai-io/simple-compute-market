@@ -8,6 +8,7 @@ from tests.e2e.roles.scenarios.vms.hosted import network
 from tests.e2e.roles.scenarios.vms.hosted.network import (
     NetworkMarketplacePort,
     _capacity_site_id,
+    _option,
     _primary_registry_authority,
 )
 
@@ -29,6 +30,18 @@ def test_capacity_site_uses_storefront_config_vocabulary() -> None:
     assert _capacity_site_id(
         {"capacity": {"sites": {"default": "http://provisioning:8081"}}}
     ) == "default"
+
+
+def test_settlement_option_uses_registry_listing_field() -> None:
+    option = {
+        "mechanism": "fiat.stripe.v1",
+        "params": {"funding_profile": "card.v1"},
+        "option_id": "option-1",
+    }
+
+    assert _option(
+        SimpleNamespace(settlement_options=[option], extra={}), "card.v1"
+    ) == option
 
 
 def test_protected_listing_declares_vm_offering_mode() -> None:
