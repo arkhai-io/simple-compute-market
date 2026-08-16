@@ -3,25 +3,24 @@
 from __future__ import annotations
 
 import json
-import re
 import logging
+import re
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from functools import partial
 from typing import Any
 
-from arkhai_vms import VmProvisionTerms
-from core_storefront.stage_log import stage_event
+from arkhai_vms import VmProvisionTerms, normalize_vm_provision_terms
 from core_storefront.domain_lifecycle import (
     StorefrontFulfillmentContext,
     StorefrontFulfillmentPorts,
     StorefrontSettlementBuildContext,
-    build_domain_settlement_artifacts,
     StorefrontSettlementFulfillmentInput,
+    build_domain_settlement_artifacts,
     fulfill_domain,
 )
-from core_storefront.domain_registry import StorefrontThreadBinding
+from core_storefront.stage_log import stage_event
 from market_alkahest import create_alkahest_registration
 from market_core import MarketDomainContract
 from market_core.schemas import (
@@ -315,7 +314,7 @@ async def prepare_vm_settlement(
             "is gone from the local DB"
         )
 
-    provision = VmProvisionTerms.model_validate(thread.get("provision_terms"))
+    provision = normalize_vm_provision_terms(thread.get("provision_terms"))
     proposal_raw = thread.get("buyer_escrow_proposal")
 
     if (
@@ -960,12 +959,12 @@ async def load_hosted_agreement(
         or accepted_amount != agreed_amount
     ):
         raise ValueError("hosted amount does not match accepted seller state")
-    thread_provision = VmProvisionTerms.model_validate(thread.get("provision_terms"))
+    thread_provision = normalize_vm_provision_terms(thread.get("provision_terms"))
     vm_state = _plain_mapping(plan.service_terms.get("vm.v1"))
     if vm_state:
         accepted_listing_id = vm_state.get("listing_id")
         order = _plain_mapping(vm_state.get("order"))
-        provision = VmProvisionTerms.model_validate(vm_state.get("provision"))
+        provision = normalize_vm_provision_terms(vm_state.get("provision"))
         if accepted_listing_id != listing_id or order.get("listing_id") != listing_id:
             raise ValueError("accepted VM listing identity is inconsistent")
         if provision != thread_provision:

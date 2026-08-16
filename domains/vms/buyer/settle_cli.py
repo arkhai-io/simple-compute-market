@@ -16,7 +16,7 @@ import webbrowser
 from types import SimpleNamespace
 
 import typer
-from arkhai_vms.provision_terms import VmProvisionPayload, VmProvisionTerms
+from arkhai_vms import normalize_vm_provision_terms
 from market_core.schemas import SettlementPlan
 from market_settlement_runtime import derive_obligation_ref
 from market_hosted_settlement import (
@@ -144,11 +144,7 @@ def _accepted_provision_inputs(deal) -> tuple[str | None, int]:
             )
         return None, int(deal.duration_seconds)
     try:
-        if isinstance(raw, dict) and "payload" in raw:
-            payload = VmProvisionTerms.model_validate(raw).payload
-            accepted = VmProvisionPayload.model_validate(payload)
-        else:
-            accepted = VmProvisionPayload.model_validate(raw)
+        accepted = normalize_vm_provision_terms(raw)
     except (TypeError, ValueError) as exc:
         raise typer.BadParameter(
             "run-log has malformed accepted VM provision terms"

@@ -77,6 +77,14 @@ def make_vm_provision_terms(
         payload["compute_resource"] = compute_resource
     return VmProvisionTerms(payload=payload)
 
+def normalize_vm_provision_terms(terms: Any) -> VmProvisionTerms:
+    """Validate either a wire envelope or its durably decoded VM payload."""
+
+    if isinstance(terms, dict) and "payload" in terms:
+        return VmProvisionTerms.model_validate(terms)
+    payload = VmProvisionPayload.model_validate(terms).model_dump(exclude_none=True)
+    return VmProvisionTerms(payload=payload)
+
 
 # ---------------------------------------------------------------------------
 # compute.v1 payload accessors

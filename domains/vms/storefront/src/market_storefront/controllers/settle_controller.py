@@ -7,7 +7,7 @@ import logging
 import time
 from typing import Any
 
-from arkhai_vms import VmProvisionTerms
+from arkhai_vms import normalize_vm_provision_terms
 from core_storefront.models.settle_models import (
     EvaluateSettleRequest,
     EvaluateSettleResponse,
@@ -95,7 +95,7 @@ class SettleController:
             )
         try:
             persisted_buyer = Identity.model_validate(thread.get("buyer_principal"))
-            provision = VmProvisionTerms.model_validate(thread.get("provision_terms"))
+            provision = normalize_vm_provision_terms(thread.get("provision_terms"))
         except (TypeError, ValueError) as exc:
             raise HTTPException(
                 status_code=409,
