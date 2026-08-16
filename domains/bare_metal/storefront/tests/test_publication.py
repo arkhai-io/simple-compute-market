@@ -84,6 +84,29 @@ def test_projections_use_allowlisted_bare_metal_publication_metadata():
     assert resource.available is False
 
 
+def test_registry_republication_replaces_the_complete_listing_payload():
+    published = []
+
+    class Client:
+        def publish_listing(self, request):
+            published.append(request)
+            return {"listing_id": request.listing_id, "status": "open"}
+
+    result = publication_cli._publish_registry_listing(
+        Client(),
+        listing_id="listing-1",
+        offer={"kind": "bare_metal.v1"},
+        accepted_escrows=[],
+        settlement_options=[{"option_id": "hosted-1"}],
+        demands=[],
+        max_duration_seconds=3600,
+        storefront_url="https://storefront.example",
+    )
+
+    assert result == {"status": "published", "listing_id": "listing-1"}
+    assert published[0].settlement_options == [{"option_id": "hosted-1"}]
+
+
 def _selection():
     return build_bare_metal_publication_selection(
         BARE_METAL_STOREFRONT_REGISTRY,

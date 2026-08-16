@@ -139,6 +139,33 @@ def _projections(
     )
 
 
+def _publish_registry_listing(
+    client: SyncRegistryClient,
+    *,
+    listing_id: str,
+    offer: dict[str, Any],
+    accepted_escrows: list[dict[str, Any]],
+    settlement_options: list[dict[str, Any]],
+    demands: list[dict[str, Any]],
+    max_duration_seconds: int | None,
+    storefront_url: str,
+) -> dict[str, Any]:
+    response = client.publish_listing(
+        ListingRequest(
+            listing_id=listing_id,
+            offer=offer,
+            accepted_escrows=accepted_escrows,
+            settlement_options=settlement_options,
+            demands=demands,
+            max_duration_seconds=max_duration_seconds,
+            storefront_url=storefront_url,
+        )
+    )
+    if str(response.get("listing_id") or "") != listing_id:
+        raise RuntimeError("registry returned a conflicting listing identity")
+    return {"status": "published", "listing_id": listing_id}
+
+
 def run_publication_once() -> dict[str, Any]:
     """Publish one exact round from freshly authenticated site projections."""
 
@@ -176,17 +203,16 @@ def run_publication_once() -> dict[str, Any]:
         return {"status": "closed", "listing_id": listing_id}
 
     def publish_existing_listing(*, listing_id: str, **values: Any) -> dict[str, Any]:
-        updates = {
-            "status": "open",
-            "offer_resource": values["offer"],
-            "accepted_escrows": values["accepted_escrows"],
-            "settlement_options": values["settlement_options"],
-            "demands": values["demands"],
-            "max_duration_seconds": values["max_duration_seconds"],
-            "storefront_url": values["storefront_url"],
-        }
-        client.update_listing(listing_id, UpdateListingRequest(updates=updates))
-        return {"status": "published", "listing_id": listing_id}
+        return _publish_registry_listing(
+            client,
+            listing_id=listing_id,
+            offer=values["offer"],
+            accepted_escrows=values["accepted_escrows"],
+            settlement_options=values["settlement_options"],
+            demands=values["demands"],
+            max_duration_seconds=values["max_duration_seconds"],
+            storefront_url=values["storefront_url"],
+        )
 
     projections = _projections(runtime)
     selection = build_bare_metal_publication_selection(
@@ -226,7 +252,8 @@ def run_publication_once() -> dict[str, Any]:
         if candidate is None:
             raise RuntimeError("publication candidate binding is unavailable")
         listing_id = uuid.uuid4().hex
-        request = ListingRequest(
+        _publish_registry_listing(
+            client,
             listing_id=listing_id,
             offer=offer,
             accepted_escrows=accepted_escrows,
@@ -235,7 +262,6 @@ def run_publication_once() -> dict[str, Any]:
             max_duration_seconds=duration,
             storefront_url=runtime.storefront_url,
         )
-        client.publish_listing(request)
         raw_listing = dict(offer)
         raw_listing.pop("virtualization_type", None)
         raw_listing["max_duration_seconds"] = duration
