@@ -81,7 +81,6 @@ class StripeApi:
     def retrieve_account(self, account_id: str) -> JsonObject:
         return self._transport(f"/v1/accounts/{account_id}", {})
 
-
     def fund_test_cash_balance(self, expected: ExpectedEffect) -> None:
         """Fund one exact push-transfer intent through Stripe's test helper."""
 
@@ -100,7 +99,7 @@ class StripeApi:
         )
         if (
             result.get("livemode") is not False
-            or result.get("amount") != expected.amount
+            or result.get("net_amount") != expected.amount
             or result.get("currency") != expected.currency
         ):
             raise ProviderInvariantError(
@@ -168,7 +167,9 @@ class StripeApi:
             or not source_matches
             or not metadata_matches
         ):
-            raise ProviderInvariantError("funding or destination transfer did not match accepted terms")
+            raise ProviderInvariantError(
+                "funding or destination transfer did not match accepted terms"
+            )
         return CollectionEvidence(
             operation_ref=opaque_ref("op", expected.marketplace_operation_id),
             checkout_count=int(session is not None),
@@ -350,7 +351,9 @@ class StripeApi:
             if not matches:
                 raise ProviderNotConverged("operation funding is not visible")
             if len(matches) != 1:
-                raise ProviderInvariantError("operation metadata identifies multiple funding intents")
+                raise ProviderInvariantError(
+                    "operation metadata identifies multiple funding intents"
+                )
             payment_intent = matches[0]
         if (
             payment_intent.get("amount") != expected.amount
@@ -484,6 +487,7 @@ def _metadata_matches(obj: JsonObject, operation_ref: str) -> bool:
     metadata = obj.get("metadata")
     return isinstance(metadata, dict) and metadata.get("operation_ref") == operation_ref
 
+
 def _has_operation_metadata(obj: JsonObject) -> bool:
     metadata = obj.get("metadata")
     return (
@@ -491,6 +495,7 @@ def _has_operation_metadata(obj: JsonObject) -> bool:
         and isinstance(metadata.get("operation_ref"), str)
         and bool(metadata["operation_ref"])
     )
+
 
 def _profile_metadata_matches(obj: JsonObject, funding_profile: str) -> bool:
     metadata = obj.get("metadata")

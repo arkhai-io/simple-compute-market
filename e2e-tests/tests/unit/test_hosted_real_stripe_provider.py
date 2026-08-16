@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import hashlib
 from collections.abc import Mapping
 from typing import Any
 
@@ -131,6 +130,7 @@ def test_collection_retrieves_exact_checkout_and_metadata_related_transfer() -> 
     assert evidence.transfer_count == 1
     assert evidence.operation_metadata_matches is True
 
+
 def test_push_transfer_funds_exact_customer_cash_balance_in_test_mode() -> None:
     expected = ExpectedEffect(
         operation_ref=OPERATION,
@@ -165,7 +165,7 @@ def test_push_transfer_funds_exact_customer_cash_balance_in_test_mode() -> None:
 
     def mutate(path: str, params: Mapping[str, str]) -> dict[str, Any]:
         mutations.append((path, params))
-        return {"livemode": False, "amount": 1250, "currency": "usd"}
+        return {"livemode": False, "net_amount": 1250, "currency": "usd"}
 
     StripeApi(
         "rk_test_secret",
