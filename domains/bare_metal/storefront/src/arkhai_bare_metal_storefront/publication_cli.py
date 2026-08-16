@@ -167,7 +167,7 @@ def run_publication_once() -> dict[str, Any]:
 
     projections = _projections(runtime)
     selection = build_bare_metal_publication_selection(
-        build_bare_metal_storefront_registry(),
+        build_bare_metal_storefront_registry(domain=runtime.domain),
         projection_snapshot=lambda: projections,
         close_listing=close_listing,
         publish_existing_listing=publish_existing_listing,

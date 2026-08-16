@@ -1,4 +1,5 @@
 from __future__ import annotations
+from types import SimpleNamespace
 
 from arkhai_bare_metal import (
     BareMetalResourceProjection,
@@ -16,7 +17,7 @@ from arkhai_bare_metal_storefront.publication import (
 from arkhai_bare_metal_storefront.sqlite_client import SQLiteClient
 from arkhai_bare_metal_storefront.domain_runtime import get_market_domain_contract
 from arkhai_bare_metal_storefront.server import BARE_METAL_STOREFRONT_REGISTRY
-
+from arkhai_bare_metal_storefront import publication_cli
 
 
 def _projection():
@@ -103,3 +104,67 @@ def test_core_runner_publishes_exact_opaque_bare_metal_payload(tmp_path):
             7200,
         ),
     ]
+
+
+def test_one_shot_publication_builds_registry_from_runtime_domain(monkeypatch):
+    domain = object()
+    runtime = SimpleNamespace(
+        settlement_composition=object(),
+        domain=domain,
+        db=SimpleNamespace(db_path="storefront.db"),
+        storefront_url="http://storefront.example",
+    )
+    registry = object()
+    selection = object()
+    closed = []
+    captured = {}
+
+    monkeypatch.setattr(
+        publication_cli, "build_runtime_from_environment", lambda: runtime
+    )
+    monkeypatch.setattr(
+        publication_cli,
+        "_registry",
+        lambda _runtime: SimpleNamespace(close=lambda: closed.append(True)),
+    )
+    monkeypatch.setattr(publication_cli, "_projections", lambda _runtime: ())
+
+    def build_registry(*, domain):
+        captured["domain"] = domain
+        return registry
+
+    monkeypatch.setattr(
+        publication_cli, "build_bare_metal_storefront_registry", build_registry
+    )
+    monkeypatch.setattr(
+        publication_cli,
+        "build_bare_metal_publication_selection",
+        lambda value, **_kwargs: selection if value is registry else None,
+    )
+    monkeypatch.setattr(
+        publication_cli,
+        "run_bare_metal_publication",
+        lambda value, **_kwargs: (
+            SimpleNamespace(closed=[], published=[], failed=[], skipped=[])
+            if value is selection
+            else None
+        ),
+    )
+    for name, value in {
+        "BARE_METAL_STOREFRONT_PUBLICATION_CLAUSES": "[]",
+        "BARE_METAL_STOREFRONT_FUNDING_DEADLINES": "{}",
+        "BARE_METAL_STOREFRONT_DEMANDS": "[]",
+        "BARE_METAL_STOREFRONT_OFFER_EXPIRES_AT": "2026-08-17T04:00:00Z",
+        "BARE_METAL_STOREFRONT_FULFILLMENT_DEADLINE": "2026-08-17T03:30:00Z",
+        "BARE_METAL_STOREFRONT_MAX_DURATION_SECONDS": "3600",
+    }.items():
+        monkeypatch.setenv(name, value)
+
+    assert publication_cli.run_publication_once() == {
+        "closed": [],
+        "published": [],
+        "failed": [],
+        "skipped": [],
+    }
+    assert captured == {"domain": domain}
+    assert closed == [True]
