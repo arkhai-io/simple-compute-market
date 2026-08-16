@@ -25,11 +25,11 @@ def test_interactive_payer_fixture_is_a_successful_lifecycle_response() -> None:
     assert response["saved_instrument_ready"] is True
 
 
-
 def test_capacity_site_uses_storefront_config_vocabulary() -> None:
-    assert _capacity_site_id(
-        {"capacity": {"sites": {"default": "http://provisioning:8081"}}}
-    ) == "default"
+    assert (
+        _capacity_site_id({"capacity": {"sites": {"default": "http://provisioning:8081"}}})
+        == "default"
+    )
 
 
 def test_settlement_option_uses_registry_listing_field() -> None:
@@ -39,9 +39,42 @@ def test_settlement_option_uses_registry_listing_field() -> None:
         "option_id": "option-1",
     }
 
-    assert _option(
-        SimpleNamespace(settlement_options=[option], extra={}), "card.v1"
-    ) == option
+    assert _option(SimpleNamespace(settlement_options=[option], extra={}), "card.v1") == option
+
+
+def test_publisher_resolver_binds_durable_buyer_profile(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+    config = object()
+    resolver = object()
+    monkeypatch.setattr(
+        network,
+        "BuyConfig",
+        lambda **kwargs: captured.update(kwargs) or config,
+    )
+    monkeypatch.setattr(
+        network,
+        "make_publisher_trust_resolver",
+        lambda **kwargs: captured.update(resolver_kwargs=kwargs) or resolver,
+    )
+    marketplace = object.__new__(NetworkMarketplacePort)
+    marketplace.registry = SimpleNamespace(
+        get_listing=lambda _listing_id: SimpleNamespace(to_dict=lambda: {})
+    )
+    marketplace._listing_id = "listing-1"
+    marketplace.registry_url = "http://registry:8080"
+    marketplace._registry_authority = SimpleNamespace(authority="registry-a")
+    marketplace._buyer_signer = SimpleNamespace(identity=object())
+    marketplace._buyer_profile = SimpleNamespace(profile_id="profile-1")
+
+    assert marketplace._publisher_resolver() is resolver
+    assert captured["buyer_profile_id"] == "profile-1"
+    assert captured["resolver_kwargs"] == {
+        "config": config,
+        "listing": {
+            "source_registry_url": "http://registry:8080",
+            "source_registry_authority": "registry-a",
+        },
+    }
 
 
 def test_protected_listing_declares_vm_offering_mode() -> None:
@@ -85,6 +118,7 @@ def test_protected_listing_declares_vm_offering_mode() -> None:
         "resource_id": "resource-1",
         "gpu_count": 1,
     }
+
 
 def test_primary_registry_authority_uses_advertised_url_not_runtime_endpoint() -> None:
     authority = _primary_registry_authority(
