@@ -269,7 +269,7 @@ async def negotiate_new(
             runtime=runtime,
             operation="negotiate_new",
             resource=body.listing_id,
-            body=body.model_dump(mode="json", exclude_none=True),
+            body=body.model_dump(mode="json", exclude_none=True, exclude_unset=True),
             expected_principal=body.buyer_principal,
         )
         return await runtime.negotiation_service().open(
@@ -295,7 +295,7 @@ async def negotiate_continue(
         runtime=runtime,
         operation="negotiate_continue",
         resource=negotiation_id,
-        body=body.model_dump(mode="json", exclude_none=True),
+        body=body.model_dump(mode="json", exclude_none=True, exclude_unset=True),
         expected_principal=body.buyer_principal,
     )
     thread = await runtime.db.load_negotiation_thread_row(
@@ -392,7 +392,7 @@ async def settle(
             runtime=runtime,
             operation="settle_escrow",
             resource=escrow_uid,
-            body=body.model_dump(mode="json", exclude_none=True),
+            body=body.model_dump(mode="json", exclude_none=True, exclude_unset=True),
             expected_principal=body.buyer_principal,
         )
         return await runtime.settlement_service().verify(

@@ -291,10 +291,11 @@ def _opening(*, payload: dict | None = None) -> dict:
 async def test_signed_opening_accepts_and_persists_domain_artifacts(tmp_path) -> None:
     runtime = _runtime(str(tmp_path / "storefront.db"))
     await _insert_listing(runtime)
+    opening = _opening()
+    opening.pop("buyer_agent_url")
     app = _app(runtime)
 
     with TestClient(app) as client:
-        opening = _opening()
         response = client.post(
             "/api/v1/negotiate/new",
             json=opening,
