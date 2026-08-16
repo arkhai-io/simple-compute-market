@@ -252,10 +252,7 @@ def buy_bare_metal(
         seller_url=listing.storefront_url,
         storefront_url=listing.storefront_url,
         publisher_id=str(listing.publisher_id),
-        publisher_principals=[
-            item.model_dump(mode="json")
-            for item in listing.publisher_principals.identities
-        ],
+        publisher_principals=listing.publisher_principals.model_dump(mode="json"),
         source_registry_url=buyer_config.registry_url,
         source_registry_authority=buyer_config.registry_authority,
     )
