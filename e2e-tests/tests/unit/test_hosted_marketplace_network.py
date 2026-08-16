@@ -64,10 +64,11 @@ def test_publisher_resolver_binds_durable_buyer_profile(monkeypatch) -> None:
     marketplace.registry_url = "http://registry:8080"
     marketplace._registry_authority = SimpleNamespace(authority="registry-a")
     marketplace._buyer_signer = SimpleNamespace(identity=object())
-    marketplace._buyer_profile = SimpleNamespace(profile_id="profile-1")
+    profile_id = network.uuid.UUID("11111111-1111-4111-8111-111111111111")
+    marketplace._buyer_profile = SimpleNamespace(profile_id=profile_id)
 
     assert marketplace._publisher_resolver() is resolver
-    assert captured["buyer_profile_id"] == "profile-1"
+    assert captured["buyer_profile_id"] == profile_id
     assert captured["resolver_kwargs"] == {
         "config": config,
         "listing": {

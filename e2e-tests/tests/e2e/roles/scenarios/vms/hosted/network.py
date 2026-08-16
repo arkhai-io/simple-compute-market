@@ -780,7 +780,7 @@ class NetworkMarketplacePort:
         listing["source_registry_url"] = self.registry_url
         listing["source_registry_authority"] = self._registry_authority.authority
         config = BuyConfig(
-            buyer_profile_id=str(self._buyer_profile.profile_id),
+            buyer_profile_id=self._buyer_profile.profile_id,
             registry_urls=[self.registry_url],
             registry_authorities={self.registry_url: self._registry_authority},
             principal=self._buyer_signer.identity,
