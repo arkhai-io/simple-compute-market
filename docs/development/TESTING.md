@@ -593,6 +593,11 @@ surface only after a release.
   path.chmod(0o600)'
   ```
 - The Stripe CLI, used to forward webhooks to the loopback authority endpoint.
+- Patience between interactive runs. After several automated Checkout sessions
+  the provider answers with an interactive hCaptcha; the run detects it and
+  fails at payer setup with `chromium_unavailable`. That is the provider
+  responding to automation, not a defect, and it is not something to work
+  around — wait, and run the interactive lanes sparingly.
 - Browsers for the interactive lanes: `uv run --project e2e-tests --extra
   stripe-test playwright install chromium`.
 - The locally built consumer image (`arkhai:storefront`) and the released hosted

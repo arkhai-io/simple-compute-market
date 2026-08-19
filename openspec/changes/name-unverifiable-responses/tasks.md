@@ -55,8 +55,15 @@
 
 ## 4. Closeout
 
-- [ ] 4.1 Hygiene clean, strict validation, suites for every touched package, and
-      the ROADMAP updated if the hosted-settlement status changes shape.
+- [x] 4.1 Hygiene clean, strict validation, lint clean on every touched file
+      (five pre-existing errors remain in files this change does not touch).
+      The provider's throughput constraint is recorded in
+      `docs/development/TESTING.md` and in `add-bare-metal-hosted-settlement`.
+      The ROADMAP hosted status is unchanged: the lane's blocker is the same
+      response authentication, still undiagnosed, because the lane cannot
+      currently reach it. Suites: core buyer 115, storefront client 30, core
+      storefront 148, e2e unit 97, VM buyer 196, VM storefront 941, bare-metal
+      buyer 11, bare-metal storefront 122.
 
 ## Design promotion record
 
