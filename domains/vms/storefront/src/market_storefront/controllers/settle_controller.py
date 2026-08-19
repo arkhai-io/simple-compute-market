@@ -20,7 +20,7 @@ from core_storefront.models.settle_models import (
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import JSONResponse
 from fastapi_utils.cbv import cbv
-from market_identity import Identity
+from market_identity import EMPTY_BODY, Identity
 from market_settlement_runtime import (
     HostedSettlementRouteError,
     HostedSettlementStart,
@@ -262,7 +262,7 @@ class SettlementsController:
                 operation,
                 resource_id,
                 expected_principal,
-                dict(body) if body is not None else None,
+                dict(body) if body is not None else EMPTY_BODY,
             )
 
         return build_vm_hosted_route_service(

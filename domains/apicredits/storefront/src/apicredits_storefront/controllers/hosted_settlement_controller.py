@@ -7,7 +7,7 @@ from typing import Any
 from core_storefront.auth import AuthError, authenticate_request
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi_utils.cbv import cbv
-from market_identity import Identity
+from market_identity import EMPTY_BODY, Identity
 from market_settlement_runtime import HostedSettlementRouteError, HostedSettlementStart
 
 import apicredits_storefront.container as _container
@@ -55,7 +55,7 @@ class HostedSettlementsController:
                 operation,
                 resource_id,
                 expected_principal=expected_principal,
-                body=dict(body) if body is not None else None,
+                body=dict(body) if body is not None else EMPTY_BODY,
                 allow_exact_retry=True,
             )
 

@@ -15,7 +15,7 @@ from market_core.schemas import (
     derive_settlement_option_id,
 )
 from market_hosted_settlement import ConditionDescriptor
-from market_identity import Ed25519Signer
+from market_identity import EMPTY_BODY, Ed25519Signer, canonical_body_hash
 from market_settlement_runtime import (
     HostedSettlementStart,
     SettlementObligationRecord,
@@ -467,3 +467,58 @@ def test_replay_journal_strips_transient_action_details() -> None:
         **body,
         "action": None,
     }
+
+
+@pytest.mark.asyncio
+async def test_bodyless_status_authorizes_against_the_empty_body(monkeypatch) -> None:
+    """A route with no body must verify the digest the buyer actually signed.
+
+    ``GET /api/v1/settlements/{ref}`` carries no content, so the buyer signs the
+    empty-body digest. Handing the verifier ``None`` instead hashes a JSON
+    ``null`` and refuses every status poll with a body mismatch.
+    """
+
+    db, _thread, _listing, obligation = _accepted_state()
+    accepted = SettlementObligationRecord.from_obligation(
+        agreement_ref="negotiation-1",
+        obligation_index=0,
+        obligation=obligation,
+    ).model_copy(update={"mechanism_ref": "settlement-1"})
+    composition = SimpleNamespace(
+        runtime=SimpleNamespace(
+            reconcile_status=AsyncMock(
+                return_value=SettlementOperationOutcome(
+                    obligation_ref=accepted.obligation_ref,
+                    operation="status",
+                    status="pending",
+                )
+            )
+        ),
+        repository=SimpleNamespace(
+            load_settlement_obligation_by_mechanism_ref=AsyncMock(
+                return_value=accepted.model_dump()
+            ),
+            load_settlement_obligation=AsyncMock(return_value=accepted.model_dump()),
+        ),
+        worker=SimpleNamespace(wake=AsyncMock()),
+        mechanism_clients={"fiat.stripe.v1": object()},
+        local_principal=SELLER,
+    )
+    monkeypatch.setattr(container, "resolved_settlement_composition", composition)
+    # Stop the route at authorization: the digest handed to the verifier is the
+    # whole subject here, and nothing after it participates.
+    reached = HTTPException(status_code=418, detail="authorization reached")
+    verify = AsyncMock(side_effect=reached)
+    monkeypatch.setattr(buyer_auth, "_verify", verify)
+
+    with pytest.raises(HTTPException) as caught:
+        await _controller(db).status("settlement-1", _request("GET"))
+    assert caught.value is reached
+
+    _context, operation, resource, principal, body = verify.await_args.args
+    assert (operation, resource, principal) == (
+        "settlement_status",
+        "settlement-1",
+        BUYER,
+    )
+    assert canonical_body_hash(body) == canonical_body_hash(EMPTY_BODY)
