@@ -658,7 +658,13 @@ class NetworkMarketplacePort:
         deadline = time.monotonic() + timeout
         status: dict[str, Any] = {}
         while time.monotonic() < deadline:
-            status = self._buyer_status(settlement_ref)
+            try:
+                status = self._buyer_status(settlement_ref)
+            except RuntimeError as exc:
+                if not _still_working(exc):
+                    raise
+                time.sleep(min(0.5, max(0.0, deadline - time.monotonic())))
+                continue
             if status.get("status") in {"ready", "collected", "reclaimed"}:
                 if self._stripe_test_case == "refund":
                     self._reconcile_refund_materialization(settlement_ref)
@@ -826,13 +832,27 @@ class NetworkMarketplacePort:
             try:
                 status = self._buyer_status(settlement_ref)
             except RuntimeError as exc:
-                if "authenticated HTTP 503:" not in str(exc):
+                if not _still_working(exc):
                     raise
             else:
                 if status.get("status") in terminal:
                     return status
             time.sleep(min(0.5, max(0.0, deadline - time.monotonic())))
         raise TimeoutError("named hosted public status did not converge")
+
+
+def _still_working(exc: Exception) -> bool:
+    """Return whether a failed poll means the storefront has not answered yet.
+
+    A hosted status poll is a read, and the storefront fulfils inline on the
+    poll that first sees authoritative funding -- provisioning a VM can outrun
+    the buyer's request timeout. Neither a 503 nor a client-side timeout is a
+    refusal, so a wait keeps polling until its own bound instead of turning
+    someone else's latency into a failed deal.
+    """
+
+    detail = str(exc)
+    return "authenticated HTTP 503:" in detail or " failed: timed out" in detail
 
 
 def create_protected_marketplace(*, buyer_config: Path) -> NetworkMarketplacePort:

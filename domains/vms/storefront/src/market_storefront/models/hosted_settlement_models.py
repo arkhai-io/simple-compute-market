@@ -24,4 +24,10 @@ class SettlementPublicResponse(BaseModel):
     action: dict[str, Any] | None = None
     action_kind: str | None = None
     action_expires_at_unix: int | None = None
+    # The buyer's guarantee is that fulfillment is anchored to the condition the
+    # authority evaluates, so both halves of that binding are public: the
+    # authority's immutable anchor, and the portable evidence reference the
+    # seller published against it.
+    condition_anchor: str | None = None
+    fulfillment_ref: str | None = None
     receipt: dict[str, Any] | None = None

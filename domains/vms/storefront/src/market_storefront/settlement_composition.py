@@ -1098,6 +1098,29 @@ async def ensure_hosted_fulfillment(
             worker_id=worker_id,
         )
         raise error
+    # Fulfillment identity for a hosted deal is the authority's immutable
+    # condition anchor, and every VM surface downstream of here reads the deal
+    # through the storefront's own escrow row: provisioning resolves the
+    # negotiation binding from it, lease registration writes the capacity
+    # reservation onto it, and terminal lease truncation finds the reservation
+    # by asking for the negotiation's primary escrow. The EVM lane writes that
+    # row when it reserves settlement; the hosted lane's equivalent moment is
+    # here -- once the anchor exists, before capacity is committed. Insertion
+    # is idempotent by escrow_uid, so a retried fulfillment rebinds rather
+    # than duplicating.
+    await sqlite_client.insert_escrow(
+        escrow_uid=record.condition_anchor,
+        negotiation_id=agreement.negotiation_id,
+        chain_name=None,
+        escrow_address=None,
+        is_primary=True,
+        status="provisioning",
+    )
+    await sqlite_client.bind_escrow_obligation(
+        escrow_uid=record.condition_anchor,
+        obligation_ref=record.obligation_ref,
+        obligation_index=record.obligation_index,
+    )
     thread_binding = await sqlite_client.load_thread_binding(
         negotiation_id=agreement.negotiation_id
     )
@@ -1223,6 +1246,8 @@ async def hosted_settlement_projection(
         "action": action,
         "action_kind": action_metadata.get("kind"),
         "action_expires_at_unix": action_metadata.get("expires_at_unix"),
+        "condition_anchor": record.condition_anchor,
+        "fulfillment_ref": record.fulfillment_ref,
         "receipt": receipt or None,
     }
 
