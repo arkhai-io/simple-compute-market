@@ -551,8 +551,13 @@ class ComposeStack:
         compose_files: Sequence[Path],
         executable: str = "docker",
         cwd: Path,
+        retain_diagnostics: bool = False,
     ) -> None:
         self._cwd = cwd
+        # Compose prints the container output that says why an operation
+        # failed. Held for a development operator only, on the same terms as
+        # the staged bridge's stderr.
+        self._retain_diagnostics = retain_diagnostics
         self._base = [
             executable,
             "compose",
@@ -629,8 +634,12 @@ class ComposeStack:
         env = self._runtime_env or {
             key: value for key, value in os.environ.items() if not _SENSITIVE_ENV.search(key)
         }
+        # The authority's state belongs to one run. Leaving the named volume
+        # behind makes the next run start against a database that already
+        # remembers this one -- locally, where runs share a machine, that is
+        # every second run; on a runner it is every retry after an interruption.
         self._run(
-            (*self._base, "down", "--remove-orphans"),
+            (*self._base, "down", "--remove-orphans", "--volumes"),
             env=env,
             check=False,
         )
@@ -661,7 +670,18 @@ class ComposeStack:
         except (OSError, subprocess.TimeoutExpired) as exc:
             raise ProcessUnavailable("ordinary hosted Compose operation was unavailable") from exc
         if check and completed.returncode != 0:
-            raise ProcessUnavailable("ordinary hosted Compose operation failed")
+            raise ProcessUnavailable(
+                self._with_diagnostics(
+                    f"ordinary hosted Compose operation failed: {argv[-1]}",
+                    completed.stdout or "",
+                )
+            )
+
+    def _with_diagnostics(self, summary: str, output: str) -> str:
+        if not self._retain_diagnostics or not output.strip():
+            return summary
+        tail = "\n".join(output.splitlines()[-_DIAGNOSTIC_LINES:])
+        return f"{summary}\n--- Compose output (development run only) ---\n{tail}"
 
     def __enter__(self) -> "ComposeStack":
         return self

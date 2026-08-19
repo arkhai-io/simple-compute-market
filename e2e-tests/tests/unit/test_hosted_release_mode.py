@@ -329,3 +329,13 @@ def test_the_driver_asks_for_the_tail_only_when_the_run_is_local() -> None:
     ).read_text(encoding="utf-8")
 
     assert 'retain_diagnostics=release.mode == "local"' in source
+
+
+def test_a_run_does_not_inherit_the_previous_run_authority_state() -> None:
+    """One run, one authority database — a second bind is a hard conflict."""
+
+    source = (
+        Path(__file__).resolve().parents[2] / "src" / "hosted_real_stripe" / "runtime.py"
+    ).read_text(encoding="utf-8")
+
+    assert '"down", "--remove-orphans", "--volumes"' in source

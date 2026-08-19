@@ -274,6 +274,7 @@ def run(args: argparse.Namespace) -> tuple[StripeTestEvidence, int]:
                         compose_files=args.compose_file,
                         cwd=args.repo_root,
                         executable=args.container_cli,
+                        retain_diagnostics=release.mode == "local",
                     ) as stack:
                         stack.start(
                             authority_env_path=authority_env,
