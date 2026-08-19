@@ -9,8 +9,14 @@
       as a protocol fault and names the header, never its value; neither report
       contains the body; and every response accepted today is still accepted.
       The two existing tests that asserted the old sentence now assert the
-      status and the state, which is what they were really about. Suite: core
-      buyer 115.
+      status and the state, which is what they were really about.
+
+      A second reader carried the same sentence: the storefront client's own
+      response verification, which the requirement names as directly as the
+      buyer's. It already distinguished an absent header from an unreadable
+      one; it now carries the status into both. Its suite could not run on a
+      machine with a proxy configured either. Suites: core buyer 115,
+      storefront client 30.
 
 ## 2. The harness authenticates to its own private registry
 
@@ -32,9 +38,20 @@
 
 - [ ] 3.1 Run one interactive `card.v1` lane locally against the real Stripe test
       account and record what buyer status polling names once it can speak.
+      **Blocked:** the lane no longer reaches that stage. Stripe now answers
+      Checkout with an interactive hCaptcha, which the harness detects and
+      classifies as an environment failure at payer setup — earlier runs today
+      passed the same step, so this is provider anti-automation responding to
+      repeated sessions rather than a defect. Solving it is not something a
+      harness should do. What section 2 fixed is confirmed independently: the
+      storefront now publishes to the private registry with `200`/`201` where
+      every earlier run answered `401`.
 - [ ] 3.2 Correct it here if it is a marketplace defect or another harness
       omission; record it for `add-bare-metal-hosted-settlement` if it belongs to
       the hosted matrix. A development run qualifies no lane either way.
+      **Blocked by 3.1.** The interactive lanes depend on the provider not
+      challenging automation, which bounds how often the matrix can be run and
+      is recorded for `add-bare-metal-hosted-settlement`.
 
 ## 4. Closeout
 

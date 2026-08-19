@@ -390,3 +390,39 @@ def test_seller_signer_and_publisher_pin_must_match():
                 )
             ),
         )
+
+
+def test_a_refusal_names_the_status_and_what_was_missing() -> None:
+    """An error answer and an unsigned acknowledgement are the same shape."""
+
+    import pytest
+
+    from storefront_client.auth import (
+        StorefrontAuthenticationError,
+        build_authenticated_request,
+        verify_authenticated_response,
+    )
+    from market_identity import Ed25519Signer, TrustedIdentitySet
+
+    seller = Ed25519Signer(b"\x21" * 32)
+    request = build_authenticated_request(
+        signer=Ed25519Signer(b"\x22" * 32),
+        role="buyer",
+        method="GET",
+        operation="settlement_status",
+        resource="esc-1",
+    )
+    trust = TrustedIdentitySet(identities=(seller.identity,))
+
+    with pytest.raises(StorefrontAuthenticationError) as refused:
+        verify_authenticated_response(
+            headers={},
+            expected_publishers=trust,
+            request=request,
+            status=404,
+        )
+
+    message = str(refused.value)
+    assert "HTTP 404" in message
+    # Which header was absent locates the fault without quoting any value.
+    assert "X-Market-Signature-Version" in message
