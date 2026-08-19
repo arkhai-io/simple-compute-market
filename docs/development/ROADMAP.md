@@ -283,13 +283,20 @@ run may read that cause, so the code resolved: the staged marketplace
 subprocess caught every startup failure and exited silently.
 
 With the cause visible, one interactive `card.v1` lane against the real test
-account passes payer profile and browser consent and stops later, at funding
-authorization, where hosted materialization returns no settlement identity.
-That is a marketplace-side defect rather than a diagnosis problem, and it is
-the next qualification work: correct the missing settlement identity, then run
-saved-card/off-session fallback, bank-transfer, ACH success/failure/return,
-collection/reclaim, restart, and loss cases under a protected run. A
-development run qualifies no lane.
+account passed payer profile and browser consent and stopped at funding
+authorization with no settlement identity. That resolved in turn: the released
+authority refuses every escrow a storefront opens while its storefront caller
+allowlist is unset, and nothing ever set it. The lane now materializes a real
+escrow and stops at buyer status polling, which refuses the storefront's
+response authentication.
+
+A refusal is no longer silent either way. A non-retryable authority rejection
+keeps the authority's own error code, and when the authority names nothing the
+marketplace names the refusal itself, so an obligation parked for a human to
+repair always says why. The next qualification work is that response
+authentication, then saved-card/off-session fallback, bank-transfer, ACH
+success/failure/return, collection/reclaim, restart, and loss cases under a
+protected run. A development run qualifies no lane.
 
 API-credit and bare-metal are separate adopters of the shared hosted transport,
 route service, configuration registry, and settlement runtime; neither imports
@@ -301,8 +308,8 @@ has proved authoritative Stripe funding and collection, portable condition
 evidence, authenticated SSH access, key revocation and failed subsequent
 access, teardown, Capacity Reservation release, and capacity republication.
 Card, ACH, automatic-fallback, and failure/recovery whole-host lanes remain
-unqualified until the missing settlement identity and the remaining provider
-matrix are resolved.
+unqualified until the buyer status-polling response authentication and the
+remaining provider matrix are resolved.
 
 ---
 

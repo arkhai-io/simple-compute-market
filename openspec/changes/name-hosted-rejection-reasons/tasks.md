@@ -64,8 +64,12 @@
 
 ## 4. Closeout
 
-- [ ] 4.1 Hygiene clean, strict validation, suites for every touched package, and
-      the ROADMAP updated if the hosted-settlement status changes shape.
+- [x] 4.1 Hygiene clean, strict validation, lint clean on every touched file.
+      ROADMAP updated: the hosted blocker moved from a missing settlement
+      identity to buyer status-polling response authentication, and a refusal
+      is no longer silent either way. Suites: settlement-runtime 78,
+      hosted-settlement 159, VM storefront 941, API-credit storefront 76,
+      bare-metal storefront 122, scripts 84, e2e unit 95.
 
 ## Design promotion record
 
