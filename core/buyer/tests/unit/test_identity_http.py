@@ -246,7 +246,9 @@ def test_legacy_response_authentication_is_rejected(monkeypatch) -> None:
         ),
     )
 
-    with pytest.raises(RuntimeError, match="malformed or legacy"):
+    # Version-1 headers are none of the version-2 ones, so from this side the
+    # answer simply arrived unauthenticated -- and it says so, with its status.
+    with pytest.raises(RuntimeError, match=r"HTTP 200 carried no response authentication"):
         _authenticated_json(
             "http://seller/api/v1/negotiate/new",
             {},
@@ -345,7 +347,7 @@ def test_valid_signed_http_error_is_verified_before_status_propagation(
 @pytest.mark.parametrize(
     ("mode", "expected_error"),
     [
-        ("unsigned", "malformed or legacy"),
+        ("unsigned", r"HTTP 409 carried no response authentication"),
         ("forged", "wrong_principal"),
         ("mutated", "invalid_proof"),
     ],
@@ -423,3 +425,84 @@ def test_settlement_retry_reuses_the_exact_authenticated_request(monkeypatch) ->
     assert len({call["timestamp"] for call in calls}) == 1
     assert all(call["principal"] == buyer.identity for call in calls)
     assert all(call["body"]["mechanism_input"] == {"value": "opaque"} for call in calls)
+
+
+def test_a_refused_response_names_its_status_without_quoting_it(monkeypatch) -> None:
+    """The refusal is the same; what it says about the answer is not."""
+
+    buyer = Ed25519Signer(b"\x1a" * 32)
+    seller = Ed25519Signer(b"\x1b" * 32)
+    secret = "sk_live_should_never_be_repeated"
+    monkeypatch.setattr("core_buyer.negotiation_client.time.time", lambda: _NOW)
+    monkeypatch.setattr(
+        "core_buyer.negotiation_client.urllib.request.urlopen",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            _error_response(
+                payload={"detail": f"Not Found {secret}"},
+                headers={},
+                status=404,
+            )
+        ),
+    )
+
+    with pytest.raises(RuntimeError) as refused:
+        _authenticated_json(
+            "http://seller/api/v1/settlements/esc-1",
+            None,
+            signer=buyer,
+            principal=buyer.identity,
+            method="GET",
+            operation="settlement_status",
+            resource="esc-1",
+            request_id="request.1",
+            timestamp=_NOW,
+            expected_response_principals=_trust(seller),
+        )
+
+    message = str(refused.value)
+    assert "HTTP 404" in message
+    assert "carried no response authentication" in message
+    # The body is what the refusal exists to distrust; it is never repeated.
+    assert secret not in message
+    assert "Not Found" not in message
+
+
+def test_a_partly_authenticated_response_reads_differently(monkeypatch) -> None:
+    """Missing one header is a protocol fault, not an unauthenticated answer."""
+
+    buyer = Ed25519Signer(b"\x1c" * 32)
+    seller = Ed25519Signer(b"\x1d" * 32)
+    payload = {"status": "ready"}
+    headers = _response_headers(
+        signer=seller,
+        payload=payload,
+        request_id="request.1",
+        operation="negotiate_new",
+        resource="listing-1",
+    )
+    del headers["X-Market-Timestamp"]
+    monkeypatch.setattr("core_buyer.negotiation_client.time.time", lambda: _NOW)
+    monkeypatch.setattr(
+        "core_buyer.negotiation_client.urllib.request.urlopen",
+        lambda *_args, **_kwargs: _Response(payload, headers),
+    )
+
+    with pytest.raises(RuntimeError) as refused:
+        _authenticated_json(
+            "http://seller/api/v1/negotiate/new",
+            {},
+            signer=buyer,
+            principal=buyer.identity,
+            method="POST",
+            operation="negotiate_new",
+            resource="listing-1",
+            request_id="request.1",
+            timestamp=_NOW,
+            expected_response_principals=_trust(seller),
+        )
+
+    message = str(refused.value)
+    assert "incomplete response authentication" in message
+    assert "X-Market-Timestamp" in message
+    # A header name locates the fault; a header value fingerprints the exchange.
+    assert headers["X-Market-Signature"] not in message
