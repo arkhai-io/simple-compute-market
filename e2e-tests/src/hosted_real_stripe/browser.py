@@ -115,18 +115,21 @@ class ChromiumCheckout:
                             ("input[name='cardNumber']", "#cardNumber"),
                             test_inputs.card_number,
                             "card number",
+                            diagnose=self._retain_diagnostics,
                         )
                         _fill_required(
                             page,
                             ("input[name='cardExpiry']", "#cardExpiry"),
                             test_inputs.expiry,
                             "card expiry",
+                            diagnose=self._retain_diagnostics,
                         )
                         _fill_required(
                             page,
                             ("input[name='cardCvc']", "#cardCvc"),
                             test_inputs.cvc,
                             "card CVC",
+                            diagnose=self._retain_diagnostics,
                         )
                         _fill_optional(
                             page,
@@ -237,18 +240,21 @@ class ChromiumCheckout:
                             ("input[name='cardNumber']", "#cardNumber"),
                             test_inputs.card_number,
                             "card number",
+                            diagnose=self._retain_diagnostics,
                         )
                         _fill_required(
                             page,
                             ("input[name='cardExpiry']", "#cardExpiry"),
                             test_inputs.expiry,
                             "card expiry",
+                            diagnose=self._retain_diagnostics,
                         )
                         _fill_required(
                             page,
                             ("input[name='cardCvc']", "#cardCvc"),
                             test_inputs.cvc,
                             "card CVC",
+                            diagnose=self._retain_diagnostics,
                         )
                         _fill_optional(
                             page,
@@ -276,8 +282,11 @@ class ChromiumCheckout:
                     if submit is None:
                         raise CheckoutContractError("Checkout setup submit action is unavailable")
                     submit.click()
-                    page.wait_for_timeout(min(5_000, self._timeout_ms))
-                    _raise_if_interactive_captcha(page)
+                    _await_checkout_left(
+                        page,
+                        timeout_ms=min(_SETUP_SUBMIT_TIMEOUT_MS, self._timeout_ms),
+                        diagnose=self._retain_diagnostics,
+                    )
                 finally:
                     browser.close()
         except (CheckoutContractError, ChromiumUnavailable):
@@ -311,7 +320,25 @@ def _browser_environment() -> dict[str, str]:
     return {key: value for key, value in os.environ.items() if not _SENSITIVE_ENV.search(key)}
 
 
-def _first_visible(page: Any, selectors: tuple[str, ...]) -> Any | None:
+#: How long a hosted Checkout page may take to mount the form this run has to
+#: fill. Long enough for a slow render, short enough that a page which will
+#: never present the field says so while an operator is still watching.
+_FORM_MOUNT_TIMEOUT_MS = 20_000
+
+
+def _first_visible(
+    page: Any, selectors: tuple[str, ...], *, wait_ms: int = 0
+) -> Any | None:
+    # Checkout mounts its form after the document is ready, so a field this run
+    # requires is worth waiting for rather than probing once. A field it merely
+    # accepts is not: an immediate probe keeps an absent optional field free.
+    if wait_ms > 0:
+        try:
+            page.wait_for_selector(
+                ", ".join(selectors), state="visible", timeout=wait_ms
+            )
+        except Exception:  # noqa: BLE001 - absence is the caller's to report
+            pass
     for selector in selectors:
         locator = page.locator(selector).first
         try:
@@ -329,8 +356,9 @@ def _fill_required(
     name: str,
     *,
     diagnose: bool = False,
+    wait_ms: int = _FORM_MOUNT_TIMEOUT_MS,
 ) -> None:
-    locator = _first_visible(page, selectors)
+    locator = _first_visible(page, selectors, wait_ms=wait_ms)
     if locator is None:
         raise CheckoutContractError(
             f"Checkout {name} field is unavailable"
@@ -427,6 +455,52 @@ def _submit_checkout(page: Any, submit: Any, outcome: CheckoutOutcome) -> None:
         bounds["x"] + bounds["width"] / 2,
         bounds["y"] + bounds["height"] / 2,
     )
+
+
+#: How long Checkout may take to accept a submitted setup form and redirect.
+_SETUP_SUBMIT_TIMEOUT_MS = 30_000
+
+
+def _await_checkout_left(page: Any, *, timeout_ms: int, diagnose: bool) -> None:
+    """Refuse to call a setup complete until Checkout says it is.
+
+    The submit click is not the outcome. Checkout redirects to the configured
+    success URL once the SetupIntent is confirmed, and stays where it is
+    otherwise -- so waiting for the page to leave is the only in-browser signal
+    that separates a saved instrument from a form that was silently rejected.
+    """
+
+    try:
+        page.wait_for_url(
+            lambda url: "checkout.stripe.com" not in str(url),
+            timeout=timeout_ms,
+        )
+    except Exception:  # noqa: BLE001 - the page is the subject, not the error
+        _raise_if_interactive_captcha(page)
+        raise CheckoutContractError(
+            "Checkout did not accept the submitted setup form"
+            + (_page_complaint(page) if diagnose else "")
+        ) from None
+
+
+def _page_complaint(page: Any) -> str:
+    """Quote what the page says is wrong, for a development run only.
+
+    This is the provider's own public validation text about input this harness
+    typed. Never a value, never a session, and never in a protected run.
+    """
+
+    try:
+        messages = page.eval_on_selector_all(
+            "[role='alert'], .Error, [data-testid*='error']",
+            "nodes => nodes.map(n => (n.innerText || '').trim()).filter(Boolean)",
+        )
+    except Exception:  # noqa: BLE001 - a diagnostic must not mask its subject
+        return ""
+    if not isinstance(messages, list) or not messages:
+        return "; the page reported nothing"
+    joined = " | ".join(sorted({str(item) for item in messages}))
+    return "; the page said " + joined[:300]
 
 
 def _interactive_captcha_visible(frame: Any) -> bool:
