@@ -69,6 +69,18 @@ sentence that did not include any of it. It now names the status, the action
 kind, the funding reason, and which fields were populated — enough to
 distinguish the failure modes, without emitting an action URL.
 
+### The reason rides in state the record already has
+
+`last_error` reaches the obligation row, but it is free text written by whichever
+mechanism raised, so projecting it would leak for a mechanism that never agreed
+to be quoted. The code instead travels on the exception, and the manual-required
+finish path writes it into the mechanism state the record already carries, under
+one key. No schema migration, no new field for a consumer to learn, and a
+projection reads it structurally rather than parsing a sentence back apart.
+
+An obligation parked before this existed carries no key and reports no reason,
+which is correct: absence is not an invented explanation.
+
 ## Risks / Trade-offs
 
 An authority could put provider detail in a `code`. That would be a defect in

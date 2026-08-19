@@ -83,6 +83,7 @@ from .ports import (
     SettlementServicingRepository,
 )
 from .runtime import (
+    MANUAL_REASON_KEY,
     SettlementManualRequired,
     SettlementRuntime,
     settlement_operation_ref,
@@ -159,6 +160,7 @@ __all__ = [
     "SettlementConfigurationError",
     "SettlementConfigurationRegistry",
     "SettlementJobCoordinator",
+    "MANUAL_REASON_KEY",
     "SettlementManualRequired",
     "SettlementMigration",
     "SettlementObligationRecord",

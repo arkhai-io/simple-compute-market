@@ -34,6 +34,7 @@ from market_hosted_settlement import (
     FundingMode,
     FundingProfile,
     create_stripe_registration,
+    hosted_projected_reason,
 )
 from market_identity import Identity, Signer
 from market_settlement_runtime import (
@@ -1216,8 +1217,7 @@ async def hosted_settlement_projection(
         "payer_principal": record.payer_principal,
         "claimant_principal": record.claimant_principal,
         "status": hosted_public_status(record),
-        "funding_reason": receipt.get("funding_reason")
-        or state.get("funding_reason"),
+        "funding_reason": hosted_projected_reason(receipt, state),
         "funding_deadline_unix": receipt.get("funding_deadline_unix")
         or state.get("funding_deadline_unix"),
         "action": action,

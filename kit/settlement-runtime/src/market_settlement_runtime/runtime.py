@@ -20,9 +20,23 @@ from .models import (
 )
 from .ports import ConditionalEscrowClient, SettlementRuntimeRepository
 
+#: Where a mechanism records why it parked an obligation, inside the mechanism
+#: state it already owns. One key, so a projection needs no mechanism knowledge
+#: to find it and no mechanism needs a schema change to report one.
+MANUAL_REASON_KEY = "manual_reason"
+
 
 class SettlementManualRequired(RuntimeError):
-    """A mechanism cannot safely converge without operator evidence."""
+    """A mechanism cannot safely converge without operator evidence.
+
+    ``code`` is the mechanism's own stable name for what it could not get past,
+    carried separately from the message so a projection can report it without
+    repeating free text a mechanism may have redacted for a reason.
+    """
+
+    def __init__(self, message: str, *, code: str = "") -> None:
+        super().__init__(message)
+        self.code = code
 
 
 class SettlementRuntime:
@@ -783,8 +797,21 @@ class SettlementRuntime:
         worker_id: str,
         error: Exception,
     ) -> SettlementOperationOutcome:
+        # An obligation parked here needs a human, and a state that requires
+        # human action while withholding its reason is unrepairable. The code
+        # joins the mechanism's own state so a projection reads it structurally
+        # rather than parsing the message back out.
+        code = getattr(error, "code", "") or ""
+        state = (
+            {**record.mechanism_state, MANUAL_REASON_KEY: code} if code else None
+        )
         await self._finish(
-            record, operation, worker_id, state="manual_required", last_error=str(error)
+            record,
+            operation,
+            worker_id,
+            state="manual_required",
+            last_error=str(error),
+            mechanism_state=state,
         )
         return self._outcome(record, operation, "manual_required")
 

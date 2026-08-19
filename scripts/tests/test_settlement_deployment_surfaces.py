@@ -160,3 +160,29 @@ def test_marketplace_compose_emits_no_legacy_settlement_environment() -> None:
     )
     assert "HOSTED_SETTLEMENT_VERIFIED_IMAGE" in authority_compose
     assert "HOSTED_SETTLEMENT_ENV_FILE" in authority_compose
+
+
+#: Every storefront that adopts the hosted mechanism and projects its status.
+_HOSTED_PROJECTIONS = (
+    "domains/vms/storefront/src/market_storefront/settlement_composition.py",
+    "domains/apicredits/storefront/src/apicredits_storefront/settlement_composition.py",
+    "domains/bare_metal/storefront/src/arkhai_bare_metal_storefront/hosted_lifecycle.py",
+)
+
+
+def test_every_domain_projects_the_hosted_reason_from_one_definition() -> None:
+    """Three copies of a projection drift; one shared definition cannot.
+
+    A domain that assembled the reason itself would keep projecting a status
+    with nothing behind it the moment the mechanism learned a new way to be
+    parked, and nothing would fail until an operator held the obligation.
+    """
+
+    for path in _HOSTED_PROJECTIONS:
+        source = (REPO_ROOT / path).read_text(encoding="utf-8")
+        assert '"funding_reason": hosted_projected_reason(' in source, path
+        assert "hosted_projected_reason" in source.split("def ", 1)[0] or (
+            "from market_hosted_settlement import" in source
+        ), path
+        # No domain reassembles it out of the receipt and mechanism state.
+        assert 'receipt.get("funding_reason")' not in source, path

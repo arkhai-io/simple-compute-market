@@ -16,6 +16,7 @@ from .adapter import (
     HostedObligationParams,
     MarketplaceSignerAdapter,
     adapt_expected_authorities,
+    hosted_projected_reason,
 )
 from .authorization import (
     AcceptedFundingAuthorization,
@@ -114,6 +115,7 @@ __all__ = [
     "ReservationRecord",
     "ReservationState",
     "adapt_expected_authorities",
+    "hosted_projected_reason",
     "authorization_input_fingerprint",
     "authorization_journal_path",
     "canonical_json",

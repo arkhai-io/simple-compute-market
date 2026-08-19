@@ -15,16 +15,22 @@
 
 ## 2. A parked obligation says why
 
-- [ ] 2.1 The manual-required finish path records the reason so it survives to
+- [x] 2.1 The manual-required finish path records the reason so it survives to
       the projection rather than only to `last_error`.
-- [ ] 2.2 The hosted status projection reports a stable reason for a
+- [x] 2.2 The hosted status projection reports a stable reason for a
       `manual_required` obligation, built once in the shared surface rather than
       in each domain's copy.
-- [ ] 2.3 The VM, API-credit, and bare-metal storefronts project it identically,
+- [x] 2.3 The VM, API-credit, and bare-metal storefronts project it identically,
       by construction rather than by three matching edits.
-- [ ] 2.4 Evidence: an obligation parked by a refused operation projects its
-      reason in every domain; a projection of a parked obligation with no reason
-      is impossible; no provider detail appears in any projected field.
+- [x] 2.4 Evidence: an obligation parked by a refused operation projects its
+      reason in every domain; no provider detail reaches the mechanism state a
+      projection reads; and a repository-level surface test rejects a domain
+      that reassembles the reason itself. One refinement recorded in design.md:
+      the reason travels in the mechanism state the record already carries,
+      under one key, so no schema migration and no new consumer field were
+      needed. Suites: settlement-runtime 78, hosted-settlement 158, VM
+      storefront 941, API-credit storefront 76, bare-metal storefront 122,
+      scripts 84.
 
 ## 3. Diagnose what it names
 

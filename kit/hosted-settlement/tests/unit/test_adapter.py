@@ -5,6 +5,7 @@ import json
 from typing import Any
 
 import market_hosted_settlement.adapter as adapter_module
+from market_hosted_settlement import hosted_projected_reason
 import pytest
 from hosted_settlement_client import (
     AccountReadiness,
@@ -923,3 +924,73 @@ async def test_legacy_card_decoder_is_recovery_only() -> None:
     assert status.receipt["legacy_recovery"] == "hosted-card.v1"
     assert "funding_profile" not in status.receipt
     assert "funding_authorization_ref" not in status.receipt
+
+
+@pytest.mark.asyncio
+async def test_a_parked_obligation_projects_the_reason_it_was_parked_for(
+    tmp_path,
+) -> None:
+    """manual_required is a request for human action; it owes a reason."""
+
+    client = FailingMaterializeClient(
+        HostedSettlementError(
+            code="funding_profile_unsupported",
+            message="sk_live_secret acct_1Example rejected 4242",
+            retryable=False,
+            status_code=409,
+        )
+    )
+    adapter = HostedConditionalEscrowClient(client)  # type: ignore[arg-type]
+    repository = SettlementSQLiteRepository(str(tmp_path / "parked.db"))
+    runtime = SettlementRuntime(
+        repository,
+        {"fiat.stripe.v1": adapter},
+        clock=lambda: 2_000_000_000,
+    )
+    record = (
+        await runtime.register_plan(
+            agreement_ref="agreement-parked",
+            obligations=[_obligation(include_authorization=False)],
+        )
+    )[0]
+    await runtime.bind_mechanism_params(
+        record.obligation_ref,
+        {
+            "funding_profile": "card.v1",
+            "funding_authorization_ref": "funding-authorization-1",
+        },
+        local_principal=BUYER,
+    )
+
+    outcome = await runtime.materialize(
+        obligation_ref=record.obligation_ref,
+        local_principal=BUYER,
+        worker_id="buyer",
+    )
+    assert outcome.status == "manual_required"
+
+    parked = await repository.load_settlement_obligation(record.obligation_ref)
+    assert parked is not None
+    reason = hosted_projected_reason(None, parked["mechanism_state"])
+    assert reason == "funding_profile_unsupported"
+    # The mechanism state a projection reads carries the code and nothing the
+    # authority said around it.
+    serialized = json.dumps(parked["mechanism_state"], sort_keys=True)
+    assert "sk_live_secret" not in serialized
+    assert "acct_1Example" not in serialized
+
+
+def test_the_reason_prefers_what_the_obligation_is_currently_doing() -> None:
+    """A funding reason outranks a parking reason it has moved on from."""
+
+    assert hosted_projected_reason({"funding_reason": "awaiting_payment"}, {}) == (
+        "awaiting_payment"
+    )
+    assert hosted_projected_reason(None, {"funding_reason": "processing"}) == "processing"
+    assert hosted_projected_reason(None, {"manual_reason": "condition_rejected"}) == (
+        "condition_rejected"
+    )
+    assert hosted_projected_reason(None, None) is None
+    # A parked obligation that reached its state before this existed reports
+    # nothing rather than an invented reason.
+    assert hosted_projected_reason({}, {"manual_reason": ""}) is None

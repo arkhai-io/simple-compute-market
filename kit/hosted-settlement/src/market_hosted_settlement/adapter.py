@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+from collections.abc import Mapping
 from typing import Any, Literal
 
 from hosted_settlement_client import (
@@ -32,6 +33,7 @@ from hosted_settlement_client import (
 from market_identity import Signer as MarketplaceSigner
 from market_identity import TrustedIdentitySet
 from market_settlement_runtime import (
+    MANUAL_REASON_KEY,
     ConditionOutcome,
     EffectOutcome,
     MaterializationOutcome,
@@ -107,7 +109,8 @@ async def _released_call(operation: str, call: Any) -> Any:
                 _reason(f"hosted settlement {operation} temporarily unavailable", code)
             ) from None
         raise SettlementManualRequired(
-            _reason(f"hosted settlement {operation} rejected", code)
+            _reason(f"hosted settlement {operation} rejected", code),
+            code=code,
         ) from None
     except Exception:
         raise HostedSettlementTemporaryError(
@@ -117,6 +120,28 @@ async def _released_call(operation: str, call: Any) -> Any:
 
 def _reason(summary: str, code: str) -> str:
     return f"{summary}: {code}" if code else summary
+
+
+def hosted_projected_reason(
+    receipt: Mapping[str, Any] | None,
+    mechanism_state: Mapping[str, Any] | None,
+) -> str | None:
+    """The one reason a hosted obligation reports, parked or merely pending.
+
+    Defined here rather than in each adopting domain, so a storefront cannot
+    project a status without the reason behind it by forgetting to. An
+    obligation the authority refused reports the authority's own code; one
+    merely awaiting funding reports the funding reason it already had.
+    """
+
+    receipt = receipt or {}
+    state = mechanism_state or {}
+    return (
+        receipt.get("funding_reason")
+        or state.get("funding_reason")
+        or state.get(MANUAL_REASON_KEY)
+        or None
+    )
 
 
 class HostedObligationParams(BaseModel):
