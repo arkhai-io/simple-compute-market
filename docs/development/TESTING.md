@@ -528,6 +528,7 @@ eval "$(uv run --no-project --with arkhai-kit-identity --find-links .dist \
   python scripts/assemble-hosted-credentials.py \
   --provider-file ~/.config/arkhai/stripe-test.env \
   --storefront-config-template e2e-tests/config/hosted-storefront.toml \
+  --buyer-config-template e2e-tests/config/hosted-buyer.toml \
   --directory "$rundir" --print)"
 
 # 2. Producer identities: five come from the signed trust manifest; the run id
@@ -546,6 +547,14 @@ export HOSTED_STRIPE_TEST_SCENARIO=collection \
        HOSTED_STRIPE_TEST_RUN_REF="local-$(git rev-parse --short HEAD)"
 make hosted-stripe-test-local
 ```
+
+Both templates are needed because the storefront, the buyer, and the service
+environments in `compose.vms-fiat.yml` pin the *same* identities — the registry
+authorities, the storefront, and the provisioning service. A brokered run holds
+the private keys behind those committed identities; a development run generates
+keys instead, so it has to re-point every pin at once. The exports the assembler
+prints do that: the two rewritten configuration files, and the identifiers the
+Compose overlay substitutes in place of its committed defaults.
 
 The provider file defines `STRIPE_SECRET_KEY` and `STRIPE_CONNECTED_ACCOUNT_ID`.
 Release v0.2.1 checks the key prefix against its own Stripe mode, so the key must

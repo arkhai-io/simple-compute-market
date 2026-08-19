@@ -252,7 +252,7 @@ def test_the_derived_config_pins_identities_this_run_holds(tmp_path) -> None:
         now_unix=1_700_000_000,
         storefront_config_template=template_path,
     )
-    document = tomllib.loads(derived)
+    document = tomllib.loads(derived.storefront)
 
     storefront = create_signer(
         document["Identity"]["principal"]["scheme"],
@@ -293,4 +293,81 @@ def test_the_derived_config_is_written_and_pointed_at(tmp_path) -> None:
 
     written = Path(environment["HOSTED_STRIPE_TEST_STOREFRONT_CONFIG"])
     assert written.is_file()
-    assert written.read_text(encoding="utf-8") == derived
+    assert written.read_text(encoding="utf-8") == derived.storefront
+
+
+def test_every_pin_of_one_identity_moves_together(tmp_path) -> None:
+    """A generated key is worthless if some service still pins the old one."""
+
+    import tomllib
+
+    storefront_template = tmp_path / "storefront.toml"
+    storefront_template.write_text(
+        Path("e2e-tests/config/hosted-storefront.toml").read_text(encoding="utf-8"),
+        encoding="utf-8",
+    )
+    buyer_template = tmp_path / "buyer.toml"
+    buyer_template.write_text(
+        Path("e2e-tests/config/hosted-buyer.toml").read_text(encoding="utf-8"),
+        encoding="utf-8",
+    )
+    overlay = Path("compose.vms-fiat.yml").read_text(encoding="utf-8")
+
+    payload, derived = assembler.assemble_payload(
+        provider_path=_provider_file(tmp_path),
+        now_unix=1_700_000_000,
+        storefront_config_template=storefront_template,
+        buyer_config_template=buyer_template,
+    )
+
+    storefront = tomllib.loads(derived.storefront)
+    buyer = tomllib.loads(derived.buyer)
+    registries = storefront["registry"]["urls"]
+    for index, url in enumerate(registries):
+        pinned = storefront["registry"]["authorities"][url]["principals"][0]["identifier"]
+        # The buyer discovers from the same registries and must trust the same
+        # authority the registry now signs as.
+        assert buyer["registry"]["authorities"][url]["principals"][0]["identifier"] == pinned
+        variable = ("VMS_REGISTRY_IDENTITY_IDENTIFIER", "VMS_REGISTRY_B_IDENTITY_IDENTIFIER")[
+            index
+        ]
+        assert derived.identifiers[variable] == pinned
+        assert f"${{{variable}:-" in overlay
+
+    assert derived.identifiers["VMS_BOB_IDENTITY_IDENTIFIER"] == (
+        storefront["Identity"]["principal"]["identifier"]
+    )
+    assert derived.identifiers["VMS_PROVISIONING_IDENTITY_IDENTIFIER"] == (
+        storefront["provisioning"]["identity"]["principals"][0]["identifier"]
+    )
+    for variable in ("VMS_BOB_IDENTITY_IDENTIFIER", "VMS_PROVISIONING_IDENTITY_IDENTIFIER"):
+        assert f"${{{variable}:-" in overlay
+
+    # Provisioning trusts an administrator no configuration file declares, so
+    # the run generates that key too and re-pins it the same way.
+    from market_identity import create_signer
+
+    admin = create_signer("ed25519", payload["admin_identity_credential"])
+    assert derived.identifiers["VMS_ADMIN_IDENTITY_IDENTIFIER"] == admin.identity.identifier
+    assert "${VMS_ADMIN_IDENTITY_IDENTIFIER:-" in overlay
+
+
+def test_a_brokered_run_rewrites_nothing(tmp_path) -> None:
+    """Committed identities stay committed when the keys already match them."""
+
+    overlay = Path("compose.vms-fiat.yml").read_text(encoding="utf-8")
+    payload, derived = assembler.assemble_payload(
+        provider_path=_provider_file(tmp_path),
+        now_unix=1_700_000_000,
+    )
+
+    assert derived.storefront is None
+    assert derived.buyer is None
+    assert derived.identifiers == {}
+    assert assembler.materialize(payload, tmp_path / "run").keys() == (
+        assembler.materialize(payload, tmp_path / "other", derived).keys()
+    )
+    # Every substitution the overlay makes falls back to the committed value.
+    for line in overlay.splitlines():
+        if "_IDENTITY_IDENTIFIER" in line or "_IDENTITY__IDENTIFIER" in line:
+            assert ":-" in line

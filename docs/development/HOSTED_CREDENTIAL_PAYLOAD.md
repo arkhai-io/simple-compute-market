@@ -57,6 +57,21 @@ everywhere else), `HOSTED_SETTLEMENT_DATABASE_PATH` (inside the Compose named
 volume), and the checkout and account-link callback allowlists, which point at
 the loopback storefront and must not repeat a URL between them.
 
+### Identities the topology already pins
+
+Five of the credentials are not free. `compose.vms-fiat.yml`,
+`e2e-tests/config/hosted-storefront.toml`, and
+`e2e-tests/config/hosted-buyer.toml` each pin the public half of the registry-A,
+registry-B, storefront, provisioning, and administrator identities, and a
+service refuses to start when the credential it is handed derives a different
+one. A broker therefore returns the keys behind exactly those committed
+identities, in the schemes they declare (`ed25519` for all five).
+
+Local assembly cannot do that — it has no committed private keys — so it
+generates the five and rewrites every pin: both configuration files, and the
+Compose overlay through the `VMS_*_IDENTITY_IDENTIFIER` variables whose defaults
+are the committed values.
+
 ## Credential encoding
 
 A credential is the raw private key for its scheme:

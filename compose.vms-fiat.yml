@@ -1,13 +1,19 @@
 # Hosted-fiat VM profile. No Anvil/RPC service or buyer wallet environment is
 # included. The buyer uses compose.vms.yml's persistent XDG profile mount and
 # strict credential-file reference; seller/service signers remain role-owned.
+#
+# Each service pins the public half of an identity whose private key is issued
+# to it separately, so the two must agree. The committed values are the
+# defaults, which is what a deployment holding the matching keys wants. A run
+# that generates its own keys instead -- a development hosted run -- overrides
+# them, and must override every place the same identity is pinned.
 
 services:
   registry:
     environment:
       - REGISTRY_AUTHORITY_ID=registry-a
       - REGISTRY_AUTHORITY_SCHEME=ed25519
-      - REGISTRY_AUTHORITY_IDENTIFIER=NLTZBDFWy23PC-sKKUm3VZyUDSvLbb6MU6mzAnjjp0Y
+      - REGISTRY_AUTHORITY_IDENTIFIER=${VMS_REGISTRY_IDENTITY_IDENTIFIER:-NLTZBDFWy23PC-sKKUm3VZyUDSvLbb6MU6mzAnjjp0Y}
       - REGISTRY_AUTHORITY_CREDENTIAL_FILE=/run/secrets/arkhai/registry-identity/credential
     volumes:
       - ${VMS_REGISTRY_IDENTITY_CREDENTIAL_FILE:?set registry Ed25519 signer credential file}:/run/secrets/arkhai/registry-identity/credential:ro
@@ -15,7 +21,7 @@ services:
     environment:
       - REGISTRY_AUTHORITY_SCHEME=ed25519
       - REGISTRY_AUTHORITY_ID=registry-b
-      - REGISTRY_AUTHORITY_IDENTIFIER=yFOtDwzSthmuqSzuxP1Wok1kmdWEznklfkXP2BObYKc
+      - REGISTRY_AUTHORITY_IDENTIFIER=${VMS_REGISTRY_B_IDENTITY_IDENTIFIER:-yFOtDwzSthmuqSzuxP1Wok1kmdWEznklfkXP2BObYKc}
       - REGISTRY_AUTHORITY_CREDENTIAL_FILE=/run/secrets/arkhai/registry-identity/credential
     volumes:
       - ${VMS_REGISTRY_B_IDENTITY_CREDENTIAL_FILE:?set private registry Ed25519 signer credential file}:/run/secrets/arkhai/registry-identity/credential:ro
@@ -26,9 +32,9 @@ services:
       - ${VMS_PROVISIONING_IDENTITY_ENV_FILE:?set provisioning Ed25519 signer credential environment file}
     environment:
       - PROVISIONING_IDENTITY__SCHEME=ed25519
-      - PROVISIONING_IDENTITY__IDENTIFIER=xoImN8fTEOxXYnvgC6JZ0lN0n0qvZERwz_vlOjX3MkI
+      - PROVISIONING_IDENTITY__IDENTIFIER=${VMS_PROVISIONING_IDENTITY_IDENTIFIER:-xoImN8fTEOxXYnvgC6JZ0lN0n0qvZERwz_vlOjX3MkI}
       - PROVISIONING_STOREFRONT_IDENTITY__SCHEME=ed25519
-      - PROVISIONING_STOREFRONT_IDENTITY__IDENTIFIER=0EqyMnQrtKs6E2i9RhXk5tAiSrcaAWuvhSCjMsl3hzc
+      - PROVISIONING_STOREFRONT_IDENTITY__IDENTIFIER=${VMS_BOB_IDENTITY_IDENTIFIER:-0EqyMnQrtKs6E2i9RhXk5tAiSrcaAWuvhSCjMsl3hzc}
       - PROVISIONING_STOREFRONT_SITE_ID=default
       - PROVISIONING_ADMIN_IDENTITY__SCHEME=ed25519
-      - PROVISIONING_ADMIN_IDENTITY__IDENTIFIER=5zTqbCtiV95yNV5HKqBaTEh-a0Y8Ap7TBt8vAbVja1g
+      - PROVISIONING_ADMIN_IDENTITY__IDENTIFIER=${VMS_ADMIN_IDENTITY_IDENTIFIER:-5zTqbCtiV95yNV5HKqBaTEh-a0Y8Ap7TBt8vAbVja1g}

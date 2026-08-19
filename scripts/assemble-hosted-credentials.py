@@ -85,11 +85,74 @@ def _identifier(scheme: str, credential: str) -> str:
 #: rewritten to the generated public identity -- the broker's equivalent is
 #: holding the private keys that match a committed configuration.
 _CONFIG_ROLES = (
-    ("storefront_identity_credential", ("Identity", "principal")),
-    ("provisioning_identity_credential", ("provisioning", "identity")),
-    ("registry_a_identity_credential", ("registry", "authorities", 0)),
-    ("registry_b_identity_credential", ("registry", "authorities", 1)),
+    ("storefront_identity_credential", ("Identity", "principal"), "VMS_BOB_IDENTITY"),
+    (
+        "provisioning_identity_credential",
+        ("provisioning", "identity"),
+        "VMS_PROVISIONING_IDENTITY",
+    ),
+    ("registry_a_identity_credential", ("registry", "authorities", 0), "VMS_REGISTRY_IDENTITY"),
+    (
+        "registry_b_identity_credential",
+        ("registry", "authorities", 1),
+        "VMS_REGISTRY_B_IDENTITY",
+    ),
 )
+
+#: The one identity the services pin that no committed configuration declares:
+#: provisioning trusts an administrator it never reads a config file for.
+_ADMIN_ROLE = ("admin_identity_credential", "ed25519", "VMS_ADMIN_IDENTITY")
+
+
+class DerivedConfiguration:
+    """What a run has to write out so its generated identities line up.
+
+    Empty when no template was supplied, which is the brokered case: there the
+    committed configuration is already correct and nothing is rewritten.
+    """
+
+    def __init__(self) -> None:
+        self.storefront: str | None = None
+        self.buyer: str | None = None
+        self.identifiers: dict[str, str] = {}
+
+
+class DerivedTopology:
+    """The identities a run generated, and the pins they have to replace.
+
+    A brokered run holds the private keys behind identities that are already
+    committed. A development run has to work the other way round: generate the
+    keys, then re-point every place those identities are pinned -- the
+    storefront configuration, the buyer configuration, and the service
+    environments in the Compose overlay.
+    """
+
+    def __init__(self) -> None:
+        self.credentials: dict[str, str] = {}
+        self.identifiers: dict[str, str] = {}
+        self._replacements: list[tuple[str, str]] = []
+
+    def add(self, role: str, scheme: str, *, replaces: str | None = None) -> str:
+        credential = _credential(scheme)
+        identifier = _identifier(scheme, credential)
+        self.credentials[role] = credential
+        self.identifiers[role] = identifier
+        if replaces is not None:
+            self._replacements.append((replaces, identifier))
+        return credential
+
+    def repin(self, replaces: str, identifier: str) -> None:
+        self._replacements.append((replaces, identifier))
+
+    def apply(self, text: str) -> str:
+        """Rewrite every pinned identity this run replaced, and no other text."""
+
+        for existing, generated in self._replacements:
+            text = text.replace(existing, generated)
+        return text
+
+    def declares(self, text: str) -> bool:
+        return any(existing in text for existing, _ in self._replacements)
 
 
 def _template_principal(document: dict, path: tuple) -> tuple[str, str]:
@@ -112,10 +175,11 @@ def derive_storefront_config(
     *,
     authority_scheme: str,
     authority_credential: str,
-) -> tuple[str, dict[str, str]]:
+) -> tuple[str, DerivedTopology]:
     """Rewrite the pinned identities to keys this run actually holds.
 
-    Returns the rewritten configuration and the credentials generated for it.
+    Returns the rewritten configuration and the topology it was derived from,
+    which every other pin of the same identities is then rewritten against.
     Replacement is by exact identifier string, so everything else in the
     operator's template survives untouched.
     """
@@ -123,30 +187,28 @@ def derive_storefront_config(
     import tomllib
 
     document = tomllib.loads(template_text)
-    credentials: dict[str, str] = {}
-    replacements: list[tuple[str, str]] = []
-    for role, path in _CONFIG_ROLES:
+    topology = DerivedTopology()
+    for role, path, _variable in _CONFIG_ROLES:
         scheme, existing = _template_principal(document, path)
-        credential = _credential(scheme)
-        credentials[role] = credential
-        replacements.append((existing, _identifier(scheme, credential)))
-    # The storefront trusts the authority whose responses it verifies, which is
-    # the runtime authority this run generates rather than a released one.
-    settlement_authority = document["Settlement"]["stripe"]["authority"]["principals"][0]
-    replacements.append(
-        (
-            str(settlement_authority["identifier"]),
-            _identifier(authority_scheme, authority_credential),
-        )
-    )
-    rewritten = template_text
-    for existing, generated in replacements:
-        if existing not in rewritten:
+        if existing not in template_text:
             raise CredentialAssemblyError(
                 "storefront template does not contain a pinned identity it declares"
             )
-        rewritten = rewritten.replace(existing, generated)
-    return rewritten, credentials
+        topology.add(role, scheme, replaces=existing)
+    # Provisioning trusts an administrator the storefront never configures, so
+    # the key for it is generated here rather than read out of a template.
+    admin_role, admin_scheme, _admin_variable = _ADMIN_ROLE
+    topology.add(admin_role, admin_scheme)
+    # The storefront trusts the authority whose responses it verifies, which is
+    # the runtime authority this run generates rather than a released one.
+    settlement_authority = document["Settlement"]["stripe"]["authority"]["principals"][0]
+    existing_authority = str(settlement_authority["identifier"])
+    if existing_authority not in template_text:
+        raise CredentialAssemblyError(
+            "storefront template does not contain a pinned identity it declares"
+        )
+    topology.repin(existing_authority, _identifier(authority_scheme, authority_credential))
+    return topology.apply(template_text), topology
 
 
 def assemble_payload(
@@ -159,11 +221,13 @@ def assemble_payload(
     now_unix: int,
     authority_env: dict[str, str] | None = None,
     storefront_config_template: Path | None = None,
-) -> tuple[dict[str, Any], str | None]:
+    buyer_config_template: Path | None = None,
+) -> tuple[dict[str, Any], "DerivedConfiguration"]:
     """Build the documented payload, and the configuration it is consistent with.
 
     Returns the payload and, when a storefront template is supplied, the
-    rewritten configuration whose pinned identities this run holds the keys for.
+    rewritten configurations whose pinned identities this run holds the keys
+    for, together with the identifiers the service environments must adopt.
     """
 
     provider = _provider_values(provider_path)
@@ -181,14 +245,29 @@ def assemble_payload(
         # a real environment rotates and therefore lists more than one.
         "HOSTED_SETTLEMENT_ENCRYPTION_KEYS": _fernet_key(),
     }
-    derived_config: str | None = None
+    derived = DerivedConfiguration()
     config_credentials: dict[str, str] = {}
     if storefront_config_template is not None:
-        derived_config, config_credentials = derive_storefront_config(
+        derived.storefront, topology = derive_storefront_config(
             storefront_config_template.read_text(encoding="utf-8"),
             authority_scheme=scheme,
             authority_credential=authority_credential,
         )
+        config_credentials = topology.credentials
+        derived.identifiers = {
+            f"{variable}_IDENTIFIER": topology.identifiers[role]
+            for role, variable in (
+                *((role, variable) for role, _path, variable in _CONFIG_ROLES),
+                (_ADMIN_ROLE[0], _ADMIN_ROLE[2]),
+            )
+        }
+        if buyer_config_template is not None:
+            buyer_text = buyer_config_template.read_text(encoding="utf-8")
+            if not topology.declares(buyer_text):
+                raise CredentialAssemblyError(
+                    "buyer template pins none of the identities this run generated"
+                )
+            derived.buyer = topology.apply(buyer_text)
     payload: dict[str, Any] = {
         "expires_at_unix": now_unix + expires_in_seconds,
         **provider,
@@ -200,7 +279,8 @@ def assemble_payload(
         "buyer_identity_credential": _credential(scheme),
         "buyer_identity_scheme": scheme,
         "storefront_identity_credential": config_credentials.get("storefront_identity_credential") or _credential(scheme),
-        "admin_identity_credential": _credential(scheme),
+        "admin_identity_credential": config_credentials.get("admin_identity_credential")
+        or _credential(scheme),
         "evidence_signer_credential": evidence_credential,
         "evidence_signer_scheme": scheme,
         "evidence_signer_identifier": _identifier(scheme, evidence_credential),
@@ -213,7 +293,7 @@ def assemble_payload(
         # replace the generated identity wholesale.
         "authority_env": {**base_authority_env, **dict(authority_env or {})},
     }
-    return payload, derived_config
+    return payload, derived
 
 
 def _fernet_key() -> str:
@@ -230,7 +310,7 @@ def _write_private(path: Path, text: str) -> None:
 def materialize(
     payload: dict[str, Any],
     directory: Path,
-    derived_config: str | None = None,
+    derived: "DerivedConfiguration | None" = None,
 ) -> dict[str, str]:
     """Write the files and return the environment the harness expects.
 
@@ -256,13 +336,18 @@ def materialize(
         f"ARKHAI_IDENTITY_CREDENTIAL={payload['storefront_identity_credential']}\n",
     )
     _write_private(directory / "storefront.secrets.toml", "")
-    storefront_config: dict[str, str] = {}
-    if derived_config is not None:
+    derived = derived or DerivedConfiguration()
+    derived_environment: dict[str, str] = dict(derived.identifiers)
+    if derived.storefront is not None:
         config_path = directory / "storefront.toml"
-        _write_private(config_path, derived_config)
-        storefront_config["HOSTED_STRIPE_TEST_STOREFRONT_CONFIG"] = str(config_path)
+        _write_private(config_path, derived.storefront)
+        derived_environment["HOSTED_STRIPE_TEST_STOREFRONT_CONFIG"] = str(config_path)
+    if derived.buyer is not None:
+        buyer_path = directory / "buyer.toml"
+        _write_private(buyer_path, derived.buyer)
+        derived_environment["HOSTED_STRIPE_TEST_BUYER_CONFIG"] = str(buyer_path)
     return {
-        **storefront_config,
+        **derived_environment,
         "STRIPE_SECRET_KEY": payload["stripe_restricted_key"],
         "STRIPE_CONNECTED_ACCOUNT_ID": payload["connected_account_id"],
         "HOSTED_SETTLEMENT_E2E_BUYER_IDENTITY_CREDENTIAL": payload[
@@ -308,6 +393,11 @@ def main() -> int:
         help="Storefront configuration whose pinned identities this run adopts.",
     )
     parser.add_argument(
+        "--buyer-config-template",
+        type=Path,
+        help="Buyer configuration pinning the same identities as the storefront.",
+    )
+    parser.add_argument(
         "--authority-env",
         type=Path,
         help="Optional base environment for the hosted authority.",
@@ -327,8 +417,9 @@ def main() -> int:
                 key, _, value = stripped.partition("=")
                 authority_env[key.strip()] = value.strip()
     try:
-        payload, derived_config = assemble_payload(
+        payload, derived = assemble_payload(
             storefront_config_template=args.storefront_config_template,
+            buyer_config_template=args.buyer_config_template,
             provider_path=args.provider_file,
             scheme=args.scheme,
             account_ref=args.account_ref,
@@ -336,7 +427,7 @@ def main() -> int:
             now_unix=int(os.environ.get("HOSTED_CREDENTIAL_NOW_UNIX") or _now()),
             authority_env=authority_env,
         )
-        environment = materialize(payload, args.directory, derived_config)
+        environment = materialize(payload, args.directory, derived)
     except CredentialAssemblyError as exc:
         parser.error(str(exc))
     if args.print_env:

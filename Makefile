@@ -16,8 +16,9 @@ HOSTED_COMPOSE_ENV ?= $(DIST_DIR)/hosted-settlement-compose.env
 # The locally built consumer a development stack runs in place of an
 # attested release image.
 HOSTED_LOCAL_MARKETPLACE_IMAGE ?= arkhai:storefront
-# Written by the local credential assembly, whose generated keys it pins.
+# Written by the local credential assembly, whose generated keys they pin.
 HOSTED_STRIPE_TEST_STOREFRONT_CONFIG ?= e2e-tests/config/hosted-storefront.toml
+HOSTED_STRIPE_TEST_BUYER_CONFIG ?= e2e-tests/config/hosted-buyer.toml
 HOSTED_MARKETPLACE_RELEASE_DIR ?= $(DIST_DIR)/marketplace-release
 HOSTED_MARKETPLACE_RELEASE_MANIFEST ?= $(HOSTED_MARKETPLACE_RELEASE_DIR)/marketplace-release-manifest.json
 HOSTED_PRODUCTION_MANIFEST_SHA256 ?=
@@ -219,6 +220,7 @@ hosted-stripe-test-local: hosted-preflight-local ## Run one development scenario
 		--authority-environment "$(HOSTED_STRIPE_TEST_AUTHORITY_ENVIRONMENT)" \
 		--hosted-service-env-base "$(HOSTED_STRIPE_TEST_AUTHORITY_ENV_FILE)" \
 		--storefront-config "$(HOSTED_STRIPE_TEST_STOREFRONT_CONFIG)" \
+		--buyer-config "$(HOSTED_STRIPE_TEST_BUYER_CONFIG)" \
 		--evidence "$(HOSTED_STRIPE_TEST_EVIDENCE)"
 
 hosted-compose-up: hosted-preflight ## Start or converge the production stack without deleting authority state.
