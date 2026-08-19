@@ -38,6 +38,11 @@ from .hosted_routes import (
     BareMetalHostedDomainCallbacks,
     lifecycle_domain_callbacks,
 )
+from .delivery import (
+    build_introduction_delivery,
+    load_storefront_delivery_sinks,
+    storefront_delivery_section,
+)
 from .sqlite_client import SQLiteClient
 from .site_clients import (
     BareMetalSiteBinding,
@@ -113,6 +118,7 @@ class BareMetalStorefrontRuntime:
     fulfillment_client: Any | None = field(default=None, repr=False)
     chain_clients: Mapping[str, Any] = field(default_factory=dict)
     chain_config_paths: Mapping[str, str | None] = field(default_factory=dict)
+    introduction_delivery: Any | None = field(default=None, repr=False)
     escrow_verifier: Callable[..., Awaitable[int]] = field(
         default_factory=lambda: create_alkahest_registration().settlement_verifier
     )
@@ -401,7 +407,14 @@ def build_runtime_from_environment(
         raise RuntimeError(
             "bare-metal storefront trusted site composition is invalid",
         ) from exc
+    try:
+        delivery_sinks = load_storefront_delivery_sinks(storefront_delivery_section())
+    except (TypeError, ValueError, json.JSONDecodeError) as exc:
+        raise RuntimeError(
+            "BARE_METAL_STOREFRONT_DELIVERY must be a strict [Delivery] section"
+        ) from exc
     runtime = BareMetalStorefrontRuntime(
+        introduction_delivery=build_introduction_delivery(delivery_sinks.sinks),
         db=db,
         domain=selected_domain,
         seller_principal=identity_config.principal,

@@ -11,6 +11,7 @@ from market_contact_exchange import (
 )
 from market_contact_exchange import (
     AuthorizedIntroductionRequest,
+    DeliverIntroduction,
     IntroductionAgreement,
     IntroductionRecord,
     IntroductionRouteCallbacks,
@@ -70,6 +71,7 @@ def build_bare_metal_introduction_service(
         [Any, str, str, tuple[Identity, ...], Mapping[str, Any] | None],
         Awaitable[AuthorizedIntroductionRequest],
     ],
+    deliver: DeliverIntroduction | None = None,
 ) -> IntroductionRouteService:
     """Install bare-metal accepted-state interpretation into the reveal service."""
 
@@ -155,7 +157,33 @@ def build_bare_metal_introduction_service(
             complete=complete,
         ),
         seller_contact=seller_contact,
+        deliver=deliver,
     )
 
 
-__all__ = ["build_bare_metal_introduction_service"]
+async def load_revealed_introduction(
+    db: SQLiteClient,
+    obligation_ref: str,
+) -> tuple[IntroductionRecord, IntroductionAgreement]:
+    """Load one already-revealed introduction and the deal it belongs to.
+
+    The path an operator's re-delivery takes: it reads the durable reveal
+    rather than reconstructing one, so a re-send can never invent contact data
+    that was never exchanged.
+    """
+
+    record = await db.load_contact_introduction(obligation_ref=obligation_ref)
+    if record is None:
+        raise ValueError("introduction has not been revealed")
+    agreement, _ = await _accepted_introduction(
+        db,
+        record.agreement_ref,
+        obligation_ref,
+    )
+    return record, agreement
+
+
+__all__ = [
+    "build_bare_metal_introduction_service",
+    "load_revealed_introduction",
+]

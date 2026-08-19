@@ -243,6 +243,7 @@ def _introduction_service(request: Request) -> Any:
         settlement_runtime=runtime.settlement_runtime,
         seller_contact=section.contact_payload,
         authorize_request=_authorize_introduction_request,
+        deliver=runtime.introduction_delivery,
     )
 
 

@@ -3,12 +3,14 @@
 from .client import ContactExchangeClient
 from .introduction_routes import (
     AuthorizedIntroductionRequest,
+    DeliverIntroduction,
     IntroductionAgreement,
     IntroductionRecord,
     IntroductionRouteCallbacks,
     IntroductionRouteError,
     IntroductionRouteService,
     IntroductionStart,
+    introduction_projection,
 )
 from .migrations import (
     CONTACT_EXCHANGE_INTRODUCTIONS_MIGRATION_ID,
@@ -46,8 +48,10 @@ __all__ = [
     "IntroductionRecord",
     "IntroductionRouteCallbacks",
     "IntroductionRouteError",
+    "DeliverIntroduction",
     "IntroductionRouteService",
     "IntroductionStart",
+    "introduction_projection",
     "ContactExchangeClient",
     "ContactProfile",
     "ContactPublicationInput",

@@ -50,23 +50,26 @@
 
 ## 3. Seller-side delivery
 
-- [ ] 3.1 `IntroductionRouteService` accepts an optional delivery dispatch and
+- [x] 3.1 `IntroductionRouteService` accepts an optional delivery dispatch and
       invokes it after `persist` and `complete` succeed, with a projection built
       for the seller as viewer. The replay branch returns before dispatch, so an
       exact retry delivers nothing.
-- [ ] 3.2 Bare-metal storefront composition: construct the configured sink set from
+- [x] 3.2 Bare-metal storefront composition: construct the configured sink set from
       `storefront.toml` at startup (failing fast on misconfiguration), inject the
       dispatch into the introduction route service, and run it as a supervised
       background task whose reference is retained and whose exceptions are logged.
-- [ ] 3.3 An explicit seller-side re-delivery action for an already-revealed
+- [x] 3.3 An explicit seller-side re-delivery action for an already-revealed
       introduction.
-- [ ] 3.4 Evidence: contact-exchange kit and bare-metal storefront tests — every
+- [x] 3.4 Evidence: contact-exchange kit and bare-metal storefront tests — every
       sink failing leaves the reveal response unchanged and the obligation
       completed; a hanging sink does not extend the counterparty's request; an
       exact retry delivers nothing; a credentialed sink's settings appear in no
       readiness projection, published listing, or wire response; and re-delivery
       sends the same introduction again.
-- [ ] 3.5 Closeout.
+- [x] 3.5 Closeout: hygiene clean; one refinement recorded in design.md --
+      "first reveal" is observed before persisting, because persist is
+      idempotent and a repeat start with a fresh request id is not a replay.
+      Suites: kit/contact-exchange 37, bare-metal storefront 122.
 
 ## 4. Buyer-side delivery
 

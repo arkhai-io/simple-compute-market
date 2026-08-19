@@ -90,7 +90,7 @@ class Harness:
     async def complete(self, agreement: IntroductionAgreement) -> None:
         self.completions.append(agreement.obligation_ref)
 
-    def service(self) -> IntroductionRouteService:
+    def service(self, deliver=None) -> IntroductionRouteService:
         return IntroductionRouteService(
             callbacks=IntroductionRouteCallbacks(
                 prepare=self.prepare,
@@ -100,6 +100,7 @@ class Harness:
                 complete=self.complete,
             ),
             seller_contact=dict(_SELLER_CONTACT),
+            deliver=deliver,
         )
 
 
@@ -190,3 +191,68 @@ def test_service_requires_a_seller_contact_payload() -> None:
             ),
             seller_contact={},
         )
+
+
+async def test_the_seller_side_is_told_its_own_half_of_the_reveal() -> None:
+    harness = Harness()
+    delivered: list[tuple] = []
+    service = harness.service(
+        deliver=lambda projection, agreement: delivered.append((projection, agreement))
+    )
+
+    await service.start({"principal": BUYER}, _start())
+
+    (projection, agreement) = delivered[0]
+    assert len(delivered) == 1
+    assert projection["counterparty_contact"] == {"email": "buyer@example.com"}
+    assert projection["obligation_ref"] == _OBLIGATION_REF
+    assert agreement.agreement_ref == "neg-1"
+    assert agreement.seller_principal == SELLER
+
+
+async def test_a_repeat_start_announces_one_introduction_once() -> None:
+    harness = Harness()
+    delivered: list[tuple] = []
+    service = harness.service(deliver=lambda projection, agreement: delivered.append(1))
+
+    await service.start({"principal": BUYER}, _start())
+    await service.start({"principal": BUYER}, _start())
+
+    assert len(delivered) == 1
+
+
+async def test_reading_the_durable_reveal_delivers_nothing() -> None:
+    harness = Harness()
+    delivered: list[tuple] = []
+    service = harness.service(deliver=lambda projection, agreement: delivered.append(1))
+    await service.start({"principal": BUYER}, _start())
+    delivered.clear()
+
+    await service.read({"principal": SELLER}, _OBLIGATION_REF)
+    await service.read({"principal": BUYER}, _OBLIGATION_REF)
+
+    assert delivered == []
+
+
+async def test_a_failing_delivery_leaves_the_reveal_and_the_deal_intact() -> None:
+    harness = Harness()
+
+    def explode(projection, agreement):
+        raise RuntimeError("the operator's mail server is down")
+
+    projection = await harness.service(deliver=explode).start(
+        {"principal": BUYER}, _start()
+    )
+
+    assert projection["revealed"] is True
+    assert projection["counterparty_contact"] == _SELLER_CONTACT
+    assert harness.completions == [_OBLIGATION_REF]
+
+
+async def test_no_delivery_configured_reads_no_record_and_changes_nothing() -> None:
+    harness = Harness()
+
+    projection = await harness.service().start({"principal": BUYER}, _start())
+
+    assert projection["revealed"] is True
+    assert harness.completions == [_OBLIGATION_REF]

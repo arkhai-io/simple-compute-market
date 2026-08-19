@@ -45,9 +45,11 @@ ones:
 ### A new kit package owns the contract
 
 `kit/delivery` (`market_delivery`) holds the event, the `DeliverySink` protocol,
-the configuration models, plugin discovery, and the built-in sinks. Both sides
-depend on it: `core/buyer` directly, and `kit/contact-exchange` for the seller-side
-dispatch injected into the route service.
+the configuration models, plugin discovery, and the built-in sinks. `core/buyer`
+depends on it directly; the bare-metal storefront depends on it to build its own
+sink set. `kit/contact-exchange` does not, because its dispatch is injected -- the
+mechanism kit knows a reveal is worth telling its owner about, not how the owner
+reads things, so it needs no delivery dependency at all.
 
 Alternatives rejected: putting it in `kit/contact-exchange` would force
 `core_buyer` to depend on a mechanism kit, reversing the dependency arrow the
@@ -83,7 +85,11 @@ hanging delivery there would make a convenience concern part of the settlement
 lifecycle, which the specs forbid.
 
 The replay branch returns the recorded outcome before reaching dispatch, so exact
-retries deliver nothing without any additional bookkeeping.
+retries deliver nothing. A repeat start with a fresh request id is not a replay,
+though, and persist is idempotent -- it returns the record it already has.
+"First reveal" is therefore observed explicitly, by reading for an existing
+record before persisting, so one introduction is announced once. That extra read
+happens only when delivery is configured.
 
 ### Seller-side delivery is dispatched, not awaited
 

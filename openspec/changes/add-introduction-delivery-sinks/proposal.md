@@ -77,8 +77,10 @@ Explicit non-goals, stated so they are not read as deferred work:
 - **New**: `kit/delivery` (`market_delivery`) — event, protocol, config models,
   entry-point discovery, four built-in sinks.
 - **Modified**: `kit/contact-exchange` — `IntroductionRouteService` gains an
-  optional injected delivery dispatch invoked after a successful, non-replayed
-  start, with the seller's own viewer projection.
+  optional delivery dispatch invoked after a successful first reveal, with the
+  seller's own viewer projection. The dispatch is *injected*, so this mechanism
+  kit gains no dependency on the delivery kit: it knows a reveal is worth
+  telling its owner about, not how the owner reads things.
 - **Modified**: `domains/bare_metal/storefront` — composes the configured sink set
   from `storefront.toml` and injects it into the introduction route service.
 - **Modified**: `core/buyer` — `introduce` dispatches to the buyer's configured
