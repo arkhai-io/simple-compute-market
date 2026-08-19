@@ -600,7 +600,16 @@ class NetworkMarketplacePort:
             )
         settlement_ref = started.get("settlement_ref")
         if not isinstance(settlement_ref, str) or not settlement_ref:
-            raise AssertionError("hosted materialization returned no settlement identity")
+            # The response is the evidence for why it has no identity: which
+            # status the storefront projected, and which fields it did fill.
+            # Named, not dumped -- an action carries a Checkout URL.
+            raise AssertionError(
+                "hosted materialization returned no settlement identity "
+                f"(status={started.get('status')!r}, "
+                f"action_kind={started.get('action_kind')!r}, "
+                f"funding_reason={started.get('funding_reason')!r}, "
+                f"present={sorted(k for k, v in started.items() if v is not None)})"
+            )
         amount = int(obligation["amount"])
         currency = str(obligation["asset"])
         condition = obligation.get("params", {}).get("condition")
