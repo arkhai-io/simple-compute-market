@@ -1064,6 +1064,7 @@ def _lifecycle_environment(
         "HOSTED_SETTLEMENT_E2E_FUNDING_PROFILE": args.funding_profile,
         "HOSTED_SETTLEMENT_E2E_INTERACTION": args.interaction,
         "HOSTED_SETTLEMENT_E2E_SCENARIO": args.scenario,
+        "HOSTED_SETTLEMENT_E2E_RUN_REF": args.run_identity,
         "HOSTED_SETTLEMENT_E2E_LIFECYCLE_TIMEOUT": str(args.lifecycle_timeout),
     }
 

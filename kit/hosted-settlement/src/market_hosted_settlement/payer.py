@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import inspect
+import re
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from typing import Any, Literal, Protocol
@@ -13,6 +14,7 @@ from hosted_settlement_client import (
     FundingMode,
     FundingProfile,
     HostedSettlementAsyncClient,
+    HostedSettlementError,
     InstrumentKind,
     InstrumentMutationRequest,
     InstrumentReadiness,
@@ -48,7 +50,17 @@ from .settlement_config import (
 
 
 class HostedPayerError(RuntimeError):
-    """A deterministic provider-redacted direct payer failure."""
+    """A deterministic provider-redacted direct payer failure.
+
+    ``code`` is the authority's own stable name for what it refused, carried
+    beside the message so a caller can act on the refusal without reading free
+    text the authority may have redacted for a reason. Empty when the authority
+    named nothing.
+    """
+
+    def __init__(self, message: str, *, code: str = "") -> None:
+        super().__init__(message)
+        self.code = code
 
 
 class PayerProfileAccess(Protocol):
@@ -147,6 +159,15 @@ async def _await_if_needed(value: Any) -> Any:
     return await value if inspect.isawaitable(value) else value
 
 
+#: An authority refusal code is a bounded lowercase identifier. Anything else
+#: is not the authority's vocabulary and is dropped rather than repeated.
+_REFUSAL_CODE = re.compile(r"^[a-z][a-z0-9_]{0,63}$")
+
+
+def _refusal_code(code: str) -> str:
+    return code if _REFUSAL_CODE.fullmatch(code or "") else ""
+
+
 def _request_id(operation: str, *values: str) -> str:
     digest = hashlib.sha256("\x00".join(values).encode()).hexdigest()
     return f"payer:{operation}:{digest}"
@@ -180,8 +201,19 @@ class HostedPayerFacade:
         self._environment = environment
 
     async def _remote(self, operation: str, call: Callable[[], Any]) -> Any:
+        # A payer operation that fails without saying why is unrepairable by
+        # the person it fails for. The authority's own code is safe to keep --
+        # it is a bounded identifier, not provider text -- so the refusal
+        # travels with the one word that says what to do about it.
         try:
             return await _await_if_needed(call())
+        except HostedSettlementError as exc:
+            code = _refusal_code(getattr(exc, "code", ""))
+            raise HostedPayerError(
+                f"hosted payer {operation} failed"
+                + (f": {code}" if code else ""),
+                code=code,
+            ) from None
         except Exception:
             raise HostedPayerError(f"hosted payer {operation} failed") from None
 

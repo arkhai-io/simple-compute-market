@@ -3,6 +3,7 @@ from __future__ import annotations
 import pytest
 from hosted_settlement_client import (
     FundingProfile,
+    HostedSettlementError,
     InstrumentKind,
     InstrumentListResult,
     InstrumentProjection,
@@ -226,3 +227,52 @@ def test_instrument_projection_is_exact_and_provider_neutral() -> None:
             }
         ],
     }
+
+
+@pytest.mark.asyncio
+async def test_a_payer_refusal_keeps_the_authority_name_for_it() -> None:
+    """A refusal that says only "failed" cannot be repaired by whoever hit it.
+
+    The authority's code is a bounded identifier, not provider text, so it is
+    the one part of the refusal that is both safe to keep and worth keeping.
+    """
+
+    from market_hosted_settlement.payer import HostedPayerError, HostedPayerFacade
+
+    facade = object.__new__(HostedPayerFacade)
+
+    async def refuse() -> None:
+        raise HostedSettlementError(
+            code="setup_provider_unavailable",
+            message="provider text that stays redacted",
+            retryable=False,
+            status_code=503,
+        )
+
+    with pytest.raises(HostedPayerError) as caught:
+        await facade._remote("setup start", refuse)
+
+    assert caught.value.code == "setup_provider_unavailable"
+    assert "setup_provider_unavailable" in str(caught.value)
+    assert "provider text" not in str(caught.value)
+
+
+@pytest.mark.asyncio
+async def test_a_payer_refusal_repeats_no_vocabulary_but_the_authority_own() -> None:
+    from market_hosted_settlement.payer import HostedPayerError, HostedPayerFacade
+
+    facade = object.__new__(HostedPayerFacade)
+
+    async def refuse() -> None:
+        raise HostedSettlementError(
+            code="Not A Code",
+            message="unused",
+            retryable=False,
+            status_code=503,
+        )
+
+    with pytest.raises(HostedPayerError) as caught:
+        await facade._remote("setup start", refuse)
+
+    assert caught.value.code == ""
+    assert str(caught.value) == "hosted payer setup start failed"

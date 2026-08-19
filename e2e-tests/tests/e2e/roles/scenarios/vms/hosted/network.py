@@ -214,6 +214,14 @@ class NetworkMarketplacePort:
         )
         self._setup_ref: str | None = None
         self._selected_instrument_ref: str | None = None
+        # A setup's identity is derived from its label, and the authority turns
+        # that identity into a provider idempotency key. Stripe remembers such a
+        # key for a day; the authority forgets its own state the moment the run
+        # ends. A fixed label therefore replays a burnt key with a moved expiry
+        # and the second setup of any day is refused. Scoping the label to the
+        # run keeps retries inside one run idempotent, which is what idempotency
+        # is for, without asking Stripe to answer for state nobody kept.
+        self._instrument_label = f"Protected test instrument {_required('HOSTED_SETTLEMENT_E2E_RUN_REF')}"[:64]
         seller_signer = _signer(
             self.storefront_config,
             _required("HOSTED_SETTLEMENT_E2E_STOREFRONT_IDENTITY_CREDENTIAL"),
@@ -358,7 +366,7 @@ class NetworkMarketplacePort:
                         "start_setup",
                         payer_profile_ref=self._payer_binding.binding_ref,
                         funding_profile=profile,
-                        label="Protected test instrument",
+                        label=self._instrument_label,
                     )
                 )
                 self._setup_ref = setup.setup_ref
