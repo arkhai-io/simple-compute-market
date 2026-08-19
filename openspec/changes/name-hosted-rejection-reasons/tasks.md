@@ -32,6 +32,11 @@
       storefront 941, API-credit storefront 76, bare-metal storefront 122,
       scripts 84.
 
+      Corrected at archive: the requirement holds for every route into
+      `manual_required`, not only a refusal. The authority can answer
+      successfully and still say a human is needed, without filling a reason
+      field this side reads, so the marketplace names that state too.
+
 ## 3. Diagnose what it names
 
 - [x] 3.1 The hosted materialization assertion in the e2e fixture reports the

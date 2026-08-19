@@ -382,7 +382,11 @@ class HostedConditionalEscrowClient:
             buyer_action=_safe_action(result),
             condition_anchor=result.condition_anchor,
             receipt=_status_receipt(result, params, legacy=False),
-            mechanism_state=_mechanism_state(result, params, legacy=False),
+            mechanism_state=_parked_reason(
+                _mechanism_state(result, params, legacy=False),
+                _materialization_status(result),
+                result,
+            ),
         )
 
     async def get_status(
@@ -412,10 +416,10 @@ class HostedConditionalEscrowClient:
             buyer_action=_safe_action(result),
             condition_anchor=result.condition_anchor,
             receipt=_status_receipt(result, params, legacy=legacy),
-            mechanism_state=_mechanism_state(
+            mechanism_state=_parked_reason(
+                _mechanism_state(result, params, legacy=legacy),
+                _escrow_status(result, mechanism_state),
                 result,
-                params,
-                legacy=legacy,
             ),
         )
 
@@ -773,6 +777,35 @@ def _status_receipt(
     }
     receipt.update(_operation_identity(params, legacy=legacy))
     return receipt
+
+
+def _parked_reason(
+    state: dict[str, Any],
+    status: str,
+    result: EscrowResult,
+) -> dict[str, Any]:
+    """Ensure an obligation the authority parked carries a reason.
+
+    The authority can answer successfully and still say the deal needs a human,
+    and it is not obliged to say why in a field this side already reads. Where
+    it does not, the marketplace names the state it was put into, so no path
+    into ``manual_required`` arrives without an explanation.
+    """
+
+    if status != "manual_required":
+        return state
+    if state.get("funding_reason") or state.get(MANUAL_REASON_KEY):
+        return state
+    incident = getattr(result, "incident", None)
+    kind = getattr(incident, "kind", None) if incident is not None else None
+    return {
+        **state,
+        MANUAL_REASON_KEY: (
+            f"authority_incident_{kind}"
+            if _REJECTION_CODE.fullmatch(str(kind or ""))
+            else "authority_operator_review"
+        ),
+    }
 
 
 def _mechanism_state(

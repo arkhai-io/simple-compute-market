@@ -1048,3 +1048,23 @@ async def test_a_refusal_the_authority_does_not_name_is_still_named(tmp_path) ->
     assert hosted_projected_reason(None, parked["mechanism_state"]) == (
         "authority_refused_403"
     )
+
+
+@pytest.mark.asyncio
+async def test_an_authority_that_parks_a_deal_itself_still_gives_a_reason() -> None:
+    """The authority can succeed and still say a human is needed."""
+
+    client = FakeClient()
+    client.escrow_result = client.escrow(
+        financial_state=FinancialState.OPERATOR_REVIEW,
+        funding_reason=None,
+    )
+    adapter = HostedConditionalEscrowClient(client)  # type: ignore[arg-type]
+
+    outcome = await adapter.materialize(
+        _obligation(),
+        operation_ref="arkhai:settlement:obligation-1:materialize",
+    )
+
+    assert outcome.status == "manual_required"
+    assert hosted_projected_reason(None, outcome.mechanism_state) is not None
