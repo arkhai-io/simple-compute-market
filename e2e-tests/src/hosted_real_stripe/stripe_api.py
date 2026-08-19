@@ -95,6 +95,7 @@ class StripeApi:
             {
                 "amount": str(expected.amount),
                 "currency": expected.currency,
+                "reference": _bank_transfer_reference(payment_intent),
             },
         )
         if (
@@ -526,6 +527,31 @@ def _escrow_metadata_matches(obj: JsonObject, escrow_ref: str) -> bool:
 def _provider_ref(prefix: str, *parts: str) -> str:
     digest = hashlib.sha256("\x00".join(parts).encode()).hexdigest()
     return f"{prefix}_{digest[:40]}"
+
+
+def _bank_transfer_reference(payment_intent: JsonObject) -> str:
+    """Return the reference a payer must quote on the incoming bank transfer.
+
+    A push transfer is attributed by the reference Stripe issues with the
+    funding instructions, not by the customer it lands on. Funding the test
+    cash balance without it simulates an unreferenced deposit, which the
+    authority is right to treat as an attribution incident.
+    """
+
+    action = payment_intent.get("next_action")
+    instructions = (
+        action.get("display_bank_transfer_instructions")
+        if isinstance(action, dict)
+        else None
+    )
+    reference = (
+        instructions.get("reference") if isinstance(instructions, dict) else None
+    )
+    if not isinstance(reference, str) or not reference:
+        raise ProviderInvariantError(
+            "push-transfer funding instructions carry no payer reference"
+        )
+    return reference
 
 
 def _object_id(value: object, name: str) -> str:

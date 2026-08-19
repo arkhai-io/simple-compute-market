@@ -18,6 +18,8 @@ from hosted_settlement_client import (
     ExpectedAuthorities,
     FinancialState,
     FulfillmentPublicationResult,
+    FundingIncidentKind,
+    FundingIncidentProjection,
     FundingProfile,
     FundingProfileReadiness,
     HostedSettlementAsyncClient,
@@ -1068,3 +1070,57 @@ async def test_an_authority_that_parks_a_deal_itself_still_gives_a_reason() -> N
 
     assert outcome.status == "manual_required"
     assert hosted_projected_reason(None, outcome.mechanism_state) is not None
+
+
+def _incident(kind: FundingIncidentKind) -> FundingIncidentProjection:
+    return FundingIncidentProjection(
+        incident_ref="funding_incident-1",
+        kind=kind,
+        state="open",
+        evidence_digest="sha256:" + "cc" * 32,
+    )
+
+
+def test_awaiting_push_transfer_funds_is_not_an_operator_condition() -> None:
+    """An underpaid push transfer that went on to fund must not park the deal.
+
+    The authority raises this incident on the first retrieval of every push
+    transfer, before any money can have arrived, and never clears it. Reading
+    it as an escalation made every ``us_bank_transfer.v1`` deal terminal.
+    """
+
+    funded = FakeClient.escrow(
+        funding_profile=FundingProfile.US_BANK_TRANSFER,
+        financial_state=FinancialState.FUNDED,
+        funding_state=NormalizedFundingState.AVAILABLE,
+        funding_reason=None,
+        action=None,
+        incident=_incident(FundingIncidentKind.ATTRIBUTION_UNDERPAID),
+    )
+
+    assert adapter_module._escrow_status(funded, {}) == "ready"
+
+
+@pytest.mark.parametrize(
+    "kind",
+    [
+        FundingIncidentKind.ATTRIBUTION_UNMATCHED,
+        FundingIncidentKind.ATTRIBUTION_OVERPAID,
+        FundingIncidentKind.ATTRIBUTION_AMBIGUOUS,
+        FundingIncidentKind.ACH_RETURN,
+        FundingIncidentKind.POST_COLLECTION_LOSS,
+    ],
+)
+def test_every_other_authority_incident_still_requires_an_operator(
+    kind: FundingIncidentKind,
+) -> None:
+    escrow = FakeClient.escrow(
+        funding_profile=FundingProfile.US_BANK_TRANSFER,
+        financial_state=FinancialState.FUNDED,
+        funding_state=NormalizedFundingState.AVAILABLE,
+        funding_reason=None,
+        action=None,
+        incident=_incident(kind),
+    )
+
+    assert adapter_module._escrow_status(escrow, {}) == "manual_required"

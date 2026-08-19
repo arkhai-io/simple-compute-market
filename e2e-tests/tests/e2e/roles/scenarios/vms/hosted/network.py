@@ -4,6 +4,7 @@ import asyncio
 import hashlib
 import json
 import os
+import sys
 import time
 import tomllib
 import uuid
@@ -655,6 +656,7 @@ class NetworkMarketplacePort:
     def wait_funded(self, settlement_ref: str) -> bool:
         timeout = float(os.environ.get("HOSTED_SETTLEMENT_E2E_LIFECYCLE_TIMEOUT", "180"))
         deadline = time.monotonic() + timeout
+        status: dict[str, Any] = {}
         while time.monotonic() < deadline:
             status = self._buyer_status(settlement_ref)
             if status.get("status") in {"ready", "collected", "reclaimed"}:
@@ -662,6 +664,25 @@ class NetworkMarketplacePort:
                     self._reconcile_refund_materialization(settlement_ref)
                 return True
             time.sleep(min(0.5, max(0.0, deadline - time.monotonic())))
+        # A timeout says only that funding never converged. Which projection it
+        # was still holding when the bound expired is the whole diagnosis, and
+        # it belongs on the development diagnostic channel -- named, not dumped.
+        receipt = status.get("receipt")
+        receipt = receipt if isinstance(receipt, dict) else {}
+        incident = receipt.get("incident")
+        incident = incident if isinstance(incident, dict) else {}
+        print(
+            f"[development] funding never converged for {settlement_ref}: "
+            f"status={status.get('status')!r}, "
+            f"funding_reason={status.get('funding_reason')!r}, "
+            f"action_kind={status.get('action_kind')!r}, "
+            f"authority financial_state={receipt.get('financial_state')!r}, "
+            f"funding_state={receipt.get('funding_state')!r}, "
+            f"condition_state={receipt.get('condition_state')!r}, "
+            f"incident kind={incident.get('kind')!r} state={incident.get('state')!r}",
+            file=sys.stderr,
+            flush=True,
+        )
         return False
 
     def _reconcile_refund_materialization(self, settlement_ref: str) -> None:

@@ -18,6 +18,7 @@ from hosted_settlement_client import (
     FinancialState,
     FulfillmentPublicationRequest,
     FulfillmentRef,
+    FundingIncidentKind,
     FundingProfile,
     FundingMode,
     HostedSettlementAsyncClient,
@@ -680,6 +681,24 @@ def _materialization_status(
     return "pending"
 
 
+def _escalating_incident(result: EscrowResult) -> bool:
+    """Return whether the authority's incident is one that needs a human.
+
+    Every incident the authority raises is an escalation except one: a push
+    transfer whose funds have not all arrived. That one is raised on the first
+    retrieval of every push transfer, before any money can have landed, its own
+    required action is to wait for the remainder or return after the deadline,
+    and the authority leaves the financial state unescalated for it. It also
+    never clears itself. Reading it as an escalation parks every bank-transfer
+    deal permanently, including the ones the authority went on to call funded.
+    """
+
+    incident = result.incident
+    if incident is None:
+        return False
+    return incident.kind != FundingIncidentKind.ATTRIBUTION_UNDERPAID
+
+
 def _escrow_status(
     result: EscrowResult,
     previous: dict[str, Any],
@@ -699,7 +718,7 @@ def _escrow_status(
         previous_financial == FinancialState.COLLECTED.value
         and (
             result.financial_state == FinancialState.OPERATOR_REVIEW
-            or result.incident
+            or _escalating_incident(result)
             or result.funding_state
             in {
                 NormalizedFundingState.RETURNED,
@@ -710,7 +729,9 @@ def _escrow_status(
     )
     if post_collection_risk:
         return "manual_required"
-    if result.financial_state == FinancialState.OPERATOR_REVIEW or result.incident:
+    if result.financial_state == FinancialState.OPERATOR_REVIEW or (
+        _escalating_incident(result)
+    ):
         return "manual_required"
     if result.funding_state == NormalizedFundingState.AMBIGUOUS:
         return "manual_required"
