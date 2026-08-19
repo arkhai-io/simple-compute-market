@@ -97,6 +97,20 @@ in-flight delivery. Given a durable, re-readable reveal and an explicit re-deliv
 command, that is a better failure than a reveal request whose latency is hostage to
 a webhook.
 
+### A sink is a synchronous callable run in a daemon thread
+
+Sinks block by nature — writing a file, running a program, opening a socket — so
+asking sink authors to be async would buy nothing and cost every third-party
+author an event loop. Instead a sink is a plain synchronous callable, and the
+dispatcher owns concurrency: one daemon thread per sink, joined against a shared
+deadline so the whole dispatch costs the slowest sink rather than their sum.
+
+The threads are daemons deliberately. A timed-out sink is abandoned, not killed —
+a thread cannot be interrupted — so a non-daemon worker would hold up interpreter
+exit and a hung webhook would hang the buyer's CLI after it had already reported
+the timeout. A pooled executor has the same defect, since its shutdown joins its
+workers.
+
 ### Buyer-side delivery is synchronous, and prints before it sends
 
 A CLI has no supervisor to outlive it, and the operator is present and waiting, so
