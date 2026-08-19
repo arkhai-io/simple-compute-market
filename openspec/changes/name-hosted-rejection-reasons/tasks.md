@@ -34,14 +34,33 @@
 
 ## 3. Diagnose what it names
 
-- [ ] 3.1 The hosted materialization assertion in the e2e fixture reports the
+- [x] 3.1 The hosted materialization assertion in the e2e fixture reports the
       result it rejected — status, action kind, funding reason, populated fields
       — without emitting an action URL.
-- [ ] 3.2 Run one interactive `card.v1` lane locally against the real Stripe test
+- [x] 3.2 Run one interactive `card.v1` lane locally against the real Stripe test
       account and record the rejection code the authority returns.
-- [ ] 3.3 Correct it here if it is a marketplace defect; record it for
+
+      It returned none. `POST /api/v1/escrows` answered `403` with no code the
+      marketplace could use, which is why the first run after section 2 still
+      projected no reason — and why section 1 was not yet enough. The
+      marketplace now names a refusal the authority does not, so a parked
+      obligation cannot be reasonless whoever is at fault.
+- [x] 3.3 Correct it here if it is a marketplace defect; record it for
       `add-bare-metal-hosted-settlement` if it is an authority-side or
       configuration matter. A development run qualifies no lane either way.
+
+      Neither, as it turned out: a harness gap. The released authority refuses
+      every escrow a storefront opens while `HOSTED_SETTLEMENT_STOREFRONT_CALLERS`
+      is unset, and nothing ever set it — not the harness, not the documented
+      broker payload. The harness builds that storefront, so it states which
+      principal exists, on the same terms as the environment and database path
+      it already states. With that, the lane materializes a real escrow against
+      the real test account and advances past funding authorization.
+
+      What it reaches next is a separate subject and is recorded for
+      `add-bare-metal-hosted-settlement`: buyer status polling refuses the
+      storefront's response as malformed or legacy response authentication.
+      This development run still qualifies no lane.
 
 ## 4. Closeout
 
