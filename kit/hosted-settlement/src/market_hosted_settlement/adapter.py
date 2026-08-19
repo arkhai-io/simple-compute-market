@@ -58,6 +58,9 @@ REQUIRED_HOSTED_CAPABILITIES = frozenset(
 _CURRENCY = re.compile(r"^[a-z]{3}$")
 _FULFILLMENT: TypeAdapter[FulfillmentRef] = TypeAdapter(FulfillmentRef)
 _CONTRACT_FINGERPRINT = re.compile(r"^sha256:[0-9a-f]{64}$")
+#: The authority's error codes are a stable lowercase enumeration. Anything
+#: else is not repeated onward, whatever the authority chose to send.
+_REJECTION_CODE = re.compile(r"^[a-z][a-z0-9_]{0,63}$")
 _UNCERTAIN_RESPONSE_CODES = frozenset(
     {
         "invalid_response",
@@ -73,23 +76,47 @@ class HostedSettlementTemporaryError(RuntimeError):
     """A provider-redacted failure that is safe to retry under the same identity."""
 
 
+def _rejection_code(code: str) -> str:
+    """The authority's own word for what it refused, or nothing at all.
+
+    Only the authority's stable enumeration passes: the marketplace already
+    branches on this value to decide retryability, so trusting it to name a
+    refusal adds no exposure the boundary did not already accept. Anything not
+    of that shape is treated as if the authority named nothing, because an
+    authority that puts free text here is one this side cannot repeat safely.
+    """
+
+    return code if _REJECTION_CODE.fullmatch(code or "") else ""
+
+
 async def _released_call(operation: str, call: Any) -> Any:
-    """Map released-client errors to stable, persistence-safe runtime failures."""
+    """Map released-client errors to stable, persistence-safe runtime failures.
+
+    The released client's message can name provider detail and its traceback can
+    carry request and response fragments, so both are dropped and the cause
+    stays severed. Its ``code`` is the authority's own vocabulary and is kept:
+    an obligation parked for a human to repair owes that human the reason.
+    """
 
     try:
         return await call()
     except HostedSettlementError as exc:
-        if exc.retryable or exc.code in _UNCERTAIN_RESPONSE_CODES:
+        code = _rejection_code(getattr(exc, "code", ""))
+        if exc.retryable or code in _UNCERTAIN_RESPONSE_CODES:
             raise HostedSettlementTemporaryError(
-                f"hosted settlement {operation} temporarily unavailable"
+                _reason(f"hosted settlement {operation} temporarily unavailable", code)
             ) from None
         raise SettlementManualRequired(
-            f"hosted settlement {operation} rejected"
+            _reason(f"hosted settlement {operation} rejected", code)
         ) from None
     except Exception:
         raise HostedSettlementTemporaryError(
             f"hosted settlement {operation} temporarily unavailable"
         ) from None
+
+
+def _reason(summary: str, code: str) -> str:
+    return f"{summary}: {code}" if code else summary
 
 
 class HostedObligationParams(BaseModel):

@@ -1,11 +1,17 @@
 ## 1. Keep the half of the error that is safe to keep
 
-- [ ] 1.1 `_released_call` carries the authority's stable `code` into both the
+- [x] 1.1 `_released_call` carries the authority's stable `code` into both the
       temporary and the manual-required failure it raises, and continues to drop
       the released client's message and sever its cause.
-- [ ] 1.2 Evidence: a non-retryable rejection produces a failure naming the
+- [x] 1.2 Evidence: a non-retryable rejection produces a failure naming the
       operation and the code; a retryable one still produces a temporary failure;
-      neither carries the client's message, and the cause stays severed.
+      neither carries the client's message, and the cause stays severed. A code
+      that is not the authority's stable enumeration is treated as no code at
+      all, so free text cannot be laundered through the field. One correction
+      folded in: the suite could not run on a machine with a proxy configured,
+      because constructing the released client builds its transport from the
+      ambient environment before any request -- the same failure this branch
+      already found in the hosted e2e. Suite: hosted-settlement 156.
 
 ## 2. A parked obligation says why
 

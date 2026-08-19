@@ -35,6 +35,7 @@ from market_hosted_settlement import (
 )
 from market_identity import Identity, IdentityScheme
 from market_settlement_runtime import (
+    SettlementManualRequired,
     SettlementRuntime,
     SettlementSQLiteRepository,
     obligation_payload_hash,
@@ -525,6 +526,75 @@ async def test_hosted_errors_are_redacted_and_retry_classified_in_sqlite(
     serialized = json.dumps(operation, sort_keys=True)
     assert canary not in serialized
     assert "customer_private" not in serialized
+    # The authority's own word for what it refused survives the redaction that
+    # its message does not: an obligation parked for repair has to say why.
+    assert "provider_failure" in serialized
+
+
+@pytest.mark.asyncio
+async def test_an_authority_refusal_names_itself_without_naming_the_provider() -> None:
+    """The code is the authority's vocabulary; the message can be anything."""
+
+    canary = "sk_live_secret declined by acct_1Example for card 4242"
+    client = FailingMaterializeClient(
+        HostedSettlementError(
+            code="funding_profile_unsupported",
+            message=canary,
+            retryable=False,
+            status_code=409,
+        )
+    )
+    adapter = HostedConditionalEscrowClient(client)  # type: ignore[arg-type]
+
+    with pytest.raises(SettlementManualRequired) as refused:
+        await adapter.materialize(_obligation(), operation_ref="arkhai:settlement:obligation-1:materialize")
+
+    assert "funding_profile_unsupported" in str(refused.value)
+    assert canary not in str(refused.value)
+    # The released client's traceback can carry request and response fragments.
+    assert refused.value.__cause__ is None
+
+
+@pytest.mark.asyncio
+async def test_an_authority_that_does_not_speak_codes_is_not_repeated() -> None:
+    """A free-text code is treated as the authority having named nothing."""
+
+    client = FailingMaterializeClient(
+        HostedSettlementError(
+            code="card declined for customer cus_1Example",
+            message="unused",
+            retryable=False,
+            status_code=409,
+        )
+    )
+    adapter = HostedConditionalEscrowClient(client)  # type: ignore[arg-type]
+
+    with pytest.raises(SettlementManualRequired) as refused:
+        await adapter.materialize(_obligation(), operation_ref="arkhai:settlement:obligation-1:materialize")
+
+    assert str(refused.value) == "hosted settlement materialization rejected"
+
+
+@pytest.mark.asyncio
+async def test_a_retryable_failure_names_its_code_too() -> None:
+    """Retry classification is unchanged; only what it says is."""
+
+    client = FailingMaterializeClient(
+        HostedSettlementError(
+            code="authority_unavailable",
+            message="upstream timeout contacting acct_1Example",
+            retryable=True,
+            status_code=503,
+        )
+    )
+    adapter = HostedConditionalEscrowClient(client)  # type: ignore[arg-type]
+
+    with pytest.raises(RuntimeError) as unavailable:
+        await adapter.materialize(_obligation(), operation_ref="arkhai:settlement:obligation-1:materialize")
+
+    assert not isinstance(unavailable.value, SettlementManualRequired)
+    assert "authority_unavailable" in str(unavailable.value)
+    assert "acct_1Example" not in str(unavailable.value)
 
 
 @pytest.mark.asyncio
