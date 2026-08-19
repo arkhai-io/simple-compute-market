@@ -611,8 +611,10 @@ class ComposeStack:
         executable: str = "docker",
         cwd: Path,
         retain_diagnostics: bool = False,
+        retain_authority_state: bool = False,
     ) -> None:
         self._cwd = cwd
+        self._retain_authority_state = retain_authority_state
         # Compose prints the container output that says why an operation
         # failed. Held for a development operator only, on the same terms as
         # the staged bridge's stderr.
@@ -697,8 +699,17 @@ class ComposeStack:
         # behind makes the next run start against a database that already
         # remembers this one -- locally, where runs share a machine, that is
         # every second run; on a runner it is every retry after an interruption.
+        #
+        # A development run may ask to keep it, and only the authority's: the
+        # topology declares exactly one named volume, and every other service
+        # keeps its state inside the container. What survives is therefore the
+        # payer fixture -- the profile, its instrument, and the account owner
+        # binding -- and nothing about the marketplace side of the run. That
+        # buys back the one thing a saved-instrument lane cannot automate: the
+        # hosted setup page, which is completed once and then reused.
+        teardown = (*self._base, "down", "--remove-orphans")
         self._run(
-            (*self._base, "down", "--remove-orphans", "--volumes"),
+            teardown if self._retain_authority_state else (*teardown, "--volumes"),
             env=env,
             check=False,
         )

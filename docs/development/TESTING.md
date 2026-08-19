@@ -612,6 +612,32 @@ surface only after a release.
   the funding instructions when it funds the test cash balance. Funding without
   it simulates an unreferenced deposit, and the authority is right to open an
   attribution incident against it.
+
+#### Reusing a payer fixture
+
+A `saved_instrument` lane needs an instrument the payer profile already holds,
+and the authority learns instruments one way only: a Checkout Session it
+creates in `setup` mode. That session's SetupIntent cannot be confirmed through
+the API — Stripe answers `You cannot confirm SetupIntents created by Checkout`
+— so the setup page has to be completed by a person or a browser exactly once.
+
+`HOSTED_STRIPE_TEST_RETAIN_AUTHORITY_STATE=1` keeps that once. It leaves the
+authority's named volume in place at teardown, so the payer profile, its
+instrument, and the account-owner binding survive into the next run. The
+topology declares exactly one named volume and it is the authority's; every
+other service keeps its state inside the container, so nothing about the
+marketplace side of the previous run is inherited.
+
+Two preconditions, both satisfied by generating credentials once and reusing
+the same `--directory`:
+
+- the buyer identity must not change, or the payer profile ref changes with it
+  and the retained instrument belongs to a profile nothing looks up;
+- the storefront identity must not change, or re-admitting the same
+  `account_ref` under a new owner fails with `account_binding_conflict`.
+
+A protected run refuses the flag. Evidence has to come from an authority that
+remembers nothing.
 - Browsers for the interactive lanes: `uv run --project e2e-tests --extra
   stripe-test playwright install chromium`.
 - The locally built consumer image (`arkhai:storefront`) and the released hosted

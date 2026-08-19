@@ -124,7 +124,14 @@ class _ScenarioResult:
 
 def run(args: argparse.Namespace) -> tuple[StripeTestEvidence, int]:
     # Provenance decides what the run may claim; it does not decide whether the
-    # body may execute. Everything after this point is one code path.
+    # body may execute. Everything after this point is one code path. The one
+    # exception is state a run inherits: protected evidence has to come from an
+    # authority that remembers nothing, so a reused payer fixture -- however
+    # convenient locally -- disqualifies the run before it starts.
+    if args.retain_authority_state and args.release_mode != "local":
+        raise AuthorizationRejected(
+            "a protected run may not inherit authority state"
+        )
     if args.release_mode == "local":
         release = local_release_identity(
             observed_marketplace_commit=args.observed_marketplace_commit,
@@ -280,6 +287,7 @@ def run(args: argparse.Namespace) -> tuple[StripeTestEvidence, int]:
                         cwd=args.repo_root,
                         executable=args.container_cli,
                         retain_diagnostics=release.mode == "local",
+                        retain_authority_state=args.retain_authority_state,
                     ) as stack:
                         stack.start(
                             authority_env_path=authority_env,
@@ -1173,6 +1181,15 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--evidence", type=Path, required=True)
     parser.add_argument("--hosted-service-env-base", type=Path)
     parser.add_argument("--container-cli", default="docker")
+    parser.add_argument(
+        "--retain-authority-state",
+        action="store_true",
+        help=(
+            "keep the authority's named volume at teardown so the payer "
+            "profile, its instrument, and the account-owner binding survive "
+            "into the next run; rejected under a protected run"
+        ),
+    )
     parser.add_argument("--webhook-url", default="http://127.0.0.1:18080/webhooks/stripe")
     parser.add_argument("--webhook-ready-timeout", type=float, default=30.0)
     parser.add_argument("--webhook-probe-timeout", type=float, default=5.0)

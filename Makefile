@@ -221,6 +221,7 @@ hosted-stripe-test-local: hosted-preflight-local ## Run one development scenario
 		--hosted-service-env-base "$(HOSTED_STRIPE_TEST_AUTHORITY_ENV_FILE)" \
 		--storefront-config "$(HOSTED_STRIPE_TEST_STOREFRONT_CONFIG)" \
 		--buyer-config "$(HOSTED_STRIPE_TEST_BUYER_CONFIG)" \
+		$(if $(HOSTED_STRIPE_TEST_RETAIN_AUTHORITY_STATE),--retain-authority-state,) \
 		--evidence "$(HOSTED_STRIPE_TEST_EVIDENCE)"
 
 hosted-compose-up: hosted-preflight ## Start or converge the production stack without deleting authority state.
