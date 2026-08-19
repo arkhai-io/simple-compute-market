@@ -270,7 +270,7 @@ def test_evidence_is_allowlisted_private_signed_and_rejects_provider_values(
     output = tmp_path / "evidence.json"
     write_evidence(output, report)
     payload = json.loads(output.read_text(encoding="utf-8"))
-    assert payload["schema"] == "arkhai.hosted-settlement-stripe-test-evidence.v3"
+    assert payload["schema"] == "arkhai.hosted-settlement-stripe-test-evidence.v4"
     assert payload["lane"] == "stripe-test"
     assert (
         payload["identities"]["marketplace"]["repository"]

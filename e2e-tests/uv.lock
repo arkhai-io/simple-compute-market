@@ -172,6 +172,7 @@ dependencies = [
     { name = "arkhai-core-storefront" },
     { name = "arkhai-hosted-settlement-client" },
     { name = "arkhai-kit-alkahest" },
+    { name = "arkhai-kit-contact-exchange" },
     { name = "arkhai-kit-hosted-settlement" },
     { name = "arkhai-kit-identity" },
     { name = "arkhai-kit-policy" },
@@ -221,6 +222,7 @@ dependencies = [
     { name = "arkhai-core" },
     { name = "arkhai-core-registry-client" },
     { name = "arkhai-kit-config" },
+    { name = "arkhai-kit-delivery" },
     { name = "arkhai-kit-identity" },
     { name = "arkhai-kit-policy" },
     { name = "arkhai-kit-settlement-runtime" },
@@ -402,6 +404,32 @@ wheels = [
 ]
 
 [[package]]
+name = "arkhai-kit-contact-exchange"
+version = "0.1.0"
+source = { registry = "../.dist" }
+dependencies = [
+    { name = "arkhai-core" },
+    { name = "arkhai-kit-identity" },
+    { name = "arkhai-kit-settlement-runtime" },
+    { name = "pydantic" },
+]
+wheels = [
+    { path = "arkhai_kit_contact_exchange-0.1.0-py3-none-any.whl" },
+]
+
+[[package]]
+name = "arkhai-kit-delivery"
+version = "0.1.0"
+source = { registry = "../.dist" }
+dependencies = [
+    { name = "arkhai-kit-identity" },
+    { name = "pydantic" },
+]
+wheels = [
+    { path = "arkhai_kit_delivery-0.1.0-py3-none-any.whl" },
+]
+
+[[package]]
 name = "arkhai-kit-fulfillment"
 version = "0.2.0"
 source = { registry = "../.dist" }
@@ -421,6 +449,7 @@ name = "arkhai-kit-hosted-settlement"
 version = "0.1.1"
 source = { registry = "../.dist" }
 dependencies = [
+    { name = "arkhai-core" },
     { name = "arkhai-hosted-settlement-client" },
     { name = "arkhai-kit-identity" },
     { name = "arkhai-kit-settlement-runtime" },

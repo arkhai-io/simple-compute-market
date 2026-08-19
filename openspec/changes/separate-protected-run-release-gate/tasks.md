@@ -1,25 +1,31 @@
 ## 1. Separate the gates
 
-- [ ] 1.1 Split `require_release_identity` into an attested constructor that
+- [x] 1.1 Split `require_release_identity` into an attested constructor that
       keeps every current check — including observed-equals-trusted commit — and
       a development constructor that builds the same `ReleaseIdentity` from
       observed local values. Both return one type; neither returns partial
       identity.
-- [ ] 1.2 Leave the safety gates (`require_test_secret`,
+- [x] 1.2 Leave the safety gates (`require_test_secret`,
       `require_connected_account`, `require_ready_account`,
       `require_loopback_webhook`, `verify_loopback_webhook_endpoint`)
       unconditional, and prove by test that they run in both modes.
-- [ ] 1.3 `driver.run()` takes `--release-mode attested|local`, defaulting to
+- [x] 1.3 `driver.run()` takes `--release-mode attested|local`, defaulting to
       `attested`, and runs one body under both. A protected invocation whose
       provenance binding fails still fails closed rather than downgrading.
-- [ ] 1.4 `StripeTestEvidence` records `release_mode`, derived from what was
+- [x] 1.4 `StripeTestEvidence` records `release_mode`, derived from what was
       proven rather than from the flag, with the schema identity bumped so an
       unaware consumer fails instead of misreading.
-- [ ] 1.5 Evidence: unit tests for the mode split — a development run records a
+- [x] 1.5 Evidence: unit tests for the mode split — a development run records a
       development mode; no argument combination yields an attested record without
       binding; a failed protected binding raises; safety gates fire in both
       modes; a live credential is refused in a development run.
-- [ ] 1.6 Closeout.
+- [x] 1.6 Closeout: hygiene clean; one refinement recorded in design.md -- the
+      generated Compose environment is allowlist-complete by construction, so a
+      locally rendered one carries every key and leaves the coordinates it
+      cannot source empty, which the record reads as the local sentinel.
+      Evidence schema bumped to v4 in both the dataclass and the JSON schema,
+      where an attested document is held to every original constraint through a
+      conditional branch. Suite: e2e-tests unit 90.
 
 ## 2. Make the stack startable locally
 

@@ -43,6 +43,7 @@ from .evidence import (
     write_evidence,
 )
 from .gates import (
+    local_release_identity,
     AuthorizationRejected,
     AuthorizationUnavailable,
     ReleaseIdentityRejected,
@@ -116,21 +117,35 @@ class _ScenarioResult:
 
 
 def run(args: argparse.Namespace) -> tuple[StripeTestEvidence, int]:
-    release = require_release_identity(
-        marketplace_commit=args.marketplace_commit,
-        observed_marketplace_commit=args.observed_marketplace_commit,
-        marketplace_workflow_run_id=args.marketplace_workflow_run_id,
-        marketplace_workflow_ref=args.marketplace_workflow_ref,
-        marketplace_manifest_sha256=args.marketplace_manifest_sha256,
-        marketplace_image_digest=args.marketplace_image_digest,
-        hosted_source_commit=args.hosted_source_commit,
-        hosted_workflow_run_id=args.hosted_workflow_run_id,
-        hosted_workflow_ref=args.hosted_workflow_ref,
-        hosted_manifest_sha256=args.hosted_manifest_sha256,
-        hosted_client_wheel_sha256=args.hosted_client_wheel_sha256,
-        hosted_image_digest=args.hosted_image_digest,
-        compose_env_path=args.compose_env,
-    )
+    # Provenance decides what the run may claim; it does not decide whether the
+    # body may execute. Everything after this point is one code path.
+    if args.release_mode == "local":
+        release = local_release_identity(
+            observed_marketplace_commit=args.observed_marketplace_commit,
+            hosted_source_commit=args.hosted_source_commit,
+            hosted_workflow_run_id=args.hosted_workflow_run_id,
+            hosted_workflow_ref=args.hosted_workflow_ref,
+            hosted_manifest_sha256=args.hosted_manifest_sha256,
+            hosted_client_wheel_sha256=args.hosted_client_wheel_sha256,
+            hosted_image_digest=args.hosted_image_digest,
+            compose_env_path=args.compose_env,
+        )
+    else:
+        release = require_release_identity(
+            marketplace_commit=args.marketplace_commit,
+            observed_marketplace_commit=args.observed_marketplace_commit,
+            marketplace_workflow_run_id=args.marketplace_workflow_run_id,
+            marketplace_workflow_ref=args.marketplace_workflow_ref,
+            marketplace_manifest_sha256=args.marketplace_manifest_sha256,
+            marketplace_image_digest=args.marketplace_image_digest,
+            hosted_source_commit=args.hosted_source_commit,
+            hosted_workflow_run_id=args.hosted_workflow_run_id,
+            hosted_workflow_ref=args.hosted_workflow_ref,
+            hosted_manifest_sha256=args.hosted_manifest_sha256,
+            hosted_client_wheel_sha256=args.hosted_client_wheel_sha256,
+            hosted_image_digest=args.hosted_image_digest,
+            compose_env_path=args.compose_env,
+        )
     run_identity = require_run_identity(args.run_identity)
     identities = IdentityEvidence(
         marketplace=MarketplaceIdentityEvidence(
@@ -155,6 +170,9 @@ def run(args: argparse.Namespace) -> tuple[StripeTestEvidence, int]:
             image_digest=release.hosted_image_digest,
         ),
         run_ref=opaque_ref("run", run_identity),
+        # Taken from what was bound, never from the argument: an invocation
+        # cannot ask for a standing it did not earn.
+        release_mode=release.mode,
     )
     scenario = cast(Scenario, args.scenario)
     funding_profile = cast(FundingProfile, args.funding_profile)
@@ -1038,12 +1056,19 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--hosted-source-commit", required=True)
     parser.add_argument("--hosted-workflow-run-id", required=True)
     parser.add_argument("--hosted-workflow-ref", required=True)
-    parser.add_argument("--marketplace-commit", required=True)
+    parser.add_argument("--marketplace-commit", default="")
     parser.add_argument("--observed-marketplace-commit", required=True)
-    parser.add_argument("--marketplace-workflow-run-id", required=True)
-    parser.add_argument("--marketplace-workflow-ref", required=True)
-    parser.add_argument("--marketplace-manifest-sha256", required=True)
-    parser.add_argument("--marketplace-image-digest", required=True)
+    parser.add_argument(
+        "--release-mode",
+        choices=("attested", "local"),
+        default="attested",
+        help="attested binds a released consumer to a released producer; "
+        "local runs the same body for development and can never qualify.",
+    )
+    parser.add_argument("--marketplace-workflow-run-id", default="")
+    parser.add_argument("--marketplace-workflow-ref", default="")
+    parser.add_argument("--marketplace-manifest-sha256", default="")
+    parser.add_argument("--marketplace-image-digest", default="")
     parser.add_argument("--run-identity", required=True)
     parser.add_argument("--scenario", choices=_SCENARIOS, required=True)
     parser.add_argument("--funding-profile", choices=_FUNDING_PROFILES, required=True)

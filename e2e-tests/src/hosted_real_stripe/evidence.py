@@ -12,8 +12,11 @@ from typing import Any, Final, Literal
 
 from market_identity import Identity, create_signer, get_identity_verifier
 
-SchemaId = Literal["arkhai.hosted-settlement-stripe-test-evidence.v3"]
-SCHEMA_ID: Final[SchemaId] = "arkhai.hosted-settlement-stripe-test-evidence.v3"
+# v4 adds the release mode. The identity bumps rather than defaulting, so a
+# reader that predates the field fails on the schema instead of silently
+# treating a development run as protected evidence.
+SchemaId = Literal["arkhai.hosted-settlement-stripe-test-evidence.v4"]
+SCHEMA_ID: Final[SchemaId] = "arkhai.hosted-settlement-stripe-test-evidence.v4"
 _FORBIDDEN_VALUE = re.compile(
     r"(?:sk_(?:test|live)_|rk_(?:test|live)_|whsec_|https?://|"
     r"\b(?:acct|cs|pi|ch|tr|re|evt|cus|pm|seti|src|ba)_[A-Za-z0-9_]+)",
@@ -117,11 +120,23 @@ class HostedReleaseIdentityEvidence:
     image_digest: str
 
 
+#: Mirrors gates.ReleaseMode; evidence carries what was proven, so a reader
+#: never has to infer a run's standing from which coordinates are populated.
+ReleaseMode = Literal["attested", "local"]
+
+
 @dataclass(frozen=True)
 class IdentityEvidence:
     marketplace: MarketplaceIdentityEvidence
     hosted_release: HostedReleaseIdentityEvidence
     run_ref: str
+    release_mode: ReleaseMode = "attested"
+
+    @property
+    def qualifies(self) -> bool:
+        """Whether this run may be cited where protected evidence is required."""
+
+        return self.release_mode == "attested"
 
 
 @dataclass(frozen=True)

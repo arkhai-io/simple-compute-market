@@ -67,7 +67,17 @@ whose binding fails still fails closed; it does not silently downgrade.
 
 `StripeTestEvidence` gains `release_mode`, and the schema identity bumps. A
 consumer that has not been updated fails on the schema rather than misreading an
-older-shaped document.
+older-shaped document. The published JSON schema keeps the original marketplace
+constraints intact for any document claiming attestation, through a conditional
+branch on the recorded mode, so the bump adds a shape for development runs
+without loosening the one that qualifies.
+
+The generated Compose environment is allowlist-complete by construction — its
+reader rejects a file that is missing or exceeds the exact key set. A locally
+rendered environment therefore carries every key and leaves empty the
+coordinates a local build cannot source, which the development constructor
+reads as the local sentinel. Completeness stays a structural property; only the
+provenance of individual values differs.
 
 ### `ReleaseIdentity` keeps one type, with a development constructor
 

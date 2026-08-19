@@ -5,7 +5,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable
+from typing import Callable, Literal
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlsplit
 from urllib.request import Request, urlopen
@@ -56,8 +56,19 @@ class WebhookRouteUnavailable(RuntimeError):
     """The required loopback webhook route could not be verified."""
 
 
+#: What a completed run's evidence may claim. Derived from what was actually
+#: bound, never from an argument, so no invocation can claim unearned
+#: attestation.
+ReleaseMode = Literal["attested", "local"]
+
+#: Recorded in place of an attested coordinate that a development stack has no
+#: released source for. Self-describing on sight in any report.
+LOCAL_COORDINATE = "local"
+
+
 @dataclass(frozen=True)
 class ReleaseIdentity:
+    mode: ReleaseMode
     marketplace_commit: str
     marketplace_workflow_run_id: str
     marketplace_workflow_ref: str
@@ -104,74 +115,33 @@ def require_run_identity(run_identity: str) -> str:
     return run_identity
 
 
-def require_release_identity(
+def _require_hosted_half(
+    values: dict[str, str],
     *,
-    marketplace_commit: str,
-    observed_marketplace_commit: str,
-    marketplace_workflow_run_id: str,
-    marketplace_workflow_ref: str,
-    marketplace_manifest_sha256: str,
-    marketplace_image_digest: str,
     hosted_source_commit: str,
     hosted_workflow_run_id: str,
     hosted_workflow_ref: str,
     hosted_manifest_sha256: str,
     hosted_client_wheel_sha256: str,
     hosted_image_digest: str,
-    compose_env_path: Path,
-) -> ReleaseIdentity:
-    if (
-        not _COMMIT.fullmatch(marketplace_commit)
-        or observed_marketplace_commit != marketplace_commit
-        or not marketplace_workflow_run_id.isdigit()
-        or not _WORKFLOW_REF.fullmatch(marketplace_workflow_ref)
-    ):
-        raise ReleaseIdentityRejected("marketplace release identity must match the trusted commit")
+) -> tuple[str, str, str, str, str]:
+    """Bind the released producer, identically in every mode.
+
+    A development run still consumes the signed hosted release -- only the
+    marketplace half is locally built -- so nothing here relaxes.
+    """
+
     if (
         not _COMMIT.fullmatch(hosted_source_commit)
         or not hosted_workflow_run_id.isdigit()
         or not _WORKFLOW_REF.fullmatch(hosted_workflow_ref)
     ):
         raise ReleaseIdentityRejected("hosted producer source, workflow, and run must be exact")
-    for value in (
-        marketplace_manifest_sha256,
-        marketplace_image_digest,
-        hosted_manifest_sha256,
-        hosted_client_wheel_sha256,
-        hosted_image_digest,
-    ):
+    for value in (hosted_manifest_sha256, hosted_client_wheel_sha256, hosted_image_digest):
         if not _DIGEST.fullmatch(value):
             raise ReleaseIdentityRejected(
                 "consumer and hosted release digests must be exact sha256 identities"
             )
-    values = _read_generated_compose_env(compose_env_path)
-    marketplace_image = values.get("HOSTED_MARKETPLACE_VERIFIED_IMAGE", "")
-    marketplace_image_match = _IMAGE.fullmatch(marketplace_image)
-    if (
-        marketplace_image_match is None
-        or marketplace_image_match.group("digest") != marketplace_image_digest
-        or values.get("HOSTED_MARKETPLACE_VERIFIED_MANIFEST_SHA256")
-        != marketplace_manifest_sha256
-        or values.get("HOSTED_MARKETPLACE_VERIFIED_REPOSITORY")
-        != "arkhai-io/simple-compute-market"
-        or values.get("HOSTED_MARKETPLACE_VERIFIED_SOURCE_COMMIT") != marketplace_commit
-        or values.get("HOSTED_MARKETPLACE_VERIFIED_WORKFLOW_REF")
-        != marketplace_workflow_ref
-        or values.get("HOSTED_MARKETPLACE_VERIFIED_WORKFLOW_RUN_ID")
-        != marketplace_workflow_run_id
-    ):
-        raise ReleaseIdentityRejected(
-            "activated marketplace image does not match the attested consumer release"
-        )
-    marketplace_artifact_digests = (
-        values.get("HOSTED_MARKETPLACE_VERIFIED_ARTIFACT_WHEELHOUSE_SHA256", ""),
-        values.get("HOSTED_MARKETPLACE_VERIFIED_ARTIFACT_SCHEMA_SHA256", ""),
-        values.get("HOSTED_MARKETPLACE_VERIFIED_ARTIFACT_PROVENANCE_SHA256", ""),
-    )
-    if not all(_DIGEST.fullmatch(value) for value in marketplace_artifact_digests):
-        raise ReleaseIdentityRejected(
-            "attested marketplace wheelhouse, schema, and provenance must be exact"
-        )
     image = values.get("HOSTED_SETTLEMENT_VERIFIED_IMAGE", "")
     match = _IMAGE.fullmatch(image)
     if match is None or match.group("digest") != hosted_image_digest:
@@ -217,7 +187,89 @@ def require_release_identity(
         or not _EIP191_ADDRESS.fullmatch(authority_address)
     ):
         raise ReleaseIdentityRejected("signed hosted authority coordinates are invalid")
+    return image, manifest_digest, authority_id, authority_scheme, authority_address
+
+
+def require_release_identity(
+    *,
+    marketplace_commit: str,
+    observed_marketplace_commit: str,
+    marketplace_workflow_run_id: str,
+    marketplace_workflow_ref: str,
+    marketplace_manifest_sha256: str,
+    marketplace_image_digest: str,
+    hosted_source_commit: str,
+    hosted_workflow_run_id: str,
+    hosted_workflow_ref: str,
+    hosted_manifest_sha256: str,
+    hosted_client_wheel_sha256: str,
+    hosted_image_digest: str,
+    compose_env_path: Path,
+) -> ReleaseIdentity:
+    """Bind a released consumer to a released producer, or refuse.
+
+    Every check a protected run has always made, unchanged. Failing here fails
+    the run: a protected invocation never quietly downgrades to a development
+    one.
+    """
+
+    if (
+        not _COMMIT.fullmatch(marketplace_commit)
+        or observed_marketplace_commit != marketplace_commit
+        or not marketplace_workflow_run_id.isdigit()
+        or not _WORKFLOW_REF.fullmatch(marketplace_workflow_ref)
+    ):
+        raise ReleaseIdentityRejected("marketplace release identity must match the trusted commit")
+    for value in (marketplace_manifest_sha256, marketplace_image_digest):
+        if not _DIGEST.fullmatch(value):
+            raise ReleaseIdentityRejected(
+                "consumer and hosted release digests must be exact sha256 identities"
+            )
+    values = _read_generated_compose_env(compose_env_path)
+    marketplace_image = values.get("HOSTED_MARKETPLACE_VERIFIED_IMAGE", "")
+    marketplace_image_match = _IMAGE.fullmatch(marketplace_image)
+    if (
+        marketplace_image_match is None
+        or marketplace_image_match.group("digest") != marketplace_image_digest
+        or values.get("HOSTED_MARKETPLACE_VERIFIED_MANIFEST_SHA256")
+        != marketplace_manifest_sha256
+        or values.get("HOSTED_MARKETPLACE_VERIFIED_REPOSITORY")
+        != "arkhai-io/simple-compute-market"
+        or values.get("HOSTED_MARKETPLACE_VERIFIED_SOURCE_COMMIT") != marketplace_commit
+        or values.get("HOSTED_MARKETPLACE_VERIFIED_WORKFLOW_REF")
+        != marketplace_workflow_ref
+        or values.get("HOSTED_MARKETPLACE_VERIFIED_WORKFLOW_RUN_ID")
+        != marketplace_workflow_run_id
+    ):
+        raise ReleaseIdentityRejected(
+            "activated marketplace image does not match the attested consumer release"
+        )
+    marketplace_artifact_digests = (
+        values.get("HOSTED_MARKETPLACE_VERIFIED_ARTIFACT_WHEELHOUSE_SHA256", ""),
+        values.get("HOSTED_MARKETPLACE_VERIFIED_ARTIFACT_SCHEMA_SHA256", ""),
+        values.get("HOSTED_MARKETPLACE_VERIFIED_ARTIFACT_PROVENANCE_SHA256", ""),
+    )
+    if not all(_DIGEST.fullmatch(value) for value in marketplace_artifact_digests):
+        raise ReleaseIdentityRejected(
+            "attested marketplace wheelhouse, schema, and provenance must be exact"
+        )
+    (
+        image,
+        manifest_digest,
+        authority_id,
+        authority_scheme,
+        authority_address,
+    ) = _require_hosted_half(
+        values,
+        hosted_source_commit=hosted_source_commit,
+        hosted_workflow_run_id=hosted_workflow_run_id,
+        hosted_workflow_ref=hosted_workflow_ref,
+        hosted_manifest_sha256=hosted_manifest_sha256,
+        hosted_client_wheel_sha256=hosted_client_wheel_sha256,
+        hosted_image_digest=hosted_image_digest,
+    )
     return ReleaseIdentity(
+        mode="attested",
         marketplace_commit=marketplace_commit,
         marketplace_workflow_run_id=marketplace_workflow_run_id,
         marketplace_workflow_ref=marketplace_workflow_ref,
@@ -227,6 +279,90 @@ def require_release_identity(
         marketplace_wheelhouse_sha256=marketplace_artifact_digests[0],
         marketplace_schema_sha256=marketplace_artifact_digests[1],
         marketplace_provenance_sha256=marketplace_artifact_digests[2],
+        hosted_source_commit=hosted_source_commit,
+        hosted_workflow_run_id=hosted_workflow_run_id,
+        hosted_workflow_ref=hosted_workflow_ref,
+        hosted_manifest_sha256=hosted_manifest_sha256,
+        hosted_manifest_digest=manifest_digest,
+        hosted_client_wheel_sha256=hosted_client_wheel_sha256,
+        hosted_image=image,
+        hosted_image_digest=hosted_image_digest,
+        hosted_authority_id=authority_id,
+        hosted_authority_scheme=authority_scheme,
+        hosted_authority_address=authority_address,
+    )
+
+
+def _observed_or_local(values: dict[str, str], key: str) -> str:
+    """A locally built stack has no released coordinate; say which, don't invent."""
+
+    return values.get(key) or LOCAL_COORDINATE
+
+
+def local_release_identity(
+    *,
+    observed_marketplace_commit: str,
+    hosted_source_commit: str,
+    hosted_workflow_run_id: str,
+    hosted_workflow_ref: str,
+    hosted_manifest_sha256: str,
+    hosted_client_wheel_sha256: str,
+    hosted_image_digest: str,
+    compose_env_path: Path,
+) -> ReleaseIdentity:
+    """Bind what a development stack can actually prove, and say so.
+
+    The producer half is validated exactly as a protected run validates it: a
+    development run consumes the same signed hosted release. Only the
+    marketplace half is locally built, so it records the working tree's real
+    commit and a self-describing placeholder wherever a released coordinate has
+    no local counterpart. The result is marked as a development run and can
+    never be cited as protected evidence.
+    """
+
+    if not _COMMIT.fullmatch(observed_marketplace_commit):
+        raise ReleaseIdentityRejected("a development run must record its exact working-tree commit")
+    values = _read_generated_compose_env(compose_env_path)
+    (
+        image,
+        manifest_digest,
+        authority_id,
+        authority_scheme,
+        authority_address,
+    ) = _require_hosted_half(
+        values,
+        hosted_source_commit=hosted_source_commit,
+        hosted_workflow_run_id=hosted_workflow_run_id,
+        hosted_workflow_ref=hosted_workflow_ref,
+        hosted_manifest_sha256=hosted_manifest_sha256,
+        hosted_client_wheel_sha256=hosted_client_wheel_sha256,
+        hosted_image_digest=hosted_image_digest,
+    )
+    return ReleaseIdentity(
+        mode="local",
+        marketplace_commit=observed_marketplace_commit,
+        marketplace_workflow_run_id=_observed_or_local(
+            values, "HOSTED_MARKETPLACE_VERIFIED_WORKFLOW_RUN_ID"
+        ),
+        marketplace_workflow_ref=_observed_or_local(
+            values, "HOSTED_MARKETPLACE_VERIFIED_WORKFLOW_REF"
+        ),
+        marketplace_manifest_sha256=_observed_or_local(
+            values, "HOSTED_MARKETPLACE_VERIFIED_MANIFEST_SHA256"
+        ),
+        marketplace_image_digest=_observed_or_local(
+            values, "HOSTED_MARKETPLACE_VERIFIED_IMAGE_DIGEST"
+        ),
+        marketplace_image=_observed_or_local(values, "HOSTED_MARKETPLACE_VERIFIED_IMAGE"),
+        marketplace_wheelhouse_sha256=_observed_or_local(
+            values, "HOSTED_MARKETPLACE_VERIFIED_ARTIFACT_WHEELHOUSE_SHA256"
+        ),
+        marketplace_schema_sha256=_observed_or_local(
+            values, "HOSTED_MARKETPLACE_VERIFIED_ARTIFACT_SCHEMA_SHA256"
+        ),
+        marketplace_provenance_sha256=_observed_or_local(
+            values, "HOSTED_MARKETPLACE_VERIFIED_ARTIFACT_PROVENANCE_SHA256"
+        ),
         hosted_source_commit=hosted_source_commit,
         hosted_workflow_run_id=hosted_workflow_run_id,
         hosted_workflow_ref=hosted_workflow_ref,
