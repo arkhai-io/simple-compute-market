@@ -235,6 +235,7 @@ def test_ephemeral_container_inputs_use_shared_directory(
         webhook_secret="whsec_example",
         authority_environment="hosted-stripe-test",
         storefront_caller="ed25519:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+        authority_caller="eip191:0xd898399d3c6151e74a236c7bf0510ac73760e8b5",
         manifest_digest="sha256:" + ("2" * 64),
         release_authority_id="release-authority",
         release_authority_address="0x1fe2aa7fbaf5720f79a22a4ada4b8b37d4e0c008",
@@ -290,20 +291,23 @@ def test_ephemeral_container_inputs_use_shared_directory(
             == ".github/workflows/release.yml@refs/tags/v0.2.0"
         )
         assert values["HOSTED_SETTLEMENT_RELEASE_SOURCE_COMMIT"] == "3" * 40
+        # The portable resolver is the authority calling itself, so both the
+        # caller allowlist and the trusted attester name its runtime identity --
+        # never the independent key that signed the release.
         assert values["HOSTED_SETTLEMENT_RESOLVER_CALLERS"] == (
-            "eip191:0x1fe2aa7fbaf5720f79a22a4ada4b8b37d4e0c008"
+            "eip191:0xd898399d3c6151e74a236c7bf0510ac73760e8b5"
         )
         remote_resolvers = json.loads(values["HOSTED_SETTLEMENT_REMOTE_RESOLVERS_JSON"])
         assert remote_resolvers == [
             {
                 "allow_insecure_loopback": True,
-                "authority_id": "release-authority",
+                "authority_id": "hosted-stripe-test",
                 "base_url": "http://127.0.0.1:8080",
                 "evaluator_id": "vm-portable",
-                "portable_authority_address": ("0x1fe2aa7fbaf5720f79a22a4ada4b8b37d4e0c008"),
+                "portable_authority_address": ("0xd898399d3c6151e74a236c7bf0510ac73760e8b5"),
                 "principals": [
                     {
-                        "identifier": "0x1fe2aa7fbaf5720f79a22a4ada4b8b37d4e0c008",
+                        "identifier": "0xd898399d3c6151e74a236c7bf0510ac73760e8b5",
                         "scheme": "eip191",
                     }
                 ],

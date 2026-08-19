@@ -199,6 +199,14 @@ class StripeWebhookForwarder:
         self.stop()
 
 
+def _caller_scheme(caller: str) -> str:
+    return caller.partition(":")[0]
+
+
+def _caller_identifier(caller: str) -> str:
+    return caller.partition(":")[2]
+
+
 class EphemeralServiceEnv:
     """Create a mode-0600 authority env file and remove it on every outcome."""
 
@@ -209,6 +217,7 @@ class EphemeralServiceEnv:
         webhook_secret: str,
         authority_environment: str,
         storefront_caller: str,
+        authority_caller: str,
         manifest_digest: str,
         release_authority_id: str,
         release_authority_address: str,
@@ -250,21 +259,28 @@ class EphemeralServiceEnv:
             # which one exists. The harness builds that storefront, so it says
             # so rather than trusting a credential payload to agree with it.
             "HOSTED_SETTLEMENT_STOREFRONT_CALLERS": storefront_caller,
-            "HOSTED_SETTLEMENT_RESOLVER_CALLERS": (f"eip191:{release_authority_address}"),
+            # The portable resolver is this authority calling itself: it signs
+            # the lookup with its own runtime key and stamps portable
+            # attestations with the same identity. Both sides therefore name
+            # the runtime authority, not the independent key that signed the
+            # release -- those are deliberately different principals.
+            "HOSTED_SETTLEMENT_RESOLVER_CALLERS": authority_caller,
             "HOSTED_SETTLEMENT_REMOTE_RESOLVERS_JSON": json.dumps(
                 [
                     {
                         "resolver_id": "vm-portable",
                         "evaluator_id": "vm-portable",
                         "base_url": "http://127.0.0.1:8080",
-                        "authority_id": release_authority_id,
+                        "authority_id": authority_environment,
                         "principals": [
                             {
-                                "scheme": "eip191",
-                                "identifier": release_authority_address,
+                                "scheme": _caller_scheme(authority_caller),
+                                "identifier": _caller_identifier(authority_caller),
                             }
                         ],
-                        "portable_authority_address": release_authority_address,
+                        "portable_authority_address": _caller_identifier(
+                            authority_caller
+                        ),
                         "allow_insecure_loopback": True,
                     }
                 ],

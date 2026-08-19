@@ -260,6 +260,7 @@ def run(args: argparse.Namespace) -> tuple[StripeTestEvidence, int]:
                     webhook_secret=webhook_secret,
                     authority_environment=args.authority_environment,
                     storefront_caller=_storefront_principal(args.storefront_config),
+                    authority_caller=_authority_principal(args.storefront_config),
                     manifest_digest=release.hosted_manifest_digest,
                     release_authority_id=release.hosted_authority_id,
                     release_authority_address=release.hosted_authority_address,
@@ -416,6 +417,27 @@ def _storefront_principal(storefront_config: Path) -> str:
         raise AuthorizationUnavailable("storefront identity is unavailable") from exc
     if not isinstance(scheme, str) or not isinstance(identifier, str):
         raise AuthorizationRejected("storefront identity is invalid")
+    return f"{scheme}:{identifier}"
+
+
+def _authority_principal(storefront_config: Path) -> str:
+    """The scheme-tagged principal the storefront trusts the authority to be.
+
+    The run generates the authority's runtime key and pins the matching public
+    identity into the storefront's configuration, so the configuration is where
+    that identity is stated once. The authority is then told the same thing
+    about itself rather than being trusted to have been told it elsewhere.
+    """
+
+    try:
+        parsed = tomllib.loads(storefront_config.read_text(encoding="utf-8"))
+        principal = parsed["Settlement"]["stripe"]["authority"]["principals"][0]
+        scheme = principal["scheme"]
+        identifier = principal["identifier"]
+    except (IndexError, KeyError, OSError, TypeError, tomllib.TOMLDecodeError) as exc:
+        raise AuthorizationUnavailable("hosted authority identity is unavailable") from exc
+    if not isinstance(scheme, str) or not isinstance(identifier, str):
+        raise AuthorizationRejected("hosted authority identity is invalid")
     return f"{scheme}:{identifier}"
 
 

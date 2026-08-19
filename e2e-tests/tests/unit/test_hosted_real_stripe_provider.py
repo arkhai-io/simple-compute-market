@@ -156,6 +156,11 @@ def test_push_transfer_funds_exact_customer_cash_balance_in_test_mode() -> None:
         "customer": "cus_private",
         "transfer_group": GROUP,
         "metadata": metadata,
+        # A push transfer is attributed by the reference Stripe issues with the
+        # funding instructions, not by the customer it lands on.
+        "next_action": {
+            "display_bank_transfer_instructions": {"reference": "BV5JFRE47YPZ"},
+        },
     }
     mutations: list[tuple[str, Mapping[str, str]]] = []
 
@@ -176,7 +181,11 @@ def test_push_transfer_funds_exact_customer_cash_balance_in_test_mode() -> None:
     assert mutations == [
         (
             "/v1/test_helpers/customers/cus_private/fund_cash_balance",
-            {"amount": "1250", "currency": "usd"},
+            {
+                "amount": "1250",
+                "currency": "usd",
+                "reference": "BV5JFRE47YPZ",
+            },
         )
     ]
 

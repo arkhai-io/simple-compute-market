@@ -673,22 +673,7 @@ class NetworkMarketplacePort:
         # A timeout says only that funding never converged. Which projection it
         # was still holding when the bound expired is the whole diagnosis, and
         # it belongs on the development diagnostic channel -- named, not dumped.
-        receipt = status.get("receipt")
-        receipt = receipt if isinstance(receipt, dict) else {}
-        incident = receipt.get("incident")
-        incident = incident if isinstance(incident, dict) else {}
-        print(
-            f"[development] funding never converged for {settlement_ref}: "
-            f"status={status.get('status')!r}, "
-            f"funding_reason={status.get('funding_reason')!r}, "
-            f"action_kind={status.get('action_kind')!r}, "
-            f"authority financial_state={receipt.get('financial_state')!r}, "
-            f"funding_state={receipt.get('funding_state')!r}, "
-            f"condition_state={receipt.get('condition_state')!r}, "
-            f"incident kind={incident.get('kind')!r} state={incident.get('state')!r}",
-            file=sys.stderr,
-            flush=True,
-        )
+        _name_unconverged("funding", settlement_ref, status)
         return False
 
     def _reconcile_refund_materialization(self, settlement_ref: str) -> None:
@@ -828,6 +813,7 @@ class NetworkMarketplacePort:
     def _wait_public_status(self, settlement_ref: str, terminal: set[str]):
         timeout = float(os.environ.get("HOSTED_SETTLEMENT_E2E_LIFECYCLE_TIMEOUT", "180"))
         deadline = time.monotonic() + timeout
+        last: dict[str, Any] = {}
         while time.monotonic() < deadline:
             try:
                 status = self._buyer_status(settlement_ref)
@@ -835,10 +821,41 @@ class NetworkMarketplacePort:
                 if not _still_working(exc):
                     raise
             else:
+                last = status
                 if status.get("status") in terminal:
                     return status
             time.sleep(min(0.5, max(0.0, deadline - time.monotonic())))
+        _name_unconverged("/".join(sorted(terminal)), settlement_ref, last)
         raise TimeoutError("named hosted public status did not converge")
+
+
+def _name_unconverged(
+    awaited: str, settlement_ref: str, status: dict[str, Any]
+) -> None:
+    """Name the projection a wait was still holding when its bound expired.
+
+    A timeout says only that something did not happen. Which state the deal was
+    actually in is the diagnosis, and it belongs on the development diagnostic
+    channel -- named, not dumped.
+    """
+
+    receipt = status.get("receipt")
+    receipt = receipt if isinstance(receipt, dict) else {}
+    incident = receipt.get("incident")
+    incident = incident if isinstance(incident, dict) else {}
+    print(
+        f"[development] {awaited} never converged for {settlement_ref}: "
+        f"status={status.get('status')!r}, "
+        f"funding_reason={status.get('funding_reason')!r}, "
+        f"action_kind={status.get('action_kind')!r}, "
+        f"fulfillment_ref={status.get('fulfillment_ref') is not None}, "
+        f"authority financial_state={receipt.get('financial_state')!r}, "
+        f"funding_state={receipt.get('funding_state')!r}, "
+        f"condition_state={receipt.get('condition_state')!r}, "
+        f"incident kind={incident.get('kind')!r} state={incident.get('state')!r}",
+        file=sys.stderr,
+        flush=True,
+    )
 
 
 def _still_working(exc: Exception) -> bool:
