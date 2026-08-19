@@ -17,7 +17,6 @@ from __future__ import annotations
 
 import argparse
 import base64
-import json
 import os
 import secrets
 import stat
@@ -278,15 +277,23 @@ def assemble_payload(
         "registry_read_token": "",
         "buyer_identity_credential": _credential(scheme),
         "buyer_identity_scheme": scheme,
-        "storefront_identity_credential": config_credentials.get("storefront_identity_credential") or _credential(scheme),
+        "storefront_identity_credential": (
+            config_credentials.get("storefront_identity_credential") or _credential(scheme)
+        ),
         "admin_identity_credential": config_credentials.get("admin_identity_credential")
         or _credential(scheme),
         "evidence_signer_credential": evidence_credential,
         "evidence_signer_scheme": scheme,
         "evidence_signer_identifier": _identifier(scheme, evidence_credential),
-        "registry_a_identity_credential": config_credentials.get("registry_a_identity_credential") or _credential(scheme),
-        "registry_b_identity_credential": config_credentials.get("registry_b_identity_credential") or _credential(scheme),
-        "provisioning_identity_credential": config_credentials.get("provisioning_identity_credential") or _credential(scheme),
+        "registry_a_identity_credential": (
+            config_credentials.get("registry_a_identity_credential") or _credential(scheme)
+        ),
+        "registry_b_identity_credential": (
+            config_credentials.get("registry_b_identity_credential") or _credential(scheme)
+        ),
+        "provisioning_identity_credential": (
+            config_credentials.get("provisioning_identity_credential") or _credential(scheme)
+        ),
         "registry_admin_api_key": secrets.token_urlsafe(32),
         "registry_bootstrap_api_key": secrets.token_urlsafe(32),
         # Operator-supplied entries win, so a real authority environment can

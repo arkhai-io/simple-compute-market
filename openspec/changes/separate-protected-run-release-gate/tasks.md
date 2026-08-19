@@ -65,15 +65,37 @@
 
 ## 4. Prove it on the blocked failure
 
-- [ ] 4.1 Run the body locally against the real Stripe test account for one card
+- [x] 4.1 Run the body locally against the real Stripe test account for one card
       lane and record what the `payer_profile_unavailable` stage actually raises
       — the diagnostic `add-bare-metal-hosted-settlement` has been unable to
       obtain. Disclose the result there rather than resolving that change's
       blocked task from a development run.
+
+      Answered, and the answer was that nothing raised it where anyone could
+      see. The staged bridge caught every startup failure and returned exit 2
+      with nothing written anywhere, so the code was accurate and empty. With
+      the cause disclosed (see design.md), the card lane runs through payer
+      profile and browser consent against the real test account and stops at
+      `funding_authorization`: hosted materialization returns no
+      `settlement_ref`, which is a marketplace-side question for
+      `add-bare-metal-hosted-settlement` and is disclosed there rather than
+      resolved here.
+
+      Five further conditions had to be met before the body would run at all,
+      each invisible to a suite and none of them provenance: the released
+      authority needs five settings nothing supplied; the registry,
+      provisioning, storefront, and administrator identities are pinned in
+      three files at once and a generated key must move all of them; teardown
+      left the authority volume behind, so a second run bound an
+      already-bound account; the Compose wrapper hid the container output
+      that said so; and the staged bridge inherited an ambient SOCKS proxy
+      into a loopback-only subprocess.
 - [x] 4.2 Permanent docs: record in `docs/development/TESTING.md` how to run the
       body locally, and that development evidence never qualifies.
-- [ ] 4.3 Closeout: hygiene clean, strict validation, ROADMAP updated if the
-      hosted-settlement gap rows change shape.
+- [x] 4.3 Closeout: hygiene clean, strict validation. ROADMAP unchanged: the
+      hosted-settlement gap rows keep their shape, since the marketplace-side
+      question the run reached belongs to `add-bare-metal-hosted-settlement`
+      and is recorded there. Suites: scripts 83, e2e unit 95.
 
 ## Design promotion record
 
@@ -83,3 +105,5 @@
 | Release mode is derived from what was proven and recorded in the evidence, so no invocation can claim unearned attestation | `openspec/specs/deployment-state/spec.md` (promote at synchronization) |
 | A development run requires no attested artifact, broker, or self-hosted runner, and local assembly matches the broker's payload shape | `openspec/specs/deployment-state/spec.md` (promote at synchronization) |
 | How to run the hosted body locally, and that its evidence never qualifies | `docs/development/TESTING.md` |
+| A development run may read the cause behind a diagnostic code; a protected run may not | `openspec/specs/deployment-state/spec.md` (promote at synchronization) |
+| The broker owns the authority's secrets and identity; the harness owns what its own topology fixes | `docs/development/HOSTED_CREDENTIAL_PAYLOAD.md` |

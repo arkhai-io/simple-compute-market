@@ -118,6 +118,23 @@ Generated identity material is ephemeral and local. The assembler never writes
 provider credentials into the repository, and the existing evidence redaction
 applies unchanged.
 
+### A diagnostic code is worth what its cause is worth
+
+Every layer of the body caught a failure, named it, and discarded the
+exception that produced it: the staged bridge returned exit 2 on any startup
+failure with nothing written anywhere, the Compose wrapper captured container
+output and raised without it, the driver consumed the exception in the handler
+that classified it, and the bridge's stderr was read only to be thrown away.
+Each was defensible alone — evidence must not carry buyer actions or provider
+identifiers — and together they made `payer_profile_unavailable` a code with
+nothing behind it.
+
+The line is the run's mode, not the stream. Stdout stays the protocol and
+evidence still records the stage and the code only. Stderr carries the reason,
+a protected run does not read it, and a development run keeps a bounded tail
+and prints it with its cause chain to the operator who already holds every
+credential it could mention.
+
 ## Risks / Trade-offs
 
 - **A development run is mistaken for qualifying evidence.** → The mode is

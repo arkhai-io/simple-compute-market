@@ -228,9 +228,7 @@ class EphemeralServiceEnv:
             "HOSTED_SETTLEMENT_CHECKOUT_CANCEL_URL": "http://127.0.0.1:18081/checkout/cancel",
             # Onboarding redirects land on the same loopback storefront. Every
             # callback URL the authority allows must be distinct.
-            "HOSTED_SETTLEMENT_ACCOUNT_LINK_RETURN_URLS": (
-                "http://127.0.0.1:18081/connect/return"
-            ),
+            "HOSTED_SETTLEMENT_ACCOUNT_LINK_RETURN_URLS": "http://127.0.0.1:18081/connect/return",
             "HOSTED_SETTLEMENT_ACCOUNT_LINK_REFRESH_URLS": (
                 "http://127.0.0.1:18081/connect/refresh"
             ),
