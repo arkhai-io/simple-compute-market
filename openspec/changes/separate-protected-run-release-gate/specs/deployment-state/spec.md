@@ -90,3 +90,33 @@ implementation later substitutes for it without changing the body.
 
 - **WHEN** a credential-broker service is introduced that returns the documented payload
 - **THEN** it substitutes for local assembly with no change to the scenario body or its gates
+
+### Requirement: A diagnostic code is readable where the run allows it
+
+The hosted scenario body MUST classify a failure by a stage and a diagnostic
+code, and its evidence report MUST carry no more than that. The cause behind a
+code MUST NOT be discarded: every layer that classifies a failure MUST preserve
+the exception, container output, or subprocess output it classified, and MUST
+make it available on a channel the evidence report does not read.
+
+Whether that channel is read MUST follow the run's recorded release mode. A
+protected run MUST NOT read or emit staged subprocess output, container output,
+or any other unfiltered runtime text, because it may name buyer actions and
+provider identifiers. A development run MUST be able to read the cause behind
+the code it was given, bounded in size, on the machine of the operator who
+already holds those credentials.
+
+#### Scenario: A stage fails in a development run
+
+- **WHEN** a stage of the body fails in a development run and is classified with a diagnostic code
+- **THEN** the operator is shown the exception and its causes, including the output of any subprocess whose failure produced the code
+
+#### Scenario: The same stage fails in a protected run
+
+- **WHEN** the same stage fails in a protected run
+- **THEN** the run reports the stage and the code, emits no staged or container output, and its evidence report is byte-for-byte the shape it would have carried before
+
+#### Scenario: A subprocess dies before answering
+
+- **WHEN** a subprocess the body drives exits without completing a request
+- **THEN** whatever it wrote explaining why is retained and reported in a development run rather than lost to the exit
