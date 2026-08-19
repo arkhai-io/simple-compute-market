@@ -28,6 +28,11 @@ from typing import Any, Mapping, Sequence
 
 _WEBHOOK_SECRET = re.compile(r"\b(whsec_[A-Za-z0-9]+)\b")
 _SENSITIVE_ENV = re.compile(r"(?:STRIPE|WEBHOOK)", re.IGNORECASE)
+#: The staged bridge speaks to the loopback stack and to nothing else, so an
+#: ambient proxy is never right for it. Clients that trust the environment
+#: build a transport for whatever they find there before any request is made,
+#: which turns an unrelated shell setting into a failure inside the run.
+_PROXY_ENV = re.compile(r"^(?:all|http|https|ftp|no)_proxy$", re.IGNORECASE)
 _SAFE_CONFIG_VALUE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/@-]{0,255}$")
 _PROTECTED_PROFILE = "hosted-stripe-test"
 #: A bounded tail: enough to read a traceback, never a transcript.
@@ -730,7 +735,11 @@ class MarketplaceLifecycleSession:
         self._responses: queue.Queue[str | None] = queue.Queue()
 
     def start(self) -> None:
-        env = {key: value for key, value in os.environ.items() if not _SENSITIVE_ENV.search(key)}
+        env = {
+            key: value
+            for key, value in os.environ.items()
+            if not _SENSITIVE_ENV.search(key) and not _PROXY_ENV.match(key)
+        }
         env.update(self._environment)
         try:
             self._process = subprocess.Popen(

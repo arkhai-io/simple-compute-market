@@ -6,6 +6,7 @@ import importlib
 import json
 import os
 import sys
+import traceback
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -242,9 +243,14 @@ def _load_marketplace() -> Any:
 
 
 def main() -> int:
+    # Stdout is the protocol and carries codes only. The reason behind a code
+    # goes to stderr, which the driver reads for a development run and does
+    # not read at all for a protected one -- so writing it here is safe in
+    # both, and withholding it is what leaves a failed stage unexplainable.
     try:
         bridge = LifecycleBridge(_load_marketplace())
     except Exception:
+        traceback.print_exc()
         return 2
     for line in sys.stdin:
         try:
@@ -253,10 +259,13 @@ def main() -> int:
                 raise RuntimeError("request must be an object")
             response = bridge.request(body)
         except TimeoutError:
+            traceback.print_exc()
             response = {"ok": False, "code": "convergence_timeout"}
         except (ExternalUnavailable, OSError, ConnectionError):
+            traceback.print_exc()
             response = {"ok": False, "code": "marketplace_unavailable"}
         except Exception:
+            traceback.print_exc()
             response = {"ok": False, "code": "marketplace_lifecycle_contract"}
         sys.stdout.write(json.dumps(response, separators=(",", ":")) + "\n")
         sys.stdout.flush()

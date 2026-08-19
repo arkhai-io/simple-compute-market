@@ -341,3 +341,40 @@ def test_a_run_does_not_inherit_the_previous_run_authority_state() -> None:
     ).read_text(encoding="utf-8")
 
     assert '"down", "--remove-orphans", "--volumes"' in source
+
+
+def test_the_staged_bridge_does_not_inherit_an_ambient_proxy(tmp_path, monkeypatch) -> None:
+    """A loopback-only subprocess has no business reading proxy settings."""
+
+    import json
+    import sys
+
+    from src.hosted_real_stripe.runtime import MarketplaceLifecycleSession
+
+    monkeypatch.setenv("ALL_PROXY", "socks5h://127.0.0.1:10808")
+    monkeypatch.setenv("HTTPS_PROXY", "http://127.0.0.1:10809")
+    monkeypatch.setenv("STRIPE_SECRET_KEY", "sk_test_never_forwarded")
+
+    session = MarketplaceLifecycleSession(
+        [
+            sys.executable,
+            "-c",
+            (
+                "import json,os,sys;"
+                "sys.stdin.readline();"
+                "print(json.dumps({'ok': True, 'seen': sorted("
+                "k for k in os.environ if 'PROXY' in k.upper() or 'STRIPE' in k.upper())}));"
+                "sys.stdout.flush()"
+            ),
+        ],
+        cwd=tmp_path,
+        request_timeout=10.0,
+    )
+    session.start()
+    try:
+        response = session.request("ensure_payer_profile_fixture")
+    finally:
+        session.stop()
+
+    assert response["seen"] == []
+    assert json.dumps(response)
