@@ -600,6 +600,11 @@ class EphemeralBuyerConfig:
         self._directory = None
 
 
+#: A volume Compose named for the project looks like ``<project>_<name>``; one
+#: a service asked for anonymously is addressed only by its own digest.
+_ANONYMOUS_VOLUME = re.compile(r"^[0-9a-f]{64}$")
+
+
 class ComposeStack:
     """Start the ordinary digest-pinned marketplace/authority topology."""
 
@@ -615,6 +620,7 @@ class ComposeStack:
     ) -> None:
         self._cwd = cwd
         self._retain_authority_state = retain_authority_state
+        self._preexisting_volumes: frozenset[str] = frozenset()
         # Compose prints the container output that says why an operation
         # failed. Held for a development operator only, on the same terms as
         # the staged bridge's stderr.
@@ -649,6 +655,12 @@ class ComposeStack:
                 f"{storefront_servicing_interval_seconds:g}"
             )
         self._runtime_env = env
+        # Only meaningful when the named volume is kept: a teardown that spares
+        # it also spares the anonymous volumes the services bring with them, so
+        # the run notes which ones predate it and removes only what it added.
+        self._preexisting_volumes = (
+            self._volumes() if self._retain_authority_state else frozenset()
+        )
         self._run((*self._base, "up", "-d", "--wait"), env=env, check=True)
         self._started = True
 
@@ -713,8 +725,43 @@ class ComposeStack:
             env=env,
             check=False,
         )
+        if self._retain_authority_state:
+            self._drop_added_anonymous_volumes(env)
         self._started = False
         self._runtime_env = None
+
+    def _volumes(self) -> frozenset[str]:
+        try:
+            completed = subprocess.run(
+                (self._base[0], "volume", "ls", "-q"),
+                cwd=self._cwd,
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.DEVNULL,
+                text=True,
+                timeout=60,
+                check=False,
+            )
+        except (OSError, subprocess.TimeoutExpired):
+            return frozenset()
+        if completed.returncode != 0:
+            return frozenset()
+        return frozenset(line.strip() for line in completed.stdout.splitlines() if line.strip())
+
+    def _drop_added_anonymous_volumes(self, env: Mapping[str, str]) -> None:
+        """Remove the unnamed volumes this run added, and only those.
+
+        A name of the project's own choosing is the cache and must survive. An
+        anonymous one is a service's scratch space, and leaving it behind on
+        every retained run leaks a volume per run. Volumes present before the
+        stack came up are somebody else's and are never touched.
+        """
+
+        added = self._volumes() - self._preexisting_volumes
+        for name in sorted(added):
+            if not _ANONYMOUS_VOLUME.fullmatch(name):
+                continue
+            self._run((self._base[0], "volume", "rm", name), env=env, check=False)
 
     def _run(
         self,

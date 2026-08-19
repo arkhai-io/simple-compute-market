@@ -355,6 +355,35 @@ def test_a_run_does_not_inherit_the_previous_run_authority_state(tmp_path) -> No
     assert _teardown_argv(tmp_path)[-3:] == ("down", "--remove-orphans", "--volumes")
 
 
+def test_a_retained_run_drops_only_the_anonymous_volumes_it_added(tmp_path) -> None:
+    """The cache is a named volume; a service's scratch space is not.
+
+    Sparing the named volume also spares every anonymous one, which leaks a
+    volume per run. Only volumes this run added are removed, and only the
+    unnamed ones — anything that predates the stack belongs to somebody else.
+    """
+
+    from src.hosted_real_stripe.runtime import ComposeStack
+
+    mine = "f" * 64
+    theirs = "a" * 64
+    stack = ComposeStack(
+        compose_env=tmp_path / "compose.env",
+        compose_files=(tmp_path / "compose.yml",),
+        cwd=tmp_path,
+        retain_authority_state=True,
+    )
+    stack._preexisting_volumes = frozenset({theirs})  # type: ignore[assignment]
+    stack._volumes = lambda: frozenset({theirs, mine, "vms_hosted-settlement-data"})  # type: ignore[method-assign]
+    recorded: list[tuple[str, ...]] = []
+    stack._run = lambda argv, **_kwargs: recorded.append(tuple(argv))  # type: ignore[method-assign]
+
+    stack.stop()
+
+    removals = [argv for argv in recorded if "rm" in argv]
+    assert removals == [("docker", "volume", "rm", mine)]
+
+
 def test_a_development_run_may_keep_the_payer_fixture_it_paid_for(tmp_path) -> None:
     """The setup page is the one step a saved-instrument lane cannot automate.
 

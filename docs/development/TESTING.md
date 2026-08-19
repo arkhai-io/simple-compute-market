@@ -638,6 +638,12 @@ the same `--directory`:
 
 A protected run refuses the flag. Evidence has to come from an authority that
 remembers nothing.
+
+The cache is one named volume, so any later run *without* the flag destroys it
+and the next saved-instrument lane pays for the setup page again. Keep the flag
+on for the whole series of runs that share a fixture. Anonymous volumes the
+services bring with them are still removed on every retained teardown, so a
+long series does not leak storage.
 - Browsers for the interactive lanes: `uv run --project e2e-tests --extra
   stripe-test playwright install chromium`.
 - The locally built consumer image (`arkhai:storefront`) and the released hosted
