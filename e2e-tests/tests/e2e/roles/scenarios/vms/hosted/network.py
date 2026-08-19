@@ -665,7 +665,12 @@ class NetworkMarketplacePort:
                     raise
                 time.sleep(min(0.5, max(0.0, deadline - time.monotonic())))
                 continue
-            if status.get("status") in {"ready", "collected", "reclaimed"}:
+            # "funded" is authoritative funding with fulfillment not yet begun,
+            # which is the whole subject of this wait -- and the only state a
+            # reclaim lane ever reaches, since it holds fulfillment back on
+            # purpose. The later states are accepted because a collection lane
+            # fulfils inline on the poll that first sees funding.
+            if status.get("status") in {"funded", "ready", "collected", "reclaimed"}:
                 if self._stripe_test_case == "refund":
                     self._reconcile_refund_materialization(settlement_ref)
                 return True

@@ -598,6 +598,20 @@ surface only after a release.
   fails at payer setup with `chromium_unavailable`. That is the provider
   responding to automation, not a defect, and it is not something to work
   around — wait, and run the interactive lanes sparingly.
+
+  Which lanes those are is decided by whether the profile drives a
+  Stripe-hosted page, not by the `interaction` argument:
+
+  | Funding profile | Payer action | Automatable |
+  | --- | --- | --- |
+  | `us_bank_transfer.v1` | `bank_instructions`, funded through the cash-balance test helper | yes, headless throughout |
+  | `card.v1` | hosted Checkout | only until hCaptcha appears |
+  | `us_ach_debit.v1` | hosted Checkout via Financial Connections | no — the page presents no manual routing/account fields |
+
+  A `us_bank_transfer.v1` run must quote the payer reference Stripe issues with
+  the funding instructions when it funds the test cash balance. Funding without
+  it simulates an unreferenced deposit, and the authority is right to open an
+  attribution incident against it.
 - Browsers for the interactive lanes: `uv run --project e2e-tests --extra
   stripe-test playwright install chromium`.
 - The locally built consumer image (`arkhai:storefront`) and the released hosted

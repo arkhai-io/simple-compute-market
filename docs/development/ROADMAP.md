@@ -274,29 +274,42 @@ activation still requires role-scoped credentials and readiness for each
 selected Stripe account, rail, instrument or mandate, browser action, webhook,
 and condition resolver; local provider fixtures cannot establish those claims.
 
-The protected three-profile provider matrix is not complete, but its blocker
-has moved. Three signed card runs reached the real ready connected account and
-verified loopback webhook, then reported `payer_profile_unavailable` — a code
-with nothing behind it, because every layer that classified a failure discarded
-the cause. The body is now runnable outside a protected run and a development
-run may read that cause, so the code resolved: the staged marketplace
-subprocess caught every startup failure and exited silently.
+**One VM hosted lane now completes end to end.** A development
+`us_bank_transfer.v1` collection run against the real Stripe test account
+carries an accepted obligation through authoritative funding, VM provisioning,
+portable condition evidence, and collection, with exactly one PaymentIntent,
+charge, and transfer, matching amount, currency, destination, transfer group,
+and operation metadata. That is the first VM hosted lane to reach a terminal
+collected state; a development run still qualifies nothing.
 
-With the cause visible, one interactive `card.v1` lane against the real test
-account passed payer profile and browser consent and stopped at funding
-authorization with no settlement identity. That resolved in turn: the released
-authority refuses every escrow a storefront opens while its storefront caller
-allowlist is unset, and nothing ever set it. The lane now materializes a real
-escrow and stops at buyer status polling, which refuses the storefront's
-response authentication.
+Getting there resolved seven defects, each of which had been hiding the next.
+Three were consumer-side blindness — a staged subprocess that swallowed every
+startup failure, a rejection path that discarded the authority's error code,
+and a refusal that named the shape it wanted rather than the answer it got.
+Four were real:
 
-A refusal is no longer silent either way. A non-retryable authority rejection
-keeps the authority's own error code, and when the authority names nothing the
-marketplace names the refusal itself, so an obligation parked for a human to
-repair always says why. The next qualification work is that response
-authentication, then saved-card/off-session fallback, bank-transfer, ACH
-success/failure/return, collection/reclaim, restart, and loss cases under a
-protected run. A development run qualifies no lane.
+- bodyless routes (`GET /api/v1/settlements/{ref}`, reclaim) authorized against
+  a JSON `null` instead of the empty body the buyer signs, so every status poll
+  was refused — and refused unsigned, before the response-signing wrapper;
+- the adapter read the authority's `attribution_underpaid` incident as an
+  operator condition, but it is raised on the first retrieval of *every* push
+  transfer, before money can have arrived, so every bank deal parked
+  permanently;
+- a hosted deal had no storefront escrow row, which VM provisioning, lease
+  registration, and terminal lease truncation all read the deal through; adding
+  it then exposed two more — the chain convergence sweep adopting hosted deals
+  it has no reservation for, and a 30-second operation lease expiring inside an
+  hour-long provisioning attempt, each handing one deal to two racing workers;
+- the portable resolver was pointed at the key that signed the release rather
+  than the authority's own runtime identity, so the authority refused its own
+  attestation lookup and the condition came back `manual_required`.
+
+The remaining VM hosted work is qualification under a protected run, plus two
+lanes blocked at Stripe's hosted Checkout page rather than by marketplace code:
+`card.v1` behind hCaptcha, and `us_ach_debit.v1` behind Financial Connections,
+whose page presents no manual routing/account fields at all. Those two are
+hosted-page lanes and belong on that side of any CI split; the push-transfer
+profile is headless throughout.
 
 API-credit and bare-metal are separate adopters of the shared hosted transport,
 route service, configuration registry, and settlement runtime; neither imports
