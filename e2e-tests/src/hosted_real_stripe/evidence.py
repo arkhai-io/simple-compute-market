@@ -335,6 +335,33 @@ def verify_evidence_signature(
         raise EvidenceValidationError("marketplace evidence signature verification failed")
 
 
+def _validate_attested_consumer(marketplace: MarketplaceIdentityEvidence) -> None:
+    """Everything a qualifying report has always had to prove about its consumer.
+
+    Reached only for evidence claiming attestation, so a development run cannot
+    be dressed up as one and an attested run loses nothing.
+    """
+
+    if not marketplace.workflow_run_id.isdigit() or not _WORKFLOW_REF.fullmatch(
+        marketplace.workflow_ref
+    ):
+        raise EvidenceValidationError("consumer, hosted release, and run identities must be exact")
+    for digest in (
+        marketplace.manifest_sha256,
+        marketplace.image_digest,
+        marketplace.wheelhouse_sha256,
+        marketplace.settlement_config_schema_sha256,
+        marketplace.provenance_sha256,
+    ):
+        if not _DIGEST.fullmatch(digest):
+            raise EvidenceValidationError("release identities must be exact sha256 digests")
+    image = _IMAGE.fullmatch(marketplace.image)
+    if image is None or image.group("digest") != marketplace.image_digest:
+        raise EvidenceValidationError(
+            "marketplace evidence must name the activated immutable consumer image"
+        )
+
+
 def _validate_evidence(report: StripeTestEvidence) -> dict[str, object]:
     payload = asdict(report)
     if report.schema != SCHEMA_ID or report.lane != "stripe-test":
@@ -342,11 +369,11 @@ def _validate_evidence(report: StripeTestEvidence) -> dict[str, object]:
     identities = report.identities
     marketplace = identities.marketplace
     hosted = identities.hosted_release
+    # The producer is a released one in every mode, and the working tree's own
+    # commit is always a real commit, so these hold for a development run too.
     if (
         marketplace.repository != "arkhai-io/simple-compute-market"
         or not _COMMIT.fullmatch(marketplace.commit)
-        or not marketplace.workflow_run_id.isdigit()
-        or not _WORKFLOW_REF.fullmatch(marketplace.workflow_ref)
         or hosted.repository != "arkhai-io/stripe-settlement-service"
         or not _COMMIT.fullmatch(hosted.source_commit)
         or not hosted.workflow_run_id.isdigit()
@@ -356,22 +383,16 @@ def _validate_evidence(report: StripeTestEvidence) -> dict[str, object]:
     ):
         raise EvidenceValidationError("consumer, hosted release, and run identities must be exact")
     for digest in (
-        marketplace.manifest_sha256,
-        marketplace.image_digest,
-        marketplace.wheelhouse_sha256,
-        marketplace.settlement_config_schema_sha256,
-        marketplace.provenance_sha256,
         hosted.manifest_sha256,
         hosted.client_wheel_sha256,
         hosted.image_digest,
     ):
         if not _DIGEST.fullmatch(digest):
             raise EvidenceValidationError("release identities must be exact sha256 digests")
-    image = _IMAGE.fullmatch(marketplace.image)
-    if image is None or image.group("digest") != marketplace.image_digest:
-        raise EvidenceValidationError(
-            "marketplace evidence must name the activated immutable consumer image"
-        )
+    if identities.release_mode == "attested":
+        _validate_attested_consumer(marketplace)
+    elif not marketplace.image:
+        raise EvidenceValidationError("a development run must name the consumer image it ran")
     _validate_funding(report)
     if report.operation_ref is not None:
         _validate_operation_ref(report.operation_ref)

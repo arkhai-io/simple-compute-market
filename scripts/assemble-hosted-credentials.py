@@ -80,6 +80,75 @@ def _identifier(scheme: str, credential: str) -> str:
     return create_signer(scheme, credential).identity.identifier
 
 
+#: Identities the storefront configuration pins that a local run must own. Each
+#: is generated in the scheme the template declares for it, and the template is
+#: rewritten to the generated public identity -- the broker's equivalent is
+#: holding the private keys that match a committed configuration.
+_CONFIG_ROLES = (
+    ("storefront_identity_credential", ("Identity", "principal")),
+    ("provisioning_identity_credential", ("provisioning", "identity")),
+    ("registry_a_identity_credential", ("registry", "authorities", 0)),
+    ("registry_b_identity_credential", ("registry", "authorities", 1)),
+)
+
+
+def _template_principal(document: dict, path: tuple) -> tuple[str, str]:
+    """Read one pinned (scheme, identifier) out of the storefront template."""
+
+    if path == ("Identity", "principal"):
+        node = document["Identity"]["principal"]
+        return str(node["scheme"]), str(node["identifier"])
+    if path == ("provisioning", "identity"):
+        node = document["provisioning"]["identity"]["principals"][0]
+        return str(node["scheme"]), str(node["identifier"])
+    authorities = document["registry"]["authorities"]
+    urls = list(document["registry"]["urls"])
+    node = authorities[urls[path[2]]]["principals"][0]
+    return str(node["scheme"]), str(node["identifier"])
+
+
+def derive_storefront_config(
+    template_text: str,
+    *,
+    authority_scheme: str,
+    authority_credential: str,
+) -> tuple[str, dict[str, str]]:
+    """Rewrite the pinned identities to keys this run actually holds.
+
+    Returns the rewritten configuration and the credentials generated for it.
+    Replacement is by exact identifier string, so everything else in the
+    operator's template survives untouched.
+    """
+
+    import tomllib
+
+    document = tomllib.loads(template_text)
+    credentials: dict[str, str] = {}
+    replacements: list[tuple[str, str]] = []
+    for role, path in _CONFIG_ROLES:
+        scheme, existing = _template_principal(document, path)
+        credential = _credential(scheme)
+        credentials[role] = credential
+        replacements.append((existing, _identifier(scheme, credential)))
+    # The storefront trusts the authority whose responses it verifies, which is
+    # the runtime authority this run generates rather than a released one.
+    settlement_authority = document["Settlement"]["stripe"]["authority"]["principals"][0]
+    replacements.append(
+        (
+            str(settlement_authority["identifier"]),
+            _identifier(authority_scheme, authority_credential),
+        )
+    )
+    rewritten = template_text
+    for existing, generated in replacements:
+        if existing not in rewritten:
+            raise CredentialAssemblyError(
+                "storefront template does not contain a pinned identity it declares"
+            )
+        rewritten = rewritten.replace(existing, generated)
+    return rewritten, credentials
+
+
 def assemble_payload(
     *,
     provider_path: Path,
@@ -89,11 +158,33 @@ def assemble_payload(
     expires_in_seconds: int = 3600,
     now_unix: int,
     authority_env: dict[str, str] | None = None,
-) -> dict[str, Any]:
-    """Build the documented payload from local inputs alone."""
+    storefront_config_template: Path | None = None,
+) -> tuple[dict[str, Any], str | None]:
+    """Build the documented payload, and the configuration it is consistent with.
+
+    Returns the payload and, when a storefront template is supplied, the
+    rewritten configuration whose pinned identities this run holds the keys for.
+    """
 
     provider = _provider_values(provider_path)
     evidence_credential = _credential(scheme)
+    # The hosted authority signs with its own key, which the harness requires to
+    # be independent of the release authority. Generated here so a development
+    # run needs nothing beyond the operator's provider file.
+    authority_credential = _credential(scheme)
+    base_authority_env = {
+        "HOSTED_SETTLEMENT_AUTHORITY_ID": authority_environment,
+        "HOSTED_SETTLEMENT_AUTHORITY_IDENTITY_SCHEME": scheme,
+        "HOSTED_SETTLEMENT_AUTHORITY_PRIVATE_KEY": authority_credential,
+    }
+    derived_config: str | None = None
+    config_credentials: dict[str, str] = {}
+    if storefront_config_template is not None:
+        derived_config, config_credentials = derive_storefront_config(
+            storefront_config_template.read_text(encoding="utf-8"),
+            authority_scheme=scheme,
+            authority_credential=authority_credential,
+        )
     payload: dict[str, Any] = {
         "expires_at_unix": now_unix + expires_in_seconds,
         **provider,
@@ -104,19 +195,21 @@ def assemble_payload(
         "registry_read_token": "",
         "buyer_identity_credential": _credential(scheme),
         "buyer_identity_scheme": scheme,
-        "storefront_identity_credential": _credential(scheme),
+        "storefront_identity_credential": config_credentials.get("storefront_identity_credential") or _credential(scheme),
         "admin_identity_credential": _credential(scheme),
         "evidence_signer_credential": evidence_credential,
         "evidence_signer_scheme": scheme,
         "evidence_signer_identifier": _identifier(scheme, evidence_credential),
-        "registry_a_identity_credential": _credential(scheme),
-        "registry_b_identity_credential": _credential(scheme),
-        "provisioning_identity_credential": _credential(scheme),
+        "registry_a_identity_credential": config_credentials.get("registry_a_identity_credential") or _credential(scheme),
+        "registry_b_identity_credential": config_credentials.get("registry_b_identity_credential") or _credential(scheme),
+        "provisioning_identity_credential": config_credentials.get("provisioning_identity_credential") or _credential(scheme),
         "registry_admin_api_key": secrets.token_urlsafe(32),
         "registry_bootstrap_api_key": secrets.token_urlsafe(32),
-        "authority_env": dict(authority_env or {}),
+        # Operator-supplied entries win, so a real authority environment can
+        # replace the generated identity wholesale.
+        "authority_env": {**base_authority_env, **dict(authority_env or {})},
     }
-    return payload
+    return payload, derived_config
 
 
 def _write_private(path: Path, text: str) -> None:
@@ -124,7 +217,11 @@ def _write_private(path: Path, text: str) -> None:
     path.chmod(stat.S_IRUSR | stat.S_IWUSR)
 
 
-def materialize(payload: dict[str, Any], directory: Path) -> dict[str, str]:
+def materialize(
+    payload: dict[str, Any],
+    directory: Path,
+    derived_config: str | None = None,
+) -> dict[str, str]:
     """Write the files and return the environment the harness expects.
 
     Same layout the workflow builds from a brokered payload, so the driver
@@ -149,7 +246,13 @@ def materialize(payload: dict[str, Any], directory: Path) -> dict[str, str]:
         f"ARKHAI_IDENTITY_CREDENTIAL={payload['storefront_identity_credential']}\n",
     )
     _write_private(directory / "storefront.secrets.toml", "")
+    storefront_config: dict[str, str] = {}
+    if derived_config is not None:
+        config_path = directory / "storefront.toml"
+        _write_private(config_path, derived_config)
+        storefront_config["HOSTED_STRIPE_TEST_STOREFRONT_CONFIG"] = str(config_path)
     return {
+        **storefront_config,
         "STRIPE_SECRET_KEY": payload["stripe_restricted_key"],
         "STRIPE_CONNECTED_ACCOUNT_ID": payload["connected_account_id"],
         "HOSTED_SETTLEMENT_E2E_BUYER_IDENTITY_CREDENTIAL": payload[
@@ -190,6 +293,11 @@ def main() -> int:
     parser.add_argument("--account-ref", default="hosted-stripe-test-local")
     parser.add_argument("--authority-environment", default="hosted-stripe-test-local")
     parser.add_argument(
+        "--storefront-config-template",
+        type=Path,
+        help="Storefront configuration whose pinned identities this run adopts.",
+    )
+    parser.add_argument(
         "--authority-env",
         type=Path,
         help="Optional base environment for the hosted authority.",
@@ -209,7 +317,8 @@ def main() -> int:
                 key, _, value = stripped.partition("=")
                 authority_env[key.strip()] = value.strip()
     try:
-        payload = assemble_payload(
+        payload, derived_config = assemble_payload(
+            storefront_config_template=args.storefront_config_template,
             provider_path=args.provider_file,
             scheme=args.scheme,
             account_ref=args.account_ref,
@@ -217,7 +326,7 @@ def main() -> int:
             now_unix=int(os.environ.get("HOSTED_CREDENTIAL_NOW_UNIX") or _now()),
             authority_env=authority_env,
         )
-        environment = materialize(payload, args.directory)
+        environment = materialize(payload, args.directory, derived_config)
     except CredentialAssemblyError as exc:
         parser.error(str(exc))
     if args.print_env:

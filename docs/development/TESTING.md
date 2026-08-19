@@ -507,3 +507,75 @@ review environment can use the wheelhouse's declared Python version.
 `REVIEW_SCOPE_FILE`, or `BASE_REF`), which rebuilds wheels, refreshes
 scoped lockfiles (`scripts/refresh-review-locks.py`), and bundles the
 result via `scripts/package-review-wheelhouse.sh`.
+
+## Running the hosted Stripe body locally
+
+The protected matrix and the mechanical body it drives are separate concerns.
+The body — compose stack, Stripe test-mode calls, webhook forwarding, browser
+interaction, lifecycle assertions — runs on a developer machine against your own
+branch. Only its *evidence* depends on release provenance.
+
+A local run needs no attested release, no credential broker, and no self-hosted
+runner. It does still refuse live credentials, an unready connected account, and
+any webhook destination that is not loopback: those gates hold in every mode.
+
+```sh
+# 1. Assemble what a credential broker would otherwise return: provider
+#    credentials from your own file, identities generated for this run, and a
+#    storefront configuration whose pinned identities those keys own.
+rundir="$(mktemp -d)"
+eval "$(uv run --no-project --with arkhai-kit-identity --find-links .dist \
+  python scripts/assemble-hosted-credentials.py \
+  --provider-file ~/.config/arkhai/stripe-test.env \
+  --storefront-config-template e2e-tests/config/hosted-storefront.toml \
+  --directory "$rundir" --print)"
+
+# 2. Producer identities: five come from the signed trust manifest; the run id
+#    comes from the producer repo's release run for that tag.
+export HOSTED_PRODUCTION_MANIFEST_SHA256=sha256:... \
+       HOSTED_PRODUCTION_CLIENT_WHEEL_SHA256=sha256:... \
+       HOSTED_PRODUCTION_IMAGE_DIGEST=sha256:... \
+       HOSTED_PRODUCTION_SOURCE_COMMIT=... \
+       HOSTED_PRODUCTION_WORKFLOW_REF=... \
+       HOSTED_PRODUCTION_WORKFLOW_RUN_ID=...
+
+# 3. Pick a lane and run.
+export HOSTED_STRIPE_TEST_SCENARIO=collection \
+       HOSTED_STRIPE_TEST_FUNDING_PROFILE=card.v1 \
+       HOSTED_STRIPE_TEST_INTERACTION=interactive \
+       HOSTED_STRIPE_TEST_RUN_REF="local-$(git rev-parse --short HEAD)"
+make hosted-stripe-test-local
+```
+
+The provider file defines `STRIPE_SECRET_KEY` (a `sk_test_`/`rk_test_` value) and
+`STRIPE_CONNECTED_ACCOUNT_ID`. Keep it outside the repository.
+
+### Development evidence never qualifies
+
+A local run records `release_mode: local` in its evidence, derived from what it
+actually bound rather than from the flag it was given. No argument produces an
+attested record without an attested release, and a verification task that
+requires protected evidence is not satisfied by a development run — the recorded
+mode is enough to reject the citation without re-inspecting the run.
+
+What a development run *is* good for: reproducing a failure, developing against
+the real provider, and reading a diagnostic that a protected run would otherwise
+surface only after a release.
+
+### Prerequisites
+
+- A container engine reachable as `docker`. With podman, put the shim on PATH
+  for this project (`mise.local.toml` with `_.path = ["~/.config/podman-docker/bin"]`).
+- The Stripe CLI, used to forward webhooks to the loopback authority endpoint.
+- Browsers for the interactive lanes: `uv run --project e2e-tests --extra
+  stripe-test playwright install chromium`.
+- The locally built consumer image (`arkhai:storefront`) and the released hosted
+  service image at the digest the trust manifest pins.
+
+### The credential broker
+
+CI takes its credentials from a broker over GitHub OIDC. No implementation
+exists in this repository; `docs/development/HOSTED_CREDENTIAL_PAYLOAD.md`
+records the payload it must return, and the local assembler produces that same
+shape. A broker written later substitutes for the assembler with no change to
+the body.

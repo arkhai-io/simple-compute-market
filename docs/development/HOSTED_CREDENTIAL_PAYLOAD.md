@@ -37,6 +37,17 @@ A JSON object. Every value is a string unless noted.
 | `registry_bootstrap_api_key` | Registry bootstrap API key. |
 | `authority_env` | Object of `NAME` → value written verbatim as the hosted authority's base environment file. Keys must match `^[A-Z_][A-Z0-9_]*$` and values must contain no newline. |
 
+### `authority_env` minimum
+
+The harness refuses to start an authority that cannot sign as itself, so the
+object must define at least:
+
+| Key | Meaning |
+|---|---|
+| `HOSTED_SETTLEMENT_AUTHORITY_ID` | The authority's own identifier. |
+| `HOSTED_SETTLEMENT_AUTHORITY_IDENTITY_SCHEME` | `eip191` or `ed25519`. |
+| `HOSTED_SETTLEMENT_AUTHORITY_PRIVATE_KEY` | Its signing credential, which **must** be independent of the release authority's key — the harness rejects reuse. |
+
 ## Credential encoding
 
 A credential is the raw private key for its scheme:

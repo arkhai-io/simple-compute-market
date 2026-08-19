@@ -16,6 +16,8 @@ HOSTED_COMPOSE_ENV ?= $(DIST_DIR)/hosted-settlement-compose.env
 # The locally built consumer a development stack runs in place of an
 # attested release image.
 HOSTED_LOCAL_MARKETPLACE_IMAGE ?= arkhai:storefront
+# Written by the local credential assembly, whose generated keys it pins.
+HOSTED_STRIPE_TEST_STOREFRONT_CONFIG ?= e2e-tests/config/hosted-storefront.toml
 HOSTED_MARKETPLACE_RELEASE_DIR ?= $(DIST_DIR)/marketplace-release
 HOSTED_MARKETPLACE_RELEASE_MANIFEST ?= $(HOSTED_MARKETPLACE_RELEASE_DIR)/marketplace-release-manifest.json
 HOSTED_PRODUCTION_MANIFEST_SHA256 ?=
@@ -196,7 +198,9 @@ hosted-stripe-test-local: hosted-preflight-local ## Run one development scenario
 	@test -n "$(HOSTED_STRIPE_TEST_AUTHORITY_ENVIRONMENT)" || { echo "ERROR: missing HOSTED_STRIPE_TEST_AUTHORITY_ENVIRONMENT"; exit 1; }
 	@test -f "$(HOSTED_STRIPE_TEST_AUTHORITY_ENV_FILE)" || { echo "ERROR: missing HOSTED_STRIPE_TEST_AUTHORITY_ENV_FILE"; exit 1; }
 	@echo "NOTE: a development run; its evidence never qualifies as protected evidence."
-	uv run --project e2e-tests --extra stripe-test --find-links "$(DIST_DIR)" \
+	# --frozen: a run must not re-resolve dependencies, and an absolute
+	# --find-links would otherwise rewrite the project lock on every run.
+	uv run --frozen --project e2e-tests --extra stripe-test --find-links "$(DIST_DIR)" \
 		python -m src.hosted_real_stripe.driver \
 		--compose-env "$(HOSTED_COMPOSE_ENV)" \
 		--release-mode local \
@@ -214,6 +218,7 @@ hosted-stripe-test-local: hosted-preflight-local ## Run one development scenario
 		--account-ref "$(HOSTED_STRIPE_TEST_ACCOUNT_REF)" \
 		--authority-environment "$(HOSTED_STRIPE_TEST_AUTHORITY_ENVIRONMENT)" \
 		--hosted-service-env-base "$(HOSTED_STRIPE_TEST_AUTHORITY_ENV_FILE)" \
+		--storefront-config "$(HOSTED_STRIPE_TEST_STOREFRONT_CONFIG)" \
 		--evidence "$(HOSTED_STRIPE_TEST_EVIDENCE)"
 
 hosted-compose-up: hosted-preflight ## Start or converge the production stack without deleting authority state.
@@ -284,7 +289,9 @@ hosted-stripe-test: hosted-preflight ## Run one protected Stripe test-mode syste
 	@test -n "$(HOSTED_STRIPE_TEST_ACCOUNT_REF)" || { echo "ERROR: missing HOSTED_STRIPE_TEST_ACCOUNT_REF"; exit 1; }
 	@test -n "$(HOSTED_STRIPE_TEST_AUTHORITY_ENVIRONMENT)" || { echo "ERROR: missing HOSTED_STRIPE_TEST_AUTHORITY_ENVIRONMENT"; exit 1; }
 	@test -f "$(HOSTED_STRIPE_TEST_AUTHORITY_ENV_FILE)" || { echo "ERROR: missing HOSTED_STRIPE_TEST_AUTHORITY_ENV_FILE"; exit 1; }
-	uv run --project e2e-tests --extra stripe-test --find-links "$(DIST_DIR)" \
+	# --frozen: a run must not re-resolve dependencies, and an absolute
+	# --find-links would otherwise rewrite the project lock on every run.
+	uv run --frozen --project e2e-tests --extra stripe-test --find-links "$(DIST_DIR)" \
 		python -m src.hosted_real_stripe.driver \
 		--compose-env "$(HOSTED_COMPOSE_ENV)" \
 		--hosted-manifest-sha256 "$(HOSTED_PRODUCTION_MANIFEST_SHA256)" \

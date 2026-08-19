@@ -70,7 +70,7 @@
       — the diagnostic `add-bare-metal-hosted-settlement` has been unable to
       obtain. Disclose the result there rather than resolving that change's
       blocked task from a development run.
-- [ ] 4.2 Permanent docs: record in `docs/development/TESTING.md` how to run the
+- [x] 4.2 Permanent docs: record in `docs/development/TESTING.md` how to run the
       body locally, and that development evidence never qualifies.
 - [ ] 4.3 Closeout: hygiene clean, strict validation, ROADMAP updated if the
       hosted-settlement gap rows change shape.

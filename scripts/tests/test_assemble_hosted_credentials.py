@@ -59,7 +59,8 @@ def _payload(tmp_path: Path, **overrides):
         "authority_env": {"HOSTED_SETTLEMENT_DATABASE_URL": "sqlite:///authority.db"},
     }
     arguments.update(overrides)
-    return assembler.assemble_payload(**arguments)
+    payload, _ = assembler.assemble_payload(**arguments)
+    return payload
 
 
 def test_the_payload_has_exactly_the_shape_the_workflow_consumes(tmp_path) -> None:
@@ -126,6 +127,43 @@ def test_live_and_malformed_provider_credentials_are_refused(tmp_path) -> None:
         _payload(tmp_path, provider_path=missing_account)
 
 
+def test_the_authority_can_sign_as_itself(tmp_path) -> None:
+    """The harness refuses an authority with no independent identity."""
+
+    from market_identity import create_signer
+
+    payload = _payload(tmp_path, authority_env=None)
+    authority = payload["authority_env"]
+
+    assert authority["HOSTED_SETTLEMENT_AUTHORITY_ID"]
+    assert authority["HOSTED_SETTLEMENT_AUTHORITY_IDENTITY_SCHEME"] in {
+        "eip191",
+        "ed25519",
+    }
+    create_signer(
+        authority["HOSTED_SETTLEMENT_AUTHORITY_IDENTITY_SCHEME"],
+        authority["HOSTED_SETTLEMENT_AUTHORITY_PRIVATE_KEY"],
+    )
+    # Independent of every other role it is issued alongside.
+    assert authority["HOSTED_SETTLEMENT_AUTHORITY_PRIVATE_KEY"] not in {
+        payload["evidence_signer_credential"],
+        payload["buyer_identity_credential"],
+        payload["storefront_identity_credential"],
+    }
+
+
+def test_an_operator_authority_environment_wins(tmp_path) -> None:
+    payload = _payload(
+        tmp_path,
+        authority_env={"HOSTED_SETTLEMENT_AUTHORITY_ID": "operator-authority"},
+    )
+
+    assert payload["authority_env"]["HOSTED_SETTLEMENT_AUTHORITY_ID"] == (
+        "operator-authority"
+    )
+    assert payload["authority_env"]["HOSTED_SETTLEMENT_AUTHORITY_PRIVATE_KEY"]
+
+
 def test_materialized_layout_matches_what_the_driver_is_handed(tmp_path) -> None:
     payload = _payload(tmp_path)
     directory = tmp_path / "run"
@@ -137,8 +175,7 @@ def test_materialized_layout_matches_what_the_driver_is_handed(tmp_path) -> None
         Path(environment["HOSTED_STRIPE_TEST_AUTHORITY_ENV_FILE"]).read_text(
             encoding="utf-8"
         )
-        == "HOSTED_SETTLEMENT_DATABASE_URL=sqlite:///authority.db\n"
-    )
+    ).splitlines()[0].startswith("HOSTED_SETTLEMENT_AUTHORITY_ID=")
     for name in (
         "VMS_REGISTRY_IDENTITY_CREDENTIAL_FILE",
         "VMS_REGISTRY_B_IDENTITY_CREDENTIAL_FILE",
@@ -180,3 +217,63 @@ def test_no_provider_credential_reaches_the_repository(tmp_path) -> None:
     )
     assert payload["stripe_restricted_key"] not in written
     assert payload["connected_account_id"] not in written
+
+
+def test_the_derived_config_pins_identities_this_run_holds(tmp_path) -> None:
+    """A local run owns the keys its storefront configuration names."""
+
+    import tomllib
+
+    from market_identity import create_signer
+
+    template = Path("e2e-tests/config/hosted-storefront.toml").read_text(encoding="utf-8")
+    template_path = tmp_path / "template.toml"
+    template_path.write_text(template, encoding="utf-8")
+
+    payload, derived = assembler.assemble_payload(
+        provider_path=_provider_file(tmp_path),
+        now_unix=1_700_000_000,
+        storefront_config_template=template_path,
+    )
+    document = tomllib.loads(derived)
+
+    storefront = create_signer(
+        document["Identity"]["principal"]["scheme"],
+        payload["storefront_identity_credential"],
+    )
+    assert storefront.identity.identifier == (
+        document["Identity"]["principal"]["identifier"]
+    )
+    provisioning_pin = document["provisioning"]["identity"]["principals"][0]
+    provisioning = create_signer(
+        provisioning_pin["scheme"], payload["provisioning_identity_credential"]
+    )
+    assert provisioning.identity.identifier == provisioning_pin["identifier"]
+    authority_pin = document["Settlement"]["stripe"]["authority"]["principals"][0]
+    authority = create_signer(
+        payload["authority_env"]["HOSTED_SETTLEMENT_AUTHORITY_IDENTITY_SCHEME"],
+        payload["authority_env"]["HOSTED_SETTLEMENT_AUTHORITY_PRIVATE_KEY"],
+    )
+    assert authority.identity.identifier == authority_pin["identifier"]
+    # Everything the operator wrote that is not an identity survives.
+    assert document["agent_id"] == "bob"
+    assert document["Settlement"]["priority"] == ["fiat.stripe.v1"]
+
+
+def test_the_derived_config_is_written_and_pointed_at(tmp_path) -> None:
+    template_path = tmp_path / "template.toml"
+    template_path.write_text(
+        Path("e2e-tests/config/hosted-storefront.toml").read_text(encoding="utf-8"),
+        encoding="utf-8",
+    )
+    payload, derived = assembler.assemble_payload(
+        provider_path=_provider_file(tmp_path),
+        now_unix=1_700_000_000,
+        storefront_config_template=template_path,
+    )
+
+    environment = assembler.materialize(payload, tmp_path / "run", derived)
+
+    written = Path(environment["HOSTED_STRIPE_TEST_STOREFRONT_CONFIG"])
+    assert written.is_file()
+    assert written.read_text(encoding="utf-8") == derived
