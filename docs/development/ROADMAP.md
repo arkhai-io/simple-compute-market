@@ -274,21 +274,22 @@ activation still requires role-scoped credentials and readiness for each
 selected Stripe account, rail, instrument or mandate, browser action, webhook,
 and condition resolver; local provider fixtures cannot establish those claims.
 
-The protected three-profile provider matrix is not complete. Three signed card
-runs reached the real ready connected account and verified loopback webhook,
-then reported `payer_profile_unavailable`. That diagnostic means the protected
-marketplace lifecycle subprocess exited while constructing the buyer-side payer
-fixture—loading the ephemeral durable buyer profile, creating or reusing the
-authority-scoped hosted payer profile through the released client, and
-persisting its opaque binding—before it returned a successful fixture result.
-It is not a Stripe funding decline and no payment was attempted. The current
-sanitized report intentionally discards child stderr, so it does not yet
-distinguish profile-store/signing/configuration failure from a released-client
-or hosted-authority rejection. The next qualification work is to add an
-allowlisted stage-specific initialization diagnostic, rerun one interactive
-card collection lane to identify and correct the exact prerequisite, then run
+The protected three-profile provider matrix is not complete, but its blocker
+has moved. Three signed card runs reached the real ready connected account and
+verified loopback webhook, then reported `payer_profile_unavailable` — a code
+with nothing behind it, because every layer that classified a failure discarded
+the cause. The body is now runnable outside a protected run and a development
+run may read that cause, so the code resolved: the staged marketplace
+subprocess caught every startup failure and exited silently.
+
+With the cause visible, one interactive `card.v1` lane against the real test
+account passes payer profile and browser consent and stops later, at funding
+authorization, where hosted materialization returns no settlement identity.
+That is a marketplace-side defect rather than a diagnosis problem, and it is
+the next qualification work: correct the missing settlement identity, then run
 saved-card/off-session fallback, bank-transfer, ACH success/failure/return,
-collection/reclaim, restart, and loss cases.
+collection/reclaim, restart, and loss cases under a protected run. A
+development run qualifies no lane.
 
 API-credit and bare-metal are separate adopters of the shared hosted transport,
 route service, configuration registry, and settlement runtime; neither imports
@@ -300,7 +301,7 @@ has proved authoritative Stripe funding and collection, portable condition
 evidence, authenticated SSH access, key revocation and failed subsequent
 access, teardown, Capacity Reservation release, and capacity republication.
 Card, ACH, automatic-fallback, and failure/recovery whole-host lanes remain
-unqualified until the protected payer-profile blocker and remaining provider
+unqualified until the missing settlement identity and the remaining provider
 matrix are resolved.
 
 ---
