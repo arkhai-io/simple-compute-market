@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import base64
 import importlib.util
 import json
 import stat
@@ -150,6 +151,22 @@ def test_the_authority_can_sign_as_itself(tmp_path) -> None:
         payload["buyer_identity_credential"],
         payload["storefront_identity_credential"],
     }
+
+
+def test_the_authority_can_encrypt_what_it_stores(tmp_path) -> None:
+    """A missing data-encryption key stops the authority before it starts."""
+
+    payload = _payload(tmp_path, authority_env=None)
+    encoded = payload["authority_env"]["HOSTED_SETTLEMENT_ENCRYPTION_KEYS"]
+    keys = encoded.split(",")
+
+    assert keys
+    for key in keys:
+        # The authority accepts Fernet keys: 32 bytes, urlsafe base64.
+        assert len(base64.urlsafe_b64decode(key.encode("ascii"))) == 32
+    # Never the same key twice, so two runs cannot read each other's data.
+    other = _payload(tmp_path, authority_env=None)
+    assert other["authority_env"]["HOSTED_SETTLEMENT_ENCRYPTION_KEYS"] != encoded
 
 
 def test_an_operator_authority_environment_wins(tmp_path) -> None:

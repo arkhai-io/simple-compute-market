@@ -252,6 +252,7 @@ def run(args: argparse.Namespace) -> tuple[StripeTestEvidence, int]:
                 with EphemeralServiceEnv(
                     api_key=secret,
                     webhook_secret=webhook_secret,
+                    authority_environment=args.authority_environment,
                     manifest_digest=release.hosted_manifest_digest,
                     release_authority_id=release.hosted_authority_id,
                     release_authority_address=release.hosted_authority_address,

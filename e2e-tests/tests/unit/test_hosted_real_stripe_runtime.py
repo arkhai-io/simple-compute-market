@@ -233,6 +233,7 @@ def test_ephemeral_container_inputs_use_shared_directory(
     with EphemeralServiceEnv(
         api_key="sk_test_example",
         webhook_secret="whsec_example",
+        authority_environment="hosted-stripe-test",
         manifest_digest="sha256:" + ("2" * 64),
         release_authority_id="release-authority",
         release_authority_address="0x1fe2aa7fbaf5720f79a22a4ada4b8b37d4e0c008",
@@ -246,6 +247,19 @@ def test_ephemeral_container_inputs_use_shared_directory(
             line.split("=", 1) for line in authority_env.read_text(encoding="utf-8").splitlines()
         )
         assert values["HOSTED_SETTLEMENT_MANIFEST_DIGEST"] == "sha256:" + ("2" * 64)
+        assert values["HOSTED_SETTLEMENT_ENVIRONMENT"] == "hosted-stripe-test"
+        assert (
+            values["HOSTED_SETTLEMENT_DATABASE_PATH"]
+            == "/var/lib/hosted-settlement/hosted-settlement.sqlite3"
+        )
+        callback_urls = [
+            values["HOSTED_SETTLEMENT_CHECKOUT_SUCCESS_URL"],
+            values["HOSTED_SETTLEMENT_CHECKOUT_CANCEL_URL"],
+            values["HOSTED_SETTLEMENT_ACCOUNT_LINK_RETURN_URLS"],
+            values["HOSTED_SETTLEMENT_ACCOUNT_LINK_REFRESH_URLS"],
+        ]
+        # The authority refuses a callback allowlist that repeats a URL.
+        assert len(set(callback_urls)) == len(callback_urls)
         assert (
             values["HOSTED_SETTLEMENT_CHECKOUT_SUCCESS_URL"]
             == "http://127.0.0.1:18081/checkout/success"

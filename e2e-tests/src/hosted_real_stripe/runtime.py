@@ -188,6 +188,7 @@ class EphemeralServiceEnv:
         *,
         api_key: str,
         webhook_secret: str,
+        authority_environment: str,
         manifest_digest: str,
         release_authority_id: str,
         release_authority_address: str,
@@ -203,8 +204,24 @@ class EphemeralServiceEnv:
             "HOSTED_SETTLEMENT_STRIPE_SECRET_KEY": api_key,
             "HOSTED_SETTLEMENT_STRIPE_WEBHOOK_SECRET": webhook_secret,
             "HOSTED_SETTLEMENT_MANIFEST_DIGEST": manifest_digest,
+            # The environment the run pins everywhere else; the authority is
+            # told it here rather than trusted to have been told the same.
+            "HOSTED_SETTLEMENT_ENVIRONMENT": authority_environment,
+            # Fixed by the Compose file's named volume, not by whoever supplied
+            # the credentials, so the harness states it.
+            "HOSTED_SETTLEMENT_DATABASE_PATH": (
+                "/var/lib/hosted-settlement/hosted-settlement.sqlite3"
+            ),
             "HOSTED_SETTLEMENT_CHECKOUT_SUCCESS_URL": "http://127.0.0.1:18081/checkout/success",
             "HOSTED_SETTLEMENT_CHECKOUT_CANCEL_URL": "http://127.0.0.1:18081/checkout/cancel",
+            # Onboarding redirects land on the same loopback storefront. Every
+            # callback URL the authority allows must be distinct.
+            "HOSTED_SETTLEMENT_ACCOUNT_LINK_RETURN_URLS": (
+                "http://127.0.0.1:18081/connect/return"
+            ),
+            "HOSTED_SETTLEMENT_ACCOUNT_LINK_REFRESH_URLS": (
+                "http://127.0.0.1:18081/connect/refresh"
+            ),
             "HOSTED_SETTLEMENT_RELEASE_PATH": "/opt/hosted-settlement/release/release-manifest.json",
             "HOSTED_SETTLEMENT_RELEASE_AUTHORITY_ID": release_authority_id,
             "HOSTED_SETTLEMENT_RELEASE_AUTHORITY_ADDRESS": release_authority_address,

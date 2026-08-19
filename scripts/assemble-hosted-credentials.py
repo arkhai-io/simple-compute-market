@@ -176,6 +176,10 @@ def assemble_payload(
         "HOSTED_SETTLEMENT_AUTHORITY_ID": authority_environment,
         "HOSTED_SETTLEMENT_AUTHORITY_IDENTITY_SCHEME": scheme,
         "HOSTED_SETTLEMENT_AUTHORITY_PRIVATE_KEY": authority_credential,
+        # The authority encrypts stored provider data at rest. A development
+        # run keeps nothing across runs, so a single fresh key is correct;
+        # a real environment rotates and therefore lists more than one.
+        "HOSTED_SETTLEMENT_ENCRYPTION_KEYS": _fernet_key(),
     }
     derived_config: str | None = None
     config_credentials: dict[str, str] = {}
@@ -210,6 +214,12 @@ def assemble_payload(
         "authority_env": {**base_authority_env, **dict(authority_env or {})},
     }
     return payload, derived_config
+
+
+def _fernet_key() -> str:
+    """One data-encryption key in the format the authority accepts."""
+
+    return base64.urlsafe_b64encode(secrets.token_bytes(32)).decode("ascii")
 
 
 def _write_private(path: Path, text: str) -> None:

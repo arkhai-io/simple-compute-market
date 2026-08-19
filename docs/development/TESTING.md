@@ -547,8 +547,10 @@ export HOSTED_STRIPE_TEST_SCENARIO=collection \
 make hosted-stripe-test-local
 ```
 
-The provider file defines `STRIPE_SECRET_KEY` (a `sk_test_`/`rk_test_` value) and
-`STRIPE_CONNECTED_ACCOUNT_ID`. Keep it outside the repository.
+The provider file defines `STRIPE_SECRET_KEY` and `STRIPE_CONNECTED_ACCOUNT_ID`.
+Release v0.2.1 checks the key prefix against its own Stripe mode, so the key must
+be an `sk_test_` value — a restricted `rk_test_` key is refused. Keep the file
+outside the repository.
 
 ### Development evidence never qualifies
 
@@ -566,6 +568,21 @@ surface only after a release.
 
 - A container engine reachable as `docker`. With podman, put the shim on PATH
   for this project (`mise.local.toml` with `_.path = ["~/.config/podman-docker/bin"]`).
+- A registry authentication file with no unusable credential helper in it.
+  Podman consults every `credHelpers` entry in `~/.docker/config.json` when it
+  resolves an image, including ones for registries this stack never touches; a
+  helper whose session has expired (`gcloud`, for instance) makes stack bring-up
+  fail one image at a time with no compose output, which reads as a hang. Either
+  re-authenticate that helper or point the run at a file without it:
+
+  ```sh
+  export REGISTRY_AUTH_FILE="$rundir/auth.json"
+  python -c 'import json,os,pathlib
+  src = json.load(open(os.path.expanduser("~/.docker/config.json")))
+  path = pathlib.Path(os.environ["REGISTRY_AUTH_FILE"])
+  path.write_text(json.dumps({"auths": src.get("auths", {})}))
+  path.chmod(0o600)'
+  ```
 - The Stripe CLI, used to forward webhooks to the loopback authority endpoint.
 - Browsers for the interactive lanes: `uv run --project e2e-tests --extra
   stripe-test playwright install chromium`.

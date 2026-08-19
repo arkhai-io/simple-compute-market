@@ -18,7 +18,7 @@ A JSON object. Every value is a string unless noted.
 | Key | Meaning |
 |---|---|
 | `expires_at_unix` | Integer expiry. The workflow requires it to be in the future and no more than an hour away. |
-| `stripe_restricted_key` | Test-mode provider key. `sk_test_` or, preferably, a least-privilege `rk_test_`. A live key is refused downstream. |
+| `stripe_restricted_key` | Test-mode provider key. Release v0.2.1 requires an `sk_test_` key — it validates the prefix against its own Stripe mode and refuses a restricted `rk_test_` key. A live key is refused downstream. |
 | `connected_account_id` | The allowlisted `acct_…` the scenario transacts against. |
 | `account_ref` | Opaque reference recorded in evidence in place of the account id. |
 | `authority_environment` | Name of the authority environment the run targets. |
@@ -39,14 +39,23 @@ A JSON object. Every value is a string unless noted.
 
 ### `authority_env` minimum
 
-The harness refuses to start an authority that cannot sign as itself, so the
-object must define at least:
+The released authority reads its whole configuration from the environment and
+exits on the first required setting it cannot find. The broker owns the half
+that is a secret or is the environment's own identity:
 
 | Key | Meaning |
 |---|---|
 | `HOSTED_SETTLEMENT_AUTHORITY_ID` | The authority's own identifier. |
 | `HOSTED_SETTLEMENT_AUTHORITY_IDENTITY_SCHEME` | `eip191` or `ed25519`. |
 | `HOSTED_SETTLEMENT_AUTHORITY_PRIVATE_KEY` | Its signing credential, which **must** be independent of the release authority's key — the harness rejects reuse. |
+| `HOSTED_SETTLEMENT_ENCRYPTION_KEYS` | Comma-separated Fernet keys (32 bytes, urlsafe base64) encrypting stored provider data. The first encrypts; the rest decrypt, so a rotation lists the outgoing key too. |
+
+The harness supplies the rest itself, and its values win over the payload's,
+because they are fixed by the topology it builds rather than by whoever issued
+the credentials: `HOSTED_SETTLEMENT_ENVIRONMENT` (the environment the run pins
+everywhere else), `HOSTED_SETTLEMENT_DATABASE_PATH` (inside the Compose named
+volume), and the checkout and account-link callback allowlists, which point at
+the loopback storefront and must not repeat a URL between them.
 
 ## Credential encoding
 
