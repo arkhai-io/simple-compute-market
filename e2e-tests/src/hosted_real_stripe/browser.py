@@ -60,17 +60,22 @@ class ChromiumCheckout:
         timeout_ms: int = 90_000,
         playwright_factory: Callable[[], Any] | None = None,
         retain_diagnostics: bool = False,
+        headless: bool = True,
     ) -> None:
         self._timeout_ms = timeout_ms
         self._playwright_factory = playwright_factory
         self._retain_diagnostics = retain_diagnostics
+        # A headless browser is itself the signal the provider answers with a
+        # CAPTCHA. A development run on a machine with a display may show the
+        # window instead; nothing else about the run changes.
+        self._headless = headless
 
     def require_available(self) -> None:
         factory = self._playwright_factory or _load_playwright
         try:
             with factory() as playwright:
                 browser = playwright.chromium.launch(
-                    headless=True,
+                    headless=self._headless,
                     env=_browser_environment(),
                 )
                 browser.close()
@@ -96,7 +101,7 @@ class ChromiumCheckout:
         try:
             with factory() as playwright:
                 browser = playwright.chromium.launch(
-                    headless=True,
+                    headless=self._headless,
                     env=_browser_environment(),
                 )
                 page: Any | None = None
@@ -193,7 +198,7 @@ class ChromiumCheckout:
         try:
             with factory() as playwright:
                 browser = playwright.chromium.launch(
-                    headless=True,
+                    headless=self._headless,
                     env=_browser_environment(),
                 )
                 try:
@@ -226,7 +231,7 @@ class ChromiumCheckout:
         try:
             with factory() as playwright:
                 browser = playwright.chromium.launch(
-                    headless=True,
+                    headless=self._headless,
                     env=_browser_environment(),
                 )
                 try:

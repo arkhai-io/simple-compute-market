@@ -233,6 +233,7 @@ def run(args: argparse.Namespace) -> tuple[StripeTestEvidence, int]:
         browser = ChromiumCheckout(
             timeout_ms=args.browser_timeout_ms,
             retain_diagnostics=release.mode == "local",
+            headless=not args.visible_browser,
         )
         browser.require_available()
 
@@ -1182,6 +1183,14 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--evidence", type=Path, required=True)
     parser.add_argument("--hosted-service-env-base", type=Path)
     parser.add_argument("--container-cli", default="docker")
+    parser.add_argument(
+        "--visible-browser",
+        action="store_true",
+        help=(
+            "show the Checkout window instead of running Chromium headless; a "
+            "headless browser is what the provider answers with a CAPTCHA"
+        ),
+    )
     parser.add_argument(
         "--retain-authority-state",
         action="store_true",

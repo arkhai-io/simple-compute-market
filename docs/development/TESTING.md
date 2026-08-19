@@ -644,6 +644,25 @@ and the next saved-instrument lane pays for the setup page again. Keep the flag
 on for the whole series of runs that share a fixture. Anonymous volumes the
 services bring with them are still removed on every retained teardown, so a
 long series does not leak storage.
+
+What it holds, and what to check when a lane behaves as though it does not:
+
+```sh
+podman run --rm -v vms_hosted-settlement-data:/data   --entrypoint python "$HOSTED_PRODUCTION_IMAGE" -c '
+import sqlite3
+c = sqlite3.connect("/data/hosted-settlement.sqlite3")
+for t in ("payer_profiles", "payer_instruments", "payer_setups",
+          "connected_accounts"):
+    print(t, c.execute(f"SELECT COUNT(*) FROM {t}").fetchone()[0])'
+```
+
+A saved-instrument lane runs without a page only once `payer_instruments` is
+non-empty. Until then the run opens a setup session, and Stripe answers a
+sufficiently automated series of those with an interactive hCaptcha — a
+throttle, not a defect. `HOSTED_STRIPE_TEST_VISIBLE_BROWSER=1` shows the window
+rather than running Chromium headless, which is itself part of what the
+provider is answering; on a throttled account it is not enough on its own, and
+the remaining lever is time.
 - Browsers for the interactive lanes: `uv run --project e2e-tests --extra
   stripe-test playwright install chromium`.
 - The locally built consumer image (`arkhai:storefront`) and the released hosted
