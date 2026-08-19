@@ -3,6 +3,7 @@
 ## Purpose
 
 Define the implemented mechanism-neutral settlement-plan carrier, persisted claim servicing, and signed heartbeat evidence.
+
 ## Requirements
 
 ### Requirement: Hosted obligation pins profile and authorization
@@ -62,6 +63,7 @@ A migrated marketplace row whose accepted plan used the historical card-only sha
 
 - **WHEN** the shared runtime loads a nonterminal historical card obligation
 - **THEN** it resumes the exact legacy hosted operation without requiring a new payer profile, funding authorization, or `card.v1` relabel
+
 ### Requirement: Negotiation-to-plan handoff
 Negotiation MUST produce deterministic Terms and the settlement path MUST
 register every accepted obligation as a mechanism-neutral Settlement Plan
@@ -262,7 +264,6 @@ The VM domain MUST encode only the versioned evidence allowed by the accepted co
 - **WHEN** a condition evidence projection is generated from a successful fulfillment result
 - **THEN** credentials and connection fields are absent and a canary test rejects any projection that would include them
 
-
 ### Requirement: Principal-bound settlement evidence and authority
 
 Settlement plans, accepted fulfillment references, heartbeats, start/status/reclaim requests, claims, and operation-journal authorization MUST bind payer, claimant, storefront, and service actors as canonical scheme-tagged principals. Matching a bare address, identifier, hosted account reference, or provider identifier MUST NOT grant settlement authority.
@@ -382,6 +383,21 @@ because a response or credential was not observed.
 - **WHEN** reclaim begins while exact issuance may have committed
 - **THEN** the API-credit before-reclaim callback retrieves by fulfillment identity; committed issuance becomes fulfillment and blocks reclaim, while unknown issuance permits ordinary financial reclaim
 
+### Requirement: Non-financial obligations are serviceable
+
+An obligation with no amount, no asset, and no funding requirement MUST be a valid
+obligation when its mechanism declares a non-financial deliverable. Servicing MUST
+materialize it to ready on the mechanism's availability signal, report it satisfied,
+and produce a receipt referencing the accepted `service_terms`, without requiring
+funding state, a chain client, or an expiration-driven reclaim path.
+
+#### Scenario: Servicing an introduction obligation
+
+- **WHEN** a `contact-exchange.v1` obligation is registered and its mechanism reports
+  the introduction available
+- **THEN** the runtime records it ready, completes collection with a receipt, and no
+  funding or reclaim machinery is invoked
+
 ## Evidence
 
 - Plan envelopes and lifecycle-universal fields:
@@ -401,4 +417,3 @@ because a response or credential was not observed.
   `kit/alkahest/tests/unit/test_claims.py` and `test_claim_hooks.py`.
 - Accepted-domain settlement/fulfillment carriers, exact-object dispatch, result codec routing, and mismatch rejection: `core/storefront/tests/unit/test_domain_lifecycle.py` and `domains/vms/storefront/tests/unit/test_settlement_composition.py`.
 - Selected-site restart and teardown routing: `domains/vms/storefront/tests/unit/test_fulfillment_resume_runtime.py`, `test_fulfillment_service.py`, and `test_lease_truncation.py`.
-
