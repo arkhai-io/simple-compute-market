@@ -1353,7 +1353,16 @@ def build_vm_settlement_composition(
                     "hosted evidence client name conflicts with a chain client"
                 )
             evidence_clients[client_name] = hosted_client
-    runtime = SettlementRuntime(repository, mechanism_clients)
+    # A fulfillment attempt provisions a VM, and the storefront gives that its
+    # own bound. The operation lease has to outlive it, or the deal is handed to
+    # a second worker while the first is still provisioning.
+    runtime = SettlementRuntime(
+        repository,
+        mechanism_clients,
+        fulfillment_lease_seconds=max(
+            30.0, float(storefront_config.settings.provisioning.timeout)
+        ),
+    )
 
     async def on_terminal(
         record: Any,

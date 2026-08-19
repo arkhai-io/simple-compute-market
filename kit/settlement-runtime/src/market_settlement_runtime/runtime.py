@@ -49,13 +49,26 @@ class SettlementRuntime:
         *,
         clock: Callable[[], float] = time.time,
         lease_seconds: float = 30.0,
+        fulfillment_lease_seconds: float | None = None,
     ) -> None:
         if lease_seconds <= 0:
             raise ValueError("lease_seconds must be positive")
+        if fulfillment_lease_seconds is not None and fulfillment_lease_seconds <= 0:
+            raise ValueError("fulfillment_lease_seconds must be positive")
         self._repository = repository
         self._clients = dict(clients)
         self._clock = clock
         self._lease_seconds = lease_seconds
+        # Every other operation is a bounded call to the authority. Domain
+        # fulfillment is the one whose duration belongs to the domain -- a VM
+        # can take as long as its provisioning bound allows -- and a lease that
+        # expires mid-attempt hands the same deal to a second worker, which
+        # then races the first for the same physical capacity.
+        self._fulfillment_lease_seconds = (
+            lease_seconds
+            if fulfillment_lease_seconds is None
+            else fulfillment_lease_seconds
+        )
 
     async def register_plan(
         self,
@@ -700,6 +713,11 @@ class SettlementRuntime:
         request_values: Mapping[str, Any] | None = None,
     ) -> dict[str, Any] | None:
         now = self._clock()
+        lease = (
+            self._fulfillment_lease_seconds
+            if operation == "fulfill"
+            else self._lease_seconds
+        )
         return await self._repository.reserve_settlement_operation(
             obligation_ref=record.obligation_ref,
             operation=operation,
@@ -711,7 +729,7 @@ class SettlementRuntime:
             ),
             lease_owner=worker_id,
             now_unix=now,
-            lease_until_unix=now + self._lease_seconds,
+            lease_until_unix=now + lease,
         )
 
     async def _finish(

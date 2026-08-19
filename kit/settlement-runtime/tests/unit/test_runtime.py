@@ -730,3 +730,42 @@ async def test_mechanism_params_require_exact_payer_and_pre_materialization_bind
             {"authorization": "ref"},
             local_principal=BUYER,
         )
+
+
+async def test_fulfillment_lease_outlives_a_domain_provisioning_attempt(
+    repository,
+) -> None:
+    """A slow domain fulfillment must not be handed to a second worker.
+
+    Every other operation is a bounded call to the authority, so they share the
+    short lease. Fulfillment provisions real capacity: at the default 30s a VM
+    attempt lost its lease mid-flight and a second worker re-provisioned behind
+    it, racing the first for the same reservation.
+    """
+
+    clock = {"now": 50.0}
+    runtime = SettlementRuntime(
+        repository,
+        {},
+        clock=lambda: clock["now"],
+        lease_seconds=30.0,
+        fulfillment_lease_seconds=3600.0,
+    )
+    record = await register(runtime, obligation())
+
+    assert (
+        await runtime.reserve_fulfillment(
+            record.obligation_ref,
+            local_principal=SELLER,
+            worker_id="vm-a",
+        )
+    ).status == "pending"
+
+    clock["now"] += 120.0
+    taken_over = await runtime.reserve_fulfillment(
+        record.obligation_ref,
+        local_principal=SELLER,
+        worker_id="vm-b",
+    )
+
+    assert taken_over.status == "busy"
