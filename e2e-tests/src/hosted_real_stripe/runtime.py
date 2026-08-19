@@ -201,6 +201,7 @@ class EphemeralServiceEnv:
         api_key: str,
         webhook_secret: str,
         authority_environment: str,
+        storefront_caller: str,
         manifest_digest: str,
         release_authority_id: str,
         release_authority_address: str,
@@ -238,6 +239,10 @@ class EphemeralServiceEnv:
             "HOSTED_SETTLEMENT_RELEASE_REPOSITORY": release_repository,
             "HOSTED_SETTLEMENT_RELEASE_WORKFLOW_REF": release_workflow_ref,
             "HOSTED_SETTLEMENT_RELEASE_SOURCE_COMMIT": release_source_commit,
+            # The authority refuses every storefront principal until it is told
+            # which one exists. The harness builds that storefront, so it says
+            # so rather than trusting a credential payload to agree with it.
+            "HOSTED_SETTLEMENT_STOREFRONT_CALLERS": storefront_caller,
             "HOSTED_SETTLEMENT_RESOLVER_CALLERS": (f"eip191:{release_authority_address}"),
             "HOSTED_SETTLEMENT_REMOTE_RESOLVERS_JSON": json.dumps(
                 [

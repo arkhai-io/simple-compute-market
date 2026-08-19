@@ -234,6 +234,7 @@ def test_ephemeral_container_inputs_use_shared_directory(
         api_key="sk_test_example",
         webhook_secret="whsec_example",
         authority_environment="hosted-stripe-test",
+        storefront_caller="ed25519:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
         manifest_digest="sha256:" + ("2" * 64),
         release_authority_id="release-authority",
         release_authority_address="0x1fe2aa7fbaf5720f79a22a4ada4b8b37d4e0c008",
@@ -248,6 +249,10 @@ def test_ephemeral_container_inputs_use_shared_directory(
         )
         assert values["HOSTED_SETTLEMENT_MANIFEST_DIGEST"] == "sha256:" + ("2" * 64)
         assert values["HOSTED_SETTLEMENT_ENVIRONMENT"] == "hosted-stripe-test"
+        # Without this the authority refuses every escrow the storefront opens.
+        assert values["HOSTED_SETTLEMENT_STOREFRONT_CALLERS"] == (
+            "ed25519:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+        )
         assert (
             values["HOSTED_SETTLEMENT_DATABASE_PATH"]
             == "/var/lib/hosted-settlement/hosted-settlement.sqlite3"

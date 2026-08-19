@@ -259,6 +259,7 @@ def run(args: argparse.Namespace) -> tuple[StripeTestEvidence, int]:
                     api_key=secret,
                     webhook_secret=webhook_secret,
                     authority_environment=args.authority_environment,
+                    storefront_caller=_storefront_principal(args.storefront_config),
                     manifest_digest=release.hosted_manifest_digest,
                     release_authority_id=release.hosted_authority_id,
                     release_authority_address=release.hosted_authority_address,
@@ -401,6 +402,21 @@ def _require_profile_scenario(
         funding_profile != "card.v1" or interaction != "interactive"
     ):
         raise AuthorizationRejected("card outcome scenarios require interactive card funding")
+
+
+def _storefront_principal(storefront_config: Path) -> str:
+    """The scheme-tagged principal the storefront signs its own calls with."""
+
+    try:
+        parsed = tomllib.loads(storefront_config.read_text(encoding="utf-8"))
+        identity = parsed["Identity"]["principal"]
+        scheme = identity["scheme"]
+        identifier = identity["identifier"]
+    except (KeyError, OSError, TypeError, tomllib.TOMLDecodeError) as exc:
+        raise AuthorizationUnavailable("storefront identity is unavailable") from exc
+    if not isinstance(scheme, str) or not isinstance(identifier, str):
+        raise AuthorizationRejected("storefront identity is invalid")
+    return f"{scheme}:{identifier}"
 
 
 def _maintained_account_binding(

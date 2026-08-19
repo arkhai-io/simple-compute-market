@@ -54,7 +54,9 @@ The harness supplies the rest itself, and its values win over the payload's,
 because they are fixed by the topology it builds rather than by whoever issued
 the credentials: `HOSTED_SETTLEMENT_ENVIRONMENT` (the environment the run pins
 everywhere else), `HOSTED_SETTLEMENT_DATABASE_PATH` (inside the Compose named
-volume), and the checkout and account-link callback allowlists, which point at
+volume), `HOSTED_SETTLEMENT_STOREFRONT_CALLERS` (the storefront the harness
+itself built, without which the authority refuses every escrow that storefront
+opens), and the checkout and account-link callback allowlists, which point at
 the loopback storefront and must not repeat a URL between them.
 
 ### Identities the topology already pins

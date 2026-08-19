@@ -108,9 +108,13 @@ async def _released_call(operation: str, call: Any) -> Any:
             raise HostedSettlementTemporaryError(
                 _reason(f"hosted settlement {operation} temporarily unavailable", code)
             ) from None
+        # An authority that names nothing usable still parked this obligation,
+        # and a parked obligation that says nothing cannot be repaired. The
+        # marketplace names it instead, from the one thing it always has.
+        refusal = code or _refusal_code(getattr(exc, "status_code", 0))
         raise SettlementManualRequired(
-            _reason(f"hosted settlement {operation} rejected", code),
-            code=code,
+            _reason(f"hosted settlement {operation} rejected", refusal),
+            code=refusal,
         ) from None
     except Exception:
         raise HostedSettlementTemporaryError(
@@ -120,6 +124,16 @@ async def _released_call(operation: str, call: Any) -> Any:
 
 def _reason(summary: str, code: str) -> str:
     return f"{summary}: {code}" if code else summary
+
+
+def _refusal_code(status_code: Any) -> str:
+    """The marketplace's own name for a refusal the authority did not name."""
+
+    return (
+        f"authority_refused_{status_code}"
+        if isinstance(status_code, int) and 400 <= status_code < 600
+        else "authority_refused"
+    )
 
 
 def hosted_projected_reason(

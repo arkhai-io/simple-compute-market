@@ -573,7 +573,13 @@ async def test_an_authority_that_does_not_speak_codes_is_not_repeated() -> None:
     with pytest.raises(SettlementManualRequired) as refused:
         await adapter.materialize(_obligation(), operation_ref="arkhai:settlement:obligation-1:materialize")
 
-    assert str(refused.value) == "hosted settlement materialization rejected"
+    # Not the authority's free text, and not nothing either: an obligation is
+    # parked, so the marketplace names the refusal from the status it has.
+    assert str(refused.value) == (
+        "hosted settlement materialization rejected: authority_refused_409"
+    )
+    assert refused.value.code == "authority_refused_409"
+    assert "cus_1Example" not in str(refused.value)
 
 
 @pytest.mark.asyncio
@@ -994,3 +1000,51 @@ def test_the_reason_prefers_what_the_obligation_is_currently_doing() -> None:
     # A parked obligation that reached its state before this existed reports
     # nothing rather than an invented reason.
     assert hosted_projected_reason({}, {"manual_reason": ""}) is None
+
+
+@pytest.mark.asyncio
+async def test_a_refusal_the_authority_does_not_name_is_still_named(tmp_path) -> None:
+    """The requirement is that a parked obligation has a reason, not that the
+    authority supplied one."""
+
+    client = FailingMaterializeClient(
+        HostedSettlementError(
+            code="",
+            message="",
+            retryable=False,
+            status_code=403,
+        )
+    )
+    adapter = HostedConditionalEscrowClient(client)  # type: ignore[arg-type]
+    repository = SettlementSQLiteRepository(str(tmp_path / "unnamed.db"))
+    runtime = SettlementRuntime(
+        repository,
+        {"fiat.stripe.v1": adapter},
+        clock=lambda: 2_000_000_000,
+    )
+    record = (
+        await runtime.register_plan(
+            agreement_ref="agreement-unnamed",
+            obligations=[_obligation(include_authorization=False)],
+        )
+    )[0]
+    await runtime.bind_mechanism_params(
+        record.obligation_ref,
+        {
+            "funding_profile": "card.v1",
+            "funding_authorization_ref": "funding-authorization-1",
+        },
+        local_principal=BUYER,
+    )
+
+    await runtime.materialize(
+        obligation_ref=record.obligation_ref,
+        local_principal=BUYER,
+        worker_id="buyer",
+    )
+
+    parked = await repository.load_settlement_obligation(record.obligation_ref)
+    assert parked is not None
+    assert hosted_projected_reason(None, parked["mechanism_state"]) == (
+        "authority_refused_403"
+    )
