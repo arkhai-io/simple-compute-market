@@ -137,14 +137,23 @@ Section 6.
 
 ## 5. Buyer surface
 
-- [ ] 5.1 Buyer flow for an introduction deal: propose the selection with no
+- [x] 5.1 Buyer flow for an introduction deal: propose the selection with no
       amount, accept the plan (already tolerated), start the introduction with a
       contact payload, and read the introduction — surfaced through the
       bare-metal buyer CLI (`domains/bare_metal/buyer`), reusing
       `core_buyer.hosted_settlement`'s transport patterns for the new family.
-- [ ] 5.2 Evidence: buyer unit tests for the introduction client (start/read,
+      `core_buyer.introductions.IntroductionTransport` carries the signed start
+      (buyer contact payload against the accepted `obligation_ref`) and the
+      signed idempotent read, exported beside the hosted transport; the CLI
+      gains `request-introduction` (rateless option negotiated from an
+      amountless opening, run log recorded), `introduce`, and `introduction`.
+- [x] 5.2 Evidence: buyer unit tests for the introduction client (start/read,
       idempotent re-read, refusal surfaces cleanly).
-- [ ] 5.3 Closeout.
+      `core/buyer/tests/unit/test_introductions.py` pins the three cases and
+      `test_buyer_composition.py` pins command registration.
+      Suites: core/buyer 105, bare-metal buyer 9.
+- [x] 5.3 Closeout: hygiene clean; the buyer side composes with no
+      `[Settlement]` section, so no configuration decision arose to promote.
 
 ## 6. Composition, discovery, end-to-end
 
