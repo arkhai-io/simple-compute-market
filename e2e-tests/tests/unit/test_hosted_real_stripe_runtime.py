@@ -342,6 +342,27 @@ def test_a_run_authorizes_the_registries_its_topology_locks(monkeypatch, tmp_pat
     assert filled["capacity"]["poll_interval"] == 1
     assert filled["registry"]["urls"][0] == "http://registry:8080"
 
+    # A generated URL-safe token may start with any of its alphabet, and about
+    # one in thirty starts with "_" or "-". Those are ordinary keys, not
+    # invalid ones.
+    import tomllib as _tomllib
+
+    for awkward in ("_gqmxYtoken", "-B2vk9token", "aB0._~+/=:-"):
+        monkeypatch.setenv("VMS_REGISTRY_BOOTSTRAP_API_KEY", awkward)
+        assert _tomllib.loads(_fill_registry_auth(template))["registry"]["auth"] == {
+            "http://registry-b:8080": awkward
+        }
+    # A value that could break out of the string it is written into is refused
+    # outright rather than escaped, because a key needing escaping is not one
+    # this run was meant to be given.
+    from src.hosted_real_stripe.runtime import ProcessUnavailable
+
+    for hostile in ('has"quote', "has\\backslash", "has\nnewline", "x" * 513):
+        monkeypatch.setenv("VMS_REGISTRY_BOOTSTRAP_API_KEY", hostile)
+        with pytest.raises(ProcessUnavailable):
+            _fill_registry_auth(template)
+
+    monkeypatch.setenv("VMS_REGISTRY_BOOTSTRAP_API_KEY", "bootstrap-key-value")
     # A run holding no key leaves the declaration empty, so the registry
     # refuses it visibly rather than being handed something invented.
     monkeypatch.delenv("VMS_REGISTRY_BOOTSTRAP_API_KEY")

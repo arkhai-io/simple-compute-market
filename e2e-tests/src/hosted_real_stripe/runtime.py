@@ -36,6 +36,12 @@ _PROXY_ENV = re.compile(r"^(?:all|http|https|ftp|no)_proxy$", re.IGNORECASE)
 _SAFE_CONFIG_VALUE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/@-]{0,255}$")
 _PROTECTED_PROFILE = "hosted-stripe-test"
 _REGISTRY_AUTH_SECTION = "[registry.auth]"
+#: A bearer token, not a configuration identifier: URL-safe base64 begins with
+#: whatever it begins with, and roughly one generated key in thirty starts with
+#: "_" or "-". Requiring a leading alphanumeric here made a run fail on the
+#: value it had been handed, intermittently. What matters is that the token
+#: cannot break out of the TOML string it is written into.
+_REGISTRY_BEARER = re.compile(r"^[A-Za-z0-9._~+/=:-]{1,512}$")
 #: A bounded tail: enough to read a traceback, never a transcript.
 _DIAGNOSTIC_LINES = 60
 _DIAGNOSTIC_LINE_LIMIT = 2048
@@ -329,7 +335,7 @@ def _fill_registry_auth(text: str) -> str:
     key = os.environ.get("VMS_REGISTRY_BOOTSTRAP_API_KEY", "")
     if not key:
         return text
-    if not _SAFE_CONFIG_VALUE.fullmatch(key):
+    if not _REGISTRY_BEARER.fullmatch(key):
         raise ProcessUnavailable("registry bootstrap authorization is invalid")
     head, _, tail = text.partition(_REGISTRY_AUTH_SECTION)
     section, boundary, rest = tail.partition("\n[")

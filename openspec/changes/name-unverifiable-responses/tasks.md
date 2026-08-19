@@ -32,7 +32,16 @@
       committed template and the fill in the driver, not in the local assembler,
       because the protected workflow writes the same empty secrets file and had
       the identical gap — both paths render their configuration through the
-      driver. Suite: e2e unit 97.
+      driver.
+
+      A second correction, found by a run rather than a test: the fill
+      validated the key with the pattern used for configuration identifiers,
+      which requires a leading alphanumeric. A URL-safe token starts with
+      whatever it starts with, and about one generated key in thirty starts
+      with `_` or `-`, so roughly one run in thirty refused the key it had been
+      handed. A bearer token is now validated as a bearer token — what matters
+      is that it cannot break out of the string it is written into — and a
+      value that would is refused rather than escaped. Suite: e2e unit 97.
 
 ## 3. Find out what the lane is actually refusing
 
