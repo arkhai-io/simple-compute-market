@@ -59,9 +59,11 @@ class ChromiumCheckout:
         *,
         timeout_ms: int = 90_000,
         playwright_factory: Callable[[], Any] | None = None,
+        retain_diagnostics: bool = False,
     ) -> None:
         self._timeout_ms = timeout_ms
         self._playwright_factory = playwright_factory
+        self._retain_diagnostics = retain_diagnostics
 
     def require_available(self) -> None:
         factory = self._playwright_factory or _load_playwright
@@ -138,7 +140,11 @@ class ChromiumCheckout:
                         )
                         _disable_optional_save_details(page)
                     else:
-                        _fill_ach(page, test_inputs)
+                        _fill_ach(
+                            page,
+                            test_inputs,
+                            diagnose=self._retain_diagnostics,
+                        )
                     submit = _first_visible(
                         page,
                         (
@@ -255,7 +261,11 @@ class ChromiumCheckout:
                             test_inputs.postal_code,
                         )
                     else:
-                        _fill_ach(page, test_inputs)
+                        _fill_ach(
+                            page,
+                            test_inputs,
+                            diagnose=self._retain_diagnostics,
+                        )
                     submit = _first_visible(
                         page,
                         (
@@ -312,11 +322,42 @@ def _first_visible(page: Any, selectors: tuple[str, ...]) -> Any | None:
     return None
 
 
-def _fill_required(page: Any, selectors: tuple[str, ...], value: str, name: str) -> None:
+def _fill_required(
+    page: Any,
+    selectors: tuple[str, ...],
+    value: str,
+    name: str,
+    *,
+    diagnose: bool = False,
+) -> None:
     locator = _first_visible(page, selectors)
     if locator is None:
-        raise CheckoutContractError(f"Checkout {name} field is unavailable")
+        raise CheckoutContractError(
+            f"Checkout {name} field is unavailable"
+            + (_offered_inputs(page) if diagnose else "")
+        )
     locator.fill(value)
+
+
+def _offered_inputs(page: Any) -> str:
+    """Name the input fields the page did offer, for a development run only.
+
+    A missing field says only that the page is not what the automation
+    expected. Which fields it does present is the diagnosis. Field names are
+    the page's own public form structure -- never a value typed into one.
+    """
+
+    try:
+        offered = page.eval_on_selector_all(
+            "input:not([type='hidden']), button, iframe",
+            "nodes => nodes.map(n => n.tagName.toLowerCase() + ':' + "
+            "(n.name || n.id || n.getAttribute('data-testid') || n.type || ''))",
+        )
+    except Exception as exc:  # noqa: BLE001 - a diagnostic must not mask its subject
+        return f"; the page could not be inspected ({type(exc).__name__})"
+    if not isinstance(offered, list) or not offered:
+        return "; the page offered no form controls"
+    return "; the page offered " + ", ".join(sorted({str(item) for item in offered})[:25])
 
 
 def _fill_optional(page: Any, selectors: tuple[str, ...], value: str) -> None:
@@ -324,18 +365,22 @@ def _fill_optional(page: Any, selectors: tuple[str, ...], value: str) -> None:
     if locator is not None:
         locator.fill(value)
 
-def _fill_ach(page: Any, test_inputs: StripeTestInputs) -> None:
+def _fill_ach(
+    page: Any, test_inputs: StripeTestInputs, *, diagnose: bool = False
+) -> None:
     _fill_required(
         page,
         ("input[name='routingNumber']", "#routingNumber"),
         "110000000",
         "ACH routing number",
+        diagnose=diagnose,
     )
     _fill_required(
         page,
         ("input[name='accountNumber']", "#accountNumber"),
         "000123456789",
         "ACH account number",
+        diagnose=diagnose,
     )
     _fill_optional(
         page,

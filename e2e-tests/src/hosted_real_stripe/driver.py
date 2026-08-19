@@ -223,7 +223,10 @@ def run(args: argparse.Namespace) -> tuple[StripeTestEvidence, int]:
         provider = ProviderEvidence(connected_account_ready=True)
 
         execution.stage = "browser_preflight"
-        browser = ChromiumCheckout(timeout_ms=args.browser_timeout_ms)
+        browser = ChromiumCheckout(
+            timeout_ms=args.browser_timeout_ms,
+            retain_diagnostics=release.mode == "local",
+        )
         browser.require_available()
 
         execution.stage = "webhook_forwarding"
