@@ -227,11 +227,14 @@ A third mechanism now exists: `contact-exchange.v1` completes a deal by durable,
 
 Deal identity is convergent: every deal — Alkahest included — has a `settlement_obligations` record keyed by `obligation_ref` with the mechanism's own identifier as `mechanism_ref` (legacy escrows are backfilled at startup), and every mechanism surface's status projection exposes the neutral ref. Settlement verification is a registration hook, the Alkahest-shaped carriers are kit-owned (core keeps tombstoned aliases only for the wire models it still types), the main compute discovery filters project settlement options (generic mechanism filter plus option-embedded token filters), and the pre-terms mechanism literals are gone — the buyer hosted transport takes its mechanism from the composing CLI, seller CLIs mount mechanism command groups from registrations, and option identities derive through the shared helper.
 
+A revealed introduction now reaches its owner rather than only being readable: each side hands its own copy of the reveal to sinks its operator configured locally, through an installed-plugin contract that grows a destination by installing a package rather than editing the marketplace. `kit/delivery` owns a mechanism-neutral event, the sink protocol, discovery, and four protocol-thin built-ins (file, local program, webhook, mail); the seller dispatches off the reveal's critical path from the introduction route service, the buyer dispatches inline after printing. Delivery is never authoritative — the durable, re-readable reveal is what makes best-effort delivery safe — and the mechanism kit gained no delivery dependency, because its dispatch is injected.
+
 What deliberately remains: the `escrows` table and the `/api/v1/settle/{escrow_uid}` route family serve as the Alkahest mechanism surface (retirement needs deployment evidence), hosted-specific servicing gates guard hosted's own surfaces, and pre-plan legacy escrow rows keep only their mechanism-surface identity.
 
 | Open gap | Owned by |
 |---|---|
 | Cross-domain contact-exchange composition beyond bare metal; contact-payload retention automation | [`contact-exchange-settlement-mechanism`](../../openspec/changes/contact-exchange-settlement-mechanism/) |
+| Delivery beyond bare metal, and a second event producer (a settled charge, a completed escrow) | [`add-introduction-delivery-sinks`](../../openspec/changes/add-introduction-delivery-sinks/) |
 
 ---
 

@@ -111,8 +111,9 @@ from delivering.
 
 ### Requirement: Sink configuration is local and carries secrets safely
 
-Delivery configuration MUST live in each side's own configuration file and MUST use
-the same section shape on the seller and buyer sides. Sink settings, including
+Delivery configuration MUST live in each side's own configuration, carried the way
+that side already carries its settlement configuration, and MUST use the same
+section shape on the seller and buyer sides. Sink settings, including
 credentials, tokens, and destination addresses, MUST NOT appear in a published
 listing, a settlement option, an accepted obligation, readiness details, any wire
 response, a run log, or ordinary command output. A side with no delivery

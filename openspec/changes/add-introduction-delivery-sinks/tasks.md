@@ -92,17 +92,18 @@
 
 ## 5. Composition, documentation, and closeout
 
-- [ ] 5.1 Verify the dependency boundary holds: the core buyer role package
+- [x] 5.1 Verify the dependency boundary holds: the core buyer role package
       resolves sinks through the plugin contract while importing no mechanism
       package, and no composition root is required to reach a sink.
-- [ ] 5.2 Permanent docs: record in `docs/development/ARCHITECTURE.md` that
+- [x] 5.2 Permanent docs: record in `docs/development/ARCHITECTURE.md` that
       delivery of a revealed introduction is recipient-side, self-addressed, and
       non-authoritative, and that a delivered copy falls outside the introduction
       retention boundary — deletion governs marketplace persistence, not the
       recipient's own copy.
-- [ ] 5.3 Closeout: comment hygiene clean, no change-ID references in production
-      code, ROADMAP Goal 6 updated to record the delivery capability and close its
-      gap row, promotion record complete.
+- [x] 5.3 Closeout: comment hygiene clean, no change-ID references in production
+      code, ROADMAP Goal 6 records the delivery capability and carries a gap row
+      for delivery beyond bare metal and a second event producer, promotion
+      record complete.
 
 ## Design promotion record
 
