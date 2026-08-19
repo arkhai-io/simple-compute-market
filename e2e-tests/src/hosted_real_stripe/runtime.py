@@ -33,6 +33,9 @@ _PROTECTED_PROFILE = "hosted-stripe-test"
 #: A bounded tail: enough to read a traceback, never a transcript.
 _DIAGNOSTIC_LINES = 60
 _DIAGNOSTIC_LINE_LIMIT = 2048
+#: Long enough for a dying process to finish writing, short enough that a
+#: live one is not waited on.
+_DIAGNOSTIC_DRAIN_SECONDS = 5.0
 
 
 class ProcessUnavailable(RuntimeError):
@@ -814,6 +817,12 @@ class MarketplaceLifecycleSession:
         return "\n".join(self._diagnostics)
 
     def _with_diagnostics(self, summary: str) -> str:
+        # stdout reaching EOF says the bridge is gone; it does not say the
+        # stderr reader has caught up. Without this the tail is empty exactly
+        # when it matters most -- the run where the bridge died on startup.
+        reader = self._stderr_reader
+        if reader is not None and self._retain_diagnostics:
+            reader.join(timeout=_DIAGNOSTIC_DRAIN_SECONDS)
         tail = self.diagnostics()
         if not tail:
             return summary

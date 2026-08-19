@@ -267,6 +267,8 @@ def test_a_development_run_can_read_what_a_protected_run_must_not(tmp_path) -> N
 
     from src.hosted_real_stripe.runtime import MarketplaceLifecycleSession, ProcessUnavailable
 
+    # Writes to stderr and exits at once, which is how a bridge that dies on
+    # startup behaves: stdout reaches EOF before stderr has been drained.
     command = [
         sys.executable,
         "-c",
