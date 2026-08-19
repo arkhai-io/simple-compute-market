@@ -45,20 +45,47 @@
 
 ## 3. Find out what the lane is actually refusing
 
-- [ ] 3.1 Run one interactive `card.v1` lane locally against the real Stripe test
-      account and record what buyer status polling names once it can speak.
-      **Blocked:** the lane no longer reaches that stage. Stripe now answers
+- [x] 3.1 Run one lane locally against the real Stripe test account and record
+      what buyer status polling names once it can speak.
+
+      It names `GET /api/v1/settlements/{ref} -> HTTP 403 carried no response
+      authentication`. Run on the `us_bank_transfer.v1` collection lane, which
+      needs no browser: interactive mode returns no payer setup and bank
+      funding goes through the test-helper simulation rather than a hosted
+      page, so the lane reproduces the refusal headlessly and repeatably.
+
+      Two corrections this produced. The first run still printed the old
+      sentence, because the e2e environment resolves `core_buyer` from an
+      installed wheel rather than the edited source — the improvement was real
+      and not in effect. The second run refused its own registry key, which is
+      recorded against 2.3.
+
+      **Previously blocked:** the card lane could not reach this stage. Stripe
+      answers Checkout with an interactive hCaptcha after repeated automated
+      sessions, which the harness detects and classifies as an environment
+      failure. An earlier reading of that as progress was wrong: the stage it
+      reached, `browser_checkout`, is earlier than `funding`, so the card lane
+      regressed rather than advanced. the lane no longer reaches that stage. Stripe now answers
       Checkout with an interactive hCaptcha, which the harness detects and
       classifies as an environment failure at payer setup — earlier runs today
       passed the same step, so this is provider anti-automation responding to
       repeated sessions rather than a defect. Solving it is not something a
       harness should do. What section 2 fixed is confirmed independently: the
       storefront now publishes to the private registry with `200`/`201` where
-      every earlier run answered `401`.
+      every earlier run answered `401`. It did not, on its own, clear this
+      refusal.
 - [ ] 3.2 Correct it here if it is a marketplace defect or another harness
       omission; record it for `add-bare-metal-hosted-settlement` if it belongs to
       the hosted matrix. A development run qualifies no lane either way.
-      **Blocked by 3.1.** The interactive lanes depend on the provider not
+
+      The refusal is `buyer_auth._verify`: the request's already-authenticated
+      principal is not the buyer the agreement records, or is not carrying the
+      buyer role. It is raised inside the authentication middleware, before the
+      wrapper that signs responses, which is why it reaches the buyer unsigned
+      and unreadable. Whether the cached principal or the role is the mismatch
+      is one storefront-side observation away and is the next step; that the
+      same route accepts `POST /api/v1/settlements` from the same buyer moments
+      earlier is the thing to explain. The interactive lanes depend on the provider not
       challenging automation, which bounds how often the matrix can be run and
       is recorded for `add-bare-metal-hosted-settlement`.
 
