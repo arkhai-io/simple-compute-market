@@ -35,6 +35,7 @@ _SENSITIVE_ENV = re.compile(r"(?:STRIPE|WEBHOOK)", re.IGNORECASE)
 _PROXY_ENV = re.compile(r"^(?:all|http|https|ftp|no)_proxy$", re.IGNORECASE)
 _SAFE_CONFIG_VALUE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/@-]{0,255}$")
 _PROTECTED_PROFILE = "hosted-stripe-test"
+_REGISTRY_AUTH_SECTION = "[registry.auth]"
 #: A bounded tail: enough to read a traceback, never a transcript.
 _DIAGNOSTIC_LINES = 60
 _DIAGNOSTIC_LINE_LIMIT = 2048
@@ -313,6 +314,29 @@ class EphemeralServiceEnv:
         self._directory = None
 
 
+def _fill_registry_auth(text: str) -> str:
+    """Supply the bearer key for every registry the template says demands one.
+
+    The declaration is committed and reviewable -- which registries are private
+    is not a secret -- and the key is not, so it arrives from the run's own
+    environment. A template that declares none is returned untouched, and a run
+    that holds no key leaves the declaration empty rather than inventing one,
+    so the registry refuses it visibly instead of being handed a wrong value.
+    """
+
+    if _REGISTRY_AUTH_SECTION not in text:
+        return text
+    key = os.environ.get("VMS_REGISTRY_BOOTSTRAP_API_KEY", "")
+    if not key:
+        return text
+    if not _SAFE_CONFIG_VALUE.fullmatch(key):
+        raise ProcessUnavailable("registry bootstrap authorization is invalid")
+    head, _, tail = text.partition(_REGISTRY_AUTH_SECTION)
+    section, boundary, rest = tail.partition("\n[")
+    filled = re.sub(r'(?m)^("[^"\n]+"\s*=\s*)""$', rf'\1"{key}"', section)
+    return head + _REGISTRY_AUTH_SECTION + filled + boundary + rest
+
+
 class EphemeralMarketplaceConfig:
     """Render release-pinned marketplace trust without provider identifiers."""
 
@@ -350,6 +374,7 @@ class EphemeralMarketplaceConfig:
             text = self._template.read_text(encoding="utf-8")
         except OSError as exc:
             raise ProcessUnavailable("marketplace configuration template is unavailable") from exc
+        text = _fill_registry_auth(text)
         text = _replace_toml_setting(text, "authority_id", self._values["authority_id"])
         text = _replace_toml_setting(
             text,
@@ -466,6 +491,7 @@ class EphemeralBuyerConfig:
             text = self._template.read_text(encoding="utf-8")
         except OSError as exc:
             raise ProcessUnavailable("buyer configuration template is unavailable") from exc
+        text = _fill_registry_auth(text)
         for key, value in (
             ("authority_id", self._values["authority_id"]),
             ("environment", self._values["authority_environment"]),

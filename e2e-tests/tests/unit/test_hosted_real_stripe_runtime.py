@@ -312,3 +312,56 @@ def test_ephemeral_container_inputs_use_shared_directory(
         ]
 
     assert tuple(tmp_path.iterdir()) == ()
+
+
+def test_a_run_authorizes_the_registries_its_topology_locks(monkeypatch, tmp_path) -> None:
+    """The harness configures a private registry; it also talks to one."""
+
+    import tomllib
+
+    from src.hosted_real_stripe.runtime import _fill_registry_auth
+
+    template = (
+        '[registry]\n'
+        'urls = ["http://registry:8080", "http://registry-b:8080"]\n'
+        '\n'
+        '[registry.auth]\n'
+        '"http://registry-b:8080" = ""\n'
+        '\n'
+        '[capacity]\n'
+        'poll_interval = 1\n'
+    )
+
+    monkeypatch.setenv("VMS_REGISTRY_BOOTSTRAP_API_KEY", "bootstrap-key-value")
+    filled = tomllib.loads(_fill_registry_auth(template))
+    auth = filled["registry"]["auth"]
+    assert auth == {"http://registry-b:8080": "bootstrap-key-value"}
+    # The public registry is not handed a key it never asked for.
+    assert "http://registry:8080" not in auth
+    # Nothing outside the section moved.
+    assert filled["capacity"]["poll_interval"] == 1
+    assert filled["registry"]["urls"][0] == "http://registry:8080"
+
+    # A run holding no key leaves the declaration empty, so the registry
+    # refuses it visibly rather than being handed something invented.
+    monkeypatch.delenv("VMS_REGISTRY_BOOTSTRAP_API_KEY")
+    assert tomllib.loads(_fill_registry_auth(template))["registry"]["auth"] == {
+        "http://registry-b:8080": ""
+    }
+
+
+def test_the_committed_hosted_templates_declare_their_private_registry() -> None:
+    """The declaration is what makes the fill possible; it must be committed."""
+
+    import tomllib
+
+    root = Path(__file__).resolve().parents[3]
+    for name in ("hosted-storefront.toml", "hosted-buyer.toml"):
+        config = tomllib.loads(
+            (root / "e2e-tests" / "config" / name).read_text(encoding="utf-8")
+        )
+        auth = config["registry"]["auth"]
+        assert auth, name
+        # Declared, and carrying no key in a committed file.
+        assert set(auth) <= set(config["registry"]["urls"]), name
+        assert all(value == "" for value in auth.values()), name

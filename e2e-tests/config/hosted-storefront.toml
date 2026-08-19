@@ -33,6 +33,11 @@ principals = [{ scheme = "ed25519", identifier = "NLTZBDFWy23PC-sKKUm3VZyUDSvLbb
 authority = "registry-b"
 principals = [{ scheme = "ed25519", identifier = "yFOtDwzSthmuqSzuxP1Wok1kmdWEznklfkXP2BObYKc" }]
 
+# Which registries demand a bearer key is public and belongs here; the key
+# itself is not and is supplied by the run. An empty value is the declaration.
+[registry.auth]
+"http://registry-b:8080" = ""
+
 [capacity]
 poll_interval = 1
 hold_ttl_seconds = 900

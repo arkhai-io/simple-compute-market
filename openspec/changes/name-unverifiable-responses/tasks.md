@@ -14,13 +14,19 @@
 
 ## 2. The harness authenticates to its own private registry
 
-- [ ] 2.1 The assembled storefront secrets carry the private registry's bearer
+- [x] 2.1 The rendered storefront configuration carries the private registry's bearer
       authorization, keyed by the registry URL the storefront is configured with.
-- [ ] 2.2 The buyer configuration carries the same authorization for discovery
+- [x] 2.2 The buyer configuration carries the same authorization for discovery
       through that registry.
-- [ ] 2.3 Evidence: the assembled material authorizes exactly the registries that
-      demand it and no others; the key never reaches a committed file; and a run
-      publishes to and discovers through the private registry without a `401`.
+- [x] 2.3 Evidence: the fill authorizes exactly the registries the template
+      declares and no others, leaves the rest of the configuration untouched,
+      and leaves the declaration empty when the run holds no key rather than
+      inventing one; the committed templates declare their private registry and
+      carry no key. One correction folded in: the declaration lives in the
+      committed template and the fill in the driver, not in the local assembler,
+      because the protected workflow writes the same empty secrets file and had
+      the identical gap — both paths render their configuration through the
+      driver. Suite: e2e unit 97.
 
 ## 3. Find out what the lane is actually refusing
 
