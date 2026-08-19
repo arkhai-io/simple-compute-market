@@ -6,6 +6,7 @@ import argparse
 from dataclasses import replace
 import json
 import os
+import sys
 import time
 import tomllib
 from dataclasses import dataclass
@@ -43,6 +44,7 @@ from .evidence import (
     write_evidence,
 )
 from .gates import (
+    ReleaseMode,
     local_release_identity,
     AuthorizationRejected,
     AuthorizationUnavailable,
@@ -103,6 +105,10 @@ _REFUND_SERVICING_INTERVAL_SECONDS = 7200.0
 class _ExecutionState:
     stage: Stage = "authorization"
     operation_ref: str | None = None
+    #: The exception a classified failure came from. Never recorded in
+    #: evidence, which carries the stage and the code only; kept so a
+    #: development run can show its operator what the code stands for.
+    failure: BaseException | None = None
 
 
 @dataclass(frozen=True)
@@ -306,6 +312,7 @@ def run(args: argparse.Namespace) -> tuple[StripeTestEvidence, int]:
                                 manifest_digest=release.hosted_manifest_digest,
                             ),
                             request_timeout=args.lifecycle_timeout,
+                            retain_diagnostics=release.mode == "local",
                         ) as lifecycle:
                             result = _execute_scenario(
                                 funding_profile=funding_profile,
@@ -343,46 +350,10 @@ def run(args: argparse.Namespace) -> tuple[StripeTestEvidence, int]:
         )
     except ReleaseIdentityRejected:
         raise
-    except AuthorizationUnavailable:
-        classification: ResultClass = (
-            "account" if execution.stage == "account_readiness" else "environment"
-        )
-        code: DiagnosticCode = (
-            "account_not_ready" if execution.stage == "account_readiness" else "credentials_missing"
-        )
-    except AuthorizationRejected:
-        classification, code = "environment", "authorization_rejected"
-    except StripeUnavailable:
-        classification, code = "environment", "stripe_unavailable"
-    except WebhookRouteUnavailable:
-        classification, code = "environment", "webhook_route_unavailable"
-    except ChromiumUnavailable:
-        classification, code = "environment", "chromium_unavailable"
-    except ProcessUnavailable:
-        if execution.stage == "account_readiness":
-            classification, code = "account", "account_not_ready"
-        else:
-            classification = "environment"
-            if execution.stage == "webhook_forwarding":
-                code = "stripe_cli_unavailable"
-            elif execution.stage == "hosted_release":
-                code = "hosted_release_unavailable"
-            elif execution.stage == "payer_profile":
-                code = "payer_profile_unavailable"
-            elif execution.stage == "payer_setup":
-                code = "setup_action_unavailable"
-            elif execution.stage in {"funding_authorization", "funding"}:
-                code = "profile_prerequisite_unavailable"
-            else:
-                code = "marketplace_unavailable"
-    except (LifecycleConvergenceTimeout, ProviderConvergenceTimeout):
-        classification, code = "timeout", "convergence_timeout"
-    except CheckoutContractError:
-        classification, code = "product", "checkout_contract_rejected"
-    except LifecycleContractError:
-        classification, code = "product", "lifecycle_contract_rejected"
-    except ProviderInvariantError:
-        classification, code = "product", "provider_invariant_failed"
+    except _CLASSIFIED_FAILURES as caught:
+        execution.failure = caught
+        classification, code = _classify(caught, execution.stage)
+        _disclose(caught, mode=release.mode, stage=execution.stage, code=code)
 
     return (
         StripeTestEvidence(
@@ -1047,6 +1018,89 @@ def _lifecycle_environment(
     }
 
 
+def _disclose(
+    caught: BaseException,
+    *,
+    mode: ReleaseMode,
+    stage: Stage,
+    code: DiagnosticCode,
+) -> None:
+    """Tell a development operator what the diagnostic code stands for.
+
+    The evidence report records the stage and the code and nothing else, which
+    is right for a document that leaves the machine. It is also why a failing
+    stage has been impossible to diagnose: the exception that produced the code
+    was discarded with it. A development run prints that exception and its
+    causes to stderr, where the operator already holds every credential it
+    could mention. A protected run prints nothing.
+    """
+
+    if mode != "local":
+        return
+    print(f"[development] {stage} -> {code}", file=sys.stderr)
+    seen: set[int] = set()
+    current: BaseException | None = caught
+    while current is not None and id(current) not in seen:
+        seen.add(id(current))
+        print(f"[development] {type(current).__name__}: {current}", file=sys.stderr)
+        current = current.__cause__ or current.__context__
+
+
+#: Every failure the body classifies rather than propagates. Ordered so the
+#: narrower kinds are matched before the ones they subclass, if any ever are.
+_CLASSIFIED_FAILURES = (
+    AuthorizationUnavailable,
+    AuthorizationRejected,
+    StripeUnavailable,
+    WebhookRouteUnavailable,
+    ChromiumUnavailable,
+    ProcessUnavailable,
+    LifecycleConvergenceTimeout,
+    ProviderConvergenceTimeout,
+    CheckoutContractError,
+    LifecycleContractError,
+    ProviderInvariantError,
+)
+
+
+def _classify(caught: BaseException, stage: Stage) -> tuple[ResultClass, DiagnosticCode]:
+    """Name a failure by what it was and where it happened, not by its text."""
+
+    if isinstance(caught, AuthorizationUnavailable):
+        if stage == "account_readiness":
+            return "account", "account_not_ready"
+        return "environment", "credentials_missing"
+    if isinstance(caught, AuthorizationRejected):
+        return "environment", "authorization_rejected"
+    if isinstance(caught, StripeUnavailable):
+        return "environment", "stripe_unavailable"
+    if isinstance(caught, WebhookRouteUnavailable):
+        return "environment", "webhook_route_unavailable"
+    if isinstance(caught, ChromiumUnavailable):
+        return "environment", "chromium_unavailable"
+    if isinstance(caught, ProcessUnavailable):
+        if stage == "account_readiness":
+            return "account", "account_not_ready"
+        if stage == "webhook_forwarding":
+            return "environment", "stripe_cli_unavailable"
+        if stage == "hosted_release":
+            return "environment", "hosted_release_unavailable"
+        if stage == "payer_profile":
+            return "environment", "payer_profile_unavailable"
+        if stage == "payer_setup":
+            return "environment", "setup_action_unavailable"
+        if stage in {"funding_authorization", "funding"}:
+            return "environment", "profile_prerequisite_unavailable"
+        return "environment", "marketplace_unavailable"
+    if isinstance(caught, (LifecycleConvergenceTimeout, ProviderConvergenceTimeout)):
+        return "timeout", "convergence_timeout"
+    if isinstance(caught, CheckoutContractError):
+        return "product", "checkout_contract_rejected"
+    if isinstance(caught, LifecycleContractError):
+        return "product", "lifecycle_contract_rejected"
+    return "product", "provider_invariant_failed"
+
+
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser()
     parser.add_argument("--repo-root", type=Path, default=Path.cwd())
@@ -1125,7 +1179,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         ]
     try:
         report, exit_code = run(args)
-    except ReleaseIdentityRejected:
+    except ReleaseIdentityRejected as rejected:
+        # A refused binding is the one failure with no evidence to write, so
+        # the exit code is all a caller would otherwise get.
+        print(f"release identity rejected: {rejected}", file=sys.stderr)
         return 1
     write_evidence(args.evidence, report)
     return exit_code

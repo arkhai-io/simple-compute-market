@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+from collections import deque
 from dataclasses import dataclass
 import queue
 import re
@@ -29,6 +30,9 @@ _WEBHOOK_SECRET = re.compile(r"\b(whsec_[A-Za-z0-9]+)\b")
 _SENSITIVE_ENV = re.compile(r"(?:STRIPE|WEBHOOK)", re.IGNORECASE)
 _SAFE_CONFIG_VALUE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/@-]{0,255}$")
 _PROTECTED_PROFILE = "hosted-stripe-test"
+#: A bounded tail: enough to read a traceback, never a transcript.
+_DIAGNOSTIC_LINES = 60
+_DIAGNOSTIC_LINE_LIMIT = 2048
 
 
 class ProcessUnavailable(RuntimeError):
@@ -676,6 +680,7 @@ class MarketplaceLifecycleSession:
         cwd: Path,
         environment: Mapping[str, str] | None = None,
         request_timeout: float = 120.0,
+        retain_diagnostics: bool = False,
     ) -> None:
         if not command or any(not isinstance(item, str) or not item for item in command):
             raise LifecycleContractError("lifecycle command must be a non-empty argv array")
@@ -690,6 +695,12 @@ class MarketplaceLifecycleSession:
         self._cwd = cwd
         self._environment = additions
         self._request_timeout = request_timeout
+        # Staged output can contain ephemeral buyer actions and provider
+        # identifiers, so a protected run discards it unread. A development run
+        # is the one place the operator is already holding those credentials,
+        # and discarding it there is what makes a failed stage undiagnosable.
+        self._retain_diagnostics = retain_diagnostics
+        self._diagnostics: deque[str] = deque(maxlen=_DIAGNOSTIC_LINES)
         self._process: subprocess.Popen[str] | None = None
         self._stderr_reader: threading.Thread | None = None
         self._stdout_reader: threading.Thread | None = None
@@ -727,10 +738,14 @@ class MarketplaceLifecycleSession:
             line = self._responses.get(timeout=self._request_timeout)
         except queue.Empty as exc:
             raise LifecycleConvergenceTimeout(
-                "marketplace lifecycle stage did not converge within its bound"
+                self._with_diagnostics(
+                    "marketplace lifecycle stage did not converge within its bound"
+                )
             ) from exc
         if line is None:
-            raise ProcessUnavailable("marketplace lifecycle bridge exited unexpectedly")
+            raise ProcessUnavailable(
+                self._with_diagnostics("marketplace lifecycle bridge exited unexpectedly")
+            )
         try:
             response = json.loads(line)
         except json.JSONDecodeError as exc:
@@ -742,12 +757,18 @@ class MarketplaceLifecycleSession:
         if response.get("ok") is not True:
             code = response.get("code")
             if code == "marketplace_unavailable":
-                raise ProcessUnavailable("marketplace lifecycle state was unavailable")
+                raise ProcessUnavailable(
+                    self._with_diagnostics("marketplace lifecycle state was unavailable")
+                )
             if code == "convergence_timeout":
                 raise LifecycleConvergenceTimeout(
                     "marketplace lifecycle stage did not converge within its bound"
                 )
-            raise LifecycleContractError("marketplace lifecycle bridge rejected a stage")
+            raise LifecycleContractError(
+                self._with_diagnostics(
+                    f"marketplace lifecycle bridge rejected a stage: {code or 'no code'}"
+                )
+            )
         return response
 
     def _read_stdout(self) -> None:
@@ -760,10 +781,23 @@ class MarketplaceLifecycleSession:
     def _discard_stderr(self) -> None:
         process = self._process
         assert process is not None and process.stderr is not None
-        for _line in process.stderr:
-            # Staged output can contain ephemeral buyer actions and provider
-            # identifiers; neither belongs in workflow logs or evidence.
-            pass
+        for line in process.stderr:
+            # Nothing read here belongs in workflow logs or evidence. A
+            # development run keeps a bounded tail in memory for the operator
+            # who is running it; a protected run does not read it at all.
+            if self._retain_diagnostics:
+                self._diagnostics.append(line.rstrip("\n")[:_DIAGNOSTIC_LINE_LIMIT])
+
+    def diagnostics(self) -> str:
+        """The retained tail, empty when the run is not allowed to keep one."""
+
+        return "\n".join(self._diagnostics)
+
+    def _with_diagnostics(self, summary: str) -> str:
+        tail = self.diagnostics()
+        if not tail:
+            return summary
+        return f"{summary}\n--- staged output (development run only) ---\n{tail}"
 
     def stop(self) -> None:
         process = self._process

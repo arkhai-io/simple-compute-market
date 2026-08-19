@@ -258,3 +258,74 @@ def test_evidence_knows_which_runs_may_be_cited() -> None:
         run_ref="run_abc",
         release_mode="local",
     ).qualifies
+
+
+def test_a_development_run_can_read_what_a_protected_run_must_not(tmp_path) -> None:
+    """The staged output that names the failure is exactly what leaks."""
+
+    import sys
+
+    from src.hosted_real_stripe.runtime import MarketplaceLifecycleSession, ProcessUnavailable
+
+    command = [
+        sys.executable,
+        "-c",
+        (
+            "import sys; print('a payer profile could not be created', file=sys.stderr);"
+            "sys.stderr.flush()"
+        ),
+    ]
+
+    protected = MarketplaceLifecycleSession(command, cwd=tmp_path, request_timeout=10.0)
+    protected.start()
+    try:
+        with pytest.raises(ProcessUnavailable) as refused:
+            protected.request("ensure_payer_profile_fixture")
+    finally:
+        protected.stop()
+    assert "payer profile could not be created" not in str(refused.value)
+
+    development = MarketplaceLifecycleSession(
+        command,
+        cwd=tmp_path,
+        request_timeout=10.0,
+        retain_diagnostics=True,
+    )
+    development.start()
+    try:
+        with pytest.raises(ProcessUnavailable) as disclosed:
+            development.request("ensure_payer_profile_fixture")
+    finally:
+        development.stop()
+    assert "payer profile could not be created" in str(disclosed.value)
+
+
+def test_only_a_development_run_prints_the_failure_behind_the_code(capsys) -> None:
+    """Nothing but the proven mode may turn the disclosure on."""
+
+    from src.hosted_real_stripe.driver import _disclose
+    from src.hosted_real_stripe.runtime import ProcessUnavailable
+
+    cause = RuntimeError("the storefront never registered a payer profile")
+    caught = ProcessUnavailable("marketplace lifecycle state was unavailable")
+    caught.__cause__ = cause
+
+    _disclose(caught, mode="attested", stage="payer_profile", code="payer_profile_unavailable")
+    assert capsys.readouterr().err == ""
+
+    _disclose(caught, mode="local", stage="payer_profile", code="payer_profile_unavailable")
+    printed = capsys.readouterr().err
+    assert "payer_profile -> payer_profile_unavailable" in printed
+    assert "marketplace lifecycle state was unavailable" in printed
+    # The cause chain is what a stage-level code otherwise throws away.
+    assert "the storefront never registered a payer profile" in printed
+
+
+def test_the_driver_asks_for_the_tail_only_when_the_run_is_local() -> None:
+    """The session is constructed from the proven mode, not from the flag."""
+
+    source = (
+        Path(__file__).resolve().parents[2] / "src" / "hosted_real_stripe" / "driver.py"
+    ).read_text(encoding="utf-8")
+
+    assert 'retain_diagnostics=release.mode == "local"' in source
