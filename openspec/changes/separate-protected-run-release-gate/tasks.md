@@ -46,16 +46,22 @@
 
 ## 3. Replace the broker for local runs
 
-- [ ] 3.1 Document the broker response payload as the seam: the keys the workflow
+- [x] 3.1 Document the broker response payload as the seam: the keys the workflow
       consumes today, recorded where a future implementer will find them.
-- [ ] 3.2 A local assembler producing that payload from operator-supplied
+- [x] 3.2 A local assembler producing that payload from operator-supplied
       provider credentials plus generated ephemeral identity credentials, writing
       the authority environment file the driver expects. Never writes provider
       credentials into the repository.
-- [ ] 3.3 Evidence: the assembled payload satisfies the same consumption the
+- [x] 3.3 Evidence: the assembled payload satisfies the same consumption the
       workflow performs; generated identities are well-formed and ephemeral;
       provider credentials are absent from every emitted artifact.
-- [ ] 3.4 Closeout.
+- [x] 3.4 Closeout: hygiene clean. Verified against the operator's real
+      provider file -- ephemeral eip191 identities generated, the derived
+      evidence-signer identifier matches its credential, and every written file
+      is owner-only. One correction folded into section 2: Compose refuses a
+      service with no image, so a local environment names the consumer it runs
+      (`arkhai:storefront`) rather than leaving the image coordinate empty.
+      Suite: scripts 28.
 
 ## 4. Prove it on the blocked failure
 

@@ -13,6 +13,9 @@ HOSTED_RELEASE_DIR ?= $(DIST_DIR)
 HOSTED_RELEASE_MANIFEST ?= $(HOSTED_RELEASE_DIR)/release-manifest.json
 HOSTED_CLIENT_WHEEL ?= $(HOSTED_RELEASE_DIR)/arkhai_hosted_settlement_client-0.2.1-py3-none-any.whl
 HOSTED_COMPOSE_ENV ?= $(DIST_DIR)/hosted-settlement-compose.env
+# The locally built consumer a development stack runs in place of an
+# attested release image.
+HOSTED_LOCAL_MARKETPLACE_IMAGE ?= arkhai:storefront
 HOSTED_MARKETPLACE_RELEASE_DIR ?= $(DIST_DIR)/marketplace-release
 HOSTED_MARKETPLACE_RELEASE_MANIFEST ?= $(HOSTED_MARKETPLACE_RELEASE_DIR)/marketplace-release-manifest.json
 HOSTED_PRODUCTION_MANIFEST_SHA256 ?=
@@ -171,6 +174,7 @@ prepare-hosted-compose-local: ## Render a Compose env for a development stack.
 		--manifest "$(HOSTED_RELEASE_MANIFEST)" \
 		--wheel "$(HOSTED_CLIENT_WHEEL)" \
 		--release-mode local \
+		--local-marketplace-image "$(HOSTED_LOCAL_MARKETPLACE_IMAGE)" \
 		--output "$(HOSTED_COMPOSE_ENV)"
 
 hosted-preflight-local: prepare-hosted-compose-local

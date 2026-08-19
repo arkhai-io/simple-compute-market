@@ -84,11 +84,12 @@ def _render_env(values: dict[str, str]) -> str:
 #: The marketplace coordinates a locally built consumer has no released source
 #: for. Rendered empty rather than omitted: the environment's reader requires
 #: the exact key set, and a development run reads an empty value as "local".
+#: The image is not among them -- Compose refuses to start a service without
+#: one -- so a local environment names the image it actually runs.
 _LOCAL_MARKETPLACE_COORDINATES = (
     "HOSTED_MARKETPLACE_VERIFIED_ARTIFACT_PROVENANCE_SHA256",
     "HOSTED_MARKETPLACE_VERIFIED_ARTIFACT_SCHEMA_SHA256",
     "HOSTED_MARKETPLACE_VERIFIED_ARTIFACT_WHEELHOUSE_SHA256",
-    "HOSTED_MARKETPLACE_VERIFIED_IMAGE",
     "HOSTED_MARKETPLACE_VERIFIED_MANIFEST_SHA256",
     "HOSTED_MARKETPLACE_VERIFIED_SOURCE_COMMIT",
     "HOSTED_MARKETPLACE_VERIFIED_WORKFLOW_REF",
@@ -109,6 +110,7 @@ def prepare_compose_env(
     marketplace_image_digest: str,
     output_path: Path,
     release_mode: str = "attested",
+    local_marketplace_image: str = "",
 ) -> str:
     """Render the Compose environment the protected stack runs under.
 
@@ -150,11 +152,18 @@ def prepare_compose_env(
     verified_authority_scheme = str(production["authority_scheme"])
     verified_authority_address = str(production["authority_address"])
     if marketplace is None:
+        if not local_marketplace_image:
+            raise ComposePreparationError(
+                "a local environment must name the marketplace image it runs"
+            )
         verified_marketplace_contract = {
             name: "" for name in _LOCAL_MARKETPLACE_COORDINATES
         }
         verified_marketplace_contract["HOSTED_MARKETPLACE_VERIFIED_REPOSITORY"] = (
             "arkhai-io/simple-compute-market"
+        )
+        verified_marketplace_contract["HOSTED_MARKETPLACE_VERIFIED_IMAGE"] = (
+            local_marketplace_image
         )
     else:
         verified_marketplace_image = _image(
@@ -296,6 +305,7 @@ def main() -> int:
     parser.add_argument("--marketplace-workflow-ref", default="")
     parser.add_argument("--marketplace-workflow-run-id", default="")
     parser.add_argument("--marketplace-image-digest", default="")
+    parser.add_argument("--local-marketplace-image", default="")
     parser.add_argument(
         "--release-mode",
         choices=("attested", "local"),
@@ -319,6 +329,7 @@ def main() -> int:
             marketplace_image_digest=args.marketplace_image_digest,
             output_path=args.output,
             release_mode=args.release_mode,
+            local_marketplace_image=args.local_marketplace_image,
         )
     except (
         _VERIFIER.ReleaseVerificationError,

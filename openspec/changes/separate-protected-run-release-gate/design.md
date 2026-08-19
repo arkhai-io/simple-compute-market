@@ -79,6 +79,13 @@ coordinates a local build cannot source, which the development constructor
 reads as the local sentinel. Completeness stays a structural property; only the
 provenance of individual values differs.
 
+The marketplace *image* is the exception: Compose interpolates it with `:?`, so
+an empty value stops the stack rather than producing a development run. A local
+environment therefore names the image it actually runs — the locally built
+`arkhai:storefront` — and only the attestation-derived coordinates go empty. The
+record is more honest for it: a development report says exactly what executed,
+and says `local` only where nothing released corresponds.
+
 ### `ReleaseIdentity` keeps one type, with a development constructor
 
 Development runs build the same `ReleaseIdentity` from observed local values —

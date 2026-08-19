@@ -679,6 +679,7 @@ def test_local_compose_env_renders_without_an_attested_consumer(tmp_path: Path) 
         marketplace_image_digest="",
         output_path=output_path,
         release_mode="local",
+        local_marketplace_image="arkhai:storefront",
     )
     values = dict(
         line.split("=", 1)
@@ -692,13 +693,34 @@ def test_local_compose_env_renders_without_an_attested_consumer(tmp_path: Path) 
     # The consumer half is structurally present and empty: the environment's
     # reader requires the exact key set, and a development run reads empty as
     # "no released coordinate".
-    assert values["HOSTED_MARKETPLACE_VERIFIED_IMAGE"] == ""
+    # Compose refuses a service with no image, so the local environment names
+    # the consumer it actually runs.
+    assert values["HOSTED_MARKETPLACE_VERIFIED_IMAGE"] == "arkhai:storefront"
     assert values["HOSTED_MARKETPLACE_VERIFIED_MANIFEST_SHA256"] == ""
     assert values["HOSTED_MARKETPLACE_VERIFIED_SOURCE_COMMIT"] == ""
     assert (
         values["HOSTED_MARKETPLACE_VERIFIED_REPOSITORY"]
         == "arkhai-io/simple-compute-market"
     )
+
+
+def test_a_local_env_must_name_the_image_it_runs(tmp_path: Path) -> None:
+    trust_path, manifest_path, client_path = _stage_release(tmp_path)
+
+    with pytest.raises(preparer.ComposePreparationError, match="marketplace image"):
+        preparer.prepare_compose_env(
+            trust_path=trust_path,
+            manifest_path=manifest_path,
+            wheel_path=client_path,
+            marketplace_manifest_path=None,
+            marketplace_manifest_sha256="",
+            marketplace_commit="",
+            marketplace_workflow_ref="",
+            marketplace_workflow_run_id="",
+            marketplace_image_digest="",
+            output_path=tmp_path / "hosted-compose.env",
+            release_mode="local",
+        )
 
 
 def test_attested_compose_env_still_requires_its_consumer_release(tmp_path: Path) -> None:
