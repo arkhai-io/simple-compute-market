@@ -81,35 +81,61 @@ def _render_env(values: dict[str, str]) -> str:
     return "\n".join(lines) + "\n"
 
 
+#: The marketplace coordinates a locally built consumer has no released source
+#: for. Rendered empty rather than omitted: the environment's reader requires
+#: the exact key set, and a development run reads an empty value as "local".
+_LOCAL_MARKETPLACE_COORDINATES = (
+    "HOSTED_MARKETPLACE_VERIFIED_ARTIFACT_PROVENANCE_SHA256",
+    "HOSTED_MARKETPLACE_VERIFIED_ARTIFACT_SCHEMA_SHA256",
+    "HOSTED_MARKETPLACE_VERIFIED_ARTIFACT_WHEELHOUSE_SHA256",
+    "HOSTED_MARKETPLACE_VERIFIED_IMAGE",
+    "HOSTED_MARKETPLACE_VERIFIED_MANIFEST_SHA256",
+    "HOSTED_MARKETPLACE_VERIFIED_SOURCE_COMMIT",
+    "HOSTED_MARKETPLACE_VERIFIED_WORKFLOW_REF",
+    "HOSTED_MARKETPLACE_VERIFIED_WORKFLOW_RUN_ID",
+)
+
+
 def prepare_compose_env(
     *,
     trust_path: Path,
     manifest_path: Path,
     wheel_path: Path,
-    marketplace_manifest_path: Path,
+    marketplace_manifest_path: Path | None,
     marketplace_manifest_sha256: str,
     marketplace_commit: str,
     marketplace_workflow_ref: str,
     marketplace_workflow_run_id: str,
     marketplace_image_digest: str,
     output_path: Path,
+    release_mode: str = "attested",
 ) -> str:
+    """Render the Compose environment the protected stack runs under.
+
+    The producer half is verified identically in both modes -- a development
+    run consumes the same signed hosted release. Only the marketplace half
+    differs: an attested run binds a verified consumer release, and a local one
+    records that it has none.
+    """
+
     production: dict[str, Any] = _VERIFIER.verify_release(
         trust_path=_required_file(trust_path, "HOSTED_RELEASE_TRUST"),
         manifest_path=_required_file(manifest_path, "HOSTED_RELEASE_MANIFEST"),
         wheel_path=_required_file(wheel_path, "HOSTED_CLIENT_WHEEL"),
     )
-    marketplace: dict[str, Any] = _MARKETPLACE_VERIFIER.verify_marketplace_release(
-        manifest_path=_required_file(
-            marketplace_manifest_path,
-            "HOSTED_MARKETPLACE_RELEASE_MANIFEST",
-        ),
-        expected_manifest_sha256=marketplace_manifest_sha256,
-        expected_commit=marketplace_commit,
-        expected_workflow_ref=marketplace_workflow_ref,
-        expected_workflow_run_id=marketplace_workflow_run_id,
-        expected_image_digest=marketplace_image_digest,
-    )
+    marketplace: dict[str, Any] | None = None
+    if release_mode == "attested":
+        marketplace = _MARKETPLACE_VERIFIER.verify_marketplace_release(
+            manifest_path=_required_file(
+                marketplace_manifest_path,
+                "HOSTED_MARKETPLACE_RELEASE_MANIFEST",
+            ),
+            expected_manifest_sha256=marketplace_manifest_sha256,
+            expected_commit=marketplace_commit,
+            expected_workflow_ref=marketplace_workflow_ref,
+            expected_workflow_run_id=marketplace_workflow_run_id,
+            expected_image_digest=marketplace_image_digest,
+        )
     verified_image = _image(
         production["service_image_reference"], production["service_image_digest"]
     )
@@ -123,35 +149,43 @@ def prepare_compose_env(
     verified_authority_id = str(production["authority_id"])
     verified_authority_scheme = str(production["authority_scheme"])
     verified_authority_address = str(production["authority_address"])
-    verified_marketplace_image = _image(
-        marketplace["service_image_reference"],
-        marketplace["service_image_digest"],
-    )
-    verified_marketplace_contract = {
-        "HOSTED_MARKETPLACE_VERIFIED_ARTIFACT_PROVENANCE_SHA256": str(
-            marketplace["artifacts"]["provenance"]["sha256"]
-        ),
-        "HOSTED_MARKETPLACE_VERIFIED_ARTIFACT_SCHEMA_SHA256": str(
-            marketplace["artifacts"]["settlement_config_schema"]["sha256"]
-        ),
-        "HOSTED_MARKETPLACE_VERIFIED_ARTIFACT_WHEELHOUSE_SHA256": str(
-            marketplace["artifacts"]["wheelhouse"]["sha256"]
-        ),
-        "HOSTED_MARKETPLACE_VERIFIED_IMAGE": verified_marketplace_image,
-        "HOSTED_MARKETPLACE_VERIFIED_MANIFEST_SHA256": str(
-            marketplace["manifest_sha256"]
-        ),
-        "HOSTED_MARKETPLACE_VERIFIED_REPOSITORY": str(marketplace["repository"]),
-        "HOSTED_MARKETPLACE_VERIFIED_SOURCE_COMMIT": str(
-            marketplace["source_commit"]
-        ),
-        "HOSTED_MARKETPLACE_VERIFIED_WORKFLOW_REF": str(
-            marketplace["workflow_ref"]
-        ),
-        "HOSTED_MARKETPLACE_VERIFIED_WORKFLOW_RUN_ID": str(
-            marketplace["workflow_run_id"]
-        ),
-    }
+    if marketplace is None:
+        verified_marketplace_contract = {
+            name: "" for name in _LOCAL_MARKETPLACE_COORDINATES
+        }
+        verified_marketplace_contract["HOSTED_MARKETPLACE_VERIFIED_REPOSITORY"] = (
+            "arkhai-io/simple-compute-market"
+        )
+    else:
+        verified_marketplace_image = _image(
+            marketplace["service_image_reference"],
+            marketplace["service_image_digest"],
+        )
+        verified_marketplace_contract = {
+            "HOSTED_MARKETPLACE_VERIFIED_ARTIFACT_PROVENANCE_SHA256": str(
+                marketplace["artifacts"]["provenance"]["sha256"]
+            ),
+            "HOSTED_MARKETPLACE_VERIFIED_ARTIFACT_SCHEMA_SHA256": str(
+                marketplace["artifacts"]["settlement_config_schema"]["sha256"]
+            ),
+            "HOSTED_MARKETPLACE_VERIFIED_ARTIFACT_WHEELHOUSE_SHA256": str(
+                marketplace["artifacts"]["wheelhouse"]["sha256"]
+            ),
+            "HOSTED_MARKETPLACE_VERIFIED_IMAGE": verified_marketplace_image,
+            "HOSTED_MARKETPLACE_VERIFIED_MANIFEST_SHA256": str(
+                marketplace["manifest_sha256"]
+            ),
+            "HOSTED_MARKETPLACE_VERIFIED_REPOSITORY": str(marketplace["repository"]),
+            "HOSTED_MARKETPLACE_VERIFIED_SOURCE_COMMIT": str(
+                marketplace["source_commit"]
+            ),
+            "HOSTED_MARKETPLACE_VERIFIED_WORKFLOW_REF": str(
+                marketplace["workflow_ref"]
+            ),
+            "HOSTED_MARKETPLACE_VERIFIED_WORKFLOW_RUN_ID": str(
+                marketplace["workflow_run_id"]
+            ),
+        }
     verified_contract = {
         "HOSTED_SETTLEMENT_VERIFIED_API_VERSION": str(production["api_version"]),
         "HOSTED_SETTLEMENT_VERIFIED_CAPABILITIES": ",".join(
@@ -256,13 +290,22 @@ def main() -> int:
     parser.add_argument("--manifest", type=Path, required=True)
     parser.add_argument("--wheel", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
-    parser.add_argument("--marketplace-manifest", type=Path, required=True)
-    parser.add_argument("--marketplace-manifest-sha256", required=True)
-    parser.add_argument("--marketplace-source-commit", required=True)
-    parser.add_argument("--marketplace-workflow-ref", required=True)
-    parser.add_argument("--marketplace-workflow-run-id", required=True)
-    parser.add_argument("--marketplace-image-digest", required=True)
+    parser.add_argument("--marketplace-manifest", type=Path)
+    parser.add_argument("--marketplace-manifest-sha256", default="")
+    parser.add_argument("--marketplace-source-commit", default="")
+    parser.add_argument("--marketplace-workflow-ref", default="")
+    parser.add_argument("--marketplace-workflow-run-id", default="")
+    parser.add_argument("--marketplace-image-digest", default="")
+    parser.add_argument(
+        "--release-mode",
+        choices=("attested", "local"),
+        default="attested",
+        help="attested verifies a released consumer; local renders the same "
+        "environment for a development stack that has none.",
+    )
     args = parser.parse_args()
+    if args.release_mode == "attested" and args.marketplace_manifest is None:
+        parser.error("--marketplace-manifest is required for an attested environment")
     try:
         image = prepare_compose_env(
             trust_path=args.trust,
@@ -275,6 +318,7 @@ def main() -> int:
             marketplace_workflow_run_id=args.marketplace_workflow_run_id,
             marketplace_image_digest=args.marketplace_image_digest,
             output_path=args.output,
+            release_mode=args.release_mode,
         )
     except (
         _VERIFIER.ReleaseVerificationError,

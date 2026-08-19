@@ -659,3 +659,61 @@ def test_compose_preparer_rejects_release_mode_selector(
 
     assert exc_info.value.code == 2
     assert "unrecognized arguments: --mode hermetic" in capsys.readouterr().err
+
+
+def test_local_compose_env_renders_without_an_attested_consumer(tmp_path: Path) -> None:
+    """A development stack starts; it just has no released consumer to name."""
+
+    trust_path, manifest_path, client_path = _stage_release(tmp_path)
+    output_path = tmp_path / "hosted-compose.env"
+
+    preparer.prepare_compose_env(
+        trust_path=trust_path,
+        manifest_path=manifest_path,
+        wheel_path=client_path,
+        marketplace_manifest_path=None,
+        marketplace_manifest_sha256="",
+        marketplace_commit="",
+        marketplace_workflow_ref="",
+        marketplace_workflow_run_id="",
+        marketplace_image_digest="",
+        output_path=output_path,
+        release_mode="local",
+    )
+    values = dict(
+        line.split("=", 1)
+        for line in output_path.read_text(encoding="utf-8").splitlines()
+        if line and not line.startswith("#")
+    )
+
+    # The producer half is bound exactly as an attested run binds it.
+    assert values["HOSTED_SETTLEMENT_VERIFIED_REPOSITORY"]
+    assert values["HOSTED_SETTLEMENT_VERIFIED_MANIFEST_SHA256"].startswith("sha256:")
+    # The consumer half is structurally present and empty: the environment's
+    # reader requires the exact key set, and a development run reads empty as
+    # "no released coordinate".
+    assert values["HOSTED_MARKETPLACE_VERIFIED_IMAGE"] == ""
+    assert values["HOSTED_MARKETPLACE_VERIFIED_MANIFEST_SHA256"] == ""
+    assert values["HOSTED_MARKETPLACE_VERIFIED_SOURCE_COMMIT"] == ""
+    assert (
+        values["HOSTED_MARKETPLACE_VERIFIED_REPOSITORY"]
+        == "arkhai-io/simple-compute-market"
+    )
+
+
+def test_attested_compose_env_still_requires_its_consumer_release(tmp_path: Path) -> None:
+    trust_path, manifest_path, client_path = _stage_release(tmp_path)
+
+    with pytest.raises(preparer.ComposePreparationError):
+        preparer.prepare_compose_env(
+            trust_path=trust_path,
+            manifest_path=manifest_path,
+            wheel_path=client_path,
+            marketplace_manifest_path=None,
+            marketplace_manifest_sha256="",
+            marketplace_commit="",
+            marketplace_workflow_ref="",
+            marketplace_workflow_run_id="",
+            marketplace_image_digest="",
+            output_path=tmp_path / "hosted-compose.env",
+        )

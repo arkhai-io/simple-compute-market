@@ -29,16 +29,20 @@
 
 ## 2. Make the stack startable locally
 
-- [ ] 2.1 Split `prepare-hosted-compose` so the attested path keeps
+- [x] 2.1 Split `prepare-hosted-compose` so the attested path keeps
       `gh attestation verify` unchanged and a local path renders the same compose
       environment from locally available inputs, sharing the rendering.
-- [ ] 2.2 A `hosted-stripe-test-local` target that requires every safety
+- [x] 2.2 A `hosted-stripe-test-local` target that requires every safety
       precondition and none of the provenance ones, and passes
       `--release-mode local`.
-- [ ] 2.3 Evidence: the attested target's preconditions are unchanged (assert on
+- [x] 2.3 Evidence: the attested target's preconditions are unchanged (assert on
       the target's own requirements), and the local target refuses to run without
       the safety inputs.
-- [ ] 2.4 Closeout.
+- [x] 2.4 Closeout: hygiene clean. Verified end to end against the real staged
+      v0.2.1 release -- `make prepare-hosted-compose-local` renders a complete
+      environment, the gates reader accepts all 30 keys, the producer binds to
+      the exact ghcr digest from the trust manifest, and the run records as
+      local with a `local` consumer coordinate. Suites: scripts 20, e2e unit 90.
 
 ## 3. Replace the broker for local runs
 
