@@ -16,6 +16,9 @@ dependencies = [
   # policies themselves (listed_price/bisection middlewares) also live
   # in kit-policy and register on import.
   "arkhai-kit-policy",
+  # Installed delivery sinks: the buyer's own copy of a revealed deal,
+  # sent where they read things. No mechanism dependency comes with it.
+  "arkhai-kit-delivery==0.1.0",
   # Mechanism-neutral settlement selection and plan carriers.
   "arkhai-core>=0.2.0",
   # Installed mechanism registration, canonical priority, and recovery dispatch.

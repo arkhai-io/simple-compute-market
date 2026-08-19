@@ -26,6 +26,9 @@ from core_buyer import (
     BuyerActionHandler,
     HostedSettlementTransport,
     IntroductionTransport,
+    deliver_introduction,
+    load_buyer_delivery_sinks,
+    report_delivery,
     resolve_buyer_action_policy,
 )
 from core_buyer.negotiation_client import negotiate_with_seller
@@ -739,6 +742,38 @@ def request_introduction(
     )
 
 
+def _deliver_locally(projection: Any, deal: Any, sinks: Any, log: Any) -> None:
+    """Send the buyer's own copy onward, after the answer has been printed.
+
+    Never fatal: the reveal is durable and re-readable, so a sink that fails
+    costs a re-send and nothing else. Outcomes carry a sink name and a deal
+    reference, never the contact payload.
+    """
+
+    outcomes = deliver_introduction(
+        projection,
+        sinks=sinks,
+        agreement_ref=deal.negotiation_id,
+        counterparty=_seller_principal(deal),
+    )
+    report_delivery(outcomes, sinks.warnings)
+    if outcomes:
+        log.event(
+            "introduction_delivered",
+            obligation_ref=projection.get("obligation_ref"),
+            outcomes=[
+                {"sink": outcome.sink, "delivered": outcome.delivered}
+                for outcome in outcomes
+            ],
+        )
+
+
+def _seller_principal(deal: Any) -> Any:
+    principals = getattr(deal, "seller_principals", None)
+    identities = getattr(principals, "identities", ()) if principals else ()
+    return identities[0] if identities else None
+
+
 @bare_metal_app.command("introduce")
 def introduce(
     run_id: str = typer.Option(...),
@@ -751,6 +786,9 @@ def introduce(
 ) -> None:
     """Start the introduction: supply your contact, receive the seller's."""
 
+    # Built before the reveal: a misconfigured sink is the operator's own
+    # mistake and should surface before anything irreversible happens.
+    sinks = load_buyer_delivery_sinks(config)
     deal, identity, transport, obligation_ref = _recovered_introduction(
         run_id, config
     )
@@ -766,17 +804,34 @@ def introduce(
     )
     log.event("introduction_revealed", obligation_ref=obligation_ref)
     _json(projection)
+    _deliver_locally(projection, deal, sinks, log)
 
 
 @bare_metal_app.command("introduction")
 def read_introduction(
     run_id: str = typer.Option(...),
+    deliver: bool = typer.Option(
+        False,
+        "--deliver",
+        help="Send the introduction to your configured sinks again.",
+    ),
     config: str | None = typer.Option(None, "--config"),
 ) -> None:
     """Re-read the revealed introduction; the reveal is durable."""
 
-    _, _, transport, obligation_ref = _recovered_introduction(run_id, config)
-    _json(transport.read(obligation_ref=obligation_ref))
+    sinks = load_buyer_delivery_sinks(config) if deliver else None
+    deal, identity, transport, obligation_ref = _recovered_introduction(
+        run_id, config
+    )
+    projection = transport.read(obligation_ref=obligation_ref)
+    _json(projection)
+    if sinks is not None:
+        log = open_run_log(
+            run_id,
+            signer=identity.signer,
+            profile_id=identity.profile_id,
+        )
+        _deliver_locally(projection, deal, sinks, log)
 
 
 def register_commands(app: object) -> None:

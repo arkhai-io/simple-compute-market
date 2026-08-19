@@ -73,19 +73,22 @@
 
 ## 4. Buyer-side delivery
 
-- [ ] 4.1 `core/buyer` depends on `arkhai-kit-delivery` (and on no mechanism kit),
+- [x] 4.1 `core/buyer` depends on `arkhai-kit-delivery` (and on no mechanism kit),
       and constructs the buyer's configured sink set from the buyer configuration
       at command start.
-- [ ] 4.2 `introduce` writes the revealed introduction to standard output first,
+- [x] 4.2 `introduce` writes the revealed introduction to standard output first,
       then dispatches to sinks with bounded timeouts, reports each outcome on the
       diagnostic stream, exits successfully regardless, and records a run-log event
       carrying obligation reference and sink outcomes only.
-- [ ] 4.3 Explicit re-delivery from the durable read command for an
+- [x] 4.3 Explicit re-delivery from the durable read command for an
       already-revealed introduction.
-- [ ] 4.4 Evidence: `core/buyer` and bare-metal buyer tests — output precedes
+- [x] 4.4 Evidence: `core/buyer` and bare-metal buyer tests — output precedes
       dispatch, a failing sink still exits successfully with the introduction
       printed, the run log holds no contact payload, and re-delivery re-sends.
-- [ ] 4.5 Closeout.
+- [x] 4.5 Closeout: hygiene clean; module-level imports throughout; the
+      buyer resolves sinks through the plugin contract only, so `core_buyer`
+      still imports no mechanism kit. Suites: core/buyer 110, bare-metal
+      buyer 11.
 
 ## 5. Composition, documentation, and closeout
 

@@ -52,6 +52,7 @@ dependencies = [
     { name = "arkhai-core" },
     { name = "arkhai-core-registry-client" },
     { name = "arkhai-kit-config" },
+    { name = "arkhai-kit-delivery" },
     { name = "arkhai-kit-identity" },
     { name = "arkhai-kit-policy" },
     { name = "arkhai-kit-settlement-runtime" },
@@ -69,6 +70,7 @@ requires-dist = [
     { name = "arkhai-core", specifier = ">=0.2.0" },
     { name = "arkhai-core-registry-client", specifier = "==0.11.0" },
     { name = "arkhai-kit-config" },
+    { name = "arkhai-kit-delivery", specifier = "==0.1.0" },
     { name = "arkhai-kit-identity", specifier = "==0.3.0" },
     { name = "arkhai-kit-policy" },
     { name = "arkhai-kit-settlement-runtime", specifier = "==0.1.0" },
@@ -104,6 +106,18 @@ dependencies = [
 ]
 wheels = [
     { path = "arkhai_kit_config-0.1.0-py3-none-any.whl" },
+]
+
+[[package]]
+name = "arkhai-kit-delivery"
+version = "0.1.0"
+source = { registry = "../../.dist" }
+dependencies = [
+    { name = "arkhai-kit-identity" },
+    { name = "pydantic" },
+]
+wheels = [
+    { path = "arkhai_kit_delivery-0.1.0-py3-none-any.whl" },
 ]
 
 [[package]]
