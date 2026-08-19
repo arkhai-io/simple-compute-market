@@ -233,8 +233,8 @@ What deliberately remains: the `escrows` table and the `/api/v1/settle/{escrow_u
 
 | Open gap | Owned by |
 |---|---|
-| Cross-domain contact-exchange composition beyond bare metal; contact-payload retention automation | [`contact-exchange-settlement-mechanism`](../../openspec/changes/contact-exchange-settlement-mechanism/) |
-| Delivery beyond bare metal, and a second event producer (a settled charge, a completed escrow) | [`add-introduction-delivery-sinks`](../../openspec/changes/add-introduction-delivery-sinks/) |
+| Cross-domain contact-exchange composition beyond bare metal; contact-payload retention automation | Unowned — needs a new change; background in [`contact-exchange-settlement-mechanism`](../../openspec/changes/archive/2026-08-19-contact-exchange-settlement-mechanism/) |
+| Delivery beyond bare metal, and a second event producer (a settled charge, a completed escrow) | Unowned — needs a new change; background in [`add-introduction-delivery-sinks`](../../openspec/changes/archive/2026-08-19-add-introduction-delivery-sinks/) |
 
 ---
 
