@@ -61,6 +61,17 @@
 - [ ] 6.2 Build hosted-settlement-service 0.3.0 locally, bind it, and run a `saved_instrument`
       lane. This is the first scenario with no published image behind it and no browser in it.
       Record what it reaches. A development run qualifies no lane in the protected matrix.
+
+      Both are blocked on building the producer image, which this machine currently cannot do:
+      podman's VM resolves `registry-1.docker.io` to an unrelated address and cannot pull a base
+      image, while the cached amd64 bases build under emulation only to time out fetching
+      dependencies. Neither failure involves this change. What was verified without a container:
+      `make artifacts` generates the 0.3.0 artifacts; the preparer renders them into a complete
+      environment naming `payer-direct-instrument-setup.v1`, schema 6, and empty provenance; and
+      `local_release_identity` binds that environment, reports `release_mode: local`, and admits
+      the direct-setup prerequisite. The released producer binds the same way through the real
+      staged release and trust manifest. What is unproven is everything downstream of Compose
+      creating the authority.
 - [x] 6.3 Confirm an attested run is unchanged: same rendered environment, same assertions, same
       fail-closed behavior, byte-for-byte evidence shape.
 
@@ -72,5 +83,5 @@
 - [x] 7.2 Promote the accepted provenance/contract split to
       `openspec/specs/deployment-state/architecture.md`, which currently explains the protected
       boundary without naming that distinction.
-- [ ] 7.3 External: a protected run of the matrix remains blocked on the protected environment and
+- [x] 7.3 External: a protected run of the matrix remains blocked on the protected environment and
       is unaffected by this change. Recorded, not simulated.
