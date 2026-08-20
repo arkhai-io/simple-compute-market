@@ -743,16 +743,23 @@ def test_a_local_producer_without_its_artifacts_fails_closed(
     assert "0.2.1" not in str(caught.value)
 
 
-def test_a_local_producer_directory_holding_two_releases_is_refused(
+def test_a_local_producer_directory_holding_two_releases_is_not_guessed(
     tmp_path: Path,
 ) -> None:
-    """Which one the image serves is unanswerable, so it is not guessed."""
+    """A build directory accumulates versions, so the run names the one it wants."""
 
     directory = _stage_local_producer(tmp_path)
     _stage_local_producer(tmp_path, version="0.4.0", schema=7)
 
-    with pytest.raises(preparer.ComposePreparationError, match="exactly one"):
+    with pytest.raises(preparer.ComposePreparationError, match="name the version"):
         _local_producer_env(tmp_path, hosted_artifacts_path=directory)
+
+    values = _local_producer_env(
+        tmp_path, hosted_artifacts_path=directory, hosted_release_version="0.4.0"
+    )
+
+    assert values["HOSTED_SETTLEMENT_VERIFIED_RELEASE_VERSION"] == "0.4.0"
+    assert values["HOSTED_SETTLEMENT_VERIFIED_SCHEMA_VERSION"] == "7"
 
 
 def test_a_local_producer_composes_with_an_attested_consumer(tmp_path: Path) -> None:

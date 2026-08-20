@@ -41,7 +41,7 @@ HOSTED_PRODUCTION_SOURCE_COMMIT ?= $(word 4,$(HOSTED_TRUSTED_IDENTITIES))
 HOSTED_PRODUCTION_WORKFLOW_REF ?= $(word 5,$(HOSTED_TRUSTED_IDENTITIES))
 HOSTED_PRODUCTION_WORKFLOW_RUN_ID ?=
 # Which producer a development run binds, in the two places it has to be said.
-HOSTED_PRODUCER_INPUTS = $(if $(HOSTED_LOCAL_HOSTED_IMAGE),--local-hosted-image "$(HOSTED_LOCAL_HOSTED_IMAGE)" --hosted-artifacts "$(HOSTED_LOCAL_HOSTED_ARTIFACTS)",--trust "$(HOSTED_RELEASE_TRUST)" --manifest "$(HOSTED_RELEASE_MANIFEST)" --wheel "$(HOSTED_CLIENT_WHEEL)")
+HOSTED_PRODUCER_INPUTS = $(if $(HOSTED_LOCAL_HOSTED_IMAGE),--local-hosted-image "$(HOSTED_LOCAL_HOSTED_IMAGE)" --hosted-artifacts "$(HOSTED_LOCAL_HOSTED_ARTIFACTS)" --hosted-release-version "$(HOSTED_LOCAL_HOSTED_VERSION)",--trust "$(HOSTED_RELEASE_TRUST)" --manifest "$(HOSTED_RELEASE_MANIFEST)" --wheel "$(HOSTED_CLIENT_WHEEL)")
 # A build made here has no released coordinates, and supplying any is refused.
 HOSTED_PRODUCER_PINS = $(if $(HOSTED_LOCAL_HOSTED_IMAGE),,--hosted-manifest-sha256 "$(HOSTED_PRODUCTION_MANIFEST_SHA256)" --hosted-client-wheel-sha256 "$(HOSTED_PRODUCTION_CLIENT_WHEEL_SHA256)" --hosted-image-digest "$(HOSTED_PRODUCTION_IMAGE_DIGEST)" --hosted-source-commit "$(HOSTED_PRODUCTION_SOURCE_COMMIT)" --hosted-workflow-ref "$(HOSTED_PRODUCTION_WORKFLOW_REF)" --hosted-workflow-run-id "$(HOSTED_PRODUCTION_WORKFLOW_RUN_ID)")
 HOSTED_MARKETPLACE_COMMIT ?=

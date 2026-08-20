@@ -169,7 +169,9 @@ def _read_conformance(path: Path) -> dict[str, Any]:
     }
 
 
-def _local_hosted_artifacts(directory: Path | None) -> tuple[dict[str, Any], str, str]:
+def _local_hosted_artifacts(
+    directory: Path | None, release_version: str = ""
+) -> tuple[dict[str, Any], str, str]:
     """Read a locally built producer from the artifacts that build generated.
 
     Fails closed and names what is missing. Falling back to another release's
@@ -182,14 +184,18 @@ def _local_hosted_artifacts(directory: Path | None) -> tuple[dict[str, Any], str
             "a local hosted image must name the directory its release artifacts "
             f"were generated into (got {directory})"
         )
-    staged = sorted(directory.glob("conformance-v*.json"))
-    if len(staged) != 1:
-        raise ComposePreparationError(
-            f"expected exactly one conformance-v*.json in {directory}, found "
-            f"{len(staged)}; run the producer's artifact generation for one version"
-        )
-    conformance_path = staged[0]
-    release_version = conformance_path.name[len("conformance-v") : -len(".json")]
+    if not release_version:
+        # A producer's build directory accumulates every version it has ever
+        # generated artifacts for. Which one the image serves is not inferable
+        # from the directory, so it is either stated or there is exactly one.
+        staged = sorted(directory.glob("conformance-v*.json"))
+        if len(staged) != 1:
+            raise ComposePreparationError(
+                f"found {len(staged)} conformance-v*.json in {directory}; name "
+                "the version the local image serves"
+            )
+        release_version = staged[0].name[len("conformance-v") : -len(".json")]
+    conformance_path = directory / f"conformance-v{release_version}.json"
     contract = _read_conformance(conformance_path)
     required = {
         "conformance": conformance_path,
@@ -352,7 +358,9 @@ def _marketplace_contract(
 
 
 def _local_hosted_contract(
-    local_hosted_image: str, hosted_artifacts_path: Path | None
+    local_hosted_image: str,
+    hosted_artifacts_path: Path | None,
+    hosted_release_version: str = "",
 ) -> dict[str, str]:
     """Bind a producer built here: no provenance, the contract from the build."""
 
@@ -361,7 +369,7 @@ def _local_hosted_contract(
             "a locally built producer names the image it runs, not a registry digest"
         )
     contract, release_version, fingerprint = _local_hosted_artifacts(
-        hosted_artifacts_path
+        hosted_artifacts_path, hosted_release_version
     )
     assert hosted_artifacts_path is not None
     return {
@@ -405,6 +413,7 @@ def prepare_compose_env(
     local_marketplace_image: str = "",
     local_hosted_image: str = "",
     hosted_artifacts_path: Path | None = None,
+    hosted_release_version: str = "",
 ) -> str:
     """Render the Compose environment the stack runs under.
 
@@ -427,7 +436,9 @@ def prepare_compose_env(
                 marketplace_workflow_run_id=marketplace_workflow_run_id,
                 marketplace_image_digest=marketplace_image_digest,
             ),
-            hosted=_local_hosted_contract(local_hosted_image, hosted_artifacts_path),
+            hosted=_local_hosted_contract(
+                local_hosted_image, hosted_artifacts_path, hosted_release_version
+            ),
         )
     production: dict[str, Any] = _VERIFIER.verify_release(
         trust_path=_required_file(trust_path, "HOSTED_RELEASE_TRUST"),
@@ -484,6 +495,12 @@ def main() -> int:
         "published release; the run is a development run either way",
     )
     parser.add_argument(
+        "--hosted-release-version",
+        default="",
+        help="which version the local image serves; a producer's build "
+        "directory accumulates the artifacts of every version it has built",
+    )
+    parser.add_argument(
         "--hosted-artifacts",
         type=Path,
         help="the directory a locally built producer generated its OpenAPI, "
@@ -522,6 +539,7 @@ def main() -> int:
             local_marketplace_image=args.local_marketplace_image,
             local_hosted_image=args.local_hosted_image,
             hosted_artifacts_path=args.hosted_artifacts,
+            hosted_release_version=args.hosted_release_version,
         )
     except (
         _VERIFIER.ReleaseVerificationError,
