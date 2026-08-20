@@ -40,8 +40,45 @@
 
 ## 6. End to end against a locally built 0.3.0 authority
 
-- [ ] 6.1 Run a `saved_instrument` bank-funded lane against the locally built 0.3.0 producer, through binding, rendering, migration, readiness, direct setup, and funding authorization. Record what was reached.
-- [ ] 6.2 Confirm the protected lane still refuses: with no signed 0.3.0 manifest it fails closed exactly as before, and the refusal names the missing release rather than the new capability.
+- [x] 6.1 Run a `saved_instrument` bank-funded lane against the locally built 0.3.0 producer, through binding, rendering, migration, readiness, direct setup, and funding authorization. Record what was reached.
+
+      Reached, against a producer built here and real Stripe test mode. The
+      compose environment rendered `0.3.0`, schema `6`, and all eighteen
+      capabilities from the producer's own artifacts. The authority migrated to
+      schema 6 and served a readiness response stating `api_version: 0.3.0` —
+      stated by the running service, which is what `report-the-contract-served`
+      changed on the producer side.
+
+      The marketplace consumer then reached ready against that live authority
+      with a configuration carrying the bound release's own contract, and the
+      same consumer bound to 0.2.1 against the same authority reported
+      `hosted.api_mismatch` and `hosted.schema_mismatch`. That pair is the whole
+      point: before this change the second case could not be reported at all,
+      because the client could not parse the response, and the first could not
+      be configured, because the version was a type.
+
+      The lane itself: `start_setup` carrying an instrument token for Stripe's
+      documented test bank returned `verification_pending` with no action;
+      `verify_setup` with the deposits that bank always makes returned `ready`;
+      the instrument listed as a ready `us_bank_account`. No browser was
+      launched and no browser action was issued. The projections carried the
+      opaque setup reference and readiness and nothing else.
+
+      Not reached: the scenario body past the payer fixture. Driving negotiation
+      and funding needs the marketplace and storefront containers, a connected
+      account bound into the stack, and webhook forwarding, none of which this
+      change touches. What it does touch was exercised end to end.
+
+- [x] 6.2 Confirm the protected lane still refuses: with no signed 0.3.0 manifest it fails closed exactly as before, and the refusal names the missing release rather than the new capability.
+
+      It refuses, and never gets near the capability. An attested render is
+      refused for want of a marketplace manifest before any hosted input is
+      read; supplied one, it is refused because the marketplace manifest digest
+      does not match its trusted identity. Naming the locally built producer in
+      attested mode changes none of that. No attested environment was rendered
+      in any of the four attempts, and no refusal mentioned
+      `payer-direct-instrument-setup.v1`, because provenance is settled before
+      contract is considered.
 
 ## 7. Record the decisions that outlive the change
 
