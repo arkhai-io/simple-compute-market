@@ -77,6 +77,7 @@ class ChromiumCheckout:
                 browser = playwright.chromium.launch(
                     headless=self._headless,
                     env=_browser_environment(),
+                    proxy=_browser_proxy(),
                 )
                 browser.close()
         except ChromiumUnavailable:
@@ -103,6 +104,7 @@ class ChromiumCheckout:
                 browser = playwright.chromium.launch(
                     headless=self._headless,
                     env=_browser_environment(),
+                    proxy=_browser_proxy(),
                 )
                 page: Any | None = None
                 try:
@@ -166,10 +168,16 @@ class ChromiumCheckout:
                     if outcome == "authentication":
                         _complete_authentication(page, self._timeout_ms)
                     if outcome in {"decline", "insufficient_funds"}:
+                        # These outcomes succeed by Checkout refusing and
+                        # staying put, so leaving would be the wrong signal.
                         _wait_for_decline(page, self._timeout_ms)
                     else:
-                        page.wait_for_timeout(min(5_000, self._timeout_ms))
-                        _raise_if_interactive_captcha(page)
+                        _await_checkout_left(
+                            page,
+                            timeout_ms=max(self._timeout_ms, _SETUP_SUBMIT_TIMEOUT_MS),
+                            diagnose=self._retain_diagnostics,
+                            subject="payment",
+                        )
                 except Exception:
                     if page is not None:
                         _raise_if_interactive_captcha(page)
@@ -200,6 +208,7 @@ class ChromiumCheckout:
                 browser = playwright.chromium.launch(
                     headless=self._headless,
                     env=_browser_environment(),
+                    proxy=_browser_proxy(),
                 )
                 try:
                     page = browser.new_context().new_page()
@@ -233,6 +242,7 @@ class ChromiumCheckout:
                 browser = playwright.chromium.launch(
                     headless=self._headless,
                     env=_browser_environment(),
+                    proxy=_browser_proxy(),
                 )
                 try:
                     page = browser.new_context().new_page()
@@ -323,6 +333,42 @@ def _load_playwright() -> Any:
 
 def _browser_environment() -> dict[str, str]:
     return {key: value for key, value in os.environ.items() if not _SENSITIVE_ENV.search(key)}
+
+
+#: Loopback is never proxied. The staged marketplace, the authority, and the
+#: webhook forwarder are all loopback, and routing them through a proxy would
+#: break a run that reaches them directly today.
+_NEVER_PROXIED = ("localhost", "127.0.0.1", "::1")
+
+
+def _browser_proxy() -> dict[str, str] | None:
+    """The proxy this run reaches the provider through, if it has one.
+
+    Chromium does not read ``HTTP_PROXY``/``HTTPS_PROXY``; it takes a proxy as a
+    launch argument or from system configuration. Passing what the rest of the
+    run already uses keeps one answer to how this run reaches the internet, and
+    keeps a machine whose egress is a proxy from loading a Checkout page that
+    mounts no form and failing three steps later as a funding timeout.
+
+    ``ALL_PROXY`` is deliberately not consulted. It is a SOCKS endpoint here,
+    and the run's own HTTP client cannot use one without an optional dependency
+    it does not install -- so honouring it would let the browser reach the
+    provider by a route nothing else in the run could.
+    """
+
+    server = os.environ.get("HTTPS_PROXY") or os.environ.get("https_proxy")
+    server = server or os.environ.get("HTTP_PROXY") or os.environ.get("http_proxy")
+    if not server:
+        return None
+    bypass = [
+        item.strip()
+        for item in (os.environ.get("NO_PROXY") or os.environ.get("no_proxy") or "").split(",")
+        if item.strip()
+    ]
+    for host in _NEVER_PROXIED:
+        if host not in bypass:
+            bypass.append(host)
+    return {"server": server, "bypass": ",".join(bypass)}
 
 
 #: How long a hosted Checkout page may take to mount the form this run has to
@@ -466,13 +512,18 @@ def _submit_checkout(page: Any, submit: Any, outcome: CheckoutOutcome) -> None:
 _SETUP_SUBMIT_TIMEOUT_MS = 30_000
 
 
-def _await_checkout_left(page: Any, *, timeout_ms: int, diagnose: bool) -> None:
-    """Refuse to call a setup complete until Checkout says it is.
+def _await_checkout_left(
+    page: Any, *, timeout_ms: int, diagnose: bool, subject: str = "setup"
+) -> None:
+    """Refuse to call a submission complete until Checkout says it is.
 
     The submit click is not the outcome. Checkout redirects to the configured
-    success URL once the SetupIntent is confirmed, and stays where it is
-    otherwise -- so waiting for the page to leave is the only in-browser signal
-    that separates a saved instrument from a form that was silently rejected.
+    success URL once the intent is confirmed, and stays where it is otherwise --
+    so waiting for the page to leave is the only in-browser signal that
+    separates a completed submission from a form that was silently rejected.
+    This holds for a payment exactly as it does for a setup: a lane that
+    returns success from a page that accepted nothing fails minutes later as a
+    funding timeout, naming neither the page nor what it did there.
     """
 
     try:
@@ -483,7 +534,7 @@ def _await_checkout_left(page: Any, *, timeout_ms: int, diagnose: bool) -> None:
     except Exception:  # noqa: BLE001 - the page is the subject, not the error
         _raise_if_interactive_captcha(page)
         raise CheckoutContractError(
-            "Checkout did not accept the submitted setup form"
+            f"Checkout did not accept the submitted {subject} form"
             + (_page_complaint(page) if diagnose else "")
         ) from None
 

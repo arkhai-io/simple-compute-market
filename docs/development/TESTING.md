@@ -677,7 +677,32 @@ surface only after a release.
   | --- | --- | --- |
   | `us_bank_transfer.v1` | `bank_instructions`, funded through the cash-balance test helper | yes, headless throughout |
   | `card.v1` | hosted Checkout | only until hCaptcha appears |
-  | `us_ach_debit.v1` | hosted Checkout via Financial Connections | no — the page presents no manual routing/account fields |
+  | `us_ach_debit.v1` | microdeposit verification against the payer's own instrument | yes, headless throughout, where the bound release declares `payer-direct-instrument-setup.v1` |
+
+  The ACH row was the other way round until the marketplace consumed
+  `payer-direct-instrument-setup.v1`. Before that the only path to a saved bank
+  instrument was a hosted Checkout page that offers Financial Connections and
+  no manual routing or account field, so the profile had no automatable lane at
+  all. A release that does not declare the capability still takes that path.
+
+- A proxy, on a machine whose egress is one. The browser is launched with the
+  `HTTPS_PROXY`/`HTTP_PROXY` the rest of the run uses, with loopback always
+  bypassed; `ALL_PROXY` is ignored because it is a SOCKS endpoint the run's own
+  HTTP client cannot use. Without a proxy on such a machine the Checkout page
+  loads its shell and mounts no form, and the lane fails at `browser_checkout`
+  saying the field it needed was unavailable.
+
+- A short `us_ach_debit.v1` availability delay. The released policy holds ACH
+  funds unavailable for four days, which is correct and unreachable in a test
+  run, so a development run adds one line to the authority environment file:
+
+  ```sh
+  echo 'HOSTED_SETTLEMENT_US_ACH_DEBIT_AVAILABILITY_DELAY_SECONDS=0' >>"$rundir/authority.env"
+  ```
+
+  Without it an ACH lane stops at `funding` with `ach_availability_pending`,
+  which is the authority correctly refusing to treat a debit as collectable
+  before it clears.
 
   A `us_bank_transfer.v1` run must quote the payer reference Stripe issues with
   the funding instructions when it funds the test cash balance. Funding without
