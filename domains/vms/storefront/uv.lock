@@ -167,7 +167,7 @@ wheels = [
 
 [[package]]
 name = "arkhai-bare-metal-storefront"
-version = "0.2.3"
+version = "0.2.4"
 source = { registry = "../../../.dist" }
 dependencies = [
     { name = "arkhai-bare-metal" },
@@ -189,7 +189,7 @@ dependencies = [
     { name = "uvicorn" },
 ]
 wheels = [
-    { path = "arkhai_bare_metal_storefront-0.2.3-py3-none-any.whl" },
+    { path = "arkhai_bare_metal_storefront-0.2.4-py3-none-any.whl" },
 ]
 
 [[package]]
@@ -305,7 +305,7 @@ wheels = [
 
 [[package]]
 name = "arkhai-kit-config"
-version = "0.1.0"
+version = "0.1.1"
 source = { registry = "../../../.dist" }
 dependencies = [
     { name = "arkhai-kit-settlement-runtime" },
@@ -314,12 +314,12 @@ dependencies = [
     { name = "tomlkit" },
 ]
 wheels = [
-    { path = "arkhai_kit_config-0.1.0-py3-none-any.whl" },
+    { path = "arkhai_kit_config-0.1.1-py3-none-any.whl" },
 ]
 
 [[package]]
 name = "arkhai-kit-contact-exchange"
-version = "0.1.0"
+version = "0.1.1"
 source = { registry = "../../../.dist" }
 dependencies = [
     { name = "arkhai-core" },
@@ -328,7 +328,7 @@ dependencies = [
     { name = "pydantic" },
 ]
 wheels = [
-    { path = "arkhai_kit_contact_exchange-0.1.0-py3-none-any.whl" },
+    { path = "arkhai_kit_contact_exchange-0.1.1-py3-none-any.whl" },
 ]
 
 [[package]]
@@ -360,7 +360,7 @@ wheels = [
 
 [[package]]
 name = "arkhai-kit-hosted-settlement"
-version = "0.1.2"
+version = "0.1.3"
 source = { registry = "../../../.dist" }
 dependencies = [
     { name = "arkhai-core" },
@@ -371,7 +371,7 @@ dependencies = [
     { name = "typer" },
 ]
 wheels = [
-    { path = "arkhai_kit_hosted_settlement-0.1.2-py3-none-any.whl" },
+    { path = "arkhai_kit_hosted_settlement-0.1.3-py3-none-any.whl" },
 ]
 
 [[package]]
@@ -429,7 +429,7 @@ wheels = [
 
 [[package]]
 name = "arkhai-kit-settlement-runtime"
-version = "0.1.0"
+version = "0.1.1"
 source = { registry = "../../../.dist" }
 dependencies = [
     { name = "arkhai-core" },
@@ -437,7 +437,7 @@ dependencies = [
     { name = "pydantic" },
 ]
 wheels = [
-    { path = "arkhai_kit_settlement_runtime-0.1.0-py3-none-any.whl" },
+    { path = "arkhai_kit_settlement_runtime-0.1.1-py3-none-any.whl" },
 ]
 
 [[package]]
@@ -494,7 +494,7 @@ wheels = [
 
 [[package]]
 name = "arkhai-vms-storefront"
-version = "0.3.3"
+version = "0.3.4"
 source = { editable = "." }
 dependencies = [
     { name = "alkahest-py" },
@@ -563,7 +563,7 @@ dev = [
 requires-dist = [
     { name = "alkahest-py", specifier = "==1.1.2" },
     { name = "arkhai-bare-metal", specifier = ">=0.2.0" },
-    { name = "arkhai-bare-metal-storefront", specifier = "==0.2.3" },
+    { name = "arkhai-bare-metal-storefront", specifier = "==0.2.4" },
     { name = "arkhai-compute-provisioning", specifier = ">=0.6.0" },
     { name = "arkhai-core", specifier = ">=0.2.0" },
     { name = "arkhai-core-registry-client", specifier = ">=0.11.0" },
@@ -573,7 +573,7 @@ requires-dist = [
     { name = "arkhai-kit-capacity-publication", specifier = "==0.1.0" },
     { name = "arkhai-kit-config" },
     { name = "arkhai-kit-fulfillment", specifier = ">=0.2.0" },
-    { name = "arkhai-kit-hosted-settlement", specifier = "==0.1.2" },
+    { name = "arkhai-kit-hosted-settlement", specifier = "==0.1.3" },
     { name = "arkhai-kit-identity", specifier = "==0.3.0" },
     { name = "arkhai-kit-negotiation-runtime", specifier = "==0.1.0" },
     { name = "arkhai-kit-policy" },
