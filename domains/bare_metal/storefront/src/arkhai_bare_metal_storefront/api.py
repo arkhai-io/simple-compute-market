@@ -49,7 +49,7 @@ from .runtime import BareMetalStorefrontRuntime
 from .settlement_service import SettlementRequestError
 from .hosted_routes import build_bare_metal_hosted_route_service
 from .introduction_routes import build_bare_metal_introduction_service
-from .response_auth import bind_response_auth
+from .response_auth import bind_response_auth, bind_response_contract
 
 router = APIRouter()
 
@@ -78,6 +78,7 @@ async def _principal(
     allowed_principals: tuple[Identity, ...] | None = None,
     body: Any = EMPTY_BODY,
 ) -> Identity:
+    bind_response_contract(request, operation=operation, resource=resource)
     try:
         authenticated = await authenticate_request(
             headers=request.headers,
@@ -147,6 +148,7 @@ async def _authorize_hosted_request(
     body: Mapping[str, Any] | None,
 ) -> Any:
     runtime = _runtime(request)
+    bind_response_contract(request, operation=operation, resource=resource)
     try:
         authenticated = await authenticate_request(
             headers=request.headers,
@@ -194,6 +196,7 @@ async def _authorize_introduction_request(
     body: Mapping[str, Any] | None,
 ) -> AuthorizedIntroductionRequest:
     runtime = _runtime(request)
+    bind_response_contract(request, operation=operation, resource=resource)
     role = request.headers.get("X-Market-Role", "buyer")
     if role not in {"buyer", "seller"}:
         raise IntroductionRouteError(403, "caller is not an introduction party")

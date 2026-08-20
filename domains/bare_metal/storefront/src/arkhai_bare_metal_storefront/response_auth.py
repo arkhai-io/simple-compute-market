@@ -18,15 +18,37 @@ from core_storefront.auth import AuthenticatedPrincipal, signed_response_headers
 
 @dataclass(frozen=True)
 class _ResponseAuthContext:
-    authenticated: AuthenticatedPrincipal
     operation: str
     resource: str
+    authenticated: AuthenticatedPrincipal | None = None
 
 
 class _RecordedOutcome(Exception):
     def __init__(self, status: int, body: Any) -> None:
         self.status = status
         self.body = body
+
+
+def bind_response_contract(
+    request: Request, *, operation: str, resource: str
+) -> None:
+    """Name the route a refusal will be bound to, before trust is established.
+
+    The operation and resource come from the route, not from the caller's
+    claims, so they are known whether or not authentication goes on to
+    succeed. Binding them here is what lets a caller read why it was refused
+    instead of discarding an unsigned answer.
+    """
+
+    existing = getattr(request.state, "marketplace_response_auth", None)
+    if isinstance(existing, _ResponseAuthContext) and existing.authenticated:
+        # A route that authenticates twice has already bound the stronger of
+        # the two contexts; naming the route again must not discard it.
+        return
+    request.state.marketplace_response_auth = _ResponseAuthContext(
+        operation=operation,
+        resource=resource,
+    )
 
 
 def bind_response_auth(
@@ -89,13 +111,23 @@ async def authenticate_response(request: Request, call_next):
         except (TypeError, ValueError):
             body = raw_body.decode("utf-8")
     authenticated = context.authenticated
-    if authenticated.dispatch_allowed:
-        await runtime.db.record_replay_outcome(
-            authenticated.reservation,
-            attempt_token=authenticated.attempt_token,
-            status=response.status_code,
-            body=body,
-        )
+    if authenticated is None:
+        # Refused while authenticating: nothing was reserved and nothing was
+        # dispatched, so there is no outcome to record. The caller's own
+        # request identity is still bindable, and a caller that sent none has
+        # nothing to compare a signature against.
+        request_id = request.headers.get("X-Market-Request-ID") or None
+        if request_id is None:
+            return response
+    else:
+        request_id = authenticated.request_id
+        if authenticated.dispatch_allowed:
+            await runtime.db.record_replay_outcome(
+                authenticated.reservation,
+                attempt_token=authenticated.attempt_token,
+                status=response.status_code,
+                body=body,
+            )
     headers = dict(response.headers)
     headers.update(
         signed_response_headers(
@@ -104,7 +136,7 @@ async def authenticate_response(request: Request, call_next):
             method=request.method,
             operation=context.operation,
             resource=context.resource,
-            request_id=authenticated.request_id,
+            request_id=request_id,
             status=response.status_code,
             body=body,
         )

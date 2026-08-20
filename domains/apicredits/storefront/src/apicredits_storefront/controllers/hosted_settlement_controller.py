@@ -16,7 +16,10 @@ from apicredits_storefront.controllers.issuance_evidence_controller import (
 )
 from apicredits_storefront.hosted_routes import build_api_credit_hosted_route_service
 from apicredits_storefront.middleware import buyer_auth
-from apicredits_storefront.middleware.response_auth import bind_response_auth
+from apicredits_storefront.middleware.response_auth import (
+    bind_response_auth,
+    bind_response_contract,
+)
 from apicredits_storefront.settlement_models import (
     ApiCreditsHostedSettlementResponse,
 )
@@ -127,6 +130,11 @@ async def _authenticate_evidence_resolver(request: Request) -> Identity:
     trust = getattr(stripe, "authority", None)
     if trust is None:
         raise HTTPException(status_code=503, detail="hosted authority trust is unavailable")
+    bind_response_contract(
+        request,
+        operation="resolve_api_credit_issuance_evidence",
+        resource=str(request.path_params.get("evidence_digest") or ""),
+    )
     try:
         authenticated = await authenticate_request(
             headers=request.headers,

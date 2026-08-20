@@ -15,11 +15,13 @@ from market_core.schemas import (
 )
 from market_settlement_runtime import derive_obligation_ref
 from market_identity import (
+    AuthenticatedResponse,
     Eip191Signer,
     RequestEnvelope,
     TrustedIdentitySet,
     canonical_body_hash,
     sign_request,
+    verify_response,
 )
 
 from arkhai_bare_metal import (
@@ -477,3 +479,73 @@ async def test_durable_pause_blocks_new_negotiation(tmp_path) -> None:
         )
 
     assert response.status_code == 503
+
+
+async def test_a_refused_caller_can_verify_the_refusal(tmp_path) -> None:
+    """An unsigned refusal is discarded by a caller that pins the storefront.
+
+    The caller then knows only that the answer was unreadable, which is the one
+    thing that does not help it. Binding the route's own operation and resource
+    plus the caller's request identity costs nothing that depends on trust.
+    """
+
+    runtime = _runtime(str(tmp_path / "storefront.db"))
+    await _insert_listing(runtime)
+    opening = _opening()
+    # A resource the route did not derive: authentication refuses this before
+    # any handler runs, which is exactly where the signing state was missing.
+    headers = _headers("negotiate_new", "listing-not-this-one", opening)
+
+    with TestClient(_app(runtime)) as client:
+        refused = client.post("/api/v1/negotiate/new", json=opening, headers=headers)
+
+    assert refused.status_code == 403
+    payload = refused.json()
+    signed = AuthenticatedResponse.model_validate(
+        {
+            "protocol": refused.headers["X-Market-Signature-Version"],
+            "role": refused.headers["X-Market-Role"],
+            "principal": {
+                "scheme": refused.headers["X-Market-Identity-Scheme"],
+                "identifier": refused.headers["X-Market-Identity-Identifier"],
+            },
+            "method": "POST",
+            "operation": "negotiate_new",
+            "resource": "listing-1",
+            "request_id": refused.headers["X-Market-Request-ID"],
+            "timestamp": int(refused.headers["X-Market-Timestamp"]),
+            "status": refused.status_code,
+            "body_hash": canonical_body_hash(payload),
+            "proof": {
+                "scheme": refused.headers["X-Market-Identity-Scheme"],
+                "value": refused.headers["X-Market-Signature"],
+            },
+        }
+    )
+    verification = verify_response(
+        signed,
+        body=payload,
+        now=int(time.time()),
+        max_skew=300,
+        expected_role="seller",
+        expected_principals=TrustedIdentitySet(identities=(SELLER_SIGNER.identity,)),
+        expected_method="POST",
+        expected_operation="negotiate_new",
+        expected_resource="listing-1",
+        expected_request_id=headers["X-Market-Request-ID"],
+    )
+    assert verification.verified, verification.code
+    assert refused.headers["X-Market-Request-ID"] == headers["X-Market-Request-ID"]
+
+
+async def test_a_caller_with_no_request_identity_is_refused_unsigned(tmp_path) -> None:
+    """Nothing to bind: a proof over an invented identity verifies against nothing."""
+
+    runtime = _runtime(str(tmp_path / "storefront.db"))
+    await _insert_listing(runtime)
+
+    with TestClient(_app(runtime)) as client:
+        refused = client.post("/api/v1/negotiate/new", json=_opening())
+
+    assert refused.status_code == 401
+    assert "X-Market-Signature" not in refused.headers

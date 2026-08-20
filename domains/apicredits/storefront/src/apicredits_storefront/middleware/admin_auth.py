@@ -11,7 +11,10 @@ from market_identity import EMPTY_BODY, Identity
 import apicredits_storefront.container as container
 from apicredits_storefront.utils.config import resolve_admin_identities
 from core_storefront.auth import AuthError, authenticate_request
-from apicredits_storefront.middleware.response_auth import bind_response_auth
+from apicredits_storefront.middleware.response_auth import (
+    bind_response_auth,
+    bind_response_contract,
+)
 
 
 async def require_admin_principal(request: Request) -> Identity:
@@ -29,6 +32,7 @@ async def require_admin_principal(request: Request) -> Identity:
         body = json.loads(raw_body) if raw_body else EMPTY_BODY
     except (TypeError, ValueError) as exc:
         raise HTTPException(status_code=400, detail="request body must be JSON") from exc
+    bind_response_contract(request, operation=operation, resource=resource)
     try:
         authenticated = await authenticate_request(
             headers=request.headers,

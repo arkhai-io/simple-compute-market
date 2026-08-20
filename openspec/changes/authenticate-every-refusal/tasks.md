@@ -33,10 +33,19 @@
 
 ## 3. The other storefronts sign what they refuse
 
-- [ ] 3.1 The bare metal storefront's response wrapper signs a refusal raised
+- [x] 3.1 The bare metal storefront's response wrapper signs a refusal raised
       before its authentication context is bound.
-- [ ] 3.2 The API-credits storefront does the same.
-- [ ] 3.3 Evidence: wire-level coverage per storefront and both suites green.
+- [x] 3.2 The API-credits storefront does the same.
+- [x] 3.3 Evidence: each storefront refuses a caller through its real mounted
+      application and the refusal verifies against the storefront principal
+      over the route's contract and the caller's request identity; a caller
+      that sent no request identity is still refused bare. Suites: bare metal
+      124 passed, API-credits 77 passed.
+
+      One thing the API-credits storefront made visible: its seller routes
+      never bound a response context at all, so they signed nothing, success
+      or refusal. Naming the contract before authenticating fixes both halves
+      at once, which is what the requirement asks for.
 
 ## 4. Read the refusal the hosted lane was giving
 
