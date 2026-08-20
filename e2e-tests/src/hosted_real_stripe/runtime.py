@@ -26,7 +26,7 @@ from market_identity import (
 )
 from typing import Any, Mapping, Sequence
 
-from .gates import LOCAL_COORDINATE
+from .gates import LOCAL_COORDINATE, HostedContract
 
 _WEBHOOK_SECRET = re.compile(r"\b(whsec_[A-Za-z0-9]+)\b")
 _SENSITIVE_ENV = re.compile(r"(?:STRIPE|WEBHOOK)", re.IGNORECASE)
@@ -36,6 +36,7 @@ _SENSITIVE_ENV = re.compile(r"(?:STRIPE|WEBHOOK)", re.IGNORECASE)
 #: which turns an unrelated shell setting into a failure inside the run.
 _PROXY_ENV = re.compile(r"^(?:all|http|https|ftp|no)_proxy$", re.IGNORECASE)
 _SAFE_CONFIG_VALUE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/@-]{0,255}$")
+_API_VERSION = re.compile(r"^[0-9]+\.[0-9]+\.[0-9]+$")
 _PROTECTED_PROFILE = "hosted-stripe-test"
 _REGISTRY_AUTH_SECTION = "[registry.auth]"
 #: A bearer token, not a configuration identifier: URL-safe base64 begins with
@@ -387,10 +388,12 @@ class EphemeralMarketplaceConfig:
         authority_address: str,
         authority_environment: str,
         manifest_digest: str,
+        contract: HostedContract,
         funding_profile: str,
         shared_directory: Path,
     ) -> None:
         self._template = template
+        self._contract = contract
         self._values = {
             "account_ref": account_ref,
             "authority_id": authority_id,
@@ -423,6 +426,7 @@ class EphemeralMarketplaceConfig:
             "expected_manifest_digest",
             self._values["manifest_digest"],
         )
+        text = _insert_hosted_contract(text, self._contract, role="marketplace")
         stripe_header = "[Settlement.stripe]\n"
         if text.count(stripe_header) != 1:
             raise ProcessUnavailable("marketplace configuration has no exact Stripe section")
@@ -501,11 +505,13 @@ class EphemeralBuyerConfig:
         authority_environment: str,
         authority_base_url: str,
         manifest_digest: str,
+        contract: HostedContract,
         funding_profile: str,
         buyer_identity_scheme: str,
         shared_directory: Path,
     ) -> None:
         self._template = template
+        self._contract = contract
         self._values = {
             "authority_id": authority_id,
             "authority_scheme": authority_scheme,
@@ -547,6 +553,7 @@ class EphemeralBuyerConfig:
             "expected_manifest_digest",
             self._values["manifest_digest"],
         )
+        text = _insert_hosted_contract(text, self._contract, role="buyer")
         text = _replace_toml_setting(
             text,
             "funding_profile",
@@ -991,6 +998,39 @@ class MarketplaceLifecycleSession:
 
     def __exit__(self, *_exc: object) -> None:
         self.stop()
+
+
+def _insert_hosted_contract(text: str, contract: HostedContract, *, role: str) -> str:
+    """State, in the rendered config, the contract the run bound.
+
+    The template states none of this. What the authority must serve is a
+    property of the release the run bound, and a consumer that carries its own
+    copy cannot admit the next release -- it reports a real disagreement as a
+    configuration edit nobody made. So the three pins arrive here, beside the
+    manifest digest, from the same verified artifact.
+    """
+
+    if not _API_VERSION.fullmatch(contract.api_version):
+        raise ProcessUnavailable(f"{role} release contract has no API version")
+    if not contract.schema_version.isdigit() or int(contract.schema_version) < 1:
+        raise ProcessUnavailable(f"{role} release contract has no schema version")
+    capabilities = tuple(sorted(contract.capabilities))
+    if not capabilities or any(
+        not _SAFE_CONFIG_VALUE.fullmatch(value) for value in capabilities
+    ):
+        raise ProcessUnavailable(f"{role} release contract has no capability set")
+    header = "[Settlement.stripe]\n"
+    if text.count(header) != 1:
+        raise ProcessUnavailable(f"{role} configuration has no exact Stripe section")
+    rendered = "".join(f'  "{value}",\n' for value in capabilities)
+    return text.replace(
+        header,
+        header
+        + f'expected_api_version = "{contract.api_version}"\n'
+        + f"expected_schema_version = {int(contract.schema_version)}\n"
+        + f"required_capabilities = [\n{rendered}]\n",
+        1,
+    )
 
 
 def _replace_toml_setting(text: str, key: str, value: str) -> str:

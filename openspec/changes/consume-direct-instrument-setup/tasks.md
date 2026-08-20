@@ -1,11 +1,11 @@
 ## 1. The consumer stops naming a hosted release
 
-- [ ] 1.1 Open up `StripeSettlementConfig` in `kit/hosted-settlement`: the API version and schema version become validated values rather than types admitting one release, and the configured capability set must be a superset of the marketplace's own required floor rather than equal to it.
-- [ ] 1.2 Make all three required-when-enabled, each with its own named blocker when absent, on the same terms as `expected_manifest_digest`.
-- [ ] 1.3 Remove the three pins from `e2e-tests/config/hosted-storefront.toml`, `e2e-tests/config/hosted-buyer.toml`, and `config.stripe-fiat-ed25519.toml`, leaving the comment that says the run supplies them.
-- [ ] 1.4 Give `EphemeralMarketplaceConfig` and `EphemeralBuyerConfig` the bound contract, and render the three pins from it with the same counted-substitution refusal the existing settings use. Integer and list settings need their own replacement helpers; `_SAFE_CONFIG_VALUE` must admit the rendered forms without loosening for anything else.
-- [ ] 1.5 Pass `release.hosted_contract` into both renderers at their construction sites in `e2e-tests/src/hosted_real_stripe/driver.py`.
-- [ ] 1.6 Prove it: a config stating a 0.3.0 contract parses and is ready; an enabled config missing any pin is unready with the blocker that names it; a rendered config states the bound release's own coordinates; a renderer whose count is wrong refuses to render.
+- [x] 1.1 Open up `StripeSettlementConfig` in `kit/hosted-settlement`: the API version and schema version become validated values rather than types admitting one release, and the configured capability set must be a superset of the marketplace's own required floor rather than equal to it.
+- [x] 1.2 Make all three required-when-enabled, each with its own named blocker when absent, on the same terms as `expected_manifest_digest`.
+- [x] 1.3 Remove the three pins from `e2e-tests/config/hosted-storefront.toml`, `e2e-tests/config/hosted-buyer.toml`, and `config.stripe-fiat-ed25519.toml`, leaving the comment that says the run supplies them.
+- [x] 1.4 Give `EphemeralMarketplaceConfig` and `EphemeralBuyerConfig` the bound contract, and render the three pins from it with the same counted-substitution refusal the existing settings use. Integer and list settings need their own replacement helpers; `_SAFE_CONFIG_VALUE` must admit the rendered forms without loosening for anything else.
+- [x] 1.5 Pass `release.hosted_contract` into both renderers at their construction sites in `e2e-tests/src/hosted_real_stripe/driver.py`.
+- [x] 1.6 Prove it: a config stating a 0.3.0 contract parses and is ready; an enabled config missing any pin is unready with the blocker that names it; a rendered config states the bound release's own coordinates; a renderer whose count is wrong refuses to render.
 
 ## 2. The build derives what follows from the release it binds
 

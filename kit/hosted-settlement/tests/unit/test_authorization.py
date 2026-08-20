@@ -51,6 +51,10 @@ def _config(**updates) -> StripeSettlementConfig:
         "environment": "production",
         "authority": {"principals": [AUTHORITY.model_dump(mode="json")]},
         "expected_manifest_digest": "sha256:" + "ab" * 32,
+        # A rendered configuration states the release it was bound to.
+        "expected_api_version": "0.2.1",
+        "expected_schema_version": 5,
+        "required_capabilities": REQUIRED_STRIPE_CAPABILITIES,
     }
     payload.update(updates)
     return StripeSettlementConfig.model_validate(payload)

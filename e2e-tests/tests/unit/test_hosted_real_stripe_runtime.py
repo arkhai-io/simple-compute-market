@@ -17,6 +17,42 @@ from src.hosted_real_stripe.runtime import (
     ProcessUnavailable,
     require_runtime_authority_identity,
 )
+from src.hosted_real_stripe.gates import HostedContract
+
+_RELEASED_CAPABILITIES = (
+    "account-owner-admission.v1",
+    "account-owner-retirement.v1",
+    "account-owner-rotation.v1",
+    "conditional-escrow.v2",
+    "eas-arbiter.v1",
+    "funding-authorization.v1",
+    "funding-profile.card.v1",
+    "funding-profile.us_ach_debit.v1",
+    "funding-profile.us_bank_transfer.v1",
+    "normalized-funding-reversal.v1",
+    "operator-recovery-redaction.v1",
+    "payer-profile.v1",
+    "portable-attestation.v1",
+    "provider-neutral-seller-onboarding.v1",
+    "scheme-tagged-identities.v1",
+    "signer-injected-client.v1",
+    "stripe-connect-separate-charges-transfers.v2",
+)
+
+
+def _contract(
+    *,
+    api_version: str = "0.2.1",
+    schema_version: str = "5",
+    capabilities: tuple[str, ...] = _RELEASED_CAPABILITIES,
+) -> HostedContract:
+    return HostedContract(
+        release_version=api_version,
+        api_version=api_version,
+        schema_version=schema_version,
+        funding_profiles=("card.v1", "us_bank_transfer.v1", "us_ach_debit.v1"),
+        capabilities=frozenset(capabilities),
+    )
 
 
 def test_runtime_authority_identity_is_derived_from_injected_credential(
@@ -185,6 +221,7 @@ def test_ephemeral_container_inputs_use_shared_directory(
         authority_address="0x1fe2aa7fbaf5720f79a22a4ada4b8b37d4e0c008",
         authority_environment="test",
         manifest_digest="sha256:" + ("1" * 64),
+        contract=_contract(),
         funding_profile="us_bank_transfer.v1",
         shared_directory=tmp_path,
     ) as marketplace_config:
@@ -213,6 +250,7 @@ def test_ephemeral_container_inputs_use_shared_directory(
         authority_environment="test",
         authority_base_url="http://127.0.0.1:18080",
         manifest_digest="sha256:" + ("1" * 64),
+        contract=_contract(),
         funding_profile="us_bank_transfer.v1",
         buyer_identity_scheme="ed25519",
         shared_directory=tmp_path,
@@ -425,3 +463,100 @@ def test_a_locally_built_authority_is_pointed_at_no_signed_release(tmp_path) -> 
 
     assert values["HOSTED_SETTLEMENT_MANIFEST_DIGEST"] == "sha256:" + ("2" * 64)
     assert not [key for key in values if key.startswith("HOSTED_SETTLEMENT_RELEASE_")]
+
+
+def _rendered_stripe(path: Path) -> dict[str, Any]:
+    parsed = tomllib.loads(path.read_text(encoding="utf-8"))
+    stripe: dict[str, Any] = parsed["Settlement"]["stripe"]
+    return stripe
+
+
+@pytest.mark.parametrize("role", ["storefront", "buyer"])
+def test_a_rendered_config_states_the_contract_the_run_bound(
+    role: str, tmp_path: Path, monkeypatch
+) -> None:
+    """The next release is admitted by binding it, not by editing a template."""
+
+    later = (*_RELEASED_CAPABILITIES, "payer-direct-instrument-setup.v1")
+    contract = _contract(api_version="0.3.0", schema_version="6", capabilities=later)
+    config = Path(__file__).resolve().parents[2] / "config" / f"hosted-{role}.toml"
+    credential = base64.urlsafe_b64encode(b"a" * 32).decode().rstrip("=")
+    monkeypatch.setenv("HOSTED_SETTLEMENT_E2E_BUYER_IDENTITY_CREDENTIAL", credential)
+    common = dict(
+        template=config,
+        authority_id="authority-1",
+        authority_scheme="eip191",
+        authority_address="0x1fe2aa7fbaf5720f79a22a4ada4b8b37d4e0c008",
+        authority_environment="test",
+        manifest_digest="sha256:" + ("1" * 64),
+        contract=contract,
+        funding_profile="card.v1",
+        shared_directory=tmp_path,
+    )
+    if role == "storefront":
+        rendered = EphemeralMarketplaceConfig(account_ref="account-1", **common)
+    else:
+        rendered = EphemeralBuyerConfig(
+            authority_base_url="http://127.0.0.1:18080",
+            buyer_identity_scheme="ed25519",
+            **common,
+        )
+
+    with rendered as path:
+        stripe = _rendered_stripe(path)
+
+    assert stripe["expected_api_version"] == "0.3.0"
+    assert stripe["expected_schema_version"] == 6
+    assert tuple(stripe["required_capabilities"]) == tuple(sorted(later))
+
+
+@pytest.mark.parametrize("name", ["hosted-storefront.toml", "hosted-buyer.toml"])
+def test_a_committed_template_names_no_hosted_release_of_its_own(name: str) -> None:
+    """What a template cannot say, it cannot say staler than the truth."""
+
+    template = Path(__file__).resolve().parents[2] / "config" / name
+    stripe = _rendered_stripe(template)
+
+    assert "expected_api_version" not in stripe
+    assert "expected_schema_version" not in stripe
+    assert "required_capabilities" not in stripe
+
+
+@pytest.mark.parametrize(
+    ("api_version", "schema_version", "capabilities"),
+    [
+        ("0.3", "6", _RELEASED_CAPABILITIES),
+        ("0.3.0", "0", _RELEASED_CAPABILITIES),
+        ("0.3.0", "6", ()),
+    ],
+)
+def test_an_unusable_bound_contract_renders_nothing(
+    api_version: str,
+    schema_version: str,
+    capabilities: tuple[str, ...],
+    tmp_path: Path,
+) -> None:
+    """A contract that cannot be stated refuses before Compose sees a file."""
+
+    template = Path(__file__).resolve().parents[2] / "config" / "hosted-storefront.toml"
+
+    with pytest.raises(ProcessUnavailable):
+        with EphemeralMarketplaceConfig(
+            template=template,
+            account_ref="account-1",
+            authority_id="authority-1",
+            authority_scheme="eip191",
+            authority_address="0x1fe2aa7fbaf5720f79a22a4ada4b8b37d4e0c008",
+            authority_environment="test",
+            manifest_digest="sha256:" + ("1" * 64),
+            contract=_contract(
+                api_version=api_version,
+                schema_version=schema_version,
+                capabilities=capabilities,
+            ),
+            funding_profile="card.v1",
+            shared_directory=tmp_path,
+        ):
+            pass
+
+    assert list(tmp_path.iterdir()) == []

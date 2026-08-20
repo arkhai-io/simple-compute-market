@@ -196,9 +196,14 @@ class StripeSettlementConfig(BaseModel):
     environment: str | None = None
     authority: StripeAuthorityTrust | None = None
     expected_manifest_digest: str | None = None
-    expected_api_version: Literal["0.2.1"] = "0.2.1"
-    expected_schema_version: Literal[5] = 5
-    required_capabilities: tuple[str, ...] = REQUIRED_STRIPE_CAPABILITIES
+    # What the bound release serves, not what this package was written against.
+    # These were once the literal types "0.2.1" and 5, and a capability set that
+    # had to equal the marketplace's own floor exactly. A configuration naming
+    # the next release did not fail a contract check under that shape -- it
+    # failed to parse, which is a different thing and reads as a typo.
+    expected_api_version: str | None = None
+    expected_schema_version: int | None = None
+    required_capabilities: tuple[str, ...] = ()
     account_ref: str | None = Field(
         default=None,
         json_schema_extra={"roles": ["seller"]},
@@ -297,12 +302,32 @@ class StripeSettlementConfig(BaseModel):
     def validate_capabilities(cls, values: tuple[str, ...]) -> tuple[str, ...]:
         if len(set(values)) != len(values):
             raise ValueError("required capabilities must be unique")
-        if set(values) != set(REQUIRED_STRIPE_CAPABILITIES):
+        if any(not _TOKEN.fullmatch(value) for value in values):
+            raise ValueError("required capabilities must be public tokens")
+        # A floor, not an equality. What this marketplace needs is its own
+        # business and stays here; what a release declares is the release's,
+        # and a newer one declaring more is the case that has to be admitted.
+        missing = set(REQUIRED_STRIPE_CAPABILITIES) - set(values)
+        if values and missing:
             raise ValueError(
-                "required capabilities must exactly match the released "
-                "hosted consumer contract"
+                "required capabilities must cover the hosted consumer contract: "
+                + ", ".join(sorted(missing))
             )
         return tuple(sorted(values))
+
+    @field_validator("expected_api_version")
+    @classmethod
+    def validate_expected_api_version(cls, value: str | None) -> str | None:
+        if value is not None and not _API_VERSION.fullmatch(value):
+            raise ValueError("expected_api_version must be a semantic version")
+        return value
+
+    @field_validator("expected_schema_version")
+    @classmethod
+    def validate_expected_schema_version(cls, value: int | None) -> int | None:
+        if value is not None and value < 1:
+            raise ValueError("expected_schema_version must be positive")
+        return value
 
     @model_validator(mode="after")
     def validate_cross_field_policy(self) -> StripeSettlementConfig:
@@ -354,6 +379,13 @@ async def _await_if_needed(value: Any) -> Any:
     return await value if inspect.isawaitable(value) else value
 
 
+def _pinned_schema(config: StripeSettlementConfig) -> str | None:
+    """Report the pinned schema, or nothing where none is pinned."""
+
+    schema = config.expected_schema_version
+    return None if schema is None else str(schema)
+
+
 def _required_config_blockers(
     config: StripeSettlementConfig,
     resources: Mapping[str, Any],
@@ -392,14 +424,35 @@ def _required_config_blockers(
             "a hosted manifest digest pin is required",
         ),
         (
+            "expected_api_version",
+            config.expected_api_version,
+            "hosted.api_pin_missing",
+            "a hosted API version pin is required",
+        ),
+        (
+            "expected_schema_version",
+            config.expected_schema_version,
+            "hosted.schema_pin_missing",
+            "a hosted schema version pin is required",
+        ),
+        (
+            "required_capabilities",
+            config.required_capabilities,
+            "hosted.capability_pin_missing",
+            "a hosted capability pin is required",
+        ),
+        (
             "marketplace_signer",
             resources.get("marketplace_signer") or resources.get("signer"),
             "hosted.signer_missing",
             "an injected marketplace signer is required",
         ),
     )
+    # An absent pin blocks rather than defaulting. A default here would be a
+    # release this package picked on the operator's behalf, which is the shape
+    # that made a stale pin look like a working configuration.
     for _name, value, code, message in required:
-        if value is None or value == "":
+        if not value:
             blockers.append(_blocker(code, message))
     if role == "seller":
         if not config.account_ref:
@@ -533,7 +586,7 @@ async def stripe_preflight(
             ready=False,
             capabilities=base_capabilities,
             contract_version=config.expected_api_version,
-            schema_version=str(config.expected_schema_version),
+            schema_version=_pinned_schema(config),
             public_details={},
         )
 
@@ -716,7 +769,7 @@ async def stripe_preflight(
         blockers=tuple(blockers),
         capabilities=reported_capabilities,
         contract_version=config.expected_api_version,
-        schema_version=str(config.expected_schema_version),
+        schema_version=_pinned_schema(config),
         public_details=details,
     )
 

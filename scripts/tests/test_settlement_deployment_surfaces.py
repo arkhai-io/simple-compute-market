@@ -29,8 +29,12 @@ def test_fiat_compose_uses_canonical_public_config_without_evm_resources() -> No
     assert settlement["priority"] == ["fiat.stripe.v1"]
     assert set(settlement) == {"schema_version", "priority", "stripe"}
     stripe = settlement["stripe"]
-    assert stripe["expected_api_version"] == "0.2.1"
-    assert stripe["expected_schema_version"] == 5
+    # The reference configuration names no hosted release. What the authority
+    # must serve is a property of the release a deployment binds, and a sample
+    # that states one goes stale the day after the next release ships.
+    assert "expected_api_version" not in stripe
+    assert "expected_schema_version" not in stripe
+    assert "required_capabilities" not in stripe
     assert stripe["currency"] == "usd"
     assert stripe["country"] == "US"
     assert stripe["account_ref"] == "replace-with-hosted-account-ref"

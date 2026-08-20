@@ -242,27 +242,9 @@ def test_wallet_free_fixtures_have_only_public_portable_configuration() -> None:
         assert document["Settlement"]["stripe"]["base_url"] == expected_url
         assert field_paths(document).isdisjoint(forbidden)
         stripe = document["Settlement"]["stripe"]
-        assert stripe["expected_api_version"] == "0.2.1"
-        assert stripe["expected_schema_version"] == 5
-        assert set(stripe["required_capabilities"]) == {
-            "scheme-tagged-identities.v1",
-            "account-owner-admission.v1",
-            "account-owner-rotation.v1",
-            "account-owner-retirement.v1",
-            "signer-injected-client.v1",
-            "provider-neutral-seller-onboarding.v1",
-            "conditional-escrow.v2",
-            "stripe-connect-separate-charges-transfers.v2",
-            "portable-attestation.v1",
-            "eas-arbiter.v1",
-            "payer-profile.v1",
-            "funding-authorization.v1",
-            "funding-profile.card.v1",
-            "funding-profile.us_bank_transfer.v1",
-            "funding-profile.us_ach_debit.v1",
-            "normalized-funding-reversal.v1",
-            "operator-recovery-redaction.v1",
-        }
+        assert "expected_api_version" not in stripe
+        assert "expected_schema_version" not in stripe
+        assert "required_capabilities" not in stripe
 
 
 def test_marketplace_hosted_configs_contain_no_provider_fixture_identity() -> None:
