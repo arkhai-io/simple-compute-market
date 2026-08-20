@@ -1,10 +1,10 @@
 ## 1. Separate the producer's contract from its provenance
 
-- [ ] 1.1 In `scripts/prepare-hosted-compose.py`, split the hosted `HOSTED_SETTLEMENT_VERIFIED_*`
+- [x] 1.1 In `scripts/prepare-hosted-compose.py`, split the hosted `HOSTED_SETTLEMENT_VERIFIED_*`
       keys into a provenance group and a contract group, mirroring the existing
       `_LOCAL_MARKETPLACE_COORDINATES` treatment of the consumer half. No behavior change yet:
       the attested path must render a byte-identical environment.
-- [ ] 1.2 Add a regression test pinning the attested environment's exact key set and values for
+- [x] 1.2 Add a regression test pinning the attested environment's exact key set and values for
       a fixed input, so every later task is checked against it.
 
 ## 2. Read the asserted contract from the bound release

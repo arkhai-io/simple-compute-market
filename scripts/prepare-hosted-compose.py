@@ -97,6 +97,101 @@ _LOCAL_MARKETPLACE_COORDINATES = (
 )
 
 
+#: The producer coordinates a locally built authority has no released source
+#: for. Same treatment as the consumer half above, and for the same reason: the
+#: environment's reader requires the exact key set, and a development run reads
+#: an empty value as "local". The image, the release directory, and the manifest
+#: digest are not among them -- Compose refuses to start a service without an
+#: image, it mounts the release directory, and the authority reports the digest
+#: back through its readiness check -- so a local environment names what it
+#: actually runs.
+_LOCAL_HOSTED_COORDINATES = (
+    "HOSTED_SETTLEMENT_VERIFIED_AUTHORITY_ADDRESS",
+    "HOSTED_SETTLEMENT_VERIFIED_AUTHORITY_ID",
+    "HOSTED_SETTLEMENT_VERIFIED_AUTHORITY_SCHEME",
+    "HOSTED_SETTLEMENT_VERIFIED_CLIENT_WHEEL_SHA256",
+    "HOSTED_SETTLEMENT_VERIFIED_CONFORMANCE_SHA256",
+    "HOSTED_SETTLEMENT_VERIFIED_MANIFEST_SHA256",
+    "HOSTED_SETTLEMENT_VERIFIED_MIGRATIONS_SHA256",
+    "HOSTED_SETTLEMENT_VERIFIED_OPENAPI_SHA256",
+    "HOSTED_SETTLEMENT_VERIFIED_PROVENANCE_SHA256",
+    "HOSTED_SETTLEMENT_VERIFIED_SERVICE_WHEEL_SHA256",
+    "HOSTED_SETTLEMENT_VERIFIED_SOURCE_COMMIT",
+    "HOSTED_SETTLEMENT_VERIFIED_WORKFLOW_REF",
+)
+
+
+def _hosted_provenance(production: dict[str, Any], *, release_dir: str) -> dict[str, str]:
+    """Who published this producer, and from what.
+
+    Every value here comes from a signature or from a hash covered by one.
+    None of it has a local counterpart, which is why the local path renders the
+    whole group empty instead of filling it from the build.
+    """
+
+    artifact_sha256 = production["artifact_sha256"]
+    return {
+        "HOSTED_SETTLEMENT_VERIFIED_AUTHORITY_ADDRESS": str(
+            production["authority_address"]
+        ),
+        "HOSTED_SETTLEMENT_VERIFIED_AUTHORITY_ID": str(production["authority_id"]),
+        "HOSTED_SETTLEMENT_VERIFIED_AUTHORITY_SCHEME": str(
+            production["authority_scheme"]
+        ),
+        "HOSTED_SETTLEMENT_VERIFIED_CLIENT_WHEEL_SHA256": "sha256:"
+        + str(production["client_wheel_sha256"]),
+        "HOSTED_SETTLEMENT_VERIFIED_CONFORMANCE_SHA256": str(
+            artifact_sha256["conformance"]
+        ),
+        "HOSTED_SETTLEMENT_VERIFIED_MANIFEST_SHA256": "sha256:"
+        + str(production["manifest_sha256"]),
+        "HOSTED_SETTLEMENT_VERIFIED_MIGRATIONS_SHA256": str(
+            artifact_sha256["migrations"]
+        ),
+        "HOSTED_SETTLEMENT_VERIFIED_OPENAPI_SHA256": str(artifact_sha256["openapi"]),
+        "HOSTED_SETTLEMENT_VERIFIED_PROVENANCE_SHA256": str(
+            artifact_sha256["provenance"]
+        ),
+        "HOSTED_SETTLEMENT_VERIFIED_SERVICE_WHEEL_SHA256": "sha256:"
+        + str(production["service_wheel_sha256"]),
+        "HOSTED_SETTLEMENT_VERIFIED_SOURCE_COMMIT": str(production["source_commit"]),
+        "HOSTED_SETTLEMENT_VERIFIED_WORKFLOW_REF": str(production["workflow_ref"]),
+        "HOSTED_SETTLEMENT_VERIFIED_MANIFEST_DIGEST": str(
+            production["manifest_digest"]
+        ),
+        "HOSTED_SETTLEMENT_VERIFIED_RELEASE_DIR": release_dir,
+        "HOSTED_SETTLEMENT_VERIFIED_REPOSITORY": str(production["repository"]),
+    }
+
+
+def _hosted_contract(
+    *,
+    release_version: Any,
+    api_version: Any,
+    schema_version: Any,
+    funding_profiles: Any,
+    capabilities: Any,
+) -> dict[str, str]:
+    """What the producer serves.
+
+    A build answers all of this about itself, which is why a locally built
+    producer can fill the group from the artifacts it generated rather than
+    from a release that does not exist.
+    """
+
+    return {
+        "HOSTED_SETTLEMENT_VERIFIED_API_VERSION": str(api_version),
+        "HOSTED_SETTLEMENT_VERIFIED_CAPABILITIES": ",".join(
+            str(value) for value in capabilities
+        ),
+        "HOSTED_SETTLEMENT_VERIFIED_FUNDING_PROFILES": ",".join(
+            str(value) for value in funding_profiles
+        ),
+        "HOSTED_SETTLEMENT_VERIFIED_RELEASE_VERSION": str(release_version),
+        "HOSTED_SETTLEMENT_VERIFIED_SCHEMA_VERSION": str(schema_version),
+    }
+
+
 def prepare_compose_env(
     *,
     trust_path: Path,
@@ -141,16 +236,6 @@ def prepare_compose_env(
     verified_image = _image(
         production["service_image_reference"], production["service_image_digest"]
     )
-    verified_manifest_sha256 = "sha256:" + str(production["manifest_sha256"])
-    verified_manifest_digest = str(production["manifest_digest"])
-    verified_client_sha256 = "sha256:" + str(production["client_wheel_sha256"])
-    verified_release_dir = str(manifest_path.resolve().parent)
-    verified_source_commit = str(production["source_commit"])
-    verified_repository = str(production["repository"])
-    verified_workflow_ref = str(production["workflow_ref"])
-    verified_authority_id = str(production["authority_id"])
-    verified_authority_scheme = str(production["authority_scheme"])
-    verified_authority_address = str(production["authority_address"])
     if marketplace is None:
         if not local_marketplace_image:
             raise ComposePreparationError(
@@ -195,96 +280,26 @@ def prepare_compose_env(
                 marketplace["workflow_run_id"]
             ),
         }
-    verified_contract = {
-        "HOSTED_SETTLEMENT_VERIFIED_API_VERSION": str(production["api_version"]),
-        "HOSTED_SETTLEMENT_VERIFIED_CAPABILITIES": ",".join(
-            str(value) for value in production["capabilities"]
+    verified_hosted_contract = {
+        **_hosted_provenance(
+            production, release_dir=str(manifest_path.resolve().parent)
         ),
-        "HOSTED_SETTLEMENT_VERIFIED_CONFORMANCE_SHA256": str(
-            production["artifact_sha256"]["conformance"]
+        **_hosted_contract(
+            release_version=production["release_version"],
+            api_version=production["api_version"],
+            schema_version=production["schema_version"],
+            funding_profiles=production["funding_profiles"],
+            capabilities=production["capabilities"],
         ),
-        "HOSTED_SETTLEMENT_VERIFIED_FUNDING_PROFILES": ",".join(
-            str(value) for value in production["funding_profiles"]
-        ),
-        "HOSTED_SETTLEMENT_VERIFIED_MIGRATIONS_SHA256": str(
-            production["artifact_sha256"]["migrations"]
-        ),
-        "HOSTED_SETTLEMENT_VERIFIED_OPENAPI_SHA256": str(
-            production["artifact_sha256"]["openapi"]
-        ),
-        "HOSTED_SETTLEMENT_VERIFIED_PROVENANCE_SHA256": str(
-            production["artifact_sha256"]["provenance"]
-        ),
-        "HOSTED_SETTLEMENT_VERIFIED_RELEASE_VERSION": str(
-            production["release_version"]
-        ),
-        "HOSTED_SETTLEMENT_VERIFIED_SCHEMA_VERSION": str(
-            production["schema_version"]
-        ),
-        "HOSTED_SETTLEMENT_VERIFIED_SERVICE_WHEEL_SHA256": "sha256:"
-        + str(production["service_wheel_sha256"]),
+        "HOSTED_SETTLEMENT_VERIFIED_IMAGE": verified_image,
     }
-    for name, expected in verified_contract.items():
+    for name, expected in {
+        **verified_marketplace_contract,
+        **verified_hosted_contract,
+    }.items():
         _reject_mismatched_override(name, expected)
-    for name, expected in verified_marketplace_contract.items():
-        _reject_mismatched_override(name, expected)
-    _reject_mismatched_override("HOSTED_SETTLEMENT_VERIFIED_IMAGE", verified_image)
-    _reject_mismatched_override(
-        "HOSTED_SETTLEMENT_VERIFIED_MANIFEST_SHA256",
-        verified_manifest_sha256,
-    )
-    _reject_mismatched_override(
-        "HOSTED_SETTLEMENT_VERIFIED_MANIFEST_DIGEST",
-        verified_manifest_digest,
-    )
-    _reject_mismatched_override(
-        "HOSTED_SETTLEMENT_VERIFIED_CLIENT_WHEEL_SHA256",
-        verified_client_sha256,
-    )
-    _reject_mismatched_override(
-        "HOSTED_SETTLEMENT_VERIFIED_RELEASE_DIR",
-        verified_release_dir,
-    )
-    _reject_mismatched_override(
-        "HOSTED_SETTLEMENT_VERIFIED_SOURCE_COMMIT",
-        verified_source_commit,
-    )
-    _reject_mismatched_override(
-        "HOSTED_SETTLEMENT_VERIFIED_REPOSITORY",
-        verified_repository,
-    )
-    _reject_mismatched_override(
-        "HOSTED_SETTLEMENT_VERIFIED_WORKFLOW_REF",
-        verified_workflow_ref,
-    )
-    _reject_mismatched_override(
-        "HOSTED_SETTLEMENT_VERIFIED_AUTHORITY_ID",
-        verified_authority_id,
-    )
-    _reject_mismatched_override(
-        "HOSTED_SETTLEMENT_VERIFIED_AUTHORITY_SCHEME",
-        verified_authority_scheme,
-    )
-    _reject_mismatched_override(
-        "HOSTED_SETTLEMENT_VERIFIED_AUTHORITY_ADDRESS",
-        verified_authority_address,
-    )
     content = _render_env(
-        {
-            "HOSTED_SETTLEMENT_VERIFIED_AUTHORITY_ADDRESS": verified_authority_address,
-            "HOSTED_SETTLEMENT_VERIFIED_AUTHORITY_ID": verified_authority_id,
-            "HOSTED_SETTLEMENT_VERIFIED_AUTHORITY_SCHEME": verified_authority_scheme,
-            "HOSTED_SETTLEMENT_VERIFIED_CLIENT_WHEEL_SHA256": verified_client_sha256,
-            "HOSTED_SETTLEMENT_VERIFIED_IMAGE": verified_image,
-            "HOSTED_SETTLEMENT_VERIFIED_MANIFEST_SHA256": verified_manifest_sha256,
-            "HOSTED_SETTLEMENT_VERIFIED_MANIFEST_DIGEST": verified_manifest_digest,
-            "HOSTED_SETTLEMENT_VERIFIED_RELEASE_DIR": verified_release_dir,
-            "HOSTED_SETTLEMENT_VERIFIED_SOURCE_COMMIT": verified_source_commit,
-            "HOSTED_SETTLEMENT_VERIFIED_REPOSITORY": verified_repository,
-            "HOSTED_SETTLEMENT_VERIFIED_WORKFLOW_REF": verified_workflow_ref,
-            **verified_marketplace_contract,
-            **verified_contract,
-        }
+        {**verified_marketplace_contract, **verified_hosted_contract}
     )
     output_path.parent.mkdir(parents=True, exist_ok=True)
     temporary = output_path.with_name(f".{output_path.name}.tmp")
