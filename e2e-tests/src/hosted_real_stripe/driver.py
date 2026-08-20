@@ -205,6 +205,8 @@ def run(args: argparse.Namespace) -> tuple[StripeTestEvidence, int]:
             manifest_sha256=release.hosted_manifest_sha256,
             client_wheel_sha256=release.hosted_client_wheel_sha256,
             image_digest=release.hosted_image_digest,
+            image=release.hosted_image,
+            manifest_digest=release.hosted_manifest_digest,
         ),
         run_ref=opaque_ref("run", run_identity),
         # Taken from what was bound, never from the argument: an invocation

@@ -12,6 +12,8 @@ from typing import Any, Final, Literal
 
 from market_identity import Identity, create_signer, get_identity_verifier
 
+from .gates import LOCAL_COORDINATE
+
 # v4 adds the release mode. The identity bumps rather than defaulting, so a
 # reader that predates the field fails on the schema instead of silently
 # treating a development run as protected evidence.
@@ -118,6 +120,12 @@ class HostedReleaseIdentityEvidence:
     manifest_sha256: str
     client_wheel_sha256: str
     image_digest: str
+    #: What a locally built producer has in place of the six coordinates above,
+    #: which it records as the self-describing local marker. A released
+    #: producer carries both of these as well, so a reader compares like with
+    #: like rather than inferring the shape from which fields are populated.
+    image: str = ""
+    manifest_digest: str = ""
 
 
 #: Mirrors gates.ReleaseMode; evidence carries what was proven, so a reader
@@ -362,26 +370,56 @@ def _validate_attested_consumer(marketplace: MarketplaceIdentityEvidence) -> Non
         )
 
 
-def _validate_evidence(report: StripeTestEvidence) -> dict[str, object]:
-    payload = asdict(report)
-    if report.schema != SCHEMA_ID or report.lane != "stripe-test":
-        raise EvidenceValidationError("report must use the exact Stripe test evidence contract")
-    identities = report.identities
-    marketplace = identities.marketplace
-    hosted = identities.hosted_release
-    # The producer is a released one in every mode, and the working tree's own
-    # commit is always a real commit, so these hold for a development run too.
+def _half_is_released(coordinates: tuple[str, ...]) -> bool:
+    """Say whether one half was released, and refuse a half that is both.
+
+    This is the rule the binding gate applies when it decides what to admit. A
+    run recorded as a development run may still hold one released half, so the
+    question is asked of each half's own coordinates rather than of the run.
+    """
+
+    local = tuple(value == LOCAL_COORDINATE for value in coordinates)
+    if all(local):
+        return False
+    if not any(local):
+        return True
+    raise EvidenceValidationError(
+        "a recorded half is either released or locally built, not partly both"
+    )
+
+
+def _validate_hosted_release(hosted: HostedReleaseIdentityEvidence) -> None:
+    if hosted.repository != "arkhai-io/stripe-settlement-service":
+        raise EvidenceValidationError("hosted release identity names another repository")
+    released = _half_is_released(
+        (
+            hosted.source_commit,
+            hosted.workflow_run_id,
+            hosted.workflow_ref,
+            hosted.manifest_sha256,
+            hosted.client_wheel_sha256,
+            hosted.image_digest,
+        )
+    )
+    if not released:
+        # Six markers name no producer. What a build does have is the image the
+        # run named and the build the authority reported, and recording both is
+        # what makes two development runs distinguishable.
+        if not hosted.image or "@" in hosted.image:
+            raise EvidenceValidationError(
+                "a locally built producer must name the image it ran"
+            )
+        if not _DIGEST.fullmatch(hosted.manifest_digest):
+            raise EvidenceValidationError(
+                "a locally built producer must record the build the authority reported"
+            )
+        return
     if (
-        marketplace.repository != "arkhai-io/simple-compute-market"
-        or not _COMMIT.fullmatch(marketplace.commit)
-        or hosted.repository != "arkhai-io/stripe-settlement-service"
-        or not _COMMIT.fullmatch(hosted.source_commit)
+        not _COMMIT.fullmatch(hosted.source_commit)
         or not hosted.workflow_run_id.isdigit()
         or not _WORKFLOW_REF.fullmatch(hosted.workflow_ref)
-        or not _OPAQUE_REF.fullmatch(identities.run_ref)
-        or not identities.run_ref.startswith("run_")
     ):
-        raise EvidenceValidationError("consumer, hosted release, and run identities must be exact")
+        raise EvidenceValidationError("hosted release source, workflow, and run must be exact")
     for digest in (
         hosted.manifest_sha256,
         hosted.client_wheel_sha256,
@@ -389,6 +427,23 @@ def _validate_evidence(report: StripeTestEvidence) -> dict[str, object]:
     ):
         if not _DIGEST.fullmatch(digest):
             raise EvidenceValidationError("release identities must be exact sha256 digests")
+
+
+def _validate_evidence(report: StripeTestEvidence) -> dict[str, object]:
+    payload = asdict(report)
+    if report.schema != SCHEMA_ID or report.lane != "stripe-test":
+        raise EvidenceValidationError("report must use the exact Stripe test evidence contract")
+    identities = report.identities
+    marketplace = identities.marketplace
+    # The working tree's own commit is a real commit in every mode.
+    if (
+        marketplace.repository != "arkhai-io/simple-compute-market"
+        or not _COMMIT.fullmatch(marketplace.commit)
+        or not _OPAQUE_REF.fullmatch(identities.run_ref)
+        or not identities.run_ref.startswith("run_")
+    ):
+        raise EvidenceValidationError("consumer and run identities must be exact")
+    _validate_hosted_release(identities.hosted_release)
     if identities.release_mode == "attested":
         _validate_attested_consumer(marketplace)
     elif not marketplace.image:
