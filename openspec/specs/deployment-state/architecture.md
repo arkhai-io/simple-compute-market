@@ -108,6 +108,25 @@ must serve what the run bound, before any service is created — and for a
 released half the artifact that expectation is read from is covered by the same
 signature as before.
 
+That rule holds on the consumer side too, and holds all the way down. The
+storefront and buyer configurations a run renders take their API version,
+migration schema, and capability set from the release the run bound, alongside
+the manifest digest they already took from it; the committed templates state
+none of the three, and an enabled configuration that reaches readiness without
+them is unready and says which pin is absent. The consumer's own required
+capability set remains its own — it is a floor describing what this marketplace
+needs, and a newer release declaring more is admitted rather than refused. The
+build derives the client wheel, OpenAPI, conformance, and migration filenames
+from the trust configuration that names the release, so choosing a release is
+stated once and what follows from it is not restated beside it.
+
+The same rule reaches the wire. The health model a consumer parses carries the
+API version and schema version as values, not as types admitting one release,
+so a consumer holding one release's client can read another release's readiness
+response and report the disagreement as a disagreement. A type that admits one
+release turns a version mismatch into an unparseable response and denies the
+consumer the one thing it is there to say.
+
 The protected composition starts only the ordinary hosted migration, API, and
 reconciliation worker roles against Stripe test mode. The marketplace reaches
 the authority through the released client and public authority address; it

@@ -588,6 +588,40 @@ composed authority against them exactly as it does for a release. A missing
 artifact fails the run before Compose creates anything, and names what is
 missing rather than falling back to another release's coordinates.
 
+The marketplace configurations do not state that contract either. Their
+`expected_api_version`, `expected_schema_version`, and `required_capabilities`
+are written by the run from the release it bound; the committed
+`hosted-storefront.toml` and `hosted-buyer.toml` leave all three out. If you are
+composing a stack by hand and see `hosted.api_pin_missing`,
+`hosted.schema_pin_missing`, or `hosted.capability_pin_missing`, the
+configuration was used unrendered — that is the readiness blocker saying so, not
+a missing feature.
+
+#### Setting up a saved bank instrument without a browser
+
+Hosted settlement 0.3.0 declares `payer-direct-instrument-setup.v1`, which lets a
+payer finish an ACH instrument setup by submitting the microdeposit amounts their
+own bank showed them:
+
+```sh
+arkhai payer setup start --funding-profile us_ach_debit.v1 --label "my bank"
+arkhai payer setup verify <setup_ref> --amounts 32,45
+```
+
+A `saved_instrument` lane takes that path automatically when the bound release
+declares the capability, and keeps driving the hosted Checkout page when it does
+not. The two amounts are Stripe's documented test-mode deposits; a real payer
+reads their own.
+
+Consuming this requires the 0.3.0 client, which is pinned exactly. A stack bound
+to an earlier release will not have it, and the operation reports
+`payer-direct-instrument-setup.v1` as the missing prerequisite rather than
+failing partway through a setup.
+
+`us_bank_transfer.v1` has no saved instrument at all — it is a push transfer,
+and the authority refuses a setup for it. Asking for one is reported as an
+unavailable prerequisite.
+
 A locally built producer never qualifies evidence. Naming one is by itself
 enough to make the run a development run, with no separate flag and no way to
 combine it with an attested claim.

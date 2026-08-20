@@ -82,5 +82,5 @@
 
 ## 7. Record the decisions that outlive the change
 
-- [ ] 7.1 Promote the source-of-expectation decision into `openspec/specs/settlement-configuration/spec.md` by way of this change's delta, and note in `openspec/specs/deployment-state/architecture.md` that the consumer half now reads its asserted contract from the bound release on the same terms as the producer half.
-- [ ] 7.2 Document the browserless bank-funded setup path and the 0.3.0 client requirement in `docs/development/TESTING.md`.
+- [x] 7.1 Promote the source-of-expectation decision into `openspec/specs/settlement-configuration/spec.md` by way of this change's delta, and note in `openspec/specs/deployment-state/architecture.md` that the consumer half now reads its asserted contract from the bound release on the same terms as the producer half.
+- [x] 7.2 Document the browserless bank-funded setup path and the 0.3.0 client requirement in `docs/development/TESTING.md`.
