@@ -44,12 +44,12 @@
 
 ## 5. Build and run a local producer
 
-- [ ] 5.1 Add `HOSTED_LOCAL_HOSTED_IMAGE` and a Makefile target that builds the producer image
+- [x] 5.1 Add `HOSTED_LOCAL_HOSTED_IMAGE` and a Makefile target that builds the producer image
       and artifacts from a sibling hosted-settlement-service checkout.
-- [ ] 5.2 Stop `prepare-hosted-compose-local` and `hosted-stripe-test-local` from requiring the
+- [x] 5.2 Stop `prepare-hosted-compose-local` and `hosted-stripe-test-local` from requiring the
       six `HOSTED_PRODUCTION_*` identities when a local producer is named; keep requiring them
       when one is not.
-- [ ] 5.3 Derive the released-producer identities from the committed trust manifest so the
+- [x] 5.3 Derive the released-producer identities from the committed trust manifest so the
       released-producer local run stops requiring six hand-copied digests. Five are in
       `manifests/hosted-settlement-*-trust.json`; the workflow run id is the remaining input.
 

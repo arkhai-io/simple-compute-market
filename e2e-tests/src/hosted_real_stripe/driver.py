@@ -53,6 +53,7 @@ from .gates import (
     require_connected_account,
     require_loopback_webhook,
     require_ready_account,
+    require_hosted_capabilities,
     require_release_identity,
     require_run_identity,
     require_test_secret,
@@ -120,6 +121,20 @@ class _ScenarioResult:
     payment_outcome: object | None = None
     recovery: RecoveryEvidence | None = None
     loss: LossEvidence | None = None
+
+
+def _required_capabilities(scenario: str, funding_profile: str) -> frozenset[str]:
+    """What the bound release has to declare for this lane to be runnable."""
+
+    required = {
+        "payer-profile.v1",
+        "funding-authorization.v1",
+        "conditional-escrow.v2",
+        f"funding-profile.{funding_profile}",
+    }
+    if scenario == "post_collection_loss":
+        required.add("operator-recovery-redaction.v1")
+    return frozenset(required)
 
 
 def run(args: argparse.Namespace) -> tuple[StripeTestEvidence, int]:
@@ -190,6 +205,13 @@ def run(args: argparse.Namespace) -> tuple[StripeTestEvidence, int]:
     scenario = cast(Scenario, args.scenario)
     funding_profile = cast(FundingProfile, args.funding_profile)
     interaction = cast(Interaction, args.interaction)
+    # Named here rather than discovered inside the provider: a lane that needs
+    # something the bound release does not serve otherwise fails after it has
+    # already mutated something, and reports that instead of the reason.
+    require_hosted_capabilities(
+        release.hosted_contract,
+        _required_capabilities(scenario, funding_profile),
+    )
     provider = ProviderEvidence()
     execution = _ExecutionState()
     funding = FundingEvidence(
@@ -1157,12 +1179,15 @@ def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser()
     parser.add_argument("--repo-root", type=Path, default=Path.cwd())
     parser.add_argument("--compose-env", type=Path, required=True)
-    parser.add_argument("--hosted-manifest-sha256", required=True)
-    parser.add_argument("--hosted-client-wheel-sha256", required=True)
-    parser.add_argument("--hosted-image-digest", required=True)
-    parser.add_argument("--hosted-source-commit", required=True)
-    parser.add_argument("--hosted-workflow-run-id", required=True)
-    parser.add_argument("--hosted-workflow-ref", required=True)
+    # A producer built here has no released coordinates, so the six below stop
+    # being required. A released one still supplies all six, and the binding
+    # refuses a released half that is missing any of them.
+    parser.add_argument("--hosted-manifest-sha256", default="")
+    parser.add_argument("--hosted-client-wheel-sha256", default="")
+    parser.add_argument("--hosted-image-digest", default="")
+    parser.add_argument("--hosted-source-commit", default="")
+    parser.add_argument("--hosted-workflow-run-id", default="")
+    parser.add_argument("--hosted-workflow-ref", default="")
     parser.add_argument("--marketplace-commit", default="")
     parser.add_argument("--observed-marketplace-commit", required=True)
     parser.add_argument(

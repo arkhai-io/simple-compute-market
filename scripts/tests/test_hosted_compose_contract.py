@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+import subprocess
 from collections.abc import Mapping
 from pathlib import Path
 
@@ -341,3 +343,61 @@ def test_the_readiness_check_names_no_release_of_its_own() -> None:
         assert f"{handed}: ${{HOSTED_SETTLEMENT_VERIFIED_" in COMPOSE or handed.endswith(
             "PRODUCTION_MANIFEST_DIGEST"
         )
+
+
+def test_a_development_run_can_bind_a_producer_built_here() -> None:
+    """One variable selects it, and the two places that say so agree."""
+
+    assert "HOSTED_LOCAL_HOSTED_IMAGE ?=" in ROOT_MAKE
+    assert "build-hosted-producer:" in ROOT_MAKE
+    assert "$(MAKE) -C \"$(HOSTED_SETTLEMENT_SOURCE)\" image artifacts" in ROOT_MAKE
+    for selector in ("HOSTED_PRODUCER_INPUTS", "HOSTED_PRODUCER_PINS"):
+        assert f"{selector} = $(if $(HOSTED_LOCAL_HOSTED_IMAGE)" in ROOT_MAKE
+    local = ROOT_MAKE.split("hosted-stripe-test-local:", 1)[1].split("\nhosted-compose-up:", 1)[0]
+    assert "$(HOSTED_PRODUCER_PINS)" in local
+    # The protected target keeps every pin it has, spelled out.
+    protected = ROOT_MAKE.split("\nhosted-stripe-test:", 1)[1].split("\ndist-hosted-client:", 1)[0]
+    for pin in (
+        "--hosted-manifest-sha256",
+        "--hosted-client-wheel-sha256",
+        "--hosted-image-digest",
+        "--hosted-source-commit",
+        "--hosted-workflow-ref",
+        "--hosted-workflow-run-id",
+    ):
+        assert f'{pin} "$(HOSTED_PRODUCTION_' in protected, pin
+    assert "HOSTED_PRODUCER_PINS" not in protected
+
+
+def test_the_released_producer_identities_come_from_the_trust_config() -> None:
+    """Five of six, so a development run stops copying digests in by hand."""
+
+    trust = json.loads(
+        (REPO_ROOT / "manifests" / "hosted-settlement-v0.2.1-trust.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    derived = subprocess.run(
+        [
+            "make",
+            "--no-print-directory",
+            "-f",
+            str(REPO_ROOT / "Makefile"),
+            "-n",
+            "hosted-stripe-test-local",
+        ],
+        cwd=REPO_ROOT,
+        capture_output=True,
+        text=True,
+    ).stdout
+
+    for value in (
+        "sha256:" + trust["manifest_sha256"],
+        "sha256:" + trust["client_wheel"]["sha256"],
+        trust["service_image"]["digest"],
+        trust["source_commit"],
+        trust["workflow_ref"],
+    ):
+        assert value in derived, value
+    # The run id is not in the trust config and stays an operator input.
+    assert 'HOSTED_PRODUCTION_WORKFLOW_RUN_ID ?=\n' in ROOT_MAKE
