@@ -383,3 +383,53 @@ def test_the_released_producer_identities_come_from_the_trust_config() -> None:
         assert value in derived, value
     # The run id is not in the trust config and stays an operator input.
     assert 'HOSTED_PRODUCTION_WORKFLOW_RUN_ID ?=\n' in ROOT_MAKE
+
+
+def test_the_build_names_the_artifacts_of_the_release_it_binds(tmp_path: Path) -> None:
+    """A later release needs a trust config, not an edit to three Makefiles.
+
+    The client wheel, OpenAPI, conformance, and migration filenames were spelled
+    out beside the trust config they had to agree with. Nothing kept them in
+    step, so the first thing a version bump broke was a copy that silently named
+    the previous release.
+    """
+
+    trust = tmp_path / "trust.json"
+    trust.write_text(
+        json.dumps({"release_version": "0.3.0", "schema_version": 6}),
+        encoding="utf-8",
+    )
+
+    recipe = subprocess.run(
+        [
+            "make",
+            "-n",
+            "dist-hosted-client",
+            f"HOSTED_RELEASE_TRUST={trust}",
+            f"HOSTED_RELEASE_DIR={tmp_path / 'release'}",
+        ],
+        cwd=REPO_ROOT,
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout
+
+    for expected in (
+        "arkhai_hosted_settlement_client-0.3.0-py3-none-any.whl",
+        "openapi-v0.3.0.json",
+        "conformance-v0.3.0.json",
+        "migrations-v6.json",
+    ):
+        assert expected in recipe
+    assert "0.2.1" not in recipe
+    assert "migrations-v5.json" not in recipe
+
+
+@pytest.mark.parametrize(
+    "makefile",
+    ["Makefile", "kit/hosted-settlement/Makefile", "domains/vms/storefront/Makefile"],
+)
+def test_no_makefile_spells_the_client_wheel_it_verifies(makefile: str) -> None:
+    text = (REPO_ROOT / makefile).read_text(encoding="utf-8")
+
+    assert "arkhai_hosted_settlement_client-0.2.1" not in text

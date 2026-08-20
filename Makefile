@@ -11,7 +11,15 @@ IDENTITY_WHEEL := $(DIST_DIR)/arkhai_kit_identity-0.3.0-py3-none-any.whl
 HOSTED_RELEASE_TRUST ?= manifests/hosted-settlement-v0.2.1-trust.json
 HOSTED_RELEASE_DIR ?= $(DIST_DIR)
 HOSTED_RELEASE_MANIFEST ?= $(HOSTED_RELEASE_DIR)/release-manifest.json
-HOSTED_CLIENT_WHEEL ?= $(HOSTED_RELEASE_DIR)/arkhai_hosted_settlement_client-0.2.1-py3-none-any.whl
+# Which release is bound is a choice and is stated above. What that release
+# contains is not a choice -- it follows -- so the artifact names are read from
+# the trust config rather than spelled out beside it, where they would have to
+# be edited in step with it and would name the previous release when they were
+# not. The verifier derives the same names from the same two values.
+HOSTED_RELEASE_CONTRACT := $(shell uv run --no-project python -c "import json;d=json.load(open('$(HOSTED_RELEASE_TRUST)'));print(d['release_version'],d['schema_version'])" 2>/dev/null)
+HOSTED_RELEASE_VERSION ?= $(word 1,$(HOSTED_RELEASE_CONTRACT))
+HOSTED_RELEASE_SCHEMA ?= $(word 2,$(HOSTED_RELEASE_CONTRACT))
+HOSTED_CLIENT_WHEEL ?= $(HOSTED_RELEASE_DIR)/arkhai_hosted_settlement_client-$(HOSTED_RELEASE_VERSION)-py3-none-any.whl
 HOSTED_COMPOSE_ENV ?= $(DIST_DIR)/hosted-settlement-compose.env
 # The locally built consumer a development stack runs in place of an
 # attested release image.
@@ -57,9 +65,11 @@ HOSTED_STRIPE_TEST_ACCOUNT_REF ?=
 HOSTED_STRIPE_TEST_AUTHORITY_ENVIRONMENT ?=
 HOSTED_STRIPE_TEST_AUTHORITY_ENV_FILE ?=
 HOSTED_STRIPE_TEST_EVIDENCE ?= $(DIST_DIR)/hosted-stripe-test-evidence.json
-HOSTED_RELEASE_FILES := release-manifest.json \
-	arkhai_hosted_settlement_client-0.2.1-py3-none-any.whl \
-	openapi-v0.2.1.json conformance-v0.2.1.json migrations-v5.json \
+HOSTED_RELEASE_FILES = release-manifest.json \
+	arkhai_hosted_settlement_client-$(HOSTED_RELEASE_VERSION)-py3-none-any.whl \
+	openapi-v$(HOSTED_RELEASE_VERSION).json \
+	conformance-v$(HOSTED_RELEASE_VERSION).json \
+	migrations-v$(HOSTED_RELEASE_SCHEMA).json \
 	sbom.spdx.json provenance.intoto.json
 VERIFY_HOSTED_RELEASE = uv run --no-project --with 'eth-account>=0.13,<0.14' \
 	python scripts/verify-hosted-release.py \

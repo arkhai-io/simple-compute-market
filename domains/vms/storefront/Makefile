@@ -14,7 +14,10 @@ DIST_DIR ?= ../../../.dist
 DIST_FINGERPRINT := $(shell find $(DIST_DIR) -maxdepth 1 -type f -name '*.whl' -exec cksum {} + 2>/dev/null | LC_ALL=C sort | cksum | awk '{print $$1}')
 HOSTED_RELEASE_TRUST ?= ../../../manifests/hosted-settlement-v0.2.1-trust.json
 HOSTED_RELEASE_MANIFEST ?= $(DIST_DIR)/release-manifest.json
-HOSTED_CLIENT_WHEEL ?= $(DIST_DIR)/arkhai_hosted_settlement_client-0.2.1-py3-none-any.whl
+# Which release is bound is stated above; what it contains follows from it and
+# is read from the trust config rather than spelled beside it.
+HOSTED_RELEASE_VERSION ?= $(shell uv run --no-project python -c "import json;print(json.load(open('$(HOSTED_RELEASE_TRUST)'))['release_version'])" 2>/dev/null)
+HOSTED_CLIENT_WHEEL ?= $(DIST_DIR)/arkhai_hosted_settlement_client-$(HOSTED_RELEASE_VERSION)-py3-none-any.whl
 VERIFY_HOSTED_RELEASE = uv run --no-project --with 'eth-account>=0.13,<0.14' \
 	python ../../../scripts/verify-hosted-release.py \
 	--trust $(HOSTED_RELEASE_TRUST) \

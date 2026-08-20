@@ -9,9 +9,9 @@
 
 ## 2. The build derives what follows from the release it binds
 
-- [ ] 2.1 Derive the client wheel, OpenAPI, conformance, and migration artifact filenames in `Makefile` from the version the bound trust config states, leaving `HOSTED_RELEASE_TRUST` naming one release explicitly.
-- [ ] 2.2 Do the same in `domains/vms/storefront/Makefile` and `kit/hosted-settlement/Makefile`.
-- [ ] 2.3 Prove it: the build's hosted artifact names follow a trust config naming a version other than 0.2.1, with no edit to a Makefile.
+- [x] 2.1 Derive the client wheel, OpenAPI, conformance, and migration artifact filenames in `Makefile` from the version the bound trust config states, leaving `HOSTED_RELEASE_TRUST` naming one release explicitly.
+- [x] 2.2 Do the same in `domains/vms/storefront/Makefile` and `kit/hosted-settlement/Makefile`.
+- [x] 2.3 Prove it: the build's hosted artifact names follow a trust config naming a version other than 0.2.1, with no edit to a Makefile.
 
 ## 3. The pinned client moves to the release that declares the capability
 
