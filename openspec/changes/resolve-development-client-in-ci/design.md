@@ -86,6 +86,30 @@ is genuinely required.
   committed, both are read in the same step, and a disagreement is exactly the signal
   the comparison exists to detect.
 
+## What must exist outside this repository
+
+The workflow can select the channel, and can stage the wheel once it holds an access
+token. It cannot obtain one: there is no GitHub-to-Google federation for this
+repository today. The only identity pool in the project is the cluster's
+`.svc.id.goog`, and the service accounts are the External Secrets reader and the default
+compute account. Three things are needed, none creatable from here:
+
+- **An identity pool and an OIDC provider** for GitHub Actions, with the provider's
+  attribute condition restricted to this repository, so that only its workflows can
+  assume the identity.
+- **A service account** holding `roles/artifactregistry.reader` on the Python repository
+  only — read, one repository, nothing else. It never needs write: publishing is the
+  producer's, from a workstation or its own release workflow.
+- **Two repository variables**, `AR_WORKLOAD_IDENTITY_PROVIDER` and
+  `AR_READER_SERVICE_ACCOUNT`, naming the two. They are variables rather than secrets
+  because neither is one; the credential is the short-lived token the exchange returns.
+
+Until they exist the two hosted jobs stop with a message naming the version and the
+channel, which is the honest report of the state and the reason the message says what to
+set. A key file for the service account would work as well and is deliberately not
+proposed: it would be a long-lived credential in a repository secret, to replace an
+exchange that issues one good for minutes.
+
 ## Migration Plan
 
 The workflow change is inert while the pinned version and the trusted version agree: it
