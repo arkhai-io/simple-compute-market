@@ -648,6 +648,15 @@ surface only after a release.
 
 - A container engine reachable as `docker`. With podman, put the shim on PATH
   for this project (`mise.local.toml` with `_.path = ["~/.config/podman-docker/bin"]`).
+
+  Podman also needs a real compose provider, and that shim cannot be one.
+  `podman compose` does not implement compose; it finds an external provider by
+  looking for `docker-compose` on PATH. A shim directory whose `docker-compose`
+  execs `podman compose` therefore calls itself until podman gives up with
+  `exit status 125`, printing the same line dozens of times with no cause in
+  it. Put a real compose binary earlier on PATH — for example by wrapping the
+  run in `nix shell nixpkgs#docker-compose --command …` — and the cycle breaks:
+  `docker compose` reaches the shim, `podman compose` finds the real binary.
 - A registry authentication file with no unusable credential helper in it.
   Podman consults every `credHelpers` entry in `~/.docker/config.json` when it
   resolves an image, including ones for registries this stack never touches; a
