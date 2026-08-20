@@ -61,7 +61,7 @@
 - [ ] 6.2 Build hosted-settlement-service 0.3.0 locally, bind it, and run a `saved_instrument`
       lane. This is the first scenario with no published image behind it and no browser in it.
       Record what it reaches. A development run qualifies no lane in the protected matrix.
-- [ ] 6.3 Confirm an attested run is unchanged: same rendered environment, same assertions, same
+- [x] 6.3 Confirm an attested run is unchanged: same rendered environment, same assertions, same
       fail-closed behavior, byte-for-byte evidence shape.
 
 ## 7. Record what was decided
