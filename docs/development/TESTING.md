@@ -654,9 +654,20 @@ surface only after a release.
   looking for `docker-compose` on PATH. A shim directory whose `docker-compose`
   execs `podman compose` therefore calls itself until podman gives up with
   `exit status 125`, printing the same line dozens of times with no cause in
-  it. Put a real compose binary earlier on PATH — for example by wrapping the
-  run in `nix shell nixpkgs#docker-compose --command …` — and the cycle breaks:
-  `docker compose` reaches the shim, `podman compose` finds the real binary.
+  it. Name the provider outright and there is no PATH lookup to cycle:
+
+  ```toml
+  # mise.local.toml
+  [tools]
+  docker-compose = "latest"
+
+  [env]
+  _.path = ["~/.config/podman-docker/bin"]
+  PODMAN_COMPOSE_PROVIDER = "{{env.HOME}}/.local/share/mise/installs/docker-compose/latest/docker-cli-plugin-docker-compose"
+  ```
+
+  The explicit path is needed because the binary installs under its Docker CLI
+  plugin name, which is not one `podman compose` searches for.
 - A registry authentication file with no unusable credential helper in it.
   Podman consults every `credHelpers` entry in `~/.docker/config.json` when it
   resolves an image, including ones for registries this stack never touches; a
