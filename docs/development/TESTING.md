@@ -531,14 +531,10 @@ eval "$(uv run --no-project --with arkhai-kit-identity --find-links .dist \
   --buyer-config-template e2e-tests/config/hosted-buyer.toml \
   --directory "$rundir" --print)"
 
-# 2. Producer identities: five come from the signed trust manifest; the run id
-#    comes from the producer repo's release run for that tag.
-export HOSTED_PRODUCTION_MANIFEST_SHA256=sha256:... \
-       HOSTED_PRODUCTION_CLIENT_WHEEL_SHA256=sha256:... \
-       HOSTED_PRODUCTION_IMAGE_DIGEST=sha256:... \
-       HOSTED_PRODUCTION_SOURCE_COMMIT=... \
-       HOSTED_PRODUCTION_WORKFLOW_REF=... \
-       HOSTED_PRODUCTION_WORKFLOW_RUN_ID=...
+# 2. Producer identities: five are read from the committed trust manifest. The
+#    run id is not in there, so it comes from the producer repo's release run
+#    for that tag.
+export HOSTED_PRODUCTION_WORKFLOW_RUN_ID=...
 
 # 3. Pick a lane and run.
 export HOSTED_STRIPE_TEST_SCENARIO=collection \
@@ -560,6 +556,47 @@ The provider file defines `STRIPE_SECRET_KEY` and `STRIPE_CONNECTED_ACCOUNT_ID`.
 Release v0.2.1 checks the key prefix against its own Stripe mode, so the key must
 be an `sk_test_` value — a restricted `rk_test_` key is refused. Keep the file
 outside the repository.
+
+### Running against a settlement authority built here
+
+The producer half needs no published release either. A version that has none —
+the usual case while it is being developed — is bound by building it from a
+sibling checkout and naming the image:
+
+```sh
+# Builds the image and the OpenAPI, conformance, and migration artifacts.
+make build-hosted-producer HOSTED_SETTLEMENT_SOURCE=../hosted-settlement-service
+
+export HOSTED_LOCAL_HOSTED_IMAGE=localhost/arkhai-hosted-settlement-service:0.3.0
+make hosted-stripe-test-local
+```
+
+Two checkouts are the prerequisite, and that is already true for anyone changing
+the producer. The alternative is publishing a release per iteration, which is
+the loop this exists to remove.
+
+None of the six `HOSTED_PRODUCTION_*` identities apply to a producer built here.
+There are none to supply, and supplying any is refused: the binding reads the
+whole provenance group as a set, so all twelve coordinates present is a release,
+all twelve empty is a build, and anything between is an environment that cannot
+say which it is.
+
+What a build made here still has to answer for is what it *serves*. The
+conformance artifact `make artifacts` generates states the API version, the
+schema, the funding profiles, and the capabilities, and the run asserts the
+composed authority against them exactly as it does for a release. A missing
+artifact fails the run before Compose creates anything, and names what is
+missing rather than falling back to another release's coordinates.
+
+A locally built producer never qualifies evidence. Naming one is by itself
+enough to make the run a development run, with no separate flag and no way to
+combine it with an attested claim.
+
+One thing this does not do is teach the marketplace half to consume a newer
+producer. The storefront and buyer configurations pin an expected API version,
+schema, and capability set of their own, so binding a producer past what they
+pin needs those configurations re-pointed too — a separate change, and a
+separate decision.
 
 ### Development evidence never qualifies
 

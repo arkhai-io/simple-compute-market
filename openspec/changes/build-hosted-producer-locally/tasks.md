@@ -66,10 +66,10 @@
 
 ## 7. Record what was decided
 
-- [ ] 7.1 Document the producer-local recipe in `docs/development/TESTING.md` beside the existing
+- [x] 7.1 Document the producer-local recipe in `docs/development/TESTING.md` beside the existing
       consumer-local one, including the two-checkout prerequisite and that a local producer never
       qualifies evidence.
-- [ ] 7.2 Promote the accepted provenance/contract split to
+- [x] 7.2 Promote the accepted provenance/contract split to
       `openspec/specs/deployment-state/architecture.md`, which currently explains the protected
       boundary without naming that distinction.
 - [ ] 7.3 External: a protected run of the matrix remains blocked on the protected environment and
