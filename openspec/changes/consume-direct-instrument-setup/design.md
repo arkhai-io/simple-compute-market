@@ -49,23 +49,43 @@ readers of the same file can disagree, and the disagreement would surface as a r
 config rather than as a gate refusal. The gate already read it, verified its hash, and
 refused a mismatch; everything downstream should be reading that decision, not redoing it.
 
-### D2. The committed template carries pins that cannot activate
+### D2. The contract stops being a type, and an unstated pin blocks
 
-`expected_api_version`, `expected_schema_version`, and `required_capabilities` stay
-present in `hosted-storefront.toml` and `hosted-buyer.toml`, as values no real release
-can satisfy, with the comment the manifest-digest placeholder already carries.
+The pins are refused before they are ever read from a file. `StripeSettlementConfig`
+declares `expected_api_version` as the literal type `"0.2.1"` and
+`expected_schema_version` as the literal type `5`, and refuses any configured capability
+set that is not exactly equal to the marketplace's own `REQUIRED_STRIPE_CAPABILITIES`.
+A config stating 0.3.0 does not fail a contract check — it fails to parse. The committed
+literals in the templates are downstream of that; changing them alone would change
+nothing.
 
-The capability placeholder must fail closed rather than fail open: an empty
-`required_capabilities` list requires nothing and would let an unrendered template pass.
-The placeholder is therefore a single capability no release declares, not an empty list.
+So the type opens up and the check moves to where the release is known:
 
-*Alternative considered:* delete the keys from the template and have the renderer insert
-them. Rejected — the committed file stops being a schema-valid config, so nothing can
-validate it, and a missing key is easier to reintroduce silently than a placeholder that
-visibly names itself.
+- The version and schema become ordinary validated values — a semantic version, a
+  positive schema number — rather than a type admitting one release.
+- The configured capability set must be a **superset** of the marketplace's own required
+  floor, not equal to it. The floor is genuinely consumer-owned: it is what the
+  marketplace needs, not what a release happens to declare. A newer release declaring
+  more is exactly the case that must be admitted.
+- Each of the three becomes required-when-enabled and produces a named blocker when
+  absent, on the same terms as `expected_manifest_digest`, which is already `None` by
+  default and blocks with `hosted.manifest_pin_missing`.
 
-Rendering keeps the existing discipline: a substitution whose count is not exactly what
-the renderer expects refuses to render at all.
+That last point changes what the committed templates should contain. Rather than
+carrying a placeholder no release satisfies, they carry **nothing**, and the renderer
+inserts the pins from the bound release the way the marketplace renderer already inserts
+`account_ref`. An unrendered template is then unready with a blocker naming the missing
+pin, which is more legible than a version string chosen to be wrong. The vocabulary is
+already the storefront's: its settings file says generated role configuration supplies
+every typed field and the exact capability pins.
+
+*Alternative considered:* keep the keys with non-activating placeholders — `"0.0.0"`,
+schema `0`, and a capability no release declares. Rejected once the blocker path existed:
+a placeholder has to be chosen to fail, and the empty-list form of it fails *open*, which
+is the kind of mistake this whole area exists to prevent. An absent pin cannot fail open.
+
+Rendering keeps the existing discipline either way: an insertion or substitution whose
+count is not exactly what the renderer expects refuses to render at all.
 
 ### D3. Naming which release you bind is not the defect
 
