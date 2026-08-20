@@ -506,3 +506,39 @@ async def test_a_refused_buyer_still_receives_a_signed_answer(wired) -> None:
         resource=settlement_ref,
         request_id=request_id,
     )
+
+
+@pytest.mark.asyncio
+async def test_a_caller_without_a_request_identity_is_refused_unsigned(wired) -> None:
+    """There is nothing to bind, and an invented identity would verify against nothing."""
+
+    _status, payload, _headers, _request_id = await _start(wired)
+    settlement_ref = payload["settlement_ref"]
+
+    response = await wired.client.get(
+        f"/api/v1/settlements/{settlement_ref}",
+        headers={"Accept": "application/json"},
+    )
+    assert response.status_code >= 400
+    assert SIGNATURE_HEADER.lower() not in response.headers
+
+
+@pytest.mark.asyncio
+async def test_a_refusal_before_dispatch_reserves_no_replay_identity(wired) -> None:
+    """A refused request dispatched nothing, so a later honest one must not inherit an outcome."""
+
+    _status, payload, _headers, _request_id = await _start(wired)
+    settlement_ref = payload["settlement_ref"]
+
+    status, _payload, _headers, request_id = await _call(
+        wired.client,
+        method="GET",
+        path=f"/api/v1/settlements/{settlement_ref}",
+        operation="settlement_status",
+        resource=settlement_ref,
+        signer=INTRUDER_SIGNER,
+    )
+    assert status == 403
+
+    db = _container.resolved_sqlite_client
+    assert await db.get_replay_reservation(INTRUDER_SIGNER.identity, request_id) is None

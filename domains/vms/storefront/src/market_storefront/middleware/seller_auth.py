@@ -319,6 +319,78 @@ def _safe_replay_body(operation: str, body: Any) -> Any:
     return safe
 
 
+def _caller_request_id(request: Request) -> str | None:
+    """Return the request identity the caller chose, if it sent one."""
+
+    return request.headers.get("X-Market-Request-ID") or None
+
+
+def _signed_unauthenticated_outcome(
+    *,
+    request: Request,
+    raw: bytes,
+    response: Response,
+    body: Any,
+    operation: str,
+    resource: str,
+) -> Response:
+    """Bind an outcome the caller can verify without a verified principal.
+
+    Everything bound here is either the route's own reading of the request line
+    or a value the caller supplied and will compare against, so none of it
+    depends on the caller being trusted. A caller that sent no request identity
+    has nothing to compare against and gets the answer bare: signing over an
+    invented identity would produce a proof that verifies against nothing it
+    sent, which it would have to reject anyway.
+    """
+
+    headers = dict(response.headers)
+    request_id = _caller_request_id(request)
+    if request_id is not None:
+        headers.update(
+            signed_response_headers(
+                signer=_seller_signer(),
+                role="seller",
+                method=request.method,
+                operation=operation,
+                resource=resource,
+                request_id=request_id,
+                status=response.status_code,
+                body=body,
+            )
+        )
+        headers.pop("content-length", None)
+    return Response(
+        content=raw,
+        status_code=response.status_code,
+        headers=headers,
+        media_type=response.media_type,
+        background=response.background,
+    )
+
+
+def signed_refusal(
+    *,
+    request: Request,
+    operation: str,
+    resource: str,
+    status_code: int,
+    detail: str,
+) -> Response:
+    """Answer a refusal raised before dispatch so its cause is readable."""
+
+    body = {"detail": detail}
+    rendered = JSONResponse(status_code=status_code, content=body)
+    return _signed_unauthenticated_outcome(
+        request=request,
+        raw=bytes(rendered.body),
+        response=rendered,
+        body=body,
+        operation=operation,
+        resource=resource,
+    )
+
+
 async def _signed_buyer_response(
     *,
     request: Request,
@@ -334,12 +406,18 @@ async def _signed_buyer_response(
     body = _wire_body(raw)
     authenticated = getattr(request.state, "marketplace_authenticated", None)
     if not isinstance(authenticated, AuthenticatedPrincipal):
-        return Response(
-            content=raw,
-            status_code=response.status_code,
-            headers=dict(response.headers),
-            media_type=response.media_type,
-            background=response.background,
+        # The route refused before authentication deposited anything, so there
+        # is no reservation to record against and no verified principal. The
+        # contract and the caller's own request identity are still known, and
+        # binding those is what lets the caller read why it was refused instead
+        # of discarding an unsigned answer.
+        return _signed_unauthenticated_outcome(
+            request=request,
+            raw=raw,
+            response=response,
+            body=body,
+            operation=operation,
+            resource=resource,
         )
     request_id = authenticated.request_id
     if authenticated.dispatch_allowed:
@@ -386,6 +464,8 @@ async def listing_lifecycle_middleware(request: Request, call_next):
             body = raw.decode("utf-8", errors="replace")
     else:
         body = EMPTY_BODY
+    mutation = None
+    buyer_contract = None
     try:
         mutation = await resolve_listing_mutation(request, body)
         buyer_contract = (
@@ -446,4 +526,23 @@ async def listing_lifecycle_middleware(request: Request, call_next):
             auth=auth,
         )
     except AuthError as exc:
-        return JSONResponse(status_code=exc.status_code, content={"detail": exc.detail})
+        # A refusal raised here never reached the wrapper that signs, so sign it
+        # against whichever contract the route recognized. Without one there is
+        # nothing to bind and the caller gets the answer bare.
+        contract = (
+            (mutation.operation, mutation.resource)
+            if mutation is not None
+            else buyer_contract
+        )
+        if contract is None:
+            return JSONResponse(
+                status_code=exc.status_code, content={"detail": exc.detail}
+            )
+        operation, resource = contract
+        return signed_refusal(
+            request=request,
+            operation=operation,
+            resource=resource,
+            status_code=exc.status_code,
+            detail=exc.detail,
+        )
