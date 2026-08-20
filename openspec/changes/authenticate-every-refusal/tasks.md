@@ -49,8 +49,27 @@
 
 ## 4. Read the refusal the hosted lane was giving
 
-- [ ] 4.1 Run the headless `us_bank_transfer.v1` lane against the real Stripe
+- [x] 4.1 Run the headless `us_bank_transfer.v1` lane against the real Stripe
       test account with a locally bound authority, and record what buyer status
       polling now names.
-- [ ] 4.2 Correct the cause it names, or record it against the change that owns
+
+      It names nothing: the lane passes end to end. A real $20 charge against
+      the connected account, transferred with a matching source transaction and
+      transfer group, condition satisfied, fulfilled, collected on both sides.
+      The refusal does not reproduce.
+
+      The earlier diagnosis was made against a storefront image built before
+      the settlement work of the last several changes landed, and the image is
+      what the lane runs — the working tree is not. Rebuilding it was the
+      difference. That is worth stating plainly: a lane against a stale image
+      diagnoses the image, and nothing in the run said which one it was
+      running until this change's sibling made a development run record it.
+- [x] 4.2 Correct the cause it names, or record it against the change that owns
       it if it is not this one.
+
+      Nothing to correct here. Three defects the run did surface are recorded
+      and fixed under the changes that own them: a development run could not
+      write its evidence at all (`write-development-run-evidence`), a parked
+      obligation lost the reason it was parked for
+      (`keep-a-parked-reason`), and a Checkout payment claimed an outcome it
+      never confirmed (`confirm-checkout-was-completed`).

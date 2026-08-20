@@ -15,8 +15,16 @@
 
 ## 2. Read the refusal the hosted lane was giving
 
-- [ ] 2.1 Run the headless `us_bank_transfer.v1` lane against the real Stripe
+- [x] 2.1 Run the headless `us_bank_transfer.v1` lane against the real Stripe
       test account with a locally built authority, and record what buyer status
       polling now names.
-- [ ] 2.2 Correct the cause it names, or record it against the change that owns
-      it.
+
+      The lane passes end to end and writes its evidence: `result: passed`,
+      `stage: complete`, `release_mode: local`, the producer half recorded as
+      the image `localhost/arkhai-hosted-settlement-service:0.3.0` and the
+      build digest `sha256:22c1fd7f…` with `local` in place of every released
+      coordinate. Before this change that same run raised
+      `EvidenceValidationError` and wrote nothing.
+- [x] 2.2 Correct the cause it names, or record it against the change that owns
+      it. Recorded against `authenticate-every-refusal`, whose lane this is:
+      the refusal does not reproduce against a rebuilt storefront image.
