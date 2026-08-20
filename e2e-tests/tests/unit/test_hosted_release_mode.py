@@ -766,3 +766,22 @@ def test_the_staged_bridge_does_not_inherit_an_ambient_proxy(tmp_path, monkeypat
 
     assert response["seen"] == []
     assert json.dumps(response)
+
+
+def test_a_protected_run_with_no_producer_pins_still_fails_closed(tmp_path) -> None:
+    """They stopped being required arguments; they did not stop being required.
+
+    A locally built producer has none to supply, so the driver no longer demands
+    them at the command line. An attested environment supplied with none of them
+    is refused by the binding rather than admitted with nothing checked.
+    """
+
+    for omitted in (
+        "hosted_source_commit",
+        "hosted_workflow_run_id",
+        "hosted_manifest_sha256",
+        "hosted_client_wheel_sha256",
+        "hosted_image_digest",
+    ):
+        with pytest.raises(ReleaseIdentityRejected):
+            _attested(tmp_path, **{omitted: ""})
