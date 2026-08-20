@@ -732,6 +732,37 @@ class SettlementRuntime:
             lease_until_unix=now + lease,
         )
 
+    @staticmethod
+    def _keep_parked_reason(
+        record: SettlementObligationRecord,
+        mechanism_state: dict[str, Any] | None,
+    ) -> dict[str, Any] | None:
+        """Carry a park's reason across writes that do not name one.
+
+        Mechanism state is replaced wholesale on every write, which is right
+        for a vocabulary the mechanism owns and re-derives each time. The
+        reason an obligation was parked is not that: it was recorded once, by
+        the operation that parked it, and the mechanism cannot re-derive it
+        because it answers for the authority's current view. A status poll
+        against an authority that is answering normally names no reason, and
+        the buyer polls continuously, so without this the reason survives about
+        one poll interval. It is cleared when the park is cleared, never while
+        the obligation is still parked and still needs a human.
+        """
+
+        if mechanism_state is None or MANUAL_REASON_KEY in mechanism_state:
+            return mechanism_state
+        parked = "manual_required" in {
+            record.materialization_state,
+            record.condition_state,
+            record.collection_state,
+            record.reclaim_state,
+        }
+        reason = record.mechanism_state.get(MANUAL_REASON_KEY)
+        if not parked or not reason:
+            return mechanism_state
+        return {**mechanism_state, MANUAL_REASON_KEY: reason}
+
     async def _finish(
         self,
         record: SettlementObligationRecord,
@@ -739,6 +770,10 @@ class SettlementRuntime:
         worker_id: str,
         **values: Any,
     ) -> None:
+        if "mechanism_state" in values:
+            values["mechanism_state"] = self._keep_parked_reason(
+                record, values["mechanism_state"]
+            )
         saved = await self._repository.finish_settlement_operation(
             obligation_ref=record.obligation_ref,
             operation=operation,
