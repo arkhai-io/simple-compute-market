@@ -82,6 +82,10 @@ class FakeClient:
         self.health_result = ManifestHealth(
             ready=True,
             manifest_digest="sha256:" + "aa" * 32,
+            # The client transports what the authority serves and constrains it
+            # to no one release, so these tests exercise a 0.2.1 contract
+            # through a 0.3.0 client, which the literal types made impossible.
+            api_version="0.2.1",
             schema_version=5,
             funding_profiles=tuple(
                 FundingProfileReadiness(

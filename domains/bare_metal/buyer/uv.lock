@@ -203,7 +203,7 @@ wheels = [
 
 [[package]]
 name = "arkhai-bare-metal-buyer"
-version = "0.1.1"
+version = "0.1.2"
 source = { editable = "." }
 dependencies = [
     { name = "arkhai-bare-metal" },
@@ -234,12 +234,12 @@ requires-dist = [
     { name = "arkhai-core", specifier = ">=0.2.0" },
     { name = "arkhai-core-buyer", specifier = "==0.3.0" },
     { name = "arkhai-core-registry-client", specifier = "==0.11.0" },
-    { name = "arkhai-hosted-settlement-client", specifier = "==0.2.1" },
+    { name = "arkhai-hosted-settlement-client", specifier = "==0.3.0" },
     { name = "arkhai-kit-alkahest" },
     { name = "arkhai-kit-config" },
     { name = "arkhai-kit-contact-exchange", specifier = "==0.1.0" },
     { name = "arkhai-kit-delivery", specifier = "==0.1.0" },
-    { name = "arkhai-kit-hosted-settlement", specifier = "==0.1.1" },
+    { name = "arkhai-kit-hosted-settlement", specifier = "==0.1.2" },
     { name = "arkhai-kit-identity", specifier = "==0.3.0" },
     { name = "arkhai-kit-policy" },
     { name = "arkhai-kit-settlement-runtime", specifier = "==0.1.0" },
@@ -295,7 +295,7 @@ wheels = [
 
 [[package]]
 name = "arkhai-hosted-settlement-client"
-version = "0.2.1"
+version = "0.3.0"
 source = { registry = "../../../.dist" }
 dependencies = [
     { name = "cryptography" },
@@ -305,7 +305,7 @@ dependencies = [
     { name = "rfc8785" },
 ]
 wheels = [
-    { path = "arkhai_hosted_settlement_client-0.2.1-py3-none-any.whl" },
+    { path = "arkhai_hosted_settlement_client-0.3.0-py3-none-any.whl" },
 ]
 
 [[package]]
@@ -364,7 +364,7 @@ wheels = [
 
 [[package]]
 name = "arkhai-kit-hosted-settlement"
-version = "0.1.1"
+version = "0.1.2"
 source = { registry = "../../../.dist" }
 dependencies = [
     { name = "arkhai-core" },
@@ -375,7 +375,7 @@ dependencies = [
     { name = "typer" },
 ]
 wheels = [
-    { path = "arkhai_kit_hosted_settlement-0.1.1-py3-none-any.whl" },
+    { path = "arkhai_kit_hosted_settlement-0.1.2-py3-none-any.whl" },
 ]
 
 [[package]]

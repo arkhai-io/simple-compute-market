@@ -115,6 +115,25 @@ installed contract unobservable from configuration.
 So the pin moves to `==0.3.0`. This is a sequencing consequence, not a policy change:
 you cannot consume a capability without depending on the release that declares it.
 
+### D4a. The client had to stop naming a release before the pin could move
+
+Moving the pin surfaced a defect in the client itself: `ManifestHealth` declared
+`api_version: Literal["0.3.0"]` and `schema_version: Literal[6]`, so a marketplace built
+on the 0.3.0 client could not *parse* a 0.2.1 authority's readiness response. Not report
+a mismatch — parse. The version disagreement that readiness exists to surface arrived as
+a malformed response, and the consumer's own `expected_api_version` pin never ran.
+
+That is the same literal defect this change removes from the consumer, sitting one layer
+down in the released wire model. It was fixed at its source, in
+`hosted-settlement-service` under `report-the-contract-served`, before the pin moved
+here: the health model now carries validated values and the service states its own
+version rather than inheriting the client library's default. 0.3.0 is unpublished, so it
+was amended in place rather than chased with a 0.3.1.
+
+The consequence for this change is that the pinned client transports what an authority
+serves and asserts nothing about which release is acceptable — which is what makes the
+consumer's own assertion, opened up in D2, the thing that actually decides.
+
 ### D5. Capability gating reuses the prerequisite path, not a new one
 
 `require_hosted_capabilities` and the per-scenario capability map added by the previous

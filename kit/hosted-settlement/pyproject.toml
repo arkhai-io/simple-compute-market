@@ -1,12 +1,12 @@
 [project]
 name = "arkhai-kit-hosted-settlement"
-version = "0.1.1"
+version = "0.1.2"
 description = "Thin settlement-runtime adapter for the hosted conditional escrow contract"
 requires-python = ">=3.12,<3.14"
 license = "MIT"
 dependencies = [
   "arkhai-core==0.2.0",
-  "arkhai-hosted-settlement-client==0.2.1",
+  "arkhai-hosted-settlement-client==0.3.0",
   "arkhai-kit-identity==0.3.0",
   "arkhai-kit-settlement-runtime==0.1.0",
   "pydantic>=2.7",

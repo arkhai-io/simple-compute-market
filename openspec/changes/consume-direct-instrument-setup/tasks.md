@@ -15,10 +15,10 @@
 
 ## 3. The pinned client moves to the release that declares the capability
 
-- [ ] 3.1 Copy the bound release's `arkhai_hosted_settlement_client-0.3.0-py3-none-any.whl` into the wheelhouse the marketplace resolves from.
-- [ ] 3.2 Move the pin to `==0.3.0` in `kit/hosted-settlement/pyproject.toml`, `domains/bare_metal/storefront/pyproject.toml`, and `domains/bare_metal/buyer/pyproject.toml`, and refresh every `uv.lock` that resolves it.
-- [ ] 3.3 Update the wheelhouse review test that asserts the pinned client version.
-- [ ] 3.4 Prove it: the storefront and buyer packages install and their existing hosted unit suites pass against the new client.
+- [x] 3.1 Copy the bound release's `arkhai_hosted_settlement_client-0.3.0-py3-none-any.whl` into the wheelhouse the marketplace resolves from.
+- [x] 3.2 Move the pin to `==0.3.0` in `kit/hosted-settlement/pyproject.toml`, `domains/bare_metal/storefront/pyproject.toml`, and `domains/bare_metal/buyer/pyproject.toml`, and refresh every `uv.lock` that resolves it.
+- [x] 3.3 Update the wheelhouse review test that asserts the pinned client version.
+- [x] 3.4 Prove it: the storefront and buyer packages install and their existing hosted unit suites pass against the new client.
 
 ## 4. The payer submits its own verification
 
