@@ -33,4 +33,12 @@
       the run says so: the same lane previously reported
       `convergence_timeout` at stage `funding`, three minutes and three steps
       downstream, naming neither the page nor what it did there.
+
+      Confirmed three times across the evening, so it is the account's
+      standing state rather than one unlucky session. The harness's
+      `--visible-browser` option, which exists because a headless browser is
+      itself the signal the provider answers, is not a way around it from an
+      unattended session: Playwright's non-headless launch blocks indefinitely
+      with no GUI session to attach to — twenty-seven minutes with the stack up
+      and no output — rather than failing inside any of the run's timeouts.
 - [x] 3.2 Record the proxy requirement in the testing documentation.
