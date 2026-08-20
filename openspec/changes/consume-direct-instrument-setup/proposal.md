@@ -3,9 +3,11 @@
 Hosted settlement 0.3.0 declares `payer-direct-instrument-setup.v1`: one endpoint that
 lets a payer finish a bank-funded instrument setup by submitting the microdeposit
 evidence their own bank showed them. Nothing on the marketplace side can reach it.
-The payer facade has `start_setup` and `setup_status` and no verification operation,
-so `us_bank_transfer.v1` has no saved-instrument path at all and the bank profile that
-does have one is bound to a browser for a flow the provider settles by microdeposit.
+The payer facade has `start_setup` and `setup_status` and no verification operation, so
+the one bank profile that can hold a saved instrument, `us_ach_debit.v1`, is bound to a
+browser for a flow the provider settles by microdeposit. (`us_bank_transfer.v1` is a
+push transfer and the released contract refuses a setup for it outright; that is the
+contract, not a gap.)
 
 The same run cannot even get that far. The consumer half writes down which hosted
 release it expects — `expected_api_version = "0.2.1"`, `expected_schema_version = 5`,
@@ -31,8 +33,8 @@ binds a correct 0.3.0 authority stops at the marketplace's own check.
   the setup projection carries verification-pending readiness.
 - A `saved_instrument` lane completes a bank-funded setup by submitting that evidence
   when the bound release declares `payer-direct-instrument-setup.v1`, and keeps the
-  existing browser path when it does not. `us_bank_transfer.v1` gains a saved-instrument
-  path it does not have today.
+  existing browser path when it does not. A profile the bound release offers no setup
+  for is reported as an unavailable prerequisite rather than as a failed lane.
 - **BREAKING (packaging).** `arkhai-hosted-settlement-client` moves from `==0.2.1` to
   `==0.3.0` in `kit/hosted-settlement`, `domains/bare_metal/storefront`, and
   `domains/bare_metal/buyer`, with affected lockfiles refreshed. Consuming a capability

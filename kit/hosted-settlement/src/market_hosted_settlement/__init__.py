@@ -41,6 +41,7 @@ from .automation import (
     evaluate_off_session_policy,
 )
 from .payer import (
+    DIRECT_INSTRUMENT_SETUP_CAPABILITY,
     HostedPayerError,
     HostedPayerFacade,
     PayerCommandContext,
@@ -93,6 +94,7 @@ __all__ = [
     "FundingProfile",
     "STRIPE_CONFIG_KEY",
     "SUPPORTED_FUNDING_PROFILES",
+    "DIRECT_INSTRUMENT_SETUP_CAPABILITY",
     "HostedPayerError",
     "HostedPayerFacade",
     "HostedConditionalEscrowClient",

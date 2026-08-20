@@ -22,11 +22,11 @@
 
 ## 4. The payer submits its own verification
 
-- [ ] 4.1 Add `verify_setup` to `HostedPayerFacade`, carrying exactly one form of evidence — deposited minor-unit amounts or descriptor code — against one setup under one opaque binding, through the pinned client's own request model. Refuse both-or-neither before any hosted call.
-- [ ] 4.2 Carry verification-pending readiness through `payer_setup_projection`, and make buyer compatibility treat a setup awaiting payer verification as not-yet-ready rather than revoked or unavailable.
-- [ ] 4.3 Add the payer CLI command, emitting the same projection the other setup commands emit.
-- [ ] 4.4 Report the operation as an unavailable prerequisite naming the capability where the bound release does not declare direct payer instrument setup, before any hosted mutation.
-- [ ] 4.5 Prove it at the kit boundary: one evidence form admits, both or neither refuses before any call, the projection carries readiness and no evidence, and an undeclaring release reports the capability as the missing prerequisite.
+- [x] 4.1 Add `verify_setup` to `HostedPayerFacade`, carrying exactly one form of evidence — deposited minor-unit amounts or descriptor code — against one setup under one opaque binding, through the pinned client's own request model. Refuse both-or-neither before any hosted call.
+- [x] 4.2 Carry verification-pending readiness through `payer_setup_projection`, and make buyer compatibility treat a setup awaiting payer verification as not-yet-ready rather than revoked or unavailable.
+- [x] 4.3 Add the payer CLI command, emitting the same projection the other setup commands emit.
+- [x] 4.4 Report the operation as an unavailable prerequisite naming the capability where the bound release does not declare direct payer instrument setup, before any hosted mutation.
+- [x] 4.5 Prove it at the kit boundary: one evidence form admits, both or neither refuses before any call, the projection carries readiness and no evidence, and an undeclaring release reports the capability as the missing prerequisite.
 
 ## 5. The saved-instrument lane sets up without a browser
 
@@ -34,7 +34,7 @@
 - [ ] 5.2 Let `_validate_payer_fixture` admit a setup awaiting payer verification, instead of requiring every saved-instrument setup to return a browser action URL.
 - [ ] 5.3 Add the lifecycle bridge surface that submits the verification and returns the refreshed fixture, alongside `complete_payer_setup`.
 - [ ] 5.4 Take the direct path in the driver's saved-instrument stage when the bound release declares the capability, and the existing browser path when it does not.
-- [ ] 5.5 Give `us_bank_transfer.v1` a saved-instrument path, and confirm the interactive path for a non-declaring release is byte-for-byte what it is today.
+- [ ] 5.5 Report a profile the bound release offers no setup for as an unavailable prerequisite, and confirm the interactive path for a non-declaring release is byte-for-byte what it is today.
 - [ ] 5.6 Prove it: a bank-funded saved-instrument lane against a declaring release needs no browser and records no submitted evidence; against a non-declaring release the interactive path and its evidence are unchanged.
 
 ## 6. End to end against a locally built 0.3.0 authority
