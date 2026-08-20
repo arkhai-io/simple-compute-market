@@ -632,6 +632,147 @@ def test_the_attested_environment_is_rendered_byte_for_byte(tmp_path: Path) -> N
     assert output_path.read_text(encoding="utf-8") == expected
 
 
+def _stage_local_producer(
+    root: Path, *, version: str = "0.3.0", schema: int = 6
+) -> Path:
+    """What `make artifacts` leaves behind in the producer's checkout."""
+
+    directory = root / "local-artifacts"
+    directory.mkdir(exist_ok=True)
+    (directory / f"conformance-v{version}.json").write_text(
+        json.dumps(
+            {
+                "api_version": version,
+                "schema_version": schema,
+                "funding_profiles": ["card.v1", "us_bank_transfer.v1"],
+                "identity_contract": {
+                    "capabilities": [
+                        "payer-profile.v1",
+                        "payer-direct-instrument-setup.v1",
+                    ]
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    (directory / f"openapi-v{version}.json").write_text("{}", encoding="utf-8")
+    (directory / f"migrations-v{schema}.json").write_text("{}", encoding="utf-8")
+    return directory
+
+
+def _local_producer_env(root: Path, **overrides: Any) -> dict[str, str]:
+    arguments: dict[str, Any] = {
+        "trust_path": None,
+        "manifest_path": None,
+        "wheel_path": None,
+        "marketplace_manifest_path": None,
+        "marketplace_manifest_sha256": "",
+        "marketplace_commit": "",
+        "marketplace_workflow_ref": "",
+        "marketplace_workflow_run_id": "",
+        "marketplace_image_digest": "",
+        "output_path": root / "hosted-compose.env",
+        "release_mode": "local",
+        "local_marketplace_image": "arkhai:storefront",
+        "local_hosted_image": "localhost/arkhai-hosted-settlement-service:0.3.0",
+    }
+    arguments.update(overrides)
+    # Staged only when the caller did not stage its own: a test that removes an
+    # artifact would otherwise have it written back underneath it.
+    if "hosted_artifacts_path" not in arguments:
+        arguments["hosted_artifacts_path"] = _stage_local_producer(root)
+    preparer.prepare_compose_env(**arguments)
+    return dict(
+        line.split("=", 1)
+        for line in arguments["output_path"].read_text(encoding="utf-8").splitlines()
+        if line and not line.startswith("#")
+    )
+
+
+def test_a_locally_built_producer_renders_the_same_key_set(tmp_path: Path) -> None:
+    """No release exists for this version, and the environment still renders."""
+
+    values = _local_producer_env(tmp_path)
+
+    # The contract comes from the build's own artifacts.
+    assert values["HOSTED_SETTLEMENT_VERIFIED_RELEASE_VERSION"] == "0.3.0"
+    assert values["HOSTED_SETTLEMENT_VERIFIED_API_VERSION"] == "0.3.0"
+    assert values["HOSTED_SETTLEMENT_VERIFIED_SCHEMA_VERSION"] == "6"
+    assert (
+        "payer-direct-instrument-setup.v1"
+        in values["HOSTED_SETTLEMENT_VERIFIED_CAPABILITIES"]
+    )
+    # The provenance has no local source and says so by being empty, exactly as
+    # the consumer half already does.
+    for key in preparer._LOCAL_HOSTED_COORDINATES:
+        assert values[key] == "", key
+    # Compose needs an image and hands the authority a digest to report back,
+    # so those are named rather than left empty -- but the image is a name, not
+    # a registry digest, and the digest is a hash of what the build generated.
+    assert (
+        values["HOSTED_SETTLEMENT_VERIFIED_IMAGE"]
+        == "localhost/arkhai-hosted-settlement-service:0.3.0"
+    )
+    assert values["HOSTED_SETTLEMENT_VERIFIED_MANIFEST_DIGEST"].startswith("sha256:")
+    assert values["HOSTED_SETTLEMENT_VERIFIED_MANIFEST_SHA256"] == ""
+
+
+def test_a_locally_built_producer_is_named_by_reference_not_by_digest(
+    tmp_path: Path,
+) -> None:
+    with pytest.raises(preparer.ComposePreparationError, match="not a registry digest"):
+        _local_producer_env(
+            tmp_path, local_hosted_image="localhost/authority@sha256:" + "ab" * 32
+        )
+
+
+@pytest.mark.parametrize(
+    "filename", ["conformance-v0.3.0.json", "openapi-v0.3.0.json", "migrations-v6.json"]
+)
+def test_a_local_producer_without_its_artifacts_fails_closed(
+    tmp_path: Path, filename: str
+) -> None:
+    """It names what is missing rather than borrowing another release's."""
+
+    directory = _stage_local_producer(tmp_path)
+    (directory / filename).unlink()
+
+    with pytest.raises(preparer.ComposePreparationError) as caught:
+        _local_producer_env(tmp_path, hosted_artifacts_path=directory)
+
+    assert "0.2.1" not in str(caught.value)
+
+
+def test_a_local_producer_directory_holding_two_releases_is_refused(
+    tmp_path: Path,
+) -> None:
+    """Which one the image serves is unanswerable, so it is not guessed."""
+
+    directory = _stage_local_producer(tmp_path)
+    _stage_local_producer(tmp_path, version="0.4.0", schema=7)
+
+    with pytest.raises(preparer.ComposePreparationError, match="exactly one"):
+        _local_producer_env(tmp_path, hosted_artifacts_path=directory)
+
+
+def test_a_local_producer_composes_with_an_attested_consumer(tmp_path: Path) -> None:
+    """One half released and the other built here is a supported combination."""
+
+    marketplace_args = _marketplace_args(tmp_path)
+    values = _local_producer_env(
+        tmp_path,
+        release_mode="attested",
+        local_marketplace_image="",
+        **{
+            key.replace("marketplace_manifest_path", "marketplace_manifest_path"): value
+            for key, value in marketplace_args.items()
+        },
+    )
+
+    assert values["HOSTED_MARKETPLACE_VERIFIED_SOURCE_COMMIT"] == "34" * 20
+    assert values["HOSTED_SETTLEMENT_VERIFIED_SOURCE_COMMIT"] == ""
+
+
 def test_compose_env_rejects_arbitrary_image_override(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

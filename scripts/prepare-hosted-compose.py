@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import importlib.util
 import json
 import os
@@ -168,6 +169,57 @@ def _read_conformance(path: Path) -> dict[str, Any]:
     }
 
 
+def _local_hosted_artifacts(directory: Path | None) -> tuple[dict[str, Any], str, str]:
+    """Read a locally built producer from the artifacts that build generated.
+
+    Fails closed and names what is missing. Falling back to another release's
+    coordinates would compose an authority under a contract nothing here has
+    seen, which is the failure this whole path exists to make impossible.
+    """
+
+    if directory is None or not directory.is_dir():
+        raise ComposePreparationError(
+            "a local hosted image must name the directory its release artifacts "
+            f"were generated into (got {directory})"
+        )
+    staged = sorted(directory.glob("conformance-v*.json"))
+    if len(staged) != 1:
+        raise ComposePreparationError(
+            f"expected exactly one conformance-v*.json in {directory}, found "
+            f"{len(staged)}; run the producer's artifact generation for one version"
+        )
+    conformance_path = staged[0]
+    release_version = conformance_path.name[len("conformance-v") : -len(".json")]
+    contract = _read_conformance(conformance_path)
+    required = {
+        "conformance": conformance_path,
+        "openapi": directory / f"openapi-v{release_version}.json",
+        "migrations": directory / f"migrations-v{contract['schema_version']}.json",
+    }
+    missing = sorted(name for name, path in required.items() if not path.is_file())
+    if missing:
+        raise ComposePreparationError(
+            "the local hosted build generated no "
+            + ", ".join(missing)
+            + f" artifact in {directory}"
+        )
+    # Compose hands the authority a digest and the authority reports it back,
+    # so unlike a provenance coordinate this one cannot be empty. It is a hash
+    # of what the build generated and of nothing else: it names the build the
+    # run composes without claiming a release published it. The signed manifest
+    # hash renders empty beside it, which is what says there is no release.
+    summary = json.dumps(
+        {
+            path.name: hashlib.sha256(path.read_bytes()).hexdigest()
+            for path in sorted(required.values())
+        },
+        separators=(",", ":"),
+        sort_keys=True,
+    ).encode()
+    fingerprint = "sha256:" + hashlib.sha256(summary).hexdigest()
+    return contract, release_version, fingerprint
+
+
 def _hosted_provenance(production: dict[str, Any], *, release_dir: str) -> dict[str, str]:
     """Who published this producer, and from what.
 
@@ -239,6 +291,104 @@ def _hosted_contract(
     }
 
 
+def _marketplace_contract(
+    *,
+    release_mode: str,
+    local_marketplace_image: str,
+    marketplace_manifest_path: Path | None,
+    marketplace_manifest_sha256: str,
+    marketplace_commit: str,
+    marketplace_workflow_ref: str,
+    marketplace_workflow_run_id: str,
+    marketplace_image_digest: str,
+) -> dict[str, str]:
+    """Bind the consumer half, released or built here."""
+
+    if release_mode != "attested":
+        if not local_marketplace_image:
+            raise ComposePreparationError(
+                "a local environment must name the marketplace image it runs"
+            )
+        return {
+            **{name: "" for name in _LOCAL_MARKETPLACE_COORDINATES},
+            "HOSTED_MARKETPLACE_VERIFIED_REPOSITORY": "arkhai-io/simple-compute-market",
+            "HOSTED_MARKETPLACE_VERIFIED_IMAGE": local_marketplace_image,
+        }
+    marketplace = _MARKETPLACE_VERIFIER.verify_marketplace_release(
+        manifest_path=_required_file(
+            marketplace_manifest_path,
+            "HOSTED_MARKETPLACE_RELEASE_MANIFEST",
+        ),
+        expected_manifest_sha256=marketplace_manifest_sha256,
+        expected_commit=marketplace_commit,
+        expected_workflow_ref=marketplace_workflow_ref,
+        expected_workflow_run_id=marketplace_workflow_run_id,
+        expected_image_digest=marketplace_image_digest,
+    )
+    return {
+        "HOSTED_MARKETPLACE_VERIFIED_ARTIFACT_PROVENANCE_SHA256": str(
+            marketplace["artifacts"]["provenance"]["sha256"]
+        ),
+        "HOSTED_MARKETPLACE_VERIFIED_ARTIFACT_SCHEMA_SHA256": str(
+            marketplace["artifacts"]["settlement_config_schema"]["sha256"]
+        ),
+        "HOSTED_MARKETPLACE_VERIFIED_ARTIFACT_WHEELHOUSE_SHA256": str(
+            marketplace["artifacts"]["wheelhouse"]["sha256"]
+        ),
+        "HOSTED_MARKETPLACE_VERIFIED_IMAGE": _image(
+            marketplace["service_image_reference"],
+            marketplace["service_image_digest"],
+        ),
+        "HOSTED_MARKETPLACE_VERIFIED_MANIFEST_SHA256": str(
+            marketplace["manifest_sha256"]
+        ),
+        "HOSTED_MARKETPLACE_VERIFIED_REPOSITORY": str(marketplace["repository"]),
+        "HOSTED_MARKETPLACE_VERIFIED_SOURCE_COMMIT": str(marketplace["source_commit"]),
+        "HOSTED_MARKETPLACE_VERIFIED_WORKFLOW_REF": str(marketplace["workflow_ref"]),
+        "HOSTED_MARKETPLACE_VERIFIED_WORKFLOW_RUN_ID": str(
+            marketplace["workflow_run_id"]
+        ),
+    }
+
+
+def _local_hosted_contract(
+    local_hosted_image: str, hosted_artifacts_path: Path | None
+) -> dict[str, str]:
+    """Bind a producer built here: no provenance, the contract from the build."""
+
+    if "@" in local_hosted_image:
+        raise ComposePreparationError(
+            "a locally built producer names the image it runs, not a registry digest"
+        )
+    contract, release_version, fingerprint = _local_hosted_artifacts(
+        hosted_artifacts_path
+    )
+    assert hosted_artifacts_path is not None
+    return {
+        **{name: "" for name in _LOCAL_HOSTED_COORDINATES},
+        "HOSTED_SETTLEMENT_VERIFIED_REPOSITORY": "arkhai-io/stripe-settlement-service",
+        "HOSTED_SETTLEMENT_VERIFIED_IMAGE": local_hosted_image,
+        "HOSTED_SETTLEMENT_VERIFIED_MANIFEST_DIGEST": fingerprint,
+        "HOSTED_SETTLEMENT_VERIFIED_RELEASE_DIR": str(
+            hosted_artifacts_path.resolve()
+        ),
+        **_hosted_contract(release_version=release_version, **contract),
+    }
+
+
+def _render(
+    output_path: Path, *, marketplace: dict[str, str], hosted: dict[str, str]
+) -> str:
+    for name, expected in {**marketplace, **hosted}.items():
+        _reject_mismatched_override(name, expected)
+    content = _render_env({**marketplace, **hosted})
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = output_path.with_name(f".{output_path.name}.tmp")
+    temporary.write_text(content, encoding="utf-8")
+    temporary.replace(output_path)
+    return hosted["HOSTED_SETTLEMENT_VERIFIED_IMAGE"]
+
+
 def prepare_compose_env(
     *,
     trust_path: Path,
@@ -253,112 +403,72 @@ def prepare_compose_env(
     output_path: Path,
     release_mode: str = "attested",
     local_marketplace_image: str = "",
+    local_hosted_image: str = "",
+    hosted_artifacts_path: Path | None = None,
 ) -> str:
-    """Render the Compose environment the protected stack runs under.
+    """Render the Compose environment the stack runs under.
 
-    The producer half is verified identically in both modes -- a development
-    run consumes the same signed hosted release. Only the marketplace half
-    differs: an attested run binds a verified consumer release, and a local one
-    records that it has none.
+    Either half may be a release or a build made here, in any combination. A
+    released half is bound by its signed coordinates; a locally built one
+    renders the same key set with those coordinates empty, and fills what it
+    can answer -- the contract it serves -- from the artifacts it generated.
     """
 
+    if local_hosted_image:
+        return _render(
+            output_path,
+            marketplace=_marketplace_contract(
+                release_mode=release_mode,
+                local_marketplace_image=local_marketplace_image,
+                marketplace_manifest_path=marketplace_manifest_path,
+                marketplace_manifest_sha256=marketplace_manifest_sha256,
+                marketplace_commit=marketplace_commit,
+                marketplace_workflow_ref=marketplace_workflow_ref,
+                marketplace_workflow_run_id=marketplace_workflow_run_id,
+                marketplace_image_digest=marketplace_image_digest,
+            ),
+            hosted=_local_hosted_contract(local_hosted_image, hosted_artifacts_path),
+        )
     production: dict[str, Any] = _VERIFIER.verify_release(
         trust_path=_required_file(trust_path, "HOSTED_RELEASE_TRUST"),
         manifest_path=_required_file(manifest_path, "HOSTED_RELEASE_MANIFEST"),
         wheel_path=_required_file(wheel_path, "HOSTED_CLIENT_WHEEL"),
     )
-    marketplace: dict[str, Any] | None = None
-    if release_mode == "attested":
-        marketplace = _MARKETPLACE_VERIFIER.verify_marketplace_release(
-            manifest_path=_required_file(
-                marketplace_manifest_path,
-                "HOSTED_MARKETPLACE_RELEASE_MANIFEST",
-            ),
-            expected_manifest_sha256=marketplace_manifest_sha256,
-            expected_commit=marketplace_commit,
-            expected_workflow_ref=marketplace_workflow_ref,
-            expected_workflow_run_id=marketplace_workflow_run_id,
-            expected_image_digest=marketplace_image_digest,
-        )
-    verified_image = _image(
-        production["service_image_reference"], production["service_image_digest"]
-    )
-    if marketplace is None:
-        if not local_marketplace_image:
-            raise ComposePreparationError(
-                "a local environment must name the marketplace image it runs"
-            )
-        verified_marketplace_contract = {
-            name: "" for name in _LOCAL_MARKETPLACE_COORDINATES
-        }
-        verified_marketplace_contract["HOSTED_MARKETPLACE_VERIFIED_REPOSITORY"] = (
-            "arkhai-io/simple-compute-market"
-        )
-        verified_marketplace_contract["HOSTED_MARKETPLACE_VERIFIED_IMAGE"] = (
-            local_marketplace_image
-        )
-    else:
-        verified_marketplace_image = _image(
-            marketplace["service_image_reference"],
-            marketplace["service_image_digest"],
-        )
-        verified_marketplace_contract = {
-            "HOSTED_MARKETPLACE_VERIFIED_ARTIFACT_PROVENANCE_SHA256": str(
-                marketplace["artifacts"]["provenance"]["sha256"]
-            ),
-            "HOSTED_MARKETPLACE_VERIFIED_ARTIFACT_SCHEMA_SHA256": str(
-                marketplace["artifacts"]["settlement_config_schema"]["sha256"]
-            ),
-            "HOSTED_MARKETPLACE_VERIFIED_ARTIFACT_WHEELHOUSE_SHA256": str(
-                marketplace["artifacts"]["wheelhouse"]["sha256"]
-            ),
-            "HOSTED_MARKETPLACE_VERIFIED_IMAGE": verified_marketplace_image,
-            "HOSTED_MARKETPLACE_VERIFIED_MANIFEST_SHA256": str(
-                marketplace["manifest_sha256"]
-            ),
-            "HOSTED_MARKETPLACE_VERIFIED_REPOSITORY": str(marketplace["repository"]),
-            "HOSTED_MARKETPLACE_VERIFIED_SOURCE_COMMIT": str(
-                marketplace["source_commit"]
-            ),
-            "HOSTED_MARKETPLACE_VERIFIED_WORKFLOW_REF": str(
-                marketplace["workflow_ref"]
-            ),
-            "HOSTED_MARKETPLACE_VERIFIED_WORKFLOW_RUN_ID": str(
-                marketplace["workflow_run_id"]
-            ),
-        }
-    verified_hosted_contract = {
-        **_hosted_provenance(
-            production, release_dir=str(manifest_path.resolve().parent)
+    return _render(
+        output_path,
+        marketplace=_marketplace_contract(
+            release_mode=release_mode,
+            local_marketplace_image=local_marketplace_image,
+            marketplace_manifest_path=marketplace_manifest_path,
+            marketplace_manifest_sha256=marketplace_manifest_sha256,
+            marketplace_commit=marketplace_commit,
+            marketplace_workflow_ref=marketplace_workflow_ref,
+            marketplace_workflow_run_id=marketplace_workflow_run_id,
+            marketplace_image_digest=marketplace_image_digest,
         ),
-        **_hosted_contract(
-            release_version=production["release_version"],
-            **_read_conformance(
-                manifest_path.parent / production["artifacts"]["conformance"]
+        hosted={
+            **_hosted_provenance(
+                production, release_dir=str(manifest_path.resolve().parent)
             ),
-        ),
-        "HOSTED_SETTLEMENT_VERIFIED_IMAGE": verified_image,
-    }
-    for name, expected in {
-        **verified_marketplace_contract,
-        **verified_hosted_contract,
-    }.items():
-        _reject_mismatched_override(name, expected)
-    content = _render_env(
-        {**verified_marketplace_contract, **verified_hosted_contract}
+            **_hosted_contract(
+                release_version=production["release_version"],
+                **_read_conformance(
+                    manifest_path.parent / production["artifacts"]["conformance"]
+                ),
+            ),
+            "HOSTED_SETTLEMENT_VERIFIED_IMAGE": _image(
+                production["service_image_reference"],
+                production["service_image_digest"],
+            ),
+        },
     )
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    temporary = output_path.with_name(f".{output_path.name}.tmp")
-    temporary.write_text(content, encoding="utf-8")
-    temporary.replace(output_path)
-    return verified_image
 
 
 def main() -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--trust", type=Path, required=True)
-    parser.add_argument("--manifest", type=Path, required=True)
-    parser.add_argument("--wheel", type=Path, required=True)
+    parser.add_argument("--trust", type=Path)
+    parser.add_argument("--manifest", type=Path)
+    parser.add_argument("--wheel", type=Path)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--marketplace-manifest", type=Path)
     parser.add_argument("--marketplace-manifest-sha256", default="")
@@ -367,6 +477,18 @@ def main() -> int:
     parser.add_argument("--marketplace-workflow-run-id", default="")
     parser.add_argument("--marketplace-image-digest", default="")
     parser.add_argument("--local-marketplace-image", default="")
+    parser.add_argument(
+        "--local-hosted-image",
+        default="",
+        help="run a hosted settlement authority built here instead of a "
+        "published release; the run is a development run either way",
+    )
+    parser.add_argument(
+        "--hosted-artifacts",
+        type=Path,
+        help="the directory a locally built producer generated its OpenAPI, "
+        "conformance, and migration artifacts into",
+    )
     parser.add_argument(
         "--release-mode",
         choices=("attested", "local"),
@@ -377,6 +499,13 @@ def main() -> int:
     args = parser.parse_args()
     if args.release_mode == "attested" and args.marketplace_manifest is None:
         parser.error("--marketplace-manifest is required for an attested environment")
+    if args.local_hosted_image:
+        if args.hosted_artifacts is None:
+            parser.error("--local-hosted-image requires --hosted-artifacts")
+    elif args.trust is None or args.manifest is None or args.wheel is None:
+        parser.error(
+            "--trust, --manifest, and --wheel are required for a released producer"
+        )
     try:
         image = prepare_compose_env(
             trust_path=args.trust,
@@ -391,6 +520,8 @@ def main() -> int:
             output_path=args.output,
             release_mode=args.release_mode,
             local_marketplace_image=args.local_marketplace_image,
+            local_hosted_image=args.local_hosted_image,
+            hosted_artifacts_path=args.hosted_artifacts,
         )
     except (
         _VERIFIER.ReleaseVerificationError,

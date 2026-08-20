@@ -313,3 +313,31 @@ def test_ready_gate_rejects_digest_schema_and_capability_mismatch(
     response[field] = value
     with pytest.raises(module.ReleaseVerificationError, match="ready response"):
         module.verify_ready_response(production, response)
+
+
+def test_the_readiness_check_names_no_release_of_its_own() -> None:
+    """It asserts the bound contract, and is handed it rather than stating it.
+
+    A literal here refuses every release but one -- including the next real
+    one -- as an unready authority, which is indistinguishable from a genuine
+    contract mismatch.
+    """
+
+    api = COMPOSE.split("  hosted-settlement-api:", 1)[1].split(
+        "\n  hosted-settlement-worker:", 1
+    )[0]
+    check = api.split("healthcheck:", 1)[1]
+
+    for named in ("0.2.1", "0.3.0", "schema_version')==5", "conditional-escrow.v2"):
+        assert named not in check, named
+    for handed in (
+        "HOSTED_VERIFIED_API_VERSION",
+        "HOSTED_VERIFIED_SCHEMA_VERSION",
+        "HOSTED_VERIFIED_CAPABILITIES",
+        "HOSTED_VERIFIED_FUNDING_PROFILES",
+        "HOSTED_VERIFIED_PRODUCTION_MANIFEST_DIGEST",
+    ):
+        assert handed in check, handed
+        assert f"{handed}: ${{HOSTED_SETTLEMENT_VERIFIED_" in COMPOSE or handed.endswith(
+            "PRODUCTION_MANIFEST_DIGEST"
+        )

@@ -22,10 +22,10 @@
 
 ## 3. Accept a locally built producer
 
-- [ ] 3.1 Add `--local-hosted-image` to `prepare-hosted-compose.py` and a `--hosted-conformance`
+- [x] 3.1 Add `--local-hosted-image` to `prepare-hosted-compose.py` and a `--hosted-conformance`
       input naming the generated artifacts. Render provenance keys empty and the contract keys
       from those artifacts.
-- [ ] 3.2 Fail closed when a local hosted image is named without readable contract artifacts,
+- [x] 3.2 Fail closed when a local hosted image is named without readable contract artifacts,
       reporting the missing artifacts rather than falling back to another release's coordinates.
 - [x] 3.3 Give `gates.py::_require_hosted_half` the matching local branch: accept a bare image
       reference, expect empty provenance, and assert the contract exactly as an attested run does.

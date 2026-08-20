@@ -26,6 +26,8 @@ from market_identity import (
 )
 from typing import Any, Mapping, Sequence
 
+from .gates import LOCAL_COORDINATE
+
 _WEBHOOK_SECRET = re.compile(r"\b(whsec_[A-Za-z0-9]+)\b")
 _SENSITIVE_ENV = re.compile(r"(?:STRIPE|WEBHOOK)", re.IGNORECASE)
 #: The staged bridge speaks to the loopback stack and to nothing else, so an
@@ -249,12 +251,6 @@ class EphemeralServiceEnv:
             "HOSTED_SETTLEMENT_ACCOUNT_LINK_REFRESH_URLS": (
                 "http://127.0.0.1:18081/connect/refresh"
             ),
-            "HOSTED_SETTLEMENT_RELEASE_PATH": "/opt/hosted-settlement/release/release-manifest.json",
-            "HOSTED_SETTLEMENT_RELEASE_AUTHORITY_ID": release_authority_id,
-            "HOSTED_SETTLEMENT_RELEASE_AUTHORITY_ADDRESS": release_authority_address,
-            "HOSTED_SETTLEMENT_RELEASE_REPOSITORY": release_repository,
-            "HOSTED_SETTLEMENT_RELEASE_WORKFLOW_REF": release_workflow_ref,
-            "HOSTED_SETTLEMENT_RELEASE_SOURCE_COMMIT": release_source_commit,
             # The authority refuses every storefront principal until it is told
             # which one exists. The harness builds that storefront, so it says
             # so rather than trusting a credential payload to agree with it.
@@ -288,6 +284,25 @@ class EphemeralServiceEnv:
                 sort_keys=True,
             ),
         }
+        # A producer built here has no signed manifest to be verified against,
+        # and the authority refuses to start if it is pointed at one that does
+        # not exist. The five release identities travel with the manifest: all
+        # six are set together for a release, and none of them for a build.
+        if release_authority_id != LOCAL_COORDINATE:
+            self._values.update(
+                {
+                    "HOSTED_SETTLEMENT_RELEASE_PATH": (
+                        "/opt/hosted-settlement/release/release-manifest.json"
+                    ),
+                    "HOSTED_SETTLEMENT_RELEASE_AUTHORITY_ID": release_authority_id,
+                    "HOSTED_SETTLEMENT_RELEASE_AUTHORITY_ADDRESS": (
+                        release_authority_address
+                    ),
+                    "HOSTED_SETTLEMENT_RELEASE_REPOSITORY": release_repository,
+                    "HOSTED_SETTLEMENT_RELEASE_WORKFLOW_REF": release_workflow_ref,
+                    "HOSTED_SETTLEMENT_RELEASE_SOURCE_COMMIT": release_source_commit,
+                }
+            )
         self._base_path = base_path
         self._shared_directory = shared_directory
         self._directory: Path | None = None

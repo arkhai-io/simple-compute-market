@@ -390,3 +390,38 @@ def test_the_committed_hosted_templates_declare_their_private_registry() -> None
         # Declared, and carrying no key in a committed file.
         assert set(auth) <= set(config["registry"]["urls"]), name
         assert all(value == "" for value in auth.values()), name
+
+
+def test_a_locally_built_authority_is_pointed_at_no_signed_release(tmp_path) -> None:
+    """It refuses to start if told to verify a manifest that does not exist.
+
+    The five release identities travel with the manifest, so all six are set
+    together for a release and none of them for a build made here. The digest
+    is not among them: Compose hands it to the authority and the authority
+    reports it back, so a local run names the build it composed.
+    """
+
+    from src.hosted_real_stripe.gates import LOCAL_COORDINATE
+    from src.hosted_real_stripe.runtime import EphemeralServiceEnv
+
+    with EphemeralServiceEnv(
+        api_key="sk_test_example",
+        webhook_secret="whsec_example",
+        authority_environment="hosted-stripe-test-local",
+        storefront_caller="ed25519:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+        authority_caller="eip191:0xd898399d3c6151e74a236c7bf0510ac73760e8b5",
+        manifest_digest="sha256:" + ("2" * 64),
+        release_authority_id=LOCAL_COORDINATE,
+        release_authority_address=LOCAL_COORDINATE,
+        release_repository="arkhai-io/stripe-settlement-service",
+        release_workflow_ref=LOCAL_COORDINATE,
+        release_source_commit=LOCAL_COORDINATE,
+        shared_directory=tmp_path,
+    ) as authority_env:
+        values = dict(
+            line.split("=", 1)
+            for line in authority_env.read_text(encoding="utf-8").splitlines()
+        )
+
+    assert values["HOSTED_SETTLEMENT_MANIFEST_DIGEST"] == "sha256:" + ("2" * 64)
+    assert not [key for key in values if key.startswith("HOSTED_SETTLEMENT_RELEASE_")]
