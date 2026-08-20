@@ -9,14 +9,14 @@
 
 ## 2. Read the asserted contract from the bound release
 
-- [ ] 2.1 Render the contract group (release version, API version, schema version, funding
+- [x] 2.1 Render the contract group (release version, API version, schema version, funding
       profiles, capabilities) from the bound release's conformance artifact rather than from
       the signed manifest's duplicated fields, keeping the attested output identical.
-- [ ] 2.2 In `e2e-tests/src/hosted_real_stripe/gates.py`, replace the `"0.2.1"`, `"5"`,
+- [x] 2.2 In `e2e-tests/src/hosted_real_stripe/gates.py`, replace the `"0.2.1"`, `"5"`,
       `_FUNDING_PROFILES`, and `_CAPABILITIES` literal expectations in `_require_hosted_half`
       with a comparison against the coordinates the run bound. Keep the disagreement failure
       closed and before Compose creates any service.
-- [ ] 2.3 Cover the "newer hosted release is bound" and "composed authority does not serve the
+- [x] 2.3 Cover the "newer hosted release is bound" and "composed authority does not serve the
       bound contract" scenarios. Verify the harness admits a 0.3.0-shaped conformance artifact
       with no source edit, and refuses a mismatched environment.
 
@@ -27,19 +27,19 @@
       from those artifacts.
 - [ ] 3.2 Fail closed when a local hosted image is named without readable contract artifacts,
       reporting the missing artifacts rather than falling back to another release's coordinates.
-- [ ] 3.3 Give `gates.py::_require_hosted_half` the matching local branch: accept a bare image
+- [x] 3.3 Give `gates.py::_require_hosted_half` the matching local branch: accept a bare image
       reference, expect empty provenance, and assert the contract exactly as an attested run does.
-- [ ] 3.4 Confirm no safety assertion acquired a mode parameter — test-mode-only credential,
+- [x] 3.4 Confirm no safety assertion acquired a mode parameter — test-mode-only credential,
       live-object refusal, loopback-only webhook delivery, connected-account readiness, and
       browser availability stay on an unbranched path (design D4).
 
 ## 4. Compute the release mode from what was bound
 
-- [ ] 4.1 Derive the recorded release mode from the bound halves rather than from a flag, so a
+- [x] 4.1 Derive the recorded release mode from the bound halves rather than from a flag, so a
       local producer alone makes the run a development run.
-- [ ] 4.2 Cover all four combinations of released/local producer and consumer: each admits, and
+- [x] 4.2 Cover all four combinations of released/local producer and consumer: each admits, and
       only attested/attested records an attested mode.
-- [ ] 4.3 Verify no flag, argument, or environment variable can record a run with any local half
+- [x] 4.3 Verify no flag, argument, or environment variable can record a run with any local half
       as attested.
 
 ## 5. Build and run a local producer

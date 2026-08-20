@@ -69,7 +69,10 @@ def _sha(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
 
 
-def _client_wheel_bytes(*, entry_points: str | None = None) -> bytes:
+def _client_wheel_bytes(
+    *, entry_points: str | None = None, version: str = "0.2.1"
+) -> bytes:
+    dist_info = f"arkhai_hosted_settlement_client-{version}.dist-info"
     buffer = io.BytesIO()
     with zipfile.ZipFile(buffer, mode="w") as archive:
         archive.writestr(
@@ -83,16 +86,16 @@ def _client_wheel_bytes(*, entry_points: str | None = None) -> bytes:
             "'PayerSetupResult','Signer']\n",
         )
         archive.writestr(
-            "arkhai_hosted_settlement_client-0.2.1.dist-info/METADATA",
-            "Name: arkhai-hosted-settlement-client\nVersion: 0.2.1\n",
+            f"{dist_info}/METADATA",
+            f"Name: arkhai-hosted-settlement-client\nVersion: {version}\n",
         )
         archive.writestr(
-            "arkhai_hosted_settlement_client-0.2.1.dist-info/WHEEL",
+            f"{dist_info}/WHEEL",
             "Wheel-Version: 1.0\nTag: py3-none-any\n",
         )
         if entry_points is not None:
             archive.writestr(
-                "arkhai_hosted_settlement_client-0.2.1.dist-info/entry_points.txt",
+                f"{dist_info}/entry_points.txt",
                 entry_points,
             )
     return buffer.getvalue()
@@ -105,32 +108,38 @@ def _stage_release(
     mutate_envelope: Callable[[dict[str, Any]], None] | None = None,
     mutate_trust: Callable[[dict[str, Any]], None] | None = None,
     client_entry_points: str | None = None,
+    release_version: str = "0.2.1",
+    schema_version: int = 5,
+    capabilities: list[str] | None = None,
 ) -> tuple[Path, Path, Path]:
+    capabilities = list(capabilities or _REQUIRED_CAPABILITIES)
+    identity_contract = copy.deepcopy(_IDENTITY_CONTRACT)
+    identity_contract["capabilities"] = list(capabilities)
+    openapi_filename = f"openapi-v{release_version}.json"
+    conformance_filename = f"conformance-v{release_version}.json"
+    migrations_filename = f"migrations-v{schema_version}.json"
     artifact_contents = {
-        "openapi-v0.2.1.json": json.dumps(
-            {"openapi": "3.1.0", "info": {"version": "0.2.1"}}
+        openapi_filename: json.dumps(
+            {"openapi": "3.1.0", "info": {"version": release_version}}
         ).encode(),
-        "conformance-v0.2.1.json": json.dumps(
+        conformance_filename: json.dumps(
             {
-                "api_version": "0.2.1",
-                "schema_version": 5,
+                "api_version": release_version,
+                "schema_version": schema_version,
                 "funding_profiles": [
                     "card.v1",
                     "us_bank_transfer.v1",
                     "us_ach_debit.v1",
                 ],
-                "identity_contract": _IDENTITY_CONTRACT,
+                "identity_contract": identity_contract,
             }
         ).encode(),
-        "migrations-v5.json": json.dumps(
+        migrations_filename: json.dumps(
             {
-                "schema_version": 5,
+                "schema_version": schema_version,
                 "migrations": [
-                    {"position": 1, "migration_id": "0001_authority"},
-                    {"position": 2, "migration_id": "0002_portable_attestations"},
-                    {"position": 3, "migration_id": "0003_durable_lifecycle"},
-                    {"position": 4, "migration_id": "0004_scheme_tagged_identities"},
-                    {"position": 5, "migration_id": "0005_payer_funding_profiles"},
+                    {"position": position, "migration_id": f"{position:04d}_migration"}
+                    for position in range(1, schema_version + 1)
                 ],
             }
         ).encode(),
@@ -140,8 +149,12 @@ def _stage_release(
     for filename, contents in artifact_contents.items():
         (root / filename).write_bytes(contents)
 
-    client_filename = "arkhai_hosted_settlement_client-0.2.1-py3-none-any.whl"
-    client_bytes = _client_wheel_bytes(entry_points=client_entry_points)
+    client_filename = (
+        f"arkhai_hosted_settlement_client-{release_version}-py3-none-any.whl"
+    )
+    client_bytes = _client_wheel_bytes(
+        entry_points=client_entry_points, version=release_version
+    )
     client_path = root / client_filename
     client_path.write_bytes(client_bytes)
     client_sha = _sha(client_bytes)
@@ -156,39 +169,43 @@ def _stage_release(
 
     payload: dict[str, Any] = {
         "contract_version": "arkhai.hosted-settlement-release.v2",
-        "release_version": "0.2.1",
-        "api_version": "0.2.1",
-        "schema_version": 5,
+        "release_version": release_version,
+        "api_version": release_version,
+        "schema_version": schema_version,
         "funding_profiles": ["card.v1", "us_bank_transfer.v1", "us_ach_debit.v1"],
-        "capabilities": list(_REQUIRED_CAPABILITIES),
-        "identity_contract": copy.deepcopy(_IDENTITY_CONTRACT),
+        "capabilities": list(capabilities),
+        "identity_contract": copy.deepcopy(identity_contract),
         "client_wheel": {
             "filename": client_filename,
             "distribution": "arkhai-hosted-settlement-client",
-            "version": "0.2.1",
+            "version": release_version,
             "sha256": "sha256:" + client_sha,
         },
         "service_wheel": {
-            "filename": "arkhai_hosted_settlement_service-0.2.1-py3-none-any.whl",
+            "filename": (
+                f"arkhai_hosted_settlement_service-{release_version}-py3-none-any.whl"
+            ),
             "distribution": "arkhai-hosted-settlement-service",
-            "version": "0.2.1",
+            "version": release_version,
             "sha256": "sha256:" + "cd" * 32,
         },
         "service_image": {
             "reference": "ghcr.io/arkhai-io/stripe-settlement-service",
             "digest": image_digest,
         },
-        "openapi": artifact("openapi-v0.2.1.json"),
-        "conformance": artifact("conformance-v0.2.1.json"),
+        "openapi": artifact(openapi_filename),
+        "conformance": artifact(conformance_filename),
         "migrations": {
-            **artifact("migrations-v5.json"),
-            "schema_version": 5,
+            **artifact(migrations_filename),
+            "schema_version": schema_version,
         },
         "sbom": artifact("sbom.spdx.json"),
         "provenance": artifact("provenance.intoto.json"),
         "build": {
             "repository": "arkhai-io/stripe-settlement-service",
-            "workflow_ref": ".github/workflows/release.yml@refs/tags/v0.2.1",
+            "workflow_ref": (
+                f".github/workflows/release.yml@refs/tags/v{release_version}"
+            ),
             "source_commit": "12" * 20,
         },
     }
@@ -216,22 +233,24 @@ def _stage_release(
 
     trust: dict[str, Any] = {
         "contract_version": "arkhai.hosted-settlement-release.v2",
-        "release_version": "0.2.1",
-        "api_version": "0.2.1",
-        "schema_version": 5,
-        "required_capabilities": list(_REQUIRED_CAPABILITIES),
-        "identity_contract": copy.deepcopy(_IDENTITY_CONTRACT),
+        "release_version": release_version,
+        "api_version": release_version,
+        "schema_version": schema_version,
+        "required_capabilities": list(capabilities),
+        "identity_contract": copy.deepcopy(identity_contract),
         "manifest_filename": manifest_path.name,
         "manifest_sha256": _sha(manifest_path.read_bytes()),
         "authority_id": "release-authority",
         "authority_address": account.address.lower(),
         "repository": "arkhai-io/stripe-settlement-service",
-        "workflow_ref": ".github/workflows/release.yml@refs/tags/v0.2.1",
+        "workflow_ref": (
+            f".github/workflows/release.yml@refs/tags/v{release_version}"
+        ),
         "source_commit": "12" * 20,
         "client_wheel": {
             "filename": client_filename,
             "distribution": "arkhai-hosted-settlement-client",
-            "version": "0.2.1",
+            "version": release_version,
             "sha256": client_sha,
         },
         "service_image": {
@@ -348,16 +367,54 @@ def test_client_wheel_with_seller_entry_point_is_rejected(tmp_path: Path) -> Non
 
 
 @pytest.mark.parametrize("schema_version", [1, 3, 4, 6])
-def test_non_current_trusted_schema_is_rejected(
+def test_a_trust_config_that_disagrees_with_the_release_is_rejected(
     tmp_path: Path, schema_version: int
 ) -> None:
-    with pytest.raises(verifier.ReleaseVerificationError, match="trust schema_version"):
+    """The trust config names the schema; it does not get to name it wrongly.
+
+    It used to be checked against a literal here, which refused every schema
+    but the one this verifier was written for -- including the next real one.
+    What refuses now is the signature: the trust config pins the manifest, the
+    manifest states the schema, and a trust config claiming a different one
+    contradicts the release it pins.
+    """
+
+    with pytest.raises(
+        verifier.ReleaseVerificationError, match="schema_version does not match"
+    ):
         _verify(
             tmp_path,
             mutate_trust=lambda trust: trust.__setitem__(
                 "schema_version", schema_version
             ),
         )
+
+
+def test_a_trust_config_naming_a_later_release_is_verified_against_it(
+    tmp_path: Path,
+) -> None:
+    """A release this verifier has never seen needs no edit here to be bound.
+
+    Nothing about 0.3.0 or schema 6 appears in the verifier. The trust config
+    names them, the signature covers them, and the artifact filenames follow.
+    """
+
+    trust_path, manifest_path, client_path = _stage_release(
+        tmp_path,
+        release_version="0.3.0",
+        schema_version=6,
+        capabilities=[*_REQUIRED_CAPABILITIES, "payer-direct-instrument-setup.v1"],
+    )
+
+    result = verifier.verify_release(
+        trust_path=trust_path, manifest_path=manifest_path, wheel_path=client_path
+    )
+
+    assert result["release_version"] == "0.3.0"
+    assert result["schema_version"] == 6
+    assert "payer-direct-instrument-setup.v1" in result["capabilities"]
+    assert result["artifacts"]["conformance"] == "conformance-v0.3.0.json"
+    assert result["artifacts"]["migrations"] == "migrations-v6.json"
 
 
 def test_missing_identity_capability_is_rejected(tmp_path: Path) -> None:

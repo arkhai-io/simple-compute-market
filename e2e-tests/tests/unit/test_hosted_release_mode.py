@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import hashlib
+import itertools
+import json
 from pathlib import Path
 
 import pytest
@@ -34,37 +37,53 @@ TRUSTED_COMMIT = "c" * 40
 OBSERVED_COMMIT = "b" * 40
 MARKET_REF = ".github/workflows/publish.yml@refs/tags/v0.2.0"
 
-_HOSTED_ENV = (
-    "HOSTED_SETTLEMENT_VERIFIED_IMAGE=registry.example/authority@" + IMAGE,
-    "HOSTED_SETTLEMENT_VERIFIED_MANIFEST_SHA256=" + DIGEST,
-    "HOSTED_SETTLEMENT_VERIFIED_CLIENT_WHEEL_SHA256=" + WHEEL,
-    "HOSTED_SETTLEMENT_VERIFIED_RELEASE_DIR=/verified/release",
-    "HOSTED_SETTLEMENT_VERIFIED_SOURCE_COMMIT=" + HOSTED_COMMIT,
-    "HOSTED_SETTLEMENT_VERIFIED_REPOSITORY=arkhai-io/stripe-settlement-service",
-    "HOSTED_SETTLEMENT_VERIFIED_WORKFLOW_REF=.github/workflows/release.yml@main",
-    "HOSTED_SETTLEMENT_VERIFIED_MANIFEST_DIGEST=" + DIGEST,
-    "HOSTED_SETTLEMENT_VERIFIED_AUTHORITY_ID=hosted-authority",
-    "HOSTED_SETTLEMENT_VERIFIED_AUTHORITY_SCHEME=eip191",
-    "HOSTED_SETTLEMENT_VERIFIED_AUTHORITY_ADDRESS=0x" + "1" * 40,
-    "HOSTED_SETTLEMENT_VERIFIED_API_VERSION=0.2.1",
-    "HOSTED_SETTLEMENT_VERIFIED_SCHEMA_VERSION=5",
-    "HOSTED_SETTLEMENT_VERIFIED_RELEASE_VERSION=0.2.1",
-    "HOSTED_SETTLEMENT_VERIFIED_CONFORMANCE_SHA256=" + DIGEST,
-    "HOSTED_SETTLEMENT_VERIFIED_MIGRATIONS_SHA256=" + DIGEST,
-    "HOSTED_SETTLEMENT_VERIFIED_OPENAPI_SHA256=" + DIGEST,
-    "HOSTED_SETTLEMENT_VERIFIED_PROVENANCE_SHA256=" + DIGEST,
-    "HOSTED_SETTLEMENT_VERIFIED_SERVICE_WHEEL_SHA256=" + DIGEST,
-    "HOSTED_SETTLEMENT_VERIFIED_FUNDING_PROFILES=card.v1,us_bank_transfer.v1,us_ach_debit.v1",
-    "HOSTED_SETTLEMENT_VERIFIED_CAPABILITIES=scheme-tagged-identities.v1,"
-    "account-owner-admission.v1,account-owner-rotation.v1,"
-    "account-owner-retirement.v1,signer-injected-client.v1,"
-    "provider-neutral-seller-onboarding.v1,conditional-escrow.v2,"
-    "stripe-connect-separate-charges-transfers.v2,portable-attestation.v1,"
-    "eas-arbiter.v1,payer-profile.v1,funding-authorization.v1,"
-    "funding-profile.card.v1,funding-profile.us_bank_transfer.v1,"
-    "funding-profile.us_ach_debit.v1,normalized-funding-reversal.v1,"
+CAPABILITIES = (
+    "scheme-tagged-identities.v1",
+    "account-owner-admission.v1",
+    "account-owner-rotation.v1",
+    "account-owner-retirement.v1",
+    "signer-injected-client.v1",
+    "provider-neutral-seller-onboarding.v1",
+    "conditional-escrow.v2",
+    "stripe-connect-separate-charges-transfers.v2",
+    "portable-attestation.v1",
+    "eas-arbiter.v1",
+    "payer-profile.v1",
+    "funding-authorization.v1",
+    "funding-profile.card.v1",
+    "funding-profile.us_bank_transfer.v1",
+    "funding-profile.us_ach_debit.v1",
+    "normalized-funding-reversal.v1",
     "operator-recovery-redaction.v1",
 )
+PROFILES = ("card.v1", "us_bank_transfer.v1", "us_ach_debit.v1")
+
+
+def _stage_contract(
+    directory: Path,
+    *,
+    version: str = "0.2.1",
+    schema: int = 5,
+    capabilities: tuple[str, ...] = CAPABILITIES,
+    profiles: tuple[str, ...] = PROFILES,
+) -> tuple[Path, str]:
+    """Write what a bound release states it serves, released or built here.
+
+    Both kinds of producer generate this artifact; only a released one has its
+    hash covered by a signature.
+    """
+
+    directory.mkdir(parents=True, exist_ok=True)
+    raw = json.dumps(
+        {
+            "api_version": version,
+            "schema_version": schema,
+            "funding_profiles": list(profiles),
+            "identity_contract": {"capabilities": list(capabilities)},
+        }
+    ).encode()
+    (directory / f"conformance-v{version}.json").write_bytes(raw)
+    return directory, "sha256:" + hashlib.sha256(raw).hexdigest()
 
 
 #: A locally rendered environment is structurally complete -- every allowlisted
@@ -83,12 +102,115 @@ _LOCAL_MARKETPLACE = {
 }
 
 
-def _compose_env(tmp_path: Path, **marketplace: str) -> Path:
-    values = {**_LOCAL_MARKETPLACE, **marketplace}
-    path = tmp_path / "hosted.env"
-    lines = [*_HOSTED_ENV, *(f"{key}={value}" for key, value in values.items())]
-    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+def _released_hosted(
+    release_dir: Path,
+    conformance_sha: str,
+    *,
+    version: str = "0.2.1",
+    schema: int = 5,
+    capabilities: tuple[str, ...] = CAPABILITIES,
+    profiles: tuple[str, ...] = PROFILES,
+) -> dict[str, str]:
+    return {
+        "HOSTED_SETTLEMENT_VERIFIED_IMAGE": "registry.example/authority@" + IMAGE,
+        "HOSTED_SETTLEMENT_VERIFIED_MANIFEST_SHA256": DIGEST,
+        "HOSTED_SETTLEMENT_VERIFIED_CLIENT_WHEEL_SHA256": WHEEL,
+        "HOSTED_SETTLEMENT_VERIFIED_RELEASE_DIR": str(release_dir),
+        "HOSTED_SETTLEMENT_VERIFIED_SOURCE_COMMIT": HOSTED_COMMIT,
+        "HOSTED_SETTLEMENT_VERIFIED_REPOSITORY": "arkhai-io/stripe-settlement-service",
+        "HOSTED_SETTLEMENT_VERIFIED_WORKFLOW_REF": (
+            ".github/workflows/release.yml@main"
+        ),
+        "HOSTED_SETTLEMENT_VERIFIED_MANIFEST_DIGEST": DIGEST,
+        "HOSTED_SETTLEMENT_VERIFIED_AUTHORITY_ID": "hosted-authority",
+        "HOSTED_SETTLEMENT_VERIFIED_AUTHORITY_SCHEME": "eip191",
+        "HOSTED_SETTLEMENT_VERIFIED_AUTHORITY_ADDRESS": "0x" + "1" * 40,
+        "HOSTED_SETTLEMENT_VERIFIED_API_VERSION": version,
+        "HOSTED_SETTLEMENT_VERIFIED_SCHEMA_VERSION": str(schema),
+        "HOSTED_SETTLEMENT_VERIFIED_RELEASE_VERSION": version,
+        "HOSTED_SETTLEMENT_VERIFIED_CONFORMANCE_SHA256": conformance_sha,
+        "HOSTED_SETTLEMENT_VERIFIED_MIGRATIONS_SHA256": DIGEST,
+        "HOSTED_SETTLEMENT_VERIFIED_OPENAPI_SHA256": DIGEST,
+        "HOSTED_SETTLEMENT_VERIFIED_PROVENANCE_SHA256": DIGEST,
+        "HOSTED_SETTLEMENT_VERIFIED_SERVICE_WHEEL_SHA256": DIGEST,
+        "HOSTED_SETTLEMENT_VERIFIED_FUNDING_PROFILES": ",".join(profiles),
+        "HOSTED_SETTLEMENT_VERIFIED_CAPABILITIES": ",".join(capabilities),
+    }
+
+
+def _local_hosted(
+    release_dir: Path,
+    _conformance_sha: str,
+    *,
+    version: str = "0.2.1",
+    schema: int = 5,
+    capabilities: tuple[str, ...] = CAPABILITIES,
+    profiles: tuple[str, ...] = PROFILES,
+) -> dict[str, str]:
+    """Every provenance key empty; the contract keys read from the build."""
+
+    values = _released_hosted(
+        release_dir,
+        "",
+        version=version,
+        schema=schema,
+        capabilities=capabilities,
+        profiles=profiles,
+    )
+    values.update(
+        {
+            "HOSTED_SETTLEMENT_VERIFIED_AUTHORITY_ADDRESS": "",
+            "HOSTED_SETTLEMENT_VERIFIED_AUTHORITY_ID": "",
+            "HOSTED_SETTLEMENT_VERIFIED_AUTHORITY_SCHEME": "",
+            "HOSTED_SETTLEMENT_VERIFIED_CLIENT_WHEEL_SHA256": "",
+            "HOSTED_SETTLEMENT_VERIFIED_CONFORMANCE_SHA256": "",
+            "HOSTED_SETTLEMENT_VERIFIED_MANIFEST_SHA256": "",
+            "HOSTED_SETTLEMENT_VERIFIED_MIGRATIONS_SHA256": "",
+            "HOSTED_SETTLEMENT_VERIFIED_OPENAPI_SHA256": "",
+            "HOSTED_SETTLEMENT_VERIFIED_PROVENANCE_SHA256": "",
+            "HOSTED_SETTLEMENT_VERIFIED_SERVICE_WHEEL_SHA256": "",
+            "HOSTED_SETTLEMENT_VERIFIED_SOURCE_COMMIT": "",
+            "HOSTED_SETTLEMENT_VERIFIED_WORKFLOW_REF": "",
+            # Named, not pinned: a build here has an image id, not a digest.
+            "HOSTED_SETTLEMENT_VERIFIED_IMAGE": "localhost/authority:0.3.0",
+        }
+    )
+    return values
+
+
+#: Every rendered environment gets its own directory. A test that prepares one
+#: and then passes it in would otherwise have it overwritten by the default
+#: another helper renders on the way past.
+_ENVIRONMENTS = itertools.count()
+
+
+def _compose_env(
+    tmp_path: Path,
+    *,
+    hosted=_released_hosted,
+    hosted_options: dict | None = None,
+    hosted_overrides: dict[str, str] | None = None,
+    **marketplace: str,
+) -> Path:
+    options = dict(hosted_options or {})
+    directory = tmp_path / f"env{next(_ENVIRONMENTS)}"
+    release_dir, conformance_sha = _stage_contract(directory / "release", **options)
+    values = {
+        **_LOCAL_MARKETPLACE,
+        **marketplace,
+        **hosted(release_dir, conformance_sha, **options),
+        **(hosted_overrides or {}),
+    }
+    path = directory / "hosted.env"
+    path.write_text(
+        "\n".join(f"{key}={value}" for key, value in values.items()) + "\n",
+        encoding="utf-8",
+    )
     return path
+
+
+def _staged_contract_path(compose_env: Path, version: str = "0.2.1") -> Path:
+    return compose_env.parent / "release" / f"conformance-v{version}.json"
 
 
 def _local(tmp_path: Path, *, observed: str = OBSERVED_COMMIT, **overrides):
@@ -101,6 +223,17 @@ def _local(tmp_path: Path, *, observed: str = OBSERVED_COMMIT, **overrides):
         "hosted_client_wheel_sha256": WHEEL,
         "hosted_image_digest": IMAGE,
         "compose_env_path": _compose_env(tmp_path),
+    }
+    arguments.update(overrides)
+    return local_release_identity(**arguments)
+
+
+def _local_producer(tmp_path: Path, **overrides):
+    """A development run whose producer was built here, not published."""
+
+    arguments = {
+        "observed_marketplace_commit": OBSERVED_COMMIT,
+        "compose_env_path": _compose_env(tmp_path, hosted=_local_hosted),
     }
     arguments.update(overrides)
     return local_release_identity(**arguments)
@@ -140,9 +273,10 @@ def test_a_development_run_still_needs_a_real_working_tree_commit(tmp_path) -> N
         _local(tmp_path, observed="not-a-commit")
 
 
-def _attested_env(tmp_path: Path) -> Path:
+def _attested_env(tmp_path: Path, **options) -> Path:
     return _compose_env(
         tmp_path,
+        **options,
         HOSTED_MARKETPLACE_VERIFIED_ARTIFACT_PROVENANCE_SHA256=DIGEST,
         HOSTED_MARKETPLACE_VERIFIED_ARTIFACT_SCHEMA_SHA256=DIGEST,
         HOSTED_MARKETPLACE_VERIFIED_ARTIFACT_WHEELHOUSE_SHA256=DIGEST,
@@ -183,6 +317,193 @@ def test_a_protected_run_fails_closed_rather_than_downgrading(tmp_path) -> None:
 
     with pytest.raises(ReleaseIdentityRejected):
         _attested(tmp_path, observed_marketplace_commit=OBSERVED_COMMIT)
+
+
+def test_a_newer_hosted_release_is_bound_without_a_harness_edit(tmp_path) -> None:
+    """Nothing about 0.3.0 or schema 6 is written down here or in the gates."""
+
+    later = {
+        "version": "0.3.0",
+        "schema": 6,
+        "capabilities": (*CAPABILITIES, "payer-direct-instrument-setup.v1"),
+    }
+    identity = _local(
+        tmp_path,
+        compose_env_path=_compose_env(tmp_path, hosted_options=later),
+    )
+
+    assert identity.hosted_contract.release_version == "0.3.0"
+    assert identity.hosted_contract.schema_version == "6"
+    assert "payer-direct-instrument-setup.v1" in identity.hosted_contract.capabilities
+
+
+@pytest.mark.parametrize(
+    ("key", "value"),
+    [
+        ("HOSTED_SETTLEMENT_VERIFIED_API_VERSION", "0.9.9"),
+        ("HOSTED_SETTLEMENT_VERIFIED_SCHEMA_VERSION", "9"),
+        ("HOSTED_SETTLEMENT_VERIFIED_FUNDING_PROFILES", "card.v1"),
+        ("HOSTED_SETTLEMENT_VERIFIED_CAPABILITIES", "payer-profile.v1"),
+    ],
+)
+def test_an_authority_that_does_not_serve_the_bound_contract_is_refused(
+    tmp_path, key: str, value: str
+) -> None:
+    """The disagreement is named, and named before Compose creates anything."""
+
+    with pytest.raises(ReleaseIdentityRejected, match="does not serve the bound"):
+        _local(
+            tmp_path,
+            compose_env_path=_compose_env(tmp_path, hosted_overrides={key: value}),
+        )
+
+
+def test_a_released_producer_still_pins_the_contract_artifact_by_hash(
+    tmp_path,
+) -> None:
+    """The trust root is unchanged: the signature covers what is read."""
+
+    path = _compose_env(tmp_path)
+    staged = _staged_contract_path(path)
+    staged.write_text(staged.read_text(encoding="utf-8") + " ", encoding="utf-8")
+
+    with pytest.raises(ReleaseIdentityRejected, match="not the one the release signed"):
+        _local(tmp_path, compose_env_path=path)
+
+
+def test_a_locally_built_producer_is_bound_and_says_it_has_no_release(
+    tmp_path,
+) -> None:
+    identity = _local_producer(tmp_path)
+
+    assert identity.mode == "local"
+    assert identity.hosted_image == "localhost/authority:0.3.0"
+    assert identity.hosted_manifest_sha256 == LOCAL_COORDINATE
+    assert identity.hosted_authority_id == LOCAL_COORDINATE
+    assert identity.hosted_source_commit == LOCAL_COORDINATE
+    # What it serves is asserted exactly as a released producer's is.
+    assert identity.hosted_contract.capabilities == frozenset(CAPABILITIES)
+
+
+def test_a_local_producer_without_its_contract_artifacts_fails_closed(
+    tmp_path,
+) -> None:
+    """It reports what is missing, not another release's coordinates."""
+
+    path = _compose_env(tmp_path, hosted=_local_hosted)
+    _staged_contract_path(path).unlink()
+
+    with pytest.raises(ReleaseIdentityRejected, match="conformance-v0.2.1.json"):
+        _local_producer(tmp_path, compose_env_path=path)
+
+
+def test_a_local_producer_may_not_be_handed_released_coordinates(tmp_path) -> None:
+    """There are none to hand it, so supplying any means something is wrong."""
+
+    with pytest.raises(ReleaseIdentityRejected, match="no released coordinates"):
+        _local_producer(tmp_path, hosted_manifest_sha256=DIGEST)
+
+
+def test_a_half_released_producer_environment_is_refused(tmp_path) -> None:
+    with pytest.raises(ReleaseIdentityRejected, match="not partly both"):
+        _local_producer(
+            tmp_path,
+            compose_env_path=_compose_env(
+                tmp_path,
+                hosted=_local_hosted,
+                hosted_overrides={
+                    "HOSTED_SETTLEMENT_VERIFIED_MANIFEST_SHA256": DIGEST
+                },
+            ),
+        )
+
+
+def test_a_protected_run_refuses_a_locally_built_producer(tmp_path) -> None:
+    """No flag raises a development stack to attested; the binding refuses it."""
+
+    with pytest.raises(ReleaseIdentityRejected, match="never a locally built one"):
+        _attested(
+            tmp_path,
+            compose_env_path=_attested_env(tmp_path, hosted=_local_hosted),
+        )
+
+
+def test_every_combination_of_released_and_local_halves_admits(tmp_path) -> None:
+    """Four combinations run; exactly one of them may be recorded attested."""
+
+    both_released = _attested(
+        tmp_path / "a", compose_env_path=_attested_env(tmp_path / "a")
+    )
+    local_consumer = _local(tmp_path / "b", compose_env_path=_compose_env(tmp_path / "b"))
+    local_producer = _local_producer(tmp_path / "c")
+    both_local = _local_producer(
+        tmp_path / "d",
+        compose_env_path=_compose_env(tmp_path / "d", hosted=_local_hosted),
+    )
+    released_consumer_local_producer = local_release_identity(
+        observed_marketplace_commit=TRUSTED_COMMIT,
+        compose_env_path=_attested_env(tmp_path / "e", hosted=_local_hosted),
+    )
+
+    assert both_released.mode == "attested"
+    for development in (
+        local_consumer,
+        local_producer,
+        both_local,
+        released_consumer_local_producer,
+    ):
+        assert development.mode == "local"
+
+
+def test_a_bound_release_that_lacks_a_scenario_capability_says_so(tmp_path) -> None:
+    """The prerequisite is named before the run reaches for it."""
+
+    from src.hosted_real_stripe.gates import require_hosted_capabilities
+
+    identity = _local_producer(tmp_path)
+
+    require_hosted_capabilities(
+        identity.hosted_contract, frozenset({"funding-profile.card.v1"})
+    )
+    with pytest.raises(
+        AuthorizationUnavailable, match="payer-direct-instrument-setup.v1"
+    ):
+        require_hosted_capabilities(
+            identity.hosted_contract,
+            frozenset({"payer-direct-instrument-setup.v1"}),
+        )
+
+
+def test_no_safety_gate_takes_a_mode_or_a_release(tmp_path) -> None:
+    """Design D4, checked mechanically rather than by reading.
+
+    Every branch this change adds sits below the provenance split. A safety
+    assertion that grew a mode parameter would be configurable out of, which is
+    the one thing none of them may become.
+    """
+
+    import inspect
+
+    from src.hosted_real_stripe import gates
+
+    for name in (
+        "require_test_secret",
+        "require_connected_account",
+        "require_loopback_webhook",
+        "verify_loopback_webhook_endpoint",
+        "require_ready_account",
+    ):
+        parameters = set(inspect.signature(getattr(gates, name)).parameters)
+        assert not parameters & {
+            "mode",
+            "release_mode",
+            "released",
+            "allow_local",
+            "release",
+        }, name
+    source = inspect.getsource(gates)
+    body = source[source.index("def require_test_secret") :]
+    assert "release_mode" not in body
 
 
 def test_safety_gates_are_not_mode_aware() -> None:

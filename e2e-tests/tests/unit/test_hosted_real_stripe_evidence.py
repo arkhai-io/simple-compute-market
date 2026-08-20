@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import base64
 import json
 import stat
@@ -35,6 +36,25 @@ from src.hosted_real_stripe.gates import (
 
 COMMIT = "a" * 40
 HOSTED_COMMIT = "d" * 40
+CAPABILITIES = (
+    "scheme-tagged-identities.v1",
+    "account-owner-admission.v1",
+    "account-owner-rotation.v1",
+    "account-owner-retirement.v1",
+    "signer-injected-client.v1",
+    "provider-neutral-seller-onboarding.v1",
+    "conditional-escrow.v2",
+    "stripe-connect-separate-charges-transfers.v2",
+    "portable-attestation.v1",
+    "eas-arbiter.v1",
+    "payer-profile.v1",
+    "funding-authorization.v1",
+    "funding-profile.card.v1",
+    "funding-profile.us_bank_transfer.v1",
+    "funding-profile.us_ach_debit.v1",
+    "normalized-funding-reversal.v1",
+    "operator-recovery-redaction.v1",
+)
 DIGEST = "sha256:" + "b" * 64
 IMAGE = "sha256:" + "c" * 64
 WHEEL = "sha256:" + "e" * 64
@@ -118,6 +138,20 @@ def test_protected_gates_reject_live_credentials_and_non_loopback_webhooks() -> 
 
 
 def test_release_gate_binds_all_signed_and_observed_identities(tmp_path: Path) -> None:
+    # The contract a run asserts is read from the release it bound, so the
+    # release's own artifact has to be where the environment says it is.
+    release_dir = tmp_path / "release"
+    release_dir.mkdir()
+    conformance = json.dumps(
+        {
+            "api_version": "0.2.1",
+            "schema_version": 5,
+            "funding_profiles": ["card.v1", "us_bank_transfer.v1", "us_ach_debit.v1"],
+            "identity_contract": {"capabilities": list(CAPABILITIES)},
+        }
+    ).encode()
+    (release_dir / "conformance-v0.2.1.json").write_bytes(conformance)
+    conformance_sha = "sha256:" + hashlib.sha256(conformance).hexdigest()
     compose_env = tmp_path / "hosted.env"
     compose_env.write_text(
         "\n".join(
@@ -134,7 +168,7 @@ def test_release_gate_binds_all_signed_and_observed_identities(tmp_path: Path) -
                 "HOSTED_SETTLEMENT_VERIFIED_IMAGE=registry.example/authority@" + IMAGE,
                 "HOSTED_SETTLEMENT_VERIFIED_MANIFEST_SHA256=" + DIGEST,
                 "HOSTED_SETTLEMENT_VERIFIED_CLIENT_WHEEL_SHA256=" + WHEEL,
-                "HOSTED_SETTLEMENT_VERIFIED_RELEASE_DIR=/verified/release",
+                "HOSTED_SETTLEMENT_VERIFIED_RELEASE_DIR=" + str(release_dir),
                 "HOSTED_SETTLEMENT_VERIFIED_SOURCE_COMMIT=" + HOSTED_COMMIT,
                 "HOSTED_SETTLEMENT_VERIFIED_REPOSITORY=arkhai-io/stripe-settlement-service",
                 "HOSTED_SETTLEMENT_VERIFIED_WORKFLOW_REF=.github/workflows/release.yml@main",
@@ -145,13 +179,13 @@ def test_release_gate_binds_all_signed_and_observed_identities(tmp_path: Path) -
                 "HOSTED_SETTLEMENT_VERIFIED_API_VERSION=0.2.1",
                 "HOSTED_SETTLEMENT_VERIFIED_SCHEMA_VERSION=5",
                 "HOSTED_SETTLEMENT_VERIFIED_RELEASE_VERSION=0.2.1",
-                "HOSTED_SETTLEMENT_VERIFIED_CONFORMANCE_SHA256=" + DIGEST,
+                "HOSTED_SETTLEMENT_VERIFIED_CONFORMANCE_SHA256=" + conformance_sha,
                 "HOSTED_SETTLEMENT_VERIFIED_MIGRATIONS_SHA256=" + DIGEST,
                 "HOSTED_SETTLEMENT_VERIFIED_OPENAPI_SHA256=" + DIGEST,
                 "HOSTED_SETTLEMENT_VERIFIED_PROVENANCE_SHA256=" + DIGEST,
                 "HOSTED_SETTLEMENT_VERIFIED_SERVICE_WHEEL_SHA256=" + DIGEST,
                 "HOSTED_SETTLEMENT_VERIFIED_FUNDING_PROFILES=card.v1,us_bank_transfer.v1,us_ach_debit.v1",
-                "HOSTED_SETTLEMENT_VERIFIED_CAPABILITIES=scheme-tagged-identities.v1,account-owner-admission.v1,account-owner-rotation.v1,account-owner-retirement.v1,signer-injected-client.v1,provider-neutral-seller-onboarding.v1,conditional-escrow.v2,stripe-connect-separate-charges-transfers.v2,portable-attestation.v1,eas-arbiter.v1,payer-profile.v1,funding-authorization.v1,funding-profile.card.v1,funding-profile.us_bank_transfer.v1,funding-profile.us_ach_debit.v1,normalized-funding-reversal.v1,operator-recovery-redaction.v1",
+                "HOSTED_SETTLEMENT_VERIFIED_CAPABILITIES=" + ",".join(CAPABILITIES),
             )
         )
         + "\n",

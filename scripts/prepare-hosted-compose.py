@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import importlib.util
+import json
 import os
 from pathlib import Path
 from typing import Any
@@ -119,6 +120,52 @@ _LOCAL_HOSTED_COORDINATES = (
     "HOSTED_SETTLEMENT_VERIFIED_SOURCE_COMMIT",
     "HOSTED_SETTLEMENT_VERIFIED_WORKFLOW_REF",
 )
+
+
+def _read_conformance(path: Path) -> dict[str, Any]:
+    """What the producer says it serves, from the artifact it generated.
+
+    Both modes read the contract from here rather than from a restatement of
+    it. For a released producer this file's hash is pinned by the signed
+    manifest, so the trust root is the same one that was there before; for a
+    locally built one there is no trust root and none is claimed.
+    """
+
+    try:
+        document = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        raise ComposePreparationError(
+            f"cannot read the hosted contract artifact {path}: {exc}"
+        ) from exc
+    if not isinstance(document, dict):
+        raise ComposePreparationError(f"hosted contract artifact {path} is not an object")
+    identity_contract = document.get("identity_contract")
+    if not isinstance(identity_contract, dict):
+        raise ComposePreparationError(
+            f"hosted contract artifact {path} declares no identity contract"
+        )
+    capabilities = identity_contract.get("capabilities")
+    funding_profiles = document.get("funding_profiles")
+    api_version = document.get("api_version")
+    schema_version = document.get("schema_version")
+    if (
+        not isinstance(capabilities, list)
+        or not capabilities
+        or not isinstance(funding_profiles, list)
+        or not funding_profiles
+        or not isinstance(api_version, str)
+        or not api_version
+        or not isinstance(schema_version, int)
+    ):
+        raise ComposePreparationError(
+            f"hosted contract artifact {path} does not state the contract it serves"
+        )
+    return {
+        "api_version": api_version,
+        "schema_version": schema_version,
+        "funding_profiles": funding_profiles,
+        "capabilities": capabilities,
+    }
 
 
 def _hosted_provenance(production: dict[str, Any], *, release_dir: str) -> dict[str, str]:
@@ -286,10 +333,9 @@ def prepare_compose_env(
         ),
         **_hosted_contract(
             release_version=production["release_version"],
-            api_version=production["api_version"],
-            schema_version=production["schema_version"],
-            funding_profiles=production["funding_profiles"],
-            capabilities=production["capabilities"],
+            **_read_conformance(
+                manifest_path.parent / production["artifacts"]["conformance"]
+            ),
         ),
         "HOSTED_SETTLEMENT_VERIFIED_IMAGE": verified_image,
     }

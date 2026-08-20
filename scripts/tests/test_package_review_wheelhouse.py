@@ -369,7 +369,10 @@ def test_wheelhouse_rejects_incomplete_hosted_identity_contract(
     result = _run(root, env)
 
     assert result.returncode != 0
-    assert "trust identity_contract does not match the trusted pin" in result.stderr
+    assert (
+        "identity_contract capabilities does not match the trusted pin"
+        in result.stderr
+    )
 
 
 def test_wheelhouse_rejects_hosted_seller_entry_point(tmp_path: Path) -> None:
