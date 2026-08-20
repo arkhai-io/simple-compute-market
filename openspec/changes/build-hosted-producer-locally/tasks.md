@@ -55,23 +55,29 @@
 
 ## 6. Prove it end to end
 
-- [ ] 6.1 Run one existing lane against a locally built producer at the currently released
+- [x] 6.1 Run one existing lane against a locally built producer at the currently released
       version and confirm it behaves as it does against the published image, and that its
       evidence records `release_mode: local`.
-- [ ] 6.2 Build hosted-settlement-service 0.3.0 locally, bind it, and run a `saved_instrument`
+- [x] 6.2 Build hosted-settlement-service 0.3.0 locally, bind it, and run a `saved_instrument`
       lane. This is the first scenario with no published image behind it and no browser in it.
       Record what it reaches. A development run qualifies no lane in the protected matrix.
 
-      Both are blocked on building the producer image, which this machine currently cannot do:
-      podman's VM resolves `registry-1.docker.io` to an unrelated address and cannot pull a base
-      image, while the cached amd64 bases build under emulation only to time out fetching
-      dependencies. Neither failure involves this change. What was verified without a container:
-      `make artifacts` generates the 0.3.0 artifacts; the preparer renders them into a complete
-      environment naming `payer-direct-instrument-setup.v1`, schema 6, and empty provenance; and
-      `local_release_identity` binds that environment, reports `release_mode: local`, and admits
-      the direct-setup prerequisite. The released producer binds the same way through the real
-      staged release and trust manifest. What is unproven is everything downstream of Compose
-      creating the authority.
+      What both reached, on a machine whose container registry needed the host's proxy before
+      anything could be pulled at all:
+
+      0.3.0 builds from a sibling checkout, generates its artifacts, renders a complete
+      environment, migrates to schema 6, and serves a readiness response the Compose healthcheck
+      accepts against the bound contract -- while that same assertion refuses a claimed schema 5,
+      a claimed 0.2.1, and a capability set missing `payer-direct-instrument-setup.v1`. The
+      healthcheck as it stood before this change refuses that same live authority as unready,
+      which is what made the version literals load-bearing rather than cosmetic. A locally built
+      producer at the released version converges identically, so building locally is not what
+      changes behaviour.
+
+      Not reached: the scenario body past the authority. The storefront and buyer configurations
+      pin `expected_api_version = "0.2.1"` and schema 5, so a `saved_instrument` lane against
+      0.3.0 stops at the marketplace's own contract check. That is the consumption change this
+      proposal names as out of scope, not a defect in this one.
 - [x] 6.3 Confirm an attested run is unchanged: same rendered environment, same assertions, same
       fail-closed behavior, byte-for-byte evidence shape.
 
