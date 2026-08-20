@@ -23,6 +23,14 @@ Transport = Callable[[str, Mapping[str, str]], JsonObject]
 MutationTransport = Callable[[str, Mapping[str, str]], JsonObject]
 T = TypeVar("T")
 
+#: Stripe's documented test-mode bank, and the deposits it always makes. A
+#: payer reads these off their own statement; the run reads them off the
+#: provider's published test behavior, which is where every other provider
+#: assertion in this harness comes from.
+_TEST_BANK_ROUTING_NUMBER = "110000000"
+_TEST_BANK_MICRODEPOSIT_ACCOUNT = "000123456789"
+MICRODEPOSIT_AMOUNTS = (32, 45)
+
 
 class StripeUnavailable(RuntimeError):
     """Stripe could not be reached or returned a non-contract response."""
@@ -106,6 +114,32 @@ class StripeApi:
             raise ProviderInvariantError(
                 "Stripe cash-balance test helper did not fund the exact accepted amount"
             )
+
+    def create_microdeposit_bank_instrument(self) -> str:
+        """Create the documented test bank instrument a payer would hold.
+
+        The token is transient. It exists so the setup can be started from an
+        instrument rather than from a hosted page, and it is handed straight to
+        the authority without being stored or reported.
+        """
+
+        result = self._mutation_transport(
+            "/v1/payment_methods",
+            {
+                "type": "us_bank_account",
+                "us_bank_account[account_number]": _TEST_BANK_MICRODEPOSIT_ACCOUNT,
+                "us_bank_account[routing_number]": _TEST_BANK_ROUTING_NUMBER,
+                "us_bank_account[account_holder_type]": "individual",
+                "us_bank_account[account_type]": "checking",
+                "billing_details[name]": "Arkhai Test Payer",
+                "billing_details[email]": "payer@example.invalid",
+            },
+        )
+        if result.get("livemode") is not False:
+            raise ProviderInvariantError(
+                "a test-mode instrument may not be created outside test mode"
+            )
+        return _object_id(result, "payment method")
 
     def wait_for_collection(
         self,

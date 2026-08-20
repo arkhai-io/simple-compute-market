@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Any, Literal, Sequence, cast
 
 from hosted_settlement_client import sign_account_owner_admission
+from market_hosted_settlement import DIRECT_INSTRUMENT_SETUP_CAPABILITY
 from market_hosted_settlement.adapter import MarketplaceSignerAdapter
 from market_identity import create_signer
 
@@ -44,6 +45,7 @@ from .evidence import (
     write_evidence,
 )
 from .gates import (
+    ReleaseIdentity,
     ReleaseMode,
     local_release_identity,
     AuthorizationRejected,
@@ -73,6 +75,7 @@ from .runtime import (
     require_runtime_authority_identity,
 )
 from .stripe_api import (
+    MICRODEPOSIT_AMOUNTS,
     ExpectedEffect,
     ProviderConvergenceTimeout,
     ProviderInvariantError,
@@ -135,6 +138,12 @@ def _required_capabilities(scenario: str, funding_profile: str) -> frozenset[str
     if scenario == "post_collection_loss":
         required.add("operator-recovery-redaction.v1")
     return frozenset(required)
+
+
+#: The profiles the released contract lets a payer hold a saved instrument for.
+#: A push transfer has nothing to save, and the authority refuses a setup for
+#: it, so a lane that asks for one is missing a prerequisite rather than failing.
+_SAVED_INSTRUMENT_PROFILES = frozenset({"card.v1", "us_ach_debit.v1"})
 
 
 def run(args: argparse.Namespace) -> tuple[StripeTestEvidence, int]:
@@ -212,6 +221,13 @@ def run(args: argparse.Namespace) -> tuple[StripeTestEvidence, int]:
         release.hosted_contract,
         _required_capabilities(scenario, funding_profile),
     )
+    if (
+        interaction == "saved_instrument"
+        and funding_profile not in _SAVED_INSTRUMENT_PROFILES
+    ):
+        raise AuthorizationUnavailable(
+            f"the bound release holds no saved instrument for {funding_profile}"
+        )
     provider = ProviderEvidence()
     execution = _ExecutionState()
     funding = FundingEvidence(
@@ -367,6 +383,7 @@ def run(args: argparse.Namespace) -> tuple[StripeTestEvidence, int]:
                                 poll_interval=args.poll_interval,
                                 execution=execution,
                                 account_ref=args.account_ref,
+                                release=release,
                             )
         finally:
             forwarder.stop()
@@ -551,18 +568,42 @@ def _execute_scenario(
     provider_timeout: float,
     poll_interval: float,
     execution: _ExecutionState,
+    release: ReleaseIdentity,
 ) -> _ScenarioResult:
     execution.stage = "payer_profile"
+    # A setup started from the payer's own instrument is one the payer can
+    # answer; one started from nothing is one only a browser can answer. Which
+    # of those the run does follows from what the bound release declares.
+    direct_setup = (
+        interaction == "saved_instrument"
+        and funding_profile == "us_ach_debit.v1"
+        and DIRECT_INSTRUMENT_SETUP_CAPABILITY in release.hosted_contract.capabilities
+    )
     payer_fixture = lifecycle.request(
         "ensure_payer_profile_fixture",
         funding_profile=funding_profile,
         interaction=interaction,
+        **(
+            {"payment_method": stripe.create_microdeposit_bank_instrument()}
+            if direct_setup
+            else {}
+        ),
     )
     setup_action = _validate_payer_fixture(
         payer_fixture,
         interaction=interaction,
     )
-    if setup_action is not None:
+    if payer_fixture.get("setup_verification_pending") is True:
+        execution.stage = "payer_setup_verification"
+        refreshed = lifecycle.request(
+            "verify_payer_setup",
+            amounts=list(MICRODEPOSIT_AMOUNTS),
+        )
+        if _validate_payer_fixture(refreshed, interaction=interaction) is not None:
+            raise LifecycleContractError(
+                "payer setup remained incomplete after submitted verification"
+            )
+    elif setup_action is not None:
         execution.stage = "browser_checkout"
         browser.complete_setup(
             setup_action["url"],
@@ -935,6 +976,15 @@ def _validate_payer_fixture(
     if interaction != "saved_instrument" or value.get("saved_instrument_ready") is True:
         if setup_action is not None:
             raise LifecycleContractError("ready payer fixture returned a stale setup action")
+        return None
+    # A setup waiting on the payer's own deposits is not a setup missing its
+    # browser action. It has no action because there is nothing for a browser
+    # to do, and the run answers it directly.
+    if value.get("setup_verification_pending") is True:
+        if setup_action is not None:
+            raise LifecycleContractError(
+                "a setup awaiting payer verification returned a browser action"
+            )
         return None
     if (
         not isinstance(setup_action, dict)

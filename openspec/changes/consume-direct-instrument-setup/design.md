@@ -154,6 +154,25 @@ The exact values are confirmed against a live authority during implementation ra
 than asserted from documentation; a value the authority rejects is reported as an
 unavailable prerequisite, not worked around.
 
+### D7. A setup the payer answers directly has to start from the payer's instrument
+
+Running the producer's own test-mode lane showed what "no browser" actually requires:
+`start_payer_setup` reaches `verification_pending` with no action only when it is given
+the payer's instrument as an opaque provider token. Without one, the authority issues a
+hosted page and the lane is back in a browser — which would make the direct verification
+a second step after an interactive first one, not a browserless path.
+
+So `start_setup` gains that optional token, exactly as the released request model
+declares it. It is transient in the strongest sense the surrounding rules already use
+for action URLs and client secrets: passed through to the authority, never persisted in
+a marketplace row, never projected, never reported. Marketplace configuration continues
+to reject provider and PaymentMethod fields outright; this is an argument, not a setting.
+
+*Alternative considered:* drive the hosted page for the account entry and use direct
+verification only for the microdeposit step. Rejected — it keeps the browser, so the
+capability buys a smaller step rather than a different lane, and the thing the change
+exists to demonstrate is not demonstrated.
+
 ## Risks / Trade-offs
 
 - **The protected lane cannot exercise this until 0.3.0 publishes.** → Nothing about the

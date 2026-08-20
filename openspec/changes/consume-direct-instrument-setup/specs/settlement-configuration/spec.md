@@ -54,6 +54,8 @@ One submission MUST name exactly one pending setup under exactly one opaque paye
 
 The submission and its result MUST carry no provider identifier, Customer, PaymentMethod, mandate, bank or card detail, client secret, action URL, or raw provider payload, and marketplace persistence MUST NOT retain the submitted evidence. The result MUST expose only the opaque setup reference, public readiness, and any transient action the authority returns.
 
+Starting a setup that the payer will answer directly MAY carry one opaque provider token naming the instrument the payer already holds, because an authority given no instrument issues a hosted page instead and the setup is no longer one the payer can answer. That token MUST be transient on the same terms as an action URL: passed to the authority, never persisted in a marketplace row, never projected, and never reported. Marketplace configuration MUST continue to reject provider and payment-method fields outright.
+
 Where the bound release does not declare the capability, the operation MUST be reported as an unavailable prerequisite naming that capability, before any hosted mutation, rather than attempted and failed.
 
 #### Scenario: A payer submits microdeposit amounts
@@ -70,6 +72,11 @@ Where the bound release does not declare the capability, the operation MUST be r
 
 - **WHEN** a verification submission is attempted against a bound release that does not declare direct payer instrument setup
 - **THEN** the capability is reported as the unavailable prerequisite before any hosted mutation, and no alternate path is substituted
+
+#### Scenario: A setup is started from an instrument the payer holds
+
+- **WHEN** a setup is started with an opaque provider token for the payer's own instrument
+- **THEN** the authority reports the setup as awaiting verification with no hosted action, and the token appears in no marketplace row, projection, or report
 
 #### Scenario: Verification evidence is not retained
 

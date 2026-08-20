@@ -355,7 +355,16 @@ class HostedPayerFacade:
         payer_profile_ref: str,
         funding_profile: FundingProfile,
         label: str,
+        payment_method: str | None = None,
     ) -> Any:
+        """Start a setup, optionally from an instrument the payer already holds.
+
+        An authority given no instrument issues a hosted page, and the setup
+        becomes one only a browser can answer. The token is transient on the
+        same terms as that page's URL: it goes to the authority and is neither
+        persisted nor projected.
+        """
+
         request = PayerSetupRequest(
             request_id=_request_id(
                 "setup-start",
@@ -366,6 +375,7 @@ class HostedPayerFacade:
             payer_profile_ref=payer_profile_ref,
             funding_profile=funding_profile,
             label=label,
+            payment_method=payment_method,
         )
         return await self._remote(
             "setup start",

@@ -43,12 +43,28 @@ class LifecycleBridge:
     def request(self, body: dict[str, Any]) -> dict[str, Any]:
         action = body.get("action")
         if action == "ensure_payer_profile_fixture":
+            method = body.get("payment_method")
             return self._marketplace.ensure_payer_profile_fixture(
                 str(body.get("funding_profile", "")),
                 str(body.get("interaction", "")),
+                payment_method=str(method) if method else None,
             )
         if action == "complete_payer_setup":
             return self._marketplace.complete_payer_setup()
+        if action == "verify_payer_setup":
+            amounts = body.get("amounts")
+            return self._marketplace.verify_payer_setup(
+                amounts=(
+                    tuple(int(value) for value in amounts)
+                    if isinstance(amounts, list | tuple)
+                    else None
+                ),
+                descriptor_code=(
+                    str(body["descriptor_code"])
+                    if body.get("descriptor_code") is not None
+                    else None
+                ),
+            )
         if action == "prepare_collection":
             return self._prepare(case="collection")
         if action == "prepare_refund":

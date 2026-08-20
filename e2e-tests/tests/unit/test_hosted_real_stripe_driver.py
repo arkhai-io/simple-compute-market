@@ -11,14 +11,16 @@ from hosted_settlement_client import (
 )
 
 from src.hosted_real_stripe.driver import (
+    _SAVED_INSTRUMENT_PROFILES,
     _browser_outcome,
+    _validate_payer_fixture,
     _maintained_account_binding,
     _pay_with_forwarding_paused,
     _prepared_effect,
     _wait_until_reclaim_eligible,
     _terminal_projection,
 )
-from src.hosted_real_stripe.runtime import LifecycleContractError
+from src.hosted_real_stripe.runtime import LifecycleContractError, ProcessUnavailable
 
 
 def _prepared() -> dict[str, object]:
@@ -198,3 +200,76 @@ def test_terminal_projection_requires_exact_public_terminal_states() -> None:
             },
             collection=True,
         )
+
+
+def _payer_fixture(**updates: object) -> dict[str, object]:
+    fixture: dict[str, object] = {
+        "ok": True,
+        "available": True,
+        "selected_owner_bound": True,
+        "historical_owner_recoverable": True,
+        "opaque_binding_persisted": True,
+        "action_persisted": False,
+        "saved_instrument_ready": False,
+        "setup_action": None,
+        "setup_verification_pending": False,
+    }
+    fixture.update(updates)
+    return fixture
+
+
+def test_a_setup_awaiting_payer_verification_needs_no_browser_action() -> None:
+    """No action is the point, not a missing prerequisite.
+
+    Every saved-instrument setup used to have to hand back an https action, so
+    a setup the payer can answer themselves read as one the run could not
+    start.
+    """
+
+    action = _validate_payer_fixture(
+        _payer_fixture(setup_verification_pending=True),
+        interaction="saved_instrument",
+    )
+
+    assert action is None
+
+
+def test_a_setup_pending_verification_may_not_also_hand_back_a_browser_action() -> None:
+    with pytest.raises(LifecycleContractError):
+        _validate_payer_fixture(
+            _payer_fixture(
+                setup_verification_pending=True,
+                setup_action={
+                    "kind": "setup",
+                    "url": "https://transient.example/action",
+                    "expires_at_unix": 4_000_000_000,
+                },
+            ),
+            interaction="saved_instrument",
+        )
+
+
+def test_a_release_without_direct_setup_still_requires_its_browser_action() -> None:
+    """The interactive path is untouched for a release that declares nothing."""
+
+    action = _validate_payer_fixture(
+        _payer_fixture(
+            setup_action={
+                "kind": "setup",
+                "url": "https://transient.example/action",
+                "expires_at_unix": 4_000_000_000,
+            },
+        ),
+        interaction="saved_instrument",
+    )
+
+    assert action is not None
+    assert action["url"] == "https://transient.example/action"
+
+    with pytest.raises(ProcessUnavailable):
+        _validate_payer_fixture(_payer_fixture(), interaction="saved_instrument")
+
+
+def test_a_push_transfer_profile_holds_no_saved_instrument() -> None:
+    assert "us_bank_transfer.v1" not in _SAVED_INSTRUMENT_PROFILES
+    assert _SAVED_INSTRUMENT_PROFILES == frozenset({"card.v1", "us_ach_debit.v1"})

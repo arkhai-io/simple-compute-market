@@ -30,12 +30,13 @@
 
 ## 5. The saved-instrument lane sets up without a browser
 
-- [ ] 5.1 Declare direct payer instrument setup as a prerequisite of a bank-funded `saved_instrument` lane in the per-scenario capability map, so an undeclaring release refuses through the existing prerequisite path.
-- [ ] 5.2 Let `_validate_payer_fixture` admit a setup awaiting payer verification, instead of requiring every saved-instrument setup to return a browser action URL.
-- [ ] 5.3 Add the lifecycle bridge surface that submits the verification and returns the refreshed fixture, alongside `complete_payer_setup`.
-- [ ] 5.4 Take the direct path in the driver's saved-instrument stage when the bound release declares the capability, and the existing browser path when it does not.
-- [ ] 5.5 Report a profile the bound release offers no setup for as an unavailable prerequisite, and confirm the interactive path for a non-declaring release is byte-for-byte what it is today.
-- [ ] 5.6 Prove it: a bank-funded saved-instrument lane against a declaring release needs no browser and records no submitted evidence; against a non-declaring release the interactive path and its evidence are unchanged.
+- [x] 5.1 Declare direct payer instrument setup as a prerequisite of a bank-funded `saved_instrument` lane in the per-scenario capability map, so an undeclaring release refuses through the existing prerequisite path.
+- [x] 5.2 Let `start_setup` carry the optional opaque instrument token the released request model declares, transient on the same terms as an action URL, and confirm it reaches no projection.
+- [x] 5.2a Let `_validate_payer_fixture` admit a setup awaiting payer verification, instead of requiring every saved-instrument setup to return a browser action URL.
+- [x] 5.3 Add the lifecycle bridge surface that submits the verification and returns the refreshed fixture, alongside `complete_payer_setup`.
+- [x] 5.4 Take the direct path in the driver's saved-instrument stage when the bound release declares the capability, and the existing browser path when it does not.
+- [x] 5.5 Report a profile the bound release offers no setup for as an unavailable prerequisite, and confirm the interactive path for a non-declaring release is byte-for-byte what it is today.
+- [x] 5.6 Prove it: a bank-funded saved-instrument lane against a declaring release needs no browser and records no submitted evidence; against a non-declaring release the interactive path and its evidence are unchanged.
 
 ## 6. End to end against a locally built 0.3.0 authority
 

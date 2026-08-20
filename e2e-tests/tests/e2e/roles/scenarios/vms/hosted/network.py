@@ -327,12 +327,14 @@ class NetworkMarketplacePort:
         self,
         funding_profile: str,
         interaction: str,
+        payment_method: str | None = None,
     ) -> dict[str, Any]:
         profile = FundingProfile(funding_profile)
         mode = FundingMode(interaction)
         if profile is not self._funding_profile or mode is not self._interaction:
             raise AssertionError("payer fixture differs from the selected protected lane")
         action: dict[str, Any] | None = None
+        verification_pending = False
         ready = mode is FundingMode.INTERACTIVE
         if mode is FundingMode.SAVED_INSTRUMENT:
             expected_kind = (
@@ -367,9 +369,15 @@ class NetworkMarketplacePort:
                         payer_profile_ref=self._payer_binding.binding_ref,
                         funding_profile=profile,
                         label=self._instrument_label,
+                        payment_method=payment_method,
                     )
                 )
                 self._setup_ref = setup.setup_ref
+                # An authority handed the payer's own instrument has nothing to
+                # ask a browser for; it waits for the deposits instead.
+                verification_pending = (
+                    setup.readiness is InstrumentReadiness.VERIFICATION_PENDING
+                )
                 action = (
                     None
                     if setup.action is None
@@ -387,7 +395,37 @@ class NetworkMarketplacePort:
             "action_persisted": False,
             "saved_instrument_ready": ready,
             "setup_action": action,
+            "setup_verification_pending": verification_pending,
         }
+
+    def verify_payer_setup(
+        self,
+        *,
+        amounts: tuple[int, ...] | None,
+        descriptor_code: str | None,
+    ) -> dict[str, Any]:
+        """Answer a pending setup with the payer's own deposit evidence."""
+
+        setup_ref = self._setup_ref
+        if setup_ref is None:
+            raise AssertionError("payer setup is not pending verification")
+        setup = asyncio.run(
+            _payer_facade_call(
+                self._payer_context,
+                self._buyer_signer,
+                "verify_setup",
+                payer_profile_ref=self._payer_binding.binding_ref,
+                setup_ref=setup_ref,
+                amounts=amounts,
+                descriptor_code=descriptor_code,
+            )
+        )
+        if setup.readiness is not InstrumentReadiness.READY:
+            raise AssertionError("payer setup did not become ready on submitted evidence")
+        return self.ensure_payer_profile_fixture(
+            self._funding_profile.value,
+            self._interaction.value,
+        )
 
     def complete_payer_setup(self) -> dict[str, Any]:
         setup_ref = self._setup_ref
