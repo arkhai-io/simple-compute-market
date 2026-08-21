@@ -201,3 +201,42 @@ def test_non_terminal_status_still_times_out(monkeypatch: pytest.MonkeyPatch) ->
 
     with pytest.raises(TimeoutError):
         _public_wait(projector, monkeypatch, {"reclaimed"}, timeout="0.01")
+
+
+def test_materialize_bound_must_sit_below_the_lifecycle_bound(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Equal bounds mean the outer wait always wins.
+
+    The bridge abandons a subprocess that is still working, and the run blames a
+    stage that never got to answer, so the setting is worse than absent.
+    """
+
+    from tests.e2e.roles.scenarios.vms.hosted import network
+
+    monkeypatch.setenv("HOSTED_SETTLEMENT_E2E_MATERIALIZE_TIMEOUT", "180")
+    monkeypatch.setenv("HOSTED_SETTLEMENT_E2E_LIFECYCLE_TIMEOUT", "180")
+
+    with pytest.raises(ValueError, match="must be below the lifecycle bound"):
+        network._materialize_timeout()
+
+
+def test_materialize_bound_below_the_lifecycle_bound_is_used(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from tests.e2e.roles.scenarios.vms.hosted import network
+
+    monkeypatch.setenv("HOSTED_SETTLEMENT_E2E_MATERIALIZE_TIMEOUT", "300")
+    monkeypatch.setenv("HOSTED_SETTLEMENT_E2E_LIFECYCLE_TIMEOUT", "600")
+
+    assert network._materialize_timeout() == {"request_timeout": 300.0}
+
+
+def test_no_materialize_override_leaves_the_transport_default(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from tests.e2e.roles.scenarios.vms.hosted import network
+
+    monkeypatch.delenv("HOSTED_SETTLEMENT_E2E_MATERIALIZE_TIMEOUT", raising=False)
+
+    assert network._materialize_timeout() == {}

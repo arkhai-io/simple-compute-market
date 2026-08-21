@@ -55,7 +55,14 @@ from .driver import (
 )
 
 def _materialize_timeout() -> dict[str, float]:
-    """The materialize request bound, overridable for profiles that fund inline."""
+    """The materialize request bound, overridable for profiles that fund inline.
+
+    The bridge that drives this process gives up on its own bound, so a
+    materialize bound at or above it can never be reached: the outer wait
+    abandons a subprocess that is still working correctly, and the run reports a
+    stage that did not converge when what expired was the harness. Refuse that
+    pairing rather than let a setting mean nothing.
+    """
 
     raw = os.environ.get("HOSTED_SETTLEMENT_E2E_MATERIALIZE_TIMEOUT")
     if not raw:
@@ -63,6 +70,12 @@ def _materialize_timeout() -> dict[str, float]:
     value = float(raw)
     if value <= 0:
         raise ValueError("materialize timeout must be positive")
+    outer = os.environ.get("HOSTED_SETTLEMENT_E2E_LIFECYCLE_TIMEOUT")
+    if outer and value >= float(outer):
+        raise ValueError(
+            f"materialize timeout {value} must be below the lifecycle bound "
+            f"{float(outer)} that governs this process"
+        )
     return {"request_timeout": value}
 
 
