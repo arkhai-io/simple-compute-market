@@ -87,3 +87,23 @@
       the two stop tests fail, and the run takes 6m39s instead of 0.4s — the
       defect made visible, since each permanent refusal is retried for its full
       180-second bound.
+
+
+## 4. A parked obligation is not waited out
+
+- [x] 4.1 End `_wait_public_status` on a `manual_required` projection, raising it
+      as a refusal named by the projection's `funding_reason`, or
+      `settlement_parked` when it carries none.
+- [x] 4.2 Add `reversal_rejected` and `settlement_parked` to the evidence
+      diagnostic allowlist, which stays closed: an unrecognised code still falls
+      back to `lifecycle_contract_rejected`.
+- [x] 4.3 Evidence: a parked projection ends the wait on its first observation
+      and names its reason; a parked projection without a reason is still named;
+      a terminal status still returns; a merely non-terminal status still times
+      out. e2e unit 153 passed.
+
+      Reached by fixing the authority, not the harness. `us_bank_transfer.v1`
+      cannot return through the refund path at all, so with the authority
+      rejecting it properly the obligation now parks with `reversal_rejected`
+      instead of retrying an uncertainty forever. The harness has to stop on
+      that, or the corrected authority would still read as a timeout.

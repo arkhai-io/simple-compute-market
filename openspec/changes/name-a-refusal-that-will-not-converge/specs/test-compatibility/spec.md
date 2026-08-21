@@ -15,6 +15,12 @@ stage instead of a cause and discards what the authority said. A wait that does
 exhaust MUST record the last refusal it received, so an exhausted retry is
 distinguishable from an answer that never arrived.
 
+An obligation the runtime parks for operator evidence MUST also end a lane's
+wait at once. A parked obligation is waiting for a person rather than for time,
+and its projection already carries the mechanism's own name for what it could
+not get past, so a wait that outlasts it replaces a stated cause with an expired
+bound.
+
 #### Scenario: Successful `card.v1` purchase
 
 - **WHEN** Chromium completes required card interaction and hosted retrieval proves accepted funding and transfer outcomes
@@ -69,3 +75,8 @@ distinguishable from an answer that never arrived.
 
 - **WHEN** an eligible-reclaim wait retries a refusal whose condition may still change and reaches its deadline
 - **THEN** the run reports a timeout that also names the last refusal received, rather than a bare statement that a stage did not converge
+
+#### Scenario: A parked obligation ends the wait
+
+- **WHEN** a lane observes the obligation projected as requiring operator evidence
+- **THEN** the wait ends at once and the run reports the mechanism's own reason for parking it, or names it as parked when the projection carries no reason
