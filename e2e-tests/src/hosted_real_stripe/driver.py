@@ -103,7 +103,13 @@ _SCENARIOS = (
 )
 _FUNDING_PROFILES = ("card.v1", "us_bank_transfer.v1", "us_ach_debit.v1")
 _INTERACTIONS = ("interactive", "saved_instrument")
-_REFUND_SERVICING_INTERVAL_SECONDS = 7200.0
+#: A reclaim lane holds the storefront's settlement servicing off so the
+#: obligation stays unfulfilled until its own reclaim runs. Overridable so a run
+#: can vary that one thing: a profile that funds inside materialization may
+#: depend on the servicing it disables.
+_REFUND_SERVICING_INTERVAL_SECONDS = float(
+    os.environ.get("HOSTED_SETTLEMENT_E2E_SERVICING_INTERVAL", "7200") or "7200"
+)
 
 
 @dataclass
