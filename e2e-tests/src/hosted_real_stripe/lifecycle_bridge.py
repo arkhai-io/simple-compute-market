@@ -281,6 +281,26 @@ def _refusal_class() -> type[BaseException]:
         return _Unraisable
 
 
+def _caused_by_timeout(exc: BaseException) -> bool:
+    """Whether a failure is a deadline, however far it has been re-wrapped.
+
+    A signed transport that gives up re-raises the deadline as its own error, so
+    the class on top says the request failed while the cause says the storefront
+    never answered. Those are different findings, and only one of them is the
+    marketplace rejecting anything: nothing replied, so there was no contract to
+    reject.
+    """
+
+    seen: set[int] = set()
+    current: BaseException | None = exc
+    while current is not None and id(current) not in seen:
+        seen.add(id(current))
+        if isinstance(current, TimeoutError):
+            return True
+        current = current.__cause__ or current.__context__
+    return False
+
+
 def main() -> int:
     # Stdout is the protocol and carries codes only. The reason behind a code
     # goes to stderr, which the driver reads for a development run and does
@@ -310,9 +330,16 @@ def main() -> int:
         except (ExternalUnavailable, OSError, ConnectionError):
             traceback.print_exc()
             response = {"ok": False, "code": "marketplace_unavailable"}
-        except Exception:
+        except Exception as exc:
             traceback.print_exc()
-            response = {"ok": False, "code": "marketplace_lifecycle_contract"}
+            response = {
+                "ok": False,
+                "code": (
+                    "convergence_timeout"
+                    if _caused_by_timeout(exc)
+                    else "marketplace_lifecycle_contract"
+                ),
+            }
         sys.stdout.write(json.dumps(response, separators=(",", ":")) + "\n")
         sys.stdout.flush()
         if response.get("shutdown") is True:
