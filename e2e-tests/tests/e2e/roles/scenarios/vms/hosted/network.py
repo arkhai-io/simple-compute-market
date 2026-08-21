@@ -952,8 +952,11 @@ class NetworkMarketplacePort:
                     # A parked obligation is waiting for a person, not for time.
                     # The projection already carries the mechanism's own word for
                     # what it could not get past, so outlasting it would replace a
-                    # named refusal with a bound that expired.
+                    # named refusal with a bound that expired. Name the state on
+                    # the way out: a stop that reports only a code hides the same
+                    # diagnosis an exhausted wait would have printed.
                     reason = status.get("funding_reason")
+                    _name_unconverged("/".join(sorted(terminal)), settlement_ref, status)
                     raise HostedAuthorityRefusal(
                         str(reason) if reason else "settlement_parked",
                         f"hosted obligation parked awaiting operator evidence: {reason!r}",
