@@ -228,7 +228,7 @@ wheels = [
 
 [[package]]
 name = "arkhai-kit-settlement-runtime"
-version = "0.1.0"
+version = "0.1.1"
 source = { registry = "../../.dist" }
 dependencies = [
     { name = "arkhai-core" },
@@ -236,7 +236,7 @@ dependencies = [
     { name = "pydantic" },
 ]
 wheels = [
-    { path = "arkhai_kit_settlement_runtime-0.1.0-py3-none-any.whl" },
+    { path = "arkhai_kit_settlement_runtime-0.1.1-py3-none-any.whl" },
 ]
 
 [[package]]
