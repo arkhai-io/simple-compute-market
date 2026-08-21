@@ -255,6 +255,19 @@ class StripeApi:
         if (len(refunds), len(transfers)) != (1, 0):
             raise ProviderInvariantError("expected one related refund and no transfer")
         refund = refunds[0]
+        # A refund settles asynchronously on the debit rails, so a status that
+        # is still in flight is this run arriving early, not the authority
+        # getting it wrong. Only a refund the provider has finished and not
+        # succeeded is an invariant violation; anything still moving is polled
+        # again, which is what the surrounding wait exists to do.
+        status = str(refund.get("status") or "")
+        if status in {"pending", "requires_action"}:
+            raise ProviderNotConverged(f"related refund is still {status}")
+        if status != "succeeded":
+            raise ProviderInvariantError(
+                f"refund did not match the accepted pre-transfer operation:"
+                f" refund status {status!r}, expected 'succeeded'"
+            )
         # Named individually on purpose. A single or-chain reports that the
         # refund did not match without saying which of seven things differed,
         # which is the whole diagnosis. Amounts, currency, and status are safe
@@ -273,8 +286,6 @@ class StripeApi:
             else f"refund currency {refund.get('currency')!r},"
             f" accepted {expected.currency!r}"
             if refund.get("currency") != expected.currency
-            else f"refund status {refund.get('status')!r}, expected 'succeeded'"
-            if refund.get("status") != "succeeded"
             else "funding metadata does not bind the accepted operation,"
             " profile, and authorization"
             if not _funding_metadata_matches(payment_intent, expected)
