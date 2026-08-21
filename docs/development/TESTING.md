@@ -729,6 +729,15 @@ surface only after a release.
   it simulates an unreferenced deposit, and the authority is right to open an
   attribution incident against it.
 
+  The funding half of that profile has been observed end to end against Stripe
+  test mode: a `bank_instructions` payer action, a referenced cash-balance
+  deposit, three loopback webhook deliveries processed with `livemode: 0`, a
+  funding record reaching `available`, and the escrow reaching `funded`. The
+  reclaim leg after it has not: three attempts were interrupted while waiting
+  for reclaim eligibility, which is a long wait because the scenario has to
+  reach the obligation deadline before it may reserve. What that leaves unproven
+  is the return itself, not the funding it returns.
+
 #### Reusing a payer fixture
 
 A `saved_instrument` lane needs an instrument the payer profile already holds,
