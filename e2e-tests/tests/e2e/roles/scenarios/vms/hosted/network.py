@@ -54,6 +54,24 @@ from .driver import (
     TerminalSnapshot,
 )
 
+def _obligation_expiration(case: str | None) -> int:
+    """How long the accepted obligation lives.
+
+    A reclaim needs one short enough that pre-transfer reclaim becomes eligible
+    inside a run. The override exists so a lane can hold every other variable
+    still and vary only this, which is how the window is told apart from the
+    scenario using it.
+    """
+
+    raw = os.environ.get("HOSTED_SETTLEMENT_E2E_OBLIGATION_EXPIRATION")
+    if raw:
+        value = int(raw)
+        if value <= 0:
+            raise ValueError("obligation expiration must be positive")
+        return value
+    return _REFUND_EXPIRATION_SECONDS if case == "refund" else 3600
+
+
 def _materialize_timeout() -> dict[str, float]:
     """The materialize request bound, overridable for profiles that fund inline.
 
@@ -669,7 +687,7 @@ class NetworkMarketplacePort:
         listing = self.registry.get_listing(registry_listing_id)
         option = _option(listing, self._funding_profile.value)
         expiration_unix = int(time.time()) + (
-            _REFUND_EXPIRATION_SECONDS if self._stripe_test_case == "refund" else 3600
+            _obligation_expiration(self._stripe_test_case)
         )
         selection = {
             "mechanism": "fiat.stripe.v1",
