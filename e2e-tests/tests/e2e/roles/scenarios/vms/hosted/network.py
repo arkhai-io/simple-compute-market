@@ -435,10 +435,17 @@ class NetworkMarketplacePort:
                 )
                 self._setup_ref = setup.setup_ref
                 # An authority handed the payer's own instrument has nothing to
-                # ask a browser for; it waits for the deposits instead.
+                # ask a browser for; it waits for the deposits instead, or, where
+                # the instrument needs no deposits, for nothing at all.
                 verification_pending = (
                     setup.readiness is InstrumentReadiness.VERIFICATION_PENDING
                 )
+                # A setup the authority completed on the spot is already usable.
+                # A directly handed card confirms off-session, so it arrives
+                # ready here rather than after a browser or a deposit, and a
+                # fixture that ignored that would demand a browser action for a
+                # setup that has already finished.
+                ready = setup.readiness is InstrumentReadiness.READY
                 action = (
                     None
                     if setup.action is None

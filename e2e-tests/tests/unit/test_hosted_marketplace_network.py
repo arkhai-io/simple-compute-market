@@ -260,3 +260,65 @@ def test_public_status_wait_rejects_nontransient_authenticated_errors(
 
     with pytest.raises(RuntimeError, match="authenticated HTTP 401"):
         marketplace._wait_public_status("settlement-1", {"funded"})
+
+
+class _Setup:
+    def __init__(self, readiness, action=None, setup_ref="setup-1"):
+        self.readiness = readiness
+        self.action = action
+        self.setup_ref = setup_ref
+
+
+class _Instruments:
+    instruments: list = []
+
+
+def _port(monkeypatch, setup):
+    """A real NetworkMarketplacePort with only the payer facade stood in."""
+
+    from hosted_settlement_client import FundingMode, FundingProfile
+    from tests.e2e.roles.scenarios.vms.hosted import network
+
+    port = network.NetworkMarketplacePort.__new__(network.NetworkMarketplacePort)
+    port._funding_profile = FundingProfile.CARD
+    port._interaction = FundingMode.SAVED_INSTRUMENT
+    port._payer_context = object()
+    port._buyer_signer = object()
+    port._payer_binding = SimpleNamespace(binding_ref="payer-1")
+    port._instrument_label = "label"
+    port._setup_ref = None
+
+    async def _call(_ctx, _signer, operation, **_kwargs):
+        return _Instruments() if operation == "list_instruments" else setup
+
+    monkeypatch.setattr(network, "_payer_facade_call", _call)
+    return port
+
+
+def test_immediately_completed_setup_is_ready(monkeypatch) -> None:
+    """A directly handed card confirms off-session and needs no browser.
+
+    Reporting it as not ready sends the lane down the browser-action branch and
+    fails a setup that has already finished.
+    """
+
+    from hosted_settlement_client import InstrumentReadiness
+
+    port = _port(monkeypatch, _Setup(InstrumentReadiness.READY))
+
+    fixture = port.ensure_payer_profile_fixture("card.v1", "saved_instrument")
+
+    assert fixture["saved_instrument_ready"] is True
+    assert fixture["setup_action"] is None
+    assert fixture["setup_verification_pending"] is False
+
+
+def test_deposit_bound_setup_is_pending_not_ready(monkeypatch) -> None:
+    from hosted_settlement_client import InstrumentReadiness
+
+    port = _port(monkeypatch, _Setup(InstrumentReadiness.VERIFICATION_PENDING))
+
+    fixture = port.ensure_payer_profile_fixture("card.v1", "saved_instrument")
+
+    assert fixture["saved_instrument_ready"] is False
+    assert fixture["setup_verification_pending"] is True
