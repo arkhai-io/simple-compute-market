@@ -97,9 +97,22 @@ def _authority_refusal(exc: RuntimeError) -> tuple[str | None, bool]:
     if not isinstance(parsed, dict):
         return None, False
     code = parsed.get("code")
-    if not isinstance(code, str) or not code:
-        return None, False
-    return code, parsed.get("retryable") is True or code in _RETRYABLE_REFUSAL_CODES
+    if isinstance(code, str) and code:
+        return code, parsed.get("retryable") is True or code in _RETRYABLE_REFUSAL_CODES
+    # The storefront answers in its own shape and does not forward the
+    # authority's code, so the only thing that survives the boundary is its
+    # detail string. Recording it keeps a wait from reporting "no refusal" when
+    # it was in fact refused repeatedly, and names the layer to look at next.
+    detail_text = parsed.get("detail")
+    if isinstance(detail_text, str) and detail_text:
+        # Retryable on purpose. The storefront collapses every mechanism failure
+        # into its own shape, so a permanent refusal and a lost reservation are
+        # indistinguishable here; stopping on both would abandon the retry this
+        # wait exists for. Recording the text still turns "no refusal" into the
+        # sentence the storefront actually returned, which names the layer that
+        # dropped the authority's code.
+        return f"storefront: {detail_text[:120]}", True
+    return None, False
 
 
 _RESOURCE_ID_PREFIX = "hosted-e2e-vm"

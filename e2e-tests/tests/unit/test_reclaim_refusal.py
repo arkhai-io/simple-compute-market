@@ -40,6 +40,20 @@ def test_authority_retryable_flag_is_honoured() -> None:
     assert (code, retryable) == ("provider_busy", True)
 
 
+def test_storefront_detail_is_recorded_when_no_code_survives() -> None:
+    """The storefront does not forward the authority's code. Recording its
+    detail keeps a refused wait from reporting that it was never refused."""
+
+    body = json.dumps({"detail": "hosted settlement reclaim is temporarily unavailable"})
+    code, retryable = _authority_refusal(
+        RuntimeError(f"POST /x -> authenticated HTTP 503: {body}")
+    )
+    assert code is not None and code.startswith("storefront: ")
+    # Retryable: the storefront gives nothing to tell a permanent refusal from a
+    # lost reservation, so the wait keeps its retry and only gains the text.
+    assert retryable is True
+
+
 def test_unparseable_body_is_not_retryable() -> None:
     assert _authority_refusal(RuntimeError("connection reset")) == (None, False)
     assert _authority_refusal(
