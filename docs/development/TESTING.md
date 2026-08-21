@@ -851,6 +851,31 @@ setup, funding authorization, payment intent, escrow, attestation, all `200 OK` 
 while the storefront continues polling past the caller's deadline. Whether
 materialization should do that work inline is a question about the storefront.
 
+`card.v1` collection passes on those bounds. Its **reclaim** leg does not, and
+raising the bounds does not fix it: runs at 180s, at 300s within a 600s
+lifecycle bound, and a capture run all end the same way, so this is not
+slowness. Captured container logs name what happens. Inside the settlements
+request the storefront runs `capacity_hold_committed`, `resource_reserved`, and
+`job_submitted`, and the sequence never reaches a fulfillment-complete event
+before the bound expires. The authority answers every call it receives with
+`200 OK` throughout, including the escrow, so nothing is failing — the request
+is waiting on a provisioning job it started itself.
+
+Two things follow, and both are the storefront's to answer:
+
+- Materialization performs fulfillment work inline, so the caller's bound has to
+  cover VM provisioning. No profile that funds asynchronously reaches this,
+  which is why it appeared only once a card lane ran.
+- The reclaim scenario needs an obligation that stays unfulfilled until its
+  pre-transfer reclaim is eligible. A saved card funds during materialization,
+  and fulfillment follows immediately, so under the current behaviour there is
+  nothing left to reclaim. This is a question about when the storefront should
+  begin fulfilling, not a property of the profile or of the lane.
+
+The lane is left reporting this rather than working around it. A harness that
+raised its bound until provisioning finished would record a passing reclaim for
+an obligation that had already been fulfilled.
+
 #### Reusing a payer fixture
 
 A `saved_instrument` lane needs an instrument the payer profile already holds,
