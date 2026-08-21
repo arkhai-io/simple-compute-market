@@ -732,22 +732,43 @@ surface only after a release.
   The funding half of that profile has been observed end to end against Stripe
   test mode: a `bank_instructions` payer action, a referenced cash-balance
   deposit, three loopback webhook deliveries processed with `livemode: 0`, a
-  funding record reaching `available`, and the escrow reaching `funded`. The
-  reclaim leg after it does not converge. A completed run reports
-  `convergence_timeout` at stage `marketplace_lifecycle` with `refund: null`,
-  after the 31-minute eligibility wait and a 180-second retry, and names no
-  cause — `request_eligible_pretransfer_refund` retries every `409` and `503`
-  alike, so a refusal the authority will never reconsider is indistinguishable
-  from one it is still working on.
+  funding record reaching `available`, and the escrow reaching `funded`.
 
-  Two of the refusals reachable there are permanent. The authority gives
-  `us_bank_transfer.v1` the exact reversal policy `(RETURN,)` while the other
-  profiles get `(CANCEL, REFUND)`, because a push transfer cannot be pulled
-  back; and the reclaim path requires a `checkout` or `payment_intent` funding
-  relation, which is a pull-funding shape. Whether this profile can reclaim
-  through this path at all is therefore an open question about the authority,
-  not a flaky lane — and it stays open until the harness reports which refusal
-  it receives.
+  The reclaim leg after it does not converge, and the cause is not the
+  authority's answer. A completed run reports `convergence_timeout` at stage
+  `marketplace_lifecycle` with `refund: null` after the 31-minute eligibility
+  wait and a 180-second retry, and the last refusal it now names is the
+  storefront's own sentence: `hosted settlement reclaim is temporarily
+  unavailable`. That sentence is a literal. `SettlementHostedRoutes.reclaim`
+  ends in a bare `except Exception` that rewrites every remaining failure as a
+  fixed `503` with that text
+  (`kit/settlement-runtime/src/market_settlement_runtime/hosted_routes.py:352`),
+  and the module logs nothing, so the cause does not survive the process. A
+  caller cannot tell what was refused, and neither can a reader of the run.
+
+  What the run does establish is where the answer is not. A permanent mechanism
+  refusal does not arrive here as an exception at all:
+  `SettlementRuntime.reclaim` catches `SettlementManualRequired` and returns a
+  `manual_required` outcome (`runtime.py:608-609`), which the route projects
+  rather than raising. So whatever this lane hit was classified retryable or
+  uncertain one layer down, or was not a mechanism refusal to begin with.
+
+  The harness reports a timeout rather than a refusal here on purpose. A
+  storefront detail carrying no code cannot distinguish a permanent refusal
+  from a transient one, so the wait keeps retrying it and gains only the
+  diagnostic. Ending the wait on that sentence would abandon the legitimate
+  retry for every genuinely temporary case.
+
+  Two permanent refusals remain plausible and remain unproven by this path. The
+  authority gives `us_bank_transfer.v1` the exact reversal policy `(RETURN,)`
+  while the other profiles get `(CANCEL, REFUND)`, because a push transfer
+  cannot be pulled back; and the reclaim path requires a `checkout` or
+  `payment_intent` funding relation, which is a pull-funding shape. Whether
+  this profile can reclaim through this path at all is still open — but the
+  question is now open against the authority-facing route, which must preserve
+  the mechanism's refusal and its retryability instead of collapsing every
+  failure into a temporary one, not against the harness, which reports exactly
+  what it is given.
 
 #### Reusing a payer fixture
 

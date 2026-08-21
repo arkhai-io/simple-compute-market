@@ -22,11 +22,31 @@
 
 ## 3. Learn what the bank-transfer lane actually hits
 
-- [ ] 3.1 Re-run the `us_bank_transfer.v1` reclaim lane and record the refusal it
+- [x] 3.1 Re-run the `us_bank_transfer.v1` reclaim lane and record the refusal it
       now names. The lane currently reports `convergence_timeout` at
       `marketplace_lifecycle` with `refund: null` after a 31-minute eligibility
       wait and a 180-second retry, which says nothing about the cause.
-- [ ] 3.2 Record the result in `docs/development/TESTING.md`, replacing the note
+
+      Run against `efd1e91f`, profile `us_bank_transfer.v1`, scenario `reclaim`,
+      run ref `run_88ef942e50eebe0de6b0ecac`. Named refusal:
+      `storefront: hosted settlement reclaim is temporarily unavailable`. No
+      authority code reached the harness, so the diagnostic stays
+      `convergence_timeout` — correct, because that sentence is classified
+      retryable on purpose.
+
+      The refusal is a literal, not an answer.
+      `SettlementHostedRoutes.reclaim` ends in a bare `except Exception` that
+      rewrites every remaining failure as a fixed 503 with that text
+      (`hosted_routes.py:352-356`), and the module logs nothing, so the cause
+      does not survive the process.
+
+      This also rules out one hypothesis the proposal carried: a permanent
+      mechanism refusal never reaches that handler.
+      `SettlementRuntime.reclaim` catches `SettlementManualRequired` and returns
+      a `manual_required` outcome (`runtime.py:608-609`) that the route
+      projects rather than raising. Whatever this lane hit was classified
+      retryable or uncertain below, or was not a mechanism refusal.
+- [x] 3.2 Record the result in `docs/development/TESTING.md`, replacing the note
       that the reclaim leg is unproven with what the authority actually answers.
       If the answer is that the profile cannot reclaim through this path, say so
       there and open the question against the authority rather than the harness.
