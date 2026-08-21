@@ -2,7 +2,7 @@
 
 ### Requirement: Provider-neutral conditional escrow client
 
-The kit-owned settlement runtime MUST drive every settlement mechanism through one asynchronous conditional-escrow contract whose operations materialize an obligation, retrieve authoritative status, evaluate an immutable fulfillment reference, and disburse a recorded disposition. Evaluation MUST produce a disposition stating how much of the obligation is owed to the claimant, the remainder being owed to the payer; a satisfied condition is the whole-to-claimant disposition and an unsatisfied one the whole-to-payer disposition. Where the obligation states a scalar lifecycle amount, a disposition MUST express the claimant's share in that amount's own minor units. Where the obligation's value is not scalar, the split MUST remain mechanism-shaped and opaque to the runtime, and conservation MUST be the mechanism's responsibility, because the runtime cannot divide a value it does not interpret. The contract MUST NOT expose separate collection and reclaim operations, because a mechanism that received the two independently could execute them against different splits of one obligation. Results MUST expose only an opaque mechanism reference, public lifecycle status, safe normalized reason/deadline, optional transient buyer action, optional condition anchor, and opaque durable receipt. Mechanism input MAY contain one exact public funding profile and operation-scoped authorization reference but MUST NOT expose a stable payer/instrument or provider model to the runtime.
+The kit-owned settlement runtime MUST drive every settlement mechanism through one asynchronous conditional-escrow contract whose operations materialize an obligation, retrieve authoritative status, evaluate an immutable fulfillment reference, and disburse a recorded disposition. Evaluation MUST produce a disposition stating how much of the obligation is owed to the claimant, the remainder being owed to the payer; a satisfied condition is the whole-to-claimant disposition and an unsatisfied one the whole-to-payer disposition. A disposition that is not degenerate MUST be over an obligation stating a scalar lifecycle amount and MUST express the claimant's share in that amount's own minor units. An obligation whose value is not scalar MUST have only the two degenerate dispositions available to it, and a split offered over one MUST be refused: the runtime cannot conserve a value it does not interpret, and no mechanism arbiter that divides value operates on a non-scalar one. The contract MUST NOT expose separate collection and reclaim operations, because a mechanism that received the two independently could execute them against different splits of one obligation. Results MUST expose only an opaque mechanism reference, public lifecycle status, safe normalized reason/deadline, optional transient buyer action, optional condition anchor, and opaque durable receipt. Mechanism input MAY contain one exact public funding profile and operation-scoped authorization reference but MUST NOT expose a stable payer/instrument or provider model to the runtime.
 
 An obligation carrying no amount MUST have exactly one disposition available to it, and its mechanism MUST NOT be asked to disburse a split.
 
@@ -35,10 +35,9 @@ MUST reuse one operation identity; changed reuse MUST fail closed.
 
 Exactly one disposition MUST be recorded for an obligation, by one compare-and-swap
 winner, before any mechanism disbursement I/O. A recorded disposition MUST NOT be
-replaced. Each leg MUST be executed at most once, so that an obligation cannot pay out the same
-leg twice. Where the obligation states a scalar lifecycle amount, its claimant and payer
-legs MUST sum to that amount, so it cannot pay out more than it holds; where the value is
-not scalar, the runtime MUST record the mechanism's disposition without arithmetic on it.
+replaced. Its claimant and payer legs MUST sum to the obligation's scalar amount, and each leg MUST
+be executed at most once, so that an obligation can neither pay out more than it holds nor
+pay out the same leg twice.
 
 #### Scenario: Plan contains obligations in both directions
 - **WHEN** an accepted plan contains buyer-funded and seller-funded obligations
@@ -56,10 +55,10 @@ not scalar, the runtime MUST record the mechanism's disposition without arithmet
 - **WHEN** claimant collection and payer reclaim concurrently target one obligation
 - **THEN** exactly one disposition reservation may invoke the mechanism and the other observes a busy or terminal outcome
 
-#### Scenario: A mechanism splits a value the runtime cannot divide
+#### Scenario: A split is offered over a value that is not scalar
 
 - **WHEN** an obligation whose lifecycle amount is absent because its value is a bundle rather than a scalar is evaluated to a partial disposition
-- **THEN** the runtime records and disburses the mechanism's own disposition, performs no arithmetic against it, and holds the mechanism to conservation
+- **THEN** the split is refused, the obligation keeps only its two degenerate dispositions, and the refusal names the obligation's value as indivisible rather than the mechanism as failed
 
 #### Scenario: A second disposition is offered for a recorded obligation
 - **WHEN** an evaluation reports a split for an obligation whose disposition was already recorded

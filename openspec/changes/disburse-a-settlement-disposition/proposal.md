@@ -31,7 +31,10 @@ arbiter has already answered has nothing to wait for.
   `ConditionOutcome` carries how much of the obligation is owed to the claimant, in
   the obligation's own minor units; the remainder is owed to the payer. `ready`
   becomes the full-to-claimant disposition and `failed` the full-to-payer one, so
-  every outcome expressible today keeps its exact meaning. Placing the split on the
+  every outcome expressible today keeps its exact meaning. A split requires a scalar
+  amount, which fiat always has — the hosted adapter refuses an obligation without
+  one — and which both registered splitter arbiters also divide; an obligation whose
+  value is a bundle keeps only the two degenerate dispositions. Placing the split on the
   evaluation rather than on the effects means collection and return cannot disagree
   about it, and matches how the splitter arbiters already work: the oracle supplies
   the split.

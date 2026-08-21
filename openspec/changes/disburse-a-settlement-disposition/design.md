@@ -4,8 +4,11 @@ See proposal.md — Why. The constraints that shape the approach:
 
 - `SettlementObligation` (`core/src/market_core/schemas.py:274`) documents `amount`/`asset`
   as the *display/lifecycle* view of value, explicitly `None` when the mechanism's value is
-  not scalar. Mechanism `params` are authoritative and core "never reads `params`". So the
-  runtime can divide some obligations and not others.
+  not scalar. Fiat is never that case: `_validate_obligation`
+  (`kit/hosted-settlement/.../adapter.py:560-581`) refuses any hosted obligation whose amount
+  is not a positive integer minor unit and whose asset is not a lowercase ISO 4217 currency.
+  Non-scalar value is an Alkahest-only shape, and both registered splitter arbiters —
+  `erc20_splitter` and `native_token_splitter` — divide scalar value as well.
 - The exclusion the change reshapes is enforced in SQL inside `BEGIN IMMEDIATE`
   (`kit/settlement-runtime/src/market_settlement_runtime/sqlite_repository.py:1052-1105`),
   not in Python. Whatever replaces it has to stay a single-statement-visible predicate over
@@ -29,7 +32,8 @@ See proposal.md — Why. The constraints that shape the approach:
 **Non-Goals:**
 - Deriving, proposing, or adjusting a split inside the runtime. The runtime records what an
   evaluation returned and executes it.
-- Enforcing conservation for non-scalar value.
+- Splitting value the runtime cannot conserve. A non-scalar obligation gets the two
+  degenerate dispositions and nothing else.
 - Any producer-side hosted contract work.
 
 ## Decisions
@@ -47,18 +51,25 @@ mechanism-neutral, and contradicts the splitter arbiters, where the oracle suppl
 Deciding once, at evaluation, also gives the invariant a natural home: a disposition is a fact
 about an obligation, recorded by one compare-and-swap winner, and effects are its execution.
 
-### Scalar splits are minor-unit integers; non-scalar splits stay opaque
+### A split is over a scalar amount, in minor units
 
-Where `amount` is present the claimant's share is an integer in the same minor units.
+The claimant's share is an integer in the obligation's own minor units. An obligation whose
+value is not scalar has only the two degenerate dispositions, and a split over one is refused.
 
 *Alternatives considered.* Fractions or basis points — rejected because they need a rounding
 rule, and a rounding rule in settlement is a rule about who eats the remainder, which is a
 term, not an implementation detail. Minor units are also what every rail accepts, so no
 conversion happens between the decision and the disbursement.
 
-Where `amount` is `None` the disposition is mechanism-shaped and the runtime performs no
-arithmetic on it. This is not a special case bolted on: it is the same rule the codebase
-already follows, that core does not interpret mechanism value.
+Carrying a second, mechanism-shaped disposition for non-scalar value — rejected, and worth
+recording why, because it was the first shape of this design. It would have let the runtime
+store a split it cannot conserve, on the reasoning that core does not interpret mechanism
+value. But nothing needs it: fiat obligations are scalar by the hosted adapter's own
+validation, and the two splitter arbiters that exist divide scalar value too. There is no
+mechanism today that splits a bundle, so the branch would have been an unenforceable
+invariant written for a caller that does not exist. Refusing the split instead keeps
+conservation total and fails closed; if a bundle-splitting arbiter ever appears, it arrives
+with its own conservation rule and its own change.
 
 ### One port verb, two journal kinds
 
@@ -131,10 +142,10 @@ that agreement.
   an unconverted mechanism fails the `runtime_checkable` protocol at registration rather than
   being quietly skipped. The blast radius is bounded because all three mechanisms live in this
   repo.
-- **Enforcing conservation only for scalar value is uneven** → accepted. The alternative is
-  either refusing non-scalar obligations a disposition at all, or teaching the runtime to
-  interpret mechanism value; the first removes a capability Alkahest has today, the second
-  breaks the neutrality the whole design rests on.
+- **A bundle-valued obligation can never be split** → accepted, and currently costless: no
+  splitter arbiter divides non-scalar value, so nothing loses a capability it has. The cost
+  arrives only if such an arbiter is built, and it arrives as a refused split with a clear
+  reason rather than as a silently unconserved one.
 - **A partial disposition makes "settled" ambiguous in operator surfaces** → aggregate plan
   status already has a `partial` literal for multi-obligation plans, so the word is now
   overloaded. Task 5 disambiguates the projections rather than reusing it.

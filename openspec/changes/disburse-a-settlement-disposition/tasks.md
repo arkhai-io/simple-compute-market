@@ -1,22 +1,23 @@
 ## 1. A disposition is a recorded fact
 
 - [ ] 1.1 Add the disposition to `ConditionOutcome` in
-      `kit/settlement-runtime/src/market_settlement_runtime/models.py`: the claimant's
-      share as a minor-unit integer where the obligation states a scalar amount, and a
-      mechanism-shaped opaque value where it does not. `ConditionDecision` keeps its four
+      `kit/settlement-runtime/src/market_settlement_runtime/models.py` as the claimant's
+      share in the obligation's own minor units. `ConditionDecision` keeps its four
       literals; `ready` and `failed` are the two degenerate dispositions.
-- [ ] 1.2 Add disposition columns to the obligation row and an additive migration in
+- [ ] 1.2 Refuse a non-degenerate disposition over an obligation with no scalar amount,
+      naming the value as indivisible rather than the mechanism as failed.
+- [ ] 1.3 Add disposition columns to the obligation row and an additive migration in
       `sqlite_repository.py`. `collection_state` and `reclaim_state` keep their names and
       meanings as the two leg states.
-- [ ] 1.3 Backfill from terminal state only — `collection_state == 'succeeded'` to
+- [ ] 1.4 Backfill from terminal state only — `collection_state == 'succeeded'` to
       whole-to-claimant, `reclaim_state == 'succeeded'` to whole-to-payer, otherwise no
       disposition — and make the backfill re-runnable.
-- [ ] 1.4 Reject a second disposition for an obligation that already recorded one, and
+- [ ] 1.5 Reject a second disposition for an obligation that already recorded one, and
       surface the disagreement instead of overwriting.
-- [ ] 1.5 Evidence: unit coverage for a scalar split that conserves the amount, a scalar
-      split that does not (refused), a non-scalar disposition the runtime stores without
-      arithmetic, a degenerate disposition matching today's behavior exactly, and a second
-      disposition offered against a recorded one.
+- [ ] 1.6 Evidence: unit coverage for a split that conserves the amount, a split that does
+      not (refused), a split over a non-scalar obligation (refused), a degenerate
+      disposition matching today's behavior exactly, and a second disposition offered
+      against a recorded one.
 
 ## 2. The reservation invariant
 
