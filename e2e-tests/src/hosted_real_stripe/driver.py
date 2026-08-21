@@ -429,6 +429,21 @@ def run(args: argparse.Namespace) -> tuple[StripeTestEvidence, int]:
     )
 
 
+#: Profiles whose instrument a payer can hand over directly. `card.v1` belongs
+#: here for the same reason the bank profiles do: the instrument exists before
+#: the setup, so there is nothing for a browser to answer. `us_bank_transfer.v1`
+#: is absent because a push transfer holds no instrument at all.
+_DIRECT_SETUP_PROFILES = frozenset({"card.v1", "us_ach_debit.v1"})
+
+
+def _direct_instrument(stripe: StripeApi, funding_profile: FundingProfile) -> str:
+    """The instrument a direct setup starts from, chosen by what the profile is."""
+
+    if funding_profile == "card.v1":
+        return stripe.create_card_instrument()
+    return stripe.create_microdeposit_bank_instrument()
+
+
 def _require_profile_scenario(
     funding_profile: FundingProfile,
     interaction: Interaction,
@@ -579,7 +594,7 @@ def _execute_scenario(
     # of those the run does follows from what the bound release declares.
     direct_setup = (
         interaction == "saved_instrument"
-        and funding_profile == "us_ach_debit.v1"
+        and funding_profile in _DIRECT_SETUP_PROFILES
         and DIRECT_INSTRUMENT_SETUP_CAPABILITY in release.hosted_contract.capabilities
     )
     payer_fixture = lifecycle.request(
@@ -587,7 +602,7 @@ def _execute_scenario(
         funding_profile=funding_profile,
         interaction=interaction,
         **(
-            {"payment_method": stripe.create_microdeposit_bank_instrument()}
+            {"payment_method": _direct_instrument(stripe, funding_profile)}
             if direct_setup
             else {}
         ),

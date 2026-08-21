@@ -29,6 +29,9 @@ T = TypeVar("T")
 #: assertion in this harness comes from.
 _TEST_BANK_ROUTING_NUMBER = "110000000"
 _TEST_BANK_MICRODEPOSIT_ACCOUNT = "000123456789"
+#: The documented test card token that confirms off-session without
+#: authentication, so a card setup has nothing for a browser to answer.
+_TEST_CARD_TOKEN = "tok_visa"
 MICRODEPOSIT_AMOUNTS = (32, 45)
 
 
@@ -131,6 +134,29 @@ class StripeApi:
                 "us_bank_account[routing_number]": _TEST_BANK_ROUTING_NUMBER,
                 "us_bank_account[account_holder_type]": "individual",
                 "us_bank_account[account_type]": "checking",
+                "billing_details[name]": "Arkhai Test Payer",
+                "billing_details[email]": "payer@example.invalid",
+            },
+        )
+        if result.get("livemode") is not False:
+            raise ProviderInvariantError(
+                "a test-mode instrument may not be created outside test mode"
+            )
+        return _object_id(result, "payment method")
+
+    def create_card_instrument(self) -> str:
+        """Create the documented test card instrument a payer would hold.
+
+        The token is transient, exactly as the bank instrument's is. A card
+        built from it confirms off-session with no next action, so a setup
+        started from it needs no browser and no interactive challenge.
+        """
+
+        result = self._mutation_transport(
+            "/v1/payment_methods",
+            {
+                "type": "card",
+                "card[token]": _TEST_CARD_TOKEN,
                 "billing_details[name]": "Arkhai Test Payer",
                 "billing_details[email]": "payer@example.invalid",
             },
