@@ -733,10 +733,21 @@ surface only after a release.
   test mode: a `bank_instructions` payer action, a referenced cash-balance
   deposit, three loopback webhook deliveries processed with `livemode: 0`, a
   funding record reaching `available`, and the escrow reaching `funded`. The
-  reclaim leg after it has not: three attempts were interrupted while waiting
-  for reclaim eligibility, which is a long wait because the scenario has to
-  reach the obligation deadline before it may reserve. What that leaves unproven
-  is the return itself, not the funding it returns.
+  reclaim leg after it does not converge. A completed run reports
+  `convergence_timeout` at stage `marketplace_lifecycle` with `refund: null`,
+  after the 31-minute eligibility wait and a 180-second retry, and names no
+  cause — `request_eligible_pretransfer_refund` retries every `409` and `503`
+  alike, so a refusal the authority will never reconsider is indistinguishable
+  from one it is still working on.
+
+  Two of the refusals reachable there are permanent. The authority gives
+  `us_bank_transfer.v1` the exact reversal policy `(RETURN,)` while the other
+  profiles get `(CANCEL, REFUND)`, because a push transfer cannot be pulled
+  back; and the reclaim path requires a `checkout` or `payment_intent` funding
+  relation, which is a pull-funding shape. Whether this profile can reclaim
+  through this path at all is therefore an open question about the authority,
+  not a flaky lane — and it stays open until the harness reports which refusal
+  it receives.
 
 #### Reusing a payer fixture
 
