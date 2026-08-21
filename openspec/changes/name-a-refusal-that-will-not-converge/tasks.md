@@ -46,6 +46,22 @@
       a `manual_required` outcome (`runtime.py:608-609`) that the route
       projects rather than raising. Whatever this lane hit was classified
       retryable or uncertain below, or was not a mechanism refusal.
+
+      Followed through to the cause, which is in the authority and is neither
+      refusal the proposal suspected. `ReversalKind.RETURN` has no provider
+      implementation: `create_reversal` branches on `CANCEL` and refunds
+      everything else, so a bank-transfer return issues `refunds.create`
+      against a `customer_balance` PaymentIntent. Stripe rejects it —
+      `Missing email. In order to create refunds that are sent to the customer,
+      the customer must have a valid email.` — confirmed directly against test
+      mode on the intent this run funded. The return is email-mediated and
+      wants `instructions_email`, which the authority never sends.
+
+      That rejection is then misclassified: `create_reversal` does not wrap
+      `stripe.InvalidRequestError`, so it escapes the rejection branch into
+      `authority.py:4708-4714` and is reported `provider_uncertain`,
+      `retryable=True`. A permanent failure is advertised as a temporary one,
+      which is why nothing converged. Recorded in `docs/development/TESTING.md`.
 - [x] 3.2 Record the result in `docs/development/TESTING.md`, replacing the note
       that the reclaim leg is unproven with what the authority actually answers.
       If the answer is that the profile cannot reclaim through this path, say so

@@ -759,16 +759,55 @@ surface only after a release.
   diagnostic. Ending the wait on that sentence would abandon the legitimate
   retry for every genuinely temporary case.
 
-  Two permanent refusals remain plausible and remain unproven by this path. The
-  authority gives `us_bank_transfer.v1` the exact reversal policy `(RETURN,)`
-  while the other profiles get `(CANCEL, REFUND)`, because a push transfer
-  cannot be pulled back; and the reclaim path requires a `checkout` or
-  `payment_intent` funding relation, which is a pull-funding shape. Whether
-  this profile can reclaim through this path at all is still open — but the
-  question is now open against the authority-facing route, which must preserve
-  the mechanism's refusal and its retryability instead of collapsing every
-  failure into a temporary one, not against the harness, which reports exactly
-  what it is given.
+  The cause is now known, and it is neither of the refusals this note first
+  suspected. Both were ruled out by reading the authority and confirmed against
+  Stripe test mode directly.
+
+  `reversal_unsupported` cannot fire. An `available` `us_bank_transfer.v1`
+  funding selects `ReversalKind.RETURN` (`authority.py:4519-4523`), which is
+  exactly what that profile's `(RETURN,)` policy permits.
+  `funding_relation_missing` cannot fire either: the profile funds through a
+  `customer_balance` PaymentIntent, so a `payment_intent` relation is recorded
+  (`providers.py:681-724`, `_funding_from_payment_intent` defaults
+  `relation_kind="payment_intent"`).
+
+  What fails is that `ReversalKind.RETURN` has no provider implementation.
+  `StripeProvider.create_reversal` branches on `CANCEL` and treats everything
+  else as a refund (`providers.py:817-871`), so a RETURN issues a plain
+  `refunds.create` against a `customer_balance` PaymentIntent. Stripe rejects
+  that:
+
+  ```
+  invalid_request_error: Missing email. In order to create refunds that are
+  sent to the customer, the customer must have a valid email.
+  ```
+
+  A bank-transfer return is email-mediated at Stripe: the payer supplies return
+  bank details through a message Stripe sends, requested with an
+  `instructions_email` parameter the authority never passes. Supplying it is
+  necessary but not sufficient on an unactivated test account:
+
+  ```
+  invalid_request_error: Cannot send email. ... To send email to the email
+  address registered with your account, verify the email address first. To send
+  email to other email addresses, submit your account application.
+  ```
+
+  So the answer to the open question is that `us_bank_transfer.v1` cannot
+  reclaim through this path as implemented, and cannot reclaim through any path
+  until the authority models the email-mediated return that Stripe requires for
+  a push-funded balance.
+
+  A second defect makes that failure look temporary. `create_reversal` does not
+  wrap `stripe.InvalidRequestError`, so a permanent rejection escapes the
+  `ProviderRejectedOperationError` branch and lands in the bare `except
+  Exception` at `authority.py:4708-4714`, which reports `provider_uncertain`
+  with `status_code=503, retryable=True`. The authority therefore tells its
+  caller to keep trying something that can never succeed — which is what the
+  storefront then relabels, and what the harness then retried for its full
+  bound. The same call site treats the identical Stripe error as a permanent
+  rejection during funding (`providers.py:721-722`), so the classification is
+  inconsistent within one provider.
 
 #### Reusing a payer fixture
 
