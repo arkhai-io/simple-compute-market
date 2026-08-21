@@ -798,6 +798,13 @@ surface only after a release.
   until the authority models the email-mediated return that Stripe requires for
   a push-funded balance.
 
+  Confirmed end to end against the fixed authority. The same lane that reported
+  `convergence_timeout` at `marketplace_lifecycle` with no cause now reports
+  `reversal_rejected` at the same stage, classified `product` rather than
+  `timeout`, and stops on the first refusal instead of consuming its
+  180-second bound. The obligation parks with the mechanism's own reason
+  attached, which is the outcome a profile with no return path should have.
+
   A second defect makes that failure look temporary. `create_reversal` does not
   wrap `stripe.InvalidRequestError`, so a permanent rejection escapes the
   `ProviderRejectedOperationError` branch and lands in the bare `except
