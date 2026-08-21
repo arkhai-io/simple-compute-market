@@ -255,16 +255,35 @@ class StripeApi:
         if (len(refunds), len(transfers)) != (1, 0):
             raise ProviderInvariantError("expected one related refund and no transfer")
         refund = refunds[0]
-        if (
-            payment_intent.get("livemode") is not False
-            or payment_intent.get("amount_received") != expected.amount
-            or payment_intent.get("currency") != expected.currency
-            or refund.get("amount") != expected.amount
-            or refund.get("currency") != expected.currency
-            or refund.get("status") != "succeeded"
-            or not _funding_metadata_matches(payment_intent, expected)
-        ):
-            raise ProviderInvariantError("refund did not match the accepted pre-transfer operation")
+        # Named individually on purpose. A single or-chain reports that the
+        # refund did not match without saying which of seven things differed,
+        # which is the whole diagnosis. Amounts, currency, and status are safe
+        # to state; identifiers are named as fields and never as values.
+        mismatch = (
+            "funding is not test-mode"
+            if payment_intent.get("livemode") is not False
+            else f"funding received {payment_intent.get('amount_received')!r},"
+            f" accepted {expected.amount!r}"
+            if payment_intent.get("amount_received") != expected.amount
+            else f"funding currency {payment_intent.get('currency')!r},"
+            f" accepted {expected.currency!r}"
+            if payment_intent.get("currency") != expected.currency
+            else f"refund amount {refund.get('amount')!r}, accepted {expected.amount!r}"
+            if refund.get("amount") != expected.amount
+            else f"refund currency {refund.get('currency')!r},"
+            f" accepted {expected.currency!r}"
+            if refund.get("currency") != expected.currency
+            else f"refund status {refund.get('status')!r}, expected 'succeeded'"
+            if refund.get("status") != "succeeded"
+            else "funding metadata does not bind the accepted operation,"
+            " profile, and authorization"
+            if not _funding_metadata_matches(payment_intent, expected)
+            else ""
+        )
+        if mismatch:
+            raise ProviderInvariantError(
+                f"refund did not match the accepted pre-transfer operation: {mismatch}"
+            )
         return RefundEvidence(
             operation_ref=opaque_ref("op", expected.marketplace_operation_id),
             checkout_count=int(session is not None),
