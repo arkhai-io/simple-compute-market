@@ -120,3 +120,70 @@ def test_timeout_without_any_refusal_says_so(monkeypatch: pytest.MonkeyPatch) ->
     with pytest.raises(TimeoutError) as caught:
         _wait(reclaimer, monkeypatch, timeout="0")
     assert "none received" in str(caught.value)
+
+
+class _Projector:
+    """`_wait_public_status` under test, with `_buyer_status` standing in."""
+
+    def __init__(self, statuses: list[dict[str, object]]) -> None:
+        self._statuses = statuses
+        self.calls = 0
+
+    def _buyer_status(self, settlement_ref: str) -> dict[str, object]:
+        self.calls += 1
+        return self._statuses[min(self.calls - 1, len(self._statuses) - 1)]
+
+
+def _public_wait(
+    projector: _Projector,
+    monkeypatch: pytest.MonkeyPatch,
+    terminal: set[str],
+    timeout: str = "180",
+):
+    from tests.e2e.roles.scenarios.vms.hosted import network
+
+    monkeypatch.setenv("HOSTED_SETTLEMENT_E2E_LIFECYCLE_TIMEOUT", timeout)
+    monkeypatch.setattr(network.time, "sleep", lambda _seconds: None)
+    return network.NetworkMarketplacePort._wait_public_status(
+        projector, "settlement-1", terminal
+    )
+
+
+def test_parked_obligation_ends_the_wait_naming_its_reason(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A parked deal waits for a person, so time cannot resolve it."""
+
+    projector = _Projector(
+        [{"status": "manual_required", "funding_reason": "reversal_rejected"}]
+    )
+
+    with pytest.raises(HostedAuthorityRefusal) as refused:
+        _public_wait(projector, monkeypatch, {"reclaimed"})
+
+    assert refused.value.code == "reversal_rejected"
+    assert projector.calls == 1
+
+
+def test_parked_obligation_without_a_reason_is_still_named(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    projector = _Projector([{"status": "manual_required"}])
+
+    with pytest.raises(HostedAuthorityRefusal) as refused:
+        _public_wait(projector, monkeypatch, {"reclaimed"})
+
+    assert refused.value.code == "settlement_parked"
+
+
+def test_terminal_status_still_returns(monkeypatch: pytest.MonkeyPatch) -> None:
+    projector = _Projector([{"status": "pending"}, {"status": "reclaimed"}])
+
+    assert _public_wait(projector, monkeypatch, {"reclaimed"})["status"] == "reclaimed"
+
+
+def test_non_terminal_status_still_times_out(monkeypatch: pytest.MonkeyPatch) -> None:
+    projector = _Projector([{"status": "pending"}])
+
+    with pytest.raises(TimeoutError):
+        _public_wait(projector, monkeypatch, {"reclaimed"}, timeout="0.01")

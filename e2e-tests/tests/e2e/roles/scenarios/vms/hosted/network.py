@@ -948,6 +948,16 @@ class NetworkMarketplacePort:
                 last = status
                 if status.get("status") in terminal:
                     return status
+                if status.get("status") == "manual_required":
+                    # A parked obligation is waiting for a person, not for time.
+                    # The projection already carries the mechanism's own word for
+                    # what it could not get past, so outlasting it would replace a
+                    # named refusal with a bound that expired.
+                    reason = status.get("funding_reason")
+                    raise HostedAuthorityRefusal(
+                        str(reason) if reason else "settlement_parked",
+                        f"hosted obligation parked awaiting operator evidence: {reason!r}",
+                    )
             time.sleep(min(0.5, max(0.0, deadline - time.monotonic())))
         _name_unconverged("/".join(sorted(terminal)), settlement_ref, last)
         raise TimeoutError("named hosted public status did not converge")

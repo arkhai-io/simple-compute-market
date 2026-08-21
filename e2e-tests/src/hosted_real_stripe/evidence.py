@@ -93,6 +93,8 @@ DiagnosticCode = Literal[
     "convergence_timeout",
     "reversal_unsupported",
     "funding_relation_missing",
+    "reversal_rejected",
+    "settlement_parked",
 ]
 
 
