@@ -54,6 +54,39 @@ from .driver import (
     TerminalSnapshot,
 )
 
+def _create_payer_when_admitted(context: Any, signer: Any, *, country: str) -> Any:
+    """Create the payer profile once the authority will admit one.
+
+    Binding an account and the account becoming ready are not the same moment:
+    the authority reconciles readiness after the binding lands, so a payer
+    created in between is refused. The refusal arrives as `invalid_response`,
+    which reads like a malformed answer rather than a state that has not
+    arrived yet, and it kills the bridge before any stage runs.
+
+    Waiting here rather than at the call site keeps the port's own construction
+    honest: a port that exists has a payer, or the wait says why it never got
+    one.
+    """
+
+    deadline = time.monotonic() + float(
+        os.environ.get("HOSTED_SETTLEMENT_E2E_ADMISSION_TIMEOUT", "120")
+    )
+    last: Exception | None = None
+    while True:
+        try:
+            return asyncio.run(
+                _payer_facade_call(context, signer, "create", country=country)
+            )
+        except Exception as exc:  # the facade names the authority's refusal
+            last = exc
+            if time.monotonic() >= deadline:
+                raise RuntimeError(
+                    "hosted authority never admitted a payer profile; last "
+                    f"refusal: {exc}"
+                ) from exc
+            time.sleep(min(2.0, max(0.0, deadline - time.monotonic())))
+
+
 def _obligation_expiration(case: str | None) -> int:
     """How long the accepted obligation lives.
 
@@ -298,13 +331,10 @@ class NetworkMarketplacePort:
             profiles=profiles,
             dispatch_action=lambda _action, _binding: None,
         )
-        payer = asyncio.run(
-            _payer_facade_call(
-                self._payer_context,
-                buyer_signer,
-                "create",
-                country=self._stripe_config.country,
-            )
+        payer = _create_payer_when_admitted(
+            self._payer_context,
+            buyer_signer,
+            country=self._stripe_config.country,
         )
         self._payer_binding = AuthorityPayerBinding(
             authority_id=str(self._stripe_config.authority_id),
