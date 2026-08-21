@@ -49,7 +49,11 @@ Every authenticated state-changing request MUST use `arkhai.market-request-signa
 
 The receiving authority MUST reserve `(principal, request_id)` before dispatch, enforce configured clock skew on first use, and reject changed reuse, missing fields, unsupported versions, or invalid proofs. An exact reuse of the same canonical request MUST resolve to the recorded operation outcome rather than execute a conflicting mutation.
 
-Every authenticated mutation response MUST use the shared version 2 response contract to bind its domain, status, originating request identity, authority principal, timestamp, and canonical response body hash. A caller MUST verify the proof, body, request identity, and exact expected authority before accepting the acknowledgement.
+Every response an authority returns on an authenticated route MUST use the shared version 2 response contract to bind its domain, status, originating request identity, authority principal, timestamp, and canonical response body hash. This MUST hold for refusals as well as acknowledgements, and for a refusal raised while authenticating the request as well as one raised after. A caller MUST verify the proof, body, request identity, and exact expected authority before accepting any of them.
+
+An authority MUST NOT withhold response authentication because trust has not been established: the operation and resource it binds are the ones the route derived from the request, and the request identity is the one the caller sent, neither of which depends on the caller being trusted. An answer MAY be unauthenticated only when it cannot be bound to a caller at all — the request carried no request identity, or the route recognized no authenticated contract — and an authority MUST NOT invent either in order to sign.
+
+A refusal body MUST NOT disclose anything the caller has not already proven it holds. Naming which bound field disagreed is disclosure of the authority's expectation, not of a secret, and is permitted.
 
 #### Scenario: Signed body is changed
 
@@ -65,6 +69,16 @@ Every authenticated mutation response MUST use the shared version 2 response con
 
 - **WHEN** an authority returns a mutation response for an authenticated request
 - **THEN** the caller accepts it only after the status, originating request identity, exact authority principal, timestamp, body, and response proof verify
+
+#### Scenario: An authenticated route refuses a caller
+
+- **WHEN** an authority refuses a request on an authenticated route, whether the refusal is raised while authenticating it or after
+- **THEN** the refusal carries response authentication bound to the route's operation and resource, the caller's request identity, the refusal status, and the refusal body, and the caller reads the refusal after verifying it
+
+#### Scenario: A refusal cannot be bound to a caller
+
+- **WHEN** a request carries no request identity, or names no authenticated route contract
+- **THEN** the refusal is returned unauthenticated rather than signed against an invented identity or contract
 
 #### Scenario: A valid but unexpected authority signs a response
 

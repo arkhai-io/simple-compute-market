@@ -3,6 +3,7 @@
 ## Purpose
 
 Define service topology, persistence ownership, migration execution, packaging, and rollout compatibility.
+
 ## Requirements
 
 ### Requirement: Expanded hosted config cutover is explicit and atomic
@@ -27,6 +28,7 @@ Compose, Helm, and bare process profiles MAY configure hosted public authority U
 
 - **WHEN** values or generated ConfigMaps/Secrets include a Stripe key, webhook secret, provider account ID, Customer ID, PaymentMethod ID, or raw setup/payment action
 - **THEN** schema/render/package validation fails rather than deploying it to a marketplace workload
+
 ### Requirement: Role-separated deployment
 Production topology MUST support independently operated registries, seller storefront/provisioning stacks, and ephemeral or long-running buyers; the local Anvil environment MUST remain a development-only fixture.
 
@@ -191,7 +193,6 @@ Marketplace builds MUST consume the hosted client only as an exact manifest-pinn
 
 - **WHEN** marketplace wheels and storefront images are built
 - **THEN** they contain no Stripe SDK, hosted service package, EVM gateway implementation, provider credential, or copied hosted model and signature module
-
 
 ### Requirement: Identity configuration separates public and secret material
 
@@ -433,6 +434,7 @@ An operator MUST quiesce effects and run the explicitly selected contribution's 
 
 - **WHEN** failure occurs after the original backup but before atomic replacement
 - **THEN** the original database remains byte-identical, the restrictive backup is retained for recovery, and startup does not activate mixed state
+
 ### Requirement: Deployable stack per market domain
 
 Every market domain intended for deployment MUST have a stack definition that
@@ -531,6 +533,24 @@ one half locally and the other from a release, in either combination.
 
 A run in which any half is locally built MUST be recorded as a development run.
 
+This MUST include recording the run. A locally built half MUST record, in place
+of each released coordinate it has none of, the same self-describing marker the
+binding gate assigned it, and MUST record the coordinates it does have: the
+image the run named and the build the authority reported. Evidence MUST NOT be
+refused for lacking coordinates the run was admitted without, and MUST NOT be
+accepted when a half is partly released and partly local — the rule that admits
+the run and the rule that records it MUST be the same rule.
+
+#### Scenario: A development run records what it ran
+
+- **WHEN** a run against a locally built half completes its scenario, whatever the outcome
+- **THEN** its evidence is written, records the development release mode, records the marker in place of each coordinate that half has none of, and names the image and the reported build
+
+#### Scenario: A recorded half is partly released and partly local
+
+- **WHEN** evidence for one half carries some exact released coordinates and some markers
+- **THEN** it is refused, because no admitted run produces that combination
+
 #### Scenario: A developer runs the body on their own branch
 
 - **WHEN** an operator supplies test-mode provider credentials and a locally built stack on a working tree that is not a released commit
@@ -613,6 +633,7 @@ already holds those credentials.
 
 - **WHEN** a subprocess the body drives exits without completing a request
 - **THEN** whatever it wrote explaining why is retained and reported in a development run rather than lost to the exit
+
 ## Evidence
 
 - Configurable registry endpoints and independently composed role stacks: core buyer registry configuration plus domain Compose and Helm manifests.
@@ -632,4 +653,3 @@ Internal Python distributions MUST be built into the repository `.dist` director
 A touched project's `init` or `reinit` target MUST explicitly upgrade and reinstall changed internal distributions from `.dist`. Docker stages that resolve internal packages MUST copy `.dist` from the build context so wheel changes invalidate the relevant layer.
 
 The aggregate kit test target MUST build prerequisite kit wheels and invoke every kit subproject's default test suite. Standalone targets MAY remain for focused development, but aggregate coverage MUST not silently omit a kit.
-
