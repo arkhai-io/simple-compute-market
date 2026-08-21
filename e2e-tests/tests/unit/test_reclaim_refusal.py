@@ -240,3 +240,35 @@ def test_no_materialize_override_leaves_the_transport_default(
     monkeypatch.delenv("HOSTED_SETTLEMENT_E2E_MATERIALIZE_TIMEOUT", raising=False)
 
     assert network._materialize_timeout() == {}
+
+
+def test_parked_on_a_retryable_reason_is_waited_through(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A lost reservation parks the obligation and then clears.
+
+    It is the one refusal the wait was always meant to outlast, so a parked
+    state naming it must not end the wait.
+    """
+
+    projector = _Projector(
+        [
+            {"status": "manual_required", "funding_reason": "operation_conflict"},
+            {"status": "collected"},
+        ]
+    )
+
+    assert _public_wait(projector, monkeypatch, {"collected"})["status"] == "collected"
+
+
+def test_parked_on_a_permanent_reason_still_stops(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    projector = _Projector(
+        [{"status": "manual_required", "funding_reason": "reversal_rejected"}]
+    )
+
+    with pytest.raises(HostedAuthorityRefusal) as refused:
+        _public_wait(projector, monkeypatch, {"collected"})
+
+    assert refused.value.code == "reversal_rejected"

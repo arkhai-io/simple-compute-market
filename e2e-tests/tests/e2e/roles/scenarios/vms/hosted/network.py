@@ -1063,6 +1063,13 @@ class NetworkMarketplacePort:
                     # state it was passing through. Record it and keep waiting.
                     reason = status.get("funding_reason")
                     parked = True
+                    # A reason the wait already knows can clear is not a reason
+                    # to stop. Losing a compare-and-set reservation parks the
+                    # obligation and then resolves itself, so stopping on it
+                    # fails a lane for the one refusal that was always meant to
+                    # be outlasted.
+                    if reason in _RETRYABLE_REFUSAL_CODES:
+                        reason = None
                     if reason:
                         _name_unconverged(
                             "/".join(sorted(terminal)), settlement_ref, status
