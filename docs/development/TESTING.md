@@ -876,6 +876,23 @@ The lane is left reporting this rather than working around it. A harness that
 raised its bound until provisioning finished would record a passing reclaim for
 an obligation that had already been fulfilled.
 
+Deferring the funds does not open a way around it, and the reason is a decision
+rather than an oversight. The ACH lane makes its profile reclaimable by setting
+`HOSTED_SETTLEMENT_US_ACH_DEBIT_AVAILABILITY_DELAY_SECONDS=0`, and the mirror
+setting exists for card, but the authority applies an availability delay only
+under `profile == FundingProfile.US_ACH_DEBIT` (`authority.py:5636-5652`). For
+card the value parses and is persisted onto the funding record, and is never
+consulted. That is deliberate: the chart pins
+`cardAvailabilityDelaySeconds` to `{"const": 0}`
+(`helm/hosted-settlement/values.schema.json:174`), so a non-zero card delay is
+not a supported deployment at all. Card funds are available immediately by
+design, which is what makes a saved-card obligation fulfil during
+materialization.
+
+So `card.v1` reclaim needs the storefront to stop fulfilling inline. It cannot
+be arranged from configuration, and arranging it from the harness would be
+fabricating a state the product does not produce.
+
 #### Reusing a payer fixture
 
 A `saved_instrument` lane needs an instrument the payer profile already holds,
