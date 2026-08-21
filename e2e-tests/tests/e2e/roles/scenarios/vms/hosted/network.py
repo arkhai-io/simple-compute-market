@@ -403,24 +403,7 @@ class NetworkMarketplacePort:
                 if profile is FundingProfile.CARD
                 else InstrumentKind.US_BANK_ACCOUNT
             )
-            instruments = asyncio.run(
-                _payer_facade_call(
-                    self._payer_context,
-                    self._buyer_signer,
-                    "list_instruments",
-                    payer_profile_ref=self._payer_binding.binding_ref,
-                )
-            )
-            selected = next(
-                (
-                    item
-                    for item in instruments.instruments
-                    if item.kind is expected_kind
-                    and item.readiness is InstrumentReadiness.READY
-                    and not item.revoked
-                ),
-                None,
-            )
+            selected = self._ready_instrument(expected_kind)
             if selected is None:
                 setup = asyncio.run(
                     _payer_facade_call(
@@ -445,7 +428,19 @@ class NetworkMarketplacePort:
                 # ready here rather than after a browser or a deposit, and a
                 # fixture that ignored that would demand a browser action for a
                 # setup that has already finished.
-                ready = setup.readiness is InstrumentReadiness.READY
+                #
+                # The setup result names no instrument, so the instrument it
+                # produced is resolved the one way this side can: by asking
+                # again. A deposit-bound setup reaches the same call later,
+                # through verification.
+                if setup.readiness is InstrumentReadiness.READY:
+                    selected = self._ready_instrument(expected_kind)
+                    if selected is None:
+                        raise AssertionError(
+                            "a completed payer setup produced no ready instrument"
+                        )
+                    self._selected_instrument_ref = selected.instrument_ref
+                    ready = True
                 action = (
                     None
                     if setup.action is None
@@ -465,6 +460,28 @@ class NetworkMarketplacePort:
             "setup_action": action,
             "setup_verification_pending": verification_pending,
         }
+
+    def _ready_instrument(self, expected_kind: InstrumentKind):
+        """The payer's own ready instrument of that kind, or nothing."""
+
+        instruments = asyncio.run(
+            _payer_facade_call(
+                self._payer_context,
+                self._buyer_signer,
+                "list_instruments",
+                payer_profile_ref=self._payer_binding.binding_ref,
+            )
+        )
+        return next(
+            (
+                item
+                for item in instruments.instruments
+                if item.kind is expected_kind
+                and item.readiness is InstrumentReadiness.READY
+                and not item.revoked
+            ),
+            None,
+        )
 
     def verify_payer_setup(
         self,

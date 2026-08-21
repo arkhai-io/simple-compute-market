@@ -269,14 +269,20 @@ class _Setup:
         self.setup_ref = setup_ref
 
 
-class _Instruments:
-    instruments: list = []
+def _port(monkeypatch, setup, *, instrument_after_setup=True):
+    """A real NetworkMarketplacePort with only the payer facade stood in.
 
+    The payer holds nothing at first, so a setup is started. Whether the
+    authority has produced a usable instrument by the time this side asks again
+    is what each test varies.
+    """
 
-def _port(monkeypatch, setup):
-    """A real NetworkMarketplacePort with only the payer facade stood in."""
-
-    from hosted_settlement_client import FundingMode, FundingProfile
+    from hosted_settlement_client import (
+        FundingMode,
+        FundingProfile,
+        InstrumentKind,
+        InstrumentReadiness,
+    )
     from tests.e2e.roles.scenarios.vms.hosted import network
 
     port = network.NetworkMarketplacePort.__new__(network.NetworkMarketplacePort)
@@ -287,9 +293,23 @@ def _port(monkeypatch, setup):
     port._payer_binding = SimpleNamespace(binding_ref="payer-1")
     port._instrument_label = "label"
     port._setup_ref = None
+    port._selected_instrument_ref = None
+
+    ready_instrument = SimpleNamespace(
+        kind=InstrumentKind.CARD,
+        readiness=InstrumentReadiness.READY,
+        revoked=False,
+        instrument_ref="instrument-1",
+    )
+    calls = {"list": 0}
 
     async def _call(_ctx, _signer, operation, **_kwargs):
-        return _Instruments() if operation == "list_instruments" else setup
+        if operation != "list_instruments":
+            return setup
+        calls["list"] += 1
+        if calls["list"] == 1 or not instrument_after_setup:
+            return SimpleNamespace(instruments=[])
+        return SimpleNamespace(instruments=[ready_instrument])
 
     monkeypatch.setattr(network, "_payer_facade_call", _call)
     return port
@@ -311,6 +331,22 @@ def test_immediately_completed_setup_is_ready(monkeypatch) -> None:
     assert fixture["saved_instrument_ready"] is True
     assert fixture["setup_action"] is None
     assert fixture["setup_verification_pending"] is False
+    # Funding authorization refuses a saved selection without one, so a ready
+    # fixture that binds no instrument fails a step later with a worse message.
+    assert port._selected_instrument_ref == "instrument-1"
+
+
+def test_completed_setup_without_an_instrument_is_refused(monkeypatch) -> None:
+    from hosted_settlement_client import InstrumentReadiness
+
+    port = _port(
+        monkeypatch,
+        _Setup(InstrumentReadiness.READY),
+        instrument_after_setup=False,
+    )
+
+    with pytest.raises(AssertionError):
+        port.ensure_payer_profile_fixture("card.v1", "saved_instrument")
 
 
 def test_deposit_bound_setup_is_pending_not_ready(monkeypatch) -> None:
