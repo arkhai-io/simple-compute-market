@@ -893,6 +893,38 @@ So `card.v1` reclaim needs the storefront to stop fulfilling inline. It cannot
 be arranged from configuration, and arranging it from the harness would be
 fabricating a state the product does not produce.
 
+#### A lane that cannot admit a payer
+
+A lane can stop at `payer_profile` with `payer_profile_unavailable`, the bridge
+dying at construction on `hosted payer create failed: invalid_response`. The
+code is the released client's word for a response it could not validate, and it
+is what an unadmitted account produces: the payer call answers with a shape the
+client does not accept rather than a refusal it can name.
+
+The account tables in the authority's SQLite file are empty in this state --
+`connected_accounts`, `account_owner_admissions`, and the rest all zero -- while
+`bind-existing-account` exits 0. A command that runs and writes nothing is the
+signature of one that received no input, and the binding contract is delivered
+on stdin (`compose exec -T ... --binding-file -`). That is the leading
+explanation and it is **not confirmed**: a direct test of stdin forwarding
+through the compose provider has not been completed.
+
+What is ruled out, each by a run from a verified-clean state: stale containers
+from an earlier lane, a data volume removed from under a running stack, an
+account-readiness race (a bounded wait for admission still exhausts), a podman
+flake, and half-cleared proxy variables. Each was a real problem, was fixed, and
+was not this one.
+
+Two lessons the runs cost, both recorded because they are cheap to repeat:
+
+- Diagnose from the failing process's own environment. A compose command run
+  without the lane's exported credentials, a Stripe probe that clears proxy
+  variables the lane keeps, and a database query against a path the service may
+  not use each produced a confident wrong answer.
+- The lane keeps its whole `make` output at `$rundir/make.log`. It previously
+  kept the last forty lines, so a cause printed earlier was unreadable, and
+  several runs were spent re-deriving what the log had already said.
+
 #### Reusing a payer fixture
 
 A `saved_instrument` lane needs an instrument the payer profile already holds,
