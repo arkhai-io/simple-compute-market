@@ -54,6 +54,18 @@ from .driver import (
     TerminalSnapshot,
 )
 
+def _materialize_timeout() -> dict[str, float]:
+    """The materialize request bound, overridable for profiles that fund inline."""
+
+    raw = os.environ.get("HOSTED_SETTLEMENT_E2E_MATERIALIZE_TIMEOUT")
+    if not raw:
+        return {}
+    value = float(raw)
+    if value <= 0:
+        raise ValueError("materialize timeout must be positive")
+    return {"request_timeout": value}
+
+
 class HostedAuthorityRefusal(RuntimeError):
     """An authority answer a wait must not keep retrying.
 
@@ -710,6 +722,11 @@ class NetworkMarketplacePort:
             principal=self._buyer_signer.identity,
             signer=self._buyer_signer,
             resolve_seller_principals=self._publisher_resolver(),
+            # Materialization is answered inline, so how long it may take is a
+            # property of the profile rather than of the transport. A card the
+            # payer already holds funds within this call, which a profile that
+            # waits on a bank does not.
+            **_materialize_timeout(),
         ).start(
             negotiation_id=negotiation_id,
             obligation_ref=obligation_ref,
