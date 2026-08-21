@@ -816,6 +816,41 @@ surface only after a release.
   rejection during funding (`providers.py:721-722`), so the classification is
   inconsistent within one provider.
 
+#### Running `card.v1` without a browser
+
+`card.v1` is reachable without an interactive challenge, and the hCaptcha that
+blocks Stripe Checkout blocks only the interactive path. A saved-instrument lane
+completes its setup from an instrument the payer already holds, exactly as the
+bank profiles do.
+
+The authority always supported this: `_setup_method` maps `card.v1` to a card
+SetupIntent and refuses only `us_bank_transfer.v1`, which holds no instrument.
+A card built from the documented test token confirms off-session with no next
+action, so there is nothing for a browser to answer.
+
+Three consumer-side gaps had to close before the profile ran end to end, each
+found only by running it:
+
+- The direct-setup gate named `us_ach_debit.v1` alone, so a card lane still
+  demanded a browser.
+- `ensure_payer_profile_fixture` described a new setup as awaiting deposits or
+  awaiting a browser, never as already done. A card arrives ready, and fell
+  through to the browser branch.
+- A completed setup bound no instrument, because only the branch that finds an
+  existing one assigned it. The setup result names no instrument, so it is
+  resolved by listing again — what the deposit-bound path already does after
+  verification.
+
+One property of the profile remains, and it is the storefront's, not the
+harness's. Materialization is answered inline, and a card the payer already
+holds funds inside that call, so the storefront polls to convergence within the
+request while the client waits. The default 30-second transport bound is not
+enough; the lane sets `HOSTED_SETTLEMENT_E2E_MATERIALIZE_TIMEOUT=180` for this
+profile. Captured container logs show the authority answering every call — payer,
+setup, funding authorization, payment intent, escrow, attestation, all `200 OK` —
+while the storefront continues polling past the caller's deadline. Whether
+materialization should do that work inline is a question about the storefront.
+
 #### Reusing a payer fixture
 
 A `saved_instrument` lane needs an instrument the payer profile already holds,
