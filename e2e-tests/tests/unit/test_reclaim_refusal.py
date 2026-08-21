@@ -165,13 +165,27 @@ def test_parked_obligation_ends_the_wait_naming_its_reason(
     assert projector.calls == 1
 
 
-def test_parked_obligation_without_a_reason_is_still_named(
+def test_unexplained_parked_state_is_waited_through(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A parked state with no reason is derived from the authority's current
+    status and a later poll re-derives it, so a lane passing through one must
+    not be failed for it."""
+
+    projector = _Projector(
+        [{"status": "manual_required"}, {"status": "reclaimed"}]
+    )
+
+    assert _public_wait(projector, monkeypatch, {"reclaimed"})["status"] == "reclaimed"
+
+
+def test_unexplained_parked_state_that_persists_is_named(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     projector = _Projector([{"status": "manual_required"}])
 
     with pytest.raises(HostedAuthorityRefusal) as refused:
-        _public_wait(projector, monkeypatch, {"reclaimed"})
+        _public_wait(projector, monkeypatch, {"reclaimed"}, timeout="0.05")
 
     assert refused.value.code == "settlement_parked"
 

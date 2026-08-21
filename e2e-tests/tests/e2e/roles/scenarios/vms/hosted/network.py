@@ -938,6 +938,7 @@ class NetworkMarketplacePort:
         timeout = float(os.environ.get("HOSTED_SETTLEMENT_E2E_LIFECYCLE_TIMEOUT", "180"))
         deadline = time.monotonic() + timeout
         last: dict[str, Any] = {}
+        parked = False
         while time.monotonic() < deadline:
             try:
                 status = self._buyer_status(settlement_ref)
@@ -949,20 +950,34 @@ class NetworkMarketplacePort:
                 if status.get("status") in terminal:
                     return status
                 if status.get("status") == "manual_required":
-                    # A parked obligation is waiting for a person, not for time.
-                    # The projection already carries the mechanism's own word for
-                    # what it could not get past, so outlasting it would replace a
-                    # named refusal with a bound that expired. Name the state on
-                    # the way out: a stop that reports only a code hides the same
-                    # diagnosis an exhausted wait would have printed.
+                    # Only a parked obligation that names its reason is one a
+                    # wait may stop on. The marketplace guarantees a reason for
+                    # every obligation the authority itself parked, so a reason
+                    # means a person is genuinely required and time cannot help.
+                    #
+                    # Without one the state is merely derived from the
+                    # authority's current status on this poll, which a later
+                    # poll re-derives -- stopping there would fail a lane for a
+                    # state it was passing through. Record it and keep waiting.
                     reason = status.get("funding_reason")
-                    _name_unconverged("/".join(sorted(terminal)), settlement_ref, status)
-                    raise HostedAuthorityRefusal(
-                        str(reason) if reason else "settlement_parked",
-                        f"hosted obligation parked awaiting operator evidence: {reason!r}",
-                    )
+                    parked = True
+                    if reason:
+                        _name_unconverged(
+                            "/".join(sorted(terminal)), settlement_ref, status
+                        )
+                        raise HostedAuthorityRefusal(
+                            str(reason),
+                            "hosted obligation parked awaiting operator "
+                            f"evidence: {reason!r}",
+                        )
             time.sleep(min(0.5, max(0.0, deadline - time.monotonic())))
         _name_unconverged("/".join(sorted(terminal)), settlement_ref, last)
+        if parked:
+            raise HostedAuthorityRefusal(
+                "settlement_parked",
+                "hosted obligation held an unexplained operator-evidence state "
+                "until the wait expired",
+            )
         raise TimeoutError("named hosted public status did not converge")
 
 
