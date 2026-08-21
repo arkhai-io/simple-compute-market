@@ -11,7 +11,7 @@ import time
 import tomllib
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Literal, Sequence, cast
+from typing import Any, Literal, Sequence, cast, get_args
 
 from hosted_settlement_client import sign_account_owner_admission
 from market_hosted_settlement import DIRECT_INSTRUMENT_SETUP_CAPABILITY
@@ -67,6 +67,7 @@ from .runtime import (
     EphemeralMarketplaceConfig,
     EphemeralServiceEnv,
     LifecycleContractError,
+    LifecycleAuthorityRefused,
     LifecycleConvergenceTimeout,
     MarketplaceLifecycleSession,
     ProcessUnavailable,
@@ -1183,6 +1184,7 @@ _CLASSIFIED_FAILURES = (
     WebhookRouteUnavailable,
     ChromiumUnavailable,
     ProcessUnavailable,
+    LifecycleAuthorityRefused,
     LifecycleConvergenceTimeout,
     ProviderConvergenceTimeout,
     CheckoutContractError,
@@ -1220,6 +1222,13 @@ def _classify(caught: BaseException, stage: Stage) -> tuple[ResultClass, Diagnos
         if stage in {"funding_authorization", "funding"}:
             return "environment", "profile_prerequisite_unavailable"
         return "environment", "marketplace_unavailable"
+    if isinstance(caught, LifecycleAuthorityRefused):
+        # The stage stays the stage the lane was in; only the cause changes.
+        # An unrecognised code would fail the evidence allowlist, which is the
+        # right outcome: a public code is enumerated before it is published.
+        if caught.code in get_args(DiagnosticCode):
+            return "product", caught.code
+        return "product", "lifecycle_contract_rejected"
     if isinstance(caught, (LifecycleConvergenceTimeout, ProviderConvergenceTimeout)):
         return "timeout", "convergence_timeout"
     if isinstance(caught, CheckoutContractError):

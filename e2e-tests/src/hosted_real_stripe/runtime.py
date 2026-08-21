@@ -102,6 +102,19 @@ class LifecycleConvergenceTimeout(TimeoutError):
     """A named marketplace state did not converge within its bound."""
 
 
+class LifecycleAuthorityRefused(RuntimeError):
+    """The authority refused, and said something a wait could not change.
+
+    Distinct from a convergence timeout: a timeout says a stage ran out of
+    bound, this says the authority answered. Carrying the code keeps the answer
+    attached to the stage that received it.
+    """
+
+    def __init__(self, code: str) -> None:
+        super().__init__(f"hosted authority refused: {code}")
+        self.code = code
+
+
 class StripeWebhookForwarder:
     """Run Stripe CLI while discarding every line after in-memory secret capture."""
 
@@ -922,6 +935,11 @@ class MarketplaceLifecycleSession:
             if code == "marketplace_unavailable":
                 raise ProcessUnavailable(
                     self._with_diagnostics("marketplace lifecycle state was unavailable")
+                )
+            if code == "authority_refused":
+                refusal = response.get("refusal")
+                raise LifecycleAuthorityRefused(
+                    refusal if isinstance(refusal, str) and refusal else "unknown"
                 )
             if code == "convergence_timeout":
                 raise LifecycleConvergenceTimeout(

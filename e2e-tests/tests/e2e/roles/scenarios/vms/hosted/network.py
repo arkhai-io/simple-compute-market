@@ -54,6 +54,54 @@ from .driver import (
     TerminalSnapshot,
 )
 
+class HostedAuthorityRefusal(RuntimeError):
+    """An authority answer a wait must not keep retrying.
+
+    The authority states a code and its own ``retryable`` flag on every refusal.
+    That flag means the identical request may be re-sent, which is not the same
+    question a polling wait asks: a lost reservation is not re-sendable, yet the
+    condition behind it can still clear. So a wait retries what it knows can
+    change and treats every other refusal as an answer.
+    """
+
+    def __init__(self, code: str, detail: str) -> None:
+        super().__init__(f"hosted authority refused: {code}")
+        self.code = code
+        self.detail = detail
+
+
+#: Refusals a polling wait may outlast. ``operation_conflict`` is the
+#: compare-and-set race the eligible-reclaim wait exists for.
+_RETRYABLE_REFUSAL_CODES = frozenset({"operation_conflict"})
+
+
+def _authority_refusal(exc: RuntimeError) -> tuple[str | None, bool]:
+    """Return the authority's refusal code and whether a wait may retry it.
+
+    The buyer client puts the response body into the error message, so the
+    structured code the authority already sends is readable here without a
+    second request.
+    """
+
+    detail = str(exc)
+    index = detail.find("authenticated HTTP ")
+    if index < 0:
+        return None, False
+    separator = detail.find(":", index)
+    if separator < 0:
+        return None, False
+    try:
+        parsed = json.loads(detail[separator + 1 :].strip())
+    except (ValueError, TypeError):
+        return None, False
+    if not isinstance(parsed, dict):
+        return None, False
+    code = parsed.get("code")
+    if not isinstance(code, str) or not code:
+        return None, False
+    return code, parsed.get("retryable") is True or code in _RETRYABLE_REFUSAL_CODES
+
+
 _RESOURCE_ID_PREFIX = "hosted-e2e-vm"
 _REFUND_EXPIRATION_SECONDS = 31 * 60
 _OFFER = {
@@ -795,6 +843,7 @@ class NetworkMarketplacePort:
     def request_eligible_pretransfer_refund(self, settlement_ref: str) -> TerminalSnapshot:
         timeout = float(os.environ.get("HOSTED_SETTLEMENT_E2E_LIFECYCLE_TIMEOUT", "180"))
         deadline = time.monotonic() + timeout
+        last_refusal: str | None = None
         while True:
             try:
                 return self.reclaim(settlement_ref)
@@ -805,8 +854,19 @@ class NetworkMarketplacePort:
                     for marker in ("authenticated HTTP 409:", "authenticated HTTP 503:")
                 ):
                     raise
+                code, retryable = _authority_refusal(exc)
+                if code is not None:
+                    last_refusal = code
+                    if not retryable:
+                        # Waiting cannot change this answer. Outlasting it would
+                        # report a cause the authority already gave as a stage
+                        # that did not converge.
+                        raise HostedAuthorityRefusal(code, detail) from exc
             if time.monotonic() >= deadline:
-                raise TimeoutError("eligible hosted refund did not converge")
+                raise TimeoutError(
+                    "eligible hosted refund did not converge; last refusal: "
+                    f"{last_refusal or 'none received'}"
+                )
             time.sleep(min(0.5, max(0.0, deadline - time.monotonic())))
 
     def recover_eligible_pretransfer_refund(self, settlement_ref: str) -> TerminalSnapshot:

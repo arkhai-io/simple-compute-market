@@ -7,6 +7,7 @@ import json
 import os
 import sys
 import traceback
+
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -258,6 +259,28 @@ def _load_marketplace() -> Any:
     return factory(buyer_config=Path(buyer_config))
 
 
+def _refusal_class() -> type[BaseException]:
+    """The marketplace's own refusal type, resolved the way the bridge resolves
+    everything else it borrows: from the module it was pointed at, not from an
+    import this package could not satisfy on its own.
+
+    A build whose marketplace half predates the type still runs; it simply has
+    nothing that raises it, and the except clause matches nothing.
+    """
+
+    module_name = os.environ.get(
+        "HOSTED_SETTLEMENT_E2E_NETWORK_MODULE",
+        "tests.e2e.roles.scenarios.vms.hosted.network",
+    )
+    try:
+        return getattr(importlib.import_module(module_name), "HostedAuthorityRefusal")
+    except (ImportError, AttributeError):
+        class _Unraisable(BaseException):
+            pass
+
+        return _Unraisable
+
+
 def main() -> int:
     # Stdout is the protocol and carries codes only. The reason behind a code
     # goes to stderr, which the driver reads for a development run and does
@@ -274,6 +297,13 @@ def main() -> int:
             if not isinstance(body, dict):
                 raise RuntimeError("request must be an object")
             response = bridge.request(body)
+        except _refusal_class() as refusal:
+            traceback.print_exc()
+            response = {
+                "ok": False,
+                "code": "authority_refused",
+                "refusal": getattr(refusal, "code", "unknown"),
+            }
         except TimeoutError:
             traceback.print_exc()
             response = {"ok": False, "code": "convergence_timeout"}

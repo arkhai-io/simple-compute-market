@@ -91,6 +91,8 @@ DiagnosticCode = Literal[
     "checkout_contract_rejected",
     "provider_invariant_failed",
     "convergence_timeout",
+    "reversal_unsupported",
+    "funding_relation_missing",
 ]
 
 
