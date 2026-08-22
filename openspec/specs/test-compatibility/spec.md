@@ -68,6 +68,8 @@ Every staged e2e state field MUST use one exact producer/consumer name, and ever
 
 The marketplace-owner wallet-free VM lifecycle against Stripe test mode MUST verify one exact signed hosted release at the producer boundary and one exact marketplace consumer release, then exercise ordinary marketplace publication, discovery, negotiation, accepted funding authorization, hosted materialization, buyer action, authoritative funding, VM fulfillment evidence, condition evaluation, collection or eligible reclaim, status, restart, and recovery for each selected exact profile. The report MUST record marketplace source/commit separately from hosted manifest, client wheel, service image, contract/schema, migrations, provenance, release repository/workflow/ref/source, capability set, and protected workflow run. Every provider assertion MUST derive from the selected profile's supported Stripe test-mode behavior; unavailable external prerequisites MUST remain explicit and MUST NOT be replaced by local simulation.
 
+How a saved instrument becomes ready MUST follow the bound release rather than the harness. Where the bound release declares direct payer instrument setup, a bank-funded saved-instrument lane MUST complete its setup by submitting the payer's own verification evidence and MUST NOT require a browser. Where it does not, the existing interactive setup path MUST stand unchanged. A profile for which the bound release offers no saved-instrument path at all MUST be reported as an unavailable prerequisite, not as a failure of the lane.
+
 #### Scenario: Successful `card.v1` purchase
 
 - **WHEN** Chromium completes required card interaction and hosted retrieval proves accepted funding and transfer outcomes
@@ -82,6 +84,16 @@ The marketplace-owner wallet-free VM lifecycle against Stripe test mode MUST ver
 
 - **WHEN** the exact test debit crosses mandate/confirmation and availability gates
 - **THEN** the report records delayed state, authoritative funding, fulfillment, and collection or declared return/reclaim boundary without claiming card behavior
+
+#### Scenario: A bank-funded saved instrument is set up without a browser
+
+- **WHEN** the bound release declares direct payer instrument setup and a saved-instrument lane selects a bank-funded profile
+- **THEN** the lane submits the payer's own verification evidence, the instrument becomes ready without a browser session, and the report records the setup boundary without the submitted evidence or any provider identifier
+
+#### Scenario: The bound release predates direct setup
+
+- **WHEN** a saved-instrument lane runs against a bound release that does not declare direct payer instrument setup
+- **THEN** the interactive setup path runs exactly as it does today, and the lane's recorded evidence is unchanged
 
 #### Scenario: Off-session action fallback
 
@@ -118,6 +130,10 @@ Deterministic tests for timeout placement, unknown acknowledgement, delayed auth
 
 Public/default checks MUST cover deterministic provider-neutral hosted client/adapter/payer/authorization behavior, state-machine integration, configuration, package contents, typing, release verification, browser action dispatch, consumer redaction, and evidence-schema validation without credentials. The marketplace MUST verify signed producer conformance evidence for producer-owned webhook-inbox recovery rather than importing, simulating, or claiming that internal behavior. Protected Stripe checks MUST require explicit role-scoped test credentials, exact signed release inputs, selected profile prerequisites, and fail-closed enablement.
 
+A public check MUST NOT require a signed producer release in order to obtain a producer artifact it compiles against. Where the artifact it needs belongs to a version that has one, it MUST use it and verify it. Where the version has none, the check MAY obtain the artifact from an access-controlled internal channel instead, and MUST treat what it obtained as unattested: it MUST NOT verify, claim, or record provenance for it, and it MUST NOT thereby satisfy anything reserved to a check with signed release inputs.
+
+Which of the two applies MUST follow from the version the consumer pins and the version the trusted release names, and MUST NOT be selected by a separate switch. A check that cannot reach the channel it needs MUST report the version and the channel as the unavailable prerequisite, rather than failing as though the artifact did not exist.
+
 #### Scenario: Contributor runs public checks
 
 - **WHEN** no Stripe credential or protected hosted release access is present
@@ -132,6 +148,21 @@ Public/default checks MUST cover deterministic provider-neutral hosted client/ad
 
 - **WHEN** an operator selects hosted Stripe system E2E without one required release, credential, network, webhook, browser, account, or selected-profile prerequisite
 - **THEN** preflight reports the exact unmet prerequisite before payment creation and does not cite focused or simulated output as Stripe evidence
+
+#### Scenario: A public check compiles against an unreleased producer version
+
+- **WHEN** the consumer pins a producer version that the trusted release does not name
+- **THEN** the public check obtains that version's artifact from the internal channel, runs its suites against it, and neither verifies nor records provenance for it
+
+#### Scenario: A public check compiles against a released producer version
+
+- **WHEN** the pinned version and the version the trusted release names are the same
+- **THEN** the public check obtains the signed release assets and verifies them exactly as it does today
+
+#### Scenario: The internal channel is unreachable
+
+- **WHEN** a public check needs an unreleased producer artifact and cannot authenticate to the internal channel
+- **THEN** it reports the version and the channel as the unavailable prerequisite, and does not report the artifact as missing or the suite as broken
 
 ### Requirement: Protected hosted evidence is attributable and sanitized
 
@@ -280,4 +311,3 @@ signed producer release, protected browser, or live external-resolver evidence.
 - VM contribution, immutable bindings, migration, publication, settlement, and selected-site recovery adapters: `domains/vms/storefront/tests/unit/test_domain_registry.py`, `test_domain_thread_bindings.py`, `test_domain_migration.py`, `test_publication_wiring.py`, `test_settlement_composition.py`, and `test_fulfillment_resume_runtime.py`.
 
 Additive/optional client coexistence during a staged rollout is not established as a general baseline contract; registry rollout work remains proposed in `migrate-registry-to-postgres`.
-

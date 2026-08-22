@@ -1,13 +1,8 @@
 DIST_DIR ?= ../../.dist
 PYTHON_VERSION ?= 3.13
-HOSTED_RELEASE_TRUST ?= ../../manifests/hosted-settlement-v0.2.1-trust.json
-HOSTED_RELEASE_MANIFEST ?= $(DIST_DIR)/release-manifest.json
-HOSTED_CLIENT_WHEEL ?= $(DIST_DIR)/arkhai_hosted_settlement_client-0.2.1-py3-none-any.whl
-VERIFY_HOSTED_RELEASE = uv run --no-project --with 'eth-account>=0.13,<0.14' \
-	python ../../scripts/verify-hosted-release.py \
-	--trust $(HOSTED_RELEASE_TRUST) \
-	--manifest $(HOSTED_RELEASE_MANIFEST) \
-	--wheel $(HOSTED_CLIENT_WHEEL)
+HOSTED_REPO_ROOT := ../..
+HOSTED_RELEASE_DIR ?= $(DIST_DIR)
+include $(HOSTED_REPO_ROOT)/make/hosted-release.mk
 
 .PHONY: build init reinit test verify-hosted-release
 

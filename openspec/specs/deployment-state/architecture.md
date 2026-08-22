@@ -82,6 +82,51 @@ Compose coordinates with a digest-qualified image. A local tag, sibling
 checkout, editable source, alternate service distribution, or compatible-major
 substitution is not equivalent.
 
+Those coordinates divide into two groups that carry different weight. Provenance
+— manifest digest, wheel and artifact hashes, source commit, repository,
+workflow reference, and release authority — says who published a half and from
+what. Contract — release and API version, migration schema, funding profiles,
+and capabilities — says what that half serves. Only the first has no answer
+outside a release, and only the first is what a protected run's evidence rests
+on. The second is a property of the build, and a build made from a working tree
+states it as completely as a release does.
+
+A development run turns on that distinction. Either half may be a published
+release or an image the operator built, in any combination; a locally built half
+renders the same key set with its provenance group empty and its contract group
+read from the artifacts that build generated. Empty is the record: it is visible
+in the environment itself rather than only in a mode flag, so a development
+environment cannot be mistaken for an attested one by inspection. Any local half
+makes the whole run a development run.
+
+The contract a run asserts is read from the release it bound, never restated in
+the harness, the preparer, or the Compose readiness check. A contract written
+down in any of those places admits exactly one release: the next one is refused
+as a corrupt environment or an unready authority, which is indistinguishable
+from a genuine mismatch. What is enforced is unchanged — the composed authority
+must serve what the run bound, before any service is created — and for a
+released half the artifact that expectation is read from is covered by the same
+signature as before.
+
+That rule holds on the consumer side too, and holds all the way down. The
+storefront and buyer configurations a run renders take their API version,
+migration schema, and capability set from the release the run bound, alongside
+the manifest digest they already took from it; the committed templates state
+none of the three, and an enabled configuration that reaches readiness without
+them is unready and says which pin is absent. The consumer's own required
+capability set remains its own — it is a floor describing what this marketplace
+needs, and a newer release declaring more is admitted rather than refused. The
+build derives the client wheel, OpenAPI, conformance, and migration filenames
+from the trust configuration that names the release, so choosing a release is
+stated once and what follows from it is not restated beside it.
+
+The same rule reaches the wire. The health model a consumer parses carries the
+API version and schema version as values, not as types admitting one release,
+so a consumer holding one release's client can read another release's readiness
+response and report the disagreement as a disagreement. A type that admits one
+release turns a version mismatch into an unparseable response and denies the
+consumer the one thing it is there to say.
+
 The protected composition starts only the ordinary hosted migration, API, and
 reconciliation worker roles against Stripe test mode. The marketplace reaches
 the authority through the released client and public authority address; it

@@ -195,6 +195,25 @@ async def _preflight_settlement_mechanisms() -> None:
     await preflight_settlement_mechanisms(composition)
 
 
+async def _backfill_escrow_identity(sqlite_client: Any) -> None:
+    import market_storefront.container as _container
+    from core_storefront.escrow_identity import backfill_escrow_obligation_records
+
+    composition = _container.resolved_settlement_composition
+    if composition is None:
+        raise RuntimeError("settlement composition was not initialized")
+    backfilled = await backfill_escrow_obligation_records(
+        sqlite_client=sqlite_client,
+        settlement_runtime=composition.runtime,
+        local_principal=composition.local_principal,
+    )
+    if backfilled:
+        logger.info(
+            "[STARTUP] Backfilled %d legacy escrow obligation records",
+            backfilled,
+        )
+
+
 def _start_settlement_servicing() -> None:
     import market_storefront.container as _container
 
@@ -319,6 +338,11 @@ async def _startup_tasks(*, registry: Any, domain: MarketDomainContract) -> None
             StorefrontStartupStep(
                 "settlement_mechanism_preflight",
                 _preflight_settlement_mechanisms,
+            ),
+            StorefrontStartupStep(
+                "escrow_identity_backfill",
+                partial(_backfill_escrow_identity, sqlite_client),
+                error_message="[STARTUP] Escrow identity backfill failed: %s",
             ),
             StorefrontStartupStep("settlement_servicing", _start_settlement_servicing),
             StorefrontStartupStep(

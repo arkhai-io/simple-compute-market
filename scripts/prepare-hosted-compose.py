@@ -4,7 +4,9 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import importlib.util
+import json
 import os
 from pathlib import Path
 from typing import Any
@@ -81,25 +83,244 @@ def _render_env(values: dict[str, str]) -> str:
     return "\n".join(lines) + "\n"
 
 
-def prepare_compose_env(
+#: The marketplace coordinates a locally built consumer has no released source
+#: for. Rendered empty rather than omitted: the environment's reader requires
+#: the exact key set, and a development run reads an empty value as "local".
+#: The image is not among them -- Compose refuses to start a service without
+#: one -- so a local environment names the image it actually runs.
+_LOCAL_MARKETPLACE_COORDINATES = (
+    "HOSTED_MARKETPLACE_VERIFIED_ARTIFACT_PROVENANCE_SHA256",
+    "HOSTED_MARKETPLACE_VERIFIED_ARTIFACT_SCHEMA_SHA256",
+    "HOSTED_MARKETPLACE_VERIFIED_ARTIFACT_WHEELHOUSE_SHA256",
+    "HOSTED_MARKETPLACE_VERIFIED_MANIFEST_SHA256",
+    "HOSTED_MARKETPLACE_VERIFIED_SOURCE_COMMIT",
+    "HOSTED_MARKETPLACE_VERIFIED_WORKFLOW_REF",
+    "HOSTED_MARKETPLACE_VERIFIED_WORKFLOW_RUN_ID",
+)
+
+
+#: The producer coordinates a locally built authority has no released source
+#: for. Same treatment as the consumer half above, and for the same reason: the
+#: environment's reader requires the exact key set, and a development run reads
+#: an empty value as "local". The image, the release directory, and the manifest
+#: digest are not among them -- Compose refuses to start a service without an
+#: image, it mounts the release directory, and the authority reports the digest
+#: back through its readiness check -- so a local environment names what it
+#: actually runs.
+_LOCAL_HOSTED_COORDINATES = (
+    "HOSTED_SETTLEMENT_VERIFIED_AUTHORITY_ADDRESS",
+    "HOSTED_SETTLEMENT_VERIFIED_AUTHORITY_ID",
+    "HOSTED_SETTLEMENT_VERIFIED_AUTHORITY_SCHEME",
+    "HOSTED_SETTLEMENT_VERIFIED_CLIENT_WHEEL_SHA256",
+    "HOSTED_SETTLEMENT_VERIFIED_CONFORMANCE_SHA256",
+    "HOSTED_SETTLEMENT_VERIFIED_MANIFEST_SHA256",
+    "HOSTED_SETTLEMENT_VERIFIED_MIGRATIONS_SHA256",
+    "HOSTED_SETTLEMENT_VERIFIED_OPENAPI_SHA256",
+    "HOSTED_SETTLEMENT_VERIFIED_PROVENANCE_SHA256",
+    "HOSTED_SETTLEMENT_VERIFIED_SERVICE_WHEEL_SHA256",
+    "HOSTED_SETTLEMENT_VERIFIED_SOURCE_COMMIT",
+    "HOSTED_SETTLEMENT_VERIFIED_WORKFLOW_REF",
+)
+
+
+def _read_conformance(path: Path) -> dict[str, Any]:
+    """What the producer says it serves, from the artifact it generated.
+
+    Both modes read the contract from here rather than from a restatement of
+    it. For a released producer this file's hash is pinned by the signed
+    manifest, so the trust root is the same one that was there before; for a
+    locally built one there is no trust root and none is claimed.
+    """
+
+    try:
+        document = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        raise ComposePreparationError(
+            f"cannot read the hosted contract artifact {path}: {exc}"
+        ) from exc
+    if not isinstance(document, dict):
+        raise ComposePreparationError(f"hosted contract artifact {path} is not an object")
+    identity_contract = document.get("identity_contract")
+    if not isinstance(identity_contract, dict):
+        raise ComposePreparationError(
+            f"hosted contract artifact {path} declares no identity contract"
+        )
+    capabilities = identity_contract.get("capabilities")
+    funding_profiles = document.get("funding_profiles")
+    api_version = document.get("api_version")
+    schema_version = document.get("schema_version")
+    if (
+        not isinstance(capabilities, list)
+        or not capabilities
+        or not isinstance(funding_profiles, list)
+        or not funding_profiles
+        or not isinstance(api_version, str)
+        or not api_version
+        or not isinstance(schema_version, int)
+    ):
+        raise ComposePreparationError(
+            f"hosted contract artifact {path} does not state the contract it serves"
+        )
+    return {
+        "api_version": api_version,
+        "schema_version": schema_version,
+        "funding_profiles": funding_profiles,
+        "capabilities": capabilities,
+    }
+
+
+def _local_hosted_artifacts(
+    directory: Path | None, release_version: str = ""
+) -> tuple[dict[str, Any], str, str]:
+    """Read a locally built producer from the artifacts that build generated.
+
+    Fails closed and names what is missing. Falling back to another release's
+    coordinates would compose an authority under a contract nothing here has
+    seen, which is the failure this whole path exists to make impossible.
+    """
+
+    if directory is None or not directory.is_dir():
+        raise ComposePreparationError(
+            "a local hosted image must name the directory its release artifacts "
+            f"were generated into (got {directory})"
+        )
+    if not release_version:
+        # A producer's build directory accumulates every version it has ever
+        # generated artifacts for. Which one the image serves is not inferable
+        # from the directory, so it is either stated or there is exactly one.
+        staged = sorted(directory.glob("conformance-v*.json"))
+        if len(staged) != 1:
+            raise ComposePreparationError(
+                f"found {len(staged)} conformance-v*.json in {directory}; name "
+                "the version the local image serves"
+            )
+        release_version = staged[0].name[len("conformance-v") : -len(".json")]
+    conformance_path = directory / f"conformance-v{release_version}.json"
+    contract = _read_conformance(conformance_path)
+    required = {
+        "conformance": conformance_path,
+        "openapi": directory / f"openapi-v{release_version}.json",
+        "migrations": directory / f"migrations-v{contract['schema_version']}.json",
+    }
+    missing = sorted(name for name, path in required.items() if not path.is_file())
+    if missing:
+        raise ComposePreparationError(
+            "the local hosted build generated no "
+            + ", ".join(missing)
+            + f" artifact in {directory}"
+        )
+    # Compose hands the authority a digest and the authority reports it back,
+    # so unlike a provenance coordinate this one cannot be empty. It is a hash
+    # of what the build generated and of nothing else: it names the build the
+    # run composes without claiming a release published it. The signed manifest
+    # hash renders empty beside it, which is what says there is no release.
+    summary = json.dumps(
+        {
+            path.name: hashlib.sha256(path.read_bytes()).hexdigest()
+            for path in sorted(required.values())
+        },
+        separators=(",", ":"),
+        sort_keys=True,
+    ).encode()
+    fingerprint = "sha256:" + hashlib.sha256(summary).hexdigest()
+    return contract, release_version, fingerprint
+
+
+def _hosted_provenance(production: dict[str, Any], *, release_dir: str) -> dict[str, str]:
+    """Who published this producer, and from what.
+
+    Every value here comes from a signature or from a hash covered by one.
+    None of it has a local counterpart, which is why the local path renders the
+    whole group empty instead of filling it from the build.
+    """
+
+    artifact_sha256 = production["artifact_sha256"]
+    return {
+        "HOSTED_SETTLEMENT_VERIFIED_AUTHORITY_ADDRESS": str(
+            production["authority_address"]
+        ),
+        "HOSTED_SETTLEMENT_VERIFIED_AUTHORITY_ID": str(production["authority_id"]),
+        "HOSTED_SETTLEMENT_VERIFIED_AUTHORITY_SCHEME": str(
+            production["authority_scheme"]
+        ),
+        "HOSTED_SETTLEMENT_VERIFIED_CLIENT_WHEEL_SHA256": "sha256:"
+        + str(production["client_wheel_sha256"]),
+        "HOSTED_SETTLEMENT_VERIFIED_CONFORMANCE_SHA256": str(
+            artifact_sha256["conformance"]
+        ),
+        "HOSTED_SETTLEMENT_VERIFIED_MANIFEST_SHA256": "sha256:"
+        + str(production["manifest_sha256"]),
+        "HOSTED_SETTLEMENT_VERIFIED_MIGRATIONS_SHA256": str(
+            artifact_sha256["migrations"]
+        ),
+        "HOSTED_SETTLEMENT_VERIFIED_OPENAPI_SHA256": str(artifact_sha256["openapi"]),
+        "HOSTED_SETTLEMENT_VERIFIED_PROVENANCE_SHA256": str(
+            artifact_sha256["provenance"]
+        ),
+        "HOSTED_SETTLEMENT_VERIFIED_SERVICE_WHEEL_SHA256": "sha256:"
+        + str(production["service_wheel_sha256"]),
+        "HOSTED_SETTLEMENT_VERIFIED_SOURCE_COMMIT": str(production["source_commit"]),
+        "HOSTED_SETTLEMENT_VERIFIED_WORKFLOW_REF": str(production["workflow_ref"]),
+        "HOSTED_SETTLEMENT_VERIFIED_MANIFEST_DIGEST": str(
+            production["manifest_digest"]
+        ),
+        "HOSTED_SETTLEMENT_VERIFIED_RELEASE_DIR": release_dir,
+        "HOSTED_SETTLEMENT_VERIFIED_REPOSITORY": str(production["repository"]),
+    }
+
+
+def _hosted_contract(
     *,
-    trust_path: Path,
-    manifest_path: Path,
-    wheel_path: Path,
-    marketplace_manifest_path: Path,
+    release_version: Any,
+    api_version: Any,
+    schema_version: Any,
+    funding_profiles: Any,
+    capabilities: Any,
+) -> dict[str, str]:
+    """What the producer serves.
+
+    A build answers all of this about itself, which is why a locally built
+    producer can fill the group from the artifacts it generated rather than
+    from a release that does not exist.
+    """
+
+    return {
+        "HOSTED_SETTLEMENT_VERIFIED_API_VERSION": str(api_version),
+        "HOSTED_SETTLEMENT_VERIFIED_CAPABILITIES": ",".join(
+            str(value) for value in capabilities
+        ),
+        "HOSTED_SETTLEMENT_VERIFIED_FUNDING_PROFILES": ",".join(
+            str(value) for value in funding_profiles
+        ),
+        "HOSTED_SETTLEMENT_VERIFIED_RELEASE_VERSION": str(release_version),
+        "HOSTED_SETTLEMENT_VERIFIED_SCHEMA_VERSION": str(schema_version),
+    }
+
+
+def _marketplace_contract(
+    *,
+    release_mode: str,
+    local_marketplace_image: str,
+    marketplace_manifest_path: Path | None,
     marketplace_manifest_sha256: str,
     marketplace_commit: str,
     marketplace_workflow_ref: str,
     marketplace_workflow_run_id: str,
     marketplace_image_digest: str,
-    output_path: Path,
-) -> str:
-    production: dict[str, Any] = _VERIFIER.verify_release(
-        trust_path=_required_file(trust_path, "HOSTED_RELEASE_TRUST"),
-        manifest_path=_required_file(manifest_path, "HOSTED_RELEASE_MANIFEST"),
-        wheel_path=_required_file(wheel_path, "HOSTED_CLIENT_WHEEL"),
-    )
-    marketplace: dict[str, Any] = _MARKETPLACE_VERIFIER.verify_marketplace_release(
+) -> dict[str, str]:
+    """Bind the consumer half, released or built here."""
+
+    if release_mode != "attested":
+        if not local_marketplace_image:
+            raise ComposePreparationError(
+                "a local environment must name the marketplace image it runs"
+            )
+        return {
+            **{name: "" for name in _LOCAL_MARKETPLACE_COORDINATES},
+            "HOSTED_MARKETPLACE_VERIFIED_REPOSITORY": "arkhai-io/simple-compute-market",
+            "HOSTED_MARKETPLACE_VERIFIED_IMAGE": local_marketplace_image,
+        }
+    marketplace = _MARKETPLACE_VERIFIER.verify_marketplace_release(
         manifest_path=_required_file(
             marketplace_manifest_path,
             "HOSTED_MARKETPLACE_RELEASE_MANIFEST",
@@ -110,24 +331,7 @@ def prepare_compose_env(
         expected_workflow_run_id=marketplace_workflow_run_id,
         expected_image_digest=marketplace_image_digest,
     )
-    verified_image = _image(
-        production["service_image_reference"], production["service_image_digest"]
-    )
-    verified_manifest_sha256 = "sha256:" + str(production["manifest_sha256"])
-    verified_manifest_digest = str(production["manifest_digest"])
-    verified_client_sha256 = "sha256:" + str(production["client_wheel_sha256"])
-    verified_release_dir = str(manifest_path.resolve().parent)
-    verified_source_commit = str(production["source_commit"])
-    verified_repository = str(production["repository"])
-    verified_workflow_ref = str(production["workflow_ref"])
-    verified_authority_id = str(production["authority_id"])
-    verified_authority_scheme = str(production["authority_scheme"])
-    verified_authority_address = str(production["authority_address"])
-    verified_marketplace_image = _image(
-        marketplace["service_image_reference"],
-        marketplace["service_image_digest"],
-    )
-    verified_marketplace_contract = {
+    return {
         "HOSTED_MARKETPLACE_VERIFIED_ARTIFACT_PROVENANCE_SHA256": str(
             marketplace["artifacts"]["provenance"]["sha256"]
         ),
@@ -137,132 +341,188 @@ def prepare_compose_env(
         "HOSTED_MARKETPLACE_VERIFIED_ARTIFACT_WHEELHOUSE_SHA256": str(
             marketplace["artifacts"]["wheelhouse"]["sha256"]
         ),
-        "HOSTED_MARKETPLACE_VERIFIED_IMAGE": verified_marketplace_image,
+        "HOSTED_MARKETPLACE_VERIFIED_IMAGE": _image(
+            marketplace["service_image_reference"],
+            marketplace["service_image_digest"],
+        ),
         "HOSTED_MARKETPLACE_VERIFIED_MANIFEST_SHA256": str(
             marketplace["manifest_sha256"]
         ),
         "HOSTED_MARKETPLACE_VERIFIED_REPOSITORY": str(marketplace["repository"]),
-        "HOSTED_MARKETPLACE_VERIFIED_SOURCE_COMMIT": str(
-            marketplace["source_commit"]
-        ),
-        "HOSTED_MARKETPLACE_VERIFIED_WORKFLOW_REF": str(
-            marketplace["workflow_ref"]
-        ),
+        "HOSTED_MARKETPLACE_VERIFIED_SOURCE_COMMIT": str(marketplace["source_commit"]),
+        "HOSTED_MARKETPLACE_VERIFIED_WORKFLOW_REF": str(marketplace["workflow_ref"]),
         "HOSTED_MARKETPLACE_VERIFIED_WORKFLOW_RUN_ID": str(
             marketplace["workflow_run_id"]
         ),
     }
-    verified_contract = {
-        "HOSTED_SETTLEMENT_VERIFIED_API_VERSION": str(production["api_version"]),
-        "HOSTED_SETTLEMENT_VERIFIED_CAPABILITIES": ",".join(
-            str(value) for value in production["capabilities"]
+
+
+def _local_hosted_contract(
+    local_hosted_image: str,
+    hosted_artifacts_path: Path | None,
+    hosted_release_version: str = "",
+) -> dict[str, str]:
+    """Bind a producer built here: no provenance, the contract from the build."""
+
+    if "@" in local_hosted_image:
+        raise ComposePreparationError(
+            "a locally built producer names the image it runs, not a registry digest"
+        )
+    contract, release_version, fingerprint = _local_hosted_artifacts(
+        hosted_artifacts_path, hosted_release_version
+    )
+    assert hosted_artifacts_path is not None
+    return {
+        **{name: "" for name in _LOCAL_HOSTED_COORDINATES},
+        "HOSTED_SETTLEMENT_VERIFIED_REPOSITORY": "arkhai-io/stripe-settlement-service",
+        "HOSTED_SETTLEMENT_VERIFIED_IMAGE": local_hosted_image,
+        "HOSTED_SETTLEMENT_VERIFIED_MANIFEST_DIGEST": fingerprint,
+        "HOSTED_SETTLEMENT_VERIFIED_RELEASE_DIR": str(
+            hosted_artifacts_path.resolve()
         ),
-        "HOSTED_SETTLEMENT_VERIFIED_CONFORMANCE_SHA256": str(
-            production["artifact_sha256"]["conformance"]
-        ),
-        "HOSTED_SETTLEMENT_VERIFIED_FUNDING_PROFILES": ",".join(
-            str(value) for value in production["funding_profiles"]
-        ),
-        "HOSTED_SETTLEMENT_VERIFIED_MIGRATIONS_SHA256": str(
-            production["artifact_sha256"]["migrations"]
-        ),
-        "HOSTED_SETTLEMENT_VERIFIED_OPENAPI_SHA256": str(
-            production["artifact_sha256"]["openapi"]
-        ),
-        "HOSTED_SETTLEMENT_VERIFIED_PROVENANCE_SHA256": str(
-            production["artifact_sha256"]["provenance"]
-        ),
-        "HOSTED_SETTLEMENT_VERIFIED_RELEASE_VERSION": str(
-            production["release_version"]
-        ),
-        "HOSTED_SETTLEMENT_VERIFIED_SCHEMA_VERSION": str(
-            production["schema_version"]
-        ),
-        "HOSTED_SETTLEMENT_VERIFIED_SERVICE_WHEEL_SHA256": "sha256:"
-        + str(production["service_wheel_sha256"]),
+        **_hosted_contract(release_version=release_version, **contract),
     }
-    for name, expected in verified_contract.items():
+
+
+def _render(
+    output_path: Path, *, marketplace: dict[str, str], hosted: dict[str, str]
+) -> str:
+    for name, expected in {**marketplace, **hosted}.items():
         _reject_mismatched_override(name, expected)
-    for name, expected in verified_marketplace_contract.items():
-        _reject_mismatched_override(name, expected)
-    _reject_mismatched_override("HOSTED_SETTLEMENT_VERIFIED_IMAGE", verified_image)
-    _reject_mismatched_override(
-        "HOSTED_SETTLEMENT_VERIFIED_MANIFEST_SHA256",
-        verified_manifest_sha256,
-    )
-    _reject_mismatched_override(
-        "HOSTED_SETTLEMENT_VERIFIED_MANIFEST_DIGEST",
-        verified_manifest_digest,
-    )
-    _reject_mismatched_override(
-        "HOSTED_SETTLEMENT_VERIFIED_CLIENT_WHEEL_SHA256",
-        verified_client_sha256,
-    )
-    _reject_mismatched_override(
-        "HOSTED_SETTLEMENT_VERIFIED_RELEASE_DIR",
-        verified_release_dir,
-    )
-    _reject_mismatched_override(
-        "HOSTED_SETTLEMENT_VERIFIED_SOURCE_COMMIT",
-        verified_source_commit,
-    )
-    _reject_mismatched_override(
-        "HOSTED_SETTLEMENT_VERIFIED_REPOSITORY",
-        verified_repository,
-    )
-    _reject_mismatched_override(
-        "HOSTED_SETTLEMENT_VERIFIED_WORKFLOW_REF",
-        verified_workflow_ref,
-    )
-    _reject_mismatched_override(
-        "HOSTED_SETTLEMENT_VERIFIED_AUTHORITY_ID",
-        verified_authority_id,
-    )
-    _reject_mismatched_override(
-        "HOSTED_SETTLEMENT_VERIFIED_AUTHORITY_SCHEME",
-        verified_authority_scheme,
-    )
-    _reject_mismatched_override(
-        "HOSTED_SETTLEMENT_VERIFIED_AUTHORITY_ADDRESS",
-        verified_authority_address,
-    )
-    content = _render_env(
-        {
-            "HOSTED_SETTLEMENT_VERIFIED_AUTHORITY_ADDRESS": verified_authority_address,
-            "HOSTED_SETTLEMENT_VERIFIED_AUTHORITY_ID": verified_authority_id,
-            "HOSTED_SETTLEMENT_VERIFIED_AUTHORITY_SCHEME": verified_authority_scheme,
-            "HOSTED_SETTLEMENT_VERIFIED_CLIENT_WHEEL_SHA256": verified_client_sha256,
-            "HOSTED_SETTLEMENT_VERIFIED_IMAGE": verified_image,
-            "HOSTED_SETTLEMENT_VERIFIED_MANIFEST_SHA256": verified_manifest_sha256,
-            "HOSTED_SETTLEMENT_VERIFIED_MANIFEST_DIGEST": verified_manifest_digest,
-            "HOSTED_SETTLEMENT_VERIFIED_RELEASE_DIR": verified_release_dir,
-            "HOSTED_SETTLEMENT_VERIFIED_SOURCE_COMMIT": verified_source_commit,
-            "HOSTED_SETTLEMENT_VERIFIED_REPOSITORY": verified_repository,
-            "HOSTED_SETTLEMENT_VERIFIED_WORKFLOW_REF": verified_workflow_ref,
-            **verified_marketplace_contract,
-            **verified_contract,
-        }
-    )
+    content = _render_env({**marketplace, **hosted})
     output_path.parent.mkdir(parents=True, exist_ok=True)
     temporary = output_path.with_name(f".{output_path.name}.tmp")
     temporary.write_text(content, encoding="utf-8")
     temporary.replace(output_path)
-    return verified_image
+    return hosted["HOSTED_SETTLEMENT_VERIFIED_IMAGE"]
+
+
+def prepare_compose_env(
+    *,
+    trust_path: Path,
+    manifest_path: Path,
+    wheel_path: Path,
+    marketplace_manifest_path: Path | None,
+    marketplace_manifest_sha256: str,
+    marketplace_commit: str,
+    marketplace_workflow_ref: str,
+    marketplace_workflow_run_id: str,
+    marketplace_image_digest: str,
+    output_path: Path,
+    release_mode: str = "attested",
+    local_marketplace_image: str = "",
+    local_hosted_image: str = "",
+    hosted_artifacts_path: Path | None = None,
+    hosted_release_version: str = "",
+) -> str:
+    """Render the Compose environment the stack runs under.
+
+    Either half may be a release or a build made here, in any combination. A
+    released half is bound by its signed coordinates; a locally built one
+    renders the same key set with those coordinates empty, and fills what it
+    can answer -- the contract it serves -- from the artifacts it generated.
+    """
+
+    if local_hosted_image:
+        return _render(
+            output_path,
+            marketplace=_marketplace_contract(
+                release_mode=release_mode,
+                local_marketplace_image=local_marketplace_image,
+                marketplace_manifest_path=marketplace_manifest_path,
+                marketplace_manifest_sha256=marketplace_manifest_sha256,
+                marketplace_commit=marketplace_commit,
+                marketplace_workflow_ref=marketplace_workflow_ref,
+                marketplace_workflow_run_id=marketplace_workflow_run_id,
+                marketplace_image_digest=marketplace_image_digest,
+            ),
+            hosted=_local_hosted_contract(
+                local_hosted_image, hosted_artifacts_path, hosted_release_version
+            ),
+        )
+    production: dict[str, Any] = _VERIFIER.verify_release(
+        trust_path=_required_file(trust_path, "HOSTED_RELEASE_TRUST"),
+        manifest_path=_required_file(manifest_path, "HOSTED_RELEASE_MANIFEST"),
+        wheel_path=_required_file(wheel_path, "HOSTED_CLIENT_WHEEL"),
+    )
+    return _render(
+        output_path,
+        marketplace=_marketplace_contract(
+            release_mode=release_mode,
+            local_marketplace_image=local_marketplace_image,
+            marketplace_manifest_path=marketplace_manifest_path,
+            marketplace_manifest_sha256=marketplace_manifest_sha256,
+            marketplace_commit=marketplace_commit,
+            marketplace_workflow_ref=marketplace_workflow_ref,
+            marketplace_workflow_run_id=marketplace_workflow_run_id,
+            marketplace_image_digest=marketplace_image_digest,
+        ),
+        hosted={
+            **_hosted_provenance(
+                production, release_dir=str(manifest_path.resolve().parent)
+            ),
+            **_hosted_contract(
+                release_version=production["release_version"],
+                **_read_conformance(
+                    manifest_path.parent / production["artifacts"]["conformance"]
+                ),
+            ),
+            "HOSTED_SETTLEMENT_VERIFIED_IMAGE": _image(
+                production["service_image_reference"],
+                production["service_image_digest"],
+            ),
+        },
+    )
 
 
 def main() -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--trust", type=Path, required=True)
-    parser.add_argument("--manifest", type=Path, required=True)
-    parser.add_argument("--wheel", type=Path, required=True)
+    parser.add_argument("--trust", type=Path)
+    parser.add_argument("--manifest", type=Path)
+    parser.add_argument("--wheel", type=Path)
     parser.add_argument("--output", type=Path, required=True)
-    parser.add_argument("--marketplace-manifest", type=Path, required=True)
-    parser.add_argument("--marketplace-manifest-sha256", required=True)
-    parser.add_argument("--marketplace-source-commit", required=True)
-    parser.add_argument("--marketplace-workflow-ref", required=True)
-    parser.add_argument("--marketplace-workflow-run-id", required=True)
-    parser.add_argument("--marketplace-image-digest", required=True)
+    parser.add_argument("--marketplace-manifest", type=Path)
+    parser.add_argument("--marketplace-manifest-sha256", default="")
+    parser.add_argument("--marketplace-source-commit", default="")
+    parser.add_argument("--marketplace-workflow-ref", default="")
+    parser.add_argument("--marketplace-workflow-run-id", default="")
+    parser.add_argument("--marketplace-image-digest", default="")
+    parser.add_argument("--local-marketplace-image", default="")
+    parser.add_argument(
+        "--local-hosted-image",
+        default="",
+        help="run a hosted settlement authority built here instead of a "
+        "published release; the run is a development run either way",
+    )
+    parser.add_argument(
+        "--hosted-release-version",
+        default="",
+        help="which version the local image serves; a producer's build "
+        "directory accumulates the artifacts of every version it has built",
+    )
+    parser.add_argument(
+        "--hosted-artifacts",
+        type=Path,
+        help="the directory a locally built producer generated its OpenAPI, "
+        "conformance, and migration artifacts into",
+    )
+    parser.add_argument(
+        "--release-mode",
+        choices=("attested", "local"),
+        default="attested",
+        help="attested verifies a released consumer; local renders the same "
+        "environment for a development stack that has none.",
+    )
     args = parser.parse_args()
+    if args.release_mode == "attested" and args.marketplace_manifest is None:
+        parser.error("--marketplace-manifest is required for an attested environment")
+    if args.local_hosted_image:
+        if args.hosted_artifacts is None:
+            parser.error("--local-hosted-image requires --hosted-artifacts")
+    elif args.trust is None or args.manifest is None or args.wheel is None:
+        parser.error(
+            "--trust, --manifest, and --wheel are required for a released producer"
+        )
     try:
         image = prepare_compose_env(
             trust_path=args.trust,
@@ -275,6 +535,11 @@ def main() -> int:
             marketplace_workflow_run_id=args.marketplace_workflow_run_id,
             marketplace_image_digest=args.marketplace_image_digest,
             output_path=args.output,
+            release_mode=args.release_mode,
+            local_marketplace_image=args.local_marketplace_image,
+            local_hosted_image=args.local_hosted_image,
+            hosted_artifacts_path=args.hosted_artifacts,
+            hosted_release_version=args.hosted_release_version,
         )
     except (
         _VERIFIER.ReleaseVerificationError,

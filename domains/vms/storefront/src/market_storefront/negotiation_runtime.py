@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from typing import Any
 
 from arkhai_vms import DIMENSION_KEYS as _DIMENSION_COMPUTE_KEYS
@@ -31,7 +31,7 @@ from market_core.schemas import (
     SettlementPlan,
     SettlementSelection,
 )
-from market_hosted_settlement import HostedObligationParams
+from market_hosted_settlement import default_hosted_selection_dispatch
 from market_identity import Identity
 from market_negotiation_runtime import (
     Acceptance,
@@ -52,6 +52,10 @@ from market_storefront.services.capacity_client import capacity_binding_for_list
 from market_storefront.utils.config import CHAINS, get_evm_wallet_address, settings
 
 logger = logging.getLogger(__name__)
+
+AcceptedObligationDispatch = Mapping[
+    str, Callable[[Mapping[str, Any], Mapping[str, Any]], Any]
+]
 
 
 def _negotiation_settings() -> Any:
@@ -352,18 +356,26 @@ def _accepted_vm_service_terms(
     }
 
 
-def _accepted_hosted_artifacts(
+def _accepted_selection_artifacts(
+    dispatch: AcceptedObligationDispatch,
     *,
     selection: Mapping[str, Any],
     option: Mapping[str, Any],
     agreed_amount: int,
+    duration_seconds: int,
     buyer_principal: Identity,
     seller_principal: Identity,
     listing: Mapping[str, Any],
     provision_terms: Any,
 ) -> dict[str, Any]:
-    if agreed_amount < 1:
-        raise OfferUnfulfillableError("hosted_amount_below_one_minor_unit")
+    """Build the accepted plan through the selected mechanism's registration.
+
+    The mechanism is resolved exactly once — from the selection — and the
+    obligation is built by the composed registry dispatch. The domain keeps
+    only domain semantics: the negotiated duration that scales time rates,
+    and the plan's ``vm.v1`` service terms.
+    """
+
     accepted = SettlementSelection.model_validate(selection)
     try:
         advertised_option = SettlementOption.model_validate(option)
@@ -374,57 +386,46 @@ def _accepted_hosted_artifacts(
         or accepted.mechanism != advertised_option.mechanism
     ):
         raise OfferUnfulfillableError("settlement_selection_not_exact")
-    if accepted.mechanism != "fiat.stripe.v1":
-        raise OfferUnfulfillableError("hosted_mechanism_not_exact")
-    params = dict(advertised_option.params)
-    condition = params.get("condition")
-    currency = advertised_option.asset
-    if (
-        not isinstance(currency, str)
-        or len(currency) != 3
-        or not currency.isalpha()
-        or currency != currency.lower()
-    ):
-        raise OfferUnfulfillableError("hosted_currency_not_exact")
-    if not isinstance(condition, dict):
-        raise OfferUnfulfillableError("hosted_condition_unavailable")
-    advertised_claimant = Identity.model_validate(params.get("claimant_principal"))
-    if advertised_claimant != seller_principal:
-        raise OfferUnfulfillableError("hosted_claimant_principal_mismatch")
-    params["payer_principal"] = buyer_principal.model_dump(mode="json")
-    params["claimant_principal"] = seller_principal.model_dump(mode="json")
-    if "funding_authorization_ref" in params:
-        raise OfferUnfulfillableError(
-            "hosted_authorization_not_allowed_before_acceptance"
-        )
+    build_obligation = dispatch.get(accepted.mechanism)
+    if build_obligation is None:
+        raise OfferUnfulfillableError("settlement_mechanism_unsupported")
+    listing_id = listing.get("listing_id")
+    if not isinstance(listing_id, str) or not listing_id:
+        raise OfferUnfulfillableError("hosted_listing_identity_unavailable")
     try:
-        params = HostedObligationParams.model_validate(
-            {**params, "funding_authorization_ref": "accepted-plan-validation"}
-        ).model_dump(mode="json", exclude={"funding_authorization_ref"})
+        built = build_obligation(
+            advertised_option.model_dump(mode="json"),
+            {
+                "buyer_principal": buyer_principal.model_dump(mode="json"),
+                "seller_principal": seller_principal.model_dump(mode="json"),
+                "expiration_unix": accepted.expiration_unix,
+                "duration_seconds": int(duration_seconds),
+                "domain_param_keys": (),
+                "listing_id": listing_id,
+            },
+        )
     except (TypeError, ValueError) as exc:
         raise OfferUnfulfillableError("hosted_settlement_option_not_exact") from exc
-    plan = SettlementPlan(
-        buyer_principal=buyer_principal.model_dump(mode="json"),
-        seller_principal=seller_principal.model_dump(mode="json"),
-        service_terms=_accepted_vm_service_terms(
-            listing=listing,
-            provision_terms=provision_terms,
-        ),
-        obligations=[
-            SettlementObligation(
-                payer="buyer",
-                claimant="seller",
-                payer_principal=buyer_principal.model_dump(mode="json"),
-                claimant_principal=seller_principal.model_dump(mode="json"),
-                amount=agreed_amount,
-                asset=advertised_option.asset,
-                expiration_unix=accepted.expiration_unix,
-                conditions=[condition],
-                mechanism=accepted.mechanism,
-                params=params,
-            )
-        ],
-    )
+    if built.amount is not None:
+        if agreed_amount != built.amount:
+            raise OfferUnfulfillableError("hosted_amount_not_duration_scaled")
+    elif agreed_amount:
+        raise OfferUnfulfillableError("selection_amount_not_negotiable")
+    try:
+        plan = SettlementPlan(
+            buyer_principal=buyer_principal.model_dump(mode="json"),
+            seller_principal=seller_principal.model_dump(mode="json"),
+            service_terms={
+                **built.service_terms,
+                **_accepted_vm_service_terms(
+                    listing=listing,
+                    provision_terms=provision_terms,
+                ),
+            },
+            obligations=[SettlementObligation.model_validate(built.obligation)],
+        )
+    except (TypeError, ValueError) as exc:
+        raise OfferUnfulfillableError("hosted_settlement_option_not_exact") from exc
     return {
         "settlement_selection": accepted.model_dump(),
         "settlement_plan": plan.model_dump(),
@@ -432,6 +433,7 @@ def _accepted_hosted_artifacts(
 
 
 def _accepted_settlement_artifacts(
+    dispatch: AcceptedObligationDispatch,
     *,
     domain: MarketDomainContract,
     capacity_binding: CapacityBinding,
@@ -467,10 +469,12 @@ def _accepted_settlement_artifacts(
         )
         if option is None:
             raise OfferUnfulfillableError("settlement_selection_not_exact")
-        return _accepted_hosted_artifacts(
+        return _accepted_selection_artifacts(
+            dispatch,
             selection=selection.model_dump(),
             option=option,
             agreed_amount=agreed_amount,
+            duration_seconds=duration_seconds,
             listing=listing,
             provision_terms=provision_terms,
             buyer_principal=buyer_principal,
@@ -494,11 +498,13 @@ def _build_response_artifacts(
     domain: MarketDomainContract,
     acceptance: Acceptance,
     accepted: bool,
+    dispatch: AcceptedObligationDispatch,
 ) -> Mapping[str, Any]:
     if not isinstance(acceptance.binding, CapacityBinding):
         raise RuntimeError("VM negotiation has no frozen capacity binding")
     if accepted:
         return _accepted_settlement_artifacts(
+            dispatch,
             capacity_binding=acceptance.binding,
             negotiation_id=acceptance.negotiation_id,
             listing_id=acceptance.listing_id,
@@ -538,10 +544,12 @@ def _build_response_artifacts(
     selection = state.get("accepted_settlement_selection")
     option = state.get("accepted_settlement_option")
     if isinstance(selection, Mapping) and isinstance(option, Mapping):
-        artifacts = _accepted_hosted_artifacts(
+        artifacts = _accepted_selection_artifacts(
+            dispatch,
             selection=selection,
             option=option,
             agreed_amount=acceptance.agreed_amount,
+            duration_seconds=acceptance.agreement.duration_seconds,
             buyer_principal=acceptance.buyer_principal,
             seller_principal=acceptance.seller_principal,
             listing=acceptance.listing_record,
@@ -686,8 +694,15 @@ def build_vm_negotiation_runtime(
     binding: StorefrontDomainBinding,
     capacity_runtime: CapacityRuntime,
     seller_round_hook: SellerRoundHook | None = None,
+    accepted_obligation_dispatch: AcceptedObligationDispatch | None = None,
 ) -> NegotiationRuntime:
     """Compose the shared lifecycle with the exact registered VM contract."""
+
+    dispatch = (
+        accepted_obligation_dispatch
+        if accepted_obligation_dispatch is not None
+        else default_hosted_selection_dispatch()
+    )
 
     if not isinstance(registry, StorefrontDomainRegistry):
         raise TypeError("registry must be a StorefrontDomainRegistry")
@@ -917,6 +932,7 @@ def build_vm_negotiation_runtime(
             domain,
             acceptance,
             accepted,
+            dispatch,
         ),
         decision_wire=_decision_wire,
         listing_is_live=lambda record: str(record.get("status") or "").strip()

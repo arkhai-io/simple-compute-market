@@ -32,6 +32,12 @@ from core_storefront import (
     StorefrontThreadBinding,
     build_storefront_derivation_key,
 )
+from market_contact_exchange import (
+    CONTACT_EXCHANGE_MIGRATIONS,
+    IntroductionRecord,
+    insert_introduction,
+    load_introduction,
+)
 from market_settlement_runtime import settlement_migrations
 from market_identity import Identity
 from pydantic import BaseModel
@@ -73,7 +79,42 @@ class SQLiteClient(CoreSQLiteClient):
         )
 
     def _domain_migrations(self) -> tuple[MigrationLike, ...]:
-        return (*settlement_migrations(), *BARE_METAL_STOREFRONT_MIGRATIONS)
+        return (
+            *settlement_migrations(),
+            *CONTACT_EXCHANGE_MIGRATIONS,
+            *BARE_METAL_STOREFRONT_MIGRATIONS,
+        )
+
+    async def save_contact_introduction(
+        self,
+        record: IntroductionRecord,
+    ) -> IntroductionRecord:
+        """Persist one revealed introduction exactly once (idempotent replays)."""
+
+        def _save() -> IntroductionRecord:
+            conn = sqlite3.connect(self.db_path)
+            try:
+                stored = insert_introduction(conn, record)
+                conn.commit()
+                return stored
+            finally:
+                conn.close()
+
+        return await asyncio.to_thread(_save)
+
+    async def load_contact_introduction(
+        self,
+        *,
+        obligation_ref: str,
+    ) -> IntroductionRecord | None:
+        def _load() -> IntroductionRecord | None:
+            conn = sqlite3.connect(self.db_path)
+            try:
+                return load_introduction(conn, obligation_ref)
+            finally:
+                conn.close()
+
+        return await asyncio.to_thread(_load)
 
     async def is_global_paused(self) -> bool:
         """Return the durable storefront-wide negotiation pause state."""

@@ -12,10 +12,12 @@ from .adapter import (
     EXPECTED_HOSTED_RESPONSE_PROTOCOL,
     MECHANISM,
     REQUIRED_HOSTED_CAPABILITIES,
+    RETURN_INSTRUCTIONS_EMAIL_OPTION,
     HostedConditionalEscrowClient,
     HostedObligationParams,
     MarketplaceSignerAdapter,
     adapt_expected_authorities,
+    hosted_projected_reason,
 )
 from .authorization import (
     AcceptedFundingAuthorization,
@@ -40,6 +42,7 @@ from .automation import (
     evaluate_off_session_policy,
 )
 from .payer import (
+    DIRECT_INSTRUMENT_SETUP_CAPABILITY,
     HostedPayerError,
     HostedPayerFacade,
     PayerCommandContext,
@@ -66,6 +69,8 @@ from .settlement_config import (
     StripeResolverConfig,
     StripeSettlementConfig,
     create_stripe_registration,
+    default_hosted_selection_dispatch,
+    stripe_accepted_obligation_builder,
     stripe_contract_fingerprint,
 )
 
@@ -83,6 +88,7 @@ __all__ = [
     "EXPECTED_HOSTED_RESPONSE_PROTOCOL",
     "MECHANISM",
     "REQUIRED_HOSTED_CAPABILITIES",
+    "RETURN_INSTRUCTIONS_EMAIL_OPTION",
     "REQUIRED_STRIPE_CAPABILITIES",
     "HOSTED_SETTLEMENT_FUNDING_MIGRATION_ID",
     "HOSTED_SETTLEMENT_MIGRATIONS",
@@ -90,6 +96,7 @@ __all__ = [
     "FundingProfile",
     "STRIPE_CONFIG_KEY",
     "SUPPORTED_FUNDING_PROFILES",
+    "DIRECT_INSTRUMENT_SETUP_CAPABILITY",
     "HostedPayerError",
     "HostedPayerFacade",
     "HostedConditionalEscrowClient",
@@ -112,14 +119,17 @@ __all__ = [
     "ReservationRecord",
     "ReservationState",
     "adapt_expected_authorities",
+    "hosted_projected_reason",
     "authorization_input_fingerprint",
     "authorization_journal_path",
     "canonical_json",
     "create_stripe_registration",
+    "default_hosted_selection_dispatch",
     "create_stripe_command_group",
     "instrument_list_projection",
     "instrument_projection",
     "onboard_hosted_seller",
+    "stripe_accepted_obligation_builder",
     "payer_compatibility_context",
     "payer_profile_projection",
     "payer_setup_projection",

@@ -1,15 +1,18 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from typing import Any
 
 import pytest
 from market_identity import Identity, IdentityScheme
 
 from market_settlement_runtime import (
+    MANUAL_REASON_KEY,
     ConditionOutcome,
     EffectOutcome,
     MaterializationOutcome,
+    SettlementManualRequired,
     SettlementRuntime,
     SettlementSQLiteRepository,
     StatusOutcome,
@@ -64,6 +67,7 @@ class Client:
         self.decisions = ["ready"]
         self.collect_calls = 0
         self.reclaim_calls = 0
+        self.reclaim_options: list[dict | None] = []
 
     async def materialize(self, obligation, *, operation_ref):
         self.materialize_obligations.append(obligation)
@@ -119,9 +123,16 @@ class Client:
         )
 
     async def reclaim_expired(
-        self, obligation, *, mechanism_ref, operation_ref, mechanism_state
+        self,
+        obligation,
+        *,
+        mechanism_ref,
+        operation_ref,
+        mechanism_state,
+        mechanism_options=None,
     ):
         self.reclaim_calls += 1
+        self.reclaim_options.append(mechanism_options)
         return EffectOutcome(
             receipt={"effect": "reclaimed"}, mechanism_state=mechanism_state
         )
@@ -730,3 +741,303 @@ async def test_mechanism_params_require_exact_payer_and_pre_materialization_bind
             {"authorization": "ref"},
             local_principal=BUYER,
         )
+
+
+async def test_fulfillment_lease_outlives_a_domain_provisioning_attempt(
+    repository,
+) -> None:
+    """A slow domain fulfillment must not be handed to a second worker.
+
+    Every other operation is a bounded call to the authority, so they share the
+    short lease. Fulfillment provisions real capacity: at the default 30s a VM
+    attempt lost its lease mid-flight and a second worker re-provisioned behind
+    it, racing the first for the same reservation.
+    """
+
+    clock = {"now": 50.0}
+    runtime = SettlementRuntime(
+        repository,
+        {},
+        clock=lambda: clock["now"],
+        lease_seconds=30.0,
+        fulfillment_lease_seconds=3600.0,
+    )
+    record = await register(runtime, obligation())
+
+    assert (
+        await runtime.reserve_fulfillment(
+            record.obligation_ref,
+            local_principal=SELLER,
+            worker_id="vm-a",
+        )
+    ).status == "pending"
+
+    clock["now"] += 120.0
+    taken_over = await runtime.reserve_fulfillment(
+        record.obligation_ref,
+        local_principal=SELLER,
+        worker_id="vm-b",
+    )
+
+    assert taken_over.status == "busy"
+
+
+async def test_a_parked_obligation_keeps_its_reason_across_later_status_polls(
+    repository,
+) -> None:
+    """A park that loses its reason is a park nobody can repair.
+
+    The reason is written once, by the operation that parked the deal. Every
+    later status poll writes a fresh mechanism state, and a buyer polls
+    continuously, so a reason that is not carried forward survives for about
+    one poll interval and is then gone for good.
+    """
+
+    class ParkingClient(Client):
+        async def collect(self, obligation, **kwargs):
+            raise SettlementManualRequired(
+                "hosted settlement collection rejected: authority_refused_409",
+                code="authority_refused_409",
+            )
+
+        async def get_status(
+            self, obligation, *, mechanism_ref, operation_ref, mechanism_state
+        ):
+            # What a real adapter returns: the state it derives from the
+            # authority's current answer, not the state it was handed. The
+            # hosted adapter builds exactly this and never merges.
+            return StatusOutcome(
+                status="ready",
+                mechanism_ref=mechanism_ref,
+                mechanism_state={"financial_state": "funded"},
+            )
+
+    client = ParkingClient()
+    runtime = SettlementRuntime(repository, {"test.v1": client}, clock=lambda: 50)
+    record = await register(runtime, obligation())
+    await runtime.materialize(
+        obligation_ref=record.obligation_ref,
+        local_principal=BUYER,
+        worker_id="worker",
+    )
+    await runtime.bind_fulfillment(
+        record.obligation_ref, "fulfillment-1", local_principal=SELLER
+    )
+    await runtime.check(
+        obligation_ref=record.obligation_ref,
+        local_principal=SELLER,
+        worker_id="worker",
+    )
+    await runtime.collect(
+        obligation_ref=record.obligation_ref,
+        local_principal=SELLER,
+        worker_id="worker",
+    )
+
+    parked = await repository.load_settlement_obligation(record.obligation_ref)
+    assert parked["collection_state"] == "manual_required"
+    assert parked["mechanism_state"].get(MANUAL_REASON_KEY) == "authority_refused_409"
+
+    # The buyer polls. The authority is answering normally now — the refusal was
+    # of the collection, not of the status — so this poll names no reason.
+    await runtime.reconcile_status(
+        obligation_ref=record.obligation_ref,
+        local_principal=BUYER,
+        worker_id="worker",
+    )
+
+    after = await repository.load_settlement_obligation(record.obligation_ref)
+    assert after["collection_state"] == "manual_required", "still parked"
+    assert after["mechanism_state"].get(MANUAL_REASON_KEY) == "authority_refused_409"
+
+
+async def test_a_newer_parking_reason_replaces_the_one_being_carried(
+    repository,
+) -> None:
+    """The reason a mechanism names describes a park it knows about."""
+
+    class ParkingClient(Client):
+        async def collect(self, obligation, **kwargs):
+            raise SettlementManualRequired("collect refused", code="first_reason")
+
+        async def get_status(
+            self, obligation, *, mechanism_ref, operation_ref, mechanism_state
+        ):
+            return StatusOutcome(
+                status="ready",
+                mechanism_ref=mechanism_ref,
+                mechanism_state={MANUAL_REASON_KEY: "second_reason"},
+            )
+
+    runtime = SettlementRuntime(repository, {"test.v1": ParkingClient()}, clock=lambda: 50)
+    record = await register(runtime, obligation())
+    await runtime.materialize(
+        obligation_ref=record.obligation_ref, local_principal=BUYER, worker_id="w"
+    )
+    await runtime.bind_fulfillment(
+        record.obligation_ref, "fulfillment-1", local_principal=SELLER
+    )
+    await runtime.check(
+        obligation_ref=record.obligation_ref, local_principal=SELLER, worker_id="w"
+    )
+    await runtime.collect(
+        obligation_ref=record.obligation_ref, local_principal=SELLER, worker_id="w"
+    )
+    await runtime.reconcile_status(
+        obligation_ref=record.obligation_ref, local_principal=BUYER, worker_id="w"
+    )
+
+    after = await repository.load_settlement_obligation(record.obligation_ref)
+    assert after["mechanism_state"][MANUAL_REASON_KEY] == "second_reason"
+
+
+async def test_an_obligation_that_was_never_parked_carries_no_reason(
+    repository,
+) -> None:
+    """Nothing is manufactured: only a recorded reason is preserved."""
+
+    class PlainClient(Client):
+        async def get_status(
+            self, obligation, *, mechanism_ref, operation_ref, mechanism_state
+        ):
+            return StatusOutcome(
+                status="ready",
+                mechanism_ref=mechanism_ref,
+                mechanism_state={"financial_state": "funded"},
+            )
+
+    runtime = SettlementRuntime(repository, {"test.v1": PlainClient()}, clock=lambda: 50)
+    record = await register(runtime, obligation())
+    await runtime.materialize(
+        obligation_ref=record.obligation_ref, local_principal=BUYER, worker_id="w"
+    )
+    await runtime.reconcile_status(
+        obligation_ref=record.obligation_ref, local_principal=BUYER, worker_id="w"
+    )
+
+    after = await repository.load_settlement_obligation(record.obligation_ref)
+    assert after["collection_state"] != "manual_required"
+    assert MANUAL_REASON_KEY not in after["mechanism_state"]
+
+
+async def test_reclaim_options_reach_the_mechanism_unread(repository) -> None:
+    """The runtime is the wrong place to know what an option means.
+
+    It relays the payer's mapping to the mechanism that gave the keys meaning
+    and keeps none of it, so the durable row a later worker reads names no
+    option and no projection can leak one.
+    """
+
+    client = Client()
+    runtime = SettlementRuntime(repository, {"test.v1": client}, clock=lambda: 200)
+    record = await register(runtime, obligation())
+    await runtime.materialize(
+        obligation_ref=record.obligation_ref,
+        local_principal=BUYER,
+        worker_id="payer",
+    )
+
+    outcome = await runtime.reclaim(
+        obligation_ref=record.obligation_ref,
+        local_principal=BUYER,
+        worker_id="payer-reclaim",
+        mechanism_options={"return_instructions_email": "payer@example.test"},
+    )
+
+    assert outcome.status == "succeeded"
+    assert client.reclaim_options == [
+        {"return_instructions_email": "payer@example.test"}
+    ]
+
+    stored = await repository.load_settlement_obligation(record.obligation_ref)
+    operation = await repository.load_settlement_operation(
+        record.obligation_ref, "reclaim"
+    )
+    assert "payer@example.test" not in json.dumps(stored)
+    assert "payer@example.test" not in json.dumps(operation)
+
+
+async def test_a_reclaim_naming_different_options_is_refused(repository) -> None:
+    """Two reclaims naming different options are two different requests.
+
+    Reusing the first reservation for the second would send the mechanism an
+    address its caller never asked for, so the reservation binds what it was
+    given and the second is refused here rather than at the provider.
+    """
+
+    client = Client()
+    runtime = SettlementRuntime(repository, {"test.v1": client}, clock=lambda: 200)
+    record = await register(runtime, obligation())
+    await runtime.materialize(
+        obligation_ref=record.obligation_ref,
+        local_principal=BUYER,
+        worker_id="payer",
+    )
+    await runtime.reclaim(
+        obligation_ref=record.obligation_ref,
+        local_principal=BUYER,
+        worker_id="payer-reclaim",
+        mechanism_options={"return_instructions_email": "first@example.test"},
+    )
+
+    with pytest.raises(ValueError, match="different request"):
+        await runtime.reclaim(
+            obligation_ref=record.obligation_ref,
+            local_principal=BUYER,
+            worker_id="payer-reclaim",
+            mechanism_options={"return_instructions_email": "second@example.test"},
+        )
+
+    assert client.reclaim_calls == 1
+
+
+async def test_repeating_a_reclaim_with_the_same_options_replays(repository) -> None:
+    """A retry the payer resends unchanged is the same request, not a new one."""
+
+    client = Client()
+    runtime = SettlementRuntime(repository, {"test.v1": client}, clock=lambda: 200)
+    record = await register(runtime, obligation())
+    await runtime.materialize(
+        obligation_ref=record.obligation_ref,
+        local_principal=BUYER,
+        worker_id="payer",
+    )
+    options = {"return_instructions_email": "payer@example.test"}
+    first = await runtime.reclaim(
+        obligation_ref=record.obligation_ref,
+        local_principal=BUYER,
+        worker_id="payer-reclaim",
+        mechanism_options=options,
+    )
+
+    second = await runtime.reclaim(
+        obligation_ref=record.obligation_ref,
+        local_principal=BUYER,
+        worker_id="payer-reclaim",
+        mechanism_options=dict(options),
+    )
+
+    assert (first.status, second.status) == ("succeeded", "succeeded")
+    assert client.reclaim_calls == 1
+
+
+async def test_a_reclaim_without_options_is_unchanged(repository) -> None:
+    """A mechanism that needs no caller input sees exactly what it saw before."""
+
+    client = Client()
+    runtime = SettlementRuntime(repository, {"test.v1": client}, clock=lambda: 200)
+    record = await register(runtime, obligation())
+    await runtime.materialize(
+        obligation_ref=record.obligation_ref,
+        local_principal=BUYER,
+        worker_id="payer",
+    )
+
+    outcome = await runtime.reclaim(
+        obligation_ref=record.obligation_ref,
+        local_principal=BUYER,
+        worker_id="payer-reclaim",
+    )
+
+    assert outcome.status == "succeeded"
+    assert client.reclaim_options == [{}]

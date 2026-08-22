@@ -25,6 +25,7 @@ from market_settlement_runtime import (
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from .claim_hooks import AlkahestConditionalEscrowClient
+from .escrow_verification import verify_escrow_for_settlement
 
 ALKAHEST_MECHANISM_ID = "alkahest.v1"
 ALKAHEST_CONFIG_KEY = "alkahest"
@@ -563,7 +564,9 @@ def validate_alkahest_publication_input(
     return AlkahestPublicationInput.model_validate(value)
 
 
-def create_alkahest_registration() -> MechanismRegistration:
+def create_alkahest_registration(
+    *, command_group: Any | None = None
+) -> MechanismRegistration:
     """Return the explicit common-contract registration for Alkahest."""
 
     return MechanismRegistration(
@@ -571,9 +574,12 @@ def create_alkahest_registration() -> MechanismRegistration:
         config_key=ALKAHEST_CONFIG_KEY,
         config_model=AlkahestSettlementConfig,
         roles=frozenset({"buyer", "seller"}),
+        negotiates_scalar_amount=True,
         preflight=alkahest_preflight,
         client_factory=alkahest_client_factory,
         option_builder=alkahest_option_builder,
+        settlement_verifier=verify_escrow_for_settlement,
+        command_group=command_group,
         clause_fields=(
             SettlementClauseField(
                 descriptor=FieldDescriptor(

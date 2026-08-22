@@ -1,6 +1,6 @@
 [project]
 name = "arkhai-core-buyer"
-version = "0.3.0"
+version = "0.3.2"
 license = "MIT"
 description = "Core buyer role shell and orchestration contracts"
 requires-python = ">=3.12"
@@ -16,10 +16,13 @@ dependencies = [
   # policies themselves (listed_price/bisection middlewares) also live
   # in kit-policy and register on import.
   "arkhai-kit-policy",
+  # Installed delivery sinks: the buyer's own copy of a revealed deal,
+  # sent where they read things. No mechanism dependency comes with it.
+  "arkhai-kit-delivery==0.1.0",
   # Mechanism-neutral settlement selection and plan carriers.
   "arkhai-core>=0.2.0",
   # Installed mechanism registration, canonical priority, and recovery dispatch.
-  "arkhai-kit-settlement-runtime==0.1.0",
+  "arkhai-kit-settlement-runtime==0.1.2",
   # Canonical principals, signer injection, and v2 request/response proofs.
   "arkhai-kit-identity==0.3.0",
   # Signed registry discovery with pinned authority responses.

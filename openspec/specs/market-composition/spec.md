@@ -3,6 +3,7 @@
 ## Purpose
 
 Define the dependency direction and role/domain/plugin boundaries that keep market orchestration schema-opaque.
+
 ## Requirements
 
 ### Requirement: Hosted payer calls bypass storefront without bypassing authority
@@ -27,6 +28,7 @@ Marketplace packages, schemas, config, persistence, logs, tests, and deployment 
 
 - **WHEN** the hosted authority changes Stripe adapter implementation without changing its released public contract
 - **THEN** marketplace code and configuration require no provider-specific change
+
 ### Requirement: Schema-opaque core orchestration
 Core role packages MUST own discovery, negotiation, settlement, and servicing control flow without importing a concrete market domain or settlement mechanism.
 
@@ -220,7 +222,6 @@ The hosted client and service MUST use their released body-bound request-signing
 #### Scenario: Hosted request is signed
 - **WHEN** the adapter invokes the external authority
 - **THEN** signing binds operation, resource, canonical body hash, and timestamp under the released client contract without importing an internal marketplace auth module
-
 
 ### Requirement: From-below identity capability
 
@@ -453,10 +454,66 @@ or the released hosted client directly.
 - **WHEN** one API-credit listing has complete Alkahest and hosted configuration
 - **THEN** both alternatives share domain pricing/fulfillment semantics while retaining independent mechanism state and failure outcomes
 
+### Requirement: Pre-terms mechanism dispatch is registration-owned
+
+The settlement mechanism for a deal MUST be resolved exactly once, from the buyer's
+settlement selection or the legacy flat-proposal coercion, and every subsequent
+mechanism-shaped decision — proposal interpretation, verification, accepted-artifact
+construction, settle-route and status projection — MUST reach the resolved mechanism's
+registration hooks. Domain code MUST NOT branch on a concrete mechanism identifier at
+these decision points.
+
+#### Scenario: A third mechanism is composed
+
+- **WHEN** a new mechanism registration is added to a domain's composition root and
+  enabled in `[Settlement]`
+- **THEN** its deals negotiate, verify, settle, and report through the registration
+  hooks with no new conditional arms in any domain
+
+#### Scenario: A mechanism conditional is sought in domain code
+
+- **WHEN** the pre-terms path of any composed domain is inspected
+- **THEN** no `if <mechanism> … else` branch on a concrete mechanism identifier exists
+  outside the composition root's registration list
+
+### Requirement: Deal identity is mechanism-neutral for every mechanism
+
+Every deal, regardless of mechanism, MUST have a durable `settlement_obligations`
+record keyed by its `obligation_ref`, with any mechanism-issued identifier (such as an
+escrow uid) recorded as that mechanism's `mechanism_ref`. Cross-mechanism tooling MUST
+correlate deals by `obligation_ref`.
+
+#### Scenario: An Alkahest deal is recorded neutrally
+
+- **WHEN** an Alkahest deal settles
+- **THEN** it has a `settlement_obligations` record whose `mechanism_ref` is the
+  escrow uid, in addition to its legacy mechanism-surface records
+
+### Requirement: Delivery sinks compose without importing implementations
+
+Core and kit packages MUST assemble a configured delivery sink set through the
+installed-plugin contract alone and MUST NOT import, name, or branch on any
+concrete sink implementation. Enabling delivery MUST NOT make a mechanism kit a
+dependency of a core role package, and a sink MUST NOT be reachable only by
+importing a composition root. A sink that fails to load, fails to deliver, or
+blocks MUST NOT degrade registry discovery, negotiation, settlement, servicing, or
+command assembly.
+
+#### Scenario: Core delivers without depending on a mechanism kit
+
+- **WHEN** the core buyer role package delivers a revealed introduction
+- **THEN** it resolves sinks through the plugin contract and imports no
+  mechanism-specific package to do so
+
+#### Scenario: A sink degrades
+
+- **WHEN** an installed sink raises on load or blocks while delivering
+- **THEN** market orchestration on that side proceeds unchanged and the sink is
+  reported as a local delivery fault
+
 ## Evidence
 
 - Import boundaries: `core/tests/unit/test_carrier_purity.py` and `domains/vms/storefront/tests/unit/test_architecture_imports.py`.
 - Core CLI fallback and shipped plugin contracts: `core/buyer/tests/unit/test_cli.py`, `domains/vms/buyer/tests/test_plugin_export.py`, and `domains/apicredits/buyer/tests/test_plugin_export.py`.
 - Distribution entry points: `core/buyer/pyproject.toml`, `domains/vms/buyer/pyproject.toml`, and `domains/apicredits/buyer/pyproject.toml`.
 - Frozen storefront registry, startup discovery, record-bound lifecycle carriers, and exact-object resolution: `core/storefront/tests/unit/test_domain_registry.py`, `test_domain_plugins.py`, `test_app_composition.py`, and `test_domain_lifecycle.py`.
-

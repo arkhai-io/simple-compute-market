@@ -20,6 +20,7 @@ from arkhai_bare_metal import (
 from compute_provisioning import FulfillmentRequestBody, FulfillmentScheduleRequest
 from market_core.schemas import SettlementObligation
 from market_fulfillment import VersionedEnvelope
+from market_hosted_settlement import hosted_projected_reason
 from market_identity import Identity
 from market_settlement_runtime import (
     HostedAcceptedAgreement,
@@ -243,6 +244,9 @@ class BareMetalHostedLifecycleCallbacks:
             "settlement_ref": record.mechanism_ref,
             "funding_profile": lifecycle.accepted_binding.option.funding_profile,
             "status": self._public_status(record, lifecycle),
+            "funding_reason": hosted_projected_reason(
+                transient_receipt, record.mechanism_state
+            ),
             "physical_state": lifecycle.physical_state,
             "financial_state": lifecycle.financial_state,
             "recovery_state": lifecycle.recovery_state,

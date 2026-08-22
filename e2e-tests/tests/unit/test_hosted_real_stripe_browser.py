@@ -8,6 +8,8 @@ from src.hosted_real_stripe.browser import (
     CheckoutContractError,
     ChromiumUnavailable,
     ChromiumCheckout,
+    _await_checkout_left,
+    _browser_proxy,
     _complete_authentication,
     _disable_optional_save_details,
     _submit_checkout,
@@ -175,3 +177,120 @@ def test_authentication_challenge_classifies_interactive_captcha_as_external() -
 
     with pytest.raises(ChromiumUnavailable, match="interactive CAPTCHA"):
         _complete_authentication(page, 500)
+
+
+# ---------------------------------------------------------------------------
+# Reaching the provider
+# ---------------------------------------------------------------------------
+
+
+def test_the_browser_takes_the_proxy_this_run_reaches_the_provider_through(
+    monkeypatch,
+) -> None:
+    """Chromium reads no proxy variable, so a page loads its shell and no form."""
+
+    monkeypatch.delenv("ALL_PROXY", raising=False)
+    monkeypatch.delenv("all_proxy", raising=False)
+    monkeypatch.setenv("HTTPS_PROXY", "http://127.0.0.1:10809")
+    monkeypatch.setenv("NO_PROXY", "example.invalid")
+
+    proxy = _browser_proxy()
+
+    assert proxy is not None
+    assert proxy["server"] == "http://127.0.0.1:10809"
+    bypass = proxy["bypass"].split(",")
+    assert "example.invalid" in bypass
+    # Loopback is the staged marketplace, the authority, and the webhook
+    # forwarder; proxying any of them breaks a run that works today.
+    for host in ("localhost", "127.0.0.1", "::1"):
+        assert host in bypass
+
+
+def test_a_run_with_no_proxy_launches_without_one(monkeypatch) -> None:
+    for name in ("HTTPS_PROXY", "https_proxy", "HTTP_PROXY", "http_proxy"):
+        monkeypatch.delenv(name, raising=False)
+
+    assert _browser_proxy() is None
+
+
+def test_the_socks_proxy_is_never_taken(monkeypatch) -> None:
+    """A route only the browser could use is worse than no route.
+
+    The run's own HTTP client refuses a SOCKS proxy without an optional
+    dependency it does not install, so every other call in the run has to have
+    it stripped.
+    """
+
+    for name in ("HTTPS_PROXY", "https_proxy", "HTTP_PROXY", "http_proxy"):
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setenv("ALL_PROXY", "socks5h://127.0.0.1:10808")
+
+    assert _browser_proxy() is None
+
+
+# ---------------------------------------------------------------------------
+# A payment says whether it happened
+# ---------------------------------------------------------------------------
+
+
+class _RedirectingPage:
+    """A page that behaves the way Checkout behaves for a given submission."""
+
+    def __init__(self, *, leaves: bool) -> None:
+        self._leaves = leaves
+        self.complaints: list[str] = []
+        # No CAPTCHA: the page rejected the form on its own terms, which is a
+        # different report from an environment that refused to serve it.
+        self.frames: list[object] = []
+
+    def wait_for_url(self, predicate, *, timeout: int) -> None:
+        if not self._leaves:
+            raise TimeoutError("still on checkout.stripe.com")
+
+    def eval_on_selector_all(self, selector: str, script: str) -> list[str]:
+        return ["Your card number is incomplete."]
+
+    def content(self) -> str:
+        return "<html></html>"
+
+
+def test_a_payment_claims_its_outcome_only_after_checkout_leaves() -> None:
+    _await_checkout_left(
+        _RedirectingPage(leaves=True),
+        timeout_ms=1_000,
+        diagnose=False,
+        subject="payment",
+    )
+
+
+def test_a_silently_rejected_payment_is_reported_at_the_browser() -> None:
+    """Otherwise the lane fails minutes later as a funding timeout.
+
+    That report names neither the page nor what was done there, which is three
+    steps and several minutes removed from the thing that went wrong.
+    """
+
+    with pytest.raises(CheckoutContractError, match="submitted payment form"):
+        _await_checkout_left(
+            _RedirectingPage(leaves=False),
+            timeout_ms=1,
+            diagnose=False,
+            subject="payment",
+        )
+
+
+def test_a_rejected_setup_still_names_the_setup() -> None:
+    with pytest.raises(CheckoutContractError, match="submitted setup form"):
+        _await_checkout_left(
+            _RedirectingPage(leaves=False), timeout_ms=1, diagnose=False
+        )
+
+
+def test_a_development_run_quotes_what_the_page_said_was_wrong() -> None:
+    with pytest.raises(CheckoutContractError, match="card number is incomplete"):
+        _await_checkout_left(
+            _RedirectingPage(leaves=False),
+            timeout_ms=1,
+            diagnose=True,
+            subject="payment",
+        )

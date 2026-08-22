@@ -50,7 +50,7 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 # editable path that could bypass the package boundary exercised by release.
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv pip install --python /app/.venv/bin/python --no-deps --find-links /.dist \
-        --reinstall arkhai-apicredits-storefront==0.2.0
+        --reinstall arkhai-apicredits-storefront==0.2.3
 
 # Stage 2: runtime
 FROM --platform=linux/amd64 ghcr.io/astral-sh/uv:python3.12-bookworm-slim AS runtime

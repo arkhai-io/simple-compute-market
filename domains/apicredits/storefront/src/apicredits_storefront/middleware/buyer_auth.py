@@ -6,7 +6,10 @@ from fastapi import HTTPException, Request
 
 from core_storefront.auth import AuthError, AuthenticatedPrincipal, authenticate_request
 from market_identity import EMPTY_BODY, Identity
-from apicredits_storefront.middleware.response_auth import bind_response_auth
+from apicredits_storefront.middleware.response_auth import (
+    bind_response_auth,
+    bind_response_contract,
+)
 
 
 async def _verify(
@@ -29,6 +32,7 @@ async def _verify(
         if hasattr(body, "model_dump")
         else body
     )
+    bind_response_contract(request, operation=operation, resource=resource_id)
     try:
         authenticated = await authenticate_request(
             headers=request.headers,

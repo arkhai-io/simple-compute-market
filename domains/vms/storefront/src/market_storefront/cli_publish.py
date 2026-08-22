@@ -1159,7 +1159,8 @@ def _print_publish_table(
     summary.add_column("Price/hr x Token")
     summary.add_column("Listing ID", overflow="fold")
     summary.add_column("Status")
-    from market_core.schemas import accepted_token_address, primary_rate_value
+    from market_alkahest.schemas import accepted_token_address
+    from market_core.schemas import primary_rate_value
 
     for entry in published:
         res = entry["resource"]

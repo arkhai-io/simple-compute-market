@@ -7,7 +7,7 @@ import inspect
 import json
 import re
 import uuid
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Annotated, Any, Literal
@@ -20,8 +20,17 @@ from hosted_settlement_client import (
     FundingProfile,
     HostedSettlementAsyncClient,
 )
+from market_core.schemas import (
+    RateValue,
+    SettlementOption,
+    compute_rate_total,
+    compute_rate_unit_total,
+    derive_settlement_option_id,
+    rate_scales_by_time,
+)
 from market_identity import Identity, TrustedIdentitySet
 from market_settlement_runtime import (
+    AcceptedObligationArtifacts,
     ComparisonOperator,
     FieldDescriptor,
     MechanismReadiness,
@@ -29,6 +38,8 @@ from market_settlement_runtime import (
     QueryValueType,
     ReadinessBlocker,
     SettlementClauseField,
+    SettlementConfig,
+    SettlementConfigurationRegistry,
     SettlementRole,
     SettlementPublicationClause,
 )
@@ -39,6 +50,7 @@ from .adapter import (
     MECHANISM,
     REQUIRED_HOSTED_CAPABILITIES,
     HostedConditionalEscrowClient,
+    HostedObligationParams,
     MarketplaceSignerAdapter,
     adapt_expected_authorities,
 )
@@ -184,9 +196,14 @@ class StripeSettlementConfig(BaseModel):
     environment: str | None = None
     authority: StripeAuthorityTrust | None = None
     expected_manifest_digest: str | None = None
-    expected_api_version: Literal["0.2.1"] = "0.2.1"
-    expected_schema_version: Literal[5] = 5
-    required_capabilities: tuple[str, ...] = REQUIRED_STRIPE_CAPABILITIES
+    # What the bound release serves, not what this package was written against.
+    # These were once the literal types "0.2.1" and 5, and a capability set that
+    # had to equal the marketplace's own floor exactly. A configuration naming
+    # the next release did not fail a contract check under that shape -- it
+    # failed to parse, which is a different thing and reads as a typo.
+    expected_api_version: str | None = None
+    expected_schema_version: int | None = None
+    required_capabilities: tuple[str, ...] = ()
     account_ref: str | None = Field(
         default=None,
         json_schema_extra={"roles": ["seller"]},
@@ -285,12 +302,32 @@ class StripeSettlementConfig(BaseModel):
     def validate_capabilities(cls, values: tuple[str, ...]) -> tuple[str, ...]:
         if len(set(values)) != len(values):
             raise ValueError("required capabilities must be unique")
-        if set(values) != set(REQUIRED_STRIPE_CAPABILITIES):
+        if any(not _TOKEN.fullmatch(value) for value in values):
+            raise ValueError("required capabilities must be public tokens")
+        # A floor, not an equality. What this marketplace needs is its own
+        # business and stays here; what a release declares is the release's,
+        # and a newer one declaring more is the case that has to be admitted.
+        missing = set(REQUIRED_STRIPE_CAPABILITIES) - set(values)
+        if values and missing:
             raise ValueError(
-                "required capabilities must exactly match the released "
-                "hosted consumer contract"
+                "required capabilities must cover the hosted consumer contract: "
+                + ", ".join(sorted(missing))
             )
         return tuple(sorted(values))
+
+    @field_validator("expected_api_version")
+    @classmethod
+    def validate_expected_api_version(cls, value: str | None) -> str | None:
+        if value is not None and not _API_VERSION.fullmatch(value):
+            raise ValueError("expected_api_version must be a semantic version")
+        return value
+
+    @field_validator("expected_schema_version")
+    @classmethod
+    def validate_expected_schema_version(cls, value: int | None) -> int | None:
+        if value is not None and value < 1:
+            raise ValueError("expected_schema_version must be positive")
+        return value
 
     @model_validator(mode="after")
     def validate_cross_field_policy(self) -> StripeSettlementConfig:
@@ -342,6 +379,13 @@ async def _await_if_needed(value: Any) -> Any:
     return await value if inspect.isawaitable(value) else value
 
 
+def _pinned_schema(config: StripeSettlementConfig) -> str | None:
+    """Report the pinned schema, or nothing where none is pinned."""
+
+    schema = config.expected_schema_version
+    return None if schema is None else str(schema)
+
+
 def _required_config_blockers(
     config: StripeSettlementConfig,
     resources: Mapping[str, Any],
@@ -380,14 +424,35 @@ def _required_config_blockers(
             "a hosted manifest digest pin is required",
         ),
         (
+            "expected_api_version",
+            config.expected_api_version,
+            "hosted.api_pin_missing",
+            "a hosted API version pin is required",
+        ),
+        (
+            "expected_schema_version",
+            config.expected_schema_version,
+            "hosted.schema_pin_missing",
+            "a hosted schema version pin is required",
+        ),
+        (
+            "required_capabilities",
+            config.required_capabilities,
+            "hosted.capability_pin_missing",
+            "a hosted capability pin is required",
+        ),
+        (
             "marketplace_signer",
             resources.get("marketplace_signer") or resources.get("signer"),
             "hosted.signer_missing",
             "an injected marketplace signer is required",
         ),
     )
+    # An absent pin blocks rather than defaulting. A default here would be a
+    # release this package picked on the operator's behalf, which is the shape
+    # that made a stale pin look like a working configuration.
     for _name, value, code, message in required:
-        if value is None or value == "":
+        if not value:
             blockers.append(_blocker(code, message))
     if role == "seller":
         if not config.account_ref:
@@ -521,7 +586,7 @@ async def stripe_preflight(
             ready=False,
             capabilities=base_capabilities,
             contract_version=config.expected_api_version,
-            schema_version=str(config.expected_schema_version),
+            schema_version=_pinned_schema(config),
             public_details={},
         )
 
@@ -704,7 +769,7 @@ async def stripe_preflight(
         blockers=tuple(blockers),
         capabilities=reported_capabilities,
         contract_version=config.expected_api_version,
-        schema_version=str(config.expected_schema_version),
+        schema_version=_pinned_schema(config),
         public_details=details,
     )
 
@@ -837,21 +902,17 @@ def stripe_option_builder(
         "contract_fingerprint": expected_fingerprint,
         "condition": condition.model_dump(mode="json"),
     }
-    identity_payload = {
+    option = {
+        "option_id": derive_settlement_option_id(
+            mechanism=MECHANISM,
+            asset=clause.asset,
+            rates=[RateValue.model_validate(item) for item in rates],
+            params=params,
+        ),
         "mechanism": MECHANISM,
         "asset": clause.asset,
         "rates": rates,
         "params": params,
-    }
-    encoded = json.dumps(
-        identity_payload,
-        ensure_ascii=False,
-        separators=(",", ":"),
-        sort_keys=True,
-    ).encode()
-    option = {
-        "option_id": hashlib.sha256(encoded).hexdigest(),
-        **identity_payload,
     }
     return {"accepted_escrows": [], "settlement_options": [option]}
 
@@ -973,6 +1034,85 @@ def stripe_funds_flow_projection(option: Any) -> str | None:
     return _stripe_param_projection(option, "funds_flow")
 
 
+def stripe_accepted_obligation_builder(
+    section: BaseModel,
+    option: Any,
+    context: Mapping[str, Any],
+) -> AcceptedObligationArtifacts:
+    """Rebuild the one canonical hosted obligation from a selected option.
+
+    The domain supplies acceptance inputs through ``context`` —
+    ``buyer_principal`` / ``seller_principal``, ``expiration_unix``, the
+    rate's scaling input (``duration_seconds`` for time-unit rates,
+    ``unit_quantity`` for counted-unit rates — the rate itself decides),
+    and ``domain_param_keys`` naming the option params it owns (dropped
+    before mechanism validation). Everything obligation-shaped stays here.
+    """
+
+    StripeSettlementConfig.model_validate(section)
+    selected = SettlementOption.model_validate(option)
+    buyer = _principal_json(context.get("buyer_principal"))
+    seller = _principal_json(context.get("seller_principal"))
+    expiration_unix = int(context.get("expiration_unix") or 0)
+    if expiration_unix <= 0:
+        raise ValueError("hosted acceptance requires an expiration")
+    if not selected.rates:
+        raise ValueError("hosted option advertises no rate")
+    rate = selected.rates[0]
+    if rate_scales_by_time(rate):
+        duration_seconds = int(context.get("duration_seconds") or 0)
+        if duration_seconds <= 0:
+            raise ValueError("hosted acceptance requires a positive duration")
+        amount = compute_rate_total(rate, duration_seconds)
+    else:
+        unit_quantity = context.get("unit_quantity")
+        if (
+            isinstance(unit_quantity, bool)
+            or not isinstance(unit_quantity, int)
+            or unit_quantity < 1
+        ):
+            raise ValueError(
+                "hosted acceptance requires a positive unit quantity for a"
+                " counted rate"
+            )
+        amount = compute_rate_unit_total(rate, unit_quantity)
+    if amount <= 0:
+        raise ValueError("trusted scaled hosted amount must be positive")
+    params = dict(selected.params)
+    for key in context.get("domain_param_keys", ()):
+        params.pop(key, None)
+    if "funding_authorization_ref" in params:
+        raise ValueError("listing cannot pre-authorize hosted funding")
+    advertised_claimant = params.get("claimant_principal")
+    if not isinstance(advertised_claimant, Mapping) or (
+        dict(advertised_claimant) != seller
+    ):
+        raise ValueError("hosted option claimant does not match the listing seller")
+    params["payer_principal"] = buyer
+    params["claimant_principal"] = seller
+    params = HostedObligationParams.model_validate(
+        {**params, "funding_authorization_ref": "accepted-plan-validation"}
+    ).model_dump(mode="json", exclude={"funding_authorization_ref"})
+    condition = params.get("condition")
+    if not isinstance(condition, Mapping):
+        raise ValueError("hosted option has no portable condition")
+    return AcceptedObligationArtifacts(
+        obligation={
+            "payer": "buyer",
+            "claimant": "seller",
+            "payer_principal": buyer,
+            "claimant_principal": seller,
+            "amount": amount,
+            "asset": selected.asset,
+            "expiration_unix": expiration_unix,
+            "conditions": [dict(condition)],
+            "mechanism": MECHANISM,
+            "params": params,
+        },
+        amount=amount,
+    )
+
+
 def validate_stripe_publication_input(
     section: BaseModel,
     value: BaseModel,
@@ -994,10 +1134,12 @@ def create_stripe_registration(*, command_group: Any | None = None) -> Mechanism
         config_key=STRIPE_CONFIG_KEY,
         config_model=StripeSettlementConfig,
         roles=frozenset({"buyer", "seller"}),
+        negotiates_scalar_amount=True,
         preflight=stripe_preflight,
         client_factory=stripe_client_factory,
         option_builder=stripe_option_builder,
         buyer_compatibility=stripe_buyer_compatibility,
+        accepted_obligation_builder=stripe_accepted_obligation_builder,
         command_group=command_group,
         public_detail_keys=frozenset(
             {
@@ -1056,6 +1198,35 @@ def create_stripe_registration(*, command_group: Any | None = None) -> Mechanism
     )
 
 
+def default_hosted_selection_dispatch() -> dict[
+    str, Callable[[Mapping[str, Any], Mapping[str, Any]], AcceptedObligationArtifacts]
+]:
+    """Hosted-only accepted-obligation dispatch for runtimes composed without
+    settlement config.
+
+    Selection acceptance works from listing data alone, so a legacy
+    deployment keeps accepting hosted selections exactly as before; the
+    validation-only section carries no deployment state.
+    """
+
+    registry = SettlementConfigurationRegistry((create_stripe_registration(),))
+    config = SettlementConfig(mechanisms={STRIPE_CONFIG_KEY: StripeSettlementConfig()})
+
+    def build(
+        option: Mapping[str, Any],
+        context: Mapping[str, Any],
+    ) -> AcceptedObligationArtifacts:
+        return registry.build_accepted_obligation(
+            MECHANISM,
+            option,
+            config,
+            role="seller",
+            context=context,
+        )
+
+    return {MECHANISM: build}
+
+
 __all__ = [
     "REQUIRED_STRIPE_CAPABILITIES",
     "STRIPE_CONFIG_KEY",
@@ -1075,4 +1246,5 @@ __all__ = [
     "stripe_preflight",
     "validate_stripe_publication_input",
     "create_stripe_registration",
+    "default_hosted_selection_dispatch",
 ]

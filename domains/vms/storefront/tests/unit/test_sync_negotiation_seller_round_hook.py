@@ -25,8 +25,9 @@ from market_storefront.domain_runtime import (
     build_vm_storefront_registry,
 )
 from domains.vms.negotiation.storefront_round import SellerRoundResult
+from market_hosted_settlement import default_hosted_selection_dispatch
 from market_storefront.negotiation_runtime import (
-    _accepted_hosted_artifacts,
+    _accepted_selection_artifacts,
     _decode_vm_terms,
     _default_seller_round_hook,
     build_vm_negotiation_runtime,
@@ -581,10 +582,12 @@ async def test_hosted_selection_is_persisted_and_materialized_as_plan(db):
         OfferUnfulfillableError,
         match="hosted_settlement_option_not_exact",
     ):
-        _accepted_hosted_artifacts(
+        _accepted_selection_artifacts(
+            default_hosted_selection_dispatch(),
             selection=selection.model_dump(mode="json"),
             option=legacy_option.model_dump(mode="json"),
             agreed_amount=42,
+            duration_seconds=3600,
             buyer_principal=_BUYER,
             seller_principal=_SELLER,
             listing=vm_state["order"],

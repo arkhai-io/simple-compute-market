@@ -227,3 +227,6 @@ deploy-base-sepolia/
 # Local assistant session exports
 omp-session-*.html
 pi-session-*.html
+
+# Local-only mise overrides (machine-specific paths).
+mise.local.toml

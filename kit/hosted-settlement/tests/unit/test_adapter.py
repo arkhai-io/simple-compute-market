@@ -5,6 +5,7 @@ import json
 from typing import Any
 
 import market_hosted_settlement.adapter as adapter_module
+from market_hosted_settlement import hosted_projected_reason
 import pytest
 from hosted_settlement_client import (
     AccountReadiness,
@@ -17,6 +18,8 @@ from hosted_settlement_client import (
     ExpectedAuthorities,
     FinancialState,
     FulfillmentPublicationResult,
+    FundingIncidentKind,
+    FundingIncidentProjection,
     FundingProfile,
     FundingProfileReadiness,
     HostedSettlementAsyncClient,
@@ -27,14 +30,17 @@ from hosted_settlement_client import (
     OperationRequest,
     PayerActionKind,
     Principal,
+    ReclaimRequest,
 )
 from market_hosted_settlement import (
     REQUIRED_HOSTED_CAPABILITIES,
+    RETURN_INSTRUCTIONS_EMAIL_OPTION,
     HostedConditionalEscrowClient,
     MarketplaceSignerAdapter,
 )
 from market_identity import Identity, IdentityScheme
 from market_settlement_runtime import (
+    SettlementManualRequired,
     SettlementRuntime,
     SettlementSQLiteRepository,
     obligation_payload_hash,
@@ -78,6 +84,10 @@ class FakeClient:
         self.health_result = ManifestHealth(
             ready=True,
             manifest_digest="sha256:" + "aa" * 32,
+            # The client transports what the authority serves and constrains it
+            # to no one release, so these tests exercise a 0.2.1 contract
+            # through a 0.3.0 client, which the literal types made impossible.
+            api_version="0.2.1",
             schema_version=5,
             funding_profiles=tuple(
                 FundingProfileReadiness(
@@ -525,6 +535,81 @@ async def test_hosted_errors_are_redacted_and_retry_classified_in_sqlite(
     serialized = json.dumps(operation, sort_keys=True)
     assert canary not in serialized
     assert "customer_private" not in serialized
+    # The authority's own word for what it refused survives the redaction that
+    # its message does not: an obligation parked for repair has to say why.
+    assert "provider_failure" in serialized
+
+
+@pytest.mark.asyncio
+async def test_an_authority_refusal_names_itself_without_naming_the_provider() -> None:
+    """The code is the authority's vocabulary; the message can be anything."""
+
+    canary = "sk_live_secret declined by acct_1Example for card 4242"
+    client = FailingMaterializeClient(
+        HostedSettlementError(
+            code="funding_profile_unsupported",
+            message=canary,
+            retryable=False,
+            status_code=409,
+        )
+    )
+    adapter = HostedConditionalEscrowClient(client)  # type: ignore[arg-type]
+
+    with pytest.raises(SettlementManualRequired) as refused:
+        await adapter.materialize(_obligation(), operation_ref="arkhai:settlement:obligation-1:materialize")
+
+    assert "funding_profile_unsupported" in str(refused.value)
+    assert canary not in str(refused.value)
+    # The released client's traceback can carry request and response fragments.
+    assert refused.value.__cause__ is None
+
+
+@pytest.mark.asyncio
+async def test_an_authority_that_does_not_speak_codes_is_not_repeated() -> None:
+    """A free-text code is treated as the authority having named nothing."""
+
+    client = FailingMaterializeClient(
+        HostedSettlementError(
+            code="card declined for customer cus_1Example",
+            message="unused",
+            retryable=False,
+            status_code=409,
+        )
+    )
+    adapter = HostedConditionalEscrowClient(client)  # type: ignore[arg-type]
+
+    with pytest.raises(SettlementManualRequired) as refused:
+        await adapter.materialize(_obligation(), operation_ref="arkhai:settlement:obligation-1:materialize")
+
+    # Not the authority's free text, and not nothing either: an obligation is
+    # parked, so the marketplace names the refusal from the status it has.
+    assert str(refused.value) == (
+        "hosted settlement materialization rejected: authority_refused_409"
+    )
+    assert refused.value.code == "authority_refused_409"
+    assert "cus_1Example" not in str(refused.value)
+
+
+@pytest.mark.asyncio
+async def test_a_retryable_failure_names_its_code_too() -> None:
+    """Retry classification is unchanged; only what it says is."""
+
+    client = FailingMaterializeClient(
+        HostedSettlementError(
+            code="authority_unavailable",
+            message="upstream timeout contacting acct_1Example",
+            retryable=True,
+            status_code=503,
+        )
+    )
+    adapter = HostedConditionalEscrowClient(client)  # type: ignore[arg-type]
+
+    with pytest.raises(RuntimeError) as unavailable:
+        await adapter.materialize(_obligation(), operation_ref="arkhai:settlement:obligation-1:materialize")
+
+    assert not isinstance(unavailable.value, SettlementManualRequired)
+    assert "authority_unavailable" in str(unavailable.value)
+    assert "acct_1Example" not in str(unavailable.value)
 
 
 @pytest.mark.asyncio
@@ -853,3 +938,291 @@ async def test_legacy_card_decoder_is_recovery_only() -> None:
     assert status.receipt["legacy_recovery"] == "hosted-card.v1"
     assert "funding_profile" not in status.receipt
     assert "funding_authorization_ref" not in status.receipt
+
+
+@pytest.mark.asyncio
+async def test_a_parked_obligation_projects_the_reason_it_was_parked_for(
+    tmp_path,
+) -> None:
+    """manual_required is a request for human action; it owes a reason."""
+
+    client = FailingMaterializeClient(
+        HostedSettlementError(
+            code="funding_profile_unsupported",
+            message="sk_live_secret acct_1Example rejected 4242",
+            retryable=False,
+            status_code=409,
+        )
+    )
+    adapter = HostedConditionalEscrowClient(client)  # type: ignore[arg-type]
+    repository = SettlementSQLiteRepository(str(tmp_path / "parked.db"))
+    runtime = SettlementRuntime(
+        repository,
+        {"fiat.stripe.v1": adapter},
+        clock=lambda: 2_000_000_000,
+    )
+    record = (
+        await runtime.register_plan(
+            agreement_ref="agreement-parked",
+            obligations=[_obligation(include_authorization=False)],
+        )
+    )[0]
+    await runtime.bind_mechanism_params(
+        record.obligation_ref,
+        {
+            "funding_profile": "card.v1",
+            "funding_authorization_ref": "funding-authorization-1",
+        },
+        local_principal=BUYER,
+    )
+
+    outcome = await runtime.materialize(
+        obligation_ref=record.obligation_ref,
+        local_principal=BUYER,
+        worker_id="buyer",
+    )
+    assert outcome.status == "manual_required"
+
+    parked = await repository.load_settlement_obligation(record.obligation_ref)
+    assert parked is not None
+    reason = hosted_projected_reason(None, parked["mechanism_state"])
+    assert reason == "funding_profile_unsupported"
+    # The mechanism state a projection reads carries the code and nothing the
+    # authority said around it.
+    serialized = json.dumps(parked["mechanism_state"], sort_keys=True)
+    assert "sk_live_secret" not in serialized
+    assert "acct_1Example" not in serialized
+
+
+def test_the_reason_prefers_what_the_obligation_is_currently_doing() -> None:
+    """A funding reason outranks a parking reason it has moved on from."""
+
+    assert hosted_projected_reason({"funding_reason": "awaiting_payment"}, {}) == (
+        "awaiting_payment"
+    )
+    assert hosted_projected_reason(None, {"funding_reason": "processing"}) == "processing"
+    assert hosted_projected_reason(None, {"manual_reason": "condition_rejected"}) == (
+        "condition_rejected"
+    )
+    assert hosted_projected_reason(None, None) is None
+    # A parked obligation that reached its state before this existed reports
+    # nothing rather than an invented reason.
+    assert hosted_projected_reason({}, {"manual_reason": ""}) is None
+
+
+@pytest.mark.asyncio
+async def test_a_refusal_the_authority_does_not_name_is_still_named(tmp_path) -> None:
+    """The requirement is that a parked obligation has a reason, not that the
+    authority supplied one."""
+
+    client = FailingMaterializeClient(
+        HostedSettlementError(
+            code="",
+            message="",
+            retryable=False,
+            status_code=403,
+        )
+    )
+    adapter = HostedConditionalEscrowClient(client)  # type: ignore[arg-type]
+    repository = SettlementSQLiteRepository(str(tmp_path / "unnamed.db"))
+    runtime = SettlementRuntime(
+        repository,
+        {"fiat.stripe.v1": adapter},
+        clock=lambda: 2_000_000_000,
+    )
+    record = (
+        await runtime.register_plan(
+            agreement_ref="agreement-unnamed",
+            obligations=[_obligation(include_authorization=False)],
+        )
+    )[0]
+    await runtime.bind_mechanism_params(
+        record.obligation_ref,
+        {
+            "funding_profile": "card.v1",
+            "funding_authorization_ref": "funding-authorization-1",
+        },
+        local_principal=BUYER,
+    )
+
+    await runtime.materialize(
+        obligation_ref=record.obligation_ref,
+        local_principal=BUYER,
+        worker_id="buyer",
+    )
+
+    parked = await repository.load_settlement_obligation(record.obligation_ref)
+    assert parked is not None
+    assert hosted_projected_reason(None, parked["mechanism_state"]) == (
+        "authority_refused_403"
+    )
+
+
+@pytest.mark.asyncio
+async def test_an_authority_that_parks_a_deal_itself_still_gives_a_reason() -> None:
+    """The authority can succeed and still say a human is needed."""
+
+    client = FakeClient()
+    client.escrow_result = client.escrow(
+        financial_state=FinancialState.OPERATOR_REVIEW,
+        funding_reason=None,
+    )
+    adapter = HostedConditionalEscrowClient(client)  # type: ignore[arg-type]
+
+    outcome = await adapter.materialize(
+        _obligation(),
+        operation_ref="arkhai:settlement:obligation-1:materialize",
+    )
+
+    assert outcome.status == "manual_required"
+    assert hosted_projected_reason(None, outcome.mechanism_state) is not None
+
+
+def _incident(kind: FundingIncidentKind) -> FundingIncidentProjection:
+    return FundingIncidentProjection(
+        incident_ref="funding_incident-1",
+        kind=kind,
+        state="open",
+        evidence_digest="sha256:" + "cc" * 32,
+    )
+
+
+def test_awaiting_push_transfer_funds_is_not_an_operator_condition() -> None:
+    """An underpaid push transfer that went on to fund must not park the deal.
+
+    The authority raises this incident on the first retrieval of every push
+    transfer, before any money can have arrived, and never clears it. Reading
+    it as an escalation made every ``us_bank_transfer.v1`` deal terminal.
+    """
+
+    funded = FakeClient.escrow(
+        funding_profile=FundingProfile.US_BANK_TRANSFER,
+        financial_state=FinancialState.FUNDED,
+        funding_state=NormalizedFundingState.AVAILABLE,
+        funding_reason=None,
+        action=None,
+        incident=_incident(FundingIncidentKind.ATTRIBUTION_UNDERPAID),
+    )
+
+    assert adapter_module._escrow_status(funded, {}) == "ready"
+
+
+@pytest.mark.parametrize(
+    "kind",
+    [
+        FundingIncidentKind.ATTRIBUTION_UNMATCHED,
+        FundingIncidentKind.ATTRIBUTION_OVERPAID,
+        FundingIncidentKind.ATTRIBUTION_AMBIGUOUS,
+        FundingIncidentKind.ACH_RETURN,
+        FundingIncidentKind.POST_COLLECTION_LOSS,
+    ],
+)
+def test_every_other_authority_incident_still_requires_an_operator(
+    kind: FundingIncidentKind,
+) -> None:
+    escrow = FakeClient.escrow(
+        funding_profile=FundingProfile.US_BANK_TRANSFER,
+        financial_state=FinancialState.FUNDED,
+        funding_state=NormalizedFundingState.AVAILABLE,
+        funding_reason=None,
+        action=None,
+        incident=_incident(kind),
+    )
+
+    assert adapter_module._escrow_status(escrow, {}) == "manual_required"
+
+
+@pytest.mark.asyncio
+async def test_a_reclaim_option_becomes_the_authority_return_address() -> None:
+    """The payer's address is the one thing this adapter reads out of the
+    options, because a push-funded return is mailed to it and the authority
+    refuses to issue one with nowhere to send it."""
+
+    client = FakeClient()
+    adapter = HostedConditionalEscrowClient(client)  # type: ignore[arg-type]
+    obligation = _obligation(funding_profile=FundingProfile.US_BANK_TRANSFER)
+
+    await adapter.reclaim_expired(
+        obligation,
+        mechanism_ref="escrow-public",
+        operation_ref="reclaim-1",
+        mechanism_state={},
+        mechanism_options={
+            RETURN_INSTRUCTIONS_EMAIL_OPTION: "payer@example.test",
+        },
+    )
+
+    assert client.reclaim_call == (
+        "escrow-public",
+        ReclaimRequest(
+            request_id="reclaim-1",
+            return_instructions_email="payer@example.test",
+        ),
+    )
+
+
+@pytest.mark.asyncio
+async def test_a_reclaim_without_an_address_sends_the_request_it_always_sent() -> None:
+    """Which profiles need an address is the authority's judgement.
+
+    Sending the bare request and letting it answer keeps a profile that needs
+    none untouched, and keeps a profile that starts needing one from requiring
+    a release here first.
+    """
+
+    client = FakeClient()
+    adapter = HostedConditionalEscrowClient(client)  # type: ignore[arg-type]
+    obligation = _obligation(funding_profile=FundingProfile.US_BANK_TRANSFER)
+
+    await adapter.reclaim_expired(
+        obligation,
+        mechanism_ref="escrow-public",
+        operation_ref="reclaim-1",
+        mechanism_state={},
+        mechanism_options={},
+    )
+
+    assert client.reclaim_call == (
+        "escrow-public",
+        OperationRequest(request_id="reclaim-1"),
+    )
+
+
+@pytest.mark.asyncio
+async def test_a_reclaim_address_reaches_no_receipt_or_mechanism_state() -> None:
+    """The address is an argument to one call. Nothing durable may carry it."""
+
+    client = FakeClient()
+    adapter = HostedConditionalEscrowClient(client)  # type: ignore[arg-type]
+    obligation = _obligation(funding_profile=FundingProfile.US_BANK_TRANSFER)
+
+    outcome = await adapter.reclaim_expired(
+        obligation,
+        mechanism_ref="escrow-public",
+        operation_ref="reclaim-1",
+        mechanism_state={},
+        mechanism_options={
+            RETURN_INSTRUCTIONS_EMAIL_OPTION: "payer@example.test",
+        },
+    )
+
+    assert "payer@example.test" not in json.dumps(outcome.receipt)
+    assert "payer@example.test" not in json.dumps(outcome.mechanism_state)
+
+
+@pytest.mark.asyncio
+async def test_a_non_string_reclaim_address_is_refused_before_the_call() -> None:
+    client = FakeClient()
+    adapter = HostedConditionalEscrowClient(client)  # type: ignore[arg-type]
+    obligation = _obligation(funding_profile=FundingProfile.US_BANK_TRANSFER)
+
+    with pytest.raises(ValueError, match="must be a string address"):
+        await adapter.reclaim_expired(
+            obligation,
+            mechanism_ref="escrow-public",
+            operation_ref="reclaim-1",
+            mechanism_state={},
+            mechanism_options={RETURN_INSTRUCTIONS_EMAIL_OPTION: ["a@b.co"]},
+        )
+
+    assert client.reclaim_call is None

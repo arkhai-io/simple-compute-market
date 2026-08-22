@@ -57,5 +57,47 @@ def publish_cmd() -> None:
     typer.echo(json.dumps(run_publication_once(), sort_keys=True))
 
 
+@app.command("redeliver-introduction")
+def redeliver_introduction_cmd(
+    obligation_ref: str = typer.Option(
+        ...,
+        "--obligation-ref",
+        help="The deal whose revealed introduction should be sent again.",
+    ),
+) -> None:
+    """Send an already-revealed introduction to this operator's sinks again."""
+
+    import asyncio
+    import json
+
+    from .delivery import (
+        load_storefront_delivery_sinks,
+        redeliver_introduction,
+        storefront_delivery_section,
+    )
+    from .runtime import build_runtime_from_environment
+
+    sinks = load_storefront_delivery_sinks(storefront_delivery_section())
+    if not sinks:
+        raise typer.BadParameter("no delivery sinks are configured")
+    runtime = build_runtime_from_environment()
+    outcomes = asyncio.run(
+        redeliver_introduction(runtime.db, obligation_ref, sinks.sinks)
+    )
+    typer.echo(
+        json.dumps(
+            [
+                {
+                    "sink": outcome.sink,
+                    "delivered": outcome.delivered,
+                    "detail": outcome.describe(),
+                }
+                for outcome in outcomes
+            ],
+            sort_keys=True,
+        )
+    )
+
+
 if __name__ == "__main__":
     app()

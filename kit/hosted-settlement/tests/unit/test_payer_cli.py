@@ -18,6 +18,7 @@ from hosted_settlement_client import (
     PayerSetupResult,
 )
 from market_hosted_settlement import (
+    DIRECT_INSTRUMENT_SETUP_CAPABILITY,
     MarketplaceSignerAdapter,
     PayerCommandContext,
     create_stripe_command_group,
@@ -221,6 +222,13 @@ class Client:
                 url="https://transient.example/secret-action",
             ),
         )
+    async def verify_payer_setup(self, request):
+        self.calls.append(("setup-verify", request))
+        return PayerSetupResult(
+            setup_ref=request.setup_ref,
+            readiness=InstrumentReadiness.READY,
+        )
+
     async def get_payer_setup(self, request):
         self.calls.append(("setup-status", request))
         return PayerSetupResult(
@@ -524,8 +532,56 @@ def test_cli_tree_registers_every_exact_namespaced_operation() -> None:
     assert runner.invoke(_app(context), ["payer", "--help"]).exit_code == 0
     for group, commands in {
         "owner": ("rotate", "retire"),
-        "setup": ("start", "status"),
+        "setup": ("start", "status", "verify"),
         "instrument": ("list", "default", "revoke", "delete"),
     }.items():
         output = runner.invoke(_app(context), ["payer", group, "--help"]).stdout
         assert all(command in output for command in commands)
+
+
+def test_setup_verify_submits_evidence_and_reports_only_readiness() -> None:
+    """The evidence is the payer's, and it stops at the authority."""
+
+    client = Client()
+    context = PayerCommandContext(
+        authority_id="authority-main",
+        environment="production",
+        profiles=Access(_profile(), _OLD),
+        client_factory=lambda signer: client,
+        dispatch_action=lambda _action, _policy: None,
+        capabilities=frozenset({DIRECT_INSTRUMENT_SETUP_CAPABILITY}),
+    )
+
+    result = CliRunner().invoke(
+        _app(context),
+        ["payer", "setup", "verify", "setup_opaque_1234", "--amounts", "32,45", "--json"],
+    )
+
+    assert result.exit_code == 0
+    assert json.loads(result.stdout) == {
+        "setup_ref": "setup_opaque_1234",
+        "readiness": "ready",
+    }
+    assert [call[0] for call in client.calls] == ["setup-verify"]
+    assert client.calls[0][1].amounts == (32, 45)
+    assert "32" not in result.stdout.replace("setup_opaque_1234", "")
+
+
+def test_setup_verify_refuses_a_release_that_does_not_declare_direct_setup() -> None:
+    client = Client()
+    context = PayerCommandContext(
+        authority_id="authority-main",
+        environment="production",
+        profiles=Access(_profile(), _OLD),
+        client_factory=lambda signer: client,
+        dispatch_action=lambda _action, _policy: None,
+        capabilities=frozenset({"payer-profile.v1"}),
+    )
+
+    result = CliRunner().invoke(
+        _app(context),
+        ["payer", "setup", "verify", "setup_opaque_1234", "--descriptor-code", "SM11AA"],
+    )
+
+    assert result.exit_code != 0
+    assert client.calls == []

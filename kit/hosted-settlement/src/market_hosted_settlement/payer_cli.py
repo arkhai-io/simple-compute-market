@@ -341,6 +341,45 @@ def create_stripe_command_group(
 
         _emit(_invoke(operation), json_output=json_output)
 
+    @setup_app.command("verify")
+    def setup_verify(
+        setup_ref: str = typer.Argument(...),
+        amounts: str | None = typer.Option(
+            None,
+            "--amounts",
+            help="The two deposited minor-unit amounts, comma separated.",
+        ),
+        descriptor_code: str | None = typer.Option(None, "--descriptor-code"),
+        json_output: bool = typer.Option(False, "--json"),
+    ) -> None:
+        """Submit the payer's own verification evidence for a pending setup."""
+
+        async def operation() -> dict[str, Any]:
+            context = context_factory()
+            _profile, signer, binding = _selected_owner(context)
+            deposited: tuple[int, ...] | None = None
+            if amounts is not None:
+                try:
+                    deposited = tuple(
+                        int(part) for part in amounts.split(",") if part.strip()
+                    )
+                except ValueError:
+                    raise PayerCommandError(
+                        "deposited amounts must be whole minor units"
+                    ) from None
+            async with _facade(context, signer) as facade:
+                result = await facade.verify_setup(
+                    payer_profile_ref=binding.binding_ref,
+                    setup_ref=setup_ref,
+                    amounts=deposited,
+                    descriptor_code=descriptor_code,
+                )
+            # No action dispatch: verification is the payer answering an action
+            # they already took, not the authority handing them a new one.
+            return payer_setup_projection(result)
+
+        _emit(_invoke(operation), json_output=json_output)
+
     @instrument_app.command("list")
     def instrument_list(json_output: bool = typer.Option(False, "--json")) -> None:
         """List only opaque and provider-neutral instrument lifecycle fields."""

@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import replace
 
 from arkhai_bare_metal.domain_runtime import market_domain
-from core_storefront.escrow_verification import verify_escrow_for_settlement
+from market_alkahest import create_alkahest_registration
 from core_storefront import StorefrontSettlementBuildContext
 from market_core import (
     DomainCapability,
@@ -54,7 +54,7 @@ def _build_market_domain_contract() -> MarketDomainContract:
                 run_negotiation_policy=default_seller_round_hook,
             ),
             settlement=ImmutableSettlementCapability(
-                verify=verify_escrow_for_settlement,
+                verify=create_alkahest_registration().settlement_verifier,
                 build_plan=_build_settlement_from_context,
             ),
             fulfillment=ImmutableFulfillmentCapability(

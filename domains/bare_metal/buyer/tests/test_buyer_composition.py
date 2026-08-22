@@ -168,3 +168,77 @@ def test_hosted_option_binding_compares_physical_host_identity() -> None:
             listing,
             physical_host_id="different-host",
         )
+
+def test_contact_entries_parse_as_bounded_pairs() -> None:
+    from arkhai_bare_metal_buyer.cli import _parse_contact
+
+    assert _parse_contact(["telegram=@buyer", "email= me@example.com "]) == {
+        "telegram": "@buyer",
+        "email": "me@example.com",
+    }
+    import typer
+
+    with pytest.raises(typer.BadParameter):
+        _parse_contact(["telegram"])
+    with pytest.raises(typer.BadParameter):
+        _parse_contact(["=value"])
+
+
+def test_introduction_commands_are_registered() -> None:
+    from arkhai_bare_metal_buyer.cli import bare_metal_app
+
+    names = {command.name for command in bare_metal_app.registered_commands}
+    assert {"request-introduction", "introduce", "introduction"} <= names
+
+
+def test_the_reveal_is_printed_before_it_is_delivered(capsys, tmp_path) -> None:
+    """A slow sink must never delay or obscure the answer the buyer came for."""
+
+    from types import SimpleNamespace
+
+    from arkhai_bare_metal_buyer import cli
+
+    order: list[str] = []
+
+    class Sinks:
+        warnings = ()
+        sinks = ("one",)
+
+    def fake_deliver(projection, *, sinks, agreement_ref, counterparty):
+        order.append("delivered")
+        return ()
+
+    original_json = cli._json
+
+    def watching_json(value):
+        order.append("printed")
+        original_json(value)
+
+    monkey = pytest.MonkeyPatch()
+    monkey.setattr(cli, "_json", watching_json)
+    monkey.setattr(cli, "deliver_introduction", fake_deliver)
+    monkey.setattr(cli, "report_delivery", lambda *args, **kwargs: None)
+    try:
+        projection = {"obligation_ref": "a" * 64, "revealed": True}
+        cli._json(projection)
+        cli._deliver_locally(
+            projection,
+            SimpleNamespace(negotiation_id="neg-1", seller_principals=None),
+            Sinks(),
+            SimpleNamespace(event=lambda *args, **kwargs: None),
+        )
+    finally:
+        monkey.undo()
+
+    assert order == ["printed", "delivered"]
+
+
+def test_the_read_command_can_redeliver() -> None:
+    from arkhai_bare_metal_buyer.cli import bare_metal_app
+
+    command = next(
+        item
+        for item in bare_metal_app.registered_commands
+        if item.name == "introduction"
+    )
+    assert "deliver" in command.callback.__code__.co_varnames

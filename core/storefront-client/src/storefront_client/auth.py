@@ -152,13 +152,17 @@ def verify_authenticated_response(
         )
 
 
-    protocol = _required_header(headers, SIGNATURE_VERSION_HEADER)
-    if protocol != RESPONSE_PROTOCOL:
-        raise StorefrontAuthenticationError(
-            "unsupported marketplace response signature version"
-        )
-    scheme = _required_header(headers, IDENTITY_SCHEME_HEADER)
+    # Which of these fails says what happened: a response with none of the
+    # headers was never an acknowledgement, and one missing a single header is
+    # a protocol fault. The status is carried into either, because an error
+    # answer and an unsigned acknowledgement are the same shape from here.
     try:
+        protocol = _required_header(headers, SIGNATURE_VERSION_HEADER)
+        if protocol != RESPONSE_PROTOCOL:
+            raise StorefrontAuthenticationError(
+                "unsupported marketplace response signature version"
+            )
+        scheme = _required_header(headers, IDENTITY_SCHEME_HEADER)
         principal = Identity(
             scheme=scheme,
             identifier=_required_header(headers, IDENTITY_IDENTIFIER_HEADER),
@@ -179,11 +183,11 @@ def verify_authenticated_response(
                 value=_required_header(headers, SIGNATURE_HEADER),
             ),
         )
-    except StorefrontAuthenticationError:
-        raise
+    except StorefrontAuthenticationError as exc:
+        raise StorefrontAuthenticationError(f"HTTP {status}: {exc}") from exc
     except (TypeError, ValueError) as exc:
         raise StorefrontAuthenticationError(
-            "malformed or legacy marketplace response authentication"
+            f"HTTP {status}: unreadable marketplace response authentication"
         ) from exc
     result = verify_response(
         authenticated,

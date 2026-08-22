@@ -196,3 +196,76 @@ async def test_reclaim_busy_preserves_domain_and_cleanup() -> None:
 
     assert exc_info.value.status_code == 409
     calls.cleanup.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_start_projects_a_funded_obligation_when_fulfillment_fails() -> None:
+    """Materialization promises a materialized obligation, not a fulfilled one.
+
+    An obligation that funded and could not begin fulfilment is a real state
+    with an owner: the resume worker retries it. Failing the whole start there
+    reports the authority as unavailable when the authority did its part, and
+    hides a funded obligation from the party that funded it.
+    """
+
+    service, calls = _service()
+    calls.fulfill.side_effect = RuntimeError("provisioning refused the job")
+    start = HostedSettlementStart(
+        negotiation_id="negotiation-1",
+        obligation_ref=RECORD.obligation_ref,
+        funding_authorization_ref="authorization-safe-1",
+    )
+
+    response = await service.start(object(), start)
+
+    assert response["status"] == "ready"
+    calls.fulfill.assert_awaited_once()
+    calls.project.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_start_still_reports_a_route_error_from_fulfillment() -> None:
+    """A refusal the route already shaped keeps its own status and detail."""
+
+    service, calls = _service()
+    calls.fulfill.side_effect = HostedSettlementRouteError(409, "already committed")
+    start = HostedSettlementStart(
+        negotiation_id="negotiation-1",
+        obligation_ref=RECORD.obligation_ref,
+        funding_authorization_ref="authorization-safe-1",
+    )
+
+    with pytest.raises(HostedSettlementRouteError) as raised:
+        await service.start(object(), start)
+
+    assert raised.value.status_code == 409
+
+
+@pytest.mark.asyncio
+async def test_reclaim_options_reach_the_runtime_and_the_signature_check() -> None:
+    """The options say where the payer's return goes.
+
+    That makes them part of what the payer authorized, so they are verified as
+    sent rather than read first and trusted after, and they reach the runtime
+    unchanged.
+    """
+
+    service, calls = _service()
+    options = {"return_instructions_email": "payer@example.test"}
+
+    await service.reclaim(object(), "settlement-1", options)
+
+    assert calls.runtime.reclaim.await_args.kwargs["mechanism_options"] == options
+    assert calls.authorize.await_args.args[-1] == options
+
+
+@pytest.mark.asyncio
+async def test_a_reclaim_without_options_authorizes_an_empty_body() -> None:
+    """A caller with nothing to say sends the request it always sent."""
+
+    service, calls = _service()
+
+    await service.reclaim(object(), "settlement-1")
+
+    assert calls.runtime.reclaim.await_args.kwargs["mechanism_options"] is None
+    assert calls.authorize.await_args.args[-1] is None

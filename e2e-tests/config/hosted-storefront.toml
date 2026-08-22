@@ -33,6 +33,11 @@ principals = [{ scheme = "ed25519", identifier = "NLTZBDFWy23PC-sKKUm3VZyUDSvLbb
 authority = "registry-b"
 principals = [{ scheme = "ed25519", identifier = "yFOtDwzSthmuqSzuxP1Wok1kmdWEznklfkXP2BObYKc" }]
 
+# Which registries demand a bearer key is public and belongs here; the key
+# itself is not and is supplied by the run. An empty value is the declaration.
+[registry.auth]
+"http://registry-b:8080" = ""
+
 [capacity]
 poll_interval = 1
 hold_ttl_seconds = 900
@@ -71,27 +76,12 @@ base_url = "http://127.0.0.1:8080"
 authority_id = "local-e2e-hosted-authority"
 environment = "local-e2e"
 expected_manifest_digest = "sha256:09d242232db26cc345d3805d0a49bfb5c7ce940959a6b878d296a2551dc21558"
-expected_api_version = "0.2.1"
-expected_schema_version = 5
-required_capabilities = [
-  "scheme-tagged-identities.v1",
-  "account-owner-admission.v1",
-  "account-owner-rotation.v1",
-  "account-owner-retirement.v1",
-  "signer-injected-client.v1",
-  "provider-neutral-seller-onboarding.v1",
-  "conditional-escrow.v2",
-  "stripe-connect-separate-charges-transfers.v2",
-  "portable-attestation.v1",
-  "eas-arbiter.v1",
-  "payer-profile.v1",
-  "funding-authorization.v1",
-  "funding-profile.card.v1",
-  "funding-profile.us_bank_transfer.v1",
-  "funding-profile.us_ach_debit.v1",
-  "normalized-funding-reversal.v1",
-  "operator-recovery-redaction.v1",
-]
+# The API version, schema version, and capability set the authority must serve
+# are supplied by the run from the release it bound, alongside the manifest
+# digest above. They are not stated here: a consumer that names one release in
+# its own configuration cannot admit the next one, and reports a real contract
+# disagreement as an edit somebody forgot to make. An enabled configuration
+# that reaches readiness without them is unready and says which pin is absent.
 currency = "usd"
 country = "US"
 condition_profile = "vm-fulfillment"

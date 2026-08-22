@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+from collections.abc import Mapping
 from typing import Any, Literal
 
 from hosted_settlement_client import (
@@ -17,6 +18,7 @@ from hosted_settlement_client import (
     FinancialState,
     FulfillmentPublicationRequest,
     FulfillmentRef,
+    FundingIncidentKind,
     FundingProfile,
     FundingMode,
     HostedSettlementAsyncClient,
@@ -24,6 +26,7 @@ from hosted_settlement_client import (
     NormalizedFundingState,
     OperationRequest,
     Principal,
+    ReclaimRequest,
     canonical_json,
 )
 from hosted_settlement_client import (
@@ -32,6 +35,7 @@ from hosted_settlement_client import (
 from market_identity import Signer as MarketplaceSigner
 from market_identity import TrustedIdentitySet
 from market_settlement_runtime import (
+    MANUAL_REASON_KEY,
     ConditionOutcome,
     EffectOutcome,
     MaterializationOutcome,
@@ -42,6 +46,11 @@ from market_settlement_runtime import (
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, field_validator
 
 MECHANISM = "fiat.stripe.v1"
+#: The reclaim option naming where a payer's return is addressed. A push-funded
+#: profile is returned by mailing the payer for return bank details, and this
+#: mechanism is the only code that gives the key meaning: everything between the
+#: buyer who supplies it and this adapter relays it without reading it.
+RETURN_INSTRUCTIONS_EMAIL_OPTION = "return_instructions_email"
 EXPECTED_HOSTED_REQUEST_PROTOCOL = "arkhai.hosted-request-signature.v2"
 EXPECTED_HOSTED_RESPONSE_PROTOCOL = "arkhai.hosted-response-signature.v2"
 REQUIRED_HOSTED_CAPABILITIES = frozenset(
@@ -58,6 +67,9 @@ REQUIRED_HOSTED_CAPABILITIES = frozenset(
 _CURRENCY = re.compile(r"^[a-z]{3}$")
 _FULFILLMENT: TypeAdapter[FulfillmentRef] = TypeAdapter(FulfillmentRef)
 _CONTRACT_FINGERPRINT = re.compile(r"^sha256:[0-9a-f]{64}$")
+#: The authority's error codes are a stable lowercase enumeration. Anything
+#: else is not repeated onward, whatever the authority chose to send.
+_REJECTION_CODE = re.compile(r"^[a-z][a-z0-9_]{0,63}$")
 _UNCERTAIN_RESPONSE_CODES = frozenset(
     {
         "invalid_response",
@@ -73,23 +85,84 @@ class HostedSettlementTemporaryError(RuntimeError):
     """A provider-redacted failure that is safe to retry under the same identity."""
 
 
+def _rejection_code(code: str) -> str:
+    """The authority's own word for what it refused, or nothing at all.
+
+    Only the authority's stable enumeration passes: the marketplace already
+    branches on this value to decide retryability, so trusting it to name a
+    refusal adds no exposure the boundary did not already accept. Anything not
+    of that shape is treated as if the authority named nothing, because an
+    authority that puts free text here is one this side cannot repeat safely.
+    """
+
+    return code if _REJECTION_CODE.fullmatch(code or "") else ""
+
+
 async def _released_call(operation: str, call: Any) -> Any:
-    """Map released-client errors to stable, persistence-safe runtime failures."""
+    """Map released-client errors to stable, persistence-safe runtime failures.
+
+    The released client's message can name provider detail and its traceback can
+    carry request and response fragments, so both are dropped and the cause
+    stays severed. Its ``code`` is the authority's own vocabulary and is kept:
+    an obligation parked for a human to repair owes that human the reason.
+    """
 
     try:
         return await call()
     except HostedSettlementError as exc:
-        if exc.retryable or exc.code in _UNCERTAIN_RESPONSE_CODES:
+        code = _rejection_code(getattr(exc, "code", ""))
+        if exc.retryable or code in _UNCERTAIN_RESPONSE_CODES:
             raise HostedSettlementTemporaryError(
-                f"hosted settlement {operation} temporarily unavailable"
+                _reason(f"hosted settlement {operation} temporarily unavailable", code)
             ) from None
+        # An authority that names nothing usable still parked this obligation,
+        # and a parked obligation that says nothing cannot be repaired. The
+        # marketplace names it instead, from the one thing it always has.
+        refusal = code or _refusal_code(getattr(exc, "status_code", 0))
         raise SettlementManualRequired(
-            f"hosted settlement {operation} rejected"
+            _reason(f"hosted settlement {operation} rejected", refusal),
+            code=refusal,
         ) from None
     except Exception:
         raise HostedSettlementTemporaryError(
             f"hosted settlement {operation} temporarily unavailable"
         ) from None
+
+
+def _reason(summary: str, code: str) -> str:
+    return f"{summary}: {code}" if code else summary
+
+
+def _refusal_code(status_code: Any) -> str:
+    """The marketplace's own name for a refusal the authority did not name."""
+
+    return (
+        f"authority_refused_{status_code}"
+        if isinstance(status_code, int) and 400 <= status_code < 600
+        else "authority_refused"
+    )
+
+
+def hosted_projected_reason(
+    receipt: Mapping[str, Any] | None,
+    mechanism_state: Mapping[str, Any] | None,
+) -> str | None:
+    """The one reason a hosted obligation reports, parked or merely pending.
+
+    Defined here rather than in each adopting domain, so a storefront cannot
+    project a status without the reason behind it by forgetting to. An
+    obligation the authority refused reports the authority's own code; one
+    merely awaiting funding reports the funding reason it already had.
+    """
+
+    receipt = receipt or {}
+    state = mechanism_state or {}
+    return (
+        receipt.get("funding_reason")
+        or state.get("funding_reason")
+        or state.get(MANUAL_REASON_KEY)
+        or None
+    )
 
 
 class HostedObligationParams(BaseModel):
@@ -316,7 +389,11 @@ class HostedConditionalEscrowClient:
             buyer_action=_safe_action(result),
             condition_anchor=result.condition_anchor,
             receipt=_status_receipt(result, params, legacy=False),
-            mechanism_state=_mechanism_state(result, params, legacy=False),
+            mechanism_state=_parked_reason(
+                _mechanism_state(result, params, legacy=False),
+                _materialization_status(result),
+                result,
+            ),
         )
 
     async def get_status(
@@ -346,10 +423,10 @@ class HostedConditionalEscrowClient:
             buyer_action=_safe_action(result),
             condition_anchor=result.condition_anchor,
             receipt=_status_receipt(result, params, legacy=legacy),
-            mechanism_state=_mechanism_state(
+            mechanism_state=_parked_reason(
+                _mechanism_state(result, params, legacy=legacy),
+                _escrow_status(result, mechanism_state),
                 result,
-                params,
-                legacy=legacy,
             ),
         )
 
@@ -414,6 +491,36 @@ class HostedConditionalEscrowClient:
             },
         )
 
+    @staticmethod
+    def _reclaim_request(
+        operation_ref: str,
+        mechanism_options: Mapping[str, Any] | None,
+    ) -> OperationRequest:
+        """Build the reclaim the authority is owed for this obligation.
+
+        A push-funded profile has no instrument to credit back, so the
+        authority returns it by mailing the payer for return bank details and
+        refuses to try with nowhere to address that mail. The payer is the only
+        party who knows where it should go, so the address arrives here as a
+        caller option rather than as anything this marketplace stores.
+
+        Which profiles need one is the authority's judgement, not ours. Absent
+        an address this sends the same bare request it always has and lets the
+        authority answer, so a profile that needs none is untouched and a
+        profile that starts needing one does not need a release here first.
+        """
+        address = (mechanism_options or {}).get(RETURN_INSTRUCTIONS_EMAIL_OPTION)
+        if address is None:
+            return OperationRequest(request_id=operation_ref)
+        if not isinstance(address, str):
+            raise ValueError(
+                f"{RETURN_INSTRUCTIONS_EMAIL_OPTION} must be a string address"
+            )
+        return ReclaimRequest(
+            request_id=operation_ref,
+            return_instructions_email=address,
+        )
+
     async def reclaim_expired(
         self,
         obligation: dict[str, Any],
@@ -421,18 +528,17 @@ class HostedConditionalEscrowClient:
         mechanism_ref: str,
         operation_ref: str,
         mechanism_state: dict[str, Any],
+        mechanism_options: Mapping[str, Any] | None = None,
     ) -> EffectOutcome:
         params, _amount, _currency, _expiration, legacy = _validate_obligation(
             obligation,
             allow_legacy=True,
         )
         del mechanism_state
+        request = self._reclaim_request(operation_ref, mechanism_options)
         result = await _released_call(
             "reclaim",
-            lambda: self._client.reclaim(
-                mechanism_ref,
-                OperationRequest(request_id=operation_ref),
-            ),
+            lambda: self._client.reclaim(mechanism_ref, request),
         )
         receipt = result.model_dump(mode="json")
         receipt.update(_operation_identity(params, legacy=legacy))
@@ -610,6 +716,24 @@ def _materialization_status(
     return "pending"
 
 
+def _escalating_incident(result: EscrowResult) -> bool:
+    """Return whether the authority's incident is one that needs a human.
+
+    Every incident the authority raises is an escalation except one: a push
+    transfer whose funds have not all arrived. That one is raised on the first
+    retrieval of every push transfer, before any money can have landed, its own
+    required action is to wait for the remainder or return after the deadline,
+    and the authority leaves the financial state unescalated for it. It also
+    never clears itself. Reading it as an escalation parks every bank-transfer
+    deal permanently, including the ones the authority went on to call funded.
+    """
+
+    incident = result.incident
+    if incident is None:
+        return False
+    return incident.kind != FundingIncidentKind.ATTRIBUTION_UNDERPAID
+
+
 def _escrow_status(
     result: EscrowResult,
     previous: dict[str, Any],
@@ -629,7 +753,7 @@ def _escrow_status(
         previous_financial == FinancialState.COLLECTED.value
         and (
             result.financial_state == FinancialState.OPERATOR_REVIEW
-            or result.incident
+            or _escalating_incident(result)
             or result.funding_state
             in {
                 NormalizedFundingState.RETURNED,
@@ -640,7 +764,9 @@ def _escrow_status(
     )
     if post_collection_risk:
         return "manual_required"
-    if result.financial_state == FinancialState.OPERATOR_REVIEW or result.incident:
+    if result.financial_state == FinancialState.OPERATOR_REVIEW or (
+        _escalating_incident(result)
+    ):
         return "manual_required"
     if result.funding_state == NormalizedFundingState.AMBIGUOUS:
         return "manual_required"
@@ -707,6 +833,35 @@ def _status_receipt(
     }
     receipt.update(_operation_identity(params, legacy=legacy))
     return receipt
+
+
+def _parked_reason(
+    state: dict[str, Any],
+    status: str,
+    result: EscrowResult,
+) -> dict[str, Any]:
+    """Ensure an obligation the authority parked carries a reason.
+
+    The authority can answer successfully and still say the deal needs a human,
+    and it is not obliged to say why in a field this side already reads. Where
+    it does not, the marketplace names the state it was put into, so no path
+    into ``manual_required`` arrives without an explanation.
+    """
+
+    if status != "manual_required":
+        return state
+    if state.get("funding_reason") or state.get(MANUAL_REASON_KEY):
+        return state
+    incident = getattr(result, "incident", None)
+    kind = getattr(incident, "kind", None) if incident is not None else None
+    return {
+        **state,
+        MANUAL_REASON_KEY: (
+            f"authority_incident_{kind}"
+            if _REJECTION_CODE.fullmatch(str(kind or ""))
+            else "authority_operator_review"
+        ),
+    }
 
 
 def _mechanism_state(

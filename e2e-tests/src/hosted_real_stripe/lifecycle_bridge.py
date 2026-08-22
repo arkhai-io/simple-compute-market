@@ -6,6 +6,8 @@ import importlib
 import json
 import os
 import sys
+import traceback
+
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -42,12 +44,28 @@ class LifecycleBridge:
     def request(self, body: dict[str, Any]) -> dict[str, Any]:
         action = body.get("action")
         if action == "ensure_payer_profile_fixture":
+            method = body.get("payment_method")
             return self._marketplace.ensure_payer_profile_fixture(
                 str(body.get("funding_profile", "")),
                 str(body.get("interaction", "")),
+                payment_method=str(method) if method else None,
             )
         if action == "complete_payer_setup":
             return self._marketplace.complete_payer_setup()
+        if action == "verify_payer_setup":
+            amounts = body.get("amounts")
+            return self._marketplace.verify_payer_setup(
+                amounts=(
+                    tuple(int(value) for value in amounts)
+                    if isinstance(amounts, list | tuple)
+                    else None
+                ),
+                descriptor_code=(
+                    str(body["descriptor_code"])
+                    if body.get("descriptor_code") is not None
+                    else None
+                ),
+            )
         if action == "prepare_collection":
             return self._prepare(case="collection")
         if action == "prepare_refund":
@@ -241,10 +259,57 @@ def _load_marketplace() -> Any:
     return factory(buyer_config=Path(buyer_config))
 
 
+def _refusal_class() -> type[BaseException]:
+    """The marketplace's own refusal type, resolved the way the bridge resolves
+    everything else it borrows: from the module it was pointed at, not from an
+    import this package could not satisfy on its own.
+
+    A build whose marketplace half predates the type still runs; it simply has
+    nothing that raises it, and the except clause matches nothing.
+    """
+
+    module_name = os.environ.get(
+        "HOSTED_SETTLEMENT_E2E_NETWORK_MODULE",
+        "tests.e2e.roles.scenarios.vms.hosted.network",
+    )
+    try:
+        return getattr(importlib.import_module(module_name), "HostedAuthorityRefusal")
+    except (ImportError, AttributeError):
+        class _Unraisable(BaseException):
+            pass
+
+        return _Unraisable
+
+
+def _caused_by_timeout(exc: BaseException) -> bool:
+    """Whether a failure is a deadline, however far it has been re-wrapped.
+
+    A signed transport that gives up re-raises the deadline as its own error, so
+    the class on top says the request failed while the cause says the storefront
+    never answered. Those are different findings, and only one of them is the
+    marketplace rejecting anything: nothing replied, so there was no contract to
+    reject.
+    """
+
+    seen: set[int] = set()
+    current: BaseException | None = exc
+    while current is not None and id(current) not in seen:
+        seen.add(id(current))
+        if isinstance(current, TimeoutError):
+            return True
+        current = current.__cause__ or current.__context__
+    return False
+
+
 def main() -> int:
+    # Stdout is the protocol and carries codes only. The reason behind a code
+    # goes to stderr, which the driver reads for a development run and does
+    # not read at all for a protected one -- so writing it here is safe in
+    # both, and withholding it is what leaves a failed stage unexplainable.
     try:
         bridge = LifecycleBridge(_load_marketplace())
     except Exception:
+        traceback.print_exc()
         return 2
     for line in sys.stdin:
         try:
@@ -252,12 +317,29 @@ def main() -> int:
             if not isinstance(body, dict):
                 raise RuntimeError("request must be an object")
             response = bridge.request(body)
+        except _refusal_class() as refusal:
+            traceback.print_exc()
+            response = {
+                "ok": False,
+                "code": "authority_refused",
+                "refusal": getattr(refusal, "code", "unknown"),
+            }
         except TimeoutError:
+            traceback.print_exc()
             response = {"ok": False, "code": "convergence_timeout"}
         except (ExternalUnavailable, OSError, ConnectionError):
+            traceback.print_exc()
             response = {"ok": False, "code": "marketplace_unavailable"}
-        except Exception:
-            response = {"ok": False, "code": "marketplace_lifecycle_contract"}
+        except Exception as exc:
+            traceback.print_exc()
+            response = {
+                "ok": False,
+                "code": (
+                    "convergence_timeout"
+                    if _caused_by_timeout(exc)
+                    else "marketplace_lifecycle_contract"
+                ),
+            }
         sys.stdout.write(json.dumps(response, separators=(",", ":")) + "\n")
         sys.stdout.flush()
         if response.get("shutdown") is True:

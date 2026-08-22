@@ -7,7 +7,7 @@ ENV UV_LINK_MODE=copy \
 COPY .dist/ /.dist/
 RUN uv venv /opt/venv && \
     uv pip install --python /opt/venv/bin/python --find-links /.dist \
-      arkhai-bare-metal-storefront==0.2.1
+      arkhai-bare-metal-storefront==0.2.5
 
 FROM python:3.12-slim-bookworm AS runtime
 

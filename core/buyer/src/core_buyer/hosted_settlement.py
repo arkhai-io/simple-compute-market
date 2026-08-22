@@ -90,12 +90,24 @@ class HostedSettlementTransport:
             resolve_response_principals=self.resolve_seller_principals,
         )
 
-    def reclaim(self, *, settlement_ref: str) -> HostedProjection:
-        """Request reclaim for one eligible accepted obligation."""
+    def reclaim(
+        self,
+        *,
+        settlement_ref: str,
+        mechanism_options: Mapping[str, Any] | None = None,
+    ) -> HostedProjection:
+        """Request reclaim for one eligible accepted obligation.
+
+        ``mechanism_options`` is the caller's input to this one reclaim, in the
+        vocabulary of the mechanism it accepted. This transport stays opaque to
+        it: it signs the mapping into the body and reads no key. A caller with
+        nothing to say sends no body at all, which is the request this has
+        always sent.
+        """
         return _signed_json(
             self.seller_url.rstrip("/")
             + f"/api/v1/settlements/{settlement_ref}/reclaim",
-            None,
+            dict(mechanism_options) if mechanism_options else None,
             signer=self.signer,
             principal=self.principal,
             method="POST",
@@ -162,6 +174,7 @@ class HostedSettlementTransport:
 def make_hosted_settle_hook(
     *,
     config: BuyConfig,
+    mechanism: str,
     prepare_authorization: Callable[[str, Mapping[str, Any]], Any],
     poll_interval: float,
     total_timeout: float,
@@ -179,8 +192,10 @@ def make_hosted_settle_hook(
         if outcome is None or match is None or outcome.settlement_plan is None:
             raise ValueError("hosted settlement requires an accepted settlement plan")
         obligations = outcome.settlement_plan.obligations
-        if len(obligations) != 1 or obligations[0].mechanism != "fiat.stripe.v1":
-            raise ValueError("hosted settlement requires one fiat.stripe.v1 obligation")
+        if len(obligations) != 1 or obligations[0].mechanism != mechanism:
+            raise ValueError(
+                f"hosted settlement requires one {mechanism} obligation"
+            )
         obligation = obligations[0].model_dump(mode="json")
         if confirm is not None and not confirm(int(obligation["amount"]), match):
             return BuyResult(

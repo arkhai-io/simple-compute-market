@@ -598,6 +598,34 @@ def compute_rate_total(rate: RateValue, duration_seconds: int) -> int:
     return rate.value * duration_seconds // divisor
 
 
+def rate_scales_by_time(rate: RateValue) -> bool:
+    """True when ``rate.per`` is a time unit settled against a duration."""
+
+    return rate.per in PER_UNIT_SECONDS
+
+
+def compute_rate_unit_total(rate: RateValue, unit_count: int) -> int:
+    """Multiply a counted-unit rate by the negotiated unit count.
+
+    Counted units (``per="credit"``, ``"token"``, ``"request"``, …) scale
+    by an exact negotiated count carried on the deal rather than by
+    elapsed time; time-unit rates must go through ``compute_rate_total``.
+    """
+
+    if rate.per in PER_UNIT_SECONDS:
+        raise ValueError(
+            f"time-unit rate {rate.per!r} scales by duration, not unit count"
+        )
+    if isinstance(unit_count, bool) or not isinstance(unit_count, int):
+        raise ValueError("counted rate requires an integer unit count")
+    if unit_count < 1:
+        raise ValueError("counted rate requires a positive unit count")
+    total = rate.value * unit_count
+    if total > 2**256 - 1:
+        raise ValueError("counted rate total exceeds uint256")
+    return total
+
+
 # ---------------------------------------------------------------------------
 # AcceptedEscrow / EscrowProposal accessors
 # ---------------------------------------------------------------------------
@@ -605,6 +633,16 @@ def compute_rate_total(rate: RateValue, duration_seconds: int) -> int:
 # round-trip through SQLite or the wire); these accessors operate on
 # either a Pydantic model OR a dict so the only change at the call site
 # is the accessor name.
+#
+# Ownership note: the Alkahest-shaped carriers below (AcceptedEscrow,
+# EscrowProposal, EscrowDemand, and the accepted_* accessors) have their
+# single authoritative definition in ``market_alkahest.schemas`` — core
+# cannot import the mechanism kit, so these stay as verbatim transitional
+# aliases only for the wire models core still types (negotiation and
+# listing carriers), to be retired with a contract change. New consumers
+# import from the kit. ``RateValue``, ``SettlementOption``,
+# ``compute_rate_total`` and ``primary_rate_value`` are mechanism-neutral
+# and deliberately stay core.
 
 
 def primary_rate_value(accepted_or_proposal: Any) -> int | None:

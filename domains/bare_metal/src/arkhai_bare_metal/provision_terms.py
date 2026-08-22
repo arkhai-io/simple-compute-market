@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 BARE_METAL_PROVISION_KIND = "bare_metal.v1"
 BARE_METAL_PROVISION_VERSION = 1
@@ -17,15 +17,26 @@ class BareMetalProvisionPayload(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     duration_seconds: int = Field(ge=1)
-    access_method: Literal["ssh"] = SSH_ACCESS_METHOD
-    ssh_public_key: str = Field(min_length=1)
+    # "none" is the non-provisioning shape: a settlement that completes with
+    # no machine access (an introduction deal). Every provisioning path
+    # re-requires SSH credentials at its own admission arm.
+    access_method: Literal["ssh", "none"] = SSH_ACCESS_METHOD
+    ssh_public_key: str | None = Field(default=None, min_length=1)
 
     @field_validator("ssh_public_key")
     @classmethod
-    def _validate_ssh_public_key(cls, value: str) -> str:
-        if not value.strip():
-            raise ValueError("ssh_public_key must be non-empty")
+    def _validate_ssh_public_key(cls, value: str | None) -> str | None:
+        if value is not None and not value.strip():
+            raise ValueError("ssh_public_key must be non-empty when supplied")
         return value
+
+    @model_validator(mode="after")
+    def _validate_access(self) -> "BareMetalProvisionPayload":
+        if self.access_method == SSH_ACCESS_METHOD and self.ssh_public_key is None:
+            raise ValueError("ssh_public_key is required for SSH access")
+        if self.access_method != SSH_ACCESS_METHOD and self.ssh_public_key:
+            raise ValueError("ssh_public_key applies only to SSH access")
+        return self
 
 
 class BareMetalProvisionTerms(BaseModel):

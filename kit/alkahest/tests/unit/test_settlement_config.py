@@ -324,3 +324,10 @@ def test_alkahest_publication_clause_builds_exact_scaled_option(monkeypatch) -> 
     assert option["asset"] == clause.asset
     assert option["rates"] == escrow["rates"]
     assert option["params"] == {"accepted_escrow": escrow}
+
+
+def test_registration_owns_settlement_verification() -> None:
+    from market_alkahest import verify_escrow_for_settlement
+
+    registration = create_alkahest_registration()
+    assert registration.settlement_verifier is verify_escrow_for_settlement

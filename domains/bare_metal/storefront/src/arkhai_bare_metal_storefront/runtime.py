@@ -13,7 +13,7 @@ from typing import Any
 
 from core_storefront.identity_config import IdentityConfig, resolve_storefront_signer
 from market_identity import Identity, IdentityScheme, Signer, TrustedIdentitySet
-from core_storefront.escrow_verification import verify_escrow_for_settlement
+from market_alkahest import create_alkahest_registration
 from market_core import MarketDomainContract, validate_domain_contract
 from market_hosted_settlement import PortableRemoteFulfillmentRef, canonical_json
 from market_settlement_runtime import (
@@ -38,6 +38,11 @@ from .hosted_routes import (
     BareMetalHostedDomainCallbacks,
     lifecycle_domain_callbacks,
 )
+from .delivery import (
+    build_introduction_delivery,
+    load_storefront_delivery_sinks,
+    storefront_delivery_section,
+)
 from .sqlite_client import SQLiteClient
 from .site_clients import (
     BareMetalSiteBinding,
@@ -47,6 +52,7 @@ from .site_clients import (
 from .settlement_composition import (
     ALKAHEST_MECHANISM,
     BareMetalStorefrontSettlementComposition,
+    default_hosted_selection_dispatch,
 )
 
 
@@ -112,7 +118,10 @@ class BareMetalStorefrontRuntime:
     fulfillment_client: Any | None = field(default=None, repr=False)
     chain_clients: Mapping[str, Any] = field(default_factory=dict)
     chain_config_paths: Mapping[str, str | None] = field(default_factory=dict)
-    escrow_verifier: Callable[..., Awaitable[int]] = verify_escrow_for_settlement
+    introduction_delivery: Any | None = field(default=None, repr=False)
+    escrow_verifier: Callable[..., Awaitable[int]] = field(
+        default_factory=lambda: create_alkahest_registration().settlement_verifier
+    )
     settlement_repository: SettlementSQLiteRepository = field(init=False, repr=False)
     settlement_clients: Mapping[str, Any] = field(init=False, repr=False)
     settlement_runtime: SettlementRuntime = field(init=False, repr=False)
@@ -143,6 +152,11 @@ class BareMetalStorefrontRuntime:
             seller_principal=self.seller_principal,
             round_hook=default_seller_round_hook(),
             build_plan=self.plan_builder,
+            accepted_obligation_dispatch=(
+                self.settlement_composition.accepted_obligation_dispatch()
+                if self.settlement_composition is not None
+                else default_hosted_selection_dispatch()
+            ),
         )
 
     def settlement_service(self) -> BareMetalSettlementService:
@@ -393,7 +407,14 @@ def build_runtime_from_environment(
         raise RuntimeError(
             "bare-metal storefront trusted site composition is invalid",
         ) from exc
+    try:
+        delivery_sinks = load_storefront_delivery_sinks(storefront_delivery_section())
+    except (TypeError, ValueError, json.JSONDecodeError) as exc:
+        raise RuntimeError(
+            "BARE_METAL_STOREFRONT_DELIVERY must be a strict [Delivery] section"
+        ) from exc
     runtime = BareMetalStorefrontRuntime(
+        introduction_delivery=build_introduction_delivery(delivery_sinks.sinks),
         db=db,
         domain=selected_domain,
         seller_principal=identity_config.principal,

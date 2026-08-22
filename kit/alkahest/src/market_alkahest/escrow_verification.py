@@ -39,6 +39,12 @@ import logging
 import time
 from typing import Any
 
+from market_alkahest import alkahest as _codecs
+from market_alkahest.schemas import (
+    accepted_recipient_address,
+    accepted_token_address,
+)
+
 logger = logging.getLogger(__name__)
 
 
@@ -95,8 +101,6 @@ def _extract_token_contract_from_listing(listing: dict[str, Any]) -> str:
     ``escrow_proposal`` on the negotiation thread. With a proposal in
     hand the verifier reads ``proposal.literal_fields["token"]`` directly.
     """
-    from market_core.schemas import accepted_token_address
-
     accepted = listing.get("accepted_escrows")
     if isinstance(accepted, str):
         try:
@@ -312,15 +316,11 @@ async def verify_escrow_for_settlement(
     # its literal_fields / fields supply the buyer-committed values.
     # Legacy threads with no proposal fall back to the kwarg defaults
     # + a listing-derived token.
-    from market_core.schemas import accepted_recipient_address, accepted_token_address
-
     effective_recipient = seller_wallet
     _codec = None
     expected_obligation_raw: dict[str, Any] | None = None
     expected_candidates: list[tuple[dict[str, Any], int | None]] = []
     if escrow_proposal is not None:
-        from market_alkahest.alkahest import get_escrow_codec_for
-
         _addr = (escrow_proposal.escrow_address or "").lower()
         # The buyer may leave the escrow contract unpinned — a zero-address
         # placeholder — so negotiation gates on field equality rather than a
@@ -332,7 +332,7 @@ async def verify_escrow_for_settlement(
             effective_escrow_kind = escrow_kind
         else:
             try:
-                _codec = get_escrow_codec_for(
+                _codec = _codecs.get_escrow_codec_for(
                     escrow_proposal.chain_name,
                     escrow_proposal.escrow_address,
                     config_path=alkahest_address_config_path,
@@ -357,10 +357,8 @@ async def verify_escrow_for_settlement(
                 )
             effective_token = proposal_token
         if build_obligation_data_fn is None:
-            from market_alkahest.alkahest import materialize_escrow_terms_from_proposal
-
             try:
-                expected_terms = materialize_escrow_terms_from_proposal(
+                expected_terms = _codecs.materialize_escrow_terms_from_proposal(
                     proposal=escrow_proposal,
                     seller_wallet_address=effective_recipient,
                     agreed_amount=int(agreed_price),
@@ -384,11 +382,9 @@ async def verify_escrow_for_settlement(
         effective_token = _extract_token_contract_from_listing(listing)
 
     if get_obligation_fn is None:
-        from market_alkahest.alkahest import get_escrow_kind_codec
-
         if _codec is None:
             try:
-                _codec = get_escrow_kind_codec(effective_escrow_kind)
+                _codec = _codecs.get_escrow_kind_codec(effective_escrow_kind)
             except ValueError as exc:
                 raise EscrowVerificationError(
                     f"Cannot read escrow {escrow_uid}: {exc}"
@@ -414,9 +410,7 @@ async def verify_escrow_for_settlement(
         # Legacy thread with no concrete proposal; keep the old ERC20 path.
         obligation_data_builder = build_obligation_data_fn
         if obligation_data_builder is None:
-            from market_alkahest.alkahest import build_payment_obligation_data
-
-            obligation_data_builder = build_payment_obligation_data
+            obligation_data_builder = _codecs.build_payment_obligation_data
         try:
             expected_obligation_raw = obligation_data_builder(
                 demands=None,

@@ -268,6 +268,8 @@ async def test_settlement_is_verified_idempotently_without_fulfillment_claims(
             ),
         )
 
+    obligation_ref = first.json().get("obligation_ref")
+    assert isinstance(obligation_ref, str) and len(obligation_ref) == 64
     expected = {
         "escrow_uid": ESCROW_UID,
         "negotiation_id": negotiation_id,
@@ -275,6 +277,7 @@ async def test_settlement_is_verified_idempotently_without_fulfillment_claims(
         "seller_principal": SELLER_SIGNER.identity.model_dump(mode="json"),
         "status": "settlement_verified",
         "fulfillment_available": True,
+        "obligation_ref": obligation_ref,
     }
     assert first.status_code == 200
     assert first.json() == expected

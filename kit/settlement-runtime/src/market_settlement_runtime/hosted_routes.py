@@ -162,6 +162,7 @@ class HostedSettlementRouteService:
         operation: str,
         resource_id: str,
         record: SettlementObligationRecord,
+        body: Mapping[str, Any] | None = None,
     ) -> AuthorizedSettlementRequest:
         agreement = await self._callbacks.prepare(
             record.agreement_ref,
@@ -173,7 +174,7 @@ class HostedSettlementRouteService:
             operation,
             resource_id,
             agreement.buyer_principal,
-            None,
+            dict(body) if body else None,
         )
         if auth.exact_retry and auth.recorded_outcome is None:
             raise HostedSettlementRouteError(409, "request retry is pending")
@@ -232,10 +233,23 @@ class HostedSettlementRouteService:
             )
             record = await self._reload(record.obligation_ref)
             if record.mechanism_status == "ready":
-                record = await self._callbacks.fulfill(
-                    record,
-                    self._worker_id("settlement-fulfill"),
-                )
+                try:
+                    record = await self._callbacks.fulfill(
+                        record,
+                        self._worker_id("settlement-fulfill"),
+                    )
+                except HostedSettlementRouteError:
+                    raise
+                except Exception:
+                    # Materialization promises a materialized obligation, not a
+                    # fulfilled one. An obligation that funded and could not
+                    # begin fulfilment is a real state with an owner -- the
+                    # resume worker retries it -- so the caller is told what it
+                    # actually got. Failing the whole start here reports the
+                    # authority as unavailable when the authority did its part,
+                    # and hides a funded obligation from the party that funded
+                    # it.
+                    record = await self._reload(record.obligation_ref)
             return await self._callbacks.project(
                 record,
                 outcome.action,
@@ -300,14 +314,24 @@ class HostedSettlementRouteService:
         self,
         request_context: Any,
         settlement_ref: str,
+        mechanism_options: Mapping[str, Any] | None = None,
     ) -> Mapping[str, Any]:
-        """Reconcile reclaim under the runtime's fulfillment exclusion guards."""
+        """Reconcile reclaim under the runtime's fulfillment exclusion guards.
+
+        ``mechanism_options`` is whatever the payer sent for this one reclaim.
+        These routes are provider-neutral, so they carry it to the runtime
+        without reading a key, logging it, or letting it reach a projection.
+        """
         record = await self._record(settlement_ref)
+        # The options say where the payer's return goes, so they are part of
+        # what the payer authorized and are verified as sent, not read first
+        # and trusted after.
         auth = await self._authorize(
             request_context,
             operation="settlement_reclaim",
             resource_id=settlement_ref,
             record=record,
+            body=mechanism_options,
         )
         replay = self._replay(auth)
         if replay is not None:
@@ -332,6 +356,7 @@ class HostedSettlementRouteService:
                 obligation_ref=record.obligation_ref,
                 local_principal=record.payer_principal,
                 worker_id=self._worker_id("settlement-reclaim"),
+                mechanism_options=mechanism_options,
             )
             if outcome.status == "busy":
                 raise HostedSettlementRouteError(

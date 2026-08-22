@@ -257,6 +257,7 @@ async def test_hosted_projection_exposes_portable_fulfillment_binding():
         collection_state="pending",
         materialization_state="materialized",
         condition_state="pending",
+        condition_anchor="0xanchor",
         fulfillment_ref="0xfulfillment",
         buyer_action=None,
         status_receipt={"funding_reason": "available"},
@@ -273,6 +274,9 @@ async def test_hosted_projection_exposes_portable_fulfillment_binding():
     assert response.funding_profile.value == "card.v1"
     assert response.funding_authorization_ref == "authorization-1"
     assert response.receipt == {"funding_reason": "available"}
+    # Both halves of the binding a buyer verifies fulfillment against.
+    assert response.condition_anchor == "0xanchor"
+    assert response.fulfillment_ref == "0xfulfillment"
     record.mechanism_status = "manual_required"
     record.collection_state = "succeeded"
     record.status_receipt = {"funding_reason": "post_collection_loss"}
