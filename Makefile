@@ -8,18 +8,9 @@ GIT_NAME   ?= simple-compute-market
 FOUNDRY_VERSION := v1.5.1
 DIST_DIR := ${CURDIR}/.dist
 IDENTITY_WHEEL := $(DIST_DIR)/arkhai_kit_identity-0.3.0-py3-none-any.whl
-HOSTED_RELEASE_TRUST ?= manifests/hosted-settlement-v0.2.1-trust.json
+HOSTED_REPO_ROOT := .
 HOSTED_RELEASE_DIR ?= $(DIST_DIR)
-HOSTED_RELEASE_MANIFEST ?= $(HOSTED_RELEASE_DIR)/release-manifest.json
-# Which release is bound is a choice and is stated above. What that release
-# contains is not a choice -- it follows -- so the artifact names are read from
-# the trust config rather than spelled out beside it, where they would have to
-# be edited in step with it and would name the previous release when they were
-# not. The verifier derives the same names from the same two values.
-HOSTED_RELEASE_CONTRACT := $(shell uv run --no-project python -c "import json;d=json.load(open('$(HOSTED_RELEASE_TRUST)'));print(d['release_version'],d['schema_version'])" 2>/dev/null)
-HOSTED_RELEASE_VERSION ?= $(word 1,$(HOSTED_RELEASE_CONTRACT))
-HOSTED_RELEASE_SCHEMA ?= $(word 2,$(HOSTED_RELEASE_CONTRACT))
-HOSTED_CLIENT_WHEEL ?= $(HOSTED_RELEASE_DIR)/arkhai_hosted_settlement_client-$(HOSTED_RELEASE_VERSION)-py3-none-any.whl
+include $(HOSTED_REPO_ROOT)/make/hosted-release.mk
 HOSTED_COMPOSE_ENV ?= $(DIST_DIR)/hosted-settlement-compose.env
 # The locally built consumer a development stack runs in place of an
 # attested release image.
@@ -65,19 +56,8 @@ HOSTED_STRIPE_TEST_ACCOUNT_REF ?=
 HOSTED_STRIPE_TEST_AUTHORITY_ENVIRONMENT ?=
 HOSTED_STRIPE_TEST_AUTHORITY_ENV_FILE ?=
 HOSTED_STRIPE_TEST_EVIDENCE ?= $(DIST_DIR)/hosted-stripe-test-evidence.json
-HOSTED_RELEASE_FILES = release-manifest.json \
-	arkhai_hosted_settlement_client-$(HOSTED_RELEASE_VERSION)-py3-none-any.whl \
-	openapi-v$(HOSTED_RELEASE_VERSION).json \
-	conformance-v$(HOSTED_RELEASE_VERSION).json \
-	migrations-v$(HOSTED_RELEASE_SCHEMA).json \
-	sbom.spdx.json provenance.intoto.json
-VERIFY_HOSTED_RELEASE = uv run --no-project --with 'eth-account>=0.13,<0.14' \
-	python scripts/verify-hosted-release.py \
-	--trust $(HOSTED_RELEASE_TRUST) \
-	--manifest $(HOSTED_RELEASE_MANIFEST) \
-	--wheel $(HOSTED_CLIENT_WHEEL)
 
-.PHONY: review-wheelhouse review-wheelhouse-scope build build-dev build-seller build-apicredits-service build-apicredits-storefront build-apicredits-sample-app test test-core test-provisioning test-provisioning-iac test-registry test-storefront test-vms-buyer test-apicredits test-apicredits-middleware test-kits dist dist-storefront-client dist-policy dist-compute-provisioning dist-compute-provisioning-service dist-kits dist-hosted-client verify-hosted-release dist-registry-client dist-registry dist-identity dist-core dist-arkhai-core-buyer dist-arkhai-core-storefront dist-bare-metal-storefront dist-alkahest dist-config dist-clean init init-prerequisites init-submodules init-zero-tier init-buyer init-storefront init-arkhai-core-registry push-runtime-artifacts push-images push-dev-image
+.PHONY: check-hosted-client-pin fix-hosted-client-pin review-wheelhouse review-wheelhouse-scope build build-dev build-seller build-apicredits-service build-apicredits-storefront build-apicredits-sample-app test test-core test-provisioning test-provisioning-iac test-registry test-storefront test-vms-buyer test-apicredits test-apicredits-middleware test-kits dist dist-storefront-client dist-policy dist-compute-provisioning dist-compute-provisioning-service dist-kits dist-hosted-client verify-hosted-release dist-registry-client dist-registry dist-identity dist-core dist-arkhai-core-buyer dist-arkhai-core-storefront dist-bare-metal-storefront dist-alkahest dist-config dist-clean init init-prerequisites init-submodules init-zero-tier init-buyer init-storefront init-arkhai-core-registry push-runtime-artifacts push-images push-dev-image
 .PHONY: build-hosted-producer
 .PHONY: test-release-tooling test-deployment-packaging prepare-hosted-compose prepare-hosted-compose-local hosted-preflight hosted-preflight-local hosted-stripe-test-local hosted-compose-up hosted-compose-restart hosted-compose-clean hosted-stripe-test hosted-stripe-test-stop
 .PHONY: dist-arkhai-core-registry
@@ -377,6 +357,12 @@ dist-config: ## Build arkhai-kit-config wheel into .dist/
 
 dist-helm: ## Package helm chart so it's ready for pushing into .dist/
 	helm package helm/ --destination $(DIST_DIR)
+
+check-hosted-client-pin: ## Report any consumer pinning a different hosted client
+	uv run --no-project python scripts/check-hosted-client-pin.py
+
+fix-hosted-client-pin: ## Move every consumer to the version kit/hosted-settlement names
+	uv run --no-project python scripts/check-hosted-client-pin.py --fix
 
 test-release-tooling: dist-identity ## Run release verifier and portable wheelhouse contract tests.
 	uv run --no-project --with pytest --with 'eth-account>=0.13,<0.14' \

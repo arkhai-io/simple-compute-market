@@ -352,13 +352,17 @@ def test_a_development_run_can_bind_a_producer_built_here() -> None:
 
 
 def test_the_released_producer_identities_come_from_the_trust_config() -> None:
-    """Five of six, so a development run stops copying digests in by hand."""
+    """Five of six, so a development run stops copying digests in by hand.
 
-    trust = json.loads(
-        (REPO_ROOT / "manifests" / "hosted-settlement-v0.2.1-trust.json").read_text(
-            encoding="utf-8"
-        )
-    )
+    The trust config is named here rather than left to the default, because the
+    default follows whichever version the tree pins and that version is signed
+    only after it is published. What this asserts is that the identities are
+    derived from whatever config is in force, which is independent of which one
+    that currently is.
+    """
+
+    trust_path = REPO_ROOT / "manifests" / "hosted-settlement-v0.2.1-trust.json"
+    trust = json.loads(trust_path.read_text(encoding="utf-8"))
     derived = subprocess.run(
         [
             "make",
@@ -367,6 +371,7 @@ def test_the_released_producer_identities_come_from_the_trust_config() -> None:
             str(REPO_ROOT / "Makefile"),
             "-n",
             "hosted-stripe-test-local",
+            f"HOSTED_RELEASE_TRUST={trust_path}",
         ],
         cwd=REPO_ROOT,
         capture_output=True,

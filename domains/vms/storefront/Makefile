@@ -12,17 +12,9 @@ DIST_DIR ?= ../../../.dist
 # Podman may reuse cross-stage layers after an internal wheel changes. Make the
 # wheel set an explicit cache key for both image stages.
 DIST_FINGERPRINT := $(shell find $(DIST_DIR) -maxdepth 1 -type f -name '*.whl' -exec cksum {} + 2>/dev/null | LC_ALL=C sort | cksum | awk '{print $$1}')
-HOSTED_RELEASE_TRUST ?= ../../../manifests/hosted-settlement-v0.2.1-trust.json
-HOSTED_RELEASE_MANIFEST ?= $(DIST_DIR)/release-manifest.json
-# Which release is bound is stated above; what it contains follows from it and
-# is read from the trust config rather than spelled beside it.
-HOSTED_RELEASE_VERSION ?= $(shell uv run --no-project python -c "import json;print(json.load(open('$(HOSTED_RELEASE_TRUST)'))['release_version'])" 2>/dev/null)
-HOSTED_CLIENT_WHEEL ?= $(DIST_DIR)/arkhai_hosted_settlement_client-$(HOSTED_RELEASE_VERSION)-py3-none-any.whl
-VERIFY_HOSTED_RELEASE = uv run --no-project --with 'eth-account>=0.13,<0.14' \
-	python ../../../scripts/verify-hosted-release.py \
-	--trust $(HOSTED_RELEASE_TRUST) \
-	--manifest $(HOSTED_RELEASE_MANIFEST) \
-	--wheel $(HOSTED_CLIENT_WHEEL)
+HOSTED_REPO_ROOT := ../../..
+HOSTED_RELEASE_DIR ?= $(DIST_DIR)
+include $(HOSTED_REPO_ROOT)/make/hosted-release.mk
 
 .PHONY: build build-images build-no-cache deploy deploy-storefront init reinit test test-unit test-integration verify-hosted-release
 

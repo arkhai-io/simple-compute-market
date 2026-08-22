@@ -597,6 +597,39 @@ composing a stack by hand and see `hosted.api_pin_missing`,
 configuration was used unrendered — that is the readiness blocker saying so, not
 a missing feature.
 
+#### Raising the hosted contract
+
+One file states which hosted contract this repository consumes: the
+`arkhai-hosted-settlement-client==` pin in `kit/hosted-settlement/pyproject.toml`.
+Everything else follows from it. `scripts/select-hosted-client-channel.py` turns
+that pin into the whole binding — whether `manifests/` holds a trust
+configuration signing it, and if so the trust path, manifest, wheel, and schema
+— and `make/hosted-release.mk` is where every Makefile reads that instead of
+naming a release itself.
+
+So raising the contract is:
+
+```sh
+# 1. state the version, in one place
+$EDITOR kit/hosted-settlement/pyproject.toml
+# 2. bring the other two distributions with it
+make fix-hosted-client-pin
+# 3. relock; these projects declare no index, so the wheels must be findable
+uv lock --find-links .dist
+```
+
+`make check-hosted-client-pin` reports a distribution left behind, by name,
+rather than letting it surface later as a resolver error naming a version nobody
+wrote down.
+
+The pinned version and the signed one are allowed to differ, and usually do
+while a capability is being built ahead of a publish. When the pin is unsigned
+the channel is `internal`: the wheel comes from the producer's index or a local
+build, and `verify-hosted-release` says there is no release to verify rather
+than verifying the last signed one, which would be a different release than the
+one being installed. Publishing and signing that version is what moves the
+channel back to `release`; no Makefile edit is involved either way.
+
 #### Setting up a saved bank instrument without a browser
 
 Hosted settlement 0.3.0 declares `payer-direct-instrument-setup.v1`, which lets a
