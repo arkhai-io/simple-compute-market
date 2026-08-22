@@ -25,6 +25,7 @@ from hosted_settlement_client import (
     InstrumentReadiness,
 )
 from market_hosted_settlement import (
+    RETURN_INSTRUCTIONS_EMAIL_OPTION,
     FundingSelection,
     StripeSettlementConfig,
     payer_command_context_from_config,
@@ -1029,10 +1030,33 @@ class NetworkMarketplacePort:
             resolve_seller_principals=self._publisher_resolver(),
             **options,
         )
-        return cast(
-            dict[str, Any],
-            getattr(transport, operation)(settlement_ref=settlement_ref),
-        )
+        call: dict[str, Any] = {"settlement_ref": settlement_ref}
+        if operation == "reclaim":
+            mechanism_options = self._reclaim_options()
+            if mechanism_options:
+                call["mechanism_options"] = mechanism_options
+        return cast(dict[str, Any], getattr(transport, operation)(**call))
+
+    def _reclaim_options(self) -> dict[str, str]:
+        """What this buyer has to say about how its funding comes back.
+
+        A push-funded obligation is returned by mailing the payer for return
+        bank details, so the run supplies the address it is entitled to use.
+        The address is given to the run rather than derived here, because
+        deriving it would mean holding provider credentials in the buyer role.
+        """
+
+        if self._funding_profile is not FundingProfile.US_BANK_TRANSFER:
+            return {}
+        address = os.environ.get("HOSTED_SETTLEMENT_E2E_RETURN_ADDRESS", "").strip()
+        if not address:
+            # Naming the missing input beats letting the authority refuse a
+            # request the run could not have completed anyway.
+            raise RuntimeError(
+                "selected hosted E2E scenario is missing prerequisite: "
+                "HOSTED_SETTLEMENT_E2E_RETURN_ADDRESS"
+            )
+        return {RETURN_INSTRUCTIONS_EMAIL_OPTION: address}
 
     def _operation(self, settlement_ref: str) -> str:
         try:

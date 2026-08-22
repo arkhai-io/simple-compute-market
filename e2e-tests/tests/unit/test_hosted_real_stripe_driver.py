@@ -13,6 +13,8 @@ from hosted_settlement_client import (
 from src.hosted_real_stripe.driver import (
     _SAVED_INSTRUMENT_PROFILES,
     _browser_outcome,
+    _lifecycle_environment,
+    _payer_return_address,
     _validate_payer_fixture,
     _maintained_account_binding,
     _pay_with_forwarding_paused,
@@ -273,3 +275,90 @@ def test_a_release_without_direct_setup_still_requires_its_browser_action() -> N
 def test_a_push_transfer_profile_holds_no_saved_instrument() -> None:
     assert "us_bank_transfer.v1" not in _SAVED_INSTRUMENT_PROFILES
     assert _SAVED_INSTRUMENT_PROFILES == frozenset({"card.v1", "us_ach_debit.v1"})
+
+
+class _AddressStripe:
+    def __init__(self) -> None:
+        self.asked = 0
+
+    def platform_return_address(self) -> str:
+        self.asked += 1
+        return "account@example.test"
+
+
+@pytest.mark.parametrize("scenario", ["reclaim", "worker_restart"])
+def test_a_push_funded_return_lane_is_given_an_address(scenario: str) -> None:
+    """Both lanes that reverse a funded obligation need somewhere to address
+    the payer's return, because the authority refuses to mail nowhere."""
+
+    stripe = _AddressStripe()
+
+    address = _payer_return_address(
+        stripe,  # type: ignore[arg-type]
+        funding_profile="us_bank_transfer.v1",
+        scenario=scenario,  # type: ignore[arg-type]
+    )
+
+    assert address == "account@example.test"
+    assert stripe.asked == 1
+
+
+@pytest.mark.parametrize(
+    ("funding_profile", "scenario"),
+    [
+        ("card.v1", "reclaim"),
+        ("us_ach_debit.v1", "reclaim"),
+        ("us_bank_transfer.v1", "collection"),
+    ],
+)
+def test_no_address_is_fetched_where_none_is_needed(
+    funding_profile: str, scenario: str
+) -> None:
+    """A pull-funded profile is credited back to the instrument that funded it,
+    and a lane that never reverses has nothing to address at all."""
+
+    stripe = _AddressStripe()
+
+    address = _payer_return_address(
+        stripe,  # type: ignore[arg-type]
+        funding_profile=funding_profile,  # type: ignore[arg-type]
+        scenario=scenario,  # type: ignore[arg-type]
+    )
+
+    assert address == ""
+    assert stripe.asked == 0
+
+
+def test_the_lifecycle_environment_omits_an_address_it_was_not_given(
+    tmp_path: Path,
+) -> None:
+    args = SimpleNamespace(
+        marketplace_factory="factory",
+        storefront_url="https://storefront.example",
+        registry_url="https://registry.example",
+        provisioning_url="https://provisioning.example",
+        authority_url="https://authority.example",
+        account_ref="account-1",
+        funding_profile="card.v1",
+        interaction="interactive",
+        scenario="collection",
+        run_identity="run-1",
+        lifecycle_timeout=180,
+    )
+
+    without = _lifecycle_environment(
+        args,  # type: ignore[arg-type]
+        buyer_config=tmp_path / "buyer.toml",
+        marketplace_config=tmp_path / "marketplace.toml",
+        manifest_digest="sha256:" + "0" * 64,
+    )
+    with_address = _lifecycle_environment(
+        args,  # type: ignore[arg-type]
+        buyer_config=tmp_path / "buyer.toml",
+        marketplace_config=tmp_path / "marketplace.toml",
+        manifest_digest="sha256:" + "0" * 64,
+        return_address="account@example.test",
+    )
+
+    assert "HOSTED_SETTLEMENT_E2E_RETURN_ADDRESS" not in without
+    assert with_address["HOSTED_SETTLEMENT_E2E_RETURN_ADDRESS"] == "account@example.test"

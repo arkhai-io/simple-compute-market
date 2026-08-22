@@ -374,6 +374,11 @@ def run(args: argparse.Namespace) -> tuple[StripeTestEvidence, int]:
                                 buyer_config=buyer_config,
                                 marketplace_config=marketplace_config,
                                 manifest_digest=release.hosted_manifest_digest,
+                                return_address=_payer_return_address(
+                                    stripe,
+                                    funding_profile=funding_profile,
+                                    scenario=scenario,
+                                ),
                             ),
                             request_timeout=args.lifecycle_timeout,
                             retain_diagnostics=release.mode == "local",
@@ -448,6 +453,27 @@ def _direct_instrument(stripe: StripeApi, funding_profile: FundingProfile) -> st
     if funding_profile == "card.v1":
         return stripe.create_card_instrument()
     return stripe.create_microdeposit_bank_instrument()
+
+
+def _payer_return_address(
+    stripe: StripeApi,
+    *,
+    funding_profile: FundingProfile,
+    scenario: Scenario,
+) -> str:
+    """Where this run's reclaim addresses the payer's return.
+
+    Only a push-funded reclaim needs one: the authority returns that balance by
+    mailing the payer for return bank details and refuses to try with nowhere
+    to send it. Every other profile is credited back to the instrument that
+    funded it, so asking for an address there would carry one for nothing.
+    """
+
+    if funding_profile != "us_bank_transfer.v1":
+        return ""
+    if scenario not in {"reclaim", "worker_restart"}:
+        return ""
+    return stripe.platform_return_address()
 
 
 def _require_profile_scenario(
@@ -1149,8 +1175,16 @@ def _lifecycle_environment(
     buyer_config: Path,
     marketplace_config: Path,
     manifest_digest: str,
+    return_address: str = "",
 ) -> dict[str, str]:
-    return {
+    """Hand the lifecycle only what the buyer role is entitled to act on.
+
+    ``return_address`` is where a push-funded return is addressed. It is passed
+    for the profiles that need one and left empty otherwise, so a lane that has
+    no use for an address never carries one.
+    """
+
+    environment = {
         "HOSTED_SETTLEMENT_E2E_MARKETPLACE_FACTORY": args.marketplace_factory,
         "HOSTED_SETTLEMENT_E2E_BUYER_CONFIG": str(buyer_config),
         "HOSTED_SETTLEMENT_E2E_STOREFRONT_CONFIG": str(marketplace_config),
@@ -1166,6 +1200,9 @@ def _lifecycle_environment(
         "HOSTED_SETTLEMENT_E2E_RUN_REF": args.run_identity,
         "HOSTED_SETTLEMENT_E2E_LIFECYCLE_TIMEOUT": str(args.lifecycle_timeout),
     }
+    if return_address:
+        environment["HOSTED_SETTLEMENT_E2E_RETURN_ADDRESS"] = return_address
+    return environment
 
 
 def _disclose(

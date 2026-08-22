@@ -92,6 +92,28 @@ class StripeApi:
     def retrieve_account(self, account_id: str) -> JsonObject:
         return self._transport(f"/v1/accounts/{account_id}", {})
 
+    def platform_return_address(self) -> str:
+        """The address this account may address a payer return to.
+
+        A push-funded balance is returned by mailing the payer for return bank
+        details. Stripe declines to mail a third party from an account whose
+        application is not submitted, but will mail the address registered to
+        the account itself -- so a run reclaims to its own address and proves
+        the whole path without waiting on an external approval.
+
+        This is why an unsubmitted account is not a blocker here, and also why
+        it stays one for a real payer's return: that case genuinely needs the
+        application submitted and is reported as unavailable, not simulated.
+        """
+
+        account = self._transport("/v1/account", {})
+        address = account.get("email")
+        if not isinstance(address, str) or not address:
+            raise ProviderInvariantError(
+                "the account registers no address a payer return can be sent to"
+            )
+        return address
+
     def fund_test_cash_balance(self, expected: ExpectedEffect) -> None:
         """Fund one exact push-transfer intent through Stripe's test helper."""
 

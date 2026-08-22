@@ -77,11 +77,25 @@
 
 ## 5. The bank-transfer lane closes
 
-- [ ] 5.1 The `us_bank_transfer.v1` reclaim lane supplies the connected
+- [x] 5.1 The `us_bank_transfer.v1` reclaim lane supplies the connected
       account's own registered address.
-- [ ] 5.2 Evidence: e2e unit coverage that the lane sends an address and that a
+- [x] 5.2 Evidence: e2e unit coverage that the lane sends an address and that a
       lane sending none reports the authority's refusal by its own name rather
       than a convergence timeout.
+
+      The address is fetched by the driver, which already holds the credential,
+      and handed to the buyer role as one environment value. Deriving it in the
+      role would mean putting provider credentials in the buyer, which is the
+      one place in this harness that must not have them. A bank-transfer lane
+      started without it names the missing prerequisite rather than issuing a
+      request it could not have completed.
+
+      Confirmed against the account this run uses: it registers an address and
+      reports `details_submitted=false` -- exactly the state where Stripe will
+      mail the account's own address but not a third party's, which is why this
+      path is exercisable now.
+
+      Suites: e2e unit 182 (was 173).
 - [ ] 5.3 Record the result in `docs/development/TESTING.md` and close the
       `us_bank_transfer.v1` reclaim cell in the coverage matrix, or state
       precisely what remains external if it does not close.

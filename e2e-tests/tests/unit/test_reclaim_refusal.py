@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from types import SimpleNamespace
 
 import pytest
 
@@ -272,3 +273,87 @@ def test_parked_on_a_permanent_reason_still_stops(
         _public_wait(projector, monkeypatch, {"collected"})
 
     assert refused.value.code == "reversal_rejected"
+
+
+class _Transport:
+    """`_buyer_call`'s transport, capturing what the reclaim was given."""
+
+    def __init__(self) -> None:
+        self.reclaim_kwargs: dict[str, object] | None = None
+
+    def reclaim(self, **kwargs: object) -> dict[str, object]:
+        self.reclaim_kwargs = kwargs
+        return {"status": "reclaimed"}
+
+    def status(self, **kwargs: object) -> dict[str, object]:
+        return {"status": "ready"}
+
+
+def _port(monkeypatch: pytest.MonkeyPatch, profile: object) -> object:
+    from tests.e2e.roles.scenarios.vms.hosted import network
+
+    transport = _Transport()
+    monkeypatch.setattr(network, "HostedSettlementTransport", lambda **_kw: transport)
+    port = network.NetworkMarketplacePort.__new__(network.NetworkMarketplacePort)
+    port.storefront_url = "https://seller.example"
+    port._buyer_signer = SimpleNamespace(identity=object())
+    port._funding_profile = profile
+    monkeypatch.setattr(port, "_publisher_resolver", lambda: (lambda: None), False)
+    return port, transport
+
+
+def test_a_bank_transfer_reclaim_supplies_the_return_address(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The authority refuses a push-funded return with nowhere to address it,
+    so the lane that reclaims one supplies the address it may use."""
+
+    from hosted_settlement_client import FundingProfile
+    from tests.e2e.roles.scenarios.vms.hosted import network
+
+    monkeypatch.setenv(
+        "HOSTED_SETTLEMENT_E2E_RETURN_ADDRESS", "account@example.test"
+    )
+    port, transport = _port(monkeypatch, FundingProfile.US_BANK_TRANSFER)
+
+    network.NetworkMarketplacePort._buyer_call(port, "reclaim", "settlement-1")
+
+    assert transport.reclaim_kwargs == {
+        "settlement_ref": "settlement-1",
+        "mechanism_options": {"return_instructions_email": "account@example.test"},
+    }
+
+
+def test_a_bank_transfer_reclaim_without_an_address_names_the_prerequisite(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Naming the missing input beats issuing a request the run could not
+    have completed, and beats reporting the authority's refusal as a surprise."""
+
+    from hosted_settlement_client import FundingProfile
+    from tests.e2e.roles.scenarios.vms.hosted import network
+
+    monkeypatch.delenv("HOSTED_SETTLEMENT_E2E_RETURN_ADDRESS", raising=False)
+    port, transport = _port(monkeypatch, FundingProfile.US_BANK_TRANSFER)
+
+    with pytest.raises(RuntimeError, match="HOSTED_SETTLEMENT_E2E_RETURN_ADDRESS"):
+        network.NetworkMarketplacePort._buyer_call(port, "reclaim", "settlement-1")
+
+    assert transport.reclaim_kwargs is None
+
+
+def test_a_card_reclaim_carries_no_address(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A pull-funded profile is credited back to the instrument that funded
+    it, so carrying an address there would carry one for nothing."""
+
+    from hosted_settlement_client import FundingProfile
+    from tests.e2e.roles.scenarios.vms.hosted import network
+
+    monkeypatch.setenv(
+        "HOSTED_SETTLEMENT_E2E_RETURN_ADDRESS", "account@example.test"
+    )
+    port, transport = _port(monkeypatch, FundingProfile.CARD)
+
+    network.NetworkMarketplacePort._buyer_call(port, "reclaim", "settlement-1")
+
+    assert transport.reclaim_kwargs == {"settlement_ref": "settlement-1"}
