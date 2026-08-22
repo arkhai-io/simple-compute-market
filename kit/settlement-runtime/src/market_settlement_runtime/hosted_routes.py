@@ -232,10 +232,23 @@ class HostedSettlementRouteService:
             )
             record = await self._reload(record.obligation_ref)
             if record.mechanism_status == "ready":
-                record = await self._callbacks.fulfill(
-                    record,
-                    self._worker_id("settlement-fulfill"),
-                )
+                try:
+                    record = await self._callbacks.fulfill(
+                        record,
+                        self._worker_id("settlement-fulfill"),
+                    )
+                except HostedSettlementRouteError:
+                    raise
+                except Exception:
+                    # Materialization promises a materialized obligation, not a
+                    # fulfilled one. An obligation that funded and could not
+                    # begin fulfilment is a real state with an owner -- the
+                    # resume worker retries it -- so the caller is told what it
+                    # actually got. Failing the whole start here reports the
+                    # authority as unavailable when the authority did its part,
+                    # and hides a funded obligation from the party that funded
+                    # it.
+                    record = await self._reload(record.obligation_ref)
             return await self._callbacks.project(
                 record,
                 outcome.action,
