@@ -646,6 +646,18 @@ class NetworkMarketplacePort:
     def eligible_pretransfer_refund_available(self) -> bool:
         return True
 
+    def _funds_within_materialization(self) -> bool:
+        """Whether funding completes inside the materialize call.
+
+        A saved card the payer already holds is charged off-session during
+        materialization; every other shape returns first and funds after.
+        """
+
+        return (
+            self._funding_profile is FundingProfile.CARD
+            and self._interaction is FundingMode.SAVED_INSTRUMENT
+        )
+
     def _keep_refund_fulfillment_unresolved(self) -> None:
         with SyncProvisioningClient(
             self.provisioning_url,
@@ -657,7 +669,15 @@ class NetworkMarketplacePort:
                 {
                     "rule_id": "hosted-stripe-refund-unresolved",
                     "match": {"vm_action": "create"},
-                    "pause_before_result": True,
+                    # Holding the job before its result keeps fulfillment
+                    # unresolved, and the release runs once funding is observed.
+                    # A profile that funds inside materialization never gets
+                    # there: the storefront polls this job within that same
+                    # request, so the call that would release it cannot run
+                    # until the call it is blocking returns. Resuming a held
+                    # job yields this same failure, so failing at once reaches
+                    # the identical state without the deadlock.
+                    "pause_before_result": not self._funds_within_materialization(),
                     "fail_with": "protected refund keeps fulfillment unresolved",
                 },
             )
