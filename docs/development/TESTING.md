@@ -851,79 +851,46 @@ setup, funding authorization, payment intent, escrow, attestation, all `200 OK` 
 while the storefront continues polling past the caller's deadline. Whether
 materialization should do that work inline is a question about the storefront.
 
-`card.v1` collection passes on those bounds. Its **reclaim** leg does not, and
-raising the bounds does not fix it: runs at 180s, at 300s within a 600s
-lifecycle bound, and a capture run all end the same way, so this is not
-slowness. Captured container logs name what happens. Inside the settlements
-request the storefront runs `capacity_hold_committed`, `resource_reserved`, and
-`job_submitted`, and the sequence never reaches a fulfillment-complete event
-before the bound expires. The authority answers every call it receives with
-`200 OK` throughout, including the escrow, so nothing is failing — the request
-is waiting on a provisioning job it started itself.
+`card.v1` reclaim passes, and what blocked it was neither the profile nor the
+storefront's inline fulfilment. Collection fulfils inline too and passes, which
+rules that out; an earlier note here claimed otherwise and was wrong.
 
-Two things follow, and both are the storefront's to answer:
+Three things had to be true at once, and each was found by a single-variable run:
 
-- Materialization performs fulfillment work inline, so the caller's bound has to
-  cover VM provisioning. No profile that funds asynchronously reaches this,
-  which is why it appeared only once a card lane ran.
-- The reclaim scenario needs an obligation that stays unfulfilled until its
-  pre-transfer reclaim is eligible. A saved card funds during materialization,
-  and fulfillment follows immediately, so under the current behaviour there is
-  nothing left to reclaim. This is a question about when the storefront should
-  begin fulfilling, not a property of the profile or of the lane.
+- The reclaim lane keeps fulfilment unresolved by holding the VM create job
+  before its result, releasing it once funding is observed. A saved card funds
+  *inside* the materialize call and the storefront polls that held job within
+  the same request, so the release could not run until the call it was blocking
+  returned. A profile that funds within materialization now fails the job at
+  once instead, which is the state a release produces anyway.
+- A failed job is retried four times with backoff, roughly seven minutes, so the
+  lane's bounds have to cover the ladder: materialize 900s inside a 1800s
+  lifecycle bound.
+- `SettlementHostedRoutes.start` fulfils inline and let any failure there fall
+  into a bare `except Exception` answering `503 hosted settlement authority is
+  temporarily unavailable`. The authority had done its part -- the escrow
+  existed and the funding was authoritative -- so the caller was told the wrong
+  component failed and a funded obligation was hidden from the party that
+  funded it. A failure to begin fulfilment now projects the record as it stands;
+  the resume worker already owns retrying it.
 
-The lane is left reporting this rather than working around it. A harness that
-raised its bound until provisioning finished would record a passing reclaim for
-an obligation that had already been fulfilled.
-
-Deferring the funds does not open a way around it, and the reason is a decision
-rather than an oversight. The ACH lane makes its profile reclaimable by setting
-`HOSTED_SETTLEMENT_US_ACH_DEBIT_AVAILABILITY_DELAY_SECONDS=0`, and the mirror
-setting exists for card, but the authority applies an availability delay only
-under `profile == FundingProfile.US_ACH_DEBIT` (`authority.py:5636-5652`). For
-card the value parses and is persisted onto the funding record, and is never
-consulted. That is deliberate: the chart pins
-`cardAvailabilityDelaySeconds` to `{"const": 0}`
-(`helm/hosted-settlement/values.schema.json:174`), so a non-zero card delay is
-not a supported deployment at all. Card funds are available immediately by
-design, which is what makes a saved-card obligation fulfil during
-materialization.
-
-So `card.v1` reclaim needs the storefront to stop fulfilling inline. It cannot
-be arranged from configuration, and arranging it from the harness would be
-fabricating a state the product does not produce.
+The obligation window and the reclaim lane's servicing interval were both
+suspected and both cleared by experiment: a collection lane run with the reclaim
+window passes, and a reclaim lane run with servicing enabled fails identically.
 
 #### A lane that cannot admit a payer
 
-A lane can stop at `payer_profile` with `payer_profile_unavailable`, the bridge
-dying at construction on `hosted payer create failed: invalid_response`. The
-code is the released client's word for a response it could not validate, and it
-is what an unadmitted account produces: the payer call answers with a shape the
-client does not accept rather than a refusal it can name.
+A lane can stop at `payer_profile` with `hosted payer create failed:
+invalid_response`. The authority answers `POST /api/v1/payers` with `401` until
+the account-owner admission takes effect -- one run showed twenty-five of them
+before a `200` -- and the client reports that authentication refusal under a code
+that reads like a malformed response. The port therefore waits, bounded, for the
+authority to admit a payer, and names the last refusal if it never does.
 
-The account tables in the authority's SQLite file are empty in this state --
-`connected_accounts`, `account_owner_admissions`, and the rest all zero -- while
-`bind-existing-account` exits 0. A command that runs and writes nothing is the
-signature of one that received no input, and the binding contract is delivered
-on stdin (`compose exec -T ... --binding-file -`). That is the leading
-explanation and it is **not confirmed**: a direct test of stdin forwarding
-through the compose provider has not been completed.
-
-What is ruled out, each by a run from a verified-clean state: stale containers
-from an earlier lane, a data volume removed from under a running stack, an
-account-readiness race (a bounded wait for admission still exhausts), a podman
-flake, and half-cleared proxy variables. Each was a real problem, was fixed, and
-was not this one.
-
-Two lessons the runs cost, both recorded because they are cheap to repeat:
-
-- Diagnose from the failing process's own environment. A compose command run
-  without the lane's exported credentials, a Stripe probe that clears proxy
-  variables the lane keeps, and a database query against a path the service may
-  not use each produced a confident wrong answer.
-- The lane keeps its whole `make` output at `$rundir/make.log`. It previously
-  kept the last forty lines, so a cause printed earlier was unreadable, and
-  several runs were spent re-deriving what the log had already said.
+An earlier note here recorded the authority's account tables as empty in this
+state. That was a query run before the binding step, not a fact: on a lane that
+reaches it, `connected_accounts` and `account_owner_admissions` each hold a row.
+The binding is sound and was never the cause.
 
 #### Reusing a payer fixture
 
