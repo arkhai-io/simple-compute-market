@@ -239,3 +239,33 @@ async def test_start_still_reports_a_route_error_from_fulfillment() -> None:
         await service.start(object(), start)
 
     assert raised.value.status_code == 409
+
+
+@pytest.mark.asyncio
+async def test_reclaim_options_reach_the_runtime_and_the_signature_check() -> None:
+    """The options say where the payer's return goes.
+
+    That makes them part of what the payer authorized, so they are verified as
+    sent rather than read first and trusted after, and they reach the runtime
+    unchanged.
+    """
+
+    service, calls = _service()
+    options = {"return_instructions_email": "payer@example.test"}
+
+    await service.reclaim(object(), "settlement-1", options)
+
+    assert calls.runtime.reclaim.await_args.kwargs["mechanism_options"] == options
+    assert calls.authorize.await_args.args[-1] == options
+
+
+@pytest.mark.asyncio
+async def test_a_reclaim_without_options_authorizes_an_empty_body() -> None:
+    """A caller with nothing to say sends the request it always sent."""
+
+    service, calls = _service()
+
+    await service.reclaim(object(), "settlement-1")
+
+    assert calls.runtime.reclaim.await_args.kwargs["mechanism_options"] is None
+    assert calls.authorize.await_args.args[-1] is None

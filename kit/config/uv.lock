@@ -24,7 +24,7 @@ wheels = [
 
 [[package]]
 name = "arkhai-kit-config"
-version = "0.1.1"
+version = "0.1.2"
 source = { editable = "." }
 dependencies = [
     { name = "arkhai-kit-settlement-runtime" },
@@ -40,7 +40,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "arkhai-kit-settlement-runtime", specifier = "==0.1.1" },
+    { name = "arkhai-kit-settlement-runtime", specifier = "==0.1.2" },
     { name = "eth-account", specifier = ">=0.13.0" },
     { name = "pydantic", specifier = ">=2.7" },
     { name = "tomlkit", specifier = ">=0.13,<1" },
@@ -66,7 +66,7 @@ wheels = [
 
 [[package]]
 name = "arkhai-kit-settlement-runtime"
-version = "0.1.1"
+version = "0.1.2"
 source = { registry = "../../.dist" }
 dependencies = [
     { name = "arkhai-core" },
@@ -74,7 +74,7 @@ dependencies = [
     { name = "pydantic" },
 ]
 wheels = [
-    { path = "arkhai_kit_settlement_runtime-0.1.1-py3-none-any.whl" },
+    { path = "arkhai_kit_settlement_runtime-0.1.2-py3-none-any.whl" },
 ]
 
 [[package]]

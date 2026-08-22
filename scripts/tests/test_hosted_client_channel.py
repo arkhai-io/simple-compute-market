@@ -121,12 +121,19 @@ def test_a_tree_that_states_no_single_pin_is_refused(
 
 
 def test_this_repository_currently_pins_an_unreleased_client() -> None:
-    """The state the change exists for, asserted rather than assumed."""
+    """The state the change exists for, asserted rather than assumed.
 
+    Which version that is comes from the pin, because naming it here would be
+    the third place stating it -- the one this selector exists to remove -- and
+    would make every routine bump look like a broken test.
+    """
+
+    pinned = selector.pinned_version(REPO_ROOT)
     selected = selector.channel(REPO_ROOT)
 
+    assert selected["version"] == pinned
     assert selected["channel"] == "internal"
-    assert selected["version"] == "0.3.0"
+    assert not (REPO_ROOT / "manifests" / f"hosted-settlement-v{pinned}-trust.json").exists()
 
 
 def test_the_workflow_names_no_hosted_version_of_its_own() -> None:

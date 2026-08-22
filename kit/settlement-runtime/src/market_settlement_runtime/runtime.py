@@ -570,7 +570,16 @@ class SettlementRuntime:
         obligation_ref: str,
         local_principal: Identity,
         worker_id: str,
+        mechanism_options: Mapping[str, Any] | None = None,
     ) -> SettlementOperationOutcome:
+        """Return an expired obligation's funding to its payer.
+
+        ``mechanism_options`` belongs to the mechanism, not to this runtime,
+        which neither reads a key nor stores one. It is bound into the
+        reservation because two reclaims naming different options are two
+        different requests, and reusing the first reservation for the second
+        would send the mechanism something its caller never asked for.
+        """
         record = await self._load(obligation_ref)
         self._require_principal(record, local_principal, "payer")
         mechanism_ref = self._require_materialized(record)
@@ -590,7 +599,13 @@ class SettlementRuntime:
                     "domain cleanup must complete before reclaiming returned funding"
                 )
         client = self._client(record)
-        reserved = await self._reserve(record, "reclaim", worker_id, local_principal)
+        reserved = await self._reserve(
+            record,
+            "reclaim",
+            worker_id,
+            local_principal,
+            request_values={"mechanism_options": dict(mechanism_options or {})},
+        )
         if reserved is None:
             return self._outcome(record, "reclaim", "busy")
         terminal = self._terminal_outcome(record, "reclaim", reserved)
@@ -604,6 +619,7 @@ class SettlementRuntime:
                     record.obligation_ref, "reclaim"
                 ),
                 mechanism_state=dict(record.mechanism_state),
+                mechanism_options=dict(mechanism_options or {}),
             )
         except SettlementManualRequired as exc:
             return await self._finish_manual(record, "reclaim", worker_id, exc)

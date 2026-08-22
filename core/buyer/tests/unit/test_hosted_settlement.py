@@ -197,3 +197,50 @@ def test_shared_settle_hook_returns_domain_result_and_private_credentials(
         "key_id": "key-public-1",
         "secret": "buyer-only-secret",
     }
+
+
+def test_reclaim_signs_mechanism_options_it_does_not_read(monkeypatch) -> None:
+    """This transport stays opaque to the mechanism's vocabulary.
+
+    It signs the mapping into the body so the storefront can verify the payer
+    asked for exactly this return, and reads no key of it.
+    """
+
+    captured: dict[str, Any] = {}
+    monkeypatch.setattr(
+        hosted,
+        "_signed_json",
+        lambda url, body, **kwargs: (
+            captured.update(url=url, body=body, kwargs=kwargs)
+            or {"status": "reclaimed"}
+        ),
+    )
+
+    _transport().reclaim(
+        settlement_ref="settlement-1",
+        mechanism_options={"return_instructions_email": "payer@example.test"},
+    )
+
+    assert captured["url"] == (
+        "https://seller.example/api/v1/settlements/settlement-1/reclaim"
+    )
+    assert captured["body"] == {"return_instructions_email": "payer@example.test"}
+    assert captured["kwargs"]["operation"] == "settlement_reclaim"
+
+
+def test_reclaim_without_options_sends_no_body(monkeypatch) -> None:
+    """A caller with nothing to say sends the request this always sent."""
+
+    captured: dict[str, Any] = {}
+    monkeypatch.setattr(
+        hosted,
+        "_signed_json",
+        lambda url, body, **kwargs: (
+            captured.update(url=url, body=body, kwargs=kwargs)
+            or {"status": "reclaimed"}
+        ),
+    )
+
+    _transport().reclaim(settlement_ref="settlement-1")
+
+    assert captured["body"] is None

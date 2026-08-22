@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from typing import Any
 
 from market_settlement_runtime import (
@@ -82,7 +83,10 @@ class ContactExchangeClient:
         mechanism_ref: str,
         operation_ref: str,
         mechanism_state: dict[str, Any],
+        mechanism_options: Mapping[str, Any] | None = None,
     ) -> EffectOutcome:
+        # An introduction that expired unmet returns nothing, so a payer has
+        # no return to address and nothing here reads an option.
         return EffectOutcome(
             receipt={
                 "kind": "contact_exchange.reclaim_noop",

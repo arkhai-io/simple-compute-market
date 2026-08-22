@@ -18,7 +18,7 @@ from core_storefront.models.negotiation_models import (
     NegotiationListResponse,
 )
 from core_storefront.models.system_models import AdminPauseResponse
-from fastapi import APIRouter, HTTPException, Query, Request
+from fastapi import APIRouter, Body, HTTPException, Query, Request
 
 from market_contact_exchange import (
     AuthorizedIntroductionRequest,
@@ -298,9 +298,18 @@ async def hosted_settlement_status(
 async def reclaim_hosted_settlement(
     settlement_ref: str,
     request: Request,
+    mechanism_options: dict[str, Any] | None = Body(default=None),
 ) -> Mapping[str, Any]:
+    """Reclaim one eligible expired hosted settlement.
+
+    The body is the mechanism's own vocabulary for this one reclaim -- a
+    push-funded profile needs somewhere to address the payer's return -- so it
+    is relayed opaquely rather than parsed into a model here.
+    """
     try:
-        return await _hosted_service(request).reclaim(request, settlement_ref)
+        return await _hosted_service(request).reclaim(
+            request, settlement_ref, mechanism_options
+        )
     except HostedSettlementRouteError as exc:
         raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
 

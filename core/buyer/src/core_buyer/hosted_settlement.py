@@ -90,12 +90,24 @@ class HostedSettlementTransport:
             resolve_response_principals=self.resolve_seller_principals,
         )
 
-    def reclaim(self, *, settlement_ref: str) -> HostedProjection:
-        """Request reclaim for one eligible accepted obligation."""
+    def reclaim(
+        self,
+        *,
+        settlement_ref: str,
+        mechanism_options: Mapping[str, Any] | None = None,
+    ) -> HostedProjection:
+        """Request reclaim for one eligible accepted obligation.
+
+        ``mechanism_options`` is the caller's input to this one reclaim, in the
+        vocabulary of the mechanism it accepted. This transport stays opaque to
+        it: it signs the mapping into the body and reads no key. A caller with
+        nothing to say sends no body at all, which is the request this has
+        always sent.
+        """
         return _signed_json(
             self.seller_url.rstrip("/")
             + f"/api/v1/settlements/{settlement_ref}/reclaim",
-            None,
+            dict(mechanism_options) if mechanism_options else None,
             signer=self.signer,
             principal=self.principal,
             method="POST",

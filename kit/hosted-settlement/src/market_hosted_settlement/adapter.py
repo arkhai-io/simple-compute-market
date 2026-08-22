@@ -26,6 +26,7 @@ from hosted_settlement_client import (
     NormalizedFundingState,
     OperationRequest,
     Principal,
+    ReclaimRequest,
     canonical_json,
 )
 from hosted_settlement_client import (
@@ -45,6 +46,11 @@ from market_settlement_runtime import (
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, field_validator
 
 MECHANISM = "fiat.stripe.v1"
+#: The reclaim option naming where a payer's return is addressed. A push-funded
+#: profile is returned by mailing the payer for return bank details, and this
+#: mechanism is the only code that gives the key meaning: everything between the
+#: buyer who supplies it and this adapter relays it without reading it.
+RETURN_INSTRUCTIONS_EMAIL_OPTION = "return_instructions_email"
 EXPECTED_HOSTED_REQUEST_PROTOCOL = "arkhai.hosted-request-signature.v2"
 EXPECTED_HOSTED_RESPONSE_PROTOCOL = "arkhai.hosted-response-signature.v2"
 REQUIRED_HOSTED_CAPABILITIES = frozenset(
@@ -485,6 +491,36 @@ class HostedConditionalEscrowClient:
             },
         )
 
+    @staticmethod
+    def _reclaim_request(
+        operation_ref: str,
+        mechanism_options: Mapping[str, Any] | None,
+    ) -> OperationRequest:
+        """Build the reclaim the authority is owed for this obligation.
+
+        A push-funded profile has no instrument to credit back, so the
+        authority returns it by mailing the payer for return bank details and
+        refuses to try with nowhere to address that mail. The payer is the only
+        party who knows where it should go, so the address arrives here as a
+        caller option rather than as anything this marketplace stores.
+
+        Which profiles need one is the authority's judgement, not ours. Absent
+        an address this sends the same bare request it always has and lets the
+        authority answer, so a profile that needs none is untouched and a
+        profile that starts needing one does not need a release here first.
+        """
+        address = (mechanism_options or {}).get(RETURN_INSTRUCTIONS_EMAIL_OPTION)
+        if address is None:
+            return OperationRequest(request_id=operation_ref)
+        if not isinstance(address, str):
+            raise ValueError(
+                f"{RETURN_INSTRUCTIONS_EMAIL_OPTION} must be a string address"
+            )
+        return ReclaimRequest(
+            request_id=operation_ref,
+            return_instructions_email=address,
+        )
+
     async def reclaim_expired(
         self,
         obligation: dict[str, Any],
@@ -492,18 +528,17 @@ class HostedConditionalEscrowClient:
         mechanism_ref: str,
         operation_ref: str,
         mechanism_state: dict[str, Any],
+        mechanism_options: Mapping[str, Any] | None = None,
     ) -> EffectOutcome:
         params, _amount, _currency, _expiration, legacy = _validate_obligation(
             obligation,
             allow_legacy=True,
         )
         del mechanism_state
+        request = self._reclaim_request(operation_ref, mechanism_options)
         result = await _released_call(
             "reclaim",
-            lambda: self._client.reclaim(
-                mechanism_ref,
-                OperationRequest(request_id=operation_ref),
-            ),
+            lambda: self._client.reclaim(mechanism_ref, request),
         )
         receipt = result.model_dump(mode="json")
         receipt.update(_operation_identity(params, legacy=legacy))

@@ -30,9 +30,11 @@ from hosted_settlement_client import (
     OperationRequest,
     PayerActionKind,
     Principal,
+    ReclaimRequest,
 )
 from market_hosted_settlement import (
     REQUIRED_HOSTED_CAPABILITIES,
+    RETURN_INSTRUCTIONS_EMAIL_OPTION,
     HostedConditionalEscrowClient,
     MarketplaceSignerAdapter,
 )
@@ -1128,3 +1130,99 @@ def test_every_other_authority_incident_still_requires_an_operator(
     )
 
     assert adapter_module._escrow_status(escrow, {}) == "manual_required"
+
+
+@pytest.mark.asyncio
+async def test_a_reclaim_option_becomes_the_authority_return_address() -> None:
+    """The payer's address is the one thing this adapter reads out of the
+    options, because a push-funded return is mailed to it and the authority
+    refuses to issue one with nowhere to send it."""
+
+    client = FakeClient()
+    adapter = HostedConditionalEscrowClient(client)  # type: ignore[arg-type]
+    obligation = _obligation(funding_profile=FundingProfile.US_BANK_TRANSFER)
+
+    await adapter.reclaim_expired(
+        obligation,
+        mechanism_ref="escrow-public",
+        operation_ref="reclaim-1",
+        mechanism_state={},
+        mechanism_options={
+            RETURN_INSTRUCTIONS_EMAIL_OPTION: "payer@example.test",
+        },
+    )
+
+    assert client.reclaim_call == (
+        "escrow-public",
+        ReclaimRequest(
+            request_id="reclaim-1",
+            return_instructions_email="payer@example.test",
+        ),
+    )
+
+
+@pytest.mark.asyncio
+async def test_a_reclaim_without_an_address_sends_the_request_it_always_sent() -> None:
+    """Which profiles need an address is the authority's judgement.
+
+    Sending the bare request and letting it answer keeps a profile that needs
+    none untouched, and keeps a profile that starts needing one from requiring
+    a release here first.
+    """
+
+    client = FakeClient()
+    adapter = HostedConditionalEscrowClient(client)  # type: ignore[arg-type]
+    obligation = _obligation(funding_profile=FundingProfile.US_BANK_TRANSFER)
+
+    await adapter.reclaim_expired(
+        obligation,
+        mechanism_ref="escrow-public",
+        operation_ref="reclaim-1",
+        mechanism_state={},
+        mechanism_options={},
+    )
+
+    assert client.reclaim_call == (
+        "escrow-public",
+        OperationRequest(request_id="reclaim-1"),
+    )
+
+
+@pytest.mark.asyncio
+async def test_a_reclaim_address_reaches_no_receipt_or_mechanism_state() -> None:
+    """The address is an argument to one call. Nothing durable may carry it."""
+
+    client = FakeClient()
+    adapter = HostedConditionalEscrowClient(client)  # type: ignore[arg-type]
+    obligation = _obligation(funding_profile=FundingProfile.US_BANK_TRANSFER)
+
+    outcome = await adapter.reclaim_expired(
+        obligation,
+        mechanism_ref="escrow-public",
+        operation_ref="reclaim-1",
+        mechanism_state={},
+        mechanism_options={
+            RETURN_INSTRUCTIONS_EMAIL_OPTION: "payer@example.test",
+        },
+    )
+
+    assert "payer@example.test" not in json.dumps(outcome.receipt)
+    assert "payer@example.test" not in json.dumps(outcome.mechanism_state)
+
+
+@pytest.mark.asyncio
+async def test_a_non_string_reclaim_address_is_refused_before_the_call() -> None:
+    client = FakeClient()
+    adapter = HostedConditionalEscrowClient(client)  # type: ignore[arg-type]
+    obligation = _obligation(funding_profile=FundingProfile.US_BANK_TRANSFER)
+
+    with pytest.raises(ValueError, match="must be a string address"):
+        await adapter.reclaim_expired(
+            obligation,
+            mechanism_ref="escrow-public",
+            operation_ref="reclaim-1",
+            mechanism_state={},
+            mechanism_options={RETURN_INSTRUCTIONS_EMAIL_OPTION: ["a@b.co"]},
+        )
+
+    assert client.reclaim_call is None

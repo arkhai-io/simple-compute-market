@@ -36,31 +36,31 @@ wheels = [
 [[package]]
 name = "arkhai-core"
 version = "0.2.0"
-source = { registry = "/Users/mlegls/dev/arkhai/simple-market-service.manual-settlement/.dist" }
+source = { registry = "../../.dist" }
 dependencies = [
     { name = "pydantic" },
 ]
 wheels = [
-    { path = "/Users/mlegls/dev/arkhai/simple-market-service.manual-settlement/.dist/arkhai_core-0.2.0-py3-none-any.whl" },
+    { path = "arkhai_core-0.2.0-py3-none-any.whl" },
 ]
 
 [[package]]
 name = "arkhai-core-registry-client"
 version = "0.11.0"
-source = { registry = "/Users/mlegls/dev/arkhai/simple-market-service.manual-settlement/.dist" }
+source = { registry = "../../.dist" }
 dependencies = [
     { name = "arkhai-core" },
     { name = "arkhai-kit-identity" },
     { name = "httpx" },
 ]
 wheels = [
-    { path = "/Users/mlegls/dev/arkhai/simple-market-service.manual-settlement/.dist/arkhai_core_registry_client-0.11.0-py3-none-any.whl" },
+    { path = "arkhai_core_registry_client-0.11.0-py3-none-any.whl" },
 ]
 
 [[package]]
 name = "arkhai-core-storefront"
 version = "0.3.0"
-source = { registry = "/Users/mlegls/dev/arkhai/simple-market-service.manual-settlement/.dist" }
+source = { registry = "../../.dist" }
 dependencies = [
     { name = "arkhai-core" },
     { name = "arkhai-core-registry-client" },
@@ -71,7 +71,7 @@ dependencies = [
     { name = "pydantic" },
 ]
 wheels = [
-    { path = "/Users/mlegls/dev/arkhai/simple-market-service.manual-settlement/.dist/arkhai_core_storefront-0.3.0-py3-none-any.whl" },
+    { path = "arkhai_core_storefront-0.3.0-py3-none-any.whl" },
 ]
 
 [[package]]
@@ -105,8 +105,8 @@ dev = [
 
 [[package]]
 name = "arkhai-kit-config"
-version = "0.1.1"
-source = { registry = "/Users/mlegls/dev/arkhai/simple-market-service.manual-settlement/.dist" }
+version = "0.1.2"
+source = { registry = "../../.dist" }
 dependencies = [
     { name = "arkhai-kit-settlement-runtime" },
     { name = "eth-account" },
@@ -114,13 +114,13 @@ dependencies = [
     { name = "tomlkit" },
 ]
 wheels = [
-    { path = "/Users/mlegls/dev/arkhai/simple-market-service.manual-settlement/.dist/arkhai_kit_config-0.1.1-py3-none-any.whl" },
+    { path = "arkhai_kit_config-0.1.2-py3-none-any.whl" },
 ]
 
 [[package]]
 name = "arkhai-kit-identity"
 version = "0.3.0"
-source = { registry = "/Users/mlegls/dev/arkhai/simple-market-service.manual-settlement/.dist" }
+source = { registry = "../../.dist" }
 dependencies = [
     { name = "cryptography" },
     { name = "eth-account" },
@@ -129,46 +129,46 @@ dependencies = [
     { name = "rfc8785" },
 ]
 wheels = [
-    { path = "/Users/mlegls/dev/arkhai/simple-market-service.manual-settlement/.dist/arkhai_kit_identity-0.3.0-py3-none-any.whl" },
+    { path = "arkhai_kit_identity-0.3.0-py3-none-any.whl" },
 ]
 
 [[package]]
 name = "arkhai-kit-policy"
 version = "0.1.1"
-source = { registry = "/Users/mlegls/dev/arkhai/simple-market-service.manual-settlement/.dist" }
+source = { registry = "../../.dist" }
 dependencies = [
     { name = "arkhai-kit-identity" },
     { name = "pydantic" },
     { name = "typer" },
 ]
 wheels = [
-    { path = "/Users/mlegls/dev/arkhai/simple-market-service.manual-settlement/.dist/arkhai_kit_policy-0.1.1-py3-none-any.whl" },
+    { path = "arkhai_kit_policy-0.1.1-py3-none-any.whl" },
 ]
 
 [[package]]
 name = "arkhai-kit-settlement-runtime"
-version = "0.1.1"
-source = { registry = "/Users/mlegls/dev/arkhai/simple-market-service.manual-settlement/.dist" }
+version = "0.1.2"
+source = { registry = "../../.dist" }
 dependencies = [
     { name = "arkhai-core" },
     { name = "arkhai-kit-identity" },
     { name = "pydantic" },
 ]
 wheels = [
-    { path = "/Users/mlegls/dev/arkhai/simple-market-service.manual-settlement/.dist/arkhai_kit_settlement_runtime-0.1.1-py3-none-any.whl" },
+    { path = "arkhai_kit_settlement_runtime-0.1.2-py3-none-any.whl" },
 ]
 
 [[package]]
 name = "arkhai-kit-site-client"
 version = "0.2.0"
-source = { registry = "/Users/mlegls/dev/arkhai/simple-market-service.manual-settlement/.dist" }
+source = { registry = "../../.dist" }
 dependencies = [
     { name = "arkhai-kit-identity" },
     { name = "httpx" },
     { name = "pydantic" },
 ]
 wheels = [
-    { path = "/Users/mlegls/dev/arkhai/simple-market-service.manual-settlement/.dist/arkhai_kit_site_client-0.2.0-py3-none-any.whl" },
+    { path = "arkhai_kit_site_client-0.2.0-py3-none-any.whl" },
 ]
 
 [[package]]

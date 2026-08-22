@@ -285,7 +285,10 @@ class AlkahestConditionalEscrowClient:
         mechanism_ref: str,
         operation_ref: str,
         mechanism_state: dict[str, Any],
+        mechanism_options: Mapping[str, Any] | None = None,
     ) -> EffectOutcome:
+        # An on-chain reclaim returns the escrow to the address that funded it,
+        # which the chain already knows, so no caller input reaches this codec.
         from market_alkahest.alkahest import reclaim_expired_escrow_with_codec
         from market_alkahest.txlock import chain_tx_lock
 
