@@ -798,6 +798,34 @@ surface only after a release.
   until the authority models the email-mediated return that Stripe requires for
   a push-funded balance.
 
+  That is a missing implementation, not an impossibility, and the activation
+  error above is narrower than it first reads. Stripe refuses to mail *another*
+  party from an unactivated account; it will mail the address registered to the
+  account itself. Probed directly against test mode on a funded
+  `customer_balance` PaymentIntent whose Customer carries that address, an
+  ordinary `refunds.create` with no extra parameters is accepted:
+
+  ```
+  refund.status = requires_action
+  next_action.type = display_details
+  next_action.display_details = {email_sent, expires_at}
+  ```
+
+  Three things follow. The return needs no Stripe product this deployment does
+  not have — no Treasury, no Global Payouts, and no platform-to-payer transfer,
+  which Stripe has no primitive for; `transfers.create` reaches connected
+  accounts only. What it needs is a payer email to address the instructions to.
+  The reversal is not immediately terminal: it reaches `requires_action` while
+  the payer supplies return bank details, then `pending`, then `succeeded`,
+  which is what `### Scenario: Reversal remains pending` already describes. And
+  the action Stripe hands back carries no URL — only that mail was sent and when
+  it expires — so the existing transient-action contract can carry it without
+  ever holding a link.
+
+  A development lane can therefore run this today by giving its payer the
+  account's own registered address. A real payer's return needs the account
+  application submitted, which is the only genuinely external part.
+
   Confirmed end to end against the fixed authority. The same lane that reported
   `convergence_timeout` at `marketplace_lifecycle` with no cause now reports
   `reversal_rejected` at the same stage, classified `product` rather than
