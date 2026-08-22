@@ -888,11 +888,57 @@ surface only after a release.
   transport signs a body only when given one, and the lane sends an address for
   `us_bank_transfer.v1` and none for `card.v1`.
 
-  Not yet run as a system lane. Everything above is boundary evidence. The
-  `us_bank_transfer.v1` reclaim lane is unproven end to end until a development
-  run drives it against real Stripe test mode, which needs a 0.4.0 authority
-  image and a marketplace image carrying these wheels; until then this profile
-  has boundary evidence for its return and no system evidence.
+  Run as a system lane against Stripe test mode, on a 0.4.0 authority built
+  here and a marketplace image carrying these wheels. The address travels the
+  whole stack: the run's reclaim produced exactly one refund carrying the
+  operation's `operation_ref`, for the accepted amount, on `us_bank_transfer.v1`,
+  at `requires_action` with `display_details`, whose
+  `next_action.display_details.email_sent.email_sent_to` is the address the run
+  supplied. Stripe echoes the address back, so the provider applying it is
+  observable rather than inferred.
+
+  The lane does not pass, and cannot, for a reason outside this repository. A
+  push-funded return reaches `succeeded` only when the payer answers Stripe's
+  mail with return bank details. Test mode offers no way to do that: the only
+  transition out of `requires_action` is
+  `POST /v1/test_helpers/refunds/{id}/expire`, which goes to `failed`. Probed
+  directly on a really funded `customer_balance` PaymentIntent before the lane
+  was run, so the stall is a known boundary rather than a discovered one. The
+  run therefore stops at `provider_inspection` with `convergence_timeout` and
+  `related refund is still requires_action`. Everything before that stage is
+  system evidence; the last leg is not reachable by any automated run.
+
+  Two defects surfaced only because this profile was driven end to end, and
+  neither is in the address carriage.
+
+  Every storefront image installed its own distribution from `.dist` at a
+  version hand-written into its Dockerfile, and all four literals had drifted
+  behind the projects they named -- the VM storefront shipped `0.3.1` beside
+  `0.3.5`'s wheels. The image starts and reports itself healthy, so the only
+  symptom was that the buyer signed a reclaim body the route in the image had
+  no parameter to receive: authorization ran against the empty body, the
+  signature did not match, and the refusal arrived as an unsigned 403 several
+  layers from its cause. Fixed, with a guard that reads the pin and the
+  declared version and fails when they part.
+
+  The neutral runtime reports a reclaim as terminal whenever the mechanism
+  client returns without raising. `SettlementRuntime.reclaim` finishes with
+  `state="succeeded"` unconditionally and never reads the `financial_state` the
+  adapter hands back. For every mechanism whose reversal is immediate that is
+  the same answer; for a push-funded return it is not. With the authority
+  holding `escrows.financial_state = 'reclaiming'`, `funding_reversals.state =
+  'pending'`, and the funding record still `available`, the buyer-facing
+  settlement status was `reclaimed` and the domain ran its reclaim cleanup. A
+  payer is told their money is back while Stripe is still waiting for their
+  bank details. Not introduced here -- the unconditional finish predates this
+  change -- and not fixed here either, because a non-terminal reclaim is a
+  question about the neutral runtime's terminal contract for every mechanism,
+  not about this profile.
+
+  The lane cannot currently catch that second defect. Its `wait_authoritative_refund`
+  step asserts `authority_state == "refunded"` against a constant the lifecycle
+  bridge supplies itself rather than against anything the authority said, so the
+  assertion holds while the authority reports `reclaiming`.
 
   Confirmed end to end against the fixed authority. The same lane that reported
   `convergence_timeout` at `marketplace_lifecycle` with no cause now reports

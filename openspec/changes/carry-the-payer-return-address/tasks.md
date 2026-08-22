@@ -100,11 +100,27 @@
       the `us_bank_transfer.v1` reclaim lane proven end to end or say precisely
       what is still missing.
 
-      Recorded, and the honest answer is that it is not proven end to end. The
-      change has boundary evidence at every layer it crosses and no system
-      evidence, because a development lane needs a 0.4.0 authority image and a
-      marketplace image carrying these wheels, neither of which this change
-      builds. TESTING.md says that rather than implying the lane passed.
+      Recorded. The lane has since been run as a system lane against Stripe
+      test mode on a 0.4.0 authority built here and a marketplace image
+      carrying these wheels, so the earlier "boundary evidence only" answer no
+      longer stands.
+
+      The address carriage is proven end to end: the run's reclaim produced one
+      refund carrying the operation's `operation_ref`, for the accepted amount,
+      whose `email_sent_to` is the address the run supplied. What is still
+      missing is the last leg, and no automated run can reach it -- a
+      push-funded return reaches `succeeded` only when the payer answers
+      Stripe's mail, and test mode's only transition out of `requires_action`
+      is `expire`, to `failed`. The run stops at `provider_inspection`.
+
+      Driving it found two defects, neither in this change: every storefront
+      image installed its own distribution at a hand-written version that had
+      drifted (fixed, with a guard), and the neutral runtime reports a reclaim
+      terminal whenever the mechanism client returns, so a payer is told their
+      money is back while the authority still holds `reclaiming` and the
+      reversal `pending`. The second is left open deliberately -- it is a
+      question about the runtime's terminal contract for every mechanism.
+      TESTING.md records both.
 
       The task originally said "close the cell in the coverage matrix". There
       is no such table in the repository -- it was a matrix from an earlier
