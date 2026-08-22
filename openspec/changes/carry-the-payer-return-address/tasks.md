@@ -96,6 +96,17 @@
       path is exercisable now.
 
       Suites: e2e unit 182 (was 173).
-- [ ] 5.3 Record the result in `docs/development/TESTING.md` and close the
-      `us_bank_transfer.v1` reclaim cell in the coverage matrix, or state
-      precisely what remains external if it does not close.
+- [x] 5.3 Record the result in `docs/development/TESTING.md`, and either state
+      the `us_bank_transfer.v1` reclaim lane proven end to end or say precisely
+      what is still missing.
+
+      Recorded, and the honest answer is that it is not proven end to end. The
+      change has boundary evidence at every layer it crosses and no system
+      evidence, because a development lane needs a 0.4.0 authority image and a
+      marketplace image carrying these wheels, neither of which this change
+      builds. TESTING.md says that rather than implying the lane passed.
+
+      The task originally said "close the cell in the coverage matrix". There
+      is no such table in the repository -- it was a matrix from an earlier
+      working session, not a committed artifact -- so both this task and the
+      note now name the lane itself.

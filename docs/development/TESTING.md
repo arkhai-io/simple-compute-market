@@ -866,12 +866,33 @@ surface only after a release.
   supplies return bank details. Proven against test mode at the provider
   boundary on a really funded `customer_balance` PaymentIntent.
 
-  The marketplace half does not supply an address yet, so this lane still ends
-  in a refusal — now `bank-transfer return requires a payer return address`,
-  which names a missing input rather than a missing mechanism. Closing the cell
-  needs the consumer change: bind the 0.4.0 release, carry the address from the
-  buyer's reclaim through the storefront and the settlement runtime, and give
-  the harness the account's registered address to use.
+  The marketplace half now supplies one. The buyer's reclaim carries
+  mechanism-scoped options through the storefront to the mechanism client; the
+  transport, the routes, and the settlement runtime relay them without reading
+  a key, and only the hosted adapter names `return_instructions_email`. The
+  driver reads the address from the account it already authenticates as and
+  hands it to the buyer role, which refuses to start a bank-transfer reclaim
+  without one rather than issue a request that cannot succeed.
+
+  Two things fell out of doing it. The options are bound into the reclaim
+  reservation, so a second reclaim naming a different address is refused at the
+  marketplace edge — `settlement operation was reused with a different request`,
+  a 409 — instead of becoming a provider-level idempotency conflict after a
+  round trip. And the options are the body the storefront verifies the payer's
+  signature over: where a payer's money is returned to is part of what that
+  payer authorized, not something read first and trusted after.
+
+  Proven at every boundary it crosses: the runtime dispatches the mapping
+  verbatim and persists none of it, the adapter turns an address into a
+  `ReclaimRequest` and its absence into the bare request it always sent, the
+  transport signs a body only when given one, and the lane sends an address for
+  `us_bank_transfer.v1` and none for `card.v1`.
+
+  Not yet run as a system lane. Everything above is boundary evidence. The
+  `us_bank_transfer.v1` reclaim lane is unproven end to end until a development
+  run drives it against real Stripe test mode, which needs a 0.4.0 authority
+  image and a marketplace image carrying these wheels; until then this profile
+  has boundary evidence for its return and no system evidence.
 
   Confirmed end to end against the fixed authority. The same lane that reported
   `convergence_timeout` at `marketplace_lifecycle` with no cause now reports
