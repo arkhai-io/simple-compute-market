@@ -826,6 +826,20 @@ surface only after a release.
   account's own registered address. A real payer's return needs the account
   application submitted, which is the only genuinely external part.
 
+  The authority implements it as of hosted-settlement 0.4.0, schema 7,
+  capability `payer-return-instructions.v1`: an authorized reclaim carries
+  `return_instructions_email`, a `us_bank_transfer.v1` return names it to the
+  provider, and the reversal is nonterminal at `requires_action` until the payer
+  supplies return bank details. Proven against test mode at the provider
+  boundary on a really funded `customer_balance` PaymentIntent.
+
+  The marketplace half does not supply an address yet, so this lane still ends
+  in a refusal — now `bank-transfer return requires a payer return address`,
+  which names a missing input rather than a missing mechanism. Closing the cell
+  needs the consumer change: bind the 0.4.0 release, carry the address from the
+  buyer's reclaim through the storefront and the settlement runtime, and give
+  the harness the account's registered address to use.
+
   Confirmed end to end against the fixed authority. The same lane that reported
   `convergence_timeout` at `marketplace_lifecycle` with no cause now reports
   `reversal_rejected` at the same stage, classified `product` rather than
