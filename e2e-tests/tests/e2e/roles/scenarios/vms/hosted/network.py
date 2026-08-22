@@ -928,6 +928,10 @@ class NetworkMarketplacePort:
             raise AssertionError("refund scenario unexpectedly completed fulfillment")
 
     def _release_refund_fulfillment_failure(self) -> None:
+        # Only a held job needs releasing. Where the job was failed outright,
+        # there is nothing paused to resume and asking would refuse.
+        if self._funds_within_materialization():
+            return
         with SyncProvisioningClient(
             self.provisioning_url,
             self._admin_signer,
