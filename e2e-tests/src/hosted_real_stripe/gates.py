@@ -31,6 +31,19 @@ class AuthorizationRejected(RuntimeError):
     """Supplied authorization could enable a live or untrusted run."""
 
 
+class LaneExcluded(RuntimeError):
+    """This run declines to attempt a lane that is otherwise runnable.
+
+    Carries the code the report publishes, because the reason is the whole
+    point: a lane withheld for want of a human reads nothing like one
+    withheld for want of behaviour that does not exist yet.
+    """
+
+    def __init__(self, code: str, message: str) -> None:
+        super().__init__(message)
+        self.code = code
+
+
 class ReleaseIdentityRejected(RuntimeError):
     """The consumer or hosted release is not pinned to immutable identities."""
 

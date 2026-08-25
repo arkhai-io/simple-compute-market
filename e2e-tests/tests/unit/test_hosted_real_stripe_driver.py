@@ -13,6 +13,9 @@ from hosted_settlement_client import (
 from src.hosted_real_stripe.driver import (
     _SAVED_INSTRUMENT_PROFILES,
     _browser_outcome,
+    _classify,
+    _direct_instrument,
+    _require_lane_admitted,
     _lifecycle_environment,
     _payer_return_address,
     _validate_payer_fixture,
@@ -22,6 +25,7 @@ from src.hosted_real_stripe.driver import (
     _wait_until_reclaim_eligible,
     _terminal_projection,
 )
+from src.hosted_real_stripe.gates import LaneExcluded
 from src.hosted_real_stripe.runtime import LifecycleContractError, ProcessUnavailable
 
 
@@ -362,3 +366,41 @@ def test_the_lifecycle_environment_omits_an_address_it_was_not_given(
 
     assert "HOSTED_SETTLEMENT_E2E_RETURN_ADDRESS" not in without
     assert with_address["HOSTED_SETTLEMENT_E2E_RETURN_ADDRESS"] == "account@example.test"
+
+
+def test_an_unattended_interactive_card_lane_is_excluded_not_attempted() -> None:
+    with pytest.raises(LaneExcluded) as caught:
+        _require_lane_admitted("card.v1", "interactive", "collection", attended=False)
+    assert caught.value.code == "interactive_lane_not_automated"
+    assert _classify(caught.value, "authorization") == (
+        "excluded",
+        "interactive_lane_not_automated",
+    )
+
+
+def test_someone_at_the_browser_admits_the_same_interactive_card_lane() -> None:
+    _require_lane_admitted("card.v1", "interactive", "collection", attended=True)
+
+
+def test_being_attended_does_not_admit_a_lane_whose_loss_nothing_projects() -> None:
+    for scenario in ("ach_return", "post_collection_loss"):
+        with pytest.raises(LaneExcluded) as caught:
+            _require_lane_admitted("us_ach_debit.v1", "saved_instrument", scenario, attended=True)
+        assert caught.value.code == "loss_projection_unimplemented"
+
+
+def test_an_unattended_saved_instrument_card_lane_still_runs() -> None:
+    _require_lane_admitted("card.v1", "saved_instrument", "collection", attended=False)
+
+
+def test_the_return_lane_funds_from_the_account_that_gets_disputed() -> None:
+    seen: list[bool] = []
+
+    class _Stripe:
+        def create_microdeposit_bank_instrument(self, *, disputed: bool = False) -> str:
+            seen.append(disputed)
+            return "pm_test"
+
+    _direct_instrument(_Stripe(), "us_ach_debit.v1", "ach_return")
+    _direct_instrument(_Stripe(), "us_ach_debit.v1", "collection")
+    assert seen == [True, False]

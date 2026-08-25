@@ -39,7 +39,10 @@ _IMAGE = re.compile(
 
 FundingProfile = Literal["card.v1", "us_bank_transfer.v1", "us_ach_debit.v1"]
 Interaction = Literal["interactive", "saved_instrument"]
-ResultClass = Literal["passed", "product", "account", "environment", "timeout"]
+#: "excluded" is not a failure and not a pass. The lane is coherent and
+#: this run declined to attempt it, so a matrix report can tell a lane
+#: nobody ran from one that ran and broke.
+ResultClass = Literal["passed", "product", "account", "environment", "timeout", "excluded"]
 Scenario = Literal[
     "collection",
     "reclaim",
@@ -95,6 +98,8 @@ DiagnosticCode = Literal[
     "funding_relation_missing",
     "reversal_rejected",
     "settlement_parked",
+    "interactive_lane_not_automated",
+    "loss_projection_unimplemented",
 ]
 
 

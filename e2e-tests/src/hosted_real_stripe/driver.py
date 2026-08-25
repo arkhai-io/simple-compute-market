@@ -50,6 +50,7 @@ from .gates import (
     local_release_identity,
     AuthorizationRejected,
     AuthorizationUnavailable,
+    LaneExcluded,
     ReleaseIdentityRejected,
     WebhookRouteUnavailable,
     require_connected_account,
@@ -251,6 +252,7 @@ def run(args: argparse.Namespace) -> tuple[StripeTestEvidence, int]:
         delayed_state_observed=False,
     )
     try:
+        _require_lane_admitted(funding_profile, interaction, scenario, attended=args.attended)
         _require_profile_scenario(funding_profile, interaction, scenario)
         secret = require_test_secret(os.environ.get("STRIPE_SECRET_KEY"))
         account_id = require_connected_account(os.environ.get("STRIPE_CONNECTED_ACCOUNT_ID"))
@@ -482,6 +484,39 @@ def _payer_return_address(
     if scenario not in {"reclaim", "worker_restart"}:
         return ""
     return stripe.platform_return_address()
+
+
+#: Lanes whose loss the storefront cannot yet report. The authority sees the
+#: dispute, but nothing on this side observes an authoritative funding loss or
+#: blocks fulfilment on one, so the projection these lanes assert does not
+#: exist. Building it is real servicing behaviour, not a test hook.
+_UNPROJECTED_LOSS_SCENARIOS = frozenset({"ach_return", "post_collection_loss"})
+
+
+def _require_lane_admitted(
+    funding_profile: FundingProfile,
+    interaction: Interaction,
+    scenario: Scenario,
+    *,
+    attended: bool,
+) -> None:
+    """Decline a lane this run may not attempt, for reasons outside the lane.
+
+    Separate from the shape rules below, which reject combinations that make
+    no sense. These lanes make sense. Something about the run refuses them,
+    and the report says so in its own word rather than borrowing a failure.
+    """
+
+    if scenario in _UNPROJECTED_LOSS_SCENARIOS:
+        raise LaneExcluded(
+            "loss_projection_unimplemented",
+            "no storefront projection reports an authoritative funding loss",
+        )
+    if funding_profile == "card.v1" and interaction == "interactive" and not attended:
+        raise LaneExcluded(
+            "interactive_lane_not_automated",
+            "an interactive card lane needs someone at the browser",
+        )
 
 
 def _require_profile_scenario(
@@ -1244,6 +1279,7 @@ def _disclose(
 #: Every failure the body classifies rather than propagates. Ordered so the
 #: narrower kinds are matched before the ones they subclass, if any ever are.
 _CLASSIFIED_FAILURES = (
+    LaneExcluded,
     AuthorizationUnavailable,
     AuthorizationRejected,
     StripeUnavailable,
@@ -1266,6 +1302,8 @@ def _classify(caught: BaseException, stage: Stage) -> tuple[ResultClass, Diagnos
         if stage == "account_readiness":
             return "account", "account_not_ready"
         return "environment", "credentials_missing"
+    if isinstance(caught, LaneExcluded):
+        return "excluded", cast(DiagnosticCode, caught.code)
     if isinstance(caught, AuthorizationRejected):
         return "environment", "authorization_rejected"
     if isinstance(caught, StripeUnavailable):
@@ -1343,6 +1381,15 @@ def _parser() -> argparse.ArgumentParser:
         help=(
             "show the Checkout window instead of running Chromium headless; a "
             "headless browser is what the provider answers with a CAPTCHA"
+        ),
+    )
+    parser.add_argument(
+        "--attended",
+        action="store_true",
+        help=(
+            "someone is watching and can answer a challenge at the browser. "
+            "Without it an interactive card lane is excluded rather than "
+            "attempted, because unattended it fails on the provider's CAPTCHA"
         ),
     )
     parser.add_argument(
