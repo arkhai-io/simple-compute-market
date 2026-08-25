@@ -6,7 +6,7 @@ requires-python = ">=3.12,<3.14"
 license = "MIT"
 dependencies = [
   "arkhai-core==0.2.0",
-  "arkhai-hosted-settlement-client==0.4.0",
+  "arkhai-hosted-settlement-client==0.4.2",
   "arkhai-kit-identity==0.3.0",
   "arkhai-kit-settlement-runtime==0.1.2",
   "pydantic>=2.7",
