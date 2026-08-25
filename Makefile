@@ -235,6 +235,7 @@ hosted-stripe-test-local: hosted-preflight-local ## Run one development scenario
 		--buyer-config "$(HOSTED_STRIPE_TEST_BUYER_CONFIG)" \
 		$(if $(HOSTED_STRIPE_TEST_RETAIN_AUTHORITY_STATE),--retain-authority-state,) \
 		$(if $(HOSTED_STRIPE_TEST_VISIBLE_BROWSER),--visible-browser,) \
+		$(if $(HOSTED_STRIPE_TEST_ATTENDED),--attended,) \
 		$(if $(HOSTED_STRIPE_TEST_LIFECYCLE_TIMEOUT),--lifecycle-timeout "$(HOSTED_STRIPE_TEST_LIFECYCLE_TIMEOUT)",) \
 		--evidence "$(HOSTED_STRIPE_TEST_EVIDENCE)"
 
@@ -330,6 +331,8 @@ hosted-stripe-test: hosted-preflight ## Run one protected Stripe test-mode syste
 		--account-ref "$(HOSTED_STRIPE_TEST_ACCOUNT_REF)" \
 		--authority-environment "$(HOSTED_STRIPE_TEST_AUTHORITY_ENVIRONMENT)" \
 		--hosted-service-env-base "$(HOSTED_STRIPE_TEST_AUTHORITY_ENV_FILE)" \
+		$(if $(HOSTED_STRIPE_TEST_VISIBLE_BROWSER),--visible-browser,) \
+		$(if $(HOSTED_STRIPE_TEST_ATTENDED),--attended,) \
 		$(if $(HOSTED_STRIPE_TEST_LIFECYCLE_TIMEOUT),--lifecycle-timeout "$(HOSTED_STRIPE_TEST_LIFECYCLE_TIMEOUT)",) \
 		--evidence "$(HOSTED_STRIPE_TEST_EVIDENCE)"
 
