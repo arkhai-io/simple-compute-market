@@ -181,3 +181,17 @@ content came from a plan epoch the author had no authority over. Path
 permissions cannot detect that. A cross-reference check can, in one pass — so
 run one before promoting documentation, and treat an unresolvable citation as a
 blocking defect rather than a stale link to fix later.
+
+## Agent skills
+
+### Issue tracker
+
+GitHub Issues handle intake and triage through the `gh` CLI. See `docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+Use the five default triage labels. See `docs/agents/triage-labels.md`.
+
+### Domain docs
+
+Single-context. See `docs/agents/domain.md`.
