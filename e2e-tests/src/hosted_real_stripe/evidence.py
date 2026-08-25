@@ -233,7 +233,9 @@ class PaymentOutcomeEvidence:
         "authentication_succeeded",
     ]
     checkout_count: int
-    payment_intent_count: Literal[1]
+    #: A refused card creates no PaymentIntent at all, so a decline reports
+    #: zero here and an authenticated payment reports one.
+    payment_intent_count: Literal[0, 1]
     charge_count: int
     transfer_count: Literal[0]
     refund_count: Literal[0]
@@ -561,6 +563,15 @@ def _validate_passed_scenario(report: StripeTestEvidence) -> None:
         }.get(scenario)
         if report.payment_outcome.outcome != expected:
             raise EvidenceValidationError("payment outcome does not match the selected scenario")
+        refused = report.payment_outcome.outcome in {"declined", "insufficient_funds"}
+        counts = (
+            report.payment_outcome.payment_intent_count,
+            report.payment_outcome.charge_count,
+        )
+        if refused and counts != (0, 0):
+            raise EvidenceValidationError("a refused payment cannot claim a funding artifact")
+        if not refused and counts != (1, 1):
+            raise EvidenceValidationError("an authenticated payment lacks its funding artifact")
 
 
 def _validate_operation_ref(value: str) -> None:

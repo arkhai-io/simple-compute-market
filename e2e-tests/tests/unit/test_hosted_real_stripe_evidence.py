@@ -17,6 +17,7 @@ from src.hosted_real_stripe.evidence import (
     HostedReleaseIdentityEvidence,
     IdentityEvidence,
     MarketplaceIdentityEvidence,
+    PaymentOutcomeEvidence,
     ProviderEvidence,
     StripeTestEvidence,
     opaque_ref,
@@ -465,3 +466,71 @@ def test_an_attested_producer_half_is_still_required_to_be_exact(
     )
     with pytest.raises(EvidenceValidationError, match="source, workflow, and run must be exact"):
         write_evidence(tmp_path / "evidence.json", report)
+
+
+def test_a_refused_payment_may_not_claim_a_funding_artifact(tmp_path: Path, monkeypatch) -> None:
+    """Checkout creates no intent for a card it refused, so neither may evidence."""
+
+    _signing_env(monkeypatch)
+    outcome = PaymentOutcomeEvidence(
+        operation_ref=opaque_ref("op", "marketplace-operation"),
+        outcome="declined",
+        checkout_count=1,
+        payment_intent_count=0,
+        charge_count=0,
+        transfer_count=0,
+        refund_count=0,
+        operation_metadata_matches=True,
+    )
+    report = StripeTestEvidence(
+        identities=_identities(),
+        provider=ProviderEvidence(connected_account_ready=True, loopback_webhook_verified=True),
+        scenario="decline",
+        result="passed",
+        stage="complete",
+        funding=replace(_funding(), authoritative_funding_observed=False),
+        operation_ref=outcome.operation_ref,
+        payment_outcome=outcome,
+    )
+    write_evidence(tmp_path / "refused.json", report)
+
+    claimed = replace(
+        report,
+        payment_outcome=replace(outcome, payment_intent_count=1, charge_count=1),
+    )
+    with pytest.raises(EvidenceValidationError, match="refused payment"):
+        write_evidence(tmp_path / "claimed.json", claimed)
+
+
+def test_an_authenticated_payment_must_carry_its_funding_artifact(
+    tmp_path: Path, monkeypatch
+) -> None:
+    _signing_env(monkeypatch)
+    outcome = PaymentOutcomeEvidence(
+        operation_ref=opaque_ref("op", "marketplace-operation"),
+        outcome="authentication_succeeded",
+        checkout_count=1,
+        payment_intent_count=1,
+        charge_count=1,
+        transfer_count=0,
+        refund_count=0,
+        operation_metadata_matches=True,
+    )
+    report = StripeTestEvidence(
+        identities=_identities(),
+        provider=ProviderEvidence(connected_account_ready=True, loopback_webhook_verified=True),
+        scenario="authentication",
+        result="passed",
+        stage="complete",
+        funding=_funding(),
+        operation_ref=outcome.operation_ref,
+        payment_outcome=outcome,
+    )
+    write_evidence(tmp_path / "authenticated.json", report)
+
+    empty = replace(
+        report,
+        payment_outcome=replace(outcome, payment_intent_count=0, charge_count=0),
+    )
+    with pytest.raises(EvidenceValidationError, match="authenticated payment"):
+        write_evidence(tmp_path / "empty.json", empty)

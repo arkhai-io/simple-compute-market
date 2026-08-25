@@ -583,7 +583,10 @@
           ]
         },
         "payment_intent_count": {
-          "const": 1
+          "enum": [
+            0,
+            1
+          ]
         },
         "charge_count": {
           "enum": [

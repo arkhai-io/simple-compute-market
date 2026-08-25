@@ -386,61 +386,82 @@ class StripeApi:
         expected: ExpectedEffect,
         outcome: Literal["decline", "insufficient_funds", "authentication"],
     ) -> PaymentOutcomeEvidence:
+        if outcome != "authentication":
+            return self._inspect_refusal(expected, outcome)
         session, payment_intent = self._exact_funding(expected)
-        charge = self._optional_charge(payment_intent)
         if not _funding_metadata_matches(payment_intent, expected):
             raise ProviderInvariantError("payment outcome metadata did not match the operation")
         if self._related_transfers(expected, ""):
             raise ProviderInvariantError("payment-outcome-only scenario created a transfer")
-        refunds = (
-            self._list_all(
-                "/v1/refunds",
-                {"charge": _object_id(charge, "charge"), "limit": "100"},
-            )
-            if charge is not None
-            else []
-        )
-        if refunds:
+        charge = self._optional_charge(payment_intent)
+        if charge is None:
+            raise ProviderNotConverged("authenticated charge is not visible")
+        if self._list_all(
+            "/v1/refunds",
+            {"charge": _object_id(charge, "charge"), "limit": "100"},
+        ):
             raise ProviderInvariantError("payment-outcome-only scenario created a refund")
-
-        normalized: Literal[
-            "declined",
-            "insufficient_funds",
-            "authentication_succeeded",
-        ]
-        if outcome == "authentication":
-            if charge is None:
-                raise ProviderNotConverged("authenticated charge is not visible")
-            three_d_secure = _nested(charge, "payment_method_details", "card", "three_d_secure")
-            if (
-                payment_intent.get("status") != "succeeded"
-                or not isinstance(three_d_secure, dict)
-                or three_d_secure.get("result") not in {"authenticated", "attempt_acknowledged"}
-            ):
-                raise ProviderInvariantError("Stripe authentication outcome did not match")
-            normalized = "authentication_succeeded"
-        else:
-            error = payment_intent.get("last_payment_error")
-            if not isinstance(error, dict):
-                raise ProviderNotConverged("documented decline is not visible")
-            expected_code = (
-                "insufficient_funds" if outcome == "insufficient_funds" else "generic_decline"
-            )
-            if (
-                payment_intent.get("status") == "succeeded"
-                or error.get("code") != "card_declined"
-                or error.get("decline_code") != expected_code
-            ):
-                raise ProviderInvariantError(
-                    "Stripe decline outcome did not match the selected test card"
-                )
-            normalized = "insufficient_funds" if outcome == "insufficient_funds" else "declined"
+        three_d_secure = _nested(charge, "payment_method_details", "card", "three_d_secure")
+        if (
+            payment_intent.get("status") != "succeeded"
+            or not isinstance(three_d_secure, dict)
+            or three_d_secure.get("result") not in {"authenticated", "attempt_acknowledged"}
+        ):
+            raise ProviderInvariantError("Stripe authentication outcome did not match")
         return PaymentOutcomeEvidence(
             operation_ref=opaque_ref("op", expected.marketplace_operation_id),
-            outcome=normalized,
+            outcome="authentication_succeeded",
             checkout_count=int(session is not None),
             payment_intent_count=1,
-            charge_count=int(charge is not None),
+            charge_count=1,
+            transfer_count=0,
+            refund_count=0,
+            operation_metadata_matches=True,
+        )
+
+    def _inspect_refusal(
+        self,
+        expected: ExpectedEffect,
+        outcome: Literal["decline", "insufficient_funds"],
+    ) -> PaymentOutcomeEvidence:
+        """A refused card leaves Stripe with no funding object to inspect.
+
+        Checkout does not persist a PaymentIntent for an attempt the acquirer
+        refused. The session stays open and unpaid, and no intent, charge, or
+        transfer is ever created -- so the provider-side proof of a decline is
+        the *absence* of every funding artifact for the operation, not a failed
+        one carrying ``last_payment_error``. Which refusal the payer met is
+        what the browser proved, by waiting for Checkout's own error and
+        refusing to accept a page that left for the success URL.
+
+        Absence is only worth asserting if it is asserted account-wide: a
+        session with no intent proves little on its own, because an operation
+        that funded through some other path would look identical. So this also
+        refuses any PaymentIntent anywhere in the account that carries this
+        operation's metadata.
+        """
+
+        session = self._exact_session(expected)
+        if session.get("livemode") is not False:
+            raise ProviderInvariantError("payment-outcome session is not a test-mode session")
+        if session.get("status") != "open" or session.get("payment_status") != "unpaid":
+            raise ProviderInvariantError("refused Checkout session did not stay open and unpaid")
+        if session.get("payment_intent") is not None:
+            raise ProviderInvariantError("refused Checkout session created a payment intent")
+        if [
+            item
+            for item in self._list_all("/v1/payment_intents", {"limit": "100"})
+            if _funding_metadata_matches(item, expected)
+        ]:
+            raise ProviderInvariantError("refused operation funded outside its Checkout session")
+        if self._related_transfers(expected, ""):
+            raise ProviderInvariantError("payment-outcome-only scenario created a transfer")
+        return PaymentOutcomeEvidence(
+            operation_ref=opaque_ref("op", expected.marketplace_operation_id),
+            outcome="insufficient_funds" if outcome == "insufficient_funds" else "declined",
+            checkout_count=1,
+            payment_intent_count=0,
+            charge_count=0,
             transfer_count=0,
             refund_count=0,
             operation_metadata_matches=True,
@@ -449,18 +470,7 @@ class StripeApi:
     def _exact_funding(self, expected: ExpectedEffect) -> tuple[JsonObject | None, JsonObject]:
         session: JsonObject | None = None
         if expected.checkout_session_id is not None:
-            session = self._transport(
-                f"/v1/checkout/sessions/{expected.checkout_session_id}",
-                {"expand[]": "payment_intent.latest_charge"},
-            )
-            metadata = session.get("metadata")
-            if (
-                _object_id(session, "Checkout session") != expected.checkout_session_id
-                or not isinstance(metadata, dict)
-                or session.get("client_reference_id") != metadata.get("operation_ref")
-                or not _funding_metadata_matches(session, expected)
-            ):
-                raise ProviderInvariantError("exact Checkout session did not match the operation")
+            session = self._exact_session(expected)
             payment_intent = self._payment_intent(session)
         else:
             matches = [
@@ -486,6 +496,25 @@ class StripeApi:
         ):
             raise ProviderInvariantError("funding intent does not match immutable accepted terms")
         return session, payment_intent
+
+    def _exact_session(self, expected: ExpectedEffect) -> JsonObject:
+        """The one Checkout session the operation named, or nothing usable."""
+
+        if expected.checkout_session_id is None:
+            raise ProviderInvariantError("operation is missing its exact Checkout session")
+        session = self._transport(
+            f"/v1/checkout/sessions/{expected.checkout_session_id}",
+            {"expand[]": "payment_intent.latest_charge"},
+        )
+        metadata = session.get("metadata")
+        if (
+            _object_id(session, "Checkout session") != expected.checkout_session_id
+            or not isinstance(metadata, dict)
+            or session.get("client_reference_id") != metadata.get("operation_ref")
+            or not _funding_metadata_matches(session, expected)
+        ):
+            raise ProviderInvariantError("exact Checkout session did not match the operation")
+        return session
 
     def _payment_intent(self, session: JsonObject) -> JsonObject:
         value = session.get("payment_intent")
