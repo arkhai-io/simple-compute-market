@@ -447,12 +447,20 @@ def run(args: argparse.Namespace) -> tuple[StripeTestEvidence, int]:
 _DIRECT_SETUP_PROFILES = frozenset({"card.v1", "us_ach_debit.v1"})
 
 
-def _direct_instrument(stripe: StripeApi, funding_profile: FundingProfile) -> str:
-    """The instrument a direct setup starts from, chosen by what the profile is."""
+def _direct_instrument(
+    stripe: StripeApi, funding_profile: FundingProfile, scenario: Scenario
+) -> str:
+    """The instrument a direct setup starts from, chosen by what the profile is.
+
+    The return lane starts from the account Stripe disputes rather than the one
+    it settles. A return is a loss after authoritative funding, and the
+    authority recognises exactly one authoritative loss, which is a dispute;
+    an account that simply declines never funds and never reaches the boundary.
+    """
 
     if funding_profile == "card.v1":
         return stripe.create_card_instrument()
-    return stripe.create_microdeposit_bank_instrument()
+    return stripe.create_microdeposit_bank_instrument(disputed=scenario == "ach_return")
 
 
 def _payer_return_address(
@@ -634,7 +642,7 @@ def _execute_scenario(
         funding_profile=funding_profile,
         interaction=interaction,
         **(
-            {"payment_method": _direct_instrument(stripe, funding_profile)}
+            {"payment_method": _direct_instrument(stripe, funding_profile, scenario)}
             if direct_setup
             else {}
         ),

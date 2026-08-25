@@ -647,6 +647,18 @@ class NetworkMarketplacePort:
     def eligible_pretransfer_refund_available(self) -> bool:
         return True
 
+    def induce_test_ach_return(self, settlement_ref: str) -> dict[str, object]:
+        """Report that the return this lane needs is already on its way.
+
+        Nothing is induced here, because the return was armed before the
+        payment existed: the lane funds from the test account Stripe settles
+        and then disputes. There is no later moment to reach in and cause one,
+        so this states that the arming happened rather than pretending to act.
+        """
+
+        del settlement_ref
+        return {"ok": True}
+
     def _funds_within_materialization(self) -> bool:
         """Whether funding completes inside the materialize call.
 

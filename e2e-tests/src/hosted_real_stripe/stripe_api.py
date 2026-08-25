@@ -29,6 +29,11 @@ T = TypeVar("T")
 #: assertion in this harness comes from.
 _TEST_BANK_ROUTING_NUMBER = "110000000"
 _TEST_BANK_MICRODEPOSIT_ACCOUNT = "000123456789"
+#: The documented test account whose payment settles and is then disputed. An
+#: ACH return reaches the authority as a dispute, not as a declined payment:
+#: the authority reads its terminal losses from disputes, and every other
+#: failing test account never funds at all, which is a decline lane instead.
+_TEST_BANK_DISPUTED_ACCOUNT = "000555555559"
 #: The documented test card token that confirms off-session without
 #: authentication, so a card setup has nothing for a browser to answer.
 _TEST_CARD_TOKEN = "tok_visa"
@@ -140,19 +145,24 @@ class StripeApi:
                 "Stripe cash-balance test helper did not fund the exact accepted amount"
             )
 
-    def create_microdeposit_bank_instrument(self) -> str:
+    def create_microdeposit_bank_instrument(self, *, disputed: bool = False) -> str:
         """Create the documented test bank instrument a payer would hold.
 
         The token is transient. It exists so the setup can be started from an
         instrument rather than from a hosted page, and it is handed straight to
         the authority without being stored or reported.
+
+        `disputed` starts from the account whose settled payment is disputed
+        afterwards, which is what a return lane needs.
         """
 
         result = self._mutation_transport(
             "/v1/payment_methods",
             {
                 "type": "us_bank_account",
-                "us_bank_account[account_number]": _TEST_BANK_MICRODEPOSIT_ACCOUNT,
+                "us_bank_account[account_number]": (
+                    _TEST_BANK_DISPUTED_ACCOUNT if disputed else _TEST_BANK_MICRODEPOSIT_ACCOUNT
+                ),
                 "us_bank_account[routing_number]": _TEST_BANK_ROUTING_NUMBER,
                 "us_bank_account[account_holder_type]": "individual",
                 "us_bank_account[account_type]": "checking",
