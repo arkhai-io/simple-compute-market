@@ -78,28 +78,55 @@ jobs:
       - uses: astral-sh/setup-uv@v3
         with:
           version: "0.11.17"
-      - name: Download exact hosted release assets
+      # Which producer version this repository compiles against is stated by the
+      # pin; which one has been signed is stated by the trust configuration
+      # naming it. Nothing else states either, and the two together decide
+      # whether there is a release to verify at all.
+      - name: Select the hosted client channel
+        id: hosted
         if: matrix.requires_hosted
+        run: python scripts/select-hosted-client-channel.py >>"$GITHUB_OUTPUT"
+      - name: Download exact hosted release assets
+        if: matrix.requires_hosted && steps.hosted.outputs.channel == 'release'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           mkdir -p .dist
-          repository="$(python -c 'import json; print(json.load(open("manifests/hosted-settlement-v0.2.1-trust.json"))["repository"])')"
-          version="$(python -c 'import json; print(json.load(open("manifests/hosted-settlement-v0.2.1-trust.json"))["release_version"])')"
-          manifest="$(python -c 'import json; print(json.load(open("manifests/hosted-settlement-v0.2.1-trust.json"))["manifest_filename"])')"
-          wheel="$(python -c 'import json; print(json.load(open("manifests/hosted-settlement-v0.2.1-trust.json"))["client_wheel"]["filename"])')"
-          test -n "$repository"
-          gh release download "v$version" --repo "$repository" --dir .dist \
-            --pattern "$manifest" \
-            --pattern "$wheel" \
-            --pattern "openapi-v0.2.1.json" \
-            --pattern "conformance-v0.2.1.json" \
-            --pattern "migrations-v5.json" \
+          gh release download "v${{ steps.hosted.outputs.version }}" \
+            --repo "${{ steps.hosted.outputs.repository }}" --dir .dist \
+            --pattern "${{ steps.hosted.outputs.manifest }}" \
+            --pattern "${{ steps.hosted.outputs.wheel }}" \
+            --pattern "openapi-v${{ steps.hosted.outputs.version }}.json" \
+            --pattern "conformance-v${{ steps.hosted.outputs.version }}.json" \
+            --pattern "migrations-v${{ steps.hosted.outputs.schema_version }}.json" \
             --pattern "sbom.spdx.json" \
             --pattern "provenance.intoto.json"
       - name: Verify staged hosted release
-        if: matrix.requires_hosted
-        run: make verify-hosted-release
+        if: matrix.requires_hosted && steps.hosted.outputs.channel == 'release'
+        run: make verify-hosted-release HOSTED_RELEASE_TRUST="${{ steps.hosted.outputs.trust }}"
+      # An unreleased version has nothing signed to verify. The wheel comes from
+      # the producer's access-controlled index instead, and is treated as what
+      # it is: something this job can compile against and cite for nothing.
+      - name: Authenticate to the internal package index
+        id: hosted_auth
+        if: matrix.requires_hosted && steps.hosted.outputs.channel == 'internal' && vars.AR_WORKLOAD_IDENTITY_PROVIDER != ''
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ vars.AR_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ vars.AR_READER_SERVICE_ACCOUNT }}
+          token_format: access_token
+      - name: Stage the development hosted client
+        if: matrix.requires_hosted && steps.hosted.outputs.channel == 'internal'
+        run: |
+          if [ -z "${{ steps.hosted_auth.outputs.access_token }}" ]; then
+            echo "::error::hosted client ${{ steps.hosted.outputs.version }} has no signed release, and this run cannot reach the internal package index. Set AR_WORKLOAD_IDENTITY_PROVIDER and AR_READER_SERVICE_ACCOUNT, or release that version."
+            exit 1
+          fi
+          mkdir -p .dist
+          python -m pip download --no-deps --quiet --dest .dist \
+            --index-url "https://oauth2accesstoken:${{ steps.hosted_auth.outputs.access_token }}@${{ steps.hosted.outputs.index_host }}/simple/" \
+            "arkhai-hosted-settlement-client==${{ steps.hosted.outputs.version }}"
+          test -f ".dist/${{ steps.hosted.outputs.wheel }}"
       - name: Build sibling wheels into .dist
         # Some lockfiles resolve sibling arkhai-* wheels from the repo's
         # .dist/ (the `make dist` output dir), which isn't in a fresh

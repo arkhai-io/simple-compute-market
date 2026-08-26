@@ -62,11 +62,15 @@ class ObservationalClient:
         health_ready: dict[FundingProfile, bool] | None = None,
         account_ready: dict[FundingProfile, bool] | None = None,
         capabilities: tuple[str, ...] = REQUIRED_STRIPE_CAPABILITIES,
+        api_version: str = "0.2.1",
+        schema_version: int = 5,
     ) -> None:
         self.fail = fail
         self.health_ready = health_ready or {}
         self.account_ready = account_ready or {}
         self.capabilities = capabilities
+        self.api_version = api_version
+        self.schema_version = schema_version
         self.read_calls: list[str] = []
         self.mutation_calls: list[str] = []
         self.request_ids: list[str] = []
@@ -81,8 +85,8 @@ class ObservationalClient:
         return SimpleNamespace(
             ready=True,
             manifest_digest="sha256:" + "ab" * 32,
-            api_version="0.2.1",
-            schema_version=5,
+            api_version=self.api_version,
+            schema_version=self.schema_version,
             payer_profile_protocol="arkhai.payer-profile.v1",
             funding_authorization_protocol="arkhai.funding-authorization.v1",
             funding_profile_protocol="arkhai.funding-profile.v1",
@@ -144,6 +148,11 @@ def _config(**updates) -> StripeSettlementConfig:
         "environment": "production",
         "authority": {"principals": [_identity().model_dump(mode="json")]},
         "expected_manifest_digest": "sha256:" + "ab" * 32,
+        # A rendered configuration states the release it was bound to; the
+        # package supplies no default for these.
+        "expected_api_version": "0.2.1",
+        "expected_schema_version": 5,
+        "required_capabilities": REQUIRED_STRIPE_CAPABILITIES,
         "account_ref": "seller-main",
         "currency": "usd",
         "country": "US",
@@ -247,9 +256,10 @@ def test_registry_validation_does_not_echo_rejected_config_values() -> None:
         ({"currency": "eur"}, "usd"),
         ({"currency": "USD"}, "usd"),
         ({"country": "DE"}, "US"),
-        ({"expected_api_version": "0.2"}, "0.2.1"),
-        ({"expected_schema_version": 4}, "5"),
-        ({"required_capabilities": ("payer-profile.v1",)}, "exactly match"),
+        ({"expected_api_version": "0.2"}, "semantic version"),
+        ({"expected_schema_version": 0}, "positive"),
+        ({"required_capabilities": ("payer-profile.v1",)}, "must cover"),
+        ({"required_capabilities": ("payer-profile.v1", "payer-profile.v1")}, "unique"),
     ],
 )
 def test_config_is_exact_and_closed(updates: dict, match: str) -> None:
@@ -745,3 +755,95 @@ def test_factory_wraps_only_the_released_client() -> None:
     )
     assert type(client) is HostedConditionalEscrowClient
     assert captured[0].caller_role == "storefront"
+
+
+@pytest.mark.asyncio
+async def test_a_later_hosted_contract_is_configurable_and_ready() -> None:
+    """The next release is admitted by stating it, not by editing this package.
+
+    Before, the version and schema were literal types and the capability set
+    had to equal this marketplace's floor exactly, so a configuration naming a
+    later release did not fail a contract check -- it failed to parse.
+    """
+
+    later = (*REQUIRED_STRIPE_CAPABILITIES, "payer-direct-instrument-setup.v1")
+    config = _config(
+        account_ref=None,
+        condition_profile=None,
+        condition_profiles={},
+        expected_api_version="0.3.0",
+        expected_schema_version=6,
+        required_capabilities=later,
+    )
+    client = ObservationalClient(
+        capabilities=later,
+        api_version="0.3.0",
+        schema_version=6,
+    )
+
+    status = await stripe_preflight(
+        config,
+        {"marketplace_signer": FakeSigner(), "preflight_client": client},
+        "buyer",
+    )
+
+    assert status.ready is True
+    assert status.contract_version == "0.3.0"
+    assert status.schema_version == "6"
+    assert "payer-direct-instrument-setup.v1" in status.capabilities
+
+
+@pytest.mark.asyncio
+async def test_a_later_authority_still_has_to_match_what_was_pinned() -> None:
+    """Opening the type up did not open the check up."""
+
+    client = ObservationalClient(api_version="0.3.0", schema_version=6)
+
+    status = await stripe_preflight(
+        _config(account_ref=None, condition_profile=None, condition_profiles={}),
+        {"marketplace_signer": FakeSigner(), "preflight_client": client},
+        "buyer",
+    )
+
+    assert status.ready is False
+    assert {blocker.code for blocker in status.blockers} == {
+        "hosted.api_mismatch",
+        "hosted.schema_mismatch",
+    }
+
+
+@pytest.mark.parametrize(
+    ("pin", "code"),
+    [
+        ("expected_api_version", "hosted.api_pin_missing"),
+        ("expected_schema_version", "hosted.schema_pin_missing"),
+        ("required_capabilities", "hosted.capability_pin_missing"),
+    ],
+)
+@pytest.mark.asyncio
+async def test_an_enabled_configuration_that_states_no_pin_blocks_by_name(
+    pin: str, code: str
+) -> None:
+    """An unrendered configuration is unready, not quietly defaulted."""
+
+    empty: dict[str, object] = {
+        "expected_api_version": None,
+        "expected_schema_version": None,
+        "required_capabilities": (),
+    }
+    client = ObservationalClient()
+
+    status = await stripe_preflight(
+        _config(
+            account_ref=None,
+            condition_profile=None,
+            condition_profiles={},
+            **{pin: empty[pin]},
+        ),
+        {"marketplace_signer": FakeSigner(), "preflight_client": client},
+        "buyer",
+    )
+
+    assert status.ready is False
+    assert code in {blocker.code for blocker in status.blockers}
+    assert client.read_calls == []

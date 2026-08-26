@@ -4,7 +4,8 @@ from __future__ import annotations
 
 import hashlib
 import inspect
-from collections.abc import Awaitable, Callable
+import re
+from collections.abc import Awaitable, Callable, Iterable
 from dataclasses import dataclass, field
 from typing import Any, Literal, Protocol
 
@@ -13,6 +14,7 @@ from hosted_settlement_client import (
     FundingMode,
     FundingProfile,
     HostedSettlementAsyncClient,
+    HostedSettlementError,
     InstrumentKind,
     InstrumentMutationRequest,
     InstrumentReadiness,
@@ -22,6 +24,7 @@ from hosted_settlement_client import (
     PayerProfileState,
     PayerSetupRequest,
     PayerSetupStatusRequest,
+    PayerSetupVerificationRequest,
     Principal,
     sign_payer_owner_retirement,
     sign_payer_owner_rotation,
@@ -47,8 +50,23 @@ from .settlement_config import (
 )
 
 
+#: The bound release must declare this before a payer can finish a bank-funded
+#: setup with evidence its own bank showed it, rather than through a browser.
+DIRECT_INSTRUMENT_SETUP_CAPABILITY = "payer-direct-instrument-setup.v1"
+
+
 class HostedPayerError(RuntimeError):
-    """A deterministic provider-redacted direct payer failure."""
+    """A deterministic provider-redacted direct payer failure.
+
+    ``code`` is the authority's own stable name for what it refused, carried
+    beside the message so a caller can act on the refusal without reading free
+    text the authority may have redacted for a reason. Empty when the authority
+    named nothing.
+    """
+
+    def __init__(self, message: str, *, code: str = "") -> None:
+        super().__init__(message)
+        self.code = code
 
 
 class PayerProfileAccess(Protocol):
@@ -90,6 +108,8 @@ class PayerCommandContext:
     profiles: PayerProfileAccess = field(repr=False)
     client_factory: PayerClientFactory = field(repr=False)
     dispatch_action: ActionDispatcher = field(repr=False)
+    #: What the bound release declares, as the configuration pinned it.
+    capabilities: frozenset[str] = frozenset()
 
     def facade(self, signer: Signer) -> HostedPayerFacade:
         return HostedPayerFacade(
@@ -97,6 +117,7 @@ class PayerCommandContext:
             signer=signer,
             authority_id=self.authority_id,
             environment=self.environment,
+            capabilities=self.capabilities,
         )
 
 
@@ -140,11 +161,21 @@ def payer_command_context_from_config(
         profiles=profiles,
         client_factory=client_factory,
         dispatch_action=dispatch_action,
+        capabilities=frozenset(resolved.required_capabilities),
     )
 
 
 async def _await_if_needed(value: Any) -> Any:
     return await value if inspect.isawaitable(value) else value
+
+
+#: An authority refusal code is a bounded lowercase identifier. Anything else
+#: is not the authority's vocabulary and is dropped rather than repeated.
+_REFUSAL_CODE = re.compile(r"^[a-z][a-z0-9_]{0,63}$")
+
+
+def _refusal_code(code: str) -> str:
+    return code if _REFUSAL_CODE.fullmatch(code or "") else ""
 
 
 def _request_id(operation: str, *values: str) -> str:
@@ -162,7 +193,13 @@ def _hosted_principal(identity: Identity) -> Principal:
 class HostedPayerFacade:
     """Use hosted signing helpers and models without reproducing wire behavior."""
 
-    __slots__ = ("_authority_id", "_client", "_environment", "_signer")
+    __slots__ = (
+        "_authority_id",
+        "_capabilities",
+        "_client",
+        "_environment",
+        "_signer",
+    )
 
     def __init__(
         self,
@@ -171,6 +208,7 @@ class HostedPayerFacade:
         signer: Signer,
         authority_id: str,
         environment: str,
+        capabilities: Iterable[str] = (),
     ) -> None:
         if not authority_id or not environment:
             raise ValueError("payer authority and environment are required")
@@ -178,10 +216,25 @@ class HostedPayerFacade:
         self._signer = MarketplaceSignerAdapter(signer)
         self._authority_id = authority_id
         self._environment = environment
+        # What the bound release declares. An operation the release does not
+        # offer is an unavailable prerequisite, reported before any hosted
+        # mutation rather than as a call that failed for an unclear reason.
+        self._capabilities = frozenset(capabilities)
 
     async def _remote(self, operation: str, call: Callable[[], Any]) -> Any:
+        # A payer operation that fails without saying why is unrepairable by
+        # the person it fails for. The authority's own code is safe to keep --
+        # it is a bounded identifier, not provider text -- so the refusal
+        # travels with the one word that says what to do about it.
         try:
             return await _await_if_needed(call())
+        except HostedSettlementError as exc:
+            code = _refusal_code(getattr(exc, "code", ""))
+            raise HostedPayerError(
+                f"hosted payer {operation} failed"
+                + (f": {code}" if code else ""),
+                code=code,
+            ) from None
         except Exception:
             raise HostedPayerError(f"hosted payer {operation} failed") from None
 
@@ -302,7 +355,16 @@ class HostedPayerFacade:
         payer_profile_ref: str,
         funding_profile: FundingProfile,
         label: str,
+        payment_method: str | None = None,
     ) -> Any:
+        """Start a setup, optionally from an instrument the payer already holds.
+
+        An authority given no instrument issues a hosted page, and the setup
+        becomes one only a browser can answer. The token is transient on the
+        same terms as that page's URL: it goes to the authority and is neither
+        persisted nor projected.
+        """
+
         request = PayerSetupRequest(
             request_id=_request_id(
                 "setup-start",
@@ -313,6 +375,7 @@ class HostedPayerFacade:
             payer_profile_ref=payer_profile_ref,
             funding_profile=funding_profile,
             label=label,
+            payment_method=payment_method,
         )
         return await self._remote(
             "setup start",
@@ -333,6 +396,46 @@ class HostedPayerFacade:
         return await self._remote(
             "setup status",
             lambda: self._client.get_payer_setup(request),
+        )
+
+    async def verify_setup(
+        self,
+        *,
+        payer_profile_ref: str,
+        setup_ref: str,
+        amounts: tuple[int, ...] | None = None,
+        descriptor_code: str | None = None,
+    ) -> Any:
+        """Submit the payer's own verification evidence for one pending setup.
+
+        Exactly one form of evidence, because the two are alternative accounts
+        of the same deposit and a submission carrying both says nothing about
+        which one the payer actually read. Neither is not a submission at all.
+        """
+
+        if self._capabilities and (
+            DIRECT_INSTRUMENT_SETUP_CAPABILITY not in self._capabilities
+        ):
+            raise HostedPayerError(
+                "the bound hosted release does not offer "
+                f"{DIRECT_INSTRUMENT_SETUP_CAPABILITY}",
+                code="capability_unavailable",
+            )
+        if (amounts is None) == (descriptor_code is None):
+            raise HostedPayerError(
+                "setup verification carries deposited amounts or a descriptor "
+                "code, and exactly one of them"
+            )
+        request = PayerSetupVerificationRequest(
+            request_id=_request_id("setup-verify", payer_profile_ref, setup_ref),
+            payer_profile_ref=payer_profile_ref,
+            setup_ref=setup_ref,
+            amounts=amounts,
+            descriptor_code=descriptor_code,
+        )
+        return await self._remote(
+            "setup verification",
+            lambda: self._client.verify_payer_setup(request),
         )
 
     async def list_instruments(self, payer_profile_ref: str) -> Any:
@@ -442,6 +545,7 @@ async def payer_compatibility_context(
         signer=signer,
         authority_id=binding.authority_id,
         environment=binding.environment,
+        capabilities=frozenset(resolved.required_capabilities),
     )
     profile = await facade.show(binding.binding_ref)
     if profile.state is not PayerProfileState.ACTIVE:
@@ -511,6 +615,7 @@ def instrument_list_projection(result: Any) -> dict[str, Any]:
 
 __all__ = [
     "ActionDispatcher",
+    "DIRECT_INSTRUMENT_SETUP_CAPABILITY",
     "HostedPayerError",
     "HostedPayerFacade",
     "PayerClientFactory",

@@ -3,7 +3,9 @@
 ## Purpose
 
 Define the buyer-driven signed round protocol, deterministic terms derivation, policy hooks, and persisted negotiation state.
+
 ## Requirements
+
 ### Requirement: Buyer-driven synchronous rounds
 Negotiation MUST use signed HTTP request/response rounds initiated by the buyer; the seller MUST return its next message inline and MUST NOT require a symmetric push channel.
 
@@ -98,7 +100,6 @@ A fiat selection MUST produce one buyer-funded, seller-claimed `SettlementObliga
 - **WHEN** exact option matching and current duration/expiry pricing succeed
 - **THEN** the accepted plan contains one buyer-funded, seller-claimed hosted obligation with the exact integer amount and typed condition
 
-
 ### Requirement: Uint256-safe negotiation values
 
 Negotiated scalar payment amounts in proposals, rates, accepted obligations, and persisted agreed state MUST remain non-negative integers without precision loss. Canonical JSON wire representations MUST encode uint256-domain values as decimal-digit strings, and persistence MUST round-trip values larger than JSON's safe-integer range and SQLite's signed 64-bit range without rounding or truncation.
@@ -169,6 +170,28 @@ Opening a negotiation MUST transactionally load the authoritative seller listing
 
 - **WHEN** the current registration or listing changes after a thread recorded an exact nonterminal or accepted binding
 - **THEN** recovery resolves the recorded contract or blocks that record and never redirects it to the new mapping
+
+### Requirement: Scalar negotiation participation is a mechanism declaration
+
+A settlement mechanism's registration MUST declare whether it negotiates a scalar
+amount. For a scalar-declaring mechanism, the existing strict behavior applies,
+including rejection of a proposal missing the amount. For a mechanism that declines
+the scalar, negotiation MUST proceed take-it-or-leave-it over the published option,
+the missing-amount rejection MUST NOT apply, and buyer ordering MUST treat its
+listings as priceless.
+
+#### Scenario: A non-scalar mechanism reaches acceptance
+
+- **WHEN** a buyer opens negotiation with a settlement selection for a mechanism that
+  declares no scalar and no `fields.amount`
+- **THEN** the round is not rejected for a missing amount and the negotiation can
+  reach acceptance on the published option's terms
+
+#### Scenario: A scalar mechanism keeps the guard
+
+- **WHEN** a buyer opens negotiation under a scalar-declaring mechanism without an
+  amount
+- **THEN** the proposal is rejected exactly as today
 
 ## Evidence
 

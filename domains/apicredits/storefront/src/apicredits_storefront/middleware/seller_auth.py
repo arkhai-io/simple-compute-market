@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from fastapi import HTTPException, Request
 
+from apicredits_storefront.middleware.response_auth import bind_response_contract
 from core_storefront.auth import AuthError, authenticate_request
 
 
@@ -22,6 +23,7 @@ async def verify_seller_signature(
 
     if container.resolved_sqlite_client is None:
         raise HTTPException(status_code=503, detail="storefront is not initialized")
+    bind_response_contract(request, operation=operation, resource=resource_id)
     try:
         body = await request.json() if request.method not in {"GET", "DELETE"} else None
         authenticated = await authenticate_request(

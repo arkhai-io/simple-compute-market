@@ -29,6 +29,7 @@ class SettleResponse(BaseModel):
     buyer_principal: Identity
     seller_principal: Identity
     status: str
+    obligation_ref: str | None = None
     provisioning_job_id: str | None = None
     fulfillment_id: str | None = None
     model_config = {"extra": "allow"}
@@ -45,6 +46,7 @@ class SettleStatusResponse(BaseModel):
     buyer_principal: Identity
     seller_principal: Identity
     status: str
+    obligation_ref: str | None = None
     provisioning_job_id: str | None = None
     fulfillment_id: str | None = None
     tenant_credentials: dict[str, Any] | None = None

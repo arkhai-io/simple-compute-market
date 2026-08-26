@@ -20,9 +20,23 @@ from .models import (
 )
 from .ports import ConditionalEscrowClient, SettlementRuntimeRepository
 
+#: Where a mechanism records why it parked an obligation, inside the mechanism
+#: state it already owns. One key, so a projection needs no mechanism knowledge
+#: to find it and no mechanism needs a schema change to report one.
+MANUAL_REASON_KEY = "manual_reason"
+
 
 class SettlementManualRequired(RuntimeError):
-    """A mechanism cannot safely converge without operator evidence."""
+    """A mechanism cannot safely converge without operator evidence.
+
+    ``code`` is the mechanism's own stable name for what it could not get past,
+    carried separately from the message so a projection can report it without
+    repeating free text a mechanism may have redacted for a reason.
+    """
+
+    def __init__(self, message: str, *, code: str = "") -> None:
+        super().__init__(message)
+        self.code = code
 
 
 class SettlementRuntime:
@@ -35,13 +49,26 @@ class SettlementRuntime:
         *,
         clock: Callable[[], float] = time.time,
         lease_seconds: float = 30.0,
+        fulfillment_lease_seconds: float | None = None,
     ) -> None:
         if lease_seconds <= 0:
             raise ValueError("lease_seconds must be positive")
+        if fulfillment_lease_seconds is not None and fulfillment_lease_seconds <= 0:
+            raise ValueError("fulfillment_lease_seconds must be positive")
         self._repository = repository
         self._clients = dict(clients)
         self._clock = clock
         self._lease_seconds = lease_seconds
+        # Every other operation is a bounded call to the authority. Domain
+        # fulfillment is the one whose duration belongs to the domain -- a VM
+        # can take as long as its provisioning bound allows -- and a lease that
+        # expires mid-attempt hands the same deal to a second worker, which
+        # then races the first for the same physical capacity.
+        self._fulfillment_lease_seconds = (
+            lease_seconds
+            if fulfillment_lease_seconds is None
+            else fulfillment_lease_seconds
+        )
 
     async def register_plan(
         self,
@@ -543,7 +570,16 @@ class SettlementRuntime:
         obligation_ref: str,
         local_principal: Identity,
         worker_id: str,
+        mechanism_options: Mapping[str, Any] | None = None,
     ) -> SettlementOperationOutcome:
+        """Return an expired obligation's funding to its payer.
+
+        ``mechanism_options`` belongs to the mechanism, not to this runtime,
+        which neither reads a key nor stores one. It is bound into the
+        reservation because two reclaims naming different options are two
+        different requests, and reusing the first reservation for the second
+        would send the mechanism something its caller never asked for.
+        """
         record = await self._load(obligation_ref)
         self._require_principal(record, local_principal, "payer")
         mechanism_ref = self._require_materialized(record)
@@ -563,7 +599,13 @@ class SettlementRuntime:
                     "domain cleanup must complete before reclaiming returned funding"
                 )
         client = self._client(record)
-        reserved = await self._reserve(record, "reclaim", worker_id, local_principal)
+        reserved = await self._reserve(
+            record,
+            "reclaim",
+            worker_id,
+            local_principal,
+            request_values={"mechanism_options": dict(mechanism_options or {})},
+        )
         if reserved is None:
             return self._outcome(record, "reclaim", "busy")
         terminal = self._terminal_outcome(record, "reclaim", reserved)
@@ -577,6 +619,7 @@ class SettlementRuntime:
                     record.obligation_ref, "reclaim"
                 ),
                 mechanism_state=dict(record.mechanism_state),
+                mechanism_options=dict(mechanism_options or {}),
             )
         except SettlementManualRequired as exc:
             return await self._finish_manual(record, "reclaim", worker_id, exc)
@@ -686,6 +729,11 @@ class SettlementRuntime:
         request_values: Mapping[str, Any] | None = None,
     ) -> dict[str, Any] | None:
         now = self._clock()
+        lease = (
+            self._fulfillment_lease_seconds
+            if operation == "fulfill"
+            else self._lease_seconds
+        )
         return await self._repository.reserve_settlement_operation(
             obligation_ref=record.obligation_ref,
             operation=operation,
@@ -697,8 +745,39 @@ class SettlementRuntime:
             ),
             lease_owner=worker_id,
             now_unix=now,
-            lease_until_unix=now + self._lease_seconds,
+            lease_until_unix=now + lease,
         )
+
+    @staticmethod
+    def _keep_parked_reason(
+        record: SettlementObligationRecord,
+        mechanism_state: dict[str, Any] | None,
+    ) -> dict[str, Any] | None:
+        """Carry a park's reason across writes that do not name one.
+
+        Mechanism state is replaced wholesale on every write, which is right
+        for a vocabulary the mechanism owns and re-derives each time. The
+        reason an obligation was parked is not that: it was recorded once, by
+        the operation that parked it, and the mechanism cannot re-derive it
+        because it answers for the authority's current view. A status poll
+        against an authority that is answering normally names no reason, and
+        the buyer polls continuously, so without this the reason survives about
+        one poll interval. It is cleared when the park is cleared, never while
+        the obligation is still parked and still needs a human.
+        """
+
+        if mechanism_state is None or MANUAL_REASON_KEY in mechanism_state:
+            return mechanism_state
+        parked = "manual_required" in {
+            record.materialization_state,
+            record.condition_state,
+            record.collection_state,
+            record.reclaim_state,
+        }
+        reason = record.mechanism_state.get(MANUAL_REASON_KEY)
+        if not parked or not reason:
+            return mechanism_state
+        return {**mechanism_state, MANUAL_REASON_KEY: reason}
 
     async def _finish(
         self,
@@ -707,6 +786,10 @@ class SettlementRuntime:
         worker_id: str,
         **values: Any,
     ) -> None:
+        if "mechanism_state" in values:
+            values["mechanism_state"] = self._keep_parked_reason(
+                record, values["mechanism_state"]
+            )
         saved = await self._repository.finish_settlement_operation(
             obligation_ref=record.obligation_ref,
             operation=operation,
@@ -783,8 +866,21 @@ class SettlementRuntime:
         worker_id: str,
         error: Exception,
     ) -> SettlementOperationOutcome:
+        # An obligation parked here needs a human, and a state that requires
+        # human action while withholding its reason is unrepairable. The code
+        # joins the mechanism's own state so a projection reads it structurally
+        # rather than parsing the message back out.
+        code = getattr(error, "code", "") or ""
+        state = (
+            {**record.mechanism_state, MANUAL_REASON_KEY: code} if code else None
+        )
         await self._finish(
-            record, operation, worker_id, state="manual_required", last_error=str(error)
+            record,
+            operation,
+            worker_id,
+            state="manual_required",
+            last_error=str(error),
+            mechanism_state=state,
         )
         return self._outcome(record, operation, "manual_required")
 

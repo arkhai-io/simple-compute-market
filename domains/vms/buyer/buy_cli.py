@@ -37,6 +37,7 @@ from market_alkahest.schemas import EscrowProposal
 from market_alkahest.token import TokenResolutionError, resolve_token
 from market_core.schemas import SettlementSelection
 from market_hosted_settlement import (
+    MECHANISM as HOSTED_MECHANISM,
     FundingMode,
     FundingSelection,
     StripeSettlementConfig,
@@ -105,6 +106,7 @@ def _make_hosted_settle_hook(
     del provision
     return make_hosted_settle_hook(
         config=config,
+        mechanism=HOSTED_MECHANISM,
         prepare_authorization=lambda obligation_ref, obligation: (
             prepare_hosted_funding_authorization(
                 buyer_profile_id=str(config.buyer_profile_id),

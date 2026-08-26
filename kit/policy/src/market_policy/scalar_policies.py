@@ -526,6 +526,45 @@ def _accepted_escrow_for_proposal(
     return None
 
 
+def _settlement_option_for_selection(
+    listing: dict[str, Any],
+    proposal: dict[str, Any],
+) -> dict[str, Any] | None:
+    selection = proposal.get("settlement_selection")
+    if not isinstance(selection, dict):
+        return None
+    option_id = selection.get("option_id")
+    mechanism = selection.get("mechanism")
+    for option in _loads_json_list(listing.get("settlement_options")):
+        if (
+            isinstance(option, dict)
+            and option.get("option_id") == option_id
+            and option.get("mechanism") == mechanism
+        ):
+            return option
+    return None
+
+
+def option_uses_scalar_amount(option: dict[str, Any] | None) -> bool:
+    """Whether a published settlement option bargains a scalar ``amount``.
+
+    The option shape is the mechanism's declaration to counterparties: an
+    ``amount`` rate means the deal is bargained through ``fields.amount``;
+    its absence means take-it-or-leave-it over the option as published.
+    """
+    if not isinstance(option, dict):
+        return True
+    for rate in option.get("rates") or []:
+        field = (
+            rate.get("field")
+            if isinstance(rate, dict)
+            else getattr(rate, "field", None)
+        )
+        if field == "amount":
+            return True
+    return False
+
+
 def _is_round_zero(history: list[NegotiationRound]) -> bool:
     return (
         len(history) == 1
@@ -561,6 +600,13 @@ def proposal_uses_scalar_amount(
     fields = proposal.get("fields") or {}
     if isinstance(fields, dict) and "amount" in fields:
         return True
+    if isinstance(proposal.get("settlement_selection"), dict):
+        matched_option = _settlement_option_for_selection(listing, proposal)
+        # An unmatched selection stays scalar so the invalid-selection
+        # rejection upstream fires instead of an exact-accept shortcut.
+        if matched_option is None:
+            return True
+        return option_uses_scalar_amount(matched_option)
     matched = _accepted_escrow_for_proposal(listing, proposal)
     return _accepted_entry_uses_scalar_amount(matched)
 
@@ -732,6 +778,46 @@ def accept_exact_listing_middleware(
         )
 
     listing = context.listing or {}
+    if isinstance(proposal.get("settlement_selection"), dict):
+        matched_option = _settlement_option_for_selection(listing, proposal)
+        if matched_option is None:
+            return (
+                NegotiationDecision(
+                    action="reject",
+                    reason="exact_listing:selection_not_in_options",
+                ),
+                context,
+            )
+        if option_uses_scalar_amount(matched_option):
+            expected_amount = int(round(context.our_reference_amount))
+            proposed_amount = _amount_from_proposal(proposal)
+            if proposed_amount is None or int(proposed_amount) != expected_amount:
+                return (
+                    NegotiationDecision(
+                        action="reject",
+                        reason=(
+                            f"exact_listing:amount_mismatch:"
+                            f"{proposed_amount!r}!={expected_amount!r}"
+                        ),
+                    ),
+                    context,
+                )
+            return (
+                NegotiationDecision(
+                    action="accept",
+                    proposal=_set_proposal_amount(proposal, expected_amount),
+                    reason="exact_listing",
+                ),
+                context,
+            )
+        return (
+            NegotiationDecision(
+                action="accept",
+                proposal=dict(proposal),
+                reason="exact_listing",
+            ),
+            context,
+        )
     matched = _accepted_escrow_for_proposal(listing, proposal)
     if matched is None:
         return (
@@ -983,6 +1069,7 @@ __all__ = [
     "our_first_proposal",
     "our_previous_counters",
     "proposal_escrow_kind",
+    "option_uses_scalar_amount",
     "proposal_uses_scalar_amount",
     "their_proposed_amount",
 ]

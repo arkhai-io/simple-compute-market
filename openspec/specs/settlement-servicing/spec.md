@@ -3,6 +3,7 @@
 ## Purpose
 
 Define the implemented mechanism-neutral settlement-plan carrier, persisted claim servicing, and signed heartbeat evidence.
+
 ## Requirements
 
 ### Requirement: Hosted obligation pins profile and authorization
@@ -62,6 +63,7 @@ A migrated marketplace row whose accepted plan used the historical card-only sha
 
 - **WHEN** the shared runtime loads a nonterminal historical card obligation
 - **THEN** it resumes the exact legacy hosted operation without requiring a new payer profile, funding authorization, or `card.v1` relabel
+
 ### Requirement: Negotiation-to-plan handoff
 Negotiation MUST produce deterministic Terms and the settlement path MUST
 register every accepted obligation as a mechanism-neutral Settlement Plan
@@ -220,6 +222,17 @@ A hosted obligation MUST carry exactly one immutable condition descriptor with a
 
 The `fiat.stripe.v1` adapter MUST accept only buyer-funded, seller-claimed obligations with a positive integer minor-unit amount, lowercase ISO 4217 currency, immutable account reference, exact supported funding profile, operation-scoped funding authorization reference, expiry, and supported typed condition. It MUST verify exact client/manifest/schema/profile capability before use. Provider-neutral awaiting-payment, action-required, deadline, return, and loss states MUST map monotonically into the shared lifecycle. Hosted `operator_review` or post-collection loss MUST project as `manual_required` without inventing a successful outcome or provider detail.
 
+A hosted operation refused by the authority with a non-retryable error MUST
+retain the authority's own stable error code. The released client's message,
+identifiers, and payloads MUST NOT reach marketplace persistence or any
+marketplace response; the code MUST, because it is the authority's own
+vocabulary rather than provider detail.
+
+An obligation the marketplace parks as `manual_required` MUST project a stable
+reason alongside its status, in the same field a consumer reads for a funding
+reason, and every domain adopting the hosted mechanism MUST project it
+identically. A `manual_required` projection carrying no reason MUST NOT occur.
+
 #### Scenario: Condition is not currently satisfied
 
 - **WHEN** the hosted authority returns an authoritative false evaluation before expiry
@@ -234,6 +247,21 @@ The `fiat.stripe.v1` adapter MUST accept only buyer-funded, seller-claimed oblig
 
 - **WHEN** an accepted new-format obligation names a profile absent from the verified client/manifest capability set
 - **THEN** adapter admission fails closed before materialization
+
+#### Scenario: Hosted authority refuses an operation outright
+
+- **WHEN** the authority answers a hosted operation with a non-retryable error carrying its own error code
+- **THEN** the obligation is parked as `manual_required` recording that code, and neither the authority's message nor any provider identifier or payload is persisted
+
+#### Scenario: An operator reads a parked obligation
+
+- **WHEN** an obligation is projected while parked as `manual_required`
+- **THEN** the projection names a stable reason for the parking, so the operator can distinguish a refused condition, an unsupported profile, and an account that lost a capability without provider access
+
+#### Scenario: Two domains park the same obligation shape
+
+- **WHEN** the VM, API-credit, and bare-metal storefronts each project an obligation their authority refused for the same reason
+- **THEN** all three carry the same stable reason in the same field, because the projection is built from one shared surface
 
 ### Requirement: Fulfillment and reclaim exclusion
 
@@ -261,7 +289,6 @@ The VM domain MUST encode only the versioned evidence allowed by the accepted co
 #### Scenario: VM fulfillment contains connection credentials
 - **WHEN** a condition evidence projection is generated from a successful fulfillment result
 - **THEN** credentials and connection fields are absent and a canary test rejects any projection that would include them
-
 
 ### Requirement: Principal-bound settlement evidence and authority
 
@@ -301,12 +328,19 @@ A settlement adapter MAY require an EVM address, wallet, RPC endpoint, chain ID,
 
 ### Requirement: Hosted client owns hosted identity wire
 
-The hosted settlement adapter and payer/authorization consumer MUST pass the selected or recorded persistent marketplace signer through the exact manifest-pinned hosted client identity interface and MUST NOT duplicate hosted canonicalization, headers, scheme implementations, response verification, payer/profile models, authorization encoding, setup/confirmation behavior, or provider models.
+The hosted settlement adapter and payer/authorization consumer MUST pass the selected or recorded persistent marketplace signer through the exact manifest-pinned hosted client identity interface and MUST NOT duplicate hosted canonicalization, headers, scheme implementations, response verification, payer/profile models, authorization encoding, setup/confirmation behavior, setup verification behavior, or provider models.
+
+Where the marketplace consumes a hosted operation the pinned client does not expose, it MUST NOT reach the authority by another route. Constructing the request, signing it, or verifying its response outside the pinned client's own interface MUST be refused, and the operation MUST be reported as unavailable under the bound release.
 
 #### Scenario: Hosted release lacks the required identity capability
 
 - **WHEN** buyer/storefront startup or publication preflight sees a hosted manifest that does not advertise the configured principal, payer, authorization, and funding-profile contract versions
 - **THEN** hosted settlement remains unavailable and no fiat option or funding authorization is created
+
+#### Scenario: A hosted operation is absent from the pinned client
+
+- **WHEN** the marketplace needs a hosted operation that the pinned client interface does not expose
+- **THEN** the operation is reported as unavailable under the bound release, and no hand-built request, signature, or response verification is used in its place
 
 ### Requirement: Configuration composes one settlement runtime
 
@@ -382,6 +416,21 @@ because a response or credential was not observed.
 - **WHEN** reclaim begins while exact issuance may have committed
 - **THEN** the API-credit before-reclaim callback retrieves by fulfillment identity; committed issuance becomes fulfillment and blocks reclaim, while unknown issuance permits ordinary financial reclaim
 
+### Requirement: Non-financial obligations are serviceable
+
+An obligation with no amount, no asset, and no funding requirement MUST be a valid
+obligation when its mechanism declares a non-financial deliverable. Servicing MUST
+materialize it to ready on the mechanism's availability signal, report it satisfied,
+and produce a receipt referencing the accepted `service_terms`, without requiring
+funding state, a chain client, or an expiration-driven reclaim path.
+
+#### Scenario: Servicing an introduction obligation
+
+- **WHEN** a `contact-exchange.v1` obligation is registered and its mechanism reports
+  the introduction available
+- **THEN** the runtime records it ready, completes collection with a receipt, and no
+  funding or reclaim machinery is invoked
+
 ## Evidence
 
 - Plan envelopes and lifecycle-universal fields:
@@ -401,4 +450,3 @@ because a response or credential was not observed.
   `kit/alkahest/tests/unit/test_claims.py` and `test_claim_hooks.py`.
 - Accepted-domain settlement/fulfillment carriers, exact-object dispatch, result codec routing, and mismatch rejection: `core/storefront/tests/unit/test_domain_lifecycle.py` and `domains/vms/storefront/tests/unit/test_settlement_composition.py`.
 - Selected-site restart and teardown routing: `domains/vms/storefront/tests/unit/test_fulfillment_resume_runtime.py`, `test_fulfillment_service.py`, and `test_lease_truncation.py`.
-

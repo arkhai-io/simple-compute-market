@@ -8,19 +8,41 @@ GIT_NAME   ?= simple-compute-market
 FOUNDRY_VERSION := v1.5.1
 DIST_DIR := ${CURDIR}/.dist
 IDENTITY_WHEEL := $(DIST_DIR)/arkhai_kit_identity-0.3.0-py3-none-any.whl
-HOSTED_RELEASE_TRUST ?= manifests/hosted-settlement-v0.2.1-trust.json
+HOSTED_REPO_ROOT := .
 HOSTED_RELEASE_DIR ?= $(DIST_DIR)
-HOSTED_RELEASE_MANIFEST ?= $(HOSTED_RELEASE_DIR)/release-manifest.json
-HOSTED_CLIENT_WHEEL ?= $(HOSTED_RELEASE_DIR)/arkhai_hosted_settlement_client-0.2.1-py3-none-any.whl
+include $(HOSTED_REPO_ROOT)/make/hosted-release.mk
 HOSTED_COMPOSE_ENV ?= $(DIST_DIR)/hosted-settlement-compose.env
+# The locally built consumer a development stack runs in place of an
+# attested release image.
+HOSTED_LOCAL_MARKETPLACE_IMAGE ?= arkhai:storefront
+# Written by the local credential assembly, whose generated keys they pin.
+HOSTED_STRIPE_TEST_STOREFRONT_CONFIG ?= e2e-tests/config/hosted-storefront.toml
+HOSTED_STRIPE_TEST_BUYER_CONFIG ?= e2e-tests/config/hosted-buyer.toml
 HOSTED_MARKETPLACE_RELEASE_DIR ?= $(DIST_DIR)/marketplace-release
 HOSTED_MARKETPLACE_RELEASE_MANIFEST ?= $(HOSTED_MARKETPLACE_RELEASE_DIR)/marketplace-release-manifest.json
-HOSTED_PRODUCTION_MANIFEST_SHA256 ?=
-HOSTED_PRODUCTION_CLIENT_WHEEL_SHA256 ?=
-HOSTED_PRODUCTION_IMAGE_DIGEST ?=
-HOSTED_PRODUCTION_SOURCE_COMMIT ?=
-HOSTED_PRODUCTION_WORKFLOW_REF ?=
+# A settlement authority built from a sibling checkout, for a development run
+# of a version that has no published release. Empty selects the released
+# producer, which is what every existing invocation gets.
+HOSTED_SETTLEMENT_SOURCE ?= ../hosted-settlement-service
+HOSTED_LOCAL_HOSTED_VERSION ?= $(shell sed -n 's/^RELEASE_VERSION ?= //p' $(HOSTED_SETTLEMENT_SOURCE)/Makefile 2>/dev/null)
+HOSTED_LOCAL_HOSTED_IMAGE ?=
+HOSTED_LOCAL_HOSTED_ARTIFACTS ?= $(HOSTED_SETTLEMENT_SOURCE)/.dist
+# Five of the released producer's six identities are in the trust config that
+# pins it, so a development run reads them from there instead of having six
+# digests copied in by hand. The workflow run id is not among them and stays an
+# input. A protected run passes all six on the command line, which wins over
+# these and is still checked for emptiness before the run starts.
+HOSTED_TRUSTED_IDENTITIES := $(shell uv run --no-project python -c "import json;d=json.load(open('$(HOSTED_RELEASE_TRUST)'));print('sha256:'+d['manifest_sha256'],'sha256:'+d['client_wheel']['sha256'],d['service_image']['digest'],d['source_commit'],d['workflow_ref'])" 2>/dev/null)
+HOSTED_PRODUCTION_MANIFEST_SHA256 ?= $(word 1,$(HOSTED_TRUSTED_IDENTITIES))
+HOSTED_PRODUCTION_CLIENT_WHEEL_SHA256 ?= $(word 2,$(HOSTED_TRUSTED_IDENTITIES))
+HOSTED_PRODUCTION_IMAGE_DIGEST ?= $(word 3,$(HOSTED_TRUSTED_IDENTITIES))
+HOSTED_PRODUCTION_SOURCE_COMMIT ?= $(word 4,$(HOSTED_TRUSTED_IDENTITIES))
+HOSTED_PRODUCTION_WORKFLOW_REF ?= $(word 5,$(HOSTED_TRUSTED_IDENTITIES))
 HOSTED_PRODUCTION_WORKFLOW_RUN_ID ?=
+# Which producer a development run binds, in the two places it has to be said.
+HOSTED_PRODUCER_INPUTS = $(if $(HOSTED_LOCAL_HOSTED_IMAGE),--local-hosted-image "$(HOSTED_LOCAL_HOSTED_IMAGE)" --hosted-artifacts "$(HOSTED_LOCAL_HOSTED_ARTIFACTS)" --hosted-release-version "$(HOSTED_LOCAL_HOSTED_VERSION)",--trust "$(HOSTED_RELEASE_TRUST)" --manifest "$(HOSTED_RELEASE_MANIFEST)" --wheel "$(HOSTED_CLIENT_WHEEL)")
+# A build made here has no released coordinates, and supplying any is refused.
+HOSTED_PRODUCER_PINS = $(if $(HOSTED_LOCAL_HOSTED_IMAGE),,--hosted-manifest-sha256 "$(HOSTED_PRODUCTION_MANIFEST_SHA256)" --hosted-client-wheel-sha256 "$(HOSTED_PRODUCTION_CLIENT_WHEEL_SHA256)" --hosted-image-digest "$(HOSTED_PRODUCTION_IMAGE_DIGEST)" --hosted-source-commit "$(HOSTED_PRODUCTION_SOURCE_COMMIT)" --hosted-workflow-ref "$(HOSTED_PRODUCTION_WORKFLOW_REF)" --hosted-workflow-run-id "$(HOSTED_PRODUCTION_WORKFLOW_RUN_ID)")
 HOSTED_MARKETPLACE_COMMIT ?=
 HOSTED_MARKETPLACE_WORKFLOW_RUN_ID ?=
 HOSTED_MARKETPLACE_WORKFLOW_REF ?=
@@ -34,18 +56,10 @@ HOSTED_STRIPE_TEST_ACCOUNT_REF ?=
 HOSTED_STRIPE_TEST_AUTHORITY_ENVIRONMENT ?=
 HOSTED_STRIPE_TEST_AUTHORITY_ENV_FILE ?=
 HOSTED_STRIPE_TEST_EVIDENCE ?= $(DIST_DIR)/hosted-stripe-test-evidence.json
-HOSTED_RELEASE_FILES := release-manifest.json \
-	arkhai_hosted_settlement_client-0.2.1-py3-none-any.whl \
-	openapi-v0.2.1.json conformance-v0.2.1.json migrations-v5.json \
-	sbom.spdx.json provenance.intoto.json
-VERIFY_HOSTED_RELEASE = uv run --no-project --with 'eth-account>=0.13,<0.14' \
-	python scripts/verify-hosted-release.py \
-	--trust $(HOSTED_RELEASE_TRUST) \
-	--manifest $(HOSTED_RELEASE_MANIFEST) \
-	--wheel $(HOSTED_CLIENT_WHEEL)
 
-.PHONY: review-wheelhouse review-wheelhouse-scope build build-dev build-seller build-apicredits-service build-apicredits-storefront build-apicredits-sample-app test test-core test-provisioning test-provisioning-iac test-registry test-storefront test-vms-buyer test-apicredits test-apicredits-middleware test-kits dist dist-storefront-client dist-policy dist-compute-provisioning dist-compute-provisioning-service dist-kits dist-hosted-client verify-hosted-release dist-registry-client dist-registry dist-identity dist-core dist-arkhai-core-buyer dist-arkhai-core-storefront dist-bare-metal-storefront dist-alkahest dist-config dist-clean init init-prerequisites init-submodules init-zero-tier init-buyer init-storefront init-arkhai-core-registry push-runtime-artifacts push-images push-dev-image
-.PHONY: test-release-tooling test-deployment-packaging prepare-hosted-compose hosted-preflight hosted-compose-up hosted-compose-restart hosted-compose-clean hosted-stripe-test hosted-stripe-test-stop
+.PHONY: check-hosted-client-pin fix-hosted-client-pin review-wheelhouse review-wheelhouse-scope build build-dev build-seller build-apicredits-service build-apicredits-storefront build-apicredits-sample-app test test-core test-provisioning test-provisioning-iac test-registry test-storefront test-vms-buyer test-apicredits test-apicredits-middleware test-kits dist dist-storefront-client dist-policy dist-compute-provisioning dist-compute-provisioning-service dist-kits dist-hosted-client verify-hosted-release dist-registry-client dist-registry dist-identity dist-core dist-arkhai-core-buyer dist-arkhai-core-storefront dist-bare-metal-storefront dist-alkahest dist-config dist-clean init init-prerequisites init-submodules init-zero-tier init-buyer init-storefront init-arkhai-core-registry push-runtime-artifacts push-images push-dev-image
+.PHONY: build-hosted-producer
+.PHONY: test-release-tooling test-deployment-packaging prepare-hosted-compose prepare-hosted-compose-local hosted-preflight hosted-preflight-local hosted-stripe-test-local hosted-compose-up hosted-compose-restart hosted-compose-clean hosted-stripe-test hosted-stripe-test-stop
 .PHONY: dist-arkhai-core-registry
 .PHONY: build-bare-metal-storefront
 .PHONY: dist-bare-metal-buyer
@@ -164,6 +178,67 @@ prepare-hosted-compose: ## Verify production inputs and render a non-secret Comp
 		--output "$(HOSTED_COMPOSE_ENV)"
 
 
+build-hosted-producer: ## Build the settlement authority image and artifacts from a sibling checkout.
+	@test -d "$(HOSTED_SETTLEMENT_SOURCE)" || { echo "ERROR: no hosted-settlement-service checkout at $(HOSTED_SETTLEMENT_SOURCE)"; exit 1; }
+	@test -n "$(HOSTED_LOCAL_HOSTED_VERSION)" || { echo "ERROR: cannot read RELEASE_VERSION from $(HOSTED_SETTLEMENT_SOURCE)/Makefile"; exit 1; }
+	$(MAKE) -C "$(HOSTED_SETTLEMENT_SOURCE)" image artifacts
+	@echo "built localhost/arkhai-hosted-settlement-service:$(HOSTED_LOCAL_HOSTED_VERSION); bind it with"
+	@echo "  make hosted-stripe-test-local HOSTED_LOCAL_HOSTED_IMAGE=localhost/arkhai-hosted-settlement-service:$(HOSTED_LOCAL_HOSTED_VERSION) ..."
+
+prepare-hosted-compose-local: ## Render a Compose env for a development stack.
+	uv run --no-project --with 'eth-account>=0.13,<0.14' \
+		python scripts/prepare-hosted-compose.py \
+		$(HOSTED_PRODUCER_INPUTS) \
+		--release-mode local \
+		--local-marketplace-image "$(HOSTED_LOCAL_MARKETPLACE_IMAGE)" \
+		--output "$(HOSTED_COMPOSE_ENV)"
+
+hosted-preflight-local: prepare-hosted-compose-local
+
+hosted-stripe-test-local: hosted-preflight-local ## Run one development scenario; its evidence never qualifies.
+	@test -n "$(STRIPE_SECRET_KEY)" || { echo "ERROR: missing STRIPE_SECRET_KEY"; exit 1; }
+	@test -n "$(STRIPE_CONNECTED_ACCOUNT_ID)" || { echo "ERROR: missing STRIPE_CONNECTED_ACCOUNT_ID"; exit 1; }
+	@if [ -n "$(HOSTED_LOCAL_HOSTED_IMAGE)" ]; then \
+		test -d "$(HOSTED_LOCAL_HOSTED_ARTIFACTS)" || { echo "ERROR: no producer artifacts at $(HOSTED_LOCAL_HOSTED_ARTIFACTS); run make build-hosted-producer"; exit 1; }; \
+	else \
+		test -n "$(HOSTED_PRODUCTION_MANIFEST_SHA256)" || { echo "ERROR: missing HOSTED_PRODUCTION_MANIFEST_SHA256"; exit 1; }; \
+		test -n "$(HOSTED_PRODUCTION_CLIENT_WHEEL_SHA256)" || { echo "ERROR: missing HOSTED_PRODUCTION_CLIENT_WHEEL_SHA256"; exit 1; }; \
+		test -n "$(HOSTED_PRODUCTION_IMAGE_DIGEST)" || { echo "ERROR: missing HOSTED_PRODUCTION_IMAGE_DIGEST"; exit 1; }; \
+		test -n "$(HOSTED_PRODUCTION_SOURCE_COMMIT)" || { echo "ERROR: missing HOSTED_PRODUCTION_SOURCE_COMMIT"; exit 1; }; \
+		test -n "$(HOSTED_PRODUCTION_WORKFLOW_REF)" || { echo "ERROR: missing HOSTED_PRODUCTION_WORKFLOW_REF"; exit 1; }; \
+		test -n "$(HOSTED_PRODUCTION_WORKFLOW_RUN_ID)" || { echo "ERROR: missing HOSTED_PRODUCTION_WORKFLOW_RUN_ID"; exit 1; }; \
+	fi
+	@test -n "$(HOSTED_STRIPE_TEST_RUN_REF)" || { echo "ERROR: missing HOSTED_STRIPE_TEST_RUN_REF"; exit 1; }
+	@test -n "$(HOSTED_STRIPE_TEST_SCENARIO)" || { echo "ERROR: missing HOSTED_STRIPE_TEST_SCENARIO"; exit 1; }
+	@test -n "$(HOSTED_STRIPE_TEST_FUNDING_PROFILE)" || { echo "ERROR: missing HOSTED_STRIPE_TEST_FUNDING_PROFILE"; exit 1; }
+	@test -n "$(HOSTED_STRIPE_TEST_INTERACTION)" || { echo "ERROR: missing HOSTED_STRIPE_TEST_INTERACTION"; exit 1; }
+	@test -n "$(HOSTED_STRIPE_TEST_ACCOUNT_REF)" || { echo "ERROR: missing HOSTED_STRIPE_TEST_ACCOUNT_REF"; exit 1; }
+	@test -n "$(HOSTED_STRIPE_TEST_AUTHORITY_ENVIRONMENT)" || { echo "ERROR: missing HOSTED_STRIPE_TEST_AUTHORITY_ENVIRONMENT"; exit 1; }
+	@test -f "$(HOSTED_STRIPE_TEST_AUTHORITY_ENV_FILE)" || { echo "ERROR: missing HOSTED_STRIPE_TEST_AUTHORITY_ENV_FILE"; exit 1; }
+	@echo "NOTE: a development run; its evidence never qualifies as protected evidence."
+	# --frozen: a run must not re-resolve dependencies, and an absolute
+	# --find-links would otherwise rewrite the project lock on every run.
+	uv run --frozen --project e2e-tests --extra stripe-test --find-links "$(DIST_DIR)" \
+		python -m src.hosted_real_stripe.driver \
+		--compose-env "$(HOSTED_COMPOSE_ENV)" \
+		--release-mode local \
+		$(HOSTED_PRODUCER_PINS) \
+		--observed-marketplace-commit "$$(git rev-parse HEAD)" \
+		--run-identity "$(HOSTED_STRIPE_TEST_RUN_REF)" \
+		--scenario "$(HOSTED_STRIPE_TEST_SCENARIO)" \
+		--funding-profile "$(HOSTED_STRIPE_TEST_FUNDING_PROFILE)" \
+		--interaction "$(HOSTED_STRIPE_TEST_INTERACTION)" \
+		--account-ref "$(HOSTED_STRIPE_TEST_ACCOUNT_REF)" \
+		--authority-environment "$(HOSTED_STRIPE_TEST_AUTHORITY_ENVIRONMENT)" \
+		--hosted-service-env-base "$(HOSTED_STRIPE_TEST_AUTHORITY_ENV_FILE)" \
+		--storefront-config "$(HOSTED_STRIPE_TEST_STOREFRONT_CONFIG)" \
+		--buyer-config "$(HOSTED_STRIPE_TEST_BUYER_CONFIG)" \
+		$(if $(HOSTED_STRIPE_TEST_RETAIN_AUTHORITY_STATE),--retain-authority-state,) \
+		$(if $(HOSTED_STRIPE_TEST_VISIBLE_BROWSER),--visible-browser,) \
+		$(if $(HOSTED_STRIPE_TEST_ATTENDED),--attended,) \
+		$(if $(HOSTED_STRIPE_TEST_LIFECYCLE_TIMEOUT),--lifecycle-timeout "$(HOSTED_STRIPE_TEST_LIFECYCLE_TIMEOUT)",) \
+		--evidence "$(HOSTED_STRIPE_TEST_EVIDENCE)"
+
 hosted-compose-up: hosted-preflight ## Start or converge the production stack without deleting authority state.
 	docker compose --profile hosted-production --env-file "$(HOSTED_COMPOSE_ENV)" \
 			-f domains/vms/compose.yml -f compose.hosted-settlement.yml -f compose.vms-fiat.yml up -d --wait
@@ -232,7 +307,9 @@ hosted-stripe-test: hosted-preflight ## Run one protected Stripe test-mode syste
 	@test -n "$(HOSTED_STRIPE_TEST_ACCOUNT_REF)" || { echo "ERROR: missing HOSTED_STRIPE_TEST_ACCOUNT_REF"; exit 1; }
 	@test -n "$(HOSTED_STRIPE_TEST_AUTHORITY_ENVIRONMENT)" || { echo "ERROR: missing HOSTED_STRIPE_TEST_AUTHORITY_ENVIRONMENT"; exit 1; }
 	@test -f "$(HOSTED_STRIPE_TEST_AUTHORITY_ENV_FILE)" || { echo "ERROR: missing HOSTED_STRIPE_TEST_AUTHORITY_ENV_FILE"; exit 1; }
-	uv run --project e2e-tests --extra stripe-test --find-links "$(DIST_DIR)" \
+	# --frozen: a run must not re-resolve dependencies, and an absolute
+	# --find-links would otherwise rewrite the project lock on every run.
+	uv run --frozen --project e2e-tests --extra stripe-test --find-links "$(DIST_DIR)" \
 		python -m src.hosted_real_stripe.driver \
 		--compose-env "$(HOSTED_COMPOSE_ENV)" \
 		--hosted-manifest-sha256 "$(HOSTED_PRODUCTION_MANIFEST_SHA256)" \
@@ -254,6 +331,9 @@ hosted-stripe-test: hosted-preflight ## Run one protected Stripe test-mode syste
 		--account-ref "$(HOSTED_STRIPE_TEST_ACCOUNT_REF)" \
 		--authority-environment "$(HOSTED_STRIPE_TEST_AUTHORITY_ENVIRONMENT)" \
 		--hosted-service-env-base "$(HOSTED_STRIPE_TEST_AUTHORITY_ENV_FILE)" \
+		$(if $(HOSTED_STRIPE_TEST_VISIBLE_BROWSER),--visible-browser,) \
+		$(if $(HOSTED_STRIPE_TEST_ATTENDED),--attended,) \
+		$(if $(HOSTED_STRIPE_TEST_LIFECYCLE_TIMEOUT),--lifecycle-timeout "$(HOSTED_STRIPE_TEST_LIFECYCLE_TIMEOUT)",) \
 		--evidence "$(HOSTED_STRIPE_TEST_EVIDENCE)"
 
 dist-hosted-client: verify-hosted-release ## Copy only verified immutable release inputs into .dist.
@@ -281,8 +361,15 @@ dist-config: ## Build arkhai-kit-config wheel into .dist/
 dist-helm: ## Package helm chart so it's ready for pushing into .dist/
 	helm package helm/ --destination $(DIST_DIR)
 
-test-release-tooling: ## Run release verifier and portable wheelhouse contract tests.
+check-hosted-client-pin: ## Report any consumer pinning a different hosted client
+	uv run --no-project python scripts/check-hosted-client-pin.py
+
+fix-hosted-client-pin: ## Move every consumer to the version kit/hosted-settlement names
+	uv run --no-project python scripts/check-hosted-client-pin.py --fix
+
+test-release-tooling: dist-identity ## Run release verifier and portable wheelhouse contract tests.
 	uv run --no-project --with pytest --with 'eth-account>=0.13,<0.14' \
+		--with 'arkhai-kit-identity' --find-links "$(DIST_DIR)" \
 		pytest -q scripts/tests
 
 test-deployment-packaging: test-release-tooling ## Run release tooling plus Helm schema/render contracts.

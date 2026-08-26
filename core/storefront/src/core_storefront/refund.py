@@ -117,7 +117,7 @@ def derive_refund_params(
             )
         token_meta = resolve_token(token_override)
     else:
-        from market_core.schemas import accepted_token_address
+        from market_alkahest.schemas import accepted_token_address
         token_addr_from_escrow = None
         if first_escrow is not None:
             candidate = accepted_token_address(first_escrow)

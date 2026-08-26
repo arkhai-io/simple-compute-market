@@ -23,6 +23,22 @@ Transport = Callable[[str, Mapping[str, str]], JsonObject]
 MutationTransport = Callable[[str, Mapping[str, str]], JsonObject]
 T = TypeVar("T")
 
+#: Stripe's documented test-mode bank, and the deposits it always makes. A
+#: payer reads these off their own statement; the run reads them off the
+#: provider's published test behavior, which is where every other provider
+#: assertion in this harness comes from.
+_TEST_BANK_ROUTING_NUMBER = "110000000"
+_TEST_BANK_MICRODEPOSIT_ACCOUNT = "000123456789"
+#: The documented test account whose payment settles and is then disputed. An
+#: ACH return reaches the authority as a dispute, not as a declined payment:
+#: the authority reads its terminal losses from disputes, and every other
+#: failing test account never funds at all, which is a decline lane instead.
+_TEST_BANK_DISPUTED_ACCOUNT = "000555555559"
+#: The documented test card token that confirms off-session without
+#: authentication, so a card setup has nothing for a browser to answer.
+_TEST_CARD_TOKEN = "tok_visa"
+MICRODEPOSIT_AMOUNTS = (32, 45)
+
 
 class StripeUnavailable(RuntimeError):
     """Stripe could not be reached or returned a non-contract response."""
@@ -81,6 +97,28 @@ class StripeApi:
     def retrieve_account(self, account_id: str) -> JsonObject:
         return self._transport(f"/v1/accounts/{account_id}", {})
 
+    def platform_return_address(self) -> str:
+        """The address this account may address a payer return to.
+
+        A push-funded balance is returned by mailing the payer for return bank
+        details. Stripe declines to mail a third party from an account whose
+        application is not submitted, but will mail the address registered to
+        the account itself -- so a run reclaims to its own address and proves
+        the whole path without waiting on an external approval.
+
+        This is why an unsubmitted account is not a blocker here, and also why
+        it stays one for a real payer's return: that case genuinely needs the
+        application submitted and is reported as unavailable, not simulated.
+        """
+
+        account = self._transport("/v1/account", {})
+        address = account.get("email")
+        if not isinstance(address, str) or not address:
+            raise ProviderInvariantError(
+                "the account registers no address a payer return can be sent to"
+            )
+        return address
+
     def fund_test_cash_balance(self, expected: ExpectedEffect) -> None:
         """Fund one exact push-transfer intent through Stripe's test helper."""
 
@@ -95,6 +133,7 @@ class StripeApi:
             {
                 "amount": str(expected.amount),
                 "currency": expected.currency,
+                "reference": _bank_transfer_reference(payment_intent),
             },
         )
         if (
@@ -105,6 +144,60 @@ class StripeApi:
             raise ProviderInvariantError(
                 "Stripe cash-balance test helper did not fund the exact accepted amount"
             )
+
+    def create_microdeposit_bank_instrument(self, *, disputed: bool = False) -> str:
+        """Create the documented test bank instrument a payer would hold.
+
+        The token is transient. It exists so the setup can be started from an
+        instrument rather than from a hosted page, and it is handed straight to
+        the authority without being stored or reported.
+
+        `disputed` starts from the account whose settled payment is disputed
+        afterwards, which is what a return lane needs.
+        """
+
+        result = self._mutation_transport(
+            "/v1/payment_methods",
+            {
+                "type": "us_bank_account",
+                "us_bank_account[account_number]": (
+                    _TEST_BANK_DISPUTED_ACCOUNT if disputed else _TEST_BANK_MICRODEPOSIT_ACCOUNT
+                ),
+                "us_bank_account[routing_number]": _TEST_BANK_ROUTING_NUMBER,
+                "us_bank_account[account_holder_type]": "individual",
+                "us_bank_account[account_type]": "checking",
+                "billing_details[name]": "Arkhai Test Payer",
+                "billing_details[email]": "payer@example.invalid",
+            },
+        )
+        if result.get("livemode") is not False:
+            raise ProviderInvariantError(
+                "a test-mode instrument may not be created outside test mode"
+            )
+        return _object_id(result, "payment method")
+
+    def create_card_instrument(self) -> str:
+        """Create the documented test card instrument a payer would hold.
+
+        The token is transient, exactly as the bank instrument's is. A card
+        built from it confirms off-session with no next action, so a setup
+        started from it needs no browser and no interactive challenge.
+        """
+
+        result = self._mutation_transport(
+            "/v1/payment_methods",
+            {
+                "type": "card",
+                "card[token]": _TEST_CARD_TOKEN,
+                "billing_details[name]": "Arkhai Test Payer",
+                "billing_details[email]": "payer@example.invalid",
+            },
+        )
+        if result.get("livemode") is not False:
+            raise ProviderInvariantError(
+                "a test-mode instrument may not be created outside test mode"
+            )
+        return _object_id(result, "payment method")
 
     def wait_for_collection(
         self,
@@ -220,16 +313,46 @@ class StripeApi:
         if (len(refunds), len(transfers)) != (1, 0):
             raise ProviderInvariantError("expected one related refund and no transfer")
         refund = refunds[0]
-        if (
-            payment_intent.get("livemode") is not False
-            or payment_intent.get("amount_received") != expected.amount
-            or payment_intent.get("currency") != expected.currency
-            or refund.get("amount") != expected.amount
-            or refund.get("currency") != expected.currency
-            or refund.get("status") != "succeeded"
-            or not _funding_metadata_matches(payment_intent, expected)
-        ):
-            raise ProviderInvariantError("refund did not match the accepted pre-transfer operation")
+        # A refund settles asynchronously on the debit rails, so a status that
+        # is still in flight is this run arriving early, not the authority
+        # getting it wrong. Only a refund the provider has finished and not
+        # succeeded is an invariant violation; anything still moving is polled
+        # again, which is what the surrounding wait exists to do.
+        status = str(refund.get("status") or "")
+        if status in {"pending", "requires_action"}:
+            raise ProviderNotConverged(f"related refund is still {status}")
+        if status != "succeeded":
+            raise ProviderInvariantError(
+                f"refund did not match the accepted pre-transfer operation:"
+                f" refund status {status!r}, expected 'succeeded'"
+            )
+        # Named individually on purpose. A single or-chain reports that the
+        # refund did not match without saying which of seven things differed,
+        # which is the whole diagnosis. Amounts, currency, and status are safe
+        # to state; identifiers are named as fields and never as values.
+        mismatch = (
+            "funding is not test-mode"
+            if payment_intent.get("livemode") is not False
+            else f"funding received {payment_intent.get('amount_received')!r},"
+            f" accepted {expected.amount!r}"
+            if payment_intent.get("amount_received") != expected.amount
+            else f"funding currency {payment_intent.get('currency')!r},"
+            f" accepted {expected.currency!r}"
+            if payment_intent.get("currency") != expected.currency
+            else f"refund amount {refund.get('amount')!r}, accepted {expected.amount!r}"
+            if refund.get("amount") != expected.amount
+            else f"refund currency {refund.get('currency')!r},"
+            f" accepted {expected.currency!r}"
+            if refund.get("currency") != expected.currency
+            else "funding metadata does not bind the accepted operation,"
+            " profile, and authorization"
+            if not _funding_metadata_matches(payment_intent, expected)
+            else ""
+        )
+        if mismatch:
+            raise ProviderInvariantError(
+                f"refund did not match the accepted pre-transfer operation: {mismatch}"
+            )
         return RefundEvidence(
             operation_ref=opaque_ref("op", expected.marketplace_operation_id),
             checkout_count=int(session is not None),
@@ -263,61 +386,82 @@ class StripeApi:
         expected: ExpectedEffect,
         outcome: Literal["decline", "insufficient_funds", "authentication"],
     ) -> PaymentOutcomeEvidence:
+        if outcome != "authentication":
+            return self._inspect_refusal(expected, outcome)
         session, payment_intent = self._exact_funding(expected)
-        charge = self._optional_charge(payment_intent)
         if not _funding_metadata_matches(payment_intent, expected):
             raise ProviderInvariantError("payment outcome metadata did not match the operation")
         if self._related_transfers(expected, ""):
             raise ProviderInvariantError("payment-outcome-only scenario created a transfer")
-        refunds = (
-            self._list_all(
-                "/v1/refunds",
-                {"charge": _object_id(charge, "charge"), "limit": "100"},
-            )
-            if charge is not None
-            else []
-        )
-        if refunds:
+        charge = self._optional_charge(payment_intent)
+        if charge is None:
+            raise ProviderNotConverged("authenticated charge is not visible")
+        if self._list_all(
+            "/v1/refunds",
+            {"charge": _object_id(charge, "charge"), "limit": "100"},
+        ):
             raise ProviderInvariantError("payment-outcome-only scenario created a refund")
-
-        normalized: Literal[
-            "declined",
-            "insufficient_funds",
-            "authentication_succeeded",
-        ]
-        if outcome == "authentication":
-            if charge is None:
-                raise ProviderNotConverged("authenticated charge is not visible")
-            three_d_secure = _nested(charge, "payment_method_details", "card", "three_d_secure")
-            if (
-                payment_intent.get("status") != "succeeded"
-                or not isinstance(three_d_secure, dict)
-                or three_d_secure.get("result") not in {"authenticated", "attempt_acknowledged"}
-            ):
-                raise ProviderInvariantError("Stripe authentication outcome did not match")
-            normalized = "authentication_succeeded"
-        else:
-            error = payment_intent.get("last_payment_error")
-            if not isinstance(error, dict):
-                raise ProviderNotConverged("documented decline is not visible")
-            expected_code = (
-                "insufficient_funds" if outcome == "insufficient_funds" else "generic_decline"
-            )
-            if (
-                payment_intent.get("status") == "succeeded"
-                or error.get("code") != "card_declined"
-                or error.get("decline_code") != expected_code
-            ):
-                raise ProviderInvariantError(
-                    "Stripe decline outcome did not match the selected test card"
-                )
-            normalized = "insufficient_funds" if outcome == "insufficient_funds" else "declined"
+        three_d_secure = _nested(charge, "payment_method_details", "card", "three_d_secure")
+        if (
+            payment_intent.get("status") != "succeeded"
+            or not isinstance(three_d_secure, dict)
+            or three_d_secure.get("result") not in {"authenticated", "attempt_acknowledged"}
+        ):
+            raise ProviderInvariantError("Stripe authentication outcome did not match")
         return PaymentOutcomeEvidence(
             operation_ref=opaque_ref("op", expected.marketplace_operation_id),
-            outcome=normalized,
+            outcome="authentication_succeeded",
             checkout_count=int(session is not None),
             payment_intent_count=1,
-            charge_count=int(charge is not None),
+            charge_count=1,
+            transfer_count=0,
+            refund_count=0,
+            operation_metadata_matches=True,
+        )
+
+    def _inspect_refusal(
+        self,
+        expected: ExpectedEffect,
+        outcome: Literal["decline", "insufficient_funds"],
+    ) -> PaymentOutcomeEvidence:
+        """A refused card leaves Stripe with no funding object to inspect.
+
+        Checkout does not persist a PaymentIntent for an attempt the acquirer
+        refused. The session stays open and unpaid, and no intent, charge, or
+        transfer is ever created -- so the provider-side proof of a decline is
+        the *absence* of every funding artifact for the operation, not a failed
+        one carrying ``last_payment_error``. Which refusal the payer met is
+        what the browser proved, by waiting for Checkout's own error and
+        refusing to accept a page that left for the success URL.
+
+        Absence is only worth asserting if it is asserted account-wide: a
+        session with no intent proves little on its own, because an operation
+        that funded through some other path would look identical. So this also
+        refuses any PaymentIntent anywhere in the account that carries this
+        operation's metadata.
+        """
+
+        session = self._exact_session(expected)
+        if session.get("livemode") is not False:
+            raise ProviderInvariantError("payment-outcome session is not a test-mode session")
+        if session.get("status") != "open" or session.get("payment_status") != "unpaid":
+            raise ProviderInvariantError("refused Checkout session did not stay open and unpaid")
+        if session.get("payment_intent") is not None:
+            raise ProviderInvariantError("refused Checkout session created a payment intent")
+        if [
+            item
+            for item in self._list_all("/v1/payment_intents", {"limit": "100"})
+            if _funding_metadata_matches(item, expected)
+        ]:
+            raise ProviderInvariantError("refused operation funded outside its Checkout session")
+        if self._related_transfers(expected, ""):
+            raise ProviderInvariantError("payment-outcome-only scenario created a transfer")
+        return PaymentOutcomeEvidence(
+            operation_ref=opaque_ref("op", expected.marketplace_operation_id),
+            outcome="insufficient_funds" if outcome == "insufficient_funds" else "declined",
+            checkout_count=1,
+            payment_intent_count=0,
+            charge_count=0,
             transfer_count=0,
             refund_count=0,
             operation_metadata_matches=True,
@@ -326,18 +470,7 @@ class StripeApi:
     def _exact_funding(self, expected: ExpectedEffect) -> tuple[JsonObject | None, JsonObject]:
         session: JsonObject | None = None
         if expected.checkout_session_id is not None:
-            session = self._transport(
-                f"/v1/checkout/sessions/{expected.checkout_session_id}",
-                {"expand[]": "payment_intent.latest_charge"},
-            )
-            metadata = session.get("metadata")
-            if (
-                _object_id(session, "Checkout session") != expected.checkout_session_id
-                or not isinstance(metadata, dict)
-                or session.get("client_reference_id") != metadata.get("operation_ref")
-                or not _funding_metadata_matches(session, expected)
-            ):
-                raise ProviderInvariantError("exact Checkout session did not match the operation")
+            session = self._exact_session(expected)
             payment_intent = self._payment_intent(session)
         else:
             matches = [
@@ -363,6 +496,25 @@ class StripeApi:
         ):
             raise ProviderInvariantError("funding intent does not match immutable accepted terms")
         return session, payment_intent
+
+    def _exact_session(self, expected: ExpectedEffect) -> JsonObject:
+        """The one Checkout session the operation named, or nothing usable."""
+
+        if expected.checkout_session_id is None:
+            raise ProviderInvariantError("operation is missing its exact Checkout session")
+        session = self._transport(
+            f"/v1/checkout/sessions/{expected.checkout_session_id}",
+            {"expand[]": "payment_intent.latest_charge"},
+        )
+        metadata = session.get("metadata")
+        if (
+            _object_id(session, "Checkout session") != expected.checkout_session_id
+            or not isinstance(metadata, dict)
+            or session.get("client_reference_id") != metadata.get("operation_ref")
+            or not _funding_metadata_matches(session, expected)
+        ):
+            raise ProviderInvariantError("exact Checkout session did not match the operation")
+        return session
 
     def _payment_intent(self, session: JsonObject) -> JsonObject:
         value = session.get("payment_intent")
@@ -526,6 +678,31 @@ def _escrow_metadata_matches(obj: JsonObject, escrow_ref: str) -> bool:
 def _provider_ref(prefix: str, *parts: str) -> str:
     digest = hashlib.sha256("\x00".join(parts).encode()).hexdigest()
     return f"{prefix}_{digest[:40]}"
+
+
+def _bank_transfer_reference(payment_intent: JsonObject) -> str:
+    """Return the reference a payer must quote on the incoming bank transfer.
+
+    A push transfer is attributed by the reference Stripe issues with the
+    funding instructions, not by the customer it lands on. Funding the test
+    cash balance without it simulates an unreferenced deposit, which the
+    authority is right to treat as an attribution incident.
+    """
+
+    action = payment_intent.get("next_action")
+    instructions = (
+        action.get("display_bank_transfer_instructions")
+        if isinstance(action, dict)
+        else None
+    )
+    reference = (
+        instructions.get("reference") if isinstance(instructions, dict) else None
+    )
+    if not isinstance(reference, str) or not reference:
+        raise ProviderInvariantError(
+            "push-transfer funding instructions carry no payer reference"
+        )
+    return reference
 
 
 def _object_id(value: object, name: str) -> str:

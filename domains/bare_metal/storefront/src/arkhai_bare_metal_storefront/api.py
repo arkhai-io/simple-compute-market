@@ -18,8 +18,15 @@ from core_storefront.models.negotiation_models import (
     NegotiationListResponse,
 )
 from core_storefront.models.system_models import AdminPauseResponse
-from fastapi import APIRouter, HTTPException, Query, Request
+from fastapi import APIRouter, Body, HTTPException, Query, Request
 
+from market_contact_exchange import (
+    AuthorizedIntroductionRequest,
+    ContactSettlementConfig,
+    IntroductionRouteError,
+    IntroductionStart,
+)
+from market_contact_exchange import MECHANISM as CONTACT_MECHANISM
 from market_identity import EMPTY_BODY, Identity
 from market_storefront_kit import get_storefront_container
 from market_settlement_runtime import (
@@ -41,7 +48,8 @@ from .negotiation_service import NegotiationRequestError
 from .runtime import BareMetalStorefrontRuntime
 from .settlement_service import SettlementRequestError
 from .hosted_routes import build_bare_metal_hosted_route_service
-from .response_auth import bind_response_auth
+from .introduction_routes import build_bare_metal_introduction_service
+from .response_auth import bind_response_auth, bind_response_contract
 
 router = APIRouter()
 
@@ -70,6 +78,7 @@ async def _principal(
     allowed_principals: tuple[Identity, ...] | None = None,
     body: Any = EMPTY_BODY,
 ) -> Identity:
+    bind_response_contract(request, operation=operation, resource=resource)
     try:
         authenticated = await authenticate_request(
             headers=request.headers,
@@ -139,6 +148,7 @@ async def _authorize_hosted_request(
     body: Mapping[str, Any] | None,
 ) -> Any:
     runtime = _runtime(request)
+    bind_response_contract(request, operation=operation, resource=resource)
     try:
         authenticated = await authenticate_request(
             headers=request.headers,
@@ -178,6 +188,90 @@ def _hosted_service(request: Request) -> Any:
     )
 
 
+async def _authorize_introduction_request(
+    request: Request,
+    operation: str,
+    resource: str,
+    allowed_principals: tuple[Identity, ...],
+    body: Mapping[str, Any] | None,
+) -> AuthorizedIntroductionRequest:
+    runtime = _runtime(request)
+    bind_response_contract(request, operation=operation, resource=resource)
+    role = request.headers.get("X-Market-Role", "buyer")
+    if role not in {"buyer", "seller"}:
+        raise IntroductionRouteError(403, "caller is not an introduction party")
+    try:
+        authenticated = await authenticate_request(
+            headers=request.headers,
+            method=request.method,
+            operation=operation,
+            resource=resource,
+            body=body if body is not None else EMPTY_BODY,
+            expected_role=role,
+            replay_store=runtime.db,
+            allowed_principals=allowed_principals,
+        )
+    except AuthError as exc:
+        raise IntroductionRouteError(exc.status_code, exc.detail) from exc
+    bind_response_auth(
+        request,
+        authenticated,
+        operation=operation,
+        resource=resource,
+    )
+    return AuthorizedIntroductionRequest(
+        principal=authenticated.principal,
+        exact_retry=bool(authenticated.exact_retry),
+        recorded_outcome=authenticated.recorded_outcome,
+    )
+
+
+def _introduction_service(request: Request) -> Any:
+    runtime = _runtime(request)
+    composition = runtime.settlement_composition
+    if (
+        composition is None
+        or CONTACT_MECHANISM not in composition.enabled_mechanisms
+    ):
+        raise HTTPException(status_code=404, detail="contact exchange is disabled")
+    section = composition.config.mechanism_config("contact")
+    if not isinstance(section, ContactSettlementConfig) or not section.contact_payload:
+        raise HTTPException(
+            status_code=503,
+            detail="contact-exchange reveal is unavailable",
+        )
+    return build_bare_metal_introduction_service(
+        db=runtime.db,
+        repository=runtime.settlement_repository,
+        settlement_runtime=runtime.settlement_runtime,
+        seller_contact=section.contact_payload,
+        authorize_request=_authorize_introduction_request,
+        deliver=runtime.introduction_delivery,
+    )
+
+
+@router.post("/api/v1/introductions")
+async def start_introduction(
+    body: IntroductionStart,
+    request: Request,
+) -> Mapping[str, Any]:
+    try:
+        return await _introduction_service(request).start(request, body)
+    except IntroductionRouteError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
+
+
+@router.get("/api/v1/introductions/{obligation_ref}")
+async def read_introduction(
+    obligation_ref: str,
+    request: Request,
+) -> Mapping[str, Any]:
+    try:
+        return await _introduction_service(request).read(request, obligation_ref)
+    except IntroductionRouteError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
+
+
 @router.post("/api/v1/settlements")
 async def start_hosted_settlement(
     body: HostedSettlementStart,
@@ -204,9 +298,18 @@ async def hosted_settlement_status(
 async def reclaim_hosted_settlement(
     settlement_ref: str,
     request: Request,
+    mechanism_options: dict[str, Any] | None = Body(default=None),
 ) -> Mapping[str, Any]:
+    """Reclaim one eligible expired hosted settlement.
+
+    The body is the mechanism's own vocabulary for this one reclaim -- a
+    push-funded profile needs somewhere to address the payer's return -- so it
+    is relayed opaquely rather than parsed into a model here.
+    """
     try:
-        return await _hosted_service(request).reclaim(request, settlement_ref)
+        return await _hosted_service(request).reclaim(
+            request, settlement_ref, mechanism_options
+        )
     except HostedSettlementRouteError as exc:
         raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
 

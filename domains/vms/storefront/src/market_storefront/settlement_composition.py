@@ -34,6 +34,7 @@ from market_hosted_settlement import (
     FundingMode,
     FundingProfile,
     create_stripe_registration,
+    hosted_projected_reason,
 )
 from market_identity import Identity, Signer
 from market_settlement_runtime import (
@@ -95,6 +96,34 @@ class VmSettlementComposition:
             role="seller",
             resources=self.mechanism_resources,
         )
+
+    def accepted_obligation_dispatch(
+        self,
+    ) -> dict[str, Callable[[Mapping[str, Any], Mapping[str, Any]], Any]]:
+        """Curried registry dispatch for every enabled obligation-building mechanism."""
+
+        dispatch: dict[str, Callable[[Mapping[str, Any], Mapping[str, Any]], Any]] = {}
+        for mechanism_id in self.settlement_config.priority:
+            registration = self.configuration_registry.registration(mechanism_id)
+            if registration.accepted_obligation_builder is None:
+                continue
+
+            def build(
+                option: Mapping[str, Any],
+                context: Mapping[str, Any],
+                *,
+                _mechanism_id: str = mechanism_id,
+            ) -> Any:
+                return self.configuration_registry.build_accepted_obligation(
+                    _mechanism_id,
+                    option,
+                    self.settlement_config,
+                    role="seller",
+                    context=context,
+                )
+
+            dispatch[mechanism_id] = build
+        return dispatch
 
     async def publication_artifacts(
         self,
@@ -612,6 +641,7 @@ def serialize_settlement_job(row: Mapping[str, Any]) -> dict[str, Any]:
         "updated_at": row.get("updated_at"),
     }
     for field in (
+        "obligation_ref",
         "fulfillment_uid",
         "fulfillment_id",
         "chain_name",
@@ -1068,6 +1098,29 @@ async def ensure_hosted_fulfillment(
             worker_id=worker_id,
         )
         raise error
+    # Fulfillment identity for a hosted deal is the authority's immutable
+    # condition anchor, and every VM surface downstream of here reads the deal
+    # through the storefront's own escrow row: provisioning resolves the
+    # negotiation binding from it, lease registration writes the capacity
+    # reservation onto it, and terminal lease truncation finds the reservation
+    # by asking for the negotiation's primary escrow. The EVM lane writes that
+    # row when it reserves settlement; the hosted lane's equivalent moment is
+    # here -- once the anchor exists, before capacity is committed. Insertion
+    # is idempotent by escrow_uid, so a retried fulfillment rebinds rather
+    # than duplicating.
+    await sqlite_client.insert_escrow(
+        escrow_uid=record.condition_anchor,
+        negotiation_id=agreement.negotiation_id,
+        chain_name=None,
+        escrow_address=None,
+        is_primary=True,
+        status="provisioning",
+    )
+    await sqlite_client.bind_escrow_obligation(
+        escrow_uid=record.condition_anchor,
+        obligation_ref=record.obligation_ref,
+        obligation_index=record.obligation_index,
+    )
     thread_binding = await sqlite_client.load_thread_binding(
         negotiation_id=agreement.negotiation_id
     )
@@ -1187,13 +1240,14 @@ async def hosted_settlement_projection(
         "payer_principal": record.payer_principal,
         "claimant_principal": record.claimant_principal,
         "status": hosted_public_status(record),
-        "funding_reason": receipt.get("funding_reason")
-        or state.get("funding_reason"),
+        "funding_reason": hosted_projected_reason(receipt, state),
         "funding_deadline_unix": receipt.get("funding_deadline_unix")
         or state.get("funding_deadline_unix"),
         "action": action,
         "action_kind": action_metadata.get("kind"),
         "action_expires_at_unix": action_metadata.get("expires_at_unix"),
+        "condition_anchor": record.condition_anchor,
+        "fulfillment_ref": record.fulfillment_ref,
         "receipt": receipt or None,
     }
 
@@ -1299,7 +1353,16 @@ def build_vm_settlement_composition(
                     "hosted evidence client name conflicts with a chain client"
                 )
             evidence_clients[client_name] = hosted_client
-    runtime = SettlementRuntime(repository, mechanism_clients)
+    # A fulfillment attempt provisions a VM, and the storefront gives that its
+    # own bound. The operation lease has to outlive it, or the deal is handed to
+    # a second worker while the first is still provisioning.
+    runtime = SettlementRuntime(
+        repository,
+        mechanism_clients,
+        fulfillment_lease_seconds=max(
+            30.0, float(storefront_config.settings.provisioning.timeout)
+        ),
+    )
 
     async def on_terminal(
         record: Any,

@@ -98,6 +98,17 @@ capacity-reservation-lifecycle-hardening ──► billable-capacity-reservation
 | [`billable-capacity-reservations`](billable-capacity-reservations/) | active; depends on `capacity-shape-pricing` and `capacity-reservation-lifecycle-hardening` | A hold carries a burn rate from the commercial rate structure; maximum duration derives from committed funds rather than a configured TTL; held time is charged as a serviced obligation with the remainder returned |
 | [`negotiation-time-capacity-hold`](negotiation-time-capacity-hold/) | active; depends on `billable-capacity-reservations` and `capacity-reservation-lifecycle-hardening` | Moves the hold from terms acceptance to the counterparty's first differing-terms proposal, one superseded reservation per negotiation, released on abandonment. Inquiry stays unheld and unfunded |
 
+## Roadmap goal — Make the settlement mechanism a composed choice
+
+```text
+finish-settlement-mechanism-neutrality ──► contact-exchange-settlement-mechanism
+```
+
+| Change | Status | Acceptance boundary |
+|---|---|---|
+| [`finish-settlement-mechanism-neutrality`](finish-settlement-mechanism-neutrality/) | design phase; core/kit-alkahest sections independent, hosted-surface sections coordinate with `consume-expanded-stripe-funding` | Pre-terms mechanism dispatch, verification, and negotiation scalar participation become registration-owned with no per-domain mechanism conditionals; every deal gains the neutral `obligation_ref` identity; Alkahest-shaped carriers move to `kit/alkahest` while `RateValue` stays core; option-aware discovery filters; residual mechanism literals removed |
+| [`contact-exchange-settlement-mechanism`](contact-exchange-settlement-mechanism/) | design phase; blocked only on the declinable-scalar and accepted-plan `service_terms` items of `finish-settlement-mechanism-neutrality` | A `contact-exchange.v1` peer mechanism completing a deal by durable, authenticated, idempotent contact reveal — no payment, no provisioning — with the introduction package in persisted `service_terms`, plus a loose-listing registry profile; composed first on bare metal |
+
 ## Lesser goal — POOLS capacity and fulfillment foundation
 
 **What it adds up to.** The durable capacity and fulfillment substrate every roadmap goal builds on: a central Settlement Record, transactional scheduling and assignment, pull-correct fulfillment results, recovery, and the projections a storefront consumes instead of owning hardware itself. POOLS-1 through POOLS-6's foundations are archived. This is not a roadmap goal because it changes how the system is built rather than what the market can do — but nearly every goal has a dependency edge into it.

@@ -73,7 +73,13 @@ class PollingClient:
         return EffectOutcome(receipt={"collected": True})
 
     async def reclaim_expired(
-        self, obligation, *, mechanism_ref, operation_ref, mechanism_state
+        self,
+        obligation,
+        *,
+        mechanism_ref,
+        operation_ref,
+        mechanism_state,
+        mechanism_options=None,
     ):
         return EffectOutcome(receipt={"reclaimed": True})
 

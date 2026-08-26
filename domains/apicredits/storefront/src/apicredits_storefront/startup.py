@@ -7,6 +7,7 @@ import logging
 
 from apicredits_storefront.utils import config
 from apicredits_storefront.utils.config import BASE_URL_OVERRIDE, settings
+from core_storefront.escrow_identity import backfill_escrow_obligation_records
 from core_storefront.stage_log import stage_event
 from market_core import MarketDomainContract
 from market_storefront_kit import (
@@ -109,6 +110,20 @@ async def _startup_tasks(*, domain: MarketDomainContract) -> None:
         watchdog_policy.interval_seconds,
         watchdog_policy.timeout_seconds,
     )
+
+    settlement_runtime = _container.resolved_settlement_runtime
+    marketplace_signer = _container.resolved_marketplace_signer
+    if settlement_runtime is not None and marketplace_signer is not None:
+        backfilled = await backfill_escrow_obligation_records(
+            sqlite_client=_container.resolved_sqlite_client,
+            settlement_runtime=settlement_runtime,
+            local_principal=marketplace_signer.identity,
+        )
+        if backfilled:
+            logger.info(
+                "[STARTUP] Backfilled %d legacy escrow obligation records",
+                backfilled,
+            )
 
     settlement_worker = _container.resolved_settlement_worker
     if settlement_worker is None:

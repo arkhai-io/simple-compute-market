@@ -5,9 +5,9 @@ from __future__ import annotations
 from typing import Any
 
 from core_storefront.auth import AuthError, authenticate_request
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Body, Depends, HTTPException, Request
 from fastapi_utils.cbv import cbv
-from market_identity import Identity
+from market_identity import EMPTY_BODY, Identity
 from market_settlement_runtime import HostedSettlementRouteError, HostedSettlementStart
 
 import apicredits_storefront.container as _container
@@ -16,7 +16,10 @@ from apicredits_storefront.controllers.issuance_evidence_controller import (
 )
 from apicredits_storefront.hosted_routes import build_api_credit_hosted_route_service
 from apicredits_storefront.middleware import buyer_auth
-from apicredits_storefront.middleware.response_auth import bind_response_auth
+from apicredits_storefront.middleware.response_auth import (
+    bind_response_auth,
+    bind_response_contract,
+)
 from apicredits_storefront.settlement_models import (
     ApiCreditsHostedSettlementResponse,
 )
@@ -55,7 +58,7 @@ class HostedSettlementsController:
                 operation,
                 resource_id,
                 expected_principal=expected_principal,
-                body=dict(body) if body is not None else None,
+                body=dict(body) if body is not None else EMPTY_BODY,
                 allow_exact_retry=True,
             )
 
@@ -110,9 +113,18 @@ class HostedSettlementsController:
         self,
         settlement_ref: str,
         request: Request,
+        mechanism_options: dict[str, Any] | None = Body(default=None),
     ) -> ApiCreditsHostedSettlementResponse:
+        """Reclaim one eligible expired hosted settlement.
+
+        The body is the mechanism's own vocabulary for this one reclaim -- a
+        push-funded profile needs somewhere to address the payer's return --
+        so it is relayed opaquely rather than parsed into a model here.
+        """
         try:
-            projected = await self._service().reclaim(request, settlement_ref)
+            projected = await self._service().reclaim(
+                request, settlement_ref, mechanism_options
+            )
         except HostedSettlementRouteError as exc:
             self._raise(exc)
         return ApiCreditsHostedSettlementResponse.model_validate(projected)
@@ -127,6 +139,11 @@ async def _authenticate_evidence_resolver(request: Request) -> Identity:
     trust = getattr(stripe, "authority", None)
     if trust is None:
         raise HTTPException(status_code=503, detail="hosted authority trust is unavailable")
+    bind_response_contract(
+        request,
+        operation="resolve_api_credit_issuance_evidence",
+        resource=str(request.path_params.get("evidence_digest") or ""),
+    )
     try:
         authenticated = await authenticate_request(
             headers=request.headers,

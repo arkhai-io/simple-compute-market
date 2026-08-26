@@ -12,8 +12,12 @@ from market_hosted_settlement import onboard_hosted_seller
 from market_settlement_runtime import MechanismReadiness, SettlementConfig
 
 settlement_app = typer.Typer(no_args_is_help=True)
-stripe_app = typer.Typer(no_args_is_help=True)
-alkahest_app = typer.Typer(no_args_is_help=True)
+stripe_app = typer.Typer(
+    no_args_is_help=True, help="Hosted Stripe seller workflow."
+)
+alkahest_app = typer.Typer(
+    no_args_is_help=True, help="Alkahest readiness checks."
+)
 
 
 def _settlement_context() -> tuple[Any, SettlementConfig, dict[str, Any]]:
@@ -163,7 +167,23 @@ def alkahest_check(
     _finish_status(_select_status(statuses, "alkahest.v1"), as_json=as_json)
 
 
-settlement_app.add_typer(stripe_app, name="stripe", help="Hosted Stripe seller workflow.")
-settlement_app.add_typer(alkahest_app, name="alkahest", help="Alkahest readiness checks.")
+def _mount_mechanism_command_groups() -> None:
+    """Mount registration-owned command groups under their config keys."""
+    from market_alkahest import create_alkahest_registration
+    from market_hosted_settlement import create_stripe_registration
+
+    for registration in (
+        create_alkahest_registration(command_group=alkahest_app),
+        create_stripe_registration(command_group=stripe_app),
+    ):
+        if registration.command_group is None:
+            continue
+        settlement_app.add_typer(
+            registration.command_group,
+            name=registration.config_key,
+        )
+
+
+_mount_mechanism_command_groups()
 
 __all__ = ["settlement_app"]

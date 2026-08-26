@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import tomllib
 from pathlib import Path
 
 _REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -33,11 +34,19 @@ def test_api_credit_state_uses_independent_named_volumes():
 
 
 def test_api_credit_storefront_runtime_uses_staged_wheel_only():
-    dockerfile = (
-        _REPO_ROOT / "domains/apicredits/storefront/Dockerfile"
-    ).read_text(encoding="utf-8")
+    """The image installs the wheel its own project declares, and only that.
 
-    assert "arkhai-apicredits-storefront==0.2.0" in dockerfile
+    The version is read rather than written down. A literal here asserts a
+    number the project has already moved past, and a guard that has to be
+    edited alongside the thing it guards eventually stops guarding it.
+    """
+
+    storefront = _REPO_ROOT / "domains/apicredits/storefront"
+    dockerfile = (storefront / "Dockerfile").read_text(encoding="utf-8")
+    declared = tomllib.loads((storefront / "pyproject.toml").read_text(encoding="utf-8"))
+    version = declared["project"]["version"]
+
+    assert f"arkhai-apicredits-storefront=={version}" in dockerfile
     assert "COPY domains/apicredits/storefront/src" not in dockerfile
     assert 'ENV PYTHONPATH="/app"' not in dockerfile
 

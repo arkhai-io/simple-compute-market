@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from typing import Any, Protocol, runtime_checkable
 
 from .models import (
@@ -57,7 +58,16 @@ class ConditionalEscrowClient(Protocol):
         mechanism_ref: str,
         operation_ref: str,
         mechanism_state: dict[str, Any],
-    ) -> EffectOutcome: ...
+        mechanism_options: Mapping[str, Any] | None = None,
+    ) -> EffectOutcome:
+        """Return an expired obligation's funding to the payer.
+
+        ``mechanism_options`` carries whatever the requesting participant
+        supplied for this one reclaim. Only the mechanism named by the
+        obligation gives those keys meaning; the runtime relays them unread and
+        keeps none of them, so a mechanism that needs no caller input reads
+        none and behaves as it always has.
+        """
 
 
 @runtime_checkable

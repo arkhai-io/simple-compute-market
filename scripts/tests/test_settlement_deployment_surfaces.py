@@ -29,8 +29,12 @@ def test_fiat_compose_uses_canonical_public_config_without_evm_resources() -> No
     assert settlement["priority"] == ["fiat.stripe.v1"]
     assert set(settlement) == {"schema_version", "priority", "stripe"}
     stripe = settlement["stripe"]
-    assert stripe["expected_api_version"] == "0.2.1"
-    assert stripe["expected_schema_version"] == 5
+    # The reference configuration names no hosted release. What the authority
+    # must serve is a property of the release a deployment binds, and a sample
+    # that states one goes stale the day after the next release ships.
+    assert "expected_api_version" not in stripe
+    assert "expected_schema_version" not in stripe
+    assert "required_capabilities" not in stripe
     assert stripe["currency"] == "usd"
     assert stripe["country"] == "US"
     assert stripe["account_ref"] == "replace-with-hosted-account-ref"
@@ -160,3 +164,29 @@ def test_marketplace_compose_emits_no_legacy_settlement_environment() -> None:
     )
     assert "HOSTED_SETTLEMENT_VERIFIED_IMAGE" in authority_compose
     assert "HOSTED_SETTLEMENT_ENV_FILE" in authority_compose
+
+
+#: Every storefront that adopts the hosted mechanism and projects its status.
+_HOSTED_PROJECTIONS = (
+    "domains/vms/storefront/src/market_storefront/settlement_composition.py",
+    "domains/apicredits/storefront/src/apicredits_storefront/settlement_composition.py",
+    "domains/bare_metal/storefront/src/arkhai_bare_metal_storefront/hosted_lifecycle.py",
+)
+
+
+def test_every_domain_projects_the_hosted_reason_from_one_definition() -> None:
+    """Three copies of a projection drift; one shared definition cannot.
+
+    A domain that assembled the reason itself would keep projecting a status
+    with nothing behind it the moment the mechanism learned a new way to be
+    parked, and nothing would fail until an operator held the obligation.
+    """
+
+    for path in _HOSTED_PROJECTIONS:
+        source = (REPO_ROOT / path).read_text(encoding="utf-8")
+        assert '"funding_reason": hosted_projected_reason(' in source, path
+        assert "hosted_projected_reason" in source.split("def ", 1)[0] or (
+            "from market_hosted_settlement import" in source
+        ), path
+        # No domain reassembles it out of the receipt and mechanism state.
+        assert 'receipt.get("funding_reason")' not in source, path

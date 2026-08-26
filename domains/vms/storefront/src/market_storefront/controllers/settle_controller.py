@@ -17,10 +17,10 @@ from core_storefront.models.settle_models import (
     VerifyEscrowRequest,
     VerifyEscrowResponse,
 )
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request
 from fastapi.responses import JSONResponse
 from fastapi_utils.cbv import cbv
-from market_identity import Identity
+from market_identity import EMPTY_BODY, Identity
 from market_settlement_runtime import (
     HostedSettlementRouteError,
     HostedSettlementStart,
@@ -262,7 +262,7 @@ class SettlementsController:
                 operation,
                 resource_id,
                 expected_principal,
-                dict(body) if body is not None else None,
+                dict(body) if body is not None else EMPTY_BODY,
             )
 
         return build_vm_hosted_route_service(
@@ -319,9 +319,18 @@ class SettlementsController:
         self,
         settlement_ref: str,
         request: Request,
+        mechanism_options: dict[str, Any] | None = Body(default=None),
     ) -> SettlementPublicResponse:
+        """Reclaim one eligible expired hosted settlement.
+
+        The body is the mechanism's own vocabulary for this one reclaim -- a
+        push-funded profile needs somewhere to address the payer's return --
+        so it is relayed opaquely rather than parsed into a model here.
+        """
         try:
-            projected = await self._service().reclaim(request, settlement_ref)
+            projected = await self._service().reclaim(
+                request, settlement_ref, mechanism_options
+            )
         except HostedSettlementRouteError as exc:
             self._raise_route_error(exc)
         return SettlementPublicResponse.model_validate(projected)

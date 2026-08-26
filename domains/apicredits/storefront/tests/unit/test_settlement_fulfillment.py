@@ -658,7 +658,7 @@ async def test_settlement_coordinator_verifies_issues_and_stores_credentials(
 ):
     db, neg_id = settled_db
     from apicredits_storefront import domain_runtime
-    from core_storefront import escrow_verification
+    from market_alkahest import escrow_verification
 
     verified = {}
     fulfillment_calls: list[dict] = []
@@ -754,7 +754,7 @@ async def test_legacy_ready_row_recovers_into_shared_servicing(
     monkeypatch,
 ):
     db, neg_id = settled_db
-    from core_storefront import escrow_verification
+    from market_alkahest import escrow_verification
 
     async def fake_verify(**_kwargs):
         return 0
@@ -799,8 +799,8 @@ async def test_settlement_coordinator_fails_closed_on_bad_escrow(
     monkeypatch,
 ):
     db, neg_id = settled_db
-    from core_storefront import escrow_verification
-    from core_storefront.escrow_verification import EscrowVerificationError
+    from market_alkahest import escrow_verification
+    from market_alkahest.escrow_verification import EscrowVerificationError
 
     async def fake_verify(**kwargs):
         raise EscrowVerificationError("amount mismatch")

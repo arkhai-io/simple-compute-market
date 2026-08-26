@@ -274,3 +274,34 @@ async def test_ambiguous_onchain_recovery_never_blindly_resubmits():
             site_id="site-1",
         )
     assert submit.await_args.kwargs["allow_submit"] is False
+
+
+@pytest.mark.asyncio
+async def test_hosted_deal_is_not_swept_by_the_chain_convergence_loop(tmp_path):
+    """A hosted deal already has a convergence owner and must keep only one.
+
+    The settlement runtime reserves fulfillment before it provisions. This
+    sweep takes no such reservation, so converging a hosted escrow here puts
+    two owners on one capacity reservation -- observed as a second provisioning
+    two seconds behind the first, rejected as ``fulfillment_conflict``.
+    """
+
+    lifecycle = await make_vm_lifecycle_fixture(tmp_path / "hosted.db")
+    db = lifecycle.reopen()
+    escrow = await db.load_escrow(escrow_uid="escrow-1")
+    assert escrow is not None
+    hosted = {**escrow, "chain_name": None}
+    remote = SimpleNamespace(
+        schedule_resource=AsyncMock(),
+        begin_fulfillment=AsyncMock(),
+        get_fulfillment_status=AsyncMock(),
+        get_fulfillment_result=AsyncMock(),
+    )
+
+    assert (
+        await converge_escrow_once(hosted, sqlite_client=db, fulfillment_client=remote)
+        is False
+    )
+    remote.schedule_resource.assert_not_awaited()
+    remote.begin_fulfillment.assert_not_awaited()
+    remote.get_fulfillment_status.assert_not_awaited()

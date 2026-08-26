@@ -69,27 +69,12 @@ account_ref = "replace-with-hosted-account-ref"
 # Operator-required placeholder: generate the deployed file from the independently
 # verified producer manifest; this value intentionally cannot activate a release.
 expected_manifest_digest = "sha256:0000000000000000000000000000000000000000000000000000000000000000"
-expected_api_version = "0.2.1"
-expected_schema_version = 5
-required_capabilities = [
-  "scheme-tagged-identities.v1",
-  "account-owner-admission.v1",
-  "account-owner-rotation.v1",
-  "account-owner-retirement.v1",
-  "signer-injected-client.v1",
-  "provider-neutral-seller-onboarding.v1",
-  "conditional-escrow.v2",
-  "stripe-connect-separate-charges-transfers.v2",
-  "portable-attestation.v1",
-  "eas-arbiter.v1",
-  "payer-profile.v1",
-  "funding-authorization.v1",
-  "funding-profile.card.v1",
-  "funding-profile.us_bank_transfer.v1",
-  "funding-profile.us_ach_debit.v1",
-  "normalized-funding-reversal.v1",
-  "operator-recovery-redaction.v1",
-]
+# The API version, schema version, and capability set the authority must serve
+# are supplied by the run from the release it bound, alongside the manifest
+# digest above. They are not stated here: a consumer that names one release in
+# its own configuration cannot admit the next one, and reports a real contract
+# disagreement as an edit somebody forgot to make. An enabled configuration
+# that reaches readiness without them is unready and says which pin is absent.
 currency = "usd"
 country = "US"
 condition_profile = "vm-fulfillment"

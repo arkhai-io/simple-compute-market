@@ -21,9 +21,11 @@ from market_core.schemas import (
     SettlementOption,
     SettlementPlan,
     SettlementSelection,
-    compute_rate_total,
 )
-from market_hosted_settlement import HostedObligationParams
+from market_hosted_settlement import (
+    StripeSettlementConfig,
+    stripe_accepted_obligation_builder,
+)
 from market_identity import Identity
 from market_settlement_runtime import derive_obligation_ref
 
@@ -45,37 +47,27 @@ def build_accepted_hosted_obligation(
     buyer_principal: Identity,
     seller_principal: Identity,
 ) -> SettlementObligation:
-    """Rebuild the one canonical obligation used by negotiation and servicing."""
+    """Rebuild the one canonical obligation used by negotiation and servicing.
+
+    Construction is delegated to the mechanism's registration-owned builder so
+    the accept path and this rebuild-verify path share one definition; the
+    validation-only config section carries no deployment state.
+    """
 
     if option.claimant_principal != _canonical(seller_principal):
         raise ValueError("hosted option claimant does not match the listing seller")
-    amount = compute_rate_total(option.option.rates[0], duration_seconds)
-    if amount <= 0:
-        raise ValueError("trusted duration-scaled hosted amount must be positive")
-    params = dict(option.option.params)
-    params.pop("bare_metal", None)
-    if "funding_authorization_ref" in params:
-        raise ValueError("listing cannot pre-authorize hosted funding")
-    params["payer_principal"] = buyer_principal.model_dump(mode="json")
-    params["claimant_principal"] = seller_principal.model_dump(mode="json")
-    params = HostedObligationParams.model_validate(
-        {**params, "funding_authorization_ref": "accepted-plan-validation"}
-    ).model_dump(mode="json", exclude={"funding_authorization_ref"})
-    condition = params.get("condition")
-    if not isinstance(condition, Mapping):
-        raise ValueError("hosted option has no portable condition")
-    return SettlementObligation(
-        payer="buyer",
-        claimant="seller",
-        payer_principal=buyer_principal.model_dump(mode="json"),
-        claimant_principal=seller_principal.model_dump(mode="json"),
-        amount=amount,
-        asset=option.option.asset,
-        expiration_unix=expiration_unix,
-        conditions=[dict(condition)],
-        mechanism=HOSTED_MECHANISM,
-        params=params,
+    built = stripe_accepted_obligation_builder(
+        StripeSettlementConfig(),
+        option.option.model_dump(mode="json"),
+        {
+            "buyer_principal": buyer_principal.model_dump(mode="json"),
+            "seller_principal": seller_principal.model_dump(mode="json"),
+            "expiration_unix": expiration_unix,
+            "duration_seconds": duration_seconds,
+            "domain_param_keys": ("bare_metal",),
+        },
     )
+    return SettlementObligation.model_validate(built.obligation)
 
 
 def build_accepted_hosted_plan(

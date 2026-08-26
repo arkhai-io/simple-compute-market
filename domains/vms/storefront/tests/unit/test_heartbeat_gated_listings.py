@@ -167,6 +167,7 @@ def test_interruptible_offer_resource_is_marked():
     from market_storefront.cli_publish import _offer_resource_for_listing
 
     resource = {
+        "offering_mode": "vm",
         "pool_id": "pool-a",
         "resource_id": "machine-a",
         "gpu_model": "A100",

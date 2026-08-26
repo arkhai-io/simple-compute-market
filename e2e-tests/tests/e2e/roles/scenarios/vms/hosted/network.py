@@ -4,6 +4,7 @@ import asyncio
 import hashlib
 import json
 import os
+import sys
 import time
 import tomllib
 import uuid
@@ -24,6 +25,7 @@ from hosted_settlement_client import (
     InstrumentReadiness,
 )
 from market_hosted_settlement import (
+    RETURN_INSTRUCTIONS_EMAIL_OPTION,
     FundingSelection,
     StripeSettlementConfig,
     payer_command_context_from_config,
@@ -52,6 +54,143 @@ from .driver import (
     RuntimeSnapshot,
     TerminalSnapshot,
 )
+
+def _create_payer_when_admitted(context: Any, signer: Any, *, country: str) -> Any:
+    """Create the payer profile once the authority will admit one.
+
+    Binding an account and the account becoming ready are not the same moment:
+    the authority reconciles readiness after the binding lands, so a payer
+    created in between is refused. The refusal arrives as `invalid_response`,
+    which reads like a malformed answer rather than a state that has not
+    arrived yet, and it kills the bridge before any stage runs.
+
+    Waiting here rather than at the call site keeps the port's own construction
+    honest: a port that exists has a payer, or the wait says why it never got
+    one.
+    """
+
+    deadline = time.monotonic() + float(
+        os.environ.get("HOSTED_SETTLEMENT_E2E_ADMISSION_TIMEOUT", "120")
+    )
+    last: Exception | None = None
+    while True:
+        try:
+            return asyncio.run(
+                _payer_facade_call(context, signer, "create", country=country)
+            )
+        except Exception as exc:  # the facade names the authority's refusal
+            last = exc
+            if time.monotonic() >= deadline:
+                raise RuntimeError(
+                    "hosted authority never admitted a payer profile; last "
+                    f"refusal: {exc}"
+                ) from exc
+            time.sleep(min(2.0, max(0.0, deadline - time.monotonic())))
+
+
+def _obligation_expiration(case: str | None) -> int:
+    """How long the accepted obligation lives.
+
+    A reclaim needs one short enough that pre-transfer reclaim becomes eligible
+    inside a run. The override exists so a lane can hold every other variable
+    still and vary only this, which is how the window is told apart from the
+    scenario using it.
+    """
+
+    raw = os.environ.get("HOSTED_SETTLEMENT_E2E_OBLIGATION_EXPIRATION")
+    if raw:
+        value = int(raw)
+        if value <= 0:
+            raise ValueError("obligation expiration must be positive")
+        return value
+    return _REFUND_EXPIRATION_SECONDS if case == "refund" else 3600
+
+
+def _materialize_timeout() -> dict[str, float]:
+    """The materialize request bound, overridable for profiles that fund inline.
+
+    The bridge that drives this process gives up on its own bound, so a
+    materialize bound at or above it can never be reached: the outer wait
+    abandons a subprocess that is still working correctly, and the run reports a
+    stage that did not converge when what expired was the harness. Refuse that
+    pairing rather than let a setting mean nothing.
+    """
+
+    raw = os.environ.get("HOSTED_SETTLEMENT_E2E_MATERIALIZE_TIMEOUT")
+    if not raw:
+        return {}
+    value = float(raw)
+    if value <= 0:
+        raise ValueError("materialize timeout must be positive")
+    outer = os.environ.get("HOSTED_SETTLEMENT_E2E_LIFECYCLE_TIMEOUT")
+    if outer and value >= float(outer):
+        raise ValueError(
+            f"materialize timeout {value} must be below the lifecycle bound "
+            f"{float(outer)} that governs this process"
+        )
+    return {"request_timeout": value}
+
+
+class HostedAuthorityRefusal(RuntimeError):
+    """An authority answer a wait must not keep retrying.
+
+    The authority states a code and its own ``retryable`` flag on every refusal.
+    That flag means the identical request may be re-sent, which is not the same
+    question a polling wait asks: a lost reservation is not re-sendable, yet the
+    condition behind it can still clear. So a wait retries what it knows can
+    change and treats every other refusal as an answer.
+    """
+
+    def __init__(self, code: str, detail: str) -> None:
+        super().__init__(f"hosted authority refused: {code}")
+        self.code = code
+        self.detail = detail
+
+
+#: Refusals a polling wait may outlast. ``operation_conflict`` is the
+#: compare-and-set race the eligible-reclaim wait exists for.
+_RETRYABLE_REFUSAL_CODES = frozenset({"operation_conflict"})
+
+
+def _authority_refusal(exc: RuntimeError) -> tuple[str | None, bool]:
+    """Return the authority's refusal code and whether a wait may retry it.
+
+    The buyer client puts the response body into the error message, so the
+    structured code the authority already sends is readable here without a
+    second request.
+    """
+
+    detail = str(exc)
+    index = detail.find("authenticated HTTP ")
+    if index < 0:
+        return None, False
+    separator = detail.find(":", index)
+    if separator < 0:
+        return None, False
+    try:
+        parsed = json.loads(detail[separator + 1 :].strip())
+    except (ValueError, TypeError):
+        return None, False
+    if not isinstance(parsed, dict):
+        return None, False
+    code = parsed.get("code")
+    if isinstance(code, str) and code:
+        return code, parsed.get("retryable") is True or code in _RETRYABLE_REFUSAL_CODES
+    # The storefront answers in its own shape and does not forward the
+    # authority's code, so the only thing that survives the boundary is its
+    # detail string. Recording it keeps a wait from reporting "no refusal" when
+    # it was in fact refused repeatedly, and names the layer to look at next.
+    detail_text = parsed.get("detail")
+    if isinstance(detail_text, str) and detail_text:
+        # Retryable on purpose. The storefront collapses every mechanism failure
+        # into its own shape, so a permanent refusal and a lost reservation are
+        # indistinguishable here; stopping on both would abandon the retry this
+        # wait exists for. Recording the text still turns "no refusal" into the
+        # sentence the storefront actually returned, which names the layer that
+        # dropped the authority's code.
+        return f"storefront: {detail_text[:120]}", True
+    return None, False
+
 
 _RESOURCE_ID_PREFIX = "hosted-e2e-vm"
 _REFUND_EXPIRATION_SECONDS = 31 * 60
@@ -193,13 +332,10 @@ class NetworkMarketplacePort:
             profiles=profiles,
             dispatch_action=lambda _action, _binding: None,
         )
-        payer = asyncio.run(
-            _payer_facade_call(
-                self._payer_context,
-                buyer_signer,
-                "create",
-                country=self._stripe_config.country,
-            )
+        payer = _create_payer_when_admitted(
+            self._payer_context,
+            buyer_signer,
+            country=self._stripe_config.country,
         )
         self._payer_binding = AuthorityPayerBinding(
             authority_id=str(self._stripe_config.authority_id),
@@ -213,6 +349,14 @@ class NetworkMarketplacePort:
         )
         self._setup_ref: str | None = None
         self._selected_instrument_ref: str | None = None
+        # A setup's identity is derived from its label, and the authority turns
+        # that identity into a provider idempotency key. Stripe remembers such a
+        # key for a day; the authority forgets its own state the moment the run
+        # ends. A fixed label therefore replays a burnt key with a moved expiry
+        # and the second setup of any day is refused. Scoping the label to the
+        # run keeps retries inside one run idempotent, which is what idempotency
+        # is for, without asking Stripe to answer for state nobody kept.
+        self._instrument_label = f"Protected test instrument {_required('HOSTED_SETTLEMENT_E2E_RUN_REF')}"[:64]
         seller_signer = _signer(
             self.storefront_config,
             _required("HOSTED_SETTLEMENT_E2E_STOREFRONT_IDENTITY_CREDENTIAL"),
@@ -318,12 +462,14 @@ class NetworkMarketplacePort:
         self,
         funding_profile: str,
         interaction: str,
+        payment_method: str | None = None,
     ) -> dict[str, Any]:
         profile = FundingProfile(funding_profile)
         mode = FundingMode(interaction)
         if profile is not self._funding_profile or mode is not self._interaction:
             raise AssertionError("payer fixture differs from the selected protected lane")
         action: dict[str, Any] | None = None
+        verification_pending = False
         ready = mode is FundingMode.INTERACTIVE
         if mode is FundingMode.SAVED_INSTRUMENT:
             expected_kind = (
@@ -331,24 +477,7 @@ class NetworkMarketplacePort:
                 if profile is FundingProfile.CARD
                 else InstrumentKind.US_BANK_ACCOUNT
             )
-            instruments = asyncio.run(
-                _payer_facade_call(
-                    self._payer_context,
-                    self._buyer_signer,
-                    "list_instruments",
-                    payer_profile_ref=self._payer_binding.binding_ref,
-                )
-            )
-            selected = next(
-                (
-                    item
-                    for item in instruments.instruments
-                    if item.kind is expected_kind
-                    and item.readiness is InstrumentReadiness.READY
-                    and not item.revoked
-                ),
-                None,
-            )
+            selected = self._ready_instrument(expected_kind)
             if selected is None:
                 setup = asyncio.run(
                     _payer_facade_call(
@@ -357,10 +486,35 @@ class NetworkMarketplacePort:
                         "start_setup",
                         payer_profile_ref=self._payer_binding.binding_ref,
                         funding_profile=profile,
-                        label="Protected test instrument",
+                        label=self._instrument_label,
+                        payment_method=payment_method,
                     )
                 )
                 self._setup_ref = setup.setup_ref
+                # An authority handed the payer's own instrument has nothing to
+                # ask a browser for; it waits for the deposits instead, or, where
+                # the instrument needs no deposits, for nothing at all.
+                verification_pending = (
+                    setup.readiness is InstrumentReadiness.VERIFICATION_PENDING
+                )
+                # A setup the authority completed on the spot is already usable.
+                # A directly handed card confirms off-session, so it arrives
+                # ready here rather than after a browser or a deposit, and a
+                # fixture that ignored that would demand a browser action for a
+                # setup that has already finished.
+                #
+                # The setup result names no instrument, so the instrument it
+                # produced is resolved the one way this side can: by asking
+                # again. A deposit-bound setup reaches the same call later,
+                # through verification.
+                if setup.readiness is InstrumentReadiness.READY:
+                    selected = self._ready_instrument(expected_kind)
+                    if selected is None:
+                        raise AssertionError(
+                            "a completed payer setup produced no ready instrument"
+                        )
+                    self._selected_instrument_ref = selected.instrument_ref
+                    ready = True
                 action = (
                     None
                     if setup.action is None
@@ -378,7 +532,59 @@ class NetworkMarketplacePort:
             "action_persisted": False,
             "saved_instrument_ready": ready,
             "setup_action": action,
+            "setup_verification_pending": verification_pending,
         }
+
+    def _ready_instrument(self, expected_kind: InstrumentKind):
+        """The payer's own ready instrument of that kind, or nothing."""
+
+        instruments = asyncio.run(
+            _payer_facade_call(
+                self._payer_context,
+                self._buyer_signer,
+                "list_instruments",
+                payer_profile_ref=self._payer_binding.binding_ref,
+            )
+        )
+        return next(
+            (
+                item
+                for item in instruments.instruments
+                if item.kind is expected_kind
+                and item.readiness is InstrumentReadiness.READY
+                and not item.revoked
+            ),
+            None,
+        )
+
+    def verify_payer_setup(
+        self,
+        *,
+        amounts: tuple[int, ...] | None,
+        descriptor_code: str | None,
+    ) -> dict[str, Any]:
+        """Answer a pending setup with the payer's own deposit evidence."""
+
+        setup_ref = self._setup_ref
+        if setup_ref is None:
+            raise AssertionError("payer setup is not pending verification")
+        setup = asyncio.run(
+            _payer_facade_call(
+                self._payer_context,
+                self._buyer_signer,
+                "verify_setup",
+                payer_profile_ref=self._payer_binding.binding_ref,
+                setup_ref=setup_ref,
+                amounts=amounts,
+                descriptor_code=descriptor_code,
+            )
+        )
+        if setup.readiness is not InstrumentReadiness.READY:
+            raise AssertionError("payer setup did not become ready on submitted evidence")
+        return self.ensure_payer_profile_fixture(
+            self._funding_profile.value,
+            self._interaction.value,
+        )
 
     def complete_payer_setup(self) -> dict[str, Any]:
         setup_ref = self._setup_ref
@@ -441,6 +647,30 @@ class NetworkMarketplacePort:
     def eligible_pretransfer_refund_available(self) -> bool:
         return True
 
+    def induce_test_ach_return(self, settlement_ref: str) -> dict[str, object]:
+        """Report that the return this lane needs is already on its way.
+
+        Nothing is induced here, because the return was armed before the
+        payment existed: the lane funds from the test account Stripe settles
+        and then disputes. There is no later moment to reach in and cause one,
+        so this states that the arming happened rather than pretending to act.
+        """
+
+        del settlement_ref
+        return {"ok": True}
+
+    def _funds_within_materialization(self) -> bool:
+        """Whether funding completes inside the materialize call.
+
+        A saved card the payer already holds is charged off-session during
+        materialization; every other shape returns first and funds after.
+        """
+
+        return (
+            self._funding_profile is FundingProfile.CARD
+            and self._interaction is FundingMode.SAVED_INSTRUMENT
+        )
+
     def _keep_refund_fulfillment_unresolved(self) -> None:
         with SyncProvisioningClient(
             self.provisioning_url,
@@ -452,7 +682,15 @@ class NetworkMarketplacePort:
                 {
                     "rule_id": "hosted-stripe-refund-unresolved",
                     "match": {"vm_action": "create"},
-                    "pause_before_result": True,
+                    # Holding the job before its result keeps fulfillment
+                    # unresolved, and the release runs once funding is observed.
+                    # A profile that funds inside materialization never gets
+                    # there: the storefront polls this job within that same
+                    # request, so the call that would release it cannot run
+                    # until the call it is blocking returns. Resuming a held
+                    # job yields this same failure, so failing at once reaches
+                    # the identical state without the deadlock.
+                    "pause_before_result": not self._funds_within_materialization(),
                     "fail_with": "protected refund keeps fulfillment unresolved",
                 },
             )
@@ -512,7 +750,7 @@ class NetworkMarketplacePort:
         listing = self.registry.get_listing(registry_listing_id)
         option = _option(listing, self._funding_profile.value)
         expiration_unix = int(time.time()) + (
-            _REFUND_EXPIRATION_SECONDS if self._stripe_test_case == "refund" else 3600
+            _obligation_expiration(self._stripe_test_case)
         )
         selection = {
             "mechanism": "fiat.stripe.v1",
@@ -578,6 +816,11 @@ class NetworkMarketplacePort:
             principal=self._buyer_signer.identity,
             signer=self._buyer_signer,
             resolve_seller_principals=self._publisher_resolver(),
+            # Materialization is answered inline, so how long it may take is a
+            # property of the profile rather than of the transport. A card the
+            # payer already holds funds within this call, which a profile that
+            # waits on a bank does not.
+            **_materialize_timeout(),
         ).start(
             negotiation_id=negotiation_id,
             obligation_ref=obligation_ref,
@@ -600,7 +843,16 @@ class NetworkMarketplacePort:
             )
         settlement_ref = started.get("settlement_ref")
         if not isinstance(settlement_ref, str) or not settlement_ref:
-            raise AssertionError("hosted materialization returned no settlement identity")
+            # The response is the evidence for why it has no identity: which
+            # status the storefront projected, and which fields it did fill.
+            # Named, not dumped -- an action carries a Checkout URL.
+            raise AssertionError(
+                "hosted materialization returned no settlement identity "
+                f"(status={started.get('status')!r}, "
+                f"action_kind={started.get('action_kind')!r}, "
+                f"funding_reason={started.get('funding_reason')!r}, "
+                f"present={sorted(k for k, v in started.items() if v is not None)})"
+            )
         amount = int(obligation["amount"])
         currency = str(obligation["asset"])
         condition = obligation.get("params", {}).get("condition")
@@ -646,13 +898,29 @@ class NetworkMarketplacePort:
     def wait_funded(self, settlement_ref: str) -> bool:
         timeout = float(os.environ.get("HOSTED_SETTLEMENT_E2E_LIFECYCLE_TIMEOUT", "180"))
         deadline = time.monotonic() + timeout
+        status: dict[str, Any] = {}
         while time.monotonic() < deadline:
-            status = self._buyer_status(settlement_ref)
-            if status.get("status") in {"ready", "collected", "reclaimed"}:
+            try:
+                status = self._buyer_status(settlement_ref)
+            except RuntimeError as exc:
+                if not _still_working(exc):
+                    raise
+                time.sleep(min(0.5, max(0.0, deadline - time.monotonic())))
+                continue
+            # "funded" is authoritative funding with fulfillment not yet begun,
+            # which is the whole subject of this wait -- and the only state a
+            # reclaim lane ever reaches, since it holds fulfillment back on
+            # purpose. The later states are accepted because a collection lane
+            # fulfils inline on the poll that first sees funding.
+            if status.get("status") in {"funded", "ready", "collected", "reclaimed"}:
                 if self._stripe_test_case == "refund":
                     self._reconcile_refund_materialization(settlement_ref)
                 return True
             time.sleep(min(0.5, max(0.0, deadline - time.monotonic())))
+        # A timeout says only that funding never converged. Which projection it
+        # was still holding when the bound expired is the whole diagnosis, and
+        # it belongs on the development diagnostic channel -- named, not dumped.
+        _name_unconverged("funding", settlement_ref, status)
         return False
 
     def _reconcile_refund_materialization(self, settlement_ref: str) -> None:
@@ -673,6 +941,10 @@ class NetworkMarketplacePort:
             raise AssertionError("refund scenario unexpectedly completed fulfillment")
 
     def _release_refund_fulfillment_failure(self) -> None:
+        # Only a held job needs releasing. Where the job was failed outright,
+        # there is nothing paused to resume and asking would refuse.
+        if self._funds_within_materialization():
+            return
         with SyncProvisioningClient(
             self.provisioning_url,
             self._admin_signer,
@@ -723,6 +995,7 @@ class NetworkMarketplacePort:
     def request_eligible_pretransfer_refund(self, settlement_ref: str) -> TerminalSnapshot:
         timeout = float(os.environ.get("HOSTED_SETTLEMENT_E2E_LIFECYCLE_TIMEOUT", "180"))
         deadline = time.monotonic() + timeout
+        last_refusal: str | None = None
         while True:
             try:
                 return self.reclaim(settlement_ref)
@@ -733,8 +1006,19 @@ class NetworkMarketplacePort:
                     for marker in ("authenticated HTTP 409:", "authenticated HTTP 503:")
                 ):
                     raise
+                code, retryable = _authority_refusal(exc)
+                if code is not None:
+                    last_refusal = code
+                    if not retryable:
+                        # Waiting cannot change this answer. Outlasting it would
+                        # report a cause the authority already gave as a stage
+                        # that did not converge.
+                        raise HostedAuthorityRefusal(code, detail) from exc
             if time.monotonic() >= deadline:
-                raise TimeoutError("eligible hosted refund did not converge")
+                raise TimeoutError(
+                    "eligible hosted refund did not converge; last refusal: "
+                    f"{last_refusal or 'none received'}"
+                )
             time.sleep(min(0.5, max(0.0, deadline - time.monotonic())))
 
     def recover_eligible_pretransfer_refund(self, settlement_ref: str) -> TerminalSnapshot:
@@ -758,10 +1042,33 @@ class NetworkMarketplacePort:
             resolve_seller_principals=self._publisher_resolver(),
             **options,
         )
-        return cast(
-            dict[str, Any],
-            getattr(transport, operation)(settlement_ref=settlement_ref),
-        )
+        call: dict[str, Any] = {"settlement_ref": settlement_ref}
+        if operation == "reclaim":
+            mechanism_options = self._reclaim_options()
+            if mechanism_options:
+                call["mechanism_options"] = mechanism_options
+        return cast(dict[str, Any], getattr(transport, operation)(**call))
+
+    def _reclaim_options(self) -> dict[str, str]:
+        """What this buyer has to say about how its funding comes back.
+
+        A push-funded obligation is returned by mailing the payer for return
+        bank details, so the run supplies the address it is entitled to use.
+        The address is given to the run rather than derived here, because
+        deriving it would mean holding provider credentials in the buyer role.
+        """
+
+        if self._funding_profile is not FundingProfile.US_BANK_TRANSFER:
+            return {}
+        address = os.environ.get("HOSTED_SETTLEMENT_E2E_RETURN_ADDRESS", "").strip()
+        if not address:
+            # Naming the missing input beats letting the authority refuse a
+            # request the run could not have completed anyway.
+            raise RuntimeError(
+                "selected hosted E2E scenario is missing prerequisite: "
+                "HOSTED_SETTLEMENT_E2E_RETURN_ADDRESS"
+            )
+        return {RETURN_INSTRUCTIONS_EMAIL_OPTION: address}
 
     def _operation(self, settlement_ref: str) -> str:
         try:
@@ -792,17 +1099,98 @@ class NetworkMarketplacePort:
     def _wait_public_status(self, settlement_ref: str, terminal: set[str]):
         timeout = float(os.environ.get("HOSTED_SETTLEMENT_E2E_LIFECYCLE_TIMEOUT", "180"))
         deadline = time.monotonic() + timeout
+        last: dict[str, Any] = {}
+        parked = False
         while time.monotonic() < deadline:
             try:
                 status = self._buyer_status(settlement_ref)
             except RuntimeError as exc:
-                if "authenticated HTTP 503:" not in str(exc):
+                if not _still_working(exc):
                     raise
             else:
+                last = status
                 if status.get("status") in terminal:
                     return status
+                if status.get("status") == "manual_required":
+                    # Only a parked obligation that names its reason is one a
+                    # wait may stop on. The marketplace guarantees a reason for
+                    # every obligation the authority itself parked, so a reason
+                    # means a person is genuinely required and time cannot help.
+                    #
+                    # Without one the state is merely derived from the
+                    # authority's current status on this poll, which a later
+                    # poll re-derives -- stopping there would fail a lane for a
+                    # state it was passing through. Record it and keep waiting.
+                    reason = status.get("funding_reason")
+                    parked = True
+                    # A reason the wait already knows can clear is not a reason
+                    # to stop. Losing a compare-and-set reservation parks the
+                    # obligation and then resolves itself, so stopping on it
+                    # fails a lane for the one refusal that was always meant to
+                    # be outlasted.
+                    if reason in _RETRYABLE_REFUSAL_CODES:
+                        reason = None
+                    if reason:
+                        _name_unconverged(
+                            "/".join(sorted(terminal)), settlement_ref, status
+                        )
+                        raise HostedAuthorityRefusal(
+                            str(reason),
+                            "hosted obligation parked awaiting operator "
+                            f"evidence: {reason!r}",
+                        )
             time.sleep(min(0.5, max(0.0, deadline - time.monotonic())))
+        _name_unconverged("/".join(sorted(terminal)), settlement_ref, last)
+        if parked:
+            raise HostedAuthorityRefusal(
+                "settlement_parked",
+                "hosted obligation held an unexplained operator-evidence state "
+                "until the wait expired",
+            )
         raise TimeoutError("named hosted public status did not converge")
+
+
+def _name_unconverged(
+    awaited: str, settlement_ref: str, status: dict[str, Any]
+) -> None:
+    """Name the projection a wait was still holding when its bound expired.
+
+    A timeout says only that something did not happen. Which state the deal was
+    actually in is the diagnosis, and it belongs on the development diagnostic
+    channel -- named, not dumped.
+    """
+
+    receipt = status.get("receipt")
+    receipt = receipt if isinstance(receipt, dict) else {}
+    incident = receipt.get("incident")
+    incident = incident if isinstance(incident, dict) else {}
+    print(
+        f"[development] {awaited} never converged for {settlement_ref}: "
+        f"status={status.get('status')!r}, "
+        f"funding_reason={status.get('funding_reason')!r}, "
+        f"action_kind={status.get('action_kind')!r}, "
+        f"fulfillment_ref={status.get('fulfillment_ref') is not None}, "
+        f"authority financial_state={receipt.get('financial_state')!r}, "
+        f"funding_state={receipt.get('funding_state')!r}, "
+        f"condition_state={receipt.get('condition_state')!r}, "
+        f"incident kind={incident.get('kind')!r} state={incident.get('state')!r}",
+        file=sys.stderr,
+        flush=True,
+    )
+
+
+def _still_working(exc: Exception) -> bool:
+    """Return whether a failed poll means the storefront has not answered yet.
+
+    A hosted status poll is a read, and the storefront fulfils inline on the
+    poll that first sees authoritative funding -- provisioning a VM can outrun
+    the buyer's request timeout. Neither a 503 nor a client-side timeout is a
+    refusal, so a wait keeps polling until its own bound instead of turning
+    someone else's latency into a failed deal.
+    """
+
+    detail = str(exc)
+    return "authenticated HTTP 503:" in detail or " failed: timed out" in detail
 
 
 def create_protected_marketplace(*, buyer_config: Path) -> NetworkMarketplacePort:

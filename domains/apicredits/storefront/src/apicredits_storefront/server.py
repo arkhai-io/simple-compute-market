@@ -162,7 +162,6 @@ def _build_api_credit_services(
         expected_legacy_sellers=(BASE_URL_OVERRIDE,),
     )
     set_stage_event_db_path(sqlite_client.db_path)
-    negotiation_runtime = build_api_credit_negotiation_runtime(domain)
     failure_policy = build_api_credit_failure_policy()
     settlement_composition = build_api_credit_settlement_composition(
         domain=domain,
@@ -170,6 +169,12 @@ def _build_api_credit_services(
         alkahest_clients=alkahest_clients,
         marketplace_signer=marketplace_signer,
         failure_policy=failure_policy,
+    )
+    negotiation_runtime = build_api_credit_negotiation_runtime(
+        domain,
+        accepted_obligation_dispatch=(
+            settlement_composition.accepted_obligation_dispatch()
+        ),
     )
     settlement_runtime = settlement_composition.runtime
     settlement_worker = settlement_composition.worker

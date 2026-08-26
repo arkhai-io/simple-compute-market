@@ -83,9 +83,17 @@ class MarketplacePort(Protocol):
         self,
         funding_profile: str,
         interaction: str,
+        payment_method: str | None = None,
     ) -> dict[str, object]: ...
 
     def complete_payer_setup(self) -> dict[str, object]: ...
+
+    def verify_payer_setup(
+        self,
+        *,
+        amounts: tuple[int, ...] | None,
+        descriptor_code: str | None,
+    ) -> dict[str, object]: ...
 
 
     def create_and_publish_listing(self) -> ListingSnapshot: ...

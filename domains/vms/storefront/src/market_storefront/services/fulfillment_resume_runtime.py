@@ -553,6 +553,13 @@ async def converge_escrow_once(
     """Advance one escrow by at most one externally observable phase."""
     if escrow.get("status") in _TERMINAL_ESCROW_STATUSES:
         return False
+    if not escrow.get("chain_name"):
+        # This sweep converges chain-settled deals, and it ends by submitting an
+        # on-chain fulfillment. A hosted deal has no chain and already has a
+        # convergence owner -- the settlement runtime, which reserves
+        # fulfillment before it provisions. Sweeping it here gives one deal two
+        # owners racing over the same capacity reservation.
+        return False
     context = _validated_context(escrow.get("fulfillment_context"))
     if context is None:
         logger.error(

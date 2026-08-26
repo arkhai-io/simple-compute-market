@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+import subprocess
 from collections.abc import Mapping
 from pathlib import Path
 
@@ -52,7 +54,7 @@ def test_compose_contains_only_ordinary_hosted_roles() -> None:
     worker = COMPOSE.split("  hosted-settlement-worker:", 1)[1].split(
         "\n  provisioning:", 1
     )[0]
-    assert 'test: ["CMD", "python", "-c", "import os; os.kill(1, 0)"]' in worker
+    assert 'test: ["CMD", "python", "-c", "__import__(\'os\').kill(1,0)"]' in worker
 
 
 def test_compose_has_no_source_or_editable_sibling_mount() -> None:
@@ -240,27 +242,9 @@ def test_wallet_free_fixtures_have_only_public_portable_configuration() -> None:
         assert document["Settlement"]["stripe"]["base_url"] == expected_url
         assert field_paths(document).isdisjoint(forbidden)
         stripe = document["Settlement"]["stripe"]
-        assert stripe["expected_api_version"] == "0.2.1"
-        assert stripe["expected_schema_version"] == 5
-        assert set(stripe["required_capabilities"]) == {
-            "scheme-tagged-identities.v1",
-            "account-owner-admission.v1",
-            "account-owner-rotation.v1",
-            "account-owner-retirement.v1",
-            "signer-injected-client.v1",
-            "provider-neutral-seller-onboarding.v1",
-            "conditional-escrow.v2",
-            "stripe-connect-separate-charges-transfers.v2",
-            "portable-attestation.v1",
-            "eas-arbiter.v1",
-            "payer-profile.v1",
-            "funding-authorization.v1",
-            "funding-profile.card.v1",
-            "funding-profile.us_bank_transfer.v1",
-            "funding-profile.us_ach_debit.v1",
-            "normalized-funding-reversal.v1",
-            "operator-recovery-redaction.v1",
-        }
+        assert "expected_api_version" not in stripe
+        assert "expected_schema_version" not in stripe
+        assert "required_capabilities" not in stripe
 
 
 def test_marketplace_hosted_configs_contain_no_provider_fixture_identity() -> None:
@@ -313,3 +297,144 @@ def test_ready_gate_rejects_digest_schema_and_capability_mismatch(
     response[field] = value
     with pytest.raises(module.ReleaseVerificationError, match="ready response"):
         module.verify_ready_response(production, response)
+
+
+def test_the_readiness_check_names_no_release_of_its_own() -> None:
+    """It asserts the bound contract, and is handed it rather than stating it.
+
+    A literal here refuses every release but one -- including the next real
+    one -- as an unready authority, which is indistinguishable from a genuine
+    contract mismatch.
+    """
+
+    api = COMPOSE.split("  hosted-settlement-api:", 1)[1].split(
+        "\n  hosted-settlement-worker:", 1
+    )[0]
+    check = api.split("healthcheck:", 1)[1]
+
+    for named in ("0.2.1", "0.3.0", "schema_version')==5", "conditional-escrow.v2"):
+        assert named not in check, named
+    for handed in (
+        "HOSTED_VERIFIED_API_VERSION",
+        "HOSTED_VERIFIED_SCHEMA_VERSION",
+        "HOSTED_VERIFIED_CAPABILITIES",
+        "HOSTED_VERIFIED_FUNDING_PROFILES",
+        "HOSTED_VERIFIED_PRODUCTION_MANIFEST_DIGEST",
+    ):
+        assert handed in check, handed
+        assert f"{handed}: ${{HOSTED_SETTLEMENT_VERIFIED_" in COMPOSE or handed.endswith(
+            "PRODUCTION_MANIFEST_DIGEST"
+        )
+
+
+def test_a_development_run_can_bind_a_producer_built_here() -> None:
+    """One variable selects it, and the two places that say so agree."""
+
+    assert "HOSTED_LOCAL_HOSTED_IMAGE ?=" in ROOT_MAKE
+    assert "build-hosted-producer:" in ROOT_MAKE
+    assert "$(MAKE) -C \"$(HOSTED_SETTLEMENT_SOURCE)\" image artifacts" in ROOT_MAKE
+    for selector in ("HOSTED_PRODUCER_INPUTS", "HOSTED_PRODUCER_PINS"):
+        assert f"{selector} = $(if $(HOSTED_LOCAL_HOSTED_IMAGE)" in ROOT_MAKE
+    local = ROOT_MAKE.split("hosted-stripe-test-local:", 1)[1].split("\nhosted-compose-up:", 1)[0]
+    assert "$(HOSTED_PRODUCER_PINS)" in local
+    # The protected target keeps every pin it has, spelled out.
+    protected = ROOT_MAKE.split("\nhosted-stripe-test:", 1)[1].split("\ndist-hosted-client:", 1)[0]
+    for pin in (
+        "--hosted-manifest-sha256",
+        "--hosted-client-wheel-sha256",
+        "--hosted-image-digest",
+        "--hosted-source-commit",
+        "--hosted-workflow-ref",
+        "--hosted-workflow-run-id",
+    ):
+        assert f'{pin} "$(HOSTED_PRODUCTION_' in protected, pin
+    assert "HOSTED_PRODUCER_PINS" not in protected
+
+
+def test_the_released_producer_identities_come_from_the_trust_config() -> None:
+    """Five of six, so a development run stops copying digests in by hand.
+
+    The trust config is named here rather than left to the default, because the
+    default follows whichever version the tree pins and that version is signed
+    only after it is published. What this asserts is that the identities are
+    derived from whatever config is in force, which is independent of which one
+    that currently is.
+    """
+
+    trust_path = REPO_ROOT / "manifests" / "hosted-settlement-v0.2.1-trust.json"
+    trust = json.loads(trust_path.read_text(encoding="utf-8"))
+    derived = subprocess.run(
+        [
+            "make",
+            "--no-print-directory",
+            "-f",
+            str(REPO_ROOT / "Makefile"),
+            "-n",
+            "hosted-stripe-test-local",
+            f"HOSTED_RELEASE_TRUST={trust_path}",
+        ],
+        cwd=REPO_ROOT,
+        capture_output=True,
+        text=True,
+    ).stdout
+
+    for value in (
+        "sha256:" + trust["manifest_sha256"],
+        "sha256:" + trust["client_wheel"]["sha256"],
+        trust["service_image"]["digest"],
+        trust["source_commit"],
+        trust["workflow_ref"],
+    ):
+        assert value in derived, value
+    # The run id is not in the trust config and stays an operator input.
+    assert 'HOSTED_PRODUCTION_WORKFLOW_RUN_ID ?=\n' in ROOT_MAKE
+
+
+def test_the_build_names_the_artifacts_of_the_release_it_binds(tmp_path: Path) -> None:
+    """A later release needs a trust config, not an edit to three Makefiles.
+
+    The client wheel, OpenAPI, conformance, and migration filenames were spelled
+    out beside the trust config they had to agree with. Nothing kept them in
+    step, so the first thing a version bump broke was a copy that silently named
+    the previous release.
+    """
+
+    trust = tmp_path / "trust.json"
+    trust.write_text(
+        json.dumps({"release_version": "0.3.0", "schema_version": 6}),
+        encoding="utf-8",
+    )
+
+    recipe = subprocess.run(
+        [
+            "make",
+            "-n",
+            "dist-hosted-client",
+            f"HOSTED_RELEASE_TRUST={trust}",
+            f"HOSTED_RELEASE_DIR={tmp_path / 'release'}",
+        ],
+        cwd=REPO_ROOT,
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout
+
+    for expected in (
+        "arkhai_hosted_settlement_client-0.3.0-py3-none-any.whl",
+        "openapi-v0.3.0.json",
+        "conformance-v0.3.0.json",
+        "migrations-v6.json",
+    ):
+        assert expected in recipe
+    assert "0.2.1" not in recipe
+    assert "migrations-v5.json" not in recipe
+
+
+@pytest.mark.parametrize(
+    "makefile",
+    ["Makefile", "kit/hosted-settlement/Makefile", "domains/vms/storefront/Makefile"],
+)
+def test_no_makefile_spells_the_client_wheel_it_verifies(makefile: str) -> None:
+    text = (REPO_ROOT / makefile).read_text(encoding="utf-8")
+
+    assert "arkhai_hosted_settlement_client-0.2.1" not in text

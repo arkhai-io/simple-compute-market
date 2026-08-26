@@ -13,49 +13,61 @@ from pathlib import Path, PurePosixPath
 from typing import Any
 
 _RELEASE_CONTRACT = "arkhai.hosted-settlement-release.v2"
-_RELEASE_VERSION = "0.2.1"
-_API_VERSION = "0.2.1"
-_SCHEMA_VERSION = 5
-_FUNDING_PROFILES = ("card.v1", "us_bank_transfer.v1", "us_ach_debit.v1")
-_CAPABILITIES = (
-    "scheme-tagged-identities.v1",
-    "account-owner-admission.v1",
-    "account-owner-rotation.v1",
-    "account-owner-retirement.v1",
-    "signer-injected-client.v1",
-    "provider-neutral-seller-onboarding.v1",
-    "conditional-escrow.v2",
-    "stripe-connect-separate-charges-transfers.v2",
-    "portable-attestation.v1",
-    "eas-arbiter.v1",
-    "payer-profile.v1",
-    "funding-authorization.v1",
-    "funding-profile.card.v1",
-    "funding-profile.us_bank_transfer.v1",
-    "funding-profile.us_ach_debit.v1",
-    "normalized-funding-reversal.v1",
-    "operator-recovery-redaction.v1",
-)
-_IDENTITY_CONTRACT = {
-    "request_signature_protocol": "arkhai.hosted-request-signature.v2",
-    "response_signature_protocol": "arkhai.hosted-response-signature.v2",
-    "supported_identity_schemes": ["eip191", "ed25519"],
-    "capabilities": list(_CAPABILITIES),
-    "account_owner_admission_protocol": "arkhai.account-owner-admission.v1",
-    "account_owner_rotation_protocol": "arkhai.account-owner-rotation.v1",
-    "client_signer_api": "hosted_settlement_client.Signer",
-    "seller_onboarding_api": "hosted_settlement_client.SellerOnboarding",
-    "payer_profile_protocol": "arkhai.payer-profile.v1",
-    "funding_authorization_protocol": "arkhai.funding-authorization.v1",
-    "funding_profiles": list(_FUNDING_PROFILES),
-}
-_ARTIFACT_FILENAMES = {
-    "openapi": "openapi-v0.2.1.json",
-    "conformance": "conformance-v0.2.1.json",
-    "migrations": "migrations-v5.json",
+#: Artifacts whose filename carries no version, so no release names them
+#: differently. The versioned three are derived from the contract instead.
+_UNVERSIONED_ARTIFACT_FILENAMES = {
     "sbom": "sbom.spdx.json",
     "provenance": "provenance.intoto.json",
 }
+
+
+class ReleaseContract:
+    """What one hosted release serves, taken from the trust config that pins it.
+
+    These used to be literals here. A literal cannot admit the next release
+    without an edit, and cannot report a mismatch as a mismatch -- it reports
+    it as "not the release this verifier was written for". The committed trust
+    config already names every one of them and is the pin that decides which
+    release is trusted, so it is the one place they belong.
+    """
+
+    def __init__(self, trust: dict[str, Any]) -> None:
+        self.release_version = _text(trust.get("release_version"), "release_version")
+        self.api_version = _text(trust.get("api_version"), "api_version")
+        schema_version = trust.get("schema_version")
+        if not isinstance(schema_version, int) or schema_version < 1:
+            raise ReleaseVerificationError("trust schema_version must be a positive integer")
+        self.schema_version = schema_version
+        self.capabilities = tuple(
+            _text(value, "required_capabilities entry")
+            for value in (trust.get("required_capabilities") or ())
+        )
+        if not self.capabilities:
+            raise ReleaseVerificationError("trust required_capabilities must not be empty")
+        self.identity_contract = _object(
+            trust.get("identity_contract"), "identity_contract"
+        )
+        _equal(
+            self.identity_contract.get("capabilities"),
+            list(self.capabilities),
+            "identity_contract capabilities",
+        )
+        self.funding_profiles = tuple(
+            _text(value, "identity_contract funding_profiles entry")
+            for value in (self.identity_contract.get("funding_profiles") or ())
+        )
+        if not self.funding_profiles:
+            raise ReleaseVerificationError(
+                "trust identity_contract must name the profiles the release funds"
+            )
+        self.artifact_filenames = {
+            "openapi": f"openapi-v{self.release_version}.json",
+            "conformance": f"conformance-v{self.release_version}.json",
+            "migrations": f"migrations-v{self.schema_version}.json",
+            **_UNVERSIONED_ARTIFACT_FILENAMES,
+        }
+
+
 _REQUIRED_CLIENT_EXPORTS = frozenset(
     {
         "CreatePayerProfileRequest",
@@ -369,51 +381,50 @@ def _verify_file(root: Path, descriptor: dict[str, Any], field: str) -> Path:
     return path
 
 
-def _verify_contract_artifacts(paths: dict[str, Path]) -> None:
+def _verify_contract_artifacts(
+    paths: dict[str, Path], contract: ReleaseContract
+) -> None:
     _, openapi = _read_json(paths["openapi"], "staged OpenAPI")
     info = _object(openapi.get("info"), "openapi.info")
-    _equal(info.get("version"), _API_VERSION, "OpenAPI version")
+    _equal(info.get("version"), contract.api_version, "OpenAPI version")
 
     _, conformance = _read_json(paths["conformance"], "staged conformance")
-    _equal(conformance.get("api_version"), _API_VERSION, "conformance api_version")
+    _equal(
+        conformance.get("api_version"), contract.api_version, "conformance api_version"
+    )
     _equal(
         conformance.get("schema_version"),
-        _SCHEMA_VERSION,
+        contract.schema_version,
         "conformance schema_version",
     )
     _equal(
         tuple(conformance.get("funding_profiles") or ()),
-        _FUNDING_PROFILES,
+        contract.funding_profiles,
         "conformance funding_profiles",
     )
     _equal(
         conformance.get("identity_contract"),
-        _IDENTITY_CONTRACT,
+        contract.identity_contract,
         "conformance identity_contract",
     )
 
     _, migrations = _read_json(paths["migrations"], "staged migrations")
     _equal(
         migrations.get("schema_version"),
-        _SCHEMA_VERSION,
+        contract.schema_version,
         "migration artifact schema_version",
     )
     migration_rows = migrations.get("migrations")
     if not isinstance(migration_rows, list):
         raise ReleaseVerificationError("migration artifact migrations must be a list")
     positions = [row.get("position") for row in migration_rows if isinstance(row, dict)]
-    if positions != list(range(1, _SCHEMA_VERSION + 1)):
+    if positions != list(range(1, contract.schema_version + 1)):
         raise ReleaseVerificationError(
             "migration artifact must contain the exact ordered schema history"
         )
-    if (
-        not migration_rows
-        or not isinstance(migration_rows[-1], dict)
-        or migration_rows[-1].get("migration_id") != "0005_payer_funding_profiles"
-    ):
-        raise ReleaseVerificationError(
-            "migration artifact does not end at payer funding schema 5"
-        )
+    # Which migration the history ends at is fixed by hash, not by name here:
+    # the trust config pins the manifest, the manifest pins this artifact's
+    # sha256, and the staged bytes were checked against it before this ran.
 
 
 def _verify_image(image: dict[str, Any], field: str) -> tuple[str, str]:
@@ -435,17 +446,7 @@ def verify_release(
 ) -> dict[str, Any]:
     _, trust = _read_json(trust_path, "release trust config")
     _equal(trust.get("contract_version"), _RELEASE_CONTRACT, "trust contract_version")
-    _equal(trust.get("release_version"), _RELEASE_VERSION, "trust release_version")
-    _equal(trust.get("api_version"), _API_VERSION, "trust api_version")
-    _equal(trust.get("schema_version"), _SCHEMA_VERSION, "trust schema_version")
-    _equal(
-        tuple(trust.get("required_capabilities") or ()),
-        _CAPABILITIES,
-        "trust capabilities",
-    )
-    _equal(
-        trust.get("identity_contract"), _IDENTITY_CONTRACT, "trust identity_contract"
-    )
+    contract = ReleaseContract(trust)
     if manifest_path.name != _text(trust.get("manifest_filename"), "manifest_filename"):
         raise ReleaseVerificationError(
             "staged manifest filename does not match the trusted pin"
@@ -475,15 +476,23 @@ def verify_release(
         label="production",
     )
     _equal(payload.get("contract_version"), _RELEASE_CONTRACT, "contract_version")
-    _equal(payload.get("release_version"), _RELEASE_VERSION, "release_version")
-    _equal(payload.get("identity_contract"), _IDENTITY_CONTRACT, "identity_contract")
+    _equal(
+        payload.get("release_version"), contract.release_version, "release_version"
+    )
+    _equal(
+        payload.get("identity_contract"),
+        contract.identity_contract,
+        "identity_contract",
+    )
     migrations = _object(payload.get("migrations"), "payload.migrations")
     _equal(
-        migrations.get("schema_version"), _SCHEMA_VERSION, "migration schema_version"
+        migrations.get("schema_version"),
+        contract.schema_version,
+        "migration schema_version",
     )
     artifact_paths: dict[str, Path] = {}
     artifact_sha256: dict[str, str] = {}
-    for artifact_name, filename in _ARTIFACT_FILENAMES.items():
+    for artifact_name, filename in contract.artifact_filenames.items():
         descriptor = _object(payload.get(artifact_name), f"payload.{artifact_name}")
         _equal(descriptor.get("filename"), filename, f"{artifact_name}.filename")
         artifact_paths[artifact_name] = _verify_file(
@@ -495,7 +504,7 @@ def verify_release(
             descriptor.get("sha256"),
             f"{artifact_name}.sha256",
         )
-    _verify_contract_artifacts(artifact_paths)
+    _verify_contract_artifacts(artifact_paths, contract)
 
     build = _object(payload.get("build"), "payload.build")
     _equal(build.get("repository"), repository, "build.repository")
@@ -550,20 +559,23 @@ def verify_release(
         "service_wheel_sha256": service_sha,
         "service_image_reference": image_reference,
         "service_image_digest": image_digest,
-        "release_version": _RELEASE_VERSION,
-        "api_version": _API_VERSION,
-        "schema_version": _SCHEMA_VERSION,
-        "funding_profiles": list(_FUNDING_PROFILES),
-        "capabilities": list(_CAPABILITIES),
+        "release_version": contract.release_version,
+        "api_version": contract.api_version,
+        "schema_version": contract.schema_version,
+        "funding_profiles": list(contract.funding_profiles),
+        "capabilities": list(contract.capabilities),
         "artifact_sha256": artifact_sha256,
         "authority_id": authority_id,
         "authority_scheme": "eip191",
         "authority_address": authority_address,
-        "identity_contract": _IDENTITY_CONTRACT,
+        "identity_contract": contract.identity_contract,
         "repository": repository,
         "workflow_ref": workflow_ref,
         "source_commit": source_commit,
-        "artifacts": dict(_ARTIFACT_FILENAMES),
+        # The filenames stay; the caller joins them with the release directory
+        # to read the contract from the artifact the manifest hash-pinned,
+        # rather than from a restatement of it.
+        "artifacts": dict(contract.artifact_filenames),
     }
 
 

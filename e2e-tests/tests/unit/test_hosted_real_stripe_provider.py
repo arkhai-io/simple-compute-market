@@ -156,6 +156,11 @@ def test_push_transfer_funds_exact_customer_cash_balance_in_test_mode() -> None:
         "customer": "cus_private",
         "transfer_group": GROUP,
         "metadata": metadata,
+        # A push transfer is attributed by the reference Stripe issues with the
+        # funding instructions, not by the customer it lands on.
+        "next_action": {
+            "display_bank_transfer_instructions": {"reference": "BV5JFRE47YPZ"},
+        },
     }
     mutations: list[tuple[str, Mapping[str, str]]] = []
 
@@ -176,7 +181,11 @@ def test_push_transfer_funds_exact_customer_cash_balance_in_test_mode() -> None:
     assert mutations == [
         (
             "/v1/test_helpers/customers/cus_private/fund_cash_balance",
-            {"amount": "1250", "currency": "usd"},
+            {
+                "amount": "1250",
+                "currency": "usd",
+                "reference": "BV5JFRE47YPZ",
+            },
         )
     ]
 
@@ -232,3 +241,101 @@ def test_collection_wait_retries_transient_stripe_unavailability() -> None:
 
     assert evidence.transfer_count == 1
     assert attempts > 1
+
+
+def _refused_transport(*, session_overrides: dict[str, Any] | None = None, stray: bool = False):
+    """Stripe as it actually answers after Checkout refuses a card.
+
+    A refused attempt persists nothing: the session stays open and unpaid with
+    a null ``payment_intent``, and the account holds no intent or charge for
+    the operation at all. These fixtures are transcribed from a live test-mode
+    refusal, not from what a failed intent would have looked like.
+    """
+
+    funding_metadata = {
+        "operation_ref": OPERATION,
+        "marketplace_operation_id": MARKET_OPERATION,
+        "funding_profile": "card.v1",
+        "funding_authorization_ref": "authorization-private",
+    }
+    session = {
+        "id": SESSION,
+        "livemode": False,
+        "mode": "payment",
+        "status": "open",
+        "payment_status": "unpaid",
+        "amount_total": 1250,
+        "currency": "usd",
+        "client_reference_id": OPERATION,
+        "metadata": funding_metadata,
+        "payment_intent": None,
+        **(session_overrides or {}),
+    }
+    elsewhere = {
+        "id": "pi_elsewhere",
+        "livemode": False,
+        "status": "succeeded",
+        "amount": 1250,
+        "currency": "usd",
+        "transfer_group": GROUP,
+        "metadata": funding_metadata,
+    }
+
+    def request(path: str, params: Mapping[str, str]) -> dict[str, Any]:
+        if path == f"/v1/checkout/sessions/{SESSION}":
+            return session
+        if path == "/v1/payment_intents":
+            return {"data": [elsewhere] if stray else [], "has_more": False}
+        if path == "/v1/transfers":
+            assert params["transfer_group"] == GROUP
+            return {"data": [], "has_more": False}
+        raise AssertionError(f"unexpected retrieval: {path}")
+
+    return request
+
+
+@pytest.mark.parametrize(
+    ("outcome", "normalized"),
+    [("decline", "declined"), ("insufficient_funds", "insufficient_funds")],
+)
+def test_refusal_is_proven_by_the_absence_of_every_funding_object(
+    outcome: str, normalized: str
+) -> None:
+    evidence = StripeApi("rk_test_secret", transport=_refused_transport()).inspect_payment_outcome(
+        _expected(),
+        outcome,  # type: ignore[arg-type]
+    )
+    assert evidence.outcome == normalized
+    assert evidence.checkout_count == 1
+    assert evidence.payment_intent_count == 0
+    assert evidence.charge_count == 0
+    assert evidence.transfer_count == 0
+    assert evidence.refund_count == 0
+    assert evidence.operation_metadata_matches is True
+
+
+def test_a_refused_session_that_completed_is_refused() -> None:
+    transport = _refused_transport(
+        session_overrides={"status": "complete", "payment_status": "paid"}
+    )
+    with pytest.raises(ProviderInvariantError):
+        StripeApi("rk_test_secret", transport=transport).inspect_payment_outcome(
+            _expected(), "decline"
+        )
+
+
+def test_a_refused_session_carrying_an_intent_is_refused() -> None:
+    transport = _refused_transport(session_overrides={"payment_intent": "pi_unexpected"})
+    with pytest.raises(ProviderInvariantError):
+        StripeApi("rk_test_secret", transport=transport).inspect_payment_outcome(
+            _expected(), "decline"
+        )
+
+
+def test_a_refused_operation_that_funded_outside_its_session_is_refused() -> None:
+    """Absence on the session is not absence in the account."""
+
+    with pytest.raises(ProviderInvariantError):
+        StripeApi(
+            "rk_test_secret", transport=_refused_transport(stray=True)
+        ).inspect_payment_outcome(_expected(), "decline")

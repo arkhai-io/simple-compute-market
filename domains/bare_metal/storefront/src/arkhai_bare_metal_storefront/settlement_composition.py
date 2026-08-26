@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import datetime
 from types import MappingProxyType
@@ -14,8 +14,12 @@ from arkhai_bare_metal import (
 )
 from core_storefront.publication_runner import PublicationPayload
 from market_alkahest import create_alkahest_registration
+from market_contact_exchange import create_contact_exchange_registration
 from market_core.schemas import SettlementOption
-from market_hosted_settlement import create_stripe_registration
+from market_hosted_settlement import (
+    create_stripe_registration,
+    default_hosted_selection_dispatch,
+)
 from market_settlement_runtime import (
     MechanismReadiness,
     SettlementConfig,
@@ -28,10 +32,14 @@ ALKAHEST_MECHANISM = "alkahest.v1"
 
 
 def build_bare_metal_settlement_registry() -> SettlementConfigurationRegistry:
-    """Install the two supported mechanisms through their shared facades."""
+    """Install the supported mechanisms through their shared facades."""
 
     return SettlementConfigurationRegistry(
-        (create_alkahest_registration(), create_stripe_registration())
+        (
+            create_alkahest_registration(),
+            create_stripe_registration(),
+            create_contact_exchange_registration(),
+        )
     )
 
 
@@ -146,18 +154,19 @@ class BareMetalStorefrontSettlementComposition:
                     for item in built_options
                 )
 
-        hosted = build_ready_bare_metal_hosted_options(
-            candidate=candidate,
-            base_hosted_options=hosted_bases,
-            policy=self.publication_policy,
-            offer_expires_at=offer_expires_at,
-            funding_deadlines=funding_deadlines,
-            fulfillment_deadline=fulfillment_deadline,
-            now=now,
-        )
-        settlement_options.extend(
-            option.model_dump(mode="json") for option in hosted.settlement_options
-        )
+        if hosted_bases:
+            hosted = build_ready_bare_metal_hosted_options(
+                candidate=candidate,
+                base_hosted_options=hosted_bases,
+                policy=self.publication_policy,
+                offer_expires_at=offer_expires_at,
+                funding_deadlines=funding_deadlines,
+                fulfillment_deadline=fulfillment_deadline,
+                now=now,
+            )
+            settlement_options.extend(
+                option.model_dump(mode="json") for option in hosted.settlement_options
+            )
         option_ids = [item["option_id"] for item in settlement_options]
         if len(option_ids) != len(set(option_ids)):
             raise ValueError(
@@ -183,10 +192,39 @@ class BareMetalStorefrontSettlementComposition:
             resources=self.resources,
         )
 
+    def accepted_obligation_dispatch(
+        self,
+    ) -> dict[str, Callable[[Mapping[str, Any], Mapping[str, Any]], Any]]:
+        """Curried registry dispatch for every enabled obligation-building mechanism."""
+
+        dispatch: dict[str, Callable[[Mapping[str, Any], Mapping[str, Any]], Any]] = {}
+        for mechanism_id in self.config.priority:
+            registration = self.registry.registration(mechanism_id)
+            if registration.accepted_obligation_builder is None:
+                continue
+
+            def build(
+                option: Mapping[str, Any],
+                context: Mapping[str, Any],
+                *,
+                _mechanism_id: str = mechanism_id,
+            ) -> Any:
+                return self.registry.build_accepted_obligation(
+                    _mechanism_id,
+                    option,
+                    self.config,
+                    role="seller",
+                    context=context,
+                )
+
+            dispatch[mechanism_id] = build
+        return dispatch
+
 
 __all__ = [
     "ALKAHEST_MECHANISM",
     "HOSTED_MECHANISM",
     "BareMetalStorefrontSettlementComposition",
     "build_bare_metal_settlement_registry",
+    "default_hosted_selection_dispatch",
 ]

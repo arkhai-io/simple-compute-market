@@ -237,6 +237,9 @@ def _build_vm_services(
         registry=registry,
         binding=binding,
         capacity_runtime=capacity_runtime,
+        accepted_obligation_dispatch=(
+            settlement_composition.accepted_obligation_dispatch()
+        ),
     )
     listing_service = _build_listing_service(
         registry=registry,

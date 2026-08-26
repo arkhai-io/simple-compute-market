@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import base64
 import json
 import stat
@@ -16,6 +17,7 @@ from src.hosted_real_stripe.evidence import (
     HostedReleaseIdentityEvidence,
     IdentityEvidence,
     MarketplaceIdentityEvidence,
+    PaymentOutcomeEvidence,
     ProviderEvidence,
     StripeTestEvidence,
     opaque_ref,
@@ -35,6 +37,25 @@ from src.hosted_real_stripe.gates import (
 
 COMMIT = "a" * 40
 HOSTED_COMMIT = "d" * 40
+CAPABILITIES = (
+    "scheme-tagged-identities.v1",
+    "account-owner-admission.v1",
+    "account-owner-rotation.v1",
+    "account-owner-retirement.v1",
+    "signer-injected-client.v1",
+    "provider-neutral-seller-onboarding.v1",
+    "conditional-escrow.v2",
+    "stripe-connect-separate-charges-transfers.v2",
+    "portable-attestation.v1",
+    "eas-arbiter.v1",
+    "payer-profile.v1",
+    "funding-authorization.v1",
+    "funding-profile.card.v1",
+    "funding-profile.us_bank_transfer.v1",
+    "funding-profile.us_ach_debit.v1",
+    "normalized-funding-reversal.v1",
+    "operator-recovery-redaction.v1",
+)
 DIGEST = "sha256:" + "b" * 64
 IMAGE = "sha256:" + "c" * 64
 WHEEL = "sha256:" + "e" * 64
@@ -118,6 +139,20 @@ def test_protected_gates_reject_live_credentials_and_non_loopback_webhooks() -> 
 
 
 def test_release_gate_binds_all_signed_and_observed_identities(tmp_path: Path) -> None:
+    # The contract a run asserts is read from the release it bound, so the
+    # release's own artifact has to be where the environment says it is.
+    release_dir = tmp_path / "release"
+    release_dir.mkdir()
+    conformance = json.dumps(
+        {
+            "api_version": "0.2.1",
+            "schema_version": 5,
+            "funding_profiles": ["card.v1", "us_bank_transfer.v1", "us_ach_debit.v1"],
+            "identity_contract": {"capabilities": list(CAPABILITIES)},
+        }
+    ).encode()
+    (release_dir / "conformance-v0.2.1.json").write_bytes(conformance)
+    conformance_sha = "sha256:" + hashlib.sha256(conformance).hexdigest()
     compose_env = tmp_path / "hosted.env"
     compose_env.write_text(
         "\n".join(
@@ -134,7 +169,7 @@ def test_release_gate_binds_all_signed_and_observed_identities(tmp_path: Path) -
                 "HOSTED_SETTLEMENT_VERIFIED_IMAGE=registry.example/authority@" + IMAGE,
                 "HOSTED_SETTLEMENT_VERIFIED_MANIFEST_SHA256=" + DIGEST,
                 "HOSTED_SETTLEMENT_VERIFIED_CLIENT_WHEEL_SHA256=" + WHEEL,
-                "HOSTED_SETTLEMENT_VERIFIED_RELEASE_DIR=/verified/release",
+                "HOSTED_SETTLEMENT_VERIFIED_RELEASE_DIR=" + str(release_dir),
                 "HOSTED_SETTLEMENT_VERIFIED_SOURCE_COMMIT=" + HOSTED_COMMIT,
                 "HOSTED_SETTLEMENT_VERIFIED_REPOSITORY=arkhai-io/stripe-settlement-service",
                 "HOSTED_SETTLEMENT_VERIFIED_WORKFLOW_REF=.github/workflows/release.yml@main",
@@ -145,13 +180,13 @@ def test_release_gate_binds_all_signed_and_observed_identities(tmp_path: Path) -
                 "HOSTED_SETTLEMENT_VERIFIED_API_VERSION=0.2.1",
                 "HOSTED_SETTLEMENT_VERIFIED_SCHEMA_VERSION=5",
                 "HOSTED_SETTLEMENT_VERIFIED_RELEASE_VERSION=0.2.1",
-                "HOSTED_SETTLEMENT_VERIFIED_CONFORMANCE_SHA256=" + DIGEST,
+                "HOSTED_SETTLEMENT_VERIFIED_CONFORMANCE_SHA256=" + conformance_sha,
                 "HOSTED_SETTLEMENT_VERIFIED_MIGRATIONS_SHA256=" + DIGEST,
                 "HOSTED_SETTLEMENT_VERIFIED_OPENAPI_SHA256=" + DIGEST,
                 "HOSTED_SETTLEMENT_VERIFIED_PROVENANCE_SHA256=" + DIGEST,
                 "HOSTED_SETTLEMENT_VERIFIED_SERVICE_WHEEL_SHA256=" + DIGEST,
                 "HOSTED_SETTLEMENT_VERIFIED_FUNDING_PROFILES=card.v1,us_bank_transfer.v1,us_ach_debit.v1",
-                "HOSTED_SETTLEMENT_VERIFIED_CAPABILITIES=scheme-tagged-identities.v1,account-owner-admission.v1,account-owner-rotation.v1,account-owner-retirement.v1,signer-injected-client.v1,provider-neutral-seller-onboarding.v1,conditional-escrow.v2,stripe-connect-separate-charges-transfers.v2,portable-attestation.v1,eas-arbiter.v1,payer-profile.v1,funding-authorization.v1,funding-profile.card.v1,funding-profile.us_bank_transfer.v1,funding-profile.us_ach_debit.v1,normalized-funding-reversal.v1,operator-recovery-redaction.v1",
+                "HOSTED_SETTLEMENT_VERIFIED_CAPABILITIES=" + ",".join(CAPABILITIES),
             )
         )
         + "\n",
@@ -270,7 +305,7 @@ def test_evidence_is_allowlisted_private_signed_and_rejects_provider_values(
     output = tmp_path / "evidence.json"
     write_evidence(output, report)
     payload = json.loads(output.read_text(encoding="utf-8"))
-    assert payload["schema"] == "arkhai.hosted-settlement-stripe-test-evidence.v3"
+    assert payload["schema"] == "arkhai.hosted-settlement-stripe-test-evidence.v4"
     assert payload["lane"] == "stripe-test"
     assert (
         payload["identities"]["marketplace"]["repository"]
@@ -301,3 +336,201 @@ def test_evidence_is_allowlisted_private_signed_and_rejects_provider_values(
     )
     with pytest.raises(EvidenceValidationError):
         write_evidence(tmp_path / "leaked.json", leaked)
+
+
+# ---------------------------------------------------------------------------
+# A development run records what it ran
+# ---------------------------------------------------------------------------
+
+LOCAL = "local"
+BUILD_DIGEST = "sha256:" + "7" * 64
+
+
+def _local_hosted(**overrides) -> HostedReleaseIdentityEvidence:
+    """The producer half exactly as the binding gate leaves it for a build."""
+
+    base = dict(
+        repository="arkhai-io/stripe-settlement-service",
+        source_commit=LOCAL,
+        workflow_run_id=LOCAL,
+        workflow_ref=LOCAL,
+        manifest_sha256=LOCAL,
+        client_wheel_sha256=LOCAL,
+        image_digest=LOCAL,
+        image="localhost/arkhai-hosted-settlement-service:0.3.0",
+        manifest_digest=BUILD_DIGEST,
+    )
+    base.update(overrides)
+    return HostedReleaseIdentityEvidence(**base)
+
+
+def _development_report(hosted: HostedReleaseIdentityEvidence) -> StripeTestEvidence:
+    collection = _collection()
+    identities = replace(
+        _identities(),
+        hosted_release=hosted,
+        release_mode="local",
+        marketplace=replace(
+            _identities().marketplace,
+            image="localhost/arkhai:storefront",
+        ),
+    )
+    return StripeTestEvidence(
+        identities=identities,
+        provider=ProviderEvidence(connected_account_ready=True, loopback_webhook_verified=True),
+        scenario="collection",
+        result="passed",
+        stage="complete",
+        funding=_funding(),
+        operation_ref=collection.operation_ref,
+        collection=collection,
+    )
+
+
+def _signing_env(monkeypatch) -> None:
+    seed = bytes(range(32))
+    signer = Ed25519Signer(seed)
+    monkeypatch.setenv("HOSTED_SETTLEMENT_E2E_EVIDENCE_SIGNER_SCHEME", "ed25519")
+    monkeypatch.setenv(
+        "HOSTED_SETTLEMENT_E2E_EVIDENCE_SIGNER_IDENTIFIER", signer.identity.identifier
+    )
+    monkeypatch.setenv(
+        "HOSTED_SETTLEMENT_E2E_EVIDENCE_SIGNER_CREDENTIAL",
+        base64.urlsafe_b64encode(seed).rstrip(b"=").decode(),
+    )
+
+
+def test_a_development_run_records_the_build_it_ran(tmp_path: Path, monkeypatch) -> None:
+    """A run the binding gate admitted must be able to record itself.
+
+    Refusing here discards the whole run: the scenario has already executed,
+    and the report is the only thing that says what it found.
+    """
+
+    _signing_env(monkeypatch)
+    output = tmp_path / "evidence.json"
+    write_evidence(output, _development_report(_local_hosted()))
+    payload = json.loads(output.read_text(encoding="utf-8"))
+    hosted = payload["identities"]["hosted_release"]
+    assert payload["identities"]["release_mode"] == "local"
+    assert hosted["source_commit"] == LOCAL
+    assert hosted["image"] == "localhost/arkhai-hosted-settlement-service:0.3.0"
+    assert hosted["manifest_digest"] == BUILD_DIGEST
+
+
+def test_a_half_that_is_partly_released_and_partly_local_is_refused(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """No admitted run produces that combination, so recording one is a defect."""
+
+    _signing_env(monkeypatch)
+    report = _development_report(_local_hosted(source_commit=HOSTED_COMMIT))
+    with pytest.raises(EvidenceValidationError, match="partly both"):
+        write_evidence(tmp_path / "evidence.json", report)
+
+
+def test_a_locally_built_producer_that_names_no_image_is_refused(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """Six markers name no producer, and two builds would be indistinguishable."""
+
+    _signing_env(monkeypatch)
+    with pytest.raises(EvidenceValidationError, match="name the image"):
+        write_evidence(
+            tmp_path / "evidence.json", _development_report(_local_hosted(image=""))
+        )
+    with pytest.raises(EvidenceValidationError, match="build the authority reported"):
+        write_evidence(
+            tmp_path / "evidence.json",
+            _development_report(_local_hosted(manifest_digest="")),
+        )
+
+
+def test_an_attested_producer_half_is_still_required_to_be_exact(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """Admitting builds must not weaken what a release has to prove."""
+
+    _signing_env(monkeypatch)
+    collection = _collection()
+    hosted = replace(_identities().hosted_release, workflow_run_id="not-a-run-id")
+    report = StripeTestEvidence(
+        identities=replace(_identities(), hosted_release=hosted),
+        provider=ProviderEvidence(connected_account_ready=True, loopback_webhook_verified=True),
+        scenario="collection",
+        result="passed",
+        stage="complete",
+        funding=_funding(),
+        operation_ref=collection.operation_ref,
+        collection=collection,
+    )
+    with pytest.raises(EvidenceValidationError, match="source, workflow, and run must be exact"):
+        write_evidence(tmp_path / "evidence.json", report)
+
+
+def test_a_refused_payment_may_not_claim_a_funding_artifact(tmp_path: Path, monkeypatch) -> None:
+    """Checkout creates no intent for a card it refused, so neither may evidence."""
+
+    _signing_env(monkeypatch)
+    outcome = PaymentOutcomeEvidence(
+        operation_ref=opaque_ref("op", "marketplace-operation"),
+        outcome="declined",
+        checkout_count=1,
+        payment_intent_count=0,
+        charge_count=0,
+        transfer_count=0,
+        refund_count=0,
+        operation_metadata_matches=True,
+    )
+    report = StripeTestEvidence(
+        identities=_identities(),
+        provider=ProviderEvidence(connected_account_ready=True, loopback_webhook_verified=True),
+        scenario="decline",
+        result="passed",
+        stage="complete",
+        funding=replace(_funding(), authoritative_funding_observed=False),
+        operation_ref=outcome.operation_ref,
+        payment_outcome=outcome,
+    )
+    write_evidence(tmp_path / "refused.json", report)
+
+    claimed = replace(
+        report,
+        payment_outcome=replace(outcome, payment_intent_count=1, charge_count=1),
+    )
+    with pytest.raises(EvidenceValidationError, match="refused payment"):
+        write_evidence(tmp_path / "claimed.json", claimed)
+
+
+def test_an_authenticated_payment_must_carry_its_funding_artifact(
+    tmp_path: Path, monkeypatch
+) -> None:
+    _signing_env(monkeypatch)
+    outcome = PaymentOutcomeEvidence(
+        operation_ref=opaque_ref("op", "marketplace-operation"),
+        outcome="authentication_succeeded",
+        checkout_count=1,
+        payment_intent_count=1,
+        charge_count=1,
+        transfer_count=0,
+        refund_count=0,
+        operation_metadata_matches=True,
+    )
+    report = StripeTestEvidence(
+        identities=_identities(),
+        provider=ProviderEvidence(connected_account_ready=True, loopback_webhook_verified=True),
+        scenario="authentication",
+        result="passed",
+        stage="complete",
+        funding=_funding(),
+        operation_ref=outcome.operation_ref,
+        payment_outcome=outcome,
+    )
+    write_evidence(tmp_path / "authenticated.json", report)
+
+    empty = replace(
+        report,
+        payment_outcome=replace(outcome, payment_intent_count=0, charge_count=0),
+    )
+    with pytest.raises(EvidenceValidationError, match="authenticated payment"):
+        write_evidence(tmp_path / "empty.json", empty)

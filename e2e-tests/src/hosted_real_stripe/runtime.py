@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+from collections import deque
 from dataclasses import dataclass
 import queue
 import re
@@ -25,10 +26,31 @@ from market_identity import (
 )
 from typing import Any, Mapping, Sequence
 
+from .gates import LOCAL_COORDINATE, HostedContract
+
 _WEBHOOK_SECRET = re.compile(r"\b(whsec_[A-Za-z0-9]+)\b")
 _SENSITIVE_ENV = re.compile(r"(?:STRIPE|WEBHOOK)", re.IGNORECASE)
+#: The staged bridge speaks to the loopback stack and to nothing else, so an
+#: ambient proxy is never right for it. Clients that trust the environment
+#: build a transport for whatever they find there before any request is made,
+#: which turns an unrelated shell setting into a failure inside the run.
+_PROXY_ENV = re.compile(r"^(?:all|http|https|ftp|no)_proxy$", re.IGNORECASE)
 _SAFE_CONFIG_VALUE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/@-]{0,255}$")
+_API_VERSION = re.compile(r"^[0-9]+\.[0-9]+\.[0-9]+$")
 _PROTECTED_PROFILE = "hosted-stripe-test"
+_REGISTRY_AUTH_SECTION = "[registry.auth]"
+#: A bearer token, not a configuration identifier: URL-safe base64 begins with
+#: whatever it begins with, and roughly one generated key in thirty starts with
+#: "_" or "-". Requiring a leading alphanumeric here made a run fail on the
+#: value it had been handed, intermittently. What matters is that the token
+#: cannot break out of the TOML string it is written into.
+_REGISTRY_BEARER = re.compile(r"^[A-Za-z0-9._~+/=:-]{1,512}$")
+#: A bounded tail: enough to read a traceback, never a transcript.
+_DIAGNOSTIC_LINES = 60
+_DIAGNOSTIC_LINE_LIMIT = 2048
+#: Long enough for a dying process to finish writing, short enough that a
+#: live one is not waited on.
+_DIAGNOSTIC_DRAIN_SECONDS = 5.0
 
 
 class ProcessUnavailable(RuntimeError):
@@ -78,6 +100,19 @@ def require_runtime_authority_identity(
 
 class LifecycleConvergenceTimeout(TimeoutError):
     """A named marketplace state did not converge within its bound."""
+
+
+class LifecycleAuthorityRefused(RuntimeError):
+    """The authority refused, and said something a wait could not change.
+
+    Distinct from a convergence timeout: a timeout says a stage ran out of
+    bound, this says the authority answered. Carrying the code keeps the answer
+    attached to the stage that received it.
+    """
+
+    def __init__(self, code: str) -> None:
+        super().__init__(f"hosted authority refused: {code}")
+        self.code = code
 
 
 class StripeWebhookForwarder:
@@ -180,6 +215,14 @@ class StripeWebhookForwarder:
         self.stop()
 
 
+def _caller_scheme(caller: str) -> str:
+    return caller.partition(":")[0]
+
+
+def _caller_identifier(caller: str) -> str:
+    return caller.partition(":")[2]
+
+
 class EphemeralServiceEnv:
     """Create a mode-0600 authority env file and remove it on every outcome."""
 
@@ -188,6 +231,9 @@ class EphemeralServiceEnv:
         *,
         api_key: str,
         webhook_secret: str,
+        authority_environment: str,
+        storefront_caller: str,
+        authority_caller: str,
         manifest_digest: str,
         release_authority_id: str,
         release_authority_address: str,
@@ -203,29 +249,48 @@ class EphemeralServiceEnv:
             "HOSTED_SETTLEMENT_STRIPE_SECRET_KEY": api_key,
             "HOSTED_SETTLEMENT_STRIPE_WEBHOOK_SECRET": webhook_secret,
             "HOSTED_SETTLEMENT_MANIFEST_DIGEST": manifest_digest,
+            # The environment the run pins everywhere else; the authority is
+            # told it here rather than trusted to have been told the same.
+            "HOSTED_SETTLEMENT_ENVIRONMENT": authority_environment,
+            # Fixed by the Compose file's named volume, not by whoever supplied
+            # the credentials, so the harness states it.
+            "HOSTED_SETTLEMENT_DATABASE_PATH": (
+                "/var/lib/hosted-settlement/hosted-settlement.sqlite3"
+            ),
             "HOSTED_SETTLEMENT_CHECKOUT_SUCCESS_URL": "http://127.0.0.1:18081/checkout/success",
             "HOSTED_SETTLEMENT_CHECKOUT_CANCEL_URL": "http://127.0.0.1:18081/checkout/cancel",
-            "HOSTED_SETTLEMENT_RELEASE_PATH": "/opt/hosted-settlement/release/release-manifest.json",
-            "HOSTED_SETTLEMENT_RELEASE_AUTHORITY_ID": release_authority_id,
-            "HOSTED_SETTLEMENT_RELEASE_AUTHORITY_ADDRESS": release_authority_address,
-            "HOSTED_SETTLEMENT_RELEASE_REPOSITORY": release_repository,
-            "HOSTED_SETTLEMENT_RELEASE_WORKFLOW_REF": release_workflow_ref,
-            "HOSTED_SETTLEMENT_RELEASE_SOURCE_COMMIT": release_source_commit,
-            "HOSTED_SETTLEMENT_RESOLVER_CALLERS": (f"eip191:{release_authority_address}"),
+            # Onboarding redirects land on the same loopback storefront. Every
+            # callback URL the authority allows must be distinct.
+            "HOSTED_SETTLEMENT_ACCOUNT_LINK_RETURN_URLS": "http://127.0.0.1:18081/connect/return",
+            "HOSTED_SETTLEMENT_ACCOUNT_LINK_REFRESH_URLS": (
+                "http://127.0.0.1:18081/connect/refresh"
+            ),
+            # The authority refuses every storefront principal until it is told
+            # which one exists. The harness builds that storefront, so it says
+            # so rather than trusting a credential payload to agree with it.
+            "HOSTED_SETTLEMENT_STOREFRONT_CALLERS": storefront_caller,
+            # The portable resolver is this authority calling itself: it signs
+            # the lookup with its own runtime key and stamps portable
+            # attestations with the same identity. Both sides therefore name
+            # the runtime authority, not the independent key that signed the
+            # release -- those are deliberately different principals.
+            "HOSTED_SETTLEMENT_RESOLVER_CALLERS": authority_caller,
             "HOSTED_SETTLEMENT_REMOTE_RESOLVERS_JSON": json.dumps(
                 [
                     {
                         "resolver_id": "vm-portable",
                         "evaluator_id": "vm-portable",
                         "base_url": "http://127.0.0.1:8080",
-                        "authority_id": release_authority_id,
+                        "authority_id": authority_environment,
                         "principals": [
                             {
-                                "scheme": "eip191",
-                                "identifier": release_authority_address,
+                                "scheme": _caller_scheme(authority_caller),
+                                "identifier": _caller_identifier(authority_caller),
                             }
                         ],
-                        "portable_authority_address": release_authority_address,
+                        "portable_authority_address": _caller_identifier(
+                            authority_caller
+                        ),
                         "allow_insecure_loopback": True,
                     }
                 ],
@@ -233,6 +298,25 @@ class EphemeralServiceEnv:
                 sort_keys=True,
             ),
         }
+        # A producer built here has no signed manifest to be verified against,
+        # and the authority refuses to start if it is pointed at one that does
+        # not exist. The five release identities travel with the manifest: all
+        # six are set together for a release, and none of them for a build.
+        if release_authority_id != LOCAL_COORDINATE:
+            self._values.update(
+                {
+                    "HOSTED_SETTLEMENT_RELEASE_PATH": (
+                        "/opt/hosted-settlement/release/release-manifest.json"
+                    ),
+                    "HOSTED_SETTLEMENT_RELEASE_AUTHORITY_ID": release_authority_id,
+                    "HOSTED_SETTLEMENT_RELEASE_AUTHORITY_ADDRESS": (
+                        release_authority_address
+                    ),
+                    "HOSTED_SETTLEMENT_RELEASE_REPOSITORY": release_repository,
+                    "HOSTED_SETTLEMENT_RELEASE_WORKFLOW_REF": release_workflow_ref,
+                    "HOSTED_SETTLEMENT_RELEASE_SOURCE_COMMIT": release_source_commit,
+                }
+            )
         self._base_path = base_path
         self._shared_directory = shared_directory
         self._directory: Path | None = None
@@ -281,6 +365,29 @@ class EphemeralServiceEnv:
         self._directory = None
 
 
+def _fill_registry_auth(text: str) -> str:
+    """Supply the bearer key for every registry the template says demands one.
+
+    The declaration is committed and reviewable -- which registries are private
+    is not a secret -- and the key is not, so it arrives from the run's own
+    environment. A template that declares none is returned untouched, and a run
+    that holds no key leaves the declaration empty rather than inventing one,
+    so the registry refuses it visibly instead of being handed a wrong value.
+    """
+
+    if _REGISTRY_AUTH_SECTION not in text:
+        return text
+    key = os.environ.get("VMS_REGISTRY_BOOTSTRAP_API_KEY", "")
+    if not key:
+        return text
+    if not _REGISTRY_BEARER.fullmatch(key):
+        raise ProcessUnavailable("registry bootstrap authorization is invalid")
+    head, _, tail = text.partition(_REGISTRY_AUTH_SECTION)
+    section, boundary, rest = tail.partition("\n[")
+    filled = re.sub(r'(?m)^("[^"\n]+"\s*=\s*)""$', rf'\1"{key}"', section)
+    return head + _REGISTRY_AUTH_SECTION + filled + boundary + rest
+
+
 class EphemeralMarketplaceConfig:
     """Render release-pinned marketplace trust without provider identifiers."""
 
@@ -294,10 +401,12 @@ class EphemeralMarketplaceConfig:
         authority_address: str,
         authority_environment: str,
         manifest_digest: str,
+        contract: HostedContract,
         funding_profile: str,
         shared_directory: Path,
     ) -> None:
         self._template = template
+        self._contract = contract
         self._values = {
             "account_ref": account_ref,
             "authority_id": authority_id,
@@ -318,6 +427,7 @@ class EphemeralMarketplaceConfig:
             text = self._template.read_text(encoding="utf-8")
         except OSError as exc:
             raise ProcessUnavailable("marketplace configuration template is unavailable") from exc
+        text = _fill_registry_auth(text)
         text = _replace_toml_setting(text, "authority_id", self._values["authority_id"])
         text = _replace_toml_setting(
             text,
@@ -329,6 +439,7 @@ class EphemeralMarketplaceConfig:
             "expected_manifest_digest",
             self._values["manifest_digest"],
         )
+        text = _insert_hosted_contract(text, self._contract, role="marketplace")
         stripe_header = "[Settlement.stripe]\n"
         if text.count(stripe_header) != 1:
             raise ProcessUnavailable("marketplace configuration has no exact Stripe section")
@@ -407,11 +518,13 @@ class EphemeralBuyerConfig:
         authority_environment: str,
         authority_base_url: str,
         manifest_digest: str,
+        contract: HostedContract,
         funding_profile: str,
         buyer_identity_scheme: str,
         shared_directory: Path,
     ) -> None:
         self._template = template
+        self._contract = contract
         self._values = {
             "authority_id": authority_id,
             "authority_scheme": authority_scheme,
@@ -434,6 +547,7 @@ class EphemeralBuyerConfig:
             text = self._template.read_text(encoding="utf-8")
         except OSError as exc:
             raise ProcessUnavailable("buyer configuration template is unavailable") from exc
+        text = _fill_registry_auth(text)
         for key, value in (
             ("authority_id", self._values["authority_id"]),
             ("environment", self._values["authority_environment"]),
@@ -452,6 +566,7 @@ class EphemeralBuyerConfig:
             "expected_manifest_digest",
             self._values["manifest_digest"],
         )
+        text = _insert_hosted_contract(text, self._contract, role="buyer")
         text = _replace_toml_setting(
             text,
             "funding_profile",
@@ -520,6 +635,11 @@ class EphemeralBuyerConfig:
         self._directory = None
 
 
+#: A volume Compose named for the project looks like ``<project>_<name>``; one
+#: a service asked for anonymously is addressed only by its own digest.
+_ANONYMOUS_VOLUME = re.compile(r"^[0-9a-f]{64}$")
+
+
 class ComposeStack:
     """Start the ordinary digest-pinned marketplace/authority topology."""
 
@@ -530,8 +650,16 @@ class ComposeStack:
         compose_files: Sequence[Path],
         executable: str = "docker",
         cwd: Path,
+        retain_diagnostics: bool = False,
+        retain_authority_state: bool = False,
     ) -> None:
         self._cwd = cwd
+        self._retain_authority_state = retain_authority_state
+        self._preexisting_volumes: frozenset[str] = frozenset()
+        # Compose prints the container output that says why an operation
+        # failed. Held for a development operator only, on the same terms as
+        # the staged bridge's stderr.
+        self._retain_diagnostics = retain_diagnostics
         self._base = [
             executable,
             "compose",
@@ -562,6 +690,12 @@ class ComposeStack:
                 f"{storefront_servicing_interval_seconds:g}"
             )
         self._runtime_env = env
+        # Only meaningful when the named volume is kept: a teardown that spares
+        # it also spares the anonymous volumes the services bring with them, so
+        # the run notes which ones predate it and removes only what it added.
+        self._preexisting_volumes = (
+            self._volumes() if self._retain_authority_state else frozenset()
+        )
         self._run((*self._base, "up", "-d", "--wait"), env=env, check=True)
         self._started = True
 
@@ -608,13 +742,61 @@ class ComposeStack:
         env = self._runtime_env or {
             key: value for key, value in os.environ.items() if not _SENSITIVE_ENV.search(key)
         }
+        # The authority's state belongs to one run. Leaving the named volume
+        # behind makes the next run start against a database that already
+        # remembers this one -- locally, where runs share a machine, that is
+        # every second run; on a runner it is every retry after an interruption.
+        #
+        # A development run may ask to keep it, and only the authority's: the
+        # topology declares exactly one named volume, and every other service
+        # keeps its state inside the container. What survives is therefore the
+        # payer fixture -- the profile, its instrument, and the account owner
+        # binding -- and nothing about the marketplace side of the run. That
+        # buys back the one thing a saved-instrument lane cannot automate: the
+        # hosted setup page, which is completed once and then reused.
+        teardown = (*self._base, "down", "--remove-orphans")
         self._run(
-            (*self._base, "down", "--remove-orphans"),
+            teardown if self._retain_authority_state else (*teardown, "--volumes"),
             env=env,
             check=False,
         )
+        if self._retain_authority_state:
+            self._drop_added_anonymous_volumes(env)
         self._started = False
         self._runtime_env = None
+
+    def _volumes(self) -> frozenset[str]:
+        try:
+            completed = subprocess.run(
+                (self._base[0], "volume", "ls", "-q"),
+                cwd=self._cwd,
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.DEVNULL,
+                text=True,
+                timeout=60,
+                check=False,
+            )
+        except (OSError, subprocess.TimeoutExpired):
+            return frozenset()
+        if completed.returncode != 0:
+            return frozenset()
+        return frozenset(line.strip() for line in completed.stdout.splitlines() if line.strip())
+
+    def _drop_added_anonymous_volumes(self, env: Mapping[str, str]) -> None:
+        """Remove the unnamed volumes this run added, and only those.
+
+        A name of the project's own choosing is the cache and must survive. An
+        anonymous one is a service's scratch space, and leaving it behind on
+        every retained run leaks a volume per run. Volumes present before the
+        stack came up are somebody else's and are never touched.
+        """
+
+        added = self._volumes() - self._preexisting_volumes
+        for name in sorted(added):
+            if not _ANONYMOUS_VOLUME.fullmatch(name):
+                continue
+            self._run((self._base[0], "volume", "rm", name), env=env, check=False)
 
     def _run(
         self,
@@ -640,7 +822,18 @@ class ComposeStack:
         except (OSError, subprocess.TimeoutExpired) as exc:
             raise ProcessUnavailable("ordinary hosted Compose operation was unavailable") from exc
         if check and completed.returncode != 0:
-            raise ProcessUnavailable("ordinary hosted Compose operation failed")
+            raise ProcessUnavailable(
+                self._with_diagnostics(
+                    f"ordinary hosted Compose operation failed: {argv[-1]}",
+                    completed.stdout or "",
+                )
+            )
+
+    def _with_diagnostics(self, summary: str, output: str) -> str:
+        if not self._retain_diagnostics or not output.strip():
+            return summary
+        tail = "\n".join(output.splitlines()[-_DIAGNOSTIC_LINES:])
+        return f"{summary}\n--- Compose output (development run only) ---\n{tail}"
 
     def __enter__(self) -> "ComposeStack":
         return self
@@ -659,6 +852,7 @@ class MarketplaceLifecycleSession:
         cwd: Path,
         environment: Mapping[str, str] | None = None,
         request_timeout: float = 120.0,
+        retain_diagnostics: bool = False,
     ) -> None:
         if not command or any(not isinstance(item, str) or not item for item in command):
             raise LifecycleContractError("lifecycle command must be a non-empty argv array")
@@ -673,13 +867,23 @@ class MarketplaceLifecycleSession:
         self._cwd = cwd
         self._environment = additions
         self._request_timeout = request_timeout
+        # Staged output can contain ephemeral buyer actions and provider
+        # identifiers, so a protected run discards it unread. A development run
+        # is the one place the operator is already holding those credentials,
+        # and discarding it there is what makes a failed stage undiagnosable.
+        self._retain_diagnostics = retain_diagnostics
+        self._diagnostics: deque[str] = deque(maxlen=_DIAGNOSTIC_LINES)
         self._process: subprocess.Popen[str] | None = None
         self._stderr_reader: threading.Thread | None = None
         self._stdout_reader: threading.Thread | None = None
         self._responses: queue.Queue[str | None] = queue.Queue()
 
     def start(self) -> None:
-        env = {key: value for key, value in os.environ.items() if not _SENSITIVE_ENV.search(key)}
+        env = {
+            key: value
+            for key, value in os.environ.items()
+            if not _SENSITIVE_ENV.search(key) and not _PROXY_ENV.match(key)
+        }
         env.update(self._environment)
         try:
             self._process = subprocess.Popen(
@@ -710,10 +914,14 @@ class MarketplaceLifecycleSession:
             line = self._responses.get(timeout=self._request_timeout)
         except queue.Empty as exc:
             raise LifecycleConvergenceTimeout(
-                "marketplace lifecycle stage did not converge within its bound"
+                self._with_diagnostics(
+                    "marketplace lifecycle stage did not converge within its bound"
+                )
             ) from exc
         if line is None:
-            raise ProcessUnavailable("marketplace lifecycle bridge exited unexpectedly")
+            raise ProcessUnavailable(
+                self._with_diagnostics("marketplace lifecycle bridge exited unexpectedly")
+            )
         try:
             response = json.loads(line)
         except json.JSONDecodeError as exc:
@@ -725,12 +933,23 @@ class MarketplaceLifecycleSession:
         if response.get("ok") is not True:
             code = response.get("code")
             if code == "marketplace_unavailable":
-                raise ProcessUnavailable("marketplace lifecycle state was unavailable")
+                raise ProcessUnavailable(
+                    self._with_diagnostics("marketplace lifecycle state was unavailable")
+                )
+            if code == "authority_refused":
+                refusal = response.get("refusal")
+                raise LifecycleAuthorityRefused(
+                    refusal if isinstance(refusal, str) and refusal else "unknown"
+                )
             if code == "convergence_timeout":
                 raise LifecycleConvergenceTimeout(
                     "marketplace lifecycle stage did not converge within its bound"
                 )
-            raise LifecycleContractError("marketplace lifecycle bridge rejected a stage")
+            raise LifecycleContractError(
+                self._with_diagnostics(
+                    f"marketplace lifecycle bridge rejected a stage: {code or 'no code'}"
+                )
+            )
         return response
 
     def _read_stdout(self) -> None:
@@ -743,10 +962,29 @@ class MarketplaceLifecycleSession:
     def _discard_stderr(self) -> None:
         process = self._process
         assert process is not None and process.stderr is not None
-        for _line in process.stderr:
-            # Staged output can contain ephemeral buyer actions and provider
-            # identifiers; neither belongs in workflow logs or evidence.
-            pass
+        for line in process.stderr:
+            # Nothing read here belongs in workflow logs or evidence. A
+            # development run keeps a bounded tail in memory for the operator
+            # who is running it; a protected run does not read it at all.
+            if self._retain_diagnostics:
+                self._diagnostics.append(line.rstrip("\n")[:_DIAGNOSTIC_LINE_LIMIT])
+
+    def diagnostics(self) -> str:
+        """The retained tail, empty when the run is not allowed to keep one."""
+
+        return "\n".join(self._diagnostics)
+
+    def _with_diagnostics(self, summary: str) -> str:
+        # stdout reaching EOF says the bridge is gone; it does not say the
+        # stderr reader has caught up. Without this the tail is empty exactly
+        # when it matters most -- the run where the bridge died on startup.
+        reader = self._stderr_reader
+        if reader is not None and self._retain_diagnostics:
+            reader.join(timeout=_DIAGNOSTIC_DRAIN_SECONDS)
+        tail = self.diagnostics()
+        if not tail:
+            return summary
+        return f"{summary}\n--- staged output (development run only) ---\n{tail}"
 
     def stop(self) -> None:
         process = self._process
@@ -778,6 +1016,39 @@ class MarketplaceLifecycleSession:
 
     def __exit__(self, *_exc: object) -> None:
         self.stop()
+
+
+def _insert_hosted_contract(text: str, contract: HostedContract, *, role: str) -> str:
+    """State, in the rendered config, the contract the run bound.
+
+    The template states none of this. What the authority must serve is a
+    property of the release the run bound, and a consumer that carries its own
+    copy cannot admit the next release -- it reports a real disagreement as a
+    configuration edit nobody made. So the three pins arrive here, beside the
+    manifest digest, from the same verified artifact.
+    """
+
+    if not _API_VERSION.fullmatch(contract.api_version):
+        raise ProcessUnavailable(f"{role} release contract has no API version")
+    if not contract.schema_version.isdigit() or int(contract.schema_version) < 1:
+        raise ProcessUnavailable(f"{role} release contract has no schema version")
+    capabilities = tuple(sorted(contract.capabilities))
+    if not capabilities or any(
+        not _SAFE_CONFIG_VALUE.fullmatch(value) for value in capabilities
+    ):
+        raise ProcessUnavailable(f"{role} release contract has no capability set")
+    header = "[Settlement.stripe]\n"
+    if text.count(header) != 1:
+        raise ProcessUnavailable(f"{role} configuration has no exact Stripe section")
+    rendered = "".join(f'  "{value}",\n' for value in capabilities)
+    return text.replace(
+        header,
+        header
+        + f'expected_api_version = "{contract.api_version}"\n'
+        + f"expected_schema_version = {int(contract.schema_version)}\n"
+        + f"required_capabilities = [\n{rendered}]\n",
+        1,
+    )
 
 
 def _replace_toml_setting(text: str, key: str, value: str) -> str:

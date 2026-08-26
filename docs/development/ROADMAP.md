@@ -217,6 +217,27 @@ Restoring a non-zero hold default is `billable-capacity-reservations`' own work:
 
 ---
 
+## Goal 6 — Make the settlement mechanism a composed choice
+
+**Value.** Escrow is one way to close a deal, not the definition of one. The hosted-fiat work proved a second mechanism can compose from kit; the next mechanism class is introduction-only settlement — a large share of real capacity trade is arranged person-to-person, with commercial terms too exotic to parametrize, where the marketplace's value is discovery, negotiation, and a trustworthy introduction rather than payment custody or provisioning. Finishing mechanism neutrality also changes the marginal cost of every future mechanism: a registration and a config section instead of a conditional arm in every domain.
+
+**Current state.** Settlement mechanisms are composed registrations: `kit/settlement-runtime` owns the registration surface, configuration hierarchy, readiness, publication options, buyer compatibility, and the obligation servicing lifecycle; `alkahest.v1` and `fiat.stripe.v1` both plug in through kit-side factories named only in domain composition roots. The registry accepts option-only listings, a mechanism-neutral durable identity (`obligation_ref`) exists with its own signed route family, and buyer and seller can complete a deal with no wallet or chain resources at all.
+
+A third mechanism now exists: `contact-exchange.v1` completes a deal by durable, authenticated introduction — rateless options, a scalar-declining registration, one non-financial obligation, a persisted reveal surface (`/api/v1/introductions`), and a loose-listing discovery profile — composed end-to-end on bare metal. All three storefront domains now dispatch exact-selection acceptance through the registration's accepted-obligation builder with no per-mechanism arm: the mechanism resolves once from the selection, rate arithmetic (duration-scaled and counted-unit alike) lives inside the mechanism, and each domain keeps only its own service terms and scaling input. Scalar participation is a declinable registration capability carried to counterparties through the option shape.
+
+Deal identity is convergent: every deal — Alkahest included — has a `settlement_obligations` record keyed by `obligation_ref` with the mechanism's own identifier as `mechanism_ref` (legacy escrows are backfilled at startup), and every mechanism surface's status projection exposes the neutral ref. Settlement verification is a registration hook, the Alkahest-shaped carriers are kit-owned (core keeps tombstoned aliases only for the wire models it still types), the main compute discovery filters project settlement options (generic mechanism filter plus option-embedded token filters), and the pre-terms mechanism literals are gone — the buyer hosted transport takes its mechanism from the composing CLI, seller CLIs mount mechanism command groups from registrations, and option identities derive through the shared helper.
+
+A revealed introduction now reaches its owner rather than only being readable: each side hands its own copy of the reveal to sinks its operator configured locally, through an installed-plugin contract that grows a destination by installing a package rather than editing the marketplace. `kit/delivery` owns a mechanism-neutral event, the sink protocol, discovery, and four protocol-thin built-ins (file, local program, webhook, mail); the seller dispatches off the reveal's critical path from the introduction route service, the buyer dispatches inline after printing. Delivery is never authoritative — the durable, re-readable reveal is what makes best-effort delivery safe — and the mechanism kit gained no delivery dependency, because its dispatch is injected.
+
+What deliberately remains: the `escrows` table and the `/api/v1/settle/{escrow_uid}` route family serve as the Alkahest mechanism surface (retirement needs deployment evidence), hosted-specific servicing gates guard hosted's own surfaces, and pre-plan legacy escrow rows keep only their mechanism-surface identity.
+
+| Open gap | Owned by |
+|---|---|
+| Cross-domain contact-exchange composition beyond bare metal; contact-payload retention automation | Unowned — needs a new change; background in [`contact-exchange-settlement-mechanism`](../../openspec/changes/archive/2026-08-19-contact-exchange-settlement-mechanism/) |
+| Delivery beyond bare metal, and a second event producer (a settled charge, a completed escrow) | Unowned — needs a new change; background in [`add-introduction-delivery-sinks`](../../openspec/changes/archive/2026-08-19-add-introduction-delivery-sinks/) |
+
+---
+
 ## Buyer identity lifecycle status
 
 Buyer marketplace identity is now a core-owned durable profile rather than
@@ -253,21 +274,42 @@ activation still requires role-scoped credentials and readiness for each
 selected Stripe account, rail, instrument or mandate, browser action, webhook,
 and condition resolver; local provider fixtures cannot establish those claims.
 
-The protected three-profile provider matrix is not complete. Three signed card
-runs reached the real ready connected account and verified loopback webhook,
-then reported `payer_profile_unavailable`. That diagnostic means the protected
-marketplace lifecycle subprocess exited while constructing the buyer-side payer
-fixture—loading the ephemeral durable buyer profile, creating or reusing the
-authority-scoped hosted payer profile through the released client, and
-persisting its opaque binding—before it returned a successful fixture result.
-It is not a Stripe funding decline and no payment was attempted. The current
-sanitized report intentionally discards child stderr, so it does not yet
-distinguish profile-store/signing/configuration failure from a released-client
-or hosted-authority rejection. The next qualification work is to add an
-allowlisted stage-specific initialization diagnostic, rerun one interactive
-card collection lane to identify and correct the exact prerequisite, then run
-saved-card/off-session fallback, bank-transfer, ACH success/failure/return,
-collection/reclaim, restart, and loss cases.
+**One VM hosted lane now completes end to end.** A development
+`us_bank_transfer.v1` collection run against the real Stripe test account
+carries an accepted obligation through authoritative funding, VM provisioning,
+portable condition evidence, and collection, with exactly one PaymentIntent,
+charge, and transfer, matching amount, currency, destination, transfer group,
+and operation metadata. That is the first VM hosted lane to reach a terminal
+collected state; a development run still qualifies nothing.
+
+Getting there resolved seven defects, each of which had been hiding the next.
+Three were consumer-side blindness — a staged subprocess that swallowed every
+startup failure, a rejection path that discarded the authority's error code,
+and a refusal that named the shape it wanted rather than the answer it got.
+Four were real:
+
+- bodyless routes (`GET /api/v1/settlements/{ref}`, reclaim) authorized against
+  a JSON `null` instead of the empty body the buyer signs, so every status poll
+  was refused — and refused unsigned, before the response-signing wrapper;
+- the adapter read the authority's `attribution_underpaid` incident as an
+  operator condition, but it is raised on the first retrieval of *every* push
+  transfer, before money can have arrived, so every bank deal parked
+  permanently;
+- a hosted deal had no storefront escrow row, which VM provisioning, lease
+  registration, and terminal lease truncation all read the deal through; adding
+  it then exposed two more — the chain convergence sweep adopting hosted deals
+  it has no reservation for, and a 30-second operation lease expiring inside an
+  hour-long provisioning attempt, each handing one deal to two racing workers;
+- the portable resolver was pointed at the key that signed the release rather
+  than the authority's own runtime identity, so the authority refused its own
+  attestation lookup and the condition came back `manual_required`.
+
+The remaining VM hosted work is qualification under a protected run, plus two
+lanes blocked at Stripe's hosted Checkout page rather than by marketplace code:
+`card.v1` behind hCaptcha, and `us_ach_debit.v1` behind Financial Connections,
+whose page presents no manual routing/account fields at all. Those two are
+hosted-page lanes and belong on that side of any CI split; the push-transfer
+profile is headless throughout.
 
 API-credit and bare-metal are separate adopters of the shared hosted transport,
 route service, configuration registry, and settlement runtime; neither imports
@@ -279,8 +321,8 @@ has proved authoritative Stripe funding and collection, portable condition
 evidence, authenticated SSH access, key revocation and failed subsequent
 access, teardown, Capacity Reservation release, and capacity republication.
 Card, ACH, automatic-fallback, and failure/recovery whole-host lanes remain
-unqualified until the protected payer-profile blocker and remaining provider
-matrix are resolved.
+unqualified until the buyer status-polling response authentication and the
+remaining provider matrix are resolved.
 
 ---
 

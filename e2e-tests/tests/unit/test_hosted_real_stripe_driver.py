@@ -11,14 +11,22 @@ from hosted_settlement_client import (
 )
 
 from src.hosted_real_stripe.driver import (
+    _SAVED_INSTRUMENT_PROFILES,
     _browser_outcome,
+    _classify,
+    _direct_instrument,
+    _require_lane_admitted,
+    _lifecycle_environment,
+    _payer_return_address,
+    _validate_payer_fixture,
     _maintained_account_binding,
     _pay_with_forwarding_paused,
     _prepared_effect,
     _wait_until_reclaim_eligible,
     _terminal_projection,
 )
-from src.hosted_real_stripe.runtime import LifecycleContractError
+from src.hosted_real_stripe.gates import LaneExcluded
+from src.hosted_real_stripe.runtime import LifecycleContractError, ProcessUnavailable
 
 
 def _prepared() -> dict[str, object]:
@@ -198,3 +206,201 @@ def test_terminal_projection_requires_exact_public_terminal_states() -> None:
             },
             collection=True,
         )
+
+
+def _payer_fixture(**updates: object) -> dict[str, object]:
+    fixture: dict[str, object] = {
+        "ok": True,
+        "available": True,
+        "selected_owner_bound": True,
+        "historical_owner_recoverable": True,
+        "opaque_binding_persisted": True,
+        "action_persisted": False,
+        "saved_instrument_ready": False,
+        "setup_action": None,
+        "setup_verification_pending": False,
+    }
+    fixture.update(updates)
+    return fixture
+
+
+def test_a_setup_awaiting_payer_verification_needs_no_browser_action() -> None:
+    """No action is the point, not a missing prerequisite.
+
+    Every saved-instrument setup used to have to hand back an https action, so
+    a setup the payer can answer themselves read as one the run could not
+    start.
+    """
+
+    action = _validate_payer_fixture(
+        _payer_fixture(setup_verification_pending=True),
+        interaction="saved_instrument",
+    )
+
+    assert action is None
+
+
+def test_a_setup_pending_verification_may_not_also_hand_back_a_browser_action() -> None:
+    with pytest.raises(LifecycleContractError):
+        _validate_payer_fixture(
+            _payer_fixture(
+                setup_verification_pending=True,
+                setup_action={
+                    "kind": "setup",
+                    "url": "https://transient.example/action",
+                    "expires_at_unix": 4_000_000_000,
+                },
+            ),
+            interaction="saved_instrument",
+        )
+
+
+def test_a_release_without_direct_setup_still_requires_its_browser_action() -> None:
+    """The interactive path is untouched for a release that declares nothing."""
+
+    action = _validate_payer_fixture(
+        _payer_fixture(
+            setup_action={
+                "kind": "setup",
+                "url": "https://transient.example/action",
+                "expires_at_unix": 4_000_000_000,
+            },
+        ),
+        interaction="saved_instrument",
+    )
+
+    assert action is not None
+    assert action["url"] == "https://transient.example/action"
+
+    with pytest.raises(ProcessUnavailable):
+        _validate_payer_fixture(_payer_fixture(), interaction="saved_instrument")
+
+
+def test_a_push_transfer_profile_holds_no_saved_instrument() -> None:
+    assert "us_bank_transfer.v1" not in _SAVED_INSTRUMENT_PROFILES
+    assert _SAVED_INSTRUMENT_PROFILES == frozenset({"card.v1", "us_ach_debit.v1"})
+
+
+class _AddressStripe:
+    def __init__(self) -> None:
+        self.asked = 0
+
+    def platform_return_address(self) -> str:
+        self.asked += 1
+        return "account@example.test"
+
+
+@pytest.mark.parametrize("scenario", ["reclaim", "worker_restart"])
+def test_a_push_funded_return_lane_is_given_an_address(scenario: str) -> None:
+    """Both lanes that reverse a funded obligation need somewhere to address
+    the payer's return, because the authority refuses to mail nowhere."""
+
+    stripe = _AddressStripe()
+
+    address = _payer_return_address(
+        stripe,  # type: ignore[arg-type]
+        funding_profile="us_bank_transfer.v1",
+        scenario=scenario,  # type: ignore[arg-type]
+    )
+
+    assert address == "account@example.test"
+    assert stripe.asked == 1
+
+
+@pytest.mark.parametrize(
+    ("funding_profile", "scenario"),
+    [
+        ("card.v1", "reclaim"),
+        ("us_ach_debit.v1", "reclaim"),
+        ("us_bank_transfer.v1", "collection"),
+    ],
+)
+def test_no_address_is_fetched_where_none_is_needed(
+    funding_profile: str, scenario: str
+) -> None:
+    """A pull-funded profile is credited back to the instrument that funded it,
+    and a lane that never reverses has nothing to address at all."""
+
+    stripe = _AddressStripe()
+
+    address = _payer_return_address(
+        stripe,  # type: ignore[arg-type]
+        funding_profile=funding_profile,  # type: ignore[arg-type]
+        scenario=scenario,  # type: ignore[arg-type]
+    )
+
+    assert address == ""
+    assert stripe.asked == 0
+
+
+def test_the_lifecycle_environment_omits_an_address_it_was_not_given(
+    tmp_path: Path,
+) -> None:
+    args = SimpleNamespace(
+        marketplace_factory="factory",
+        storefront_url="https://storefront.example",
+        registry_url="https://registry.example",
+        provisioning_url="https://provisioning.example",
+        authority_url="https://authority.example",
+        account_ref="account-1",
+        funding_profile="card.v1",
+        interaction="interactive",
+        scenario="collection",
+        run_identity="run-1",
+        lifecycle_timeout=180,
+    )
+
+    without = _lifecycle_environment(
+        args,  # type: ignore[arg-type]
+        buyer_config=tmp_path / "buyer.toml",
+        marketplace_config=tmp_path / "marketplace.toml",
+        manifest_digest="sha256:" + "0" * 64,
+    )
+    with_address = _lifecycle_environment(
+        args,  # type: ignore[arg-type]
+        buyer_config=tmp_path / "buyer.toml",
+        marketplace_config=tmp_path / "marketplace.toml",
+        manifest_digest="sha256:" + "0" * 64,
+        return_address="account@example.test",
+    )
+
+    assert "HOSTED_SETTLEMENT_E2E_RETURN_ADDRESS" not in without
+    assert with_address["HOSTED_SETTLEMENT_E2E_RETURN_ADDRESS"] == "account@example.test"
+
+
+def test_an_unattended_interactive_card_lane_is_excluded_not_attempted() -> None:
+    with pytest.raises(LaneExcluded) as caught:
+        _require_lane_admitted("card.v1", "interactive", "collection", attended=False)
+    assert caught.value.code == "interactive_lane_not_automated"
+    assert _classify(caught.value, "authorization") == (
+        "excluded",
+        "interactive_lane_not_automated",
+    )
+
+
+def test_someone_at_the_browser_admits_the_same_interactive_card_lane() -> None:
+    _require_lane_admitted("card.v1", "interactive", "collection", attended=True)
+
+
+def test_being_attended_does_not_admit_a_lane_whose_loss_nothing_projects() -> None:
+    for scenario in ("ach_return", "post_collection_loss"):
+        with pytest.raises(LaneExcluded) as caught:
+            _require_lane_admitted("us_ach_debit.v1", "saved_instrument", scenario, attended=True)
+        assert caught.value.code == "loss_projection_unimplemented"
+
+
+def test_an_unattended_saved_instrument_card_lane_still_runs() -> None:
+    _require_lane_admitted("card.v1", "saved_instrument", "collection", attended=False)
+
+
+def test_the_return_lane_funds_from_the_account_that_gets_disputed() -> None:
+    seen: list[bool] = []
+
+    class _Stripe:
+        def create_microdeposit_bank_instrument(self, *, disputed: bool = False) -> str:
+            seen.append(disputed)
+            return "pm_test"
+
+    _direct_instrument(_Stripe(), "us_ach_debit.v1", "ach_return")
+    _direct_instrument(_Stripe(), "us_ach_debit.v1", "collection")
+    assert seen == [True, False]

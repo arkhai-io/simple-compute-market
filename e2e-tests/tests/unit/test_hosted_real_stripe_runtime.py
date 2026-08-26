@@ -17,6 +17,42 @@ from src.hosted_real_stripe.runtime import (
     ProcessUnavailable,
     require_runtime_authority_identity,
 )
+from src.hosted_real_stripe.gates import HostedContract
+
+_RELEASED_CAPABILITIES = (
+    "account-owner-admission.v1",
+    "account-owner-retirement.v1",
+    "account-owner-rotation.v1",
+    "conditional-escrow.v2",
+    "eas-arbiter.v1",
+    "funding-authorization.v1",
+    "funding-profile.card.v1",
+    "funding-profile.us_ach_debit.v1",
+    "funding-profile.us_bank_transfer.v1",
+    "normalized-funding-reversal.v1",
+    "operator-recovery-redaction.v1",
+    "payer-profile.v1",
+    "portable-attestation.v1",
+    "provider-neutral-seller-onboarding.v1",
+    "scheme-tagged-identities.v1",
+    "signer-injected-client.v1",
+    "stripe-connect-separate-charges-transfers.v2",
+)
+
+
+def _contract(
+    *,
+    api_version: str = "0.2.1",
+    schema_version: str = "5",
+    capabilities: tuple[str, ...] = _RELEASED_CAPABILITIES,
+) -> HostedContract:
+    return HostedContract(
+        release_version=api_version,
+        api_version=api_version,
+        schema_version=schema_version,
+        funding_profiles=("card.v1", "us_bank_transfer.v1", "us_ach_debit.v1"),
+        capabilities=frozenset(capabilities),
+    )
 
 
 def test_runtime_authority_identity_is_derived_from_injected_credential(
@@ -185,6 +221,7 @@ def test_ephemeral_container_inputs_use_shared_directory(
         authority_address="0x1fe2aa7fbaf5720f79a22a4ada4b8b37d4e0c008",
         authority_environment="test",
         manifest_digest="sha256:" + ("1" * 64),
+        contract=_contract(),
         funding_profile="us_bank_transfer.v1",
         shared_directory=tmp_path,
     ) as marketplace_config:
@@ -213,6 +250,7 @@ def test_ephemeral_container_inputs_use_shared_directory(
         authority_environment="test",
         authority_base_url="http://127.0.0.1:18080",
         manifest_digest="sha256:" + ("1" * 64),
+        contract=_contract(),
         funding_profile="us_bank_transfer.v1",
         buyer_identity_scheme="ed25519",
         shared_directory=tmp_path,
@@ -233,6 +271,9 @@ def test_ephemeral_container_inputs_use_shared_directory(
     with EphemeralServiceEnv(
         api_key="sk_test_example",
         webhook_secret="whsec_example",
+        authority_environment="hosted-stripe-test",
+        storefront_caller="ed25519:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+        authority_caller="eip191:0xd898399d3c6151e74a236c7bf0510ac73760e8b5",
         manifest_digest="sha256:" + ("2" * 64),
         release_authority_id="release-authority",
         release_authority_address="0x1fe2aa7fbaf5720f79a22a4ada4b8b37d4e0c008",
@@ -246,6 +287,23 @@ def test_ephemeral_container_inputs_use_shared_directory(
             line.split("=", 1) for line in authority_env.read_text(encoding="utf-8").splitlines()
         )
         assert values["HOSTED_SETTLEMENT_MANIFEST_DIGEST"] == "sha256:" + ("2" * 64)
+        assert values["HOSTED_SETTLEMENT_ENVIRONMENT"] == "hosted-stripe-test"
+        # Without this the authority refuses every escrow the storefront opens.
+        assert values["HOSTED_SETTLEMENT_STOREFRONT_CALLERS"] == (
+            "ed25519:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+        )
+        assert (
+            values["HOSTED_SETTLEMENT_DATABASE_PATH"]
+            == "/var/lib/hosted-settlement/hosted-settlement.sqlite3"
+        )
+        callback_urls = [
+            values["HOSTED_SETTLEMENT_CHECKOUT_SUCCESS_URL"],
+            values["HOSTED_SETTLEMENT_CHECKOUT_CANCEL_URL"],
+            values["HOSTED_SETTLEMENT_ACCOUNT_LINK_RETURN_URLS"],
+            values["HOSTED_SETTLEMENT_ACCOUNT_LINK_REFRESH_URLS"],
+        ]
+        # The authority refuses a callback allowlist that repeats a URL.
+        assert len(set(callback_urls)) == len(callback_urls)
         assert (
             values["HOSTED_SETTLEMENT_CHECKOUT_SUCCESS_URL"]
             == "http://127.0.0.1:18081/checkout/success"
@@ -271,20 +329,23 @@ def test_ephemeral_container_inputs_use_shared_directory(
             == ".github/workflows/release.yml@refs/tags/v0.2.0"
         )
         assert values["HOSTED_SETTLEMENT_RELEASE_SOURCE_COMMIT"] == "3" * 40
+        # The portable resolver is the authority calling itself, so both the
+        # caller allowlist and the trusted attester name its runtime identity --
+        # never the independent key that signed the release.
         assert values["HOSTED_SETTLEMENT_RESOLVER_CALLERS"] == (
-            "eip191:0x1fe2aa7fbaf5720f79a22a4ada4b8b37d4e0c008"
+            "eip191:0xd898399d3c6151e74a236c7bf0510ac73760e8b5"
         )
         remote_resolvers = json.loads(values["HOSTED_SETTLEMENT_REMOTE_RESOLVERS_JSON"])
         assert remote_resolvers == [
             {
                 "allow_insecure_loopback": True,
-                "authority_id": "release-authority",
+                "authority_id": "hosted-stripe-test",
                 "base_url": "http://127.0.0.1:8080",
                 "evaluator_id": "vm-portable",
-                "portable_authority_address": ("0x1fe2aa7fbaf5720f79a22a4ada4b8b37d4e0c008"),
+                "portable_authority_address": ("0xd898399d3c6151e74a236c7bf0510ac73760e8b5"),
                 "principals": [
                     {
-                        "identifier": "0x1fe2aa7fbaf5720f79a22a4ada4b8b37d4e0c008",
+                        "identifier": "0xd898399d3c6151e74a236c7bf0510ac73760e8b5",
                         "scheme": "eip191",
                     }
                 ],
@@ -293,3 +354,209 @@ def test_ephemeral_container_inputs_use_shared_directory(
         ]
 
     assert tuple(tmp_path.iterdir()) == ()
+
+
+def test_a_run_authorizes_the_registries_its_topology_locks(monkeypatch, tmp_path) -> None:
+    """The harness configures a private registry; it also talks to one."""
+
+    import tomllib
+
+    from src.hosted_real_stripe.runtime import _fill_registry_auth
+
+    template = (
+        '[registry]\n'
+        'urls = ["http://registry:8080", "http://registry-b:8080"]\n'
+        '\n'
+        '[registry.auth]\n'
+        '"http://registry-b:8080" = ""\n'
+        '\n'
+        '[capacity]\n'
+        'poll_interval = 1\n'
+    )
+
+    monkeypatch.setenv("VMS_REGISTRY_BOOTSTRAP_API_KEY", "bootstrap-key-value")
+    filled = tomllib.loads(_fill_registry_auth(template))
+    auth = filled["registry"]["auth"]
+    assert auth == {"http://registry-b:8080": "bootstrap-key-value"}
+    # The public registry is not handed a key it never asked for.
+    assert "http://registry:8080" not in auth
+    # Nothing outside the section moved.
+    assert filled["capacity"]["poll_interval"] == 1
+    assert filled["registry"]["urls"][0] == "http://registry:8080"
+
+    # A generated URL-safe token may start with any of its alphabet, and about
+    # one in thirty starts with "_" or "-". Those are ordinary keys, not
+    # invalid ones.
+    import tomllib as _tomllib
+
+    for awkward in ("_gqmxYtoken", "-B2vk9token", "aB0._~+/=:-"):
+        monkeypatch.setenv("VMS_REGISTRY_BOOTSTRAP_API_KEY", awkward)
+        assert _tomllib.loads(_fill_registry_auth(template))["registry"]["auth"] == {
+            "http://registry-b:8080": awkward
+        }
+    # A value that could break out of the string it is written into is refused
+    # outright rather than escaped, because a key needing escaping is not one
+    # this run was meant to be given.
+    from src.hosted_real_stripe.runtime import ProcessUnavailable
+
+    for hostile in ('has"quote', "has\\backslash", "has\nnewline", "x" * 513):
+        monkeypatch.setenv("VMS_REGISTRY_BOOTSTRAP_API_KEY", hostile)
+        with pytest.raises(ProcessUnavailable):
+            _fill_registry_auth(template)
+
+    monkeypatch.setenv("VMS_REGISTRY_BOOTSTRAP_API_KEY", "bootstrap-key-value")
+    # A run holding no key leaves the declaration empty, so the registry
+    # refuses it visibly rather than being handed something invented.
+    monkeypatch.delenv("VMS_REGISTRY_BOOTSTRAP_API_KEY")
+    assert tomllib.loads(_fill_registry_auth(template))["registry"]["auth"] == {
+        "http://registry-b:8080": ""
+    }
+
+
+def test_the_committed_hosted_templates_declare_their_private_registry() -> None:
+    """The declaration is what makes the fill possible; it must be committed."""
+
+    import tomllib
+
+    root = Path(__file__).resolve().parents[3]
+    for name in ("hosted-storefront.toml", "hosted-buyer.toml"):
+        config = tomllib.loads(
+            (root / "e2e-tests" / "config" / name).read_text(encoding="utf-8")
+        )
+        auth = config["registry"]["auth"]
+        assert auth, name
+        # Declared, and carrying no key in a committed file.
+        assert set(auth) <= set(config["registry"]["urls"]), name
+        assert all(value == "" for value in auth.values()), name
+
+
+def test_a_locally_built_authority_is_pointed_at_no_signed_release(tmp_path) -> None:
+    """It refuses to start if told to verify a manifest that does not exist.
+
+    The five release identities travel with the manifest, so all six are set
+    together for a release and none of them for a build made here. The digest
+    is not among them: Compose hands it to the authority and the authority
+    reports it back, so a local run names the build it composed.
+    """
+
+    from src.hosted_real_stripe.gates import LOCAL_COORDINATE
+    from src.hosted_real_stripe.runtime import EphemeralServiceEnv
+
+    with EphemeralServiceEnv(
+        api_key="sk_test_example",
+        webhook_secret="whsec_example",
+        authority_environment="hosted-stripe-test-local",
+        storefront_caller="ed25519:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+        authority_caller="eip191:0xd898399d3c6151e74a236c7bf0510ac73760e8b5",
+        manifest_digest="sha256:" + ("2" * 64),
+        release_authority_id=LOCAL_COORDINATE,
+        release_authority_address=LOCAL_COORDINATE,
+        release_repository="arkhai-io/stripe-settlement-service",
+        release_workflow_ref=LOCAL_COORDINATE,
+        release_source_commit=LOCAL_COORDINATE,
+        shared_directory=tmp_path,
+    ) as authority_env:
+        values = dict(
+            line.split("=", 1)
+            for line in authority_env.read_text(encoding="utf-8").splitlines()
+        )
+
+    assert values["HOSTED_SETTLEMENT_MANIFEST_DIGEST"] == "sha256:" + ("2" * 64)
+    assert not [key for key in values if key.startswith("HOSTED_SETTLEMENT_RELEASE_")]
+
+
+def _rendered_stripe(path: Path) -> dict[str, Any]:
+    parsed = tomllib.loads(path.read_text(encoding="utf-8"))
+    stripe: dict[str, Any] = parsed["Settlement"]["stripe"]
+    return stripe
+
+
+@pytest.mark.parametrize("role", ["storefront", "buyer"])
+def test_a_rendered_config_states_the_contract_the_run_bound(
+    role: str, tmp_path: Path, monkeypatch
+) -> None:
+    """The next release is admitted by binding it, not by editing a template."""
+
+    later = (*_RELEASED_CAPABILITIES, "payer-direct-instrument-setup.v1")
+    contract = _contract(api_version="0.3.0", schema_version="6", capabilities=later)
+    config = Path(__file__).resolve().parents[2] / "config" / f"hosted-{role}.toml"
+    credential = base64.urlsafe_b64encode(b"a" * 32).decode().rstrip("=")
+    monkeypatch.setenv("HOSTED_SETTLEMENT_E2E_BUYER_IDENTITY_CREDENTIAL", credential)
+    common = dict(
+        template=config,
+        authority_id="authority-1",
+        authority_scheme="eip191",
+        authority_address="0x1fe2aa7fbaf5720f79a22a4ada4b8b37d4e0c008",
+        authority_environment="test",
+        manifest_digest="sha256:" + ("1" * 64),
+        contract=contract,
+        funding_profile="card.v1",
+        shared_directory=tmp_path,
+    )
+    if role == "storefront":
+        rendered = EphemeralMarketplaceConfig(account_ref="account-1", **common)
+    else:
+        rendered = EphemeralBuyerConfig(
+            authority_base_url="http://127.0.0.1:18080",
+            buyer_identity_scheme="ed25519",
+            **common,
+        )
+
+    with rendered as path:
+        stripe = _rendered_stripe(path)
+
+    assert stripe["expected_api_version"] == "0.3.0"
+    assert stripe["expected_schema_version"] == 6
+    assert tuple(stripe["required_capabilities"]) == tuple(sorted(later))
+
+
+@pytest.mark.parametrize("name", ["hosted-storefront.toml", "hosted-buyer.toml"])
+def test_a_committed_template_names_no_hosted_release_of_its_own(name: str) -> None:
+    """What a template cannot say, it cannot say staler than the truth."""
+
+    template = Path(__file__).resolve().parents[2] / "config" / name
+    stripe = _rendered_stripe(template)
+
+    assert "expected_api_version" not in stripe
+    assert "expected_schema_version" not in stripe
+    assert "required_capabilities" not in stripe
+
+
+@pytest.mark.parametrize(
+    ("api_version", "schema_version", "capabilities"),
+    [
+        ("0.3", "6", _RELEASED_CAPABILITIES),
+        ("0.3.0", "0", _RELEASED_CAPABILITIES),
+        ("0.3.0", "6", ()),
+    ],
+)
+def test_an_unusable_bound_contract_renders_nothing(
+    api_version: str,
+    schema_version: str,
+    capabilities: tuple[str, ...],
+    tmp_path: Path,
+) -> None:
+    """A contract that cannot be stated refuses before Compose sees a file."""
+
+    template = Path(__file__).resolve().parents[2] / "config" / "hosted-storefront.toml"
+
+    with pytest.raises(ProcessUnavailable):
+        with EphemeralMarketplaceConfig(
+            template=template,
+            account_ref="account-1",
+            authority_id="authority-1",
+            authority_scheme="eip191",
+            authority_address="0x1fe2aa7fbaf5720f79a22a4ada4b8b37d4e0c008",
+            authority_environment="test",
+            manifest_digest="sha256:" + ("1" * 64),
+            contract=_contract(
+                api_version=api_version,
+                schema_version=schema_version,
+                capabilities=capabilities,
+            ),
+            funding_profile="card.v1",
+            shared_directory=tmp_path,
+        ):
+            pass
+
+    assert list(tmp_path.iterdir()) == []

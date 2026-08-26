@@ -453,7 +453,11 @@ def _validate_settlement_acceptance(
         )
     condition = advertised_option.params.get("condition")
     expected_conditions = [dict(condition)] if isinstance(condition, Mapping) else []
-    if obligation.conditions != expected_conditions or plan.service_terms:
+    # service_terms are deliberately not compared against the advertised
+    # option: they carry seller service context established during the
+    # negotiation (listing/order/provision packages) that the option cannot
+    # predict. The funded obligation stays strictly validated above.
+    if obligation.conditions != expected_conditions:
         raise RuntimeError(
             "seller settlement_plan semantics differ from the advertised option"
         )
@@ -480,6 +484,36 @@ def _header(headers: Mapping[str, str] | Any, name: str) -> str | None:
         if str(key).lower() == lowered:
             return str(candidate)
     return None
+
+
+#: Every header the shared version 2 response authentication is built from.
+_RESPONSE_AUTHENTICATION_HEADERS = (
+    _SIGNATURE_VERSION_HEADER,
+    _ROLE_HEADER,
+    _IDENTITY_SCHEME_HEADER,
+    _IDENTITY_IDENTIFIER_HEADER,
+    _REQUEST_ID_HEADER,
+    _TIMESTAMP_HEADER,
+    _SIGNATURE_HEADER,
+)
+
+
+def _authentication_description(response_headers: Any) -> str:
+    """Say whether the answer was authenticated, never with what."""
+
+    missing = [
+        name
+        for name in _RESPONSE_AUTHENTICATION_HEADERS
+        if not _header(response_headers, name)
+    ]
+    if len(missing) == len(_RESPONSE_AUTHENTICATION_HEADERS):
+        return "carried no response authentication"
+    if missing:
+        return (
+            "carried incomplete response authentication, missing "
+            + ", ".join(sorted(missing))
+        )
+    return "returned unreadable response authentication"
 
 
 def _authenticated_json(
@@ -586,8 +620,16 @@ def _authenticated_json(
             }
         )
     except (TypeError, ValueError) as exc:
+        # A response with no authentication headers is indistinguishable by
+        # shape from one signed badly, and the two want different repairs: the
+        # first is usually a route, identity, or authorization problem several
+        # layers away, the second a protocol fault. The status and whether the
+        # answer was authenticated at all separate them. The body stays out --
+        # that is what the redaction here is for -- and so do header values,
+        # which fingerprint the exchange.
         raise RuntimeError(
-            f"{method} {url} returned malformed or legacy response authentication"
+            f"{method} {url} -> HTTP {response_status} "
+            f"{_authentication_description(response_headers)}"
         ) from exc
     verification = verify_response(
         signed_response,

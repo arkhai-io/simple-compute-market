@@ -20,6 +20,15 @@ from core_buyer.hosted_settlement import (
     HostedSettlementTransport,
     make_hosted_settle_hook,
 )
+from core_buyer.delivery import (
+    deliver_introduction,
+    load_buyer_delivery_sinks,
+    report_delivery,
+)
+from core_buyer.introductions import (
+    IntroductionProjection,
+    IntroductionTransport,
+)
 from core_buyer.explanation import (
     EXPLANATION_SCHEMA_VERSION,
     build_buyer_explanation,
@@ -81,6 +90,11 @@ __all__ = [
     "RegistryAuthority",
     "HostedProjection",
     "HostedSettlementTransport",
+    "IntroductionProjection",
+    "IntroductionTransport",
+    "deliver_introduction",
+    "load_buyer_delivery_sinks",
+    "report_delivery",
     "make_hosted_settle_hook",
     "SelectedSettlementOption",
     "SettleFn",
