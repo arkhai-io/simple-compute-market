@@ -68,3 +68,50 @@ def test_a_package_reaching_outside_itself_publishes_a_wheel_only(
         f"{package['dist']} force-includes {escaping} from outside {package['path']}, "
         "which an sdist cannot carry; publish it as a wheel only"
     )
+
+
+def _find_links(package: Path) -> list[str]:
+    declared = tomllib.loads((package / "pyproject.toml").read_text(encoding="utf-8"))
+    return list(declared.get("tool", {}).get("uv", {}).get("find-links", []))
+
+
+@pytest.mark.parametrize("package", _packages(), ids=lambda entry: str(entry["key"]))
+def test_a_published_package_looks_for_local_wheels_only_in_dist(
+    package: dict[str, object],
+) -> None:
+    """The one local directory a publish build may consult is the one CI makes.
+
+    uv reads `find-links` even under `--no-sources`, so a directory named here
+    has to exist by the time the workflow builds -- and on a fresh checkout the
+    only one that does is the `.dist` the workflow creates. Four packages named
+    it and nothing created it, so their builds failed with an `os error 2`
+    naming a path that appears in no build command. A publish only ever
+    resolves from PyPI, so pointing anywhere else is the mistake, not the
+    missing directory.
+    """
+
+    directory = REPO_ROOT / str(package["path"])
+    if not (directory / "pyproject.toml").is_file():
+        pytest.skip(f"{package['path']} is not checked out here")
+
+    for entry in _find_links(directory):
+        resolved = (directory / entry).resolve()
+        assert resolved == (REPO_ROOT / ".dist").resolve(), (
+            f"{package['dist']} resolves find-links {entry!r} to {resolved}, which no "
+            "publish job creates; a publish build resolves from PyPI"
+        )
+
+
+def test_the_publish_job_creates_the_directory_those_packages_look_in() -> None:
+    """The other half of the pair above, which is otherwise only true by luck.
+
+    Requiring every `find-links` to point at `.dist` means nothing unless the
+    workflow actually makes `.dist`. It did not, which is the whole bug: the
+    hosted client job created it as a side effect of staging release assets,
+    so that one package built and the four that merely declared it did not.
+    """
+
+    text = WORKFLOW.read_text(encoding="utf-8")
+    creates = text.index("mkdir -p .dist\n      - name: Build distribution")
+
+    assert creates < text.index("run: |\n          if [ \"${{ matrix.wheel_only }}\" = \"true\" ]")
