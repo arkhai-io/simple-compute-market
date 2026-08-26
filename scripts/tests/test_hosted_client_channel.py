@@ -120,20 +120,26 @@ def test_a_tree_that_states_no_single_pin_is_refused(
         selector.channel(tmp_path)
 
 
-def test_this_repository_currently_pins_an_unreleased_client() -> None:
-    """The state the change exists for, asserted rather than assumed.
+def test_this_repository_selects_the_channel_its_own_files_imply() -> None:
+    """The selector's answer, checked against the state it reads.
 
     Which version that is comes from the pin, because naming it here would be
     the third place stating it -- the one this selector exists to remove -- and
-    would make every routine bump look like a broken test.
+    would make every routine bump look like a broken test. The channel is
+    checked the same way. It was asserted as `internal` while the pin was an
+    unreleased client, which made binding a signed release look like a
+    regression; what the assertion was always for is that the two agree.
     """
 
     pinned = selector.pinned_version(REPO_ROOT)
     selected = selector.channel(REPO_ROOT)
+    signed = REPO_ROOT / "manifests" / f"hosted-settlement-v{pinned}-trust.json"
 
     assert selected["version"] == pinned
-    assert selected["channel"] == "internal"
-    assert not (REPO_ROOT / "manifests" / f"hosted-settlement-v{pinned}-trust.json").exists()
+    assert selected["channel"] == ("release" if signed.exists() else "internal")
+    if signed.exists():
+        assert selected["trust"] == str(signed.relative_to(REPO_ROOT))
+        assert selected["wheel"].endswith(f"-{pinned}-py3-none-any.whl")
 
 
 def test_the_workflow_names_no_hosted_version_of_its_own() -> None:
