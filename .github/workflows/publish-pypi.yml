@@ -129,7 +129,7 @@ jobs:
             {"key": "vms-buyer",              "path": "domains/vms/buyer",                "dist": "arkhai-vms-buyer", "wheel_only": true},
             {"key": "vms-provisioning-adapter", "path": "domains/vms/provisioning/adapter", "dist": "arkhai-vms-provisioning-adapter"},
             {"key": "compute-provisioning-service", "path": "provisioning/compute/service", "dist": "arkhai-compute-provisioning-service"},
-            {"key": "vms-storefront",         "path": "domains/vms/storefront",           "dist": "arkhai-vms-storefront"},
+            {"key": "vms-storefront",         "path": "domains/vms/storefront",           "dist": "arkhai-vms-storefront", "wheel_only": true},
             {"key": "apicredits-domain",       "path": "domains/apicredits",               "dist": "arkhai-apicredits-domain"},
             {"key": "apicredits-buyer",        "path": "domains/apicredits/buyer",          "dist": "arkhai-apicredits-buyer", "wheel_only": true},
             {"key": "apicredits-middleware",   "path": "domains/apicredits/middleware/python", "dist": "arkhai-apicredits-middleware"},
