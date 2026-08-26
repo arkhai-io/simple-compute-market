@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import re
+import sys
 import time
 from dataclasses import dataclass
 from typing import Any, Callable, Literal
@@ -61,6 +62,7 @@ class ChromiumCheckout:
         playwright_factory: Callable[[], Any] | None = None,
         retain_diagnostics: bool = False,
         headless: bool = True,
+        attended: bool = False,
     ) -> None:
         self._timeout_ms = timeout_ms
         self._playwright_factory = playwright_factory
@@ -69,6 +71,10 @@ class ChromiumCheckout:
         # CAPTCHA. A development run on a machine with a display may show the
         # window instead; nothing else about the run changes.
         self._headless = headless
+        # Whether someone is at the window. A visible browser is not the same
+        # claim: it says the page can be seen, not that anyone is watching it.
+        # Only this decides whether a CAPTCHA is a dead end or a pause.
+        self._attended = attended
 
     def require_available(self) -> None:
         factory = self._playwright_factory or _load_playwright
@@ -166,7 +172,9 @@ class ChromiumCheckout:
                         raise CheckoutContractError("Checkout submit action is unavailable")
                     _submit_checkout(page, submit, outcome)
                     if outcome == "authentication":
-                        _complete_authentication(page, self._timeout_ms)
+                        _complete_authentication(
+                            page, self._timeout_ms, attended=self._attended
+                        )
                     if outcome in {"decline", "insufficient_funds"}:
                         # These outcomes succeed by Checkout refusing and
                         # staying put, so leaving would be the wrong signal.
@@ -177,6 +185,7 @@ class ChromiumCheckout:
                             timeout_ms=max(self._timeout_ms, _SETUP_SUBMIT_TIMEOUT_MS),
                             diagnose=self._retain_diagnostics,
                             subject="payment",
+                            attended=self._attended,
                         )
                 except Exception:
                     if page is not None:
@@ -513,7 +522,12 @@ _SETUP_SUBMIT_TIMEOUT_MS = 30_000
 
 
 def _await_checkout_left(
-    page: Any, *, timeout_ms: int, diagnose: bool, subject: str = "setup"
+    page: Any,
+    *,
+    timeout_ms: int,
+    diagnose: bool,
+    subject: str = "setup",
+    attended: bool = False,
 ) -> None:
     """Refuse to call a submission complete until Checkout says it is.
 
@@ -526,17 +540,22 @@ def _await_checkout_left(
     funding timeout, naming neither the page nor what it did there.
     """
 
-    try:
-        page.wait_for_url(
-            lambda url: "checkout.stripe.com" not in str(url),
-            timeout=timeout_ms,
-        )
-    except Exception:  # noqa: BLE001 - the page is the subject, not the error
-        _raise_if_interactive_captcha(page)
-        raise CheckoutContractError(
-            f"Checkout did not accept the submitted {subject} form"
-            + (_page_complaint(page) if diagnose else "")
-        ) from None
+    for attempt in (0, 1):
+        try:
+            page.wait_for_url(
+                lambda url: "checkout.stripe.com" not in str(url),
+                timeout=timeout_ms,
+            )
+            return
+        except Exception:  # noqa: BLE001 - the page is the subject, not the error
+            # A challenge answered by hand is not a submission that failed: the
+            # page was held, not refused, so the wait is worth one more turn.
+            if attempt == 0 and _settle_interactive_captcha(page, attended=attended):
+                continue
+            raise CheckoutContractError(
+                f"Checkout did not accept the submitted {subject} form"
+                + (_page_complaint(page) if diagnose else "")
+            ) from None
 
 
 def _page_complaint(page: Any) -> str:
@@ -570,14 +589,69 @@ def _interactive_captcha_visible(frame: Any) -> bool:
 
 
 def _raise_if_interactive_captcha(page: Any) -> None:
+    """Name a CAPTCHA as the reason an operation that already failed did.
+
+    Nothing is waited on here. By the time this runs the page has stopped
+    being usable, so the only thing left is to say why.
+    """
+
     if any(_interactive_captcha_visible(frame) for frame in page.frames):
         raise ChromiumUnavailable("Stripe Checkout requires an interactive CAPTCHA")
+
+
+#: How long someone at the browser is given to answer a challenge. Generous by
+#: intent: the cost of waiting too long is a slow lane, and the cost of not
+#: waiting is failing a run for the one thing it was attended to handle.
+_ATTENDED_CAPTCHA_TIMEOUT_S = 300.0
+
+
+def _settle_interactive_captcha(
+    page: Any,
+    *,
+    attended: bool,
+    monotonic: Callable[[], float] = time.monotonic,
+) -> float:
+    """Fail on a challenge nobody can answer; wait on one somebody can.
+
+    An interactive CAPTCHA is the provider asking for a person, so it is only
+    a dead end when there is no person. Reporting `chromium_unavailable` from
+    an attended run fails the lane for precisely the reason the run was
+    attended, and it misreports besides: Chromium was available and working,
+    and it was the provider that stopped.
+
+    Returns the seconds spent waiting, so a caller that had already given up
+    can tell a page that was held from one that was refused, and can pay back
+    the deadline the wait consumed.
+    """
+
+    def challenged() -> bool:
+        return any(_interactive_captcha_visible(frame) for frame in page.frames)
+
+    if not challenged():
+        return 0.0
+    if not attended:
+        raise ChromiumUnavailable("Stripe Checkout requires an interactive CAPTCHA")
+    print(
+        "\n  The provider raised a CAPTCHA. Answer it in the browser window;\n"
+        "  the lane goes on by itself once you do.\n",
+        file=sys.stderr,
+        flush=True,
+    )
+    started = monotonic()
+    deadline = started + _ATTENDED_CAPTCHA_TIMEOUT_S
+    while challenged():
+        remaining_ms = (deadline - monotonic()) * 1000
+        if remaining_ms <= 0:
+            raise ChromiumUnavailable("the CAPTCHA Stripe Checkout raised went unanswered")
+        page.wait_for_timeout(min(500, remaining_ms))
+    return monotonic() - started
 
 
 def _complete_authentication(
     page: Any,
     timeout_ms: int,
     *,
+    attended: bool = False,
     monotonic: Callable[[], float] = time.monotonic,
 ) -> None:
     selectors = (
@@ -589,7 +663,9 @@ def _complete_authentication(
     )
     deadline = monotonic() + timeout_ms / 1000
     while True:
-        _raise_if_interactive_captcha(page)
+        # Time spent waiting on a person is not time the challenge took to
+        # appear, so it is given back rather than counted against the deadline.
+        deadline += _settle_interactive_captcha(page, attended=attended, monotonic=monotonic)
         for frame in page.frames:
             for selector in selectors:
                 locator = frame.locator(selector).first

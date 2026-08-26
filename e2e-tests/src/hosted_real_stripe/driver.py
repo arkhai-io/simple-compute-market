@@ -283,6 +283,7 @@ def run(args: argparse.Namespace) -> tuple[StripeTestEvidence, int]:
             timeout_ms=args.browser_timeout_ms,
             retain_diagnostics=release.mode == "local",
             headless=not args.visible_browser,
+            attended=args.attended,
         )
         browser.require_available()
 

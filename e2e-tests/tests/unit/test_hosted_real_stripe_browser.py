@@ -12,6 +12,7 @@ from src.hosted_real_stripe.browser import (
     _browser_proxy,
     _complete_authentication,
     _disable_optional_save_details,
+    _settle_interactive_captcha,
     _submit_checkout,
 )
 
@@ -177,6 +178,136 @@ def test_authentication_challenge_classifies_interactive_captcha_as_external() -
 
     with pytest.raises(ChromiumUnavailable, match="interactive CAPTCHA"):
         _complete_authentication(page, 500)
+
+
+class _AnsweredCaptcha:
+    """A challenge that stops being visible once someone has answered it."""
+
+    url = "https://newassets.hcaptcha.com/captcha/v1"
+
+    def __init__(self, clock: _Clock, *, answered_at: float) -> None:
+        self.first = self
+        self._clock = clock
+        self._answered_at = answered_at
+
+    def locator(self, _selector: str) -> "_AnsweredCaptcha":
+        return self
+
+    def is_visible(self) -> bool:
+        return self._clock.value < self._answered_at
+
+
+class _AuthorizeButton:
+    def __init__(self) -> None:
+        self.first = self
+        self.clicked = False
+
+    def is_visible(self) -> bool:
+        return True
+
+    def click(self) -> None:
+        self.clicked = True
+
+
+class _AuthorizeFrame:
+    url = "https://hooks.stripe.com/3d_secure"
+
+    def __init__(self, button: _AuthorizeButton) -> None:
+        self._button = button
+
+    def locator(self, selector: str) -> object:
+        if selector == "#test-source-authorize-3ds":
+            return self._button
+        return _MissingChallenge()
+
+
+def test_an_attended_run_waits_for_the_person_to_answer_the_captcha() -> None:
+    """The person at the window is the whole reason the run is attended."""
+
+    clock = _Clock()
+    button = _AuthorizeButton()
+    page = _ChallengePage(clock, frame_count=0)
+    page.frames = [_AnsweredCaptcha(clock, answered_at=30.0), _AuthorizeFrame(button)]
+
+    _complete_authentication(page, 500, attended=True, monotonic=clock)
+
+    assert button.clicked is True
+    assert clock.value >= 30.0
+
+
+def test_the_time_a_person_spends_answering_is_not_charged_to_the_challenge() -> None:
+    """Otherwise every answered challenge fails the timeout it just cleared."""
+
+    clock = _Clock()
+    button = _AuthorizeButton()
+    page = _ChallengePage(clock, frame_count=0)
+    # Answered well past the challenge's own half-second budget.
+    page.frames = [_AnsweredCaptcha(clock, answered_at=120.0), _AuthorizeFrame(button)]
+
+    _complete_authentication(page, 500, attended=True, monotonic=clock)
+
+    assert button.clicked is True
+
+
+def test_a_captcha_nobody_answers_still_fails_an_attended_run() -> None:
+    clock = _Clock()
+    page = _ChallengePage(clock, frame_count=0)
+    page.frames = [_AnsweredCaptcha(clock, answered_at=float("inf"))]
+
+    with pytest.raises(ChromiumUnavailable, match="went unanswered"):
+        _settle_interactive_captcha(page, attended=True, monotonic=clock)
+
+
+def test_an_unchallenged_page_waits_for_nothing() -> None:
+    clock = _Clock()
+    page = _ChallengePage(clock, frame_count=3)
+
+    assert _settle_interactive_captcha(page, attended=True, monotonic=clock) == 0.0
+    assert page.waited_ms == 0.0
+
+
+class _HeldCheckoutPage:
+    """Checkout that never leaves until its challenge is answered."""
+
+    url = "https://checkout.stripe.com/c/pay/cs_test_example"
+
+    def __init__(self, clock: _Clock, *, answered_at: float) -> None:
+        self._clock = clock
+        self._captcha = _AnsweredCaptcha(clock, answered_at=answered_at)
+        self.frames = [self._captcha]
+        self.waits = 0
+        self.waited_ms = 0.0
+
+    def wait_for_url(self, _predicate, *, timeout: float) -> None:
+        self.waits += 1
+        if self._captcha.is_visible():
+            self._clock.value += timeout / 1000
+            raise TimeoutError("still on Checkout")
+
+    def wait_for_timeout(self, timeout_ms: float) -> None:
+        self.waited_ms += timeout_ms
+        self._clock.value += timeout_ms / 1000
+
+
+def test_a_page_held_by_a_captcha_is_waited_on_again_once_it_clears() -> None:
+    """A challenge answered by hand is a held page, not a refused submission."""
+
+    clock = _Clock()
+    page = _HeldCheckoutPage(clock, answered_at=20.0)
+
+    _await_checkout_left(page, timeout_ms=1_000, diagnose=False, attended=True)
+
+    assert page.waits == 2
+
+
+def test_a_page_held_by_a_captcha_is_not_retried_when_nobody_is_watching() -> None:
+    clock = _Clock()
+    page = _HeldCheckoutPage(clock, answered_at=float("inf"))
+
+    with pytest.raises(ChromiumUnavailable, match="interactive CAPTCHA"):
+        _await_checkout_left(page, timeout_ms=1_000, diagnose=False)
+
+    assert page.waits == 1
 
 
 # ---------------------------------------------------------------------------
