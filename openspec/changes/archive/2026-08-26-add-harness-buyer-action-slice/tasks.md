@@ -1,3 +1,12 @@
+> **Archived 2026-08-26 — not implemented.** No task below was started.
+>
+> The list is retained as the record of what this change intended to build and
+> in what order. Read it as evidence of scope, never as work to resume: its
+> successor sequences differently, and a task here that looks unfinished is
+> finished in the sense that matters — it will not be done.
+
+---
+
 # Tasks
 
 One commit. The boundary and the thing it constrains are the same review: an

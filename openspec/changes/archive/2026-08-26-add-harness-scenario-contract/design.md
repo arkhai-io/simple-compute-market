@@ -233,3 +233,14 @@ field, would let scenarios assert exactly and would help the buyer CLI and the
 e2e suite equally. It is a product change with consumers outside the harness and
 belongs to whoever owns the negotiation protocol specification. Recorded here
 because this contract is shaped around its absence.
+
+
+---
+
+## Disposition
+
+**Archived 2026-08-26.** Superseded by `define-scenario-and-topology`, in the testing-harness repository, not implemented.
+
+**What carried forward.** The declaration-not-execution boundary, the refusal signature with status code and match mode, the hold-posture declaration, and the per-buyer discovery-receipt requirement all carry forward. Contention scenarios become a deferred family: first-pass scenarios exercise isolation on disjoint resources rather than contention over a shared one.
+
+**Referenced, not duplicated.** `design.md`'s analysis of interpolated refusal reasons is grounded in observed product behaviour and is cited by the successor rather than restated. It remains authoritative here.

@@ -1,3 +1,19 @@
+> **Archived 2026-08-26 — superseded, not implemented.**
+>
+> **Superseded by:** `define-scenario-and-topology`, in the testing-harness repository.
+>
+> **Why.** The harness moved to a repository of its own. These requirements were deltas against `test-compatibility`, a capability describing this repository's own test architecture, and harness content does not belong there.
+>
+> **What carried forward.** The declaration-not-execution boundary, the refusal signature with status code and match mode, the hold-posture declaration, and the per-buyer discovery-receipt requirement all carry forward. Contention scenarios become a deferred family: first-pass scenarios exercise isolation on disjoint resources rather than contention over a shared one.
+>
+> **Where the reasoning lives.** `design.md`'s analysis of interpolated refusal reasons is grounded in observed product behaviour and is cited by the successor rather than restated. It remains authoritative here.
+>
+> Design rationale is referenced rather than duplicated: successors cite this
+> change by name and do not restate it, so the two cannot drift under two
+> vocabularies.
+
+---
+
 ## Why
 
 The harness's purpose is to declare a finite set of capacity scenarios, run

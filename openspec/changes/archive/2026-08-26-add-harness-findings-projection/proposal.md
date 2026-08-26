@@ -1,3 +1,19 @@
+> **Archived 2026-08-26 — superseded, not implemented.**
+>
+> **Superseded by:** `define-assessment-and-findings` and `define-public-projection`, in the testing-harness repository.
+>
+> **Why.** The harness moved to a repository of its own, and this change held two separable concerns.
+>
+> **What carried forward.** The update, reopen, and deduplication lifecycle and the finding-is-not-authority rule go to the first. The projection boundary goes to the second, because more than one projection exists with different allowlists and neither belongs to findings alone. The rule keeping offered demand, served capacity, and load-generator limit distinct carries forward as a measurement requirement.
+>
+> **Where the reasoning lives.** `design.md`'s argument that these three quantities are the most plausible false claim the harness can make is cited by both successors.
+>
+> Design rationale is referenced rather than duplicated: successors cite this
+> change by name and do not restate it, so the two cannot drift under two
+> vocabularies.
+
+---
+
 ## Why
 
 A harness run produces events. Nothing turns them into a result, and nothing

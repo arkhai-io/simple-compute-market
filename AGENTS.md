@@ -117,6 +117,13 @@ edit removes it.
 Some work here is paired with work in separate private repositories. That
 pairing never appears here.
 
+A change may exist because an external consumer needs it. Describe the
+requirement in terms of this repository's own behaviour and never in terms of
+that consumer: *"exposes a stable, versioned surface reporting deal state"*, not
+a reference to the repository, plan, or run that wanted one. A requirement that
+cannot be stated without naming a private consumer is a requirement this
+repository should not adopt.
+
 ### Never enters this repository
 
 - Private repository names, branch names, or commit SHAs.

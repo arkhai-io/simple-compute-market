@@ -237,3 +237,14 @@ it. Whoever answers restores the phase against the right package, which is a
 small edit. Repointing it now at a plausible directory would be worse than
 removing it: the phase would run, pass or fail, and attribute its result to a
 package nobody chose.
+
+
+---
+
+## Disposition
+
+**Archived 2026-08-26.** Superseded by `correct-testing-documentation` here. The runner half is retired without a successor, not implemented.
+
+**What carried forward.** The `TESTING.md` correction stays: this repository documents a subsystem that has never existed on `dev`, and that is a defect independent of any harness. The runner repair, phase-configuration repointing, and Make targets are dropped. The `reinit` coverage gap is already owned by `remove-relative-uv-sources` task 2.5 and needs no new home.
+
+**Referenced, not duplicated.** `design.md`'s inventory of the inherited tool — what exists, what its configuration points at, and what no longer resolves — is the record of why repair was not attempted. Removing `tools/issue-discovery` is deferred until a working replacement exists.

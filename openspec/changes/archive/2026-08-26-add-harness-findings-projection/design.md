@@ -159,3 +159,14 @@ suspicious.
 **Decided:** counted in the result, absent from candidates. A scenario that
 declared three refusals and produced none has a finding, and that finding is
 only visible if the count is reported.
+
+
+---
+
+## Disposition
+
+**Archived 2026-08-26.** Superseded by `define-assessment-and-findings` and `define-public-projection`, in the testing-harness repository, not implemented.
+
+**What carried forward.** The update, reopen, and deduplication lifecycle and the finding-is-not-authority rule go to the first. The projection boundary goes to the second, because more than one projection exists with different allowlists and neither belongs to findings alone. The rule keeping offered demand, served capacity, and load-generator limit distinct carries forward as a measurement requirement.
+
+**Referenced, not duplicated.** `design.md`'s argument that these three quantities are the most plausible false claim the harness can make is cited by both successors.

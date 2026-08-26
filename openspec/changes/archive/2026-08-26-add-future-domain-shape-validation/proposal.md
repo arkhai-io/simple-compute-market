@@ -1,3 +1,19 @@
+> **Archived 2026-08-26 — superseded, not implemented.**
+>
+> **Superseded by:** `define-future-feature-conformance`, in the testing-harness repository.
+>
+> **Why.** The harness moved to a repository of its own. Its fixtures read `MarketDomainContract` identities from `domains/vms`, `domains/bare_metal`, and `domains/apicredits`, but reading them requires no product change, so nothing remains here.
+>
+> **What carried forward.** Essentially all of it, with terminology adjusted. The zero-effect assertion — a disabled fixture proves nothing happened rather than that an exception was raised — and the testing-seam-not-plugin-platform boundary carry forward unchanged.
+>
+> **Where the reasoning lives.** This was the closest alignment of any migrated change; the successor's design agrees with this one on mechanism, assertion, and boundary.
+>
+> Design rationale is referenced rather than duplicated: successors cite this
+> change by name and do not restate it, so the two cannot drift under two
+> vocabularies.
+
+---
+
 ## Why
 
 The harness is being built against one domain. If supporting a second requires

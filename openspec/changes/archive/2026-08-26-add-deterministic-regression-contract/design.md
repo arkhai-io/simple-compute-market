@@ -130,3 +130,14 @@ Deliberately left to the private generation change, which is design phase for
 this reason among others. Recorded here because the public representation has to
 carry whatever identity the answer needs, and a representation designed without
 it may not.
+
+
+---
+
+## Disposition
+
+**Archived 2026-08-26.** Superseded by `define-regression-jurisdiction` here, and `define-regression-disposition` in the testing-harness repository, not implemented.
+
+**What carried forward.** The jurisdiction question stays here and is the whole of its successor. Generation semantics and evidence-class inheritance go to the harness. The rule that a green regression suite must never be readable as concurrency or capacity evidence is restated in both, because it constrains both.
+
+**Referenced, not duplicated.** `design.md`'s recording-is-not-a-specification argument — that nothing in a capture distinguishes correct behaviour from a defect that happened to be present — is cited by both successors.

@@ -1,3 +1,19 @@
+> **Archived 2026-08-26 — superseded, not implemented.**
+>
+> **Superseded by:** `define-regression-jurisdiction` here, and `define-regression-disposition` in the testing-harness repository.
+>
+> **Why.** Two of this change's three properties are harness concerns; the third is not. Which of the four test levels receives a generated regression, and who owns it afterwards, is a question about this repository's test architecture and only this repository can answer it.
+>
+> **What carried forward.** The jurisdiction question stays here and is the whole of its successor. Generation semantics and evidence-class inheritance go to the harness. The rule that a green regression suite must never be readable as concurrency or capacity evidence is restated in both, because it constrains both.
+>
+> **Where the reasoning lives.** `design.md`'s recording-is-not-a-specification argument — that nothing in a capture distinguishes correct behaviour from a defect that happened to be present — is cited by both successors.
+>
+> Design rationale is referenced rather than duplicated: successors cite this
+> change by name and do not restate it, so the two cannot drift under two
+> vocabularies.
+
+---
+
 ## Why
 
 Agent-driven runs are the most expensive tests in this system and the only ones

@@ -1,3 +1,19 @@
+> **Archived 2026-08-26 — superseded, not implemented.**
+>
+> **Superseded by:** `define-participant-contracts-and-action-boundary`, in the testing-harness repository.
+>
+> **Why.** The harness moved to a repository of its own. The word *slice* was undefined here and appeared once; it is not carried forward.
+>
+> **What carried forward.** The action-ownership boundary, independent observation, and frozen requests carry forward close to verbatim. The boundary is now expressed per effect rather than per role, because the same effect class is a fixture before a scenario starts and under test after it, for the same participant.
+>
+> **Where the reasoning lives.** `design.md`'s account of how the abandoned branch crossed this boundary — a wrapper emitting a buyer request from the controller side, with tests passing throughout — is why the successor enforces by capability rather than by review. It is cited, not restated.
+>
+> Design rationale is referenced rather than duplicated: successors cite this
+> change by name and do not restate it, so the two cannot drift under two
+> vocabularies.
+
+---
+
 ## Why
 
 `add-harness-scenario-contract` declares what a scenario is. Nothing performs

@@ -128,3 +128,14 @@ or with the product domain.
 
 Not resolved here, and not urgent — but worth deciding before the second adapter
 exists rather than after, because the first answer becomes the precedent.
+
+
+---
+
+## Disposition
+
+**Archived 2026-08-26.** Superseded by `define-future-feature-conformance`, in the testing-harness repository, not implemented.
+
+**What carried forward.** Essentially all of it, with terminology adjusted. The zero-effect assertion — a disabled fixture proves nothing happened rather than that an exception was raised — and the testing-seam-not-plugin-platform boundary carry forward unchanged.
+
+**Referenced, not duplicated.** This was the closest alignment of any migrated change; the successor's design agrees with this one on mechanism, assertion, and boundary.
