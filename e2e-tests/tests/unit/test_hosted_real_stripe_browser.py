@@ -165,11 +165,43 @@ def test_authentication_challenge_uses_one_total_timeout_across_frames() -> None
     assert page.waited_ms == 500
 
 
+class _HostIframe:
+    """The `<iframe>` as the parent document sees it, which is the deciding view."""
+
+    def __init__(self, *, visible: bool = True, box: dict | None = None) -> None:
+        self._visible = visible
+        self._box = {"x": 20.0, "y": 120.0, "width": 300.0, "height": 150.0} if box is None else box
+
+    def is_visible(self) -> bool:
+        return self._visible
+
+    def bounding_box(self) -> dict | None:
+        return self._box
+
+
 class _CaptchaFrame:
     url = "https://newassets.hcaptcha.com/captcha/v1"
 
+    def __init__(self, host: _HostIframe | None = None) -> None:
+        self._host = host or _HostIframe()
+
     def locator(self, _selector: str) -> _SaveDetailsLocator:
         return _SaveDetailsLocator(checked=False)
+
+    def frame_element(self) -> _HostIframe:
+        return self._host
+
+
+#: What hCaptcha actually leaves behind on an ordinary submitted Checkout,
+#: measured from a live test-mode page: the button is there and reports itself
+#: visible inside its own frame, while the parent has the iframe hidden and
+#: parked far off the top of the page.
+_HIDDEN_CHALLENGE = _HostIframe(
+    visible=False, box={"x": 17.0, "y": -8880.5, "width": 300.0, "height": 150.0}
+)
+_OFFSCREEN_CHALLENGE = _HostIframe(
+    visible=True, box={"x": 9.0, "y": -9999.0, "width": 300.0, "height": 150.0}
+)
 
 
 def test_authentication_challenge_classifies_interactive_captcha_as_external() -> None:
@@ -178,6 +210,27 @@ def test_authentication_challenge_classifies_interactive_captcha_as_external() -
 
     with pytest.raises(ChromiumUnavailable, match="interactive CAPTCHA"):
         _complete_authentication(page, 500)
+
+
+@pytest.mark.parametrize(
+    ("label", "host"),
+    [("hidden by the parent", _HIDDEN_CHALLENGE), ("parked off-screen", _OFFSCREEN_CHALLENGE)],
+)
+def test_a_challenge_the_page_never_showed_is_not_a_challenge(
+    label: str, host: _HostIframe
+) -> None:
+    """hCaptcha leaves this behind on every submitted Checkout, asking nothing.
+
+    The button inside the frame reports itself visible either way, so a lane
+    that trusts the frame's own answer fails every authentication run on a
+    page the person watching it saw nothing wrong with.
+    """
+
+    page = _ChallengePage(_Clock(), frame_count=0)
+    page.frames = [_CaptchaFrame(host)]
+
+    assert _settle_interactive_captcha(page, attended=True) == 0.0
+    assert _settle_interactive_captcha(page, attended=False) == 0.0
 
 
 class _AnsweredCaptcha:
@@ -192,6 +245,9 @@ class _AnsweredCaptcha:
 
     def locator(self, _selector: str) -> "_AnsweredCaptcha":
         return self
+
+    def frame_element(self) -> _HostIframe:
+        return _HostIframe(visible=self._clock.value < self._answered_at)
 
     def is_visible(self) -> bool:
         return self._clock.value < self._answered_at

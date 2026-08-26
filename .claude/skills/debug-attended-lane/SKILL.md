@@ -55,17 +55,21 @@ a protected run discards. Reproduce the lane as a development run instead.
 The stage names where the lane stopped, which is often several steps from what
 broke. Past examples worth knowing:
 
-- `browser_checkout` with `chromium_unavailable` on an interactive card lane is
-  the provider's CAPTCHA, not a broken Chromium. A visible browser is *not* a
-  reliable way around it: `authentication` drew an interactive challenge as the
-  only lane of a fresh session with the window showing. An attended run now
-  waits for the challenge instead of failing on it, printing a line asking for
-  it to be answered, so this code from an attended run means either nobody
-  answered within five minutes or the page had already failed for another
-  reason before the challenge was seen. From an unattended run it still means
-  what it always did. If a lane reports `excluded` with
-  `interactive_lane_not_automated`, it was never attempted: it needs
-  `--attended`.
+- `browser_checkout` with `chromium_unavailable` on an interactive card lane
+  used to be reported as the provider's CAPTCHA. Measured against a live
+  Checkout page, that was a false positive: hCaptcha loads its challenge frame
+  on *every* submitted Checkout, button and all, and hides it in the parent
+  document. Asking the frame about its own contents cannot see the parent's
+  CSS, so it answered `visible` on pages showing nothing. The detector now
+  asks the hosting iframe instead. What headless Chromium actually meets is
+  not a challenge but a silent stall: the submit button sits at `Processing`,
+  the page shows no error, and no PaymentIntent is ever created -- for a plain
+  `4242` success card as much as a 3DS one. So a headless card lane cannot
+  fund at all on this account, which is why interactive card lanes are
+  `excluded` when unattended. An attended run waits for a challenge that is
+  genuinely on screen and fails only if nobody answers in five minutes. If a
+  lane reports `excluded` with `interactive_lane_not_automated`, it was never
+  attempted: it needs `--attended`.
 - `loss_boundary` on `ach_return` or `post_collection_loss` reports `excluded`
   with `loss_projection_unimplemented`. Nothing on the consumer side observes an
   authoritative funding loss or blocks fulfilment on one. That is a known gap,

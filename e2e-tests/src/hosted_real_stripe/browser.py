@@ -579,13 +579,39 @@ def _page_complaint(page: Any) -> str:
 
 
 def _interactive_captcha_visible(frame: Any) -> bool:
+    """Whether a challenge is on the screen, asked from the side that knows.
+
+    The challenge frame is loaded on every submitted Checkout whether or not
+    anyone is being asked to answer it. hCaptcha builds it, button and all,
+    and hides it in the *parent* document. A frame cannot see that: inside it
+    the button is laid out and unhidden, so asking the frame about its own
+    contents gets `visible` back from a page that is showing nothing -- which
+    is how the authentication lane came to report an interactive CAPTCHA on
+    runs where a person watching the window saw an ordinary Checkout.
+
+    So the hosting iframe is what gets asked, and being parked off-screen
+    counts as hidden however the page spells it.
+    """
+
     host = urlsplit(str(getattr(frame, "url", ""))).hostname or ""
     if host != "hcaptcha.com" and not host.endswith(".hcaptcha.com"):
         return False
     try:
-        return frame.locator("[aria-label='Verify Answers']").first.is_visible()
+        if not frame.locator("[aria-label='Verify Answers']").first.is_visible():
+            return False
+        element = frame.frame_element()
+        if not element.is_visible():
+            return False
+        box = element.bounding_box()
     except Exception:
         return False
+    return (
+        box is not None
+        and box["width"] > 0
+        and box["height"] > 0
+        and box["x"] + box["width"] > 0
+        and box["y"] + box["height"] > 0
+    )
 
 
 def _raise_if_interactive_captcha(page: Any) -> None:
