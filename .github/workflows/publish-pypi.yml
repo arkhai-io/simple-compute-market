@@ -187,19 +187,29 @@ jobs:
       # Read the trust configuration for the version this source pins, not one
       # named here. Naming the file was already half-derived -- the repository,
       # the tag and the artifact names came out of the JSON -- so the filename
-      # was the only stale part, and it was enough: it pointed at v0.2.1 after
-      # the pin moved to v0.4.2, and the download failed with `release not
-      # found` because no such producer release exists.
+      # was the only stale part, and it was enough: it kept pointing at v0.2.1
+      # after the pin moved to v0.4.2, which would have staged one release's
+      # assets for a wheel built against another and failed in the verifier.
       - name: Select the hosted release this source binds
         id: hosted
         if: steps.check.outputs.skip == 'false' && matrix.dist == 'arkhai-kit-hosted-settlement'
         run: python scripts/select-hosted-client-channel.py >>"$GITHUB_OUTPUT"
+      # The producer repository is private and this one is public, so the
+      # workspace token cannot see it: GitHub answers a private release with
+      # `release not found`, which reads as a missing tag and is really a
+      # missing permission. `release.yml` has always used the producer token
+      # for exactly this; this job was reaching for the release with the one
+      # token that cannot reach it.
       - name: Download exact hosted release assets
         if: steps.hosted.outputs.channel == 'release'
         env:
-          GH_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ secrets.HOSTED_RELEASE_TOKEN }}
         run: |
           set -euo pipefail
+          if [ -z "${GH_TOKEN}" ]; then
+            echo "::error::HOSTED_RELEASE_TOKEN is unset; the private producer release cannot be read"
+            exit 1
+          fi
           mkdir -p .dist
           gh release download "v${{ steps.hosted.outputs.version }}" \
             --repo "${{ steps.hosted.outputs.repository }}" --dir .dist \

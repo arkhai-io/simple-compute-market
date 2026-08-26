@@ -86,11 +86,21 @@ jobs:
         id: hosted
         if: matrix.requires_hosted
         run: python scripts/select-hosted-client-channel.py >>"$GITHUB_OUTPUT"
+      # Same private producer, same reason as in publish-pypi.yml: the
+      # workspace token answers a private release with `release not found`.
+      # This repository is public, so a pull request from a fork is handed no
+      # secret at all -- say which of the two happened rather than letting `gh`
+      # report a missing tag for both.
       - name: Download exact hosted release assets
         if: matrix.requires_hosted && steps.hosted.outputs.channel == 'release'
         env:
-          GH_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ secrets.HOSTED_RELEASE_TOKEN }}
         run: |
+          set -euo pipefail
+          if [ -z "${GH_TOKEN}" ]; then
+            echo "::error::HOSTED_RELEASE_TOKEN is unset (forked pull requests receive no secrets); the private producer release cannot be read"
+            exit 1
+          fi
           mkdir -p .dist
           gh release download "v${{ steps.hosted.outputs.version }}" \
             --repo "${{ steps.hosted.outputs.repository }}" --dir .dist \
