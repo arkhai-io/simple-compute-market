@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 
 import pytest
@@ -167,3 +168,42 @@ def test_an_unreachable_index_reports_the_version_and_the_channel() -> None:
     assert "::error::hosted client" in WORKFLOW
     assert "AR_WORKLOAD_IDENTITY_PROVIDER" in WORKFLOW
     assert "or release that version" in WORKFLOW
+
+
+#: Names a producer release asset carries, spelled with the version in them.
+#: Each is derivable from the pin, so a literal one in a workflow is a second
+#: statement of which release is bound -- and the one that goes stale, because
+#: nothing reads it back.
+_STALE_HOSTED_LITERALS = (
+    re.compile(r"hosted-settlement-v\d+\.\d+\.\d+-trust\.json"),
+    re.compile(r"(?:openapi|conformance)-v\d+\.\d+\.\d+\.json"),
+    re.compile(r"migrations-v\d+\.json"),
+    re.compile(r"HOSTED_RELEASE_TAG"),
+)
+
+
+@pytest.mark.parametrize(
+    "workflow",
+    sorted((REPO_ROOT / ".github" / "workflows").glob("*.yml")),
+    ids=lambda path: path.name,
+)
+def test_no_workflow_names_a_hosted_release_of_its_own(workflow: Path) -> None:
+    """Every workflow asks the selector which release is bound, or asks nobody.
+
+    Three workflows consume the producer and only one derived the version.
+    `release.yml` carried `HOSTED_RELEASE_TAG: v0.2.1` and `publish-pypi.yml`
+    opened `hosted-settlement-v0.2.1-trust.json` by name; both survived the
+    move to v0.4.2 unchanged, and both then reached for a release that does
+    not exist. The failure was a publish job reporting `release not found`,
+    which names neither the version it wanted nor where it got it.
+    """
+
+    text = workflow.read_text(encoding="utf-8")
+    found = sorted(
+        {match.group(0) for pattern in _STALE_HOSTED_LITERALS for match in pattern.finditer(text)}
+    )
+
+    assert not found, (
+        f"{workflow.name} names {found}; derive it from "
+        "scripts/select-hosted-client-channel.py instead"
+    )
