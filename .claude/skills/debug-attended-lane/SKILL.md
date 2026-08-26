@@ -64,12 +64,17 @@ broke. Past examples worth knowing:
   asks the hosting iframe instead. What headless Chromium actually meets is
   not a challenge but a silent stall: the submit button sits at `Processing`,
   the page shows no error, and no PaymentIntent is ever created -- for a plain
-  `4242` success card as much as a 3DS one. So a headless card lane cannot
-  fund at all on this account, which is why interactive card lanes are
-  `excluded` when unattended. An attended run waits for a challenge that is
-  genuinely on screen and fails only if nobody answers in five minutes. If a
-  lane reports `excluded` with `interactive_lane_not_automated`, it was never
-  attempted: it needs `--attended`.
+  `4242` success card as much as a 3DS one, and in a visible window as much as
+  a headless one. Someone touching the page is what releases it, which is why
+  interactive card lanes are `excluded` when unattended. An attended run now
+  asks for the payment to be finished in the window and waits five minutes,
+  for a stall and for a real challenge alike, so `checkout_contract_rejected`
+  from an attended run means nobody finished it in time. `_complete_
+  authentication` also names the controls the page was offering when it gave
+  up: `Pay Processing` there means the submit stalled and 3DS never started,
+  and it is not evidence that the 3DS selectors are stale. If a lane reports
+  `excluded` with `interactive_lane_not_automated`, it was never attempted:
+  it needs `--attended`.
 - `loss_boundary` on `ach_return` or `post_collection_loss` reports `excluded`
   with `loss_projection_unimplemented`. Nothing on the consumer side observes an
   authoritative funding loss or blocks fulfilment on one. That is a known gap,

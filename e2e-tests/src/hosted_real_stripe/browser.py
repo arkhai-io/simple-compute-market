@@ -543,22 +543,43 @@ def _await_checkout_left(
     funding timeout, naming neither the page nor what it did there.
     """
 
-    for attempt in (0, 1):
+    def left() -> bool:
         try:
             page.wait_for_url(
                 lambda url: "checkout.stripe.com" not in str(url),
                 timeout=timeout_ms,
             )
-            return
         except Exception:  # noqa: BLE001 - the page is the subject, not the error
-            # A challenge answered by hand is not a submission that failed: the
-            # page was held, not refused, so the wait is worth one more turn.
-            if attempt == 0 and _settle_interactive_captcha(page, attended=attended):
-                continue
-            raise CheckoutContractError(
-                f"Checkout did not accept the submitted {subject} form"
-                + (_page_complaint(page) if diagnose else "")
-            ) from None
+            return False
+        return True
+
+    if left():
+        return
+    # A challenge answered by hand is not a submission that failed: the page
+    # was held, not refused, so the wait is worth one more turn.
+    if _settle_interactive_captcha(page, attended=attended) and left():
+        return
+    if attended:
+        # Stripe holds a submission it is not convinced a person made, and
+        # holds it silently: the button sits at its processing label, no error
+        # appears, and no PaymentIntent is ever created. Someone touching the
+        # page is what releases it, which is the whole reason this run has
+        # someone at the window.
+        _ask_for_a_person(
+            f"Stripe is holding this {subject} for a person. Finish it in the browser window."
+        )
+        try:
+            page.wait_for_url(
+                lambda url: "checkout.stripe.com" not in str(url),
+                timeout=_ATTENDED_PAUSE_S * 1000,
+            )
+            return
+        except Exception:  # noqa: BLE001 - the page is still the subject
+            pass
+    raise CheckoutContractError(
+        f"Checkout did not accept the submitted {subject} form"
+        + (_page_complaint(page) if diagnose else "")
+    ) from None
 
 
 def _page_complaint(page: Any) -> str:
@@ -579,6 +600,33 @@ def _page_complaint(page: Any) -> str:
         return "; the page reported nothing"
     joined = " | ".join(sorted({str(item) for item in messages}))
     return "; the page said " + joined[:300]
+
+
+def _frame_is_shown(frame: Any) -> bool:
+    """Whether a frame is on the screen, asked from the document that owns it.
+
+    A frame cannot answer this about itself. Its contents are laid out and
+    unhidden inside it whatever the parent has done with the iframe, so the
+    only useful view is the parent's -- and being parked off the page counts
+    as hidden however the page spells it.
+    """
+
+    try:
+        if frame.parent_frame is None:
+            return True
+        element = frame.frame_element()
+        if not element.is_visible():
+            return False
+        box = element.bounding_box()
+    except Exception:  # noqa: BLE001 - a frame that cannot answer is not shown
+        return False
+    return (
+        box is not None
+        and box["width"] > 0
+        and box["height"] > 0
+        and box["x"] + box["width"] > 0
+        and box["y"] + box["height"] > 0
+    )
 
 
 def _offered_controls(page: Any) -> str:
@@ -603,6 +651,10 @@ def _offered_controls(page: Any) -> str:
     except Exception:  # noqa: BLE001 - a diagnostic must not mask its subject
         return ""
     for frame in frames:
+        # A control in a frame the page is hiding was never offered to anyone,
+        # and listing it invites the reading that cost this lane three rounds.
+        if not _frame_is_shown(frame):
+            continue
         try:
             found = frame.eval_on_selector_all(
                 "button, input[type='submit'], [role='button']", script
@@ -637,19 +689,9 @@ def _interactive_captcha_visible(frame: Any) -> bool:
     try:
         if not frame.locator("[aria-label='Verify Answers']").first.is_visible():
             return False
-        element = frame.frame_element()
-        if not element.is_visible():
-            return False
-        box = element.bounding_box()
-    except Exception:
+    except Exception:  # noqa: BLE001 - a frame that cannot answer is not asking
         return False
-    return (
-        box is not None
-        and box["width"] > 0
-        and box["height"] > 0
-        and box["x"] + box["width"] > 0
-        and box["y"] + box["height"] > 0
-    )
+    return _frame_is_shown(frame)
 
 
 def _raise_if_interactive_captcha(page: Any) -> None:
@@ -663,10 +705,15 @@ def _raise_if_interactive_captcha(page: Any) -> None:
         raise ChromiumUnavailable("Stripe Checkout requires an interactive CAPTCHA")
 
 
-#: How long someone at the browser is given to answer a challenge. Generous by
-#: intent: the cost of waiting too long is a slow lane, and the cost of not
-#: waiting is failing a run for the one thing it was attended to handle.
-_ATTENDED_CAPTCHA_TIMEOUT_S = 300.0
+#: How long someone at the browser is given to do the thing the provider is
+#: waiting for. Generous by intent: the cost of waiting too long is a slow
+#: lane, and the cost of not waiting is failing a run for the one thing it was
+#: attended to handle.
+_ATTENDED_PAUSE_S = 300.0
+
+
+def _ask_for_a_person(what: str) -> None:
+    print(f"\n  {what}\n  The lane goes on by itself once you do.\n", file=sys.stderr, flush=True)
 
 
 def _settle_interactive_captcha(
@@ -695,20 +742,22 @@ def _settle_interactive_captcha(
         return 0.0
     if not attended:
         raise ChromiumUnavailable("Stripe Checkout requires an interactive CAPTCHA")
-    print(
-        "\n  The provider raised a CAPTCHA. Answer it in the browser window;\n"
-        "  the lane goes on by itself once you do.\n",
-        file=sys.stderr,
-        flush=True,
-    )
+    _ask_for_a_person("Stripe raised a CAPTCHA. Answer it in the browser window.")
     started = monotonic()
-    deadline = started + _ATTENDED_CAPTCHA_TIMEOUT_S
+    deadline = started + _ATTENDED_PAUSE_S
     while challenged():
         remaining_ms = (deadline - monotonic()) * 1000
         if remaining_ms <= 0:
             raise ChromiumUnavailable("the CAPTCHA Stripe Checkout raised went unanswered")
         page.wait_for_timeout(min(500, remaining_ms))
     return monotonic() - started
+
+
+def _checkout_left(page: Any) -> bool:
+    try:
+        return "checkout.stripe.com" not in str(page.url)
+    except Exception:  # noqa: BLE001 - a page that cannot say has not said so
+        return False
 
 
 def _complete_authentication(
@@ -727,10 +776,15 @@ def _complete_authentication(
         "button:has-text('Authorize')",
     )
     deadline = monotonic() + timeout_ms / 1000
+    asked = False
     while True:
         # Time spent waiting on a person is not time the challenge took to
         # appear, so it is given back rather than counted against the deadline.
         deadline += _settle_interactive_captcha(page, attended=attended, monotonic=monotonic)
+        if _checkout_left(page):
+            # Someone drove the challenge themselves. There is nothing left to
+            # click, and the page having left is the better proof anyway.
+            return
         for frame in page.frames:
             for selector in selectors:
                 locator = frame.locator(selector).first
@@ -742,7 +796,14 @@ def _complete_authentication(
                     continue
         remaining_ms = (deadline - monotonic()) * 1000
         if remaining_ms <= 0:
-            break
+            if not attended or asked:
+                break
+            asked = True
+            _ask_for_a_person(
+                "Stripe is holding this payment for a person. Finish it in the browser window."
+            )
+            deadline = monotonic() + _ATTENDED_PAUSE_S
+            continue
         page.wait_for_timeout(min(100, remaining_ms))
     raise CheckoutContractError(
         "Stripe test authentication challenge was unavailable"

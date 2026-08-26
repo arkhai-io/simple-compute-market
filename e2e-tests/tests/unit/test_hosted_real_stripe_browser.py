@@ -139,12 +139,20 @@ class _MissingChallenge:
         return False
 
 
+#: Any non-None owner: `_frame_is_shown` only asks whether a frame has one.
+_PARENT = object()
+
+
 class _ChallengeFrame:
+    parent_frame = _PARENT
+
     def locator(self, _selector: str) -> _MissingChallenge:
         return _MissingChallenge()
 
 
 class _ChallengePage:
+    url = "https://checkout.stripe.com/c/pay/cs_test_example"
+
     def __init__(self, clock: _Clock, frame_count: int) -> None:
         self.frames = [_ChallengeFrame() for _ in range(frame_count)]
         self._clock = clock
@@ -159,6 +167,7 @@ class _OfferingFrame:
     """A frame that answers what controls it is showing."""
 
     url = "https://checkout.stripe.com/c/pay/cs_test_example"
+    parent_frame = None
 
     def __init__(self, labels: list[str]) -> None:
         self._labels = labels
@@ -220,6 +229,7 @@ class _HostIframe:
 
 class _CaptchaFrame:
     url = "https://newassets.hcaptcha.com/captcha/v1"
+    parent_frame = _PARENT
 
     def __init__(self, host: _HostIframe | None = None) -> None:
         self._host = host or _HostIframe()
@@ -277,6 +287,8 @@ class _AnsweredCaptcha:
 
     url = "https://newassets.hcaptcha.com/captcha/v1"
 
+    parent_frame = _PARENT
+
     def __init__(self, clock: _Clock, *, answered_at: float) -> None:
         self.first = self
         self._clock = clock
@@ -306,6 +318,7 @@ class _AuthorizeButton:
 
 class _AuthorizeFrame:
     url = "https://hooks.stripe.com/3d_secure"
+    parent_frame = _PARENT
 
     def __init__(self, button: _AuthorizeButton) -> None:
         self._button = button
@@ -393,6 +406,63 @@ def test_a_page_held_by_a_captcha_is_waited_on_again_once_it_clears() -> None:
     _await_checkout_left(page, timeout_ms=1_000, diagnose=False, attended=True)
 
     assert page.waits == 2
+
+
+class _StalledCheckoutPage:
+    """Checkout holding a submission it is not convinced a person made.
+
+    No challenge, no error, no navigation -- the state a live run reaches with
+    the submit button sitting at `Processing` and no PaymentIntent ever
+    created. Only a person touching the page releases it.
+    """
+
+    def __init__(self, *, released_on_wait: int) -> None:
+        self.url = "https://checkout.stripe.com/c/pay/cs_test_example"
+        self.frames = [_ChallengeFrame()]
+        self.waits = 0
+        self._released_on_wait = released_on_wait
+
+    def wait_for_url(self, _predicate, *, timeout: float) -> None:
+        self.waits += 1
+        if self.waits < self._released_on_wait:
+            raise TimeoutError("still on Checkout")
+        self.url = "https://storefront.invalid/paid"
+
+    def wait_for_timeout(self, _timeout_ms: float) -> None:
+        return None
+
+
+def test_a_stalled_submission_is_handed_to_the_person_at_the_window() -> None:
+    """Stripe holds it silently; someone touching the page is what releases it."""
+
+    page = _StalledCheckoutPage(released_on_wait=2)
+
+    _await_checkout_left(page, timeout_ms=1_000, diagnose=False, attended=True)
+
+    assert page.waits == 2
+
+
+def test_a_stalled_submission_is_not_waited_on_when_nobody_is_watching() -> None:
+    page = _StalledCheckoutPage(released_on_wait=99)
+
+    with pytest.raises(CheckoutContractError, match="did not accept"):
+        _await_checkout_left(page, timeout_ms=1_000, diagnose=False)
+
+    assert page.waits == 1
+
+
+class _SelfDrivenPage(_ChallengePage):
+    """A page whose person completed the challenge before the harness looked."""
+
+    def __init__(self, clock: _Clock) -> None:
+        super().__init__(clock, frame_count=1)
+        self.url = "https://storefront.invalid/paid"
+
+
+def test_a_challenge_someone_completed_by_hand_needs_no_control() -> None:
+    """Leaving Checkout is better proof than a button that is now gone."""
+
+    _complete_authentication(_SelfDrivenPage(_Clock()), 0, attended=True)
 
 
 def test_a_page_held_by_a_captcha_is_not_retried_when_nobody_is_watching() -> None:
