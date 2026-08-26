@@ -16,8 +16,6 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     env:
-      HOSTED_RELEASE_TAG: v0.2.1
-      HOSTED_RELEASE_REPOSITORY: arkhai-io/stripe-settlement-service
       IMAGE_REPOSITORY: ghcr.io/arkhai-io/simple-compute-market
       RELEASE_DIR: marketplace-release
     steps:
@@ -33,6 +31,25 @@ jobs:
           python-version: 3.13.7
           enable-cache: true
 
+      # Which producer release this tag binds is already stated, by the pin
+      # and by the trust configuration signing it. Naming a tag here made a
+      # third statement, and it was the one that went stale: it still said
+      # v0.2.1 after the source moved to v0.4.2, so a release cut from this
+      # workflow would have fetched a producer the source does not consume --
+      # or, as it did, no producer at all.
+      - name: Select the hosted release this source binds
+        id: hosted
+        run: python scripts/select-hosted-client-channel.py >>"$GITHUB_OUTPUT"
+
+      # An unsigned pin is a supported state for a test run, which compiles
+      # against the wheel and cites it for nothing. It is not a state a
+      # release can be cut from: there would be no signature to carry.
+      - name: Refuse to release against an unsigned hosted pin
+        if: steps.hosted.outputs.channel != 'release'
+        run: |
+          echo "::error::hosted client ${{ steps.hosted.outputs.version }} is pinned but unsigned; sign that release before tagging a marketplace release"
+          exit 1
+
       - name: Download exact hosted producer release
         env:
           GH_TOKEN: ${{ secrets.HOSTED_RELEASE_TOKEN }}
@@ -40,8 +57,8 @@ jobs:
           set -euo pipefail
           test -n "$GH_TOKEN"
           mkdir -p .hosted-release
-          gh release download "$HOSTED_RELEASE_TAG" \
-            --repo "$HOSTED_RELEASE_REPOSITORY" \
+          gh release download "v${{ steps.hosted.outputs.version }}" \
+            --repo "${{ steps.hosted.outputs.repository }}" \
             --dir .hosted-release
 
       - name: Verify and build exact marketplace wheel set
