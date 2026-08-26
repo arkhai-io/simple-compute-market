@@ -173,7 +173,10 @@ class ChromiumCheckout:
                     _submit_checkout(page, submit, outcome)
                     if outcome == "authentication":
                         _complete_authentication(
-                            page, self._timeout_ms, attended=self._attended
+                            page,
+                            self._timeout_ms,
+                            attended=self._attended,
+                            diagnose=self._retain_diagnostics,
                         )
                     if outcome in {"decline", "insufficient_funds"}:
                         # These outcomes succeed by Checkout refusing and
@@ -578,6 +581,41 @@ def _page_complaint(page: Any) -> str:
     return "; the page said " + joined[:300]
 
 
+def _offered_controls(page: Any) -> str:
+    """Name what the page was offering, for a development run only.
+
+    A control that is not found is either absent or renamed, and the error
+    alone cannot separate those: a challenge that never appeared and one whose
+    button Stripe relabelled both read as `unavailable`. Labels are the
+    provider's own public button text -- no value, no session, and never in a
+    protected run.
+    """
+
+    script = (
+        "nodes => nodes.filter(n => n.getClientRects().length > 0"
+        " && getComputedStyle(n).visibility !== 'hidden')"
+        ".map(n => (n.innerText || n.value || '').trim().replace(/\\s+/g, ' '))"
+        ".filter(Boolean)"
+    )
+    labels: list[str] = []
+    try:
+        frames = list(page.frames)
+    except Exception:  # noqa: BLE001 - a diagnostic must not mask its subject
+        return ""
+    for frame in frames:
+        try:
+            found = frame.eval_on_selector_all(
+                "button, input[type='submit'], [role='button']", script
+            )
+        except Exception:  # noqa: BLE001 - one unreachable frame is not the answer
+            continue
+        if isinstance(found, list):
+            labels.extend(str(item)[:40] for item in found)
+    if not labels:
+        return "; the page offered no controls"
+    return "; the page offered " + " | ".join(sorted(set(labels)))[:300]
+
+
 def _interactive_captcha_visible(frame: Any) -> bool:
     """Whether a challenge is on the screen, asked from the side that knows.
 
@@ -678,6 +716,7 @@ def _complete_authentication(
     timeout_ms: int,
     *,
     attended: bool = False,
+    diagnose: bool = False,
     monotonic: Callable[[], float] = time.monotonic,
 ) -> None:
     selectors = (
@@ -705,4 +744,7 @@ def _complete_authentication(
         if remaining_ms <= 0:
             break
         page.wait_for_timeout(min(100, remaining_ms))
-    raise CheckoutContractError("Stripe test authentication challenge was unavailable")
+    raise CheckoutContractError(
+        "Stripe test authentication challenge was unavailable"
+        + (_offered_controls(page) if diagnose else "")
+    )

@@ -155,6 +155,45 @@ class _ChallengePage:
         self._clock.value += timeout_ms / 1000
 
 
+class _OfferingFrame:
+    """A frame that answers what controls it is showing."""
+
+    url = "https://checkout.stripe.com/c/pay/cs_test_example"
+
+    def __init__(self, labels: list[str]) -> None:
+        self._labels = labels
+
+    def locator(self, _selector: str) -> _MissingChallenge:
+        return _MissingChallenge()
+
+    def eval_on_selector_all(self, _selector: str, _script: str) -> list[str]:
+        return self._labels
+
+
+class _OfferingPage(_ChallengePage):
+    def __init__(self, clock: _Clock, labels: list[str]) -> None:
+        super().__init__(clock, frame_count=0)
+        self.frames = [_OfferingFrame(labels)]
+
+
+def test_a_missing_authentication_control_says_what_was_offered() -> None:
+    """Absent and renamed both read as `unavailable` without this."""
+
+    page = _OfferingPage(_Clock(), ["Pay Processing", "Verify"])
+
+    with pytest.raises(CheckoutContractError, match="Pay Processing"):
+        _complete_authentication(page, 0, diagnose=True)
+
+
+def test_a_protected_run_names_no_control_it_saw() -> None:
+    page = _OfferingPage(_Clock(), ["Pay Processing"])
+
+    with pytest.raises(CheckoutContractError) as caught:
+        _complete_authentication(page, 0)
+
+    assert "Pay Processing" not in str(caught.value)
+
+
 def test_authentication_challenge_uses_one_total_timeout_across_frames() -> None:
     clock = _Clock()
     page = _ChallengePage(clock, frame_count=20)
