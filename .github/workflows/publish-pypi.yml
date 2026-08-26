@@ -227,6 +227,18 @@ jobs:
       - name: Verify staged hosted client release
         if: steps.check.outputs.skip == 'false' && matrix.dist == 'arkhai-kit-hosted-settlement'
         run: make verify-hosted-release HOSTED_RELEASE_TRUST="${{ steps.hosted.outputs.trust }}"
+      # Four published packages point `tool.uv.find-links` at the repository's
+      # .dist so a local build resolves sibling arkhai-* wheels from there.
+      # uv reads that directory even under --no-sources, and a fresh checkout
+      # has no .dist at all, so the build died before it started -- reported as
+      # a bare `No such file or directory (os error 2)` naming a path nobody
+      # asked for. Empty is the right state here rather than merely a tolerable
+      # one: a published wheel must record plain PyPI dependencies, so there is
+      # nothing a publish build should be resolving locally. The hosted client
+      # job fills the same directory on purpose, and only it should.
+      - name: Ensure the local wheel directory exists but is empty
+        if: steps.check.outputs.skip == 'false' && matrix.dist != 'arkhai-kit-hosted-settlement'
+        run: mkdir -p .dist
       - name: Build distribution
         if: steps.check.outputs.skip == 'false'
         working-directory: ${{ matrix.path }}
