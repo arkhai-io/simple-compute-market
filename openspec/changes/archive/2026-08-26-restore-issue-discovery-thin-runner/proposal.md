@@ -1,12 +1,12 @@
 > **Archived 2026-08-26 — superseded, not implemented.**
 >
-> **Superseded by:** `correct-testing-documentation` here. The runner half is retired without a successor.
+> **Superseded by:** `retire-issue-discovery-tooling` here. The runner repair is retired without a successor.
 >
 > **Why.** The harness is being built new in a repository of its own rather than repaired here. The tool's phase-pipeline model has no actor in it and does not map onto the harness's execution model, so repairing it would produce something with no consumer.
 >
 > **What carried forward.** The `TESTING.md` correction stays: this repository documents a subsystem that has never existed on `dev`, and that is a defect independent of any harness. The runner repair, phase-configuration repointing, and Make targets are dropped. The `reinit` coverage gap is already owned by `remove-relative-uv-sources` task 2.5 and needs no new home.
 >
-> **Where the reasoning lives.** `design.md`'s inventory of the inherited tool — what exists, what its configuration points at, and what no longer resolves — is the record of why repair was not attempted. Removing `tools/issue-discovery` is deferred until a working replacement exists.
+> **Where the reasoning lives.** `design.md`'s inventory of the inherited tool — what exists, what its configuration points at, and what no longer resolves — is the record of why repair was not attempted. Removing `tools/issue-discovery` is owned by `retire-issue-discovery-tooling`, retained and not started until a working replacement exists.
 >
 > Design rationale is referenced rather than duplicated: successors cite this
 > change by name and do not restate it, so the two cannot drift under two
