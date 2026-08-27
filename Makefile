@@ -331,6 +331,8 @@ hosted-stripe-test: hosted-preflight ## Run one protected Stripe test-mode syste
 		--account-ref "$(HOSTED_STRIPE_TEST_ACCOUNT_REF)" \
 		--authority-environment "$(HOSTED_STRIPE_TEST_AUTHORITY_ENVIRONMENT)" \
 		--hosted-service-env-base "$(HOSTED_STRIPE_TEST_AUTHORITY_ENV_FILE)" \
+		--storefront-config "$(HOSTED_STRIPE_TEST_STOREFRONT_CONFIG)" \
+		--buyer-config "$(HOSTED_STRIPE_TEST_BUYER_CONFIG)" \
 		$(if $(HOSTED_STRIPE_TEST_VISIBLE_BROWSER),--visible-browser,) \
 		$(if $(HOSTED_STRIPE_TEST_ATTENDED),--attended,) \
 		$(if $(HOSTED_STRIPE_TEST_LIFECYCLE_TIMEOUT),--lifecycle-timeout "$(HOSTED_STRIPE_TEST_LIFECYCLE_TIMEOUT)",) \
