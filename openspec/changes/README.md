@@ -180,11 +180,11 @@ remove-relative-uv-sources ──► finish-buyer-cli-residue ──► type-cor
 
 ## Lesser goal — Support an external qualification suite
 
-**What it adds up to.** A separate suite drives this product through its published documentation and reports what it finds. Three of these changes exist because that suite cannot bind to anything this repository has not promised: the flow it traverses, the state it observes, and the documentation a reader actually receives are all currently implicit. The fourth decides what happens to a test the suite hands back. Not a roadmap goal — none of it changes what the market can do — but each is a real gap in what this repository states about itself, and each would be worth closing with no external consumer at all.
+**What it adds up to.** A separate suite drives this product through its published documentation and reports what it finds. Four of these changes exist because that suite cannot bind to anything this repository has not promised: the flow it traverses, the state it observes, the time each service spends, and the documentation a reader actually receives are all currently implicit. The fifth decides what happens to a test the suite hands back. Not a roadmap goal — none of it changes what the market can do — but each is a real gap in what this repository states about itself, and each would be worth closing with no external consumer at all.
 
 ```text
 declare-deal-lifecycle-contract ──┬──► define-regression-jurisdiction
-                                  └──► expose-product-observation-surfaces
+                                  └──► expose-product-observation-surfaces ──► instrument-service-timing-spans
 publish-documentation-closure (independent)
 ```
 
@@ -193,6 +193,7 @@ publish-documentation-closure (independent)
 | 1 | [`declare-deal-lifecycle-contract`](declare-deal-lifecycle-contract/) | active | The inter-service flow is named, its stages are a published artifact, and e2e scenarios reference them. A numbered choreography step remains a phase within a stage; several carry no deal content and collapsing the two would misattribute them. Declares which stages exist, never what should be true at one |
 | 2 | [`define-regression-jurisdiction`](define-regression-jurisdiction/) | blocked on the lifecycle contract | Which of the four test levels receives a generated regression and who owns it afterwards. A generated regression carries deterministic-reference strength and records what it does not demonstrate before its assertions. Accepts regressions; generates none |
 | 2 | [`expose-product-observation-surfaces`](expose-product-observation-surfaces/) | blocked on the lifecycle contract | Deal state observable through documented, versioned surfaces with stable identifiers, distinct from operator endpoints, each recording what it does not promise. An observation surface is a public contract |
+| 3 | [`instrument-service-timing-spans`](instrument-service-timing-spans/) | blocked on the observation surfaces | Spans naming the intervals a service can distinguish internally and a caller cannot — queue wait against service time, transaction construction against receipt wait. Context propagates through this repository's own clients and CLI and no further. Emits spans; deploys no collector |
 | — | [`publish-documentation-closure`](publish-documentation-closure/) | active | The transitive closure of internal links from each entry document, published as a content-addressed manifest per revision. A missing closure member fails the build rather than surprising a reader |
 | — | [`retire-issue-discovery-tooling`](retire-issue-discovery-tooling/) | retained, not started until a replacement exists | `tools/issue-discovery` and its Make targets removed, and `TESTING.md` stops describing a subsystem that has never existed on `dev`. The four test levels and their jurisdiction statement are untouched |
 
