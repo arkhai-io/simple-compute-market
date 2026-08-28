@@ -27,9 +27,21 @@ to conform to rather than a file to imitate.
   choreography step is retained as a `TestPhase` **within** a stage: several
   phases carry no deal content at all — arming a gate, dry-running a publication,
   advancing a pipeline — and collapsing the two would misattribute them.
+- Declares which refusal reasons are stable protocol constants and which are
+  interpolated at their raise site. A `409 offer_unfulfillable` carries a `reason`
+  drawn from several sites; some are literals and some interpolate incidental
+  content — a mismatched attribute list, a listing status — into the message. A
+  consumer cannot tell the two apart from the wire, so equality matching against
+  an interpolated reason passes or fails on detail the contract never meant to
+  promise. Publishing the distinction is what makes a refusal referenceable at
+  all, in the same way naming a stage is.
+- Records that one reason carries no information: a policy rejecting without a
+  reason emits a bare fallback string. It is declared unmatchable rather than
+  published as a constant, so nothing asserts against it while appearing to.
 - Records the boundary this contract does **not** cross: it declares which stages
-  exist, not what should be true at one. An expectation authored from this
-  contract by the thing being tested would be the product grading itself.
+  exist and which reasons are constants, not what should be true at one. An
+  expectation authored from this contract by the thing being tested would be the
+  product grading itself.
 
 ## Permanent documentation impact
 
@@ -38,8 +50,9 @@ to conform to rather than a file to imitate.
 
 ### Knowledge to promote
 
-The deal lifecycle and its stages, the stage-versus-phase distinction, and the
-rule that this contract carries structure and not expectations.
+The deal lifecycle and its stages, the stage-versus-phase distinction, the
+stability classification of refusal reasons, and the rule that this contract
+carries structure and not expectations.
 
 ## Impact
 
@@ -47,3 +60,8 @@ rule that this contract carries structure and not expectations.
 - Affected code: `e2e-tests/`, `docs/development/TESTING.md`
 - Consumed by an external suite that imports the contract rather than
   reimplementing it
+- **Scope grew during design.** The refusal-reason classification was added
+  because a published stage vocabulary that cannot say which refusal reasons are
+  constants leaves every consumer matching on strings that were never promised to
+  be stable. Classifying them is the same kind of work as naming a stage and
+  belongs with it rather than in a second artifact.
