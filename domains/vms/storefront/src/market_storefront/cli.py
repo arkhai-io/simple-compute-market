@@ -9,6 +9,7 @@ Subcommands:
     publish      Post listings from the agent DB. Mirror of
                  `market buy` on the buyer side.
     escrow       Seller-side escrow lifecycle (claim, refund, show).
+    settlement    Inspect readiness and administer installed mechanisms.
     portfolio    Manage local resource portfolio data.
     network      Join the operator's ZeroTier network and list peers.
     config       Inspect or edit the user config.toml.
@@ -16,9 +17,8 @@ Subcommands:
 
 from __future__ import annotations
 
-import asyncio
+from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
-from importlib.metadata import version, PackageNotFoundError
 
 import typer
 
@@ -28,7 +28,7 @@ from .cli_publish import register as register_publish_command
 from .groups.config import config_app
 from .groups.escrow import escrow_app
 from .groups.network import network_app
-
+from .groups.settlement import settlement_app
 
 app = typer.Typer(no_args_is_help=True)
 
@@ -47,6 +47,7 @@ def _config_path_callback(value: str | None) -> str | None:
     """Override the TOML loader path before any subcommand body runs."""
     if value:
         from market_config.config_loader import set_user_config_path
+
         set_user_config_path(Path(value))
     return value
 
@@ -67,7 +68,7 @@ def main(
         callback=_config_path_callback,
         is_eager=True,
         help="Path to an explicit storefront.toml. Defaults to "
-             "$XDG_CONFIG_HOME/arkhai/storefront.toml.",
+        "$XDG_CONFIG_HOME/arkhai/storefront.toml.",
     ),
 ) -> None:
     """market-storefront — provider-side admin CLI."""
@@ -82,11 +83,13 @@ def main(
 @app.command("serve")
 def serve_cmd(
     host: str = typer.Option(
-        "0.0.0.0", "--host",
+        "0.0.0.0",
+        "--host",
         help="Bind interface (default 0.0.0.0).",
     ),
     port: int | None = typer.Option(
-        None, "--port",
+        None,
+        "--port",
         help="Override seller.port from config.toml.",
     ),
 ) -> None:
@@ -105,11 +108,32 @@ def serve_cmd(
 # Group registrations
 # ---------------------------------------------------------------------------
 
-app.add_typer(logs_app, name="logs", help="Inspect storefront stage events from the local SQLite log.")
-app.add_typer(network_app, name="network", help="Join the operator's ZeroTier network and list peers.")
-app.add_typer(portfolio_app, name="portfolio", help="Manage local resource portfolio data.")
-app.add_typer(config_app, name="config", help="Inspect or edit the user config.toml (path/show/get/set/init-user).")
-app.add_typer(escrow_app, name="escrow", help="Seller-side escrow lifecycle (claim, refund).")
+app.add_typer(
+    logs_app,
+    name="logs",
+    help="Inspect storefront stage events from the local SQLite log.",
+)
+app.add_typer(
+    network_app,
+    name="network",
+    help="Join the operator's ZeroTier network and list peers.",
+)
+app.add_typer(
+    portfolio_app, name="portfolio", help="Manage local resource portfolio data."
+)
+app.add_typer(
+    config_app,
+    name="config",
+    help="Inspect or edit user config (path/show/get/set/init-user/migrate).",
+)
+app.add_typer(
+    escrow_app, name="escrow", help="Seller-side escrow lifecycle (claim, refund)."
+)
+app.add_typer(
+    settlement_app,
+    name="settlement",
+    help="Inspect readiness and administer installed settlement mechanisms.",
+)
 register_publish_command(app)
 
 

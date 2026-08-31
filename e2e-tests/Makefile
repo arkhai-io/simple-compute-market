@@ -17,7 +17,7 @@ MODULE ?= contracts
 # CLI instead; this variable is for local development only.
 DIST_DIR ?= ../.dist
 
-.PHONY: build venv test test-e2e
+.PHONY: build venv test test-e2e hosted-preflight hosted-start hosted-restart hosted-clean hosted-stripe-test hosted-stripe-test-stop
 
 # -----------------------------------------------------------------------
 # Setup
@@ -29,20 +29,32 @@ init-venv:
 init: init-venv
 	uv sync --find-links $(DIST_DIR)
 
-# Every internal wheel this project declares must be listed. A dependency
-# omitted here keeps whatever version the venv already resolved, so a scenario
-# can exercise fresh domain wheels against a stale kit — and the resulting
-# failure appears in the scenario rather than at the boundary that caused it.
 reinit: init-venv
 	uv sync --find-links $(DIST_DIR) \
-	--upgrade-package arkhai-apicredits-buyer        --reinstall-package arkhai-apicredits-buyer \
-	--upgrade-package arkhai-core-registry-client    --reinstall-package arkhai-core-registry-client \
-	--upgrade-package arkhai-core-storefront-client  --reinstall-package arkhai-core-storefront-client \
-	--upgrade-package arkhai-kit-alkahest            --reinstall-package arkhai-kit-alkahest \
-	--upgrade-package arkhai-kit-policy              --reinstall-package arkhai-kit-policy \
-	--upgrade-package arkhai-vms-buyer               --reinstall-package arkhai-vms-buyer \
+	--upgrade-package arkhai-core                           --reinstall-package arkhai-core \
+	--upgrade-package arkhai-core-buyer                     --reinstall-package arkhai-core-buyer \
+	--upgrade-package arkhai-core-storefront                --reinstall-package arkhai-core-storefront \
+	--upgrade-package arkhai-core-registry-client            --reinstall-package arkhai-core-registry-client \
+	--upgrade-package arkhai-core-storefront-client          --reinstall-package arkhai-core-storefront-client \
+	--upgrade-package arkhai-kit-config                      --reinstall-package arkhai-kit-config \
+	--upgrade-package arkhai-kit-identity                    --reinstall-package arkhai-kit-identity \
+	--upgrade-package arkhai-kit-policy                      --reinstall-package arkhai-kit-policy \
+	--upgrade-package arkhai-kit-settlement-runtime          --reinstall-package arkhai-kit-settlement-runtime \
+	--upgrade-package arkhai-kit-storefront                 --reinstall-package arkhai-kit-storefront \
+	--upgrade-package arkhai-kit-alkahest                    --reinstall-package arkhai-kit-alkahest \
+	--upgrade-package arkhai-hosted-settlement-client        --reinstall-package arkhai-hosted-settlement-client \
+	--upgrade-package arkhai-kit-hosted-settlement           --reinstall-package arkhai-kit-hosted-settlement \
+	--upgrade-package arkhai-kit-site                        --reinstall-package arkhai-kit-site \
+	--upgrade-package arkhai-kit-site-client                 --reinstall-package arkhai-kit-site-client \
+	--upgrade-package arkhai-kit-resource-pools              --reinstall-package arkhai-kit-resource-pools \
+	--upgrade-package arkhai-kit-fulfillment                 --reinstall-package arkhai-kit-fulfillment \
+	--upgrade-package arkhai-vms                             --reinstall-package arkhai-vms \
+	--upgrade-package arkhai-vms-buyer                       --reinstall-package arkhai-vms-buyer \
+	--upgrade-package arkhai-vms-storefront                  --reinstall-package arkhai-vms-storefront \
+	--upgrade-package arkhai-bare-metal                      --reinstall-package arkhai-bare-metal \
+	--upgrade-package arkhai-compute-provisioning            --reinstall-package arkhai-compute-provisioning \
 	--upgrade-package arkhai-vms-provisioning-operator-client --reinstall-package arkhai-vms-provisioning-operator-client \
-	--upgrade-package arkhai-vms-storefront          --reinstall-package arkhai-vms-storefront
+	--upgrade-package arkhai-apicredits-buyer                --reinstall-package arkhai-apicredits-buyer
 
 # -----------------------------------------------------------------------
 # Build
@@ -58,6 +70,26 @@ build: build-images
 build-images: reinit
 	cd .. && docker build -t $(IMAGE_NAME):$(IMAGE_TAG) -f e2e-tests/Dockerfile .
 	docker tag $(IMAGE_NAME):$(IMAGE_TAG) $(IMAGE_NAME):$(IMAGE_TAG)-$(GIT_SUFFIX)
+
+
+hosted-preflight:
+	$(MAKE) -C .. hosted-preflight
+
+hosted-start:
+	$(MAKE) -C .. hosted-compose-start
+
+hosted-restart:
+	$(MAKE) -C .. hosted-compose-restart
+
+hosted-clean:
+	$(MAKE) -C .. hosted-compose-clean
+
+
+hosted-stripe-test:
+	$(MAKE) -C .. hosted-stripe-test
+
+hosted-stripe-test-stop:
+	$(MAKE) -C .. hosted-stripe-test-stop
 
 # -----------------------------------------------------------------------
 # Tests — local
@@ -102,7 +134,7 @@ NETWORK ?= simple-market-service_default
 BUYER_MODULE ?= e2e_deal_buyer_cli or e2e_buy
 E2E_MODULE ?= e2e_deal or e2e_deal_buyer_cli or e2e_buy or multi_registry \
               or e2e_compute_dynamic_listings or e2e_alkahest_escrow_codecs \
-              or e2e_credits_deal
+              or e2e_credits_deal or e2e_bare_metal_deal
 
 test-buyer-machine:
 	docker run --rm \

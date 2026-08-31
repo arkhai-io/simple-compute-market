@@ -8,6 +8,7 @@ from arkhai_bare_metal_storefront.settlement import (
     build_bare_metal_settlement_plan,
 )
 from market_core.schemas import SettlementPlan
+from market_identity import Ed25519Signer
 
 
 PROPOSAL = {
@@ -15,6 +16,8 @@ PROPOSAL = {
     "escrow_address": "0x1111111111111111111111111111111111111111",
     "fields": {"amount": "100"},
 }
+BUYER_PRINCIPAL = Ed25519Signer(bytes.fromhex("11" * 32)).identity
+SELLER_PRINCIPAL = Ed25519Signer(bytes.fromhex("22" * 32)).identity
 
 
 def _artifacts():
@@ -57,12 +60,20 @@ def test_plan_builder_forwards_agreed_inputs_and_validates_plan(monkeypatch) -> 
         proposal=PROPOSAL,
         agreed_amount=100,
         duration_seconds=3600,
+        buyer_principal=BUYER_PRINCIPAL,
+        seller_principal=SELLER_PRINCIPAL,
         seller_wallet_address="0xseller",
         chain_config_paths={"base": "/config/base.json"},
     )
 
     plan = SettlementPlan.model_validate(result["settlement_plan"])
     assert plan.obligations[0].mechanism == "alkahest.v1"
+    assert plan.obligations[0].payer_principal == BUYER_PRINCIPAL.model_dump(
+        mode="json"
+    )
+    assert plan.obligations[0].claimant_principal == SELLER_PRINCIPAL.model_dump(
+        mode="json"
+    )
     assert plan.obligations[0].amount == 100
     assert plan.service_terms == {}
     assert calls == [
@@ -89,22 +100,31 @@ def test_plan_builder_is_deterministic(monkeypatch) -> None:
         proposal=PROPOSAL,
         agreed_amount=100,
         duration_seconds=3600,
+        buyer_principal=BUYER_PRINCIPAL,
+        seller_principal=SELLER_PRINCIPAL,
     )
     second = build_bare_metal_settlement_plan(
         proposal=PROPOSAL,
         agreed_amount=100,
         duration_seconds=3600,
+        buyer_principal=BUYER_PRINCIPAL,
+        seller_principal=SELLER_PRINCIPAL,
     )
 
     assert first == second
 
 
 def test_plan_builder_returns_empty_without_proposal() -> None:
-    assert build_bare_metal_settlement_plan(
-        proposal=None,
-        agreed_amount=0,
-        duration_seconds=3600,
-    ) == {}
+    assert (
+        build_bare_metal_settlement_plan(
+            proposal=None,
+            agreed_amount=0,
+            duration_seconds=3600,
+            buyer_principal=BUYER_PRINCIPAL,
+            seller_principal=SELLER_PRINCIPAL,
+        )
+        == {}
+    )
 
 
 def test_plan_builder_rejects_invalid_duration_before_materialization(
@@ -124,6 +144,8 @@ def test_plan_builder_rejects_invalid_duration_before_materialization(
             proposal=PROPOSAL,
             agreed_amount=100,
             duration_seconds=0,
+            buyer_principal=BUYER_PRINCIPAL,
+            seller_principal=SELLER_PRINCIPAL,
         )
 
 
@@ -150,4 +172,6 @@ def test_plan_builder_fails_closed_on_invalid_materialization(
             proposal=PROPOSAL,
             agreed_amount=100,
             duration_seconds=3600,
+            buyer_principal=BUYER_PRINCIPAL,
+            seller_principal=SELLER_PRINCIPAL,
         )

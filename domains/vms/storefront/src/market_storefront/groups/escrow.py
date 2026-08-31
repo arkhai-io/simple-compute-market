@@ -7,24 +7,21 @@ Three verbs:
            (e.g. provisioning failed post-claim, dispute).
   show   — read-only EVM inspection via the matching escrow codec.
 
-Counterpart on the buyer side: `market escrow reclaim`, which pulls
-tokens back when an escrow expired *unclaimed*. Reclaim is buyer-only;
+Counterpart on the buyer side:
+``market settlement alkahest escrow show|reclaim``. Reclaim is buyer-only;
 claim/refund are seller-only; show is symmetric.
 """
 
 from __future__ import annotations
 
-from typing import Optional
-
 import typer
+from market_identity import Identity, TrustedIdentitySet
 from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
-
 from storefront_client import StorefrontClientError, SyncStorefrontClient
 
 from ..cli_common import resolve_storefront_url
-
 
 escrow_app = typer.Typer(no_args_is_help=True)
 
@@ -72,19 +69,35 @@ def _render_obligation_data(body: Table, obligation: object) -> None:
         body.add_row("Data", str(obligation))
 
 
+def _seller_client(agent_url: str) -> SyncStorefrontClient:
+    from ..utils.config import resolve_marketplace_signer
+
+    signer = resolve_marketplace_signer()
+    return SyncStorefrontClient(
+        agent_url,
+        signer=signer,
+        caller_role="seller",
+        expected_publishers=TrustedIdentitySet(identities=(signer.identity,)),
+    )
+
+
 def _submit_claim(
     agent_url: str,
     listing_id: str,
-    fulfillment_uid: Optional[str],
-    private_key: Optional[str],
+    escrow_uid: str,
+    fulfillment_uid: str,
 ) -> dict:
     """POST /listings/claim; returns the storefront's response as a dict."""
-    with SyncStorefrontClient(agent_url, private_key=private_key) as client:
+    with _seller_client(agent_url) as client:
         try:
-            resp = client.claim_listing(listing_id=listing_id, fulfillment_uid=fulfillment_uid)
+            resp = client.claim_listing(
+                listing_id=listing_id,
+                escrow_uid=escrow_uid,
+                fulfillment_uid=fulfillment_uid,
+            )
         except StorefrontClientError as exc:
             typer.secho(f"Storefront error: {exc}", err=True, fg=typer.colors.RED)
-            raise typer.Exit(code=1)
+            raise typer.Exit(code=1) from exc
     return {
         "status": resp.status,
         "listing_id": resp.listing_id,
@@ -97,23 +110,24 @@ def _submit_claim(
 def _submit_refund(
     agent_url: str,
     listing_id: str,
+    buyer_principal: Identity,
     buyer_address: str,
-    amount: Optional[str],
-    token: Optional[str],
-    private_key: Optional[str],
+    amount: str | None,
+    token: str | None,
 ) -> dict:
     """POST /listings/refund; returns the storefront's response as a dict."""
-    with SyncStorefrontClient(agent_url, private_key=private_key) as client:
+    with _seller_client(agent_url) as client:
         try:
             resp = client.refund_listing(
                 listing_id=listing_id,
-                buyer_address=buyer_address,
+                buyer_principal=buyer_principal,
+                buyer_evm_address=buyer_address,
                 amount=amount,
                 token=token,
             )
         except StorefrontClientError as exc:
             typer.secho(f"Storefront error: {exc}", err=True, fg=typer.colors.RED)
-            raise typer.Exit(code=1)
+            raise typer.Exit(code=1) from exc
     return {
         "status": resp.status,
         "listing_id": resp.listing_id,
@@ -124,28 +138,31 @@ def _submit_refund(
 
 @escrow_app.command("claim")
 def claim_cmd(
-    listing_id: str = typer.Argument(..., help="Local listing ID on the provider storefront."),
-    fulfillment_uid: Optional[str] = typer.Option(
-        None, "--fulfillment-uid",
-        help="Override the fulfillment_uid from local state. Use this if the seller's "
-             "StringObligation attestation landed on-chain but the storefront DB is out of sync.",
+    listing_id: str = typer.Argument(
+        ..., help="Local listing ID on the provider storefront."
     ),
-    storefront_url: Optional[str] = typer.Option(
-        None, "--storefront-url", "-a",
+    escrow_uid: str = typer.Option(
+        ..., "--escrow-uid", help="Exact accepted escrow obligation UID."
+    ),
+    fulfillment_uid: str = typer.Option(
+        ..., "--fulfillment-uid", help="Exact seller fulfillment attestation UID."
+    ),
+    storefront_url: str | None = typer.Option(
+        None,
+        "--storefront-url",
+        "-a",
         help="Provider storefront base URL (default: base_url from storefront.toml).",
     ),
 ) -> None:
     """Collect an escrow on-chain after fulfillment.
 
-    Once the fulfillment attestation is on-chain, this tells the storefront
-    to run `escrow.collect(escrow_uid, fulfillment_uid)` and close the
-    listing locally. Useful when the automatic post-fulfillment collection
-    path failed or was never triggered (storefront restart, RPC outage, etc.).
+    Once the fulfillment attestation is on-chain, this asks the storefront's
+    shared settlement runtime to bind it to the exact accepted obligation and
+    collect idempotently. Useful when automatic servicing was interrupted by a
+    storefront restart or RPC outage.
     """
     console = Console()
-    from ..utils.config import settings
     base_url = resolve_storefront_url(storefront_url, default_port=8001)
-    private_key = settings.wallet.private_key
 
     header = Table.grid(padding=(0, 2))
     header.add_column(style="bold")
@@ -154,10 +171,12 @@ def claim_cmd(
     header.add_row("Listing", listing_id)
     if fulfillment_uid:
         header.add_row("Fulfillment UID override", fulfillment_uid)
-    console.print(Panel(header, title="market-storefront escrow claim", border_style="cyan"))
+    console.print(
+        Panel(header, title="market-storefront escrow claim", border_style="cyan")
+    )
 
     try:
-        resp = _submit_claim(base_url, listing_id, fulfillment_uid, private_key)
+        resp = _submit_claim(base_url, listing_id, escrow_uid, fulfillment_uid)
     except typer.Exit:
         raise
 
@@ -165,7 +184,8 @@ def claim_cmd(
     if status != "claimed":
         typer.secho(
             f"Claim did not succeed: status={status} detail={resp}",
-            err=True, fg=typer.colors.RED,
+            err=True,
+            fg=typer.colors.RED,
         )
         raise typer.Exit(7)
 
@@ -182,26 +202,39 @@ def claim_cmd(
 
 @escrow_app.command("refund")
 def refund_cmd(
-    listing_id: str = typer.Argument(..., help="Local listing ID on the provider storefront."),
-    buyer_address: Optional[str] = typer.Option(
-        None, "--buyer", "-b",
-        help="0x-prefixed wallet address to receive the refund. "
-             "Optional — the storefront resolves this from the listing's "
-             "recorded buyer when omitted. Pass explicitly to override.",
+    listing_id: str = typer.Argument(
+        ..., help="Local listing ID on the provider storefront."
     ),
-    amount: Optional[str] = typer.Option(
-        None, "--amount", "-n",
+    buyer_address: str = typer.Option(
+        ...,
+        "--buyer",
+        "-b",
+        help="EVM mechanism address that receives the refund.",
+    ),
+    buyer_scheme: str = typer.Option(
+        ..., "--buyer-scheme", help="Durable marketplace buyer identity scheme."
+    ),
+    buyer_identifier: str = typer.Option(
+        ..., "--buyer-identifier", help="Durable marketplace buyer identifier."
+    ),
+    amount: str | None = typer.Option(
+        None,
+        "--amount",
+        "-n",
         help="Refund amount in base units (decimal-digit string; uint256-safe). "
-             "Defaults to the listing's accepted_escrows[0] primary rate × "
-             "agreed_duration_seconds // 3600.",
+        "Defaults to the listing's accepted_escrows[0] primary rate x "
+        "agreed_duration_seconds // 3600.",
     ),
-    token: Optional[str] = typer.Option(
-        None, "--token",
+    token: str | None = typer.Option(
+        None,
+        "--token",
         help="Override the refund token (0x contract address). Defaults to the "
-             "token on the listing's accepted_escrows[0].",
+        "token on the listing's accepted_escrows[0].",
     ),
-    storefront_url: Optional[str] = typer.Option(
-        None, "--storefront-url", "-a",
+    storefront_url: str | None = typer.Option(
+        None,
+        "--storefront-url",
+        "-a",
         help="Provider storefront base URL (default: base_url from storefront.toml).",
     ),
 ) -> None:
@@ -212,9 +245,10 @@ def refund_cmd(
     deal otherwise can't settle through the normal escrow release path.
     """
     console = Console()
-    from ..utils.config import settings
     base_url = resolve_storefront_url(storefront_url, default_port=8001)
-    private_key = settings.wallet.private_key
+    buyer_principal = Identity.model_validate(
+        {"scheme": buyer_scheme, "identifier": buyer_identifier}
+    )
 
     header = Table.grid(padding=(0, 2))
     header.add_column(style="bold")
@@ -226,11 +260,18 @@ def refund_cmd(
         header.add_row("Amount", f"{amount} {token or '(listing default)'}")
     else:
         header.add_row("Amount", "[dim]default from listing[/dim]")
-    console.print(Panel(header, title="market-storefront escrow refund", border_style="yellow"))
+    console.print(
+        Panel(header, title="market-storefront escrow refund", border_style="yellow")
+    )
 
     try:
         resp = _submit_refund(
-            base_url, listing_id, buyer_address, amount, token, private_key,
+            base_url,
+            listing_id,
+            buyer_principal,
+            buyer_address,
+            amount,
+            token,
         )
     except typer.Exit:
         raise
@@ -239,7 +280,8 @@ def refund_cmd(
     if status != "refunded":
         typer.secho(
             f"Refund did not succeed: status={status} detail={resp}",
-            err=True, fg=typer.colors.RED,
+            err=True,
+            fg=typer.colors.RED,
         )
         raise typer.Exit(6)
 
@@ -251,6 +293,7 @@ def refund_cmd(
     result.add_row("From", str(resp.get("from_address", "-")))
     result.add_row("To", str(resp.get("to_address", "-")))
     from market_alkahest.token import render_token
+
     result.add_row("Token", render_token(resp.get("token")))
     result.add_row("Amount (raw)", str(resp.get("amount_raw", "-")))
     result.add_row("Block", str(resp.get("block_number", "-")))
@@ -260,41 +303,49 @@ def refund_cmd(
 @escrow_app.command("show")
 def show_cmd(
     escrow_uid: str = typer.Option(
-        ..., "--escrow-uid", "-u",
+        ...,
+        "--escrow-uid",
+        "-u",
         help="0x-prefixed escrow UID to inspect.",
     ),
     chain_name: str = typer.Option(
-        None, "--chain",
+        None,
+        "--chain",
         help="Chain name (matching a [chains.<name>] table). Required when "
-             "more than one chain is configured; defaults to the only chain "
-             "otherwise.",
+        "more than one chain is configured; defaults to the only chain "
+        "otherwise.",
     ),
-    escrow_address: Optional[str] = typer.Option(
-        None, "--escrow-address",
+    escrow_address: str | None = typer.Option(
+        None,
+        "--escrow-address",
         help="Escrow obligation contract address. When omitted, the command "
-             "tries registered codecs on the selected chain.",
+        "tries registered codecs on the selected chain.",
     ),
 ) -> None:
     """Read an escrow attestation from chain state.
 
-    Symmetric with ``market escrow show`` on the buyer side. The chain is
-    selected by ``--chain`` (or implicit when only one is configured); the
-    EAS contract address is read from that chain's alkahest address config.
+    Symmetric with ``market settlement alkahest escrow show`` on the buyer
+    side. The chain is selected by ``--chain`` (or implicitly when only one is
+    configured); the EAS contract address comes from that chain's Alkahest
+    address config.
     """
     import asyncio
-    from ..utils.config import CHAINS, settings
+
+    from alkahest_py import AlkahestClient
     from market_alkahest.alkahest import (
         get_alkahest_network,
         get_escrow_obligation_with_codec,
         prewarm_alkahest_address_config_cache,
         resolve_alkahest_address_config,
     )
-    from alkahest_py import AlkahestClient
+
+    from ..utils.config import CHAINS, get_evm_wallet_private_key
 
     if not CHAINS:
         typer.secho(
             "No [chains.<name>] tables configured in storefront.toml.",
-            err=True, fg=typer.colors.RED,
+            err=True,
+            fg=typer.colors.RED,
         )
         raise typer.Exit(2)
 
@@ -304,7 +355,8 @@ def show_cmd(
         else:
             typer.secho(
                 f"Multiple chains configured ({sorted(CHAINS)}); pass --chain to pick one.",
-                err=True, fg=typer.colors.RED,
+                err=True,
+                fg=typer.colors.RED,
             )
             raise typer.Exit(2)
 
@@ -312,15 +364,18 @@ def show_cmd(
     if chain is None:
         typer.secho(
             f"Chain {chain_name!r} not configured. Available: {sorted(CHAINS)}",
-            err=True, fg=typer.colors.RED,
+            err=True,
+            fg=typer.colors.RED,
         )
         raise typer.Exit(2)
 
-    if not settings.wallet.private_key:
+    private_key = get_evm_wallet_private_key()
+    if not private_key:
         typer.secho(
-            "Missing wallet.private_key in storefront.toml — alkahest_py "
-            "requires a wallet key even for read-only inspection.",
-            err=True, fg=typer.colors.RED,
+            "Missing wallet.private_key — Alkahest inspection requires an "
+            "explicit EVM mechanism credential.",
+            err=True,
+            fg=typer.colors.RED,
         )
         raise typer.Exit(2)
 
@@ -332,10 +387,10 @@ def show_cmd(
         )
     except Exception as exc:
         typer.secho(str(exc), err=True, fg=typer.colors.RED)
-        raise typer.Exit(2)
+        raise typer.Exit(2) from exc
 
     client = AlkahestClient(
-        private_key=settings.wallet.private_key,
+        private_key=private_key,
         rpc_url=chain.rpc_url,
         address_config=address_config,
     )
@@ -353,7 +408,8 @@ def show_cmd(
     except Exception as exc:
         typer.secho(
             f"alkahest get_obligation failed: {exc}",
-            err=True, fg=typer.colors.RED,
+            err=True,
+            fg=typer.colors.RED,
         )
         raise typer.Exit(4) from exc
 

@@ -4,24 +4,17 @@ from __future__ import annotations
 
 from typing import Any
 
-from pydantic import BaseModel, Field
+from market_identity import Identity
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class DealHeartbeatRequest(BaseModel):
-    """One buyer-signed liveness attestation for an active deal.
+    """One body-bound liveness attestation from the recorded buyer principal."""
+    model_config = ConfigDict(extra="forbid")
 
-    The request signature covers ``deal_heartbeat:<escrow_uid>:<ts>``
-    where ``ts`` is the ``X-Timestamp`` header — that timestamp doubles
-    as the heartbeat's claimed send time, so replay protection (strict
-    per-deal monotonicity in ``core_storefront.heartbeats``) covers
-    exactly what was signed.
 
-    ``payload`` is schema-tagged and opaque to core, like every other
-    domain envelope: what a VM heartbeat attests is
-    ``market_storefront.settlement.heartbeats``' business.
-    """
-
-    buyer_address: str = Field(description="Buyer wallet address (EIP-191 signer).")
+    buyer_principal: Identity
+    seller_principal: Identity
     payload: dict[str, Any] = Field(
         default_factory=dict,
         description="Schema-tagged attestation payload. Opaque to core.",
@@ -30,6 +23,8 @@ class DealHeartbeatRequest(BaseModel):
 
 class DealHeartbeatResponse(BaseModel):
     deal_ref: str
+    buyer_principal: Identity
+    seller_principal: Identity
     sent_at_unix: float
     heartbeat_count: int = Field(
         description="Total heartbeats recorded for this deal so far.",
@@ -37,8 +32,6 @@ class DealHeartbeatResponse(BaseModel):
     next_expected_by_unix: float | None = Field(
         default=None,
         description=(
-            "Hint: when the seller expects the next heartbeat (sent_at + "
-            "the advertised cadence). Advisory — gating is lifecycle "
-            "policy."
+            "Hint for the next expected heartbeat. Advisory; lifecycle policy owns gating."
         ),
     )

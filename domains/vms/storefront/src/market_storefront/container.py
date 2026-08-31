@@ -14,18 +14,29 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
+    from core_storefront.domain_registry import (
+        StorefrontDomainBinding,
+        StorefrontDomainRegistry,
+    )
     from core_storefront.services.negotiation_service import NegotiationService
-    from market_policy import NegotiationCatalogue
+    from market_capacity_publication import CapacityRuntime
+    from market_identity import Signer
+    from market_negotiation_runtime import NegotiationRuntime
 
     from market_storefront.services.listing_service import ListingService
     from market_storefront.services.system_service import SystemService
+    from market_storefront.settlement_composition import VmSettlementComposition
     from market_storefront.utils.sqlite_client import SQLiteClient
 
 # ---------------------------------------------------------------------------
 # Resolved service instances — populated during FastAPI lifespan startup.
 # ---------------------------------------------------------------------------
 
+resolved_domain_registry: StorefrontDomainRegistry | None = None
 resolved_sqlite_client: SQLiteClient | None = None
+resolved_marketplace_signer: Signer | None = None
+resolved_negotiation_runtime: NegotiationRuntime | None = None
+resolved_capacity_runtime: CapacityRuntime | None = None
 
 # AlkahestClient instances keyed by chain name. Populated from
 # AlkahestService.build_clients(). May be empty if no chains are
@@ -35,30 +46,52 @@ resolved_alkahest_clients: dict[str, Any] = {}
 resolved_listing_service: ListingService | None = None
 resolved_negotiation_service: NegotiationService | None = None
 resolved_system_service: SystemService | None = None
+resolved_settlement_composition: VmSettlementComposition | None = None
 
 resolved_storefront_service = None
 
-# The negotiation policy catalogue this role composed. Resolved once during
-# lifespan startup, so a source that cannot load, a malformed middleware, or a
-# name two sources both offer fails before the application serves traffic rather
-# than on the first negotiation that reaches it. Immutable once built.
-resolved_policy_catalogue: NegotiationCatalogue | None = None
+def resolve_market_domain(binding: StorefrontDomainBinding):
+    """Resolve only from the frozen startup registry and exact durable binding."""
+
+    if resolved_domain_registry is None:
+        raise RuntimeError("storefront domain registry is unavailable")
+    return resolved_domain_registry.resolve(binding)
 
 
-def policy_catalogue() -> NegotiationCatalogue:
-    """The composed negotiation policy catalogue.
+def clear_lifespan_state(*, registry: StorefrontDomainRegistry) -> None:
+    """Clear state owned by the lifespan bound to ``registry``."""
+    global resolved_domain_registry
+    global resolved_sqlite_client
+    global resolved_marketplace_signer
+    global resolved_negotiation_runtime
+    global resolved_capacity_runtime
+    global resolved_alkahest_clients
+    global resolved_listing_service
+    global resolved_negotiation_service
+    global resolved_system_service
+    global resolved_settlement_composition
+    global resolved_storefront_service
 
-    Raises rather than composing on demand: a catalogue built here would be
-    built from whatever configuration happened to be loaded, and would move the
-    failure this design exists to surface at startup back into a request.
-    """
-    if resolved_policy_catalogue is None:
+    if (
+        resolved_domain_registry is not None
+        and resolved_domain_registry is not registry
+    ):
         raise RuntimeError(
-            "negotiation policy catalogue is unresolved — the storefront "
-            "composes it during lifespan startup; a caller reaching this "
-            "before startup has bypassed application composition"
+            "cannot clear a dependency container owned by a different "
+            "storefront domain registry"
         )
-    return resolved_policy_catalogue
+    resolved_domain_registry = None
+    resolved_sqlite_client = None
+    resolved_marketplace_signer = None
+    resolved_alkahest_clients = {}
+    resolved_negotiation_runtime = None
+    resolved_capacity_runtime = None
+    resolved_listing_service = None
+    resolved_negotiation_service = None
+    resolved_system_service = None
+    resolved_settlement_composition = None
+    resolved_storefront_service = None
+
 
 
 def get_alkahest_client(chain_name: str) -> Any | None:

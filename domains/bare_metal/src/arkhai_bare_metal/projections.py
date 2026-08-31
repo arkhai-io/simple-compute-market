@@ -41,6 +41,7 @@ class BareMetalResourceProjection(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     physical_resource_id: str = Field(min_length=1)
+    pool_id: str | None = Field(default=None, min_length=1)
     physical_host_id: str = Field(min_length=1)
     machine_id: str = Field(min_length=1)
     available: bool

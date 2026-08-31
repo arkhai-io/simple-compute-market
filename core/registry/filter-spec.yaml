@@ -26,7 +26,14 @@ listing_shape:
   # matching the GET /publishers entity. gpu_model is gated to a vetted
   # NVIDIA vocabulary; region stays open because city/datacenter naming
   # has no canonical list.
-  required: [listing_id, offer_resource, accepted_escrows, storefront_url]
+  required: [listing_id, offer_resource, storefront_url]
+  anyOf:
+    - properties:
+        accepted_escrows: {type: array, minItems: 1}
+      required: [accepted_escrows]
+    - properties:
+        settlement_options: {type: array, minItems: 1}
+      required: [settlement_options]
   properties:
     listing_id: {type: string, minLength: 1}
     storefront_url: {type: string, minLength: 1}
@@ -116,7 +123,7 @@ listing_shape:
         open_ports_count: {type: integer, minimum: 0}
     accepted_escrows:
       type: array
-      minItems: 1
+      minItems: 0
       items:
         type: object
         required: [chain_name, escrow_address, literal_fields]
@@ -138,6 +145,28 @@ listing_shape:
                 field: {type: string}
                 per: {type: string}
                 value: {type: string}
+    settlement_options:
+      type: array
+      minItems: 0
+      items:
+        type: object
+        additionalProperties: false
+        required: [option_id, mechanism, asset, rates, params]
+        properties:
+          option_id: {type: string, pattern: "^[0-9a-f]{64}$"}
+          mechanism: {type: string, minLength: 1}
+          asset: {type: string, minLength: 1}
+          rates:
+            type: array
+            items:
+              type: object
+              additionalProperties: false
+              required: [field, per, value]
+              properties:
+                field: {type: string, minLength: 1}
+                per: {type: string, minLength: 1}
+                value: {type: string, pattern: "^[0-9]+$"}
+          params: {type: object}
     max_duration_seconds:
       type: [integer, "null"]
       minimum: 1
@@ -161,18 +190,18 @@ filters:
   # to `range: {min: 16, min_inclusive: true}`.  Offers missing the field
   # are rejected (`on_missing: fail`); an unknown spec can't be assumed
   # to satisfy a stated requirement.
-  - {name: gpu_count_min,              path: $.offer_resource.gpu_count,              op: range, value_type: integer, alias_kind: lower_bound, on_missing: fail}
-  - {name: vcpu_count_min,             path: $.offer_resource.vcpu_count,             op: range, value_type: integer, alias_kind: lower_bound, on_missing: fail}
-  - {name: ram_gb_min,                 path: $.offer_resource.ram_gb,                 op: range, value_type: integer, alias_kind: lower_bound, on_missing: fail}
-  - {name: disk_gb_min,                path: $.offer_resource.disk_gb,                op: range, value_type: integer, alias_kind: lower_bound, on_missing: fail}
-  - {name: host_cpu_cores_min,         path: $.offer_resource.host_cpu_cores,         op: range, value_type: integer, alias_kind: lower_bound, on_missing: fail}
-  - {name: host_ram_gb_min,            path: $.offer_resource.host_ram_gb,            op: range, value_type: integer, alias_kind: lower_bound, on_missing: fail}
-  - {name: host_disk_gb_min,           path: $.offer_resource.host_disk_gb,           op: range, value_type: integer, alias_kind: lower_bound, on_missing: fail}
-  - {name: total_gpu_count_min,        path: $.offer_resource.total_gpu_count,        op: range, value_type: integer, alias_kind: lower_bound, on_missing: fail}
-  - {name: nic_speed_gbps_min,         path: $.offer_resource.nic_speed_gbps,         op: range, value_type: integer, alias_kind: lower_bound, on_missing: fail}
-  - {name: internet_download_mbps_min, path: $.offer_resource.internet_download_mbps, op: range, value_type: integer, alias_kind: lower_bound, on_missing: fail}
-  - {name: internet_upload_mbps_min,   path: $.offer_resource.internet_upload_mbps,   op: range, value_type: integer, alias_kind: lower_bound, on_missing: fail}
-  - {name: open_ports_count_min,       path: $.offer_resource.open_ports_count,       op: range, value_type: integer, alias_kind: lower_bound, on_missing: fail}
+  - {name: gpu_count_min,              query_name: gpu_count,              query_aliases: [gpu_count_min],              path: $.offer_resource.gpu_count,              op: range, value_type: integer, alias_kind: lower_bound, on_missing: fail}
+  - {name: vcpu_count_min,             query_name: vcpu_count,             query_aliases: [vcpu_count_min],             path: $.offer_resource.vcpu_count,             op: range, value_type: integer, alias_kind: lower_bound, on_missing: fail}
+  - {name: ram_gb_min,                 query_name: ram_gb,                 query_aliases: [ram_gb_min],                 path: $.offer_resource.ram_gb,                 op: range, value_type: integer, alias_kind: lower_bound, on_missing: fail}
+  - {name: disk_gb_min,                query_name: disk_gb,                query_aliases: [disk_gb_min],                path: $.offer_resource.disk_gb,                op: range, value_type: integer, alias_kind: lower_bound, on_missing: fail}
+  - {name: host_cpu_cores_min,         query_name: host_cpu_cores,         query_aliases: [host_cpu_cores_min],         path: $.offer_resource.host_cpu_cores,         op: range, value_type: integer, alias_kind: lower_bound, on_missing: fail}
+  - {name: host_ram_gb_min,            query_name: host_ram_gb,            query_aliases: [host_ram_gb_min],            path: $.offer_resource.host_ram_gb,            op: range, value_type: integer, alias_kind: lower_bound, on_missing: fail}
+  - {name: host_disk_gb_min,           query_name: host_disk_gb,           query_aliases: [host_disk_gb_min],           path: $.offer_resource.host_disk_gb,           op: range, value_type: integer, alias_kind: lower_bound, on_missing: fail}
+  - {name: total_gpu_count_min,        query_name: total_gpu_count,        query_aliases: [total_gpu_count_min],        path: $.offer_resource.total_gpu_count,        op: range, value_type: integer, alias_kind: lower_bound, on_missing: fail}
+  - {name: nic_speed_gbps_min,         query_name: nic_speed_gbps,         query_aliases: [nic_speed_gbps_min],         path: $.offer_resource.nic_speed_gbps,         op: range, value_type: integer, alias_kind: lower_bound, on_missing: fail}
+  - {name: internet_download_mbps_min, query_name: internet_download_mbps, query_aliases: [internet_download_mbps_min], path: $.offer_resource.internet_download_mbps, op: range, value_type: integer, alias_kind: lower_bound, on_missing: fail}
+  - {name: internet_upload_mbps_min,   query_name: internet_upload_mbps,   query_aliases: [internet_upload_mbps_min],   path: $.offer_resource.internet_upload_mbps,   op: range, value_type: integer, alias_kind: lower_bound, on_missing: fail}
+  - {name: open_ports_count_min,       query_name: open_ports_count,       query_aliases: [open_ports_count_min],       path: $.offer_resource.open_ports_count,       op: range, value_type: integer, alias_kind: lower_bound, on_missing: fail}
 
   # Payment-token filter: array projection over accepted_escrows[*].literal_fields.token.
   # `on_missing: pass` is underreport-friendly — a seller advertising no
@@ -185,6 +214,22 @@ filters:
   # the listed token addresses. `on_missing: pass` is again underreport-
   # friendly — a seller with no escrows has no conflict to assert.
   - {name: token_exclude,              path: "$.accepted_escrows[*].literal_fields.token",    op: not_in, value_type: string,  on_missing: pass}
+
+  # Mechanism filter: option-aware projection (the resolution of the
+  # generic-mechanism question, decided with the introduction-market
+  # profile) — ``?mechanism=in:[fiat.stripe.v1]`` matches listings that
+  # advertise at least one option under a named mechanism.
+  # `on_missing: pass` keeps escrow-carrier legacy listings visible to
+  # mechanism-agnostic buyers.
+  - {name: mechanism,                  path: "$.settlement_options[*].mechanism",     op: in,     value_type: string,  on_missing: pass}
+
+  # Option-aware payment-token filters: settlement options embed their
+  # Alkahest escrow template under ``params.accepted_escrow``, so
+  # option-only listings answer the same token questions the
+  # accepted_escrows projections above answer for escrow-carrier
+  # listings.
+  - {name: option_token,               path: "$.settlement_options[*].params.accepted_escrow.literal_fields.token", op: in,     value_type: string, on_missing: pass}
+  - {name: option_token_exclude,       path: "$.settlement_options[*].params.accepted_escrow.literal_fields.token", op: not_in, value_type: string, on_missing: pass}
 
   # Oracle-presence filter: ``?has_oracle=exists:true`` matches listings
   # with a non-null oracle_address. Pure presence check — value of the

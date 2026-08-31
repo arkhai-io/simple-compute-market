@@ -45,12 +45,18 @@ RUN --mount=type=cache,target=/root/.cache/uv \
         --refresh-package arkhai-vms-buyer \
         --refresh-package arkhai-vms \
         --refresh-package arkhai-apicredits-buyer \
+        --refresh-package arkhai-apicredits-domain \
         --refresh-package arkhai-kit-policy \
         --refresh-package arkhai-vms-storefront \
         --refresh-package arkhai-vms-provisioning-operator-client \
         --refresh-package arkhai-core-storefront-client \
         --refresh-package arkhai-kit-alkahest \
         --refresh-package arkhai-kit-identity \
+        --refresh-package arkhai-kit-settlement-runtime \
+        --refresh-package arkhai-kit-storefront \
+        --refresh-package arkhai-hosted-settlement-client \
+        --refresh-package arkhai-kit-hosted-settlement \
+        --refresh-package arkhai-kit-site-client \
         --refresh-package arkhai-kit-config \
         --refresh-package arkhai-core-registry-client
 

@@ -15,6 +15,21 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
+from market_identity import Identity
+
+
+def _identity(value: Any) -> Identity | None:
+    if value is None:
+        return None
+    return Identity.model_validate(value)
+
+
+def _required_identity(value: Any, *, field_name: str) -> Identity:
+    identity = _identity(value)
+    if identity is None:
+        raise ValueError(f"{field_name} is required")
+    return identity
+
 
 # ---------------------------------------------------------------------------
 # Listing create response  (POST /listings/create)
@@ -150,16 +165,6 @@ class HealthResponse:
     status: str = "ok"          # "ok" | "degraded"
     checks: dict[str, str] = field(default_factory=dict)
     paused: bool | None = None  # present on /api/v1/system/status only
-    # Whether timer loops are held idle — a different question from `paused`,
-    # which is about accepting new negotiations.
-    loops_paused: bool | None = None
-    # Per timer loop: "starting", "running", "pausing", "paused", "cancelled",
-    # or "exited". Present on /api/v1/system/status and /api/v1/system/ready.
-    # Read this rather than `paused` to confirm a pause halted the background
-    # work: the flag says what was requested, this says what actually stopped —
-    # and `starting` says the loop has not begun cycling, so it could not have
-    # observed the request at all.
-    loops: dict[str, str] | None = None
     agent_id: str | None = None  # canonical eip155:… form; present on /api/v1/system/status
     chain_id: int | None = None  # EVM chain ID; present on /api/v1/system/status
     resource_count: int | None = None  # registered compute resources; present on /api/v1/system/status
@@ -170,8 +175,7 @@ class HealthResponse:
     @classmethod
     def from_dict(cls, d: dict) -> "HealthResponse":
         known = {
-            "status", "checks", "paused", "loops_paused", "loops", "agent_id",
-            "chain_id",
+            "status", "checks", "paused", "agent_id", "chain_id",
             "resource_count", "site_projections", "listing_mode_explanations",
         }
         raw_chain_id = d.get("chain_id")
@@ -180,8 +184,6 @@ class HealthResponse:
             status=d.get("status", "ok"),
             checks=d.get("checks", {}),
             paused=d.get("paused"),
-            loops_paused=d.get("loops_paused"),
-            loops=d.get("loops"),
             agent_id=d.get("agent_id"),
             chain_id=int(raw_chain_id) if raw_chain_id is not None else None,
             resource_count=int(raw_resource_count) if raw_resource_count is not None else None,
@@ -328,24 +330,16 @@ class StageEvent:
 
 @dataclass
 class StageEventListResponse:
-    """Response from GET /api/v1/system/events (non-streaming).
-
-    `truncated` reports that more rows matched than were returned. It is not
-    derivable from `count`: a caller receiving exactly the server's page cap
-    cannot otherwise tell a complete result from a partial one. A caller treating
-    the result as a whole history should check it.
-    """
+    """Response from GET /api/v1/system/events (non-streaming)."""
 
     events: list[StageEvent] = field(default_factory=list)
     count: int = 0
-    truncated: bool = False
 
     @classmethod
     def from_dict(cls, d: dict) -> "StageEventListResponse":
         return cls(
             events=[StageEvent.from_dict(e) for e in d.get("events", [])],
             count=d.get("count", 0),
-            truncated=bool(d.get("truncated", False)),
         )
 
 
@@ -356,33 +350,34 @@ class StageEventListResponse:
 
 @dataclass
 class NegotiationMessage:
-    """A single round message in a negotiation thread."""
+    """A scheme-tagged round message in a negotiation thread."""
 
     round: int = 0
-    sender: str = ""
+    sender_role: str = ""
+    sender_principal: Identity | None = None
     action_taken: str = ""
-    proposed_price: float | None = None
-    our_price: float | None = None
-    their_price: float | None = None
-    message_type: str = ""
-    timestamp: str = ""
+    proposed_amount: int | None = None
     extra: dict[str, Any] = field(default_factory=dict)
 
     @classmethod
     def from_dict(cls, d: dict) -> "NegotiationMessage":
         known = {
-            "round", "sender", "action_taken", "proposed_price",
-            "our_price", "their_price", "message_type", "timestamp",
+            "round",
+            "sender_role",
+            "sender_principal",
+            "action_taken",
+            "proposed_amount",
         }
         return cls(
             round=int(d.get("round", 0)),
-            sender=d.get("sender", ""),
+            sender_role=d.get("sender_role", ""),
+            sender_principal=_identity(d.get("sender_principal")),
             action_taken=d.get("action_taken", ""),
-            proposed_price=d.get("proposed_price"),
-            our_price=d.get("our_price"),
-            their_price=d.get("their_price"),
-            message_type=d.get("message_type", ""),
-            timestamp=d.get("timestamp", ""),
+            proposed_amount=(
+                int(d["proposed_amount"])
+                if d.get("proposed_amount") is not None
+                else None
+            ),
             extra={k: v for k, v in d.items() if k not in known},
         )
 
@@ -393,32 +388,42 @@ class NegotiationSummary:
 
     negotiation_id: str = ""
     our_listing_id: str = ""
-    buyer_address: str = ""
-    status: str = ""
+    their_agent_id: str | None = None
+    buyer_principal: Identity | None = None
+    seller_principal: Identity | None = None
     terminal_state: str | None = None
     agreed_amount: int | None = None
-    agreed_duration_seconds: int | None = None
-    requested_duration_seconds: int | None = None
-    created_at: str = ""
+    round_count: int = 0
+    created_at: str | None = None
     extra: dict[str, Any] = field(default_factory=dict)
 
     @classmethod
     def from_dict(cls, d: dict) -> "NegotiationSummary":
         known = {
-            "negotiation_id", "our_listing_id", "buyer_address", "status",
-            "terminal_state", "agreed_amount", "agreed_duration_seconds",
-            "requested_duration_seconds", "created_at",
+            "negotiation_id",
+            "our_listing_id",
+            "their_agent_id",
+            "buyer_principal",
+            "seller_principal",
+            "terminal_state",
+            "agreed_amount",
+            "round_count",
+            "created_at",
         }
         return cls(
             negotiation_id=d.get("negotiation_id", ""),
             our_listing_id=d.get("our_listing_id", ""),
-            buyer_address=d.get("buyer_address", ""),
-            status=d.get("status", ""),
+            their_agent_id=d.get("their_agent_id"),
+            buyer_principal=_identity(d.get("buyer_principal")),
+            seller_principal=_identity(d.get("seller_principal")),
             terminal_state=d.get("terminal_state"),
-            agreed_amount=int(d["agreed_amount"]) if d.get("agreed_amount") is not None else None,
-            agreed_duration_seconds=d.get("agreed_duration_seconds"),
-            requested_duration_seconds=d.get("requested_duration_seconds"),
-            created_at=d.get("created_at", ""),
+            agreed_amount=(
+                int(d["agreed_amount"])
+                if d.get("agreed_amount") is not None
+                else None
+            ),
+            round_count=int(d.get("round_count", 0)),
+            created_at=d.get("created_at"),
             extra={k: v for k, v in d.items() if k not in known},
         )
 
@@ -453,12 +458,11 @@ class NegotiationDetail:
 
     negotiation_id: str = ""
     our_listing_id: str = ""
-    their_agent_id: str = ""
-    status: str = ""
+    their_agent_id: str | None = None
+    buyer_principal: Identity | None = None
+    seller_principal: Identity | None = None
     terminal_state: str | None = None
     agreed_amount: int | None = None
-    agreed_duration_seconds: int | None = None
-    requested_duration_seconds: int | None = None
     round_count: int = 0
     messages: list[NegotiationMessage] = field(default_factory=list)
     stage_events: list[dict[str, Any]] = field(default_factory=list)
@@ -468,22 +472,35 @@ class NegotiationDetail:
     @classmethod
     def from_dict(cls, d: dict) -> "NegotiationDetail":
         known = {
-            "negotiation_id", "our_listing_id", "their_agent_id", "status",
-            "terminal_state", "agreed_amount", "agreed_duration_seconds",
-            "requested_duration_seconds", "round_count", "messages", "stage_events",
+            "negotiation_id",
+            "our_listing_id",
+            "their_agent_id",
+            "buyer_principal",
+            "seller_principal",
+            "terminal_state",
+            "agreed_amount",
+            "round_count",
+            "messages",
+            "stage_events",
             "escrows",
         }
         return cls(
             negotiation_id=d.get("negotiation_id", ""),
             our_listing_id=d.get("our_listing_id", ""),
-            their_agent_id=d.get("their_agent_id", ""),
-            status=d.get("status", ""),
+            their_agent_id=d.get("their_agent_id"),
+            buyer_principal=_identity(d.get("buyer_principal")),
+            seller_principal=_identity(d.get("seller_principal")),
             terminal_state=d.get("terminal_state"),
-            agreed_amount=int(d["agreed_amount"]) if d.get("agreed_amount") is not None else None,
-            agreed_duration_seconds=d.get("agreed_duration_seconds"),
-            requested_duration_seconds=d.get("requested_duration_seconds"),
-            round_count=d.get("round_count", 0),
-            messages=[NegotiationMessage.from_dict(m) for m in d.get("messages", [])],
+            agreed_amount=(
+                int(d["agreed_amount"])
+                if d.get("agreed_amount") is not None
+                else None
+            ),
+            round_count=int(d.get("round_count", 0)),
+            messages=[
+                NegotiationMessage.from_dict(message)
+                for message in d.get("messages", [])
+            ],
             stage_events=d.get("stage_events", []),
             escrows=d.get("escrows", []),
             extra={k: v for k, v in d.items() if k not in known},
@@ -530,27 +547,82 @@ class NegotiationActionResponse:
 
 
 @dataclass
-class AdminPauseResponse:
-    """Response from POST /admin/pause or /admin/resume.
+class IdentityBindingStatusResponse:
+    """One principal binding in an identity rotation status response."""
 
-    `loops` maps each timer loop's name to its state after the call. Pause halts
-    the storefront's background work as well as refusing new negotiations, so a
-    caller confirming a pause took effect reads this rather than `paused`.
-    """
+    principal: Identity
+    status: str
+    active: bool
+    overlap_until: int | None = None
+
+    @classmethod
+    def from_dict(cls, d: dict) -> "IdentityBindingStatusResponse":
+        return cls(
+            principal=_required_identity(
+                d.get("principal"), field_name="binding principal"
+            ),
+            status=d["status"],
+            overlap_until=(
+                int(d["overlap_until"])
+                if d.get("overlap_until") is not None
+                else None
+            ),
+            active=d["active"],
+        )
+
+
+@dataclass
+class IdentitySubjectStatusResponse:
+    """Current primary, overlap, disabled, and retired bindings for one subject."""
+
+    authority: str
+    subject: str
+    role: str
+    primary: Identity
+    observed_at: int
+    bindings: list[IdentityBindingStatusResponse] = field(default_factory=list)
+    extra: dict[str, Any] = field(default_factory=dict)
+
+    @classmethod
+    def from_dict(cls, d: dict) -> "IdentitySubjectStatusResponse":
+        known = {
+            "authority",
+            "subject",
+            "role",
+            "bindings",
+            "primary",
+            "observed_at",
+        }
+        return cls(
+            authority=d["authority"],
+            subject=d["subject"],
+            role=d["role"],
+            bindings=[
+                IdentityBindingStatusResponse.from_dict(binding)
+                for binding in d.get("bindings", [])
+            ],
+            extra={key: value for key, value in d.items() if key not in known},
+            primary=_required_identity(
+                d.get("primary"), field_name="primary"
+            ),
+            observed_at=int(d["observed_at"]),
+        )
+
+
+@dataclass
+class AdminPauseResponse:
+    """Response from POST /admin/pause or /admin/resume."""
 
     paused: bool = False
     message: str = ""
-    loops: dict[str, str] = field(default_factory=dict)
     extra: dict[str, Any] = field(default_factory=dict)
 
     @classmethod
     def from_dict(cls, d: dict) -> "AdminPauseResponse":
-        known = {"paused", "message", "loops"}
-        loops = d.get("loops")
+        known = {"paused", "message"}
         return cls(
             paused=bool(d.get("paused", False)),
             message=d.get("message", ""),
-            loops=dict(loops) if isinstance(loops, dict) else {},
             extra={k: v for k, v in d.items() if k not in known},
         )
 
@@ -575,19 +647,12 @@ class ReleaseReservationsResponse:
 
 @dataclass
 class ReserveCapacityResponse:
-    """Response from POST /api/v1/admin/portfolio/reservations.
-
-    `pool_id` and `resource_id` echo whichever the request's claim pinned, and
-    are `None` when the claim pinned neither -- absent, not empty. The site
-    authority reports neither the resource it matched nor that resource's pool,
-    because a reservation commits to a site and a shape and scheduling may
-    rebind it within that site.
-    """
+    """Response from POST /api/v1/admin/portfolio/reservations."""
 
     capacity_reservation_id: str = ""
     pool_id: str | None = None
     member_id: str | None = None
-    resource_id: str | None = None
+    resource_id: str = ""
     gpu_count: int = 0
     resource_state: str | None = None
     closed_listing_ids: list[str] = field(default_factory=list)
@@ -608,7 +673,7 @@ class ReserveCapacityResponse:
             capacity_reservation_id=str(d.get("capacity_reservation_id") or ""),
             pool_id=d.get("pool_id"),
             member_id=d.get("member_id"),
-            resource_id=str(d["resource_id"]) if d.get("resource_id") else None,
+            resource_id=str(d.get("resource_id") or ""),
             gpu_count=int(d.get("gpu_count") or 0),
             resource_state=d.get("resource_state"),
             closed_listing_ids=list(d.get("closed_listing_ids") or []),
@@ -660,39 +725,42 @@ class SettleResponse:
 
     status: str = ""
     escrow_uid: str = ""
-    negotiation_id: str = ""
+    buyer_principal: Identity | None = None
+    seller_principal: Identity | None = None
+    provisioning_job_id: str | None = None
+    fulfillment_id: str | None = None
     extra: dict[str, Any] = field(default_factory=dict)
 
     @classmethod
     def from_dict(cls, d: dict) -> "SettleResponse":
-        known = {"status", "escrow_uid", "negotiation_id"}
+        known = {
+            "status",
+            "escrow_uid",
+            "buyer_principal",
+            "seller_principal",
+            "provisioning_job_id",
+            "fulfillment_id",
+        }
         return cls(
             status=d.get("status", ""),
             escrow_uid=d.get("escrow_uid", ""),
-            negotiation_id=d.get("negotiation_id", ""),
+            buyer_principal=_identity(d.get("buyer_principal")),
+            seller_principal=_identity(d.get("seller_principal")),
+            provisioning_job_id=d.get("provisioning_job_id"),
+            fulfillment_id=d.get("fulfillment_id"),
             extra={k: v for k, v in d.items() if k not in known},
         )
 
 
 @dataclass
 class SettleStatusResponse:
-    """Response from GET /api/v1/settle/{escrow_uid}/status.
-
-    Carries two different identities, and they are not interchangeable.
-    `fulfillment_id` is the durable fulfillment aggregate's identity and is the
-    field a caller should prefer; `fulfillment_uid` is the on-chain settlement
-    claim identity the storefront's settlement mechanism issues for escrow
-    arbitration. One escrow row legitimately carries both, meaning two different
-    things — see `docs/development/ARCHITECTURE.md`'s identifier table.
-
-    `provisioning_job_id` is the legacy ephemeral executor-job identity and is
-    always absent for a fulfillment that took the durable path.
-    """
+    """Response from GET /api/v1/settle/{escrow_uid}/status."""
 
     status: str = ""
     escrow_uid: str = ""
+    buyer_principal: Identity | None = None
+    seller_principal: Identity | None = None
     fulfillment_id: str | None = None
-    fulfillment_uid: str | None = None
     provisioning_job_id: str | None = None
     tenant_credentials: dict[str, Any] | None = None
     extra: dict[str, Any] = field(default_factory=dict)
@@ -700,15 +768,21 @@ class SettleStatusResponse:
     @classmethod
     def from_dict(cls, d: dict) -> "SettleStatusResponse":
         known = {
-            "status", "escrow_uid", "fulfillment_id", "fulfillment_uid",
-            "provisioning_job_id", "tenant_credentials",
+            "status",
+            "escrow_uid",
+            "buyer_principal",
+            "seller_principal",
+            "fulfillment_id",
+            "provisioning_job_id",
+            "tenant_credentials",
         }
         creds = d.get("tenant_credentials")
         return cls(
             status=d.get("status", ""),
             escrow_uid=d.get("escrow_uid", ""),
+            buyer_principal=_identity(d.get("buyer_principal")),
+            seller_principal=_identity(d.get("seller_principal")),
             fulfillment_id=d.get("fulfillment_id"),
-            fulfillment_uid=d.get("fulfillment_uid"),
             provisioning_job_id=d.get("provisioning_job_id"),
             tenant_credentials=dict(creds) if isinstance(creds, dict) else None,
             extra={k: v for k, v in d.items() if k not in known},

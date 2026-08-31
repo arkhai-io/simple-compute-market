@@ -10,11 +10,10 @@ per-test fixtures here that wire only the routers under test.
 """
 from __future__ import annotations
 
-from typing import AsyncIterator
+from collections.abc import AsyncIterator
 from unittest.mock import AsyncMock, MagicMock
 
 import httpx
-import pytest
 import pytest_asyncio
 from fastapi import FastAPI
 
@@ -56,8 +55,12 @@ async def mock_svc():
 
 @pytest_asyncio.fixture
 async def orders_client(mock_svc, tmp_path) -> AsyncIterator[httpx.AsyncClient]:
+    from market_storefront.domain_runtime import (
+        build_vm_storefront_domain,
+        build_vm_storefront_registry,
+    )
     from market_storefront.utils.sqlite_client import SQLiteClient
-    db = SQLiteClient(db_path=str(tmp_path / "orders_test.db"))
+    db = SQLiteClient(db_path=str(tmp_path / "orders_test.db"), registry=build_vm_storefront_registry(build_vm_storefront_domain()))
     _container.resolved_sqlite_client = db
     _container.resolved_listing_service = mock_svc
 
@@ -80,6 +83,11 @@ class TestCreateOrderEndpoint:
     async def test_valid_create_returns_200(self, orders_client):
         body = {
             "offer": _COMPUTE_OFFER,
+            "capacity_source": {
+                "site_id": "site-test",
+                "resource_id": "resource-1",
+                "gpu_count": 1,
+            },
             "accepted_escrows": _ACCEPTED_ESCROWS,
         }
         resp = await orders_client.post("/api/v1/listings/create", json=body)
@@ -93,6 +101,16 @@ class TestCreateOrderEndpoint:
         resp = await orders_client.post(
             "/api/v1/listings/create",
             json={"accepted_escrows": _ACCEPTED_ESCROWS},
+        )
+        assert resp.status_code == 422
+
+    async def test_missing_capacity_source_returns_422(self, orders_client):
+        resp = await orders_client.post(
+            "/api/v1/listings/create",
+            json={
+                "offer": _COMPUTE_OFFER,
+                "accepted_escrows": _ACCEPTED_ESCROWS,
+            },
         )
         assert resp.status_code == 422
 

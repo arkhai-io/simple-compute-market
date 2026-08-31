@@ -52,8 +52,8 @@ def _make_app_with_key(key: str) -> FastAPI:
     return app
 
 
-def _make_app_no_key() -> FastAPI:
-    """App where require_admin_key is NOT overridden — uses CONFIG (None in tests = dev mode)."""
+def _make_app_without_authenticated_principal() -> FastAPI:
+    """App using the real fail-closed marketplace v2 authentication dependency."""
     app = FastAPI()
 
     @app.post("/admin/test", dependencies=[Depends(require_admin_key)])
@@ -77,10 +77,10 @@ async def protected_client() -> AsyncClient:
 
 
 @pytest_asyncio.fixture
-async def dev_mode_client() -> AsyncClient:
-    """No key configured — all requests pass through (local dev default)."""
+async def unauthenticated_client() -> AsyncClient:
+    """No authenticated v2 principal is attached to request state."""
     async with AsyncClient(
-        transport=ASGITransport(app=_make_app_no_key()),
+        transport=ASGITransport(app=_make_app_without_authenticated_principal()),
         base_url="http://test",
     ) as c:
         yield c
@@ -120,18 +120,17 @@ class TestRequireAdminKeyEnforced:
         assert r.status_code == 403
 
 
-# ---------------------------------------------------------------------------
-# Tests: dev mode (no key configured = all pass)
+# Tests: requests without an authenticated marketplace v2 principal fail closed
 # ---------------------------------------------------------------------------
 
-class TestRequireAdminKeyDevMode:
-    async def test_admin_route_passes_without_key(self, dev_mode_client):
-        """settings.admin_api_key is None in tests → require_admin_key is a no-op."""
-        r = await dev_mode_client.post("/admin/test")
-        assert r.status_code == 200
+class TestRequireAdminKeyFailClosed:
+    async def test_admin_route_rejects_missing_auth(self, unauthenticated_client):
+        r = await unauthenticated_client.post("/admin/test")
+        assert r.status_code == 401
+        assert "marketplace v2 principal authentication" in r.json()["detail"]
 
-    async def test_admin_route_passes_with_any_key(self, dev_mode_client):
-        r = await dev_mode_client.post(
+    async def test_admin_route_rejects_legacy_key(self, unauthenticated_client):
+        r = await unauthenticated_client.post(
             "/admin/test", headers={"X-Admin-Key": "anything"}
         )
-        assert r.status_code == 200
+        assert r.status_code == 401

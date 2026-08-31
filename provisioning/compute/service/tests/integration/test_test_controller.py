@@ -24,6 +24,20 @@ from httpx import ASGITransport, AsyncClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
+from .conftest import (
+    ADMIN_SIGNER,
+    SERVICE_AUTHORITIES,
+    SERVICE_SIGNER,
+    STOREFRONT_SIGNER,
+    _install_signed_asgi_transport,
+)
+from compute_provisioning_service.identity import ProvisioningIdentityContext
+from compute_provisioning_service.middleware.auth import (
+    SqlAlchemyProvisioningReplayStore,
+)
+from compute_provisioning_service.services.principal_authority import (
+    SqlAlchemyProvisioningPrincipalAuthority,
+)
 
 from compute_provisioning_service import container as _container_module
 from vm_provisioning_operator import ProvisioningClient, ProvisioningError
@@ -67,8 +81,11 @@ def programmable_mock(fake_inventory_path) -> ProgrammableMockAnsibleService:
 
 @pytest_asyncio.fixture
 async def client_and_queue(
-    session_factory, programmable_mock
+    session_factory,
+    programmable_mock,
+    monkeypatch,
 ) -> AsyncIterator[tuple[ProvisioningClient, AsyncJobQueue, ProgrammableMockAnsibleService, AsyncProvisioningTestClient]]:
+    _install_signed_asgi_transport(monkeypatch)
     mock_settings = MagicMock(
         default_vm_host="kvm1",
         default_max_retries=3,
@@ -85,6 +102,20 @@ async def client_and_queue(
         ssh_decryption_key="",
         database_url="sqlite:///:memory:",
     )
+    identity_context = ProvisioningIdentityContext(
+        signer=SERVICE_SIGNER,
+        storefront_principal=STOREFRONT_SIGNER.identity,
+        admin_principal=ADMIN_SIGNER.identity,
+        storefront_site_id="default",
+    )
+    principal_authority = SqlAlchemyProvisioningPrincipalAuthority(
+        session_factory,
+        identity_context,
+    )
+    replay_store = SqlAlchemyProvisioningReplayStore(session_factory)
+    app.container.identity_context.override(identity_context)
+    app.container.principal_authority.override(principal_authority)
+    app.container.provisioning_replay_store.override(replay_store)
 
     host_service = HostService(session_factory=session_factory, settings=mock_settings)
     from vm_provisioning_operator.models import HostCreate
@@ -181,7 +212,12 @@ async def client_and_queue(
     )
 
     transport = ASGITransport(app=app)
-    prov_client = ProvisioningClient("http://test", transport=transport)
+    prov_client = ProvisioningClient(
+        "http://test",
+        signer=ADMIN_SIGNER,
+        expected_authorities=SERVICE_AUTHORITIES,
+        transport=transport,
+    )
     test_client = AsyncProvisioningTestClient(transport)
 
     yield prov_client, job_queue, programmable_mock, test_client
@@ -194,6 +230,9 @@ async def client_and_queue(
         pass
 
     app.container.vm_runtime.reset_override()
+    app.container.identity_context.reset_override()
+    app.container.principal_authority.reset_override()
+    app.container.provisioning_replay_store.reset_override()
     app.container.ansible_service.reset_override()
     app.container.job_service.reset_override()
     app.container.system_service.reset_override()

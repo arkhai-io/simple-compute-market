@@ -9,13 +9,14 @@ The alkahest ``get_obligation`` call and the canonical
 tests are fully offline — no web3, no eth-abi setup beyond what's
 needed to round-trip an ABI-encoded address.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import Any
 
 import pytest
-
+from market_alkahest.schemas import EscrowTerms
 from market_core.schemas import EscrowProposal
 
 from market_storefront.utils.escrow_verification import (
@@ -27,7 +28,6 @@ from market_storefront.utils.escrow_verification import (
     _read_chain_obligation_data,
     verify_escrow_for_settlement,
 )
-
 
 SELLER = "0x1111111111111111111111111111111111111111"
 SELLER_LOWER = SELLER.lower()
@@ -45,6 +45,7 @@ CONFIG_PATH = "/tmp/addresses.json"
 def _encode_recipient(address: str) -> bytes:
     """Real ABI-encode of a single address — matches the buyer's encoding."""
     from eth_abi import encode as abi_encode
+
     return abi_encode(["address"], [address])
 
 
@@ -52,6 +53,7 @@ def _encode_recipient(address: str) -> bytes:
 class _FakeAttestationEnvelope:
     """Mirrors the fields the verifier reads off alkahest's
     ``decoded["attestation"]`` (the EAS envelope)."""
+
     revocation_time: int = 0
     expiration_time: int = 1_800_000_000  # absolute UTC unix far enough out
 
@@ -60,6 +62,7 @@ class _FakeAttestationEnvelope:
 class _FakeObligationData:
     """Mirrors alkahest's ``decoded["data"]`` typed
     ``ERC20EscrowObligation.ObligationData`` payload."""
+
     arbiter: str | None = ARBITER
     demand: bytes | None = None
     token: str | None = TOKEN
@@ -126,7 +129,7 @@ def _good_obligation(**overrides: Any) -> dict[str, Any]:
     att = _FakeAttestationEnvelope()
     data = _FakeObligationData(
         demand=_encode_recipient(SELLER),
-        amount=1000,  # 1000 per-hour × 3600s / 3600 = 1000
+        amount=1000,  # 1000 per-hour * 3600s / 3600 = 1000
     )
     for k, v in overrides.items():
         if hasattr(att, k):
@@ -168,9 +171,18 @@ def _make_seams(decoded: dict[str, Any]) -> dict[str, Any]:
     async def _get_obligation(client, uid):
         return decoded
 
-    def _build(*, demands=None, recipient=None, seller_wallet=None, agreed_amount, duration_seconds,
-               token_contract_address, chain_name, addr_config_path=None,
-               arbiter_kind="recipient"):
+    def _build(
+        *,
+        demands=None,
+        recipient=None,
+        seller_wallet=None,
+        agreed_amount,
+        duration_seconds,
+        token_contract_address,
+        chain_name,
+        addr_config_path=None,
+        arbiter_kind="recipient",
+    ):
         effective_recipient = recipient or seller_wallet
         return _canonical_obligation_data(
             seller_wallet=effective_recipient,
@@ -187,12 +199,14 @@ def _make_seams(decoded: dict[str, Any]) -> dict[str, Any]:
 
 def _good_listing() -> dict:
     return {
-        "accepted_escrows": [{
-            "chain_name": "anvil",
-            "escrow_address": "0x" + "11" * 20,
-            "literal_fields": {"token": TOKEN},
-            "rates": [{"field": "amount", "per": "hour", "value": "100"}],
-        }],
+        "accepted_escrows": [
+            {
+                "chain_name": "anvil",
+                "escrow_address": "0x" + "11" * 20,
+                "literal_fields": {"token": TOKEN},
+                "rates": [{"field": "amount", "per": "hour", "value": "100"}],
+            }
+        ],
         "offer_resource": {"gpu_model": "H200", "gpu_count": 1},
     }
 
@@ -204,8 +218,10 @@ def _good_listing() -> dict:
 
 class TestNormalizeAddress:
     def test_lowercases(self):
-        assert _normalize_address("0xABCdef0000000000000000000000000000000000") == \
-            "0xabcdef0000000000000000000000000000000000"
+        assert (
+            _normalize_address("0xABCdef0000000000000000000000000000000000")
+            == "0xabcdef0000000000000000000000000000000000"
+        )
 
     def test_empty_returns_none(self):
         assert _normalize_address("") is None
@@ -234,12 +250,14 @@ class TestNormalizeBytes:
 
 class TestNormalizeObligationData:
     def test_round_trips_canonical_shape(self):
-        normalized = _normalize_obligation_data({
-            "arbiter": "0xABCDEF0000000000000000000000000000000000",
-            "demand": b"\xab\xcd",
-            "token": "0x1234000000000000000000000000000000000000",
-            "amount": 999,
-        })
+        normalized = _normalize_obligation_data(
+            {
+                "arbiter": "0xABCDEF0000000000000000000000000000000000",
+                "demand": b"\xab\xcd",
+                "token": "0x1234000000000000000000000000000000000000",
+                "amount": 999,
+            }
+        )
         assert normalized == {
             "arbiter": "0xabcdef0000000000000000000000000000000000",
             "demand": "0xabcd",
@@ -290,7 +308,9 @@ class TestReadChainObligationData:
         }
 
     def test_reads_attestation_reference_shape(self):
-        assert _read_chain_obligation_data(_FakeAttestationReferenceObligationData()) == {
+        assert _read_chain_obligation_data(
+            _FakeAttestationReferenceObligationData()
+        ) == {
             "arbiter": ARBITER_LOWER,
             "demand": "0x1122",
             "attestationUid": "0x" + "44" * 32,
@@ -308,24 +328,31 @@ class TestExtractTokenContractFromListing:
 
     def test_serialized_json_string_accepted_escrows(self):
         import json
+
         listing = {
-            "accepted_escrows": json.dumps([{
-                "chain_name": "anvil",
-                "escrow_address": "0x" + "11" * 20,
-                "literal_fields": {"token": TOKEN},
-                "rates": [{"field": "amount", "per": "hour", "value": "1"}],
-            }]),
+            "accepted_escrows": json.dumps(
+                [
+                    {
+                        "chain_name": "anvil",
+                        "escrow_address": "0x" + "11" * 20,
+                        "literal_fields": {"token": TOKEN},
+                        "rates": [{"field": "amount", "per": "hour", "value": "1"}],
+                    }
+                ]
+            ),
             "offer_resource": {"gpu_model": "H200"},
         }
         assert _extract_token_contract_from_listing(listing) == TOKEN
 
     def test_no_token_raises(self):
         listing = {
-            "accepted_escrows": [{
-                "chain_name": "anvil",
-                "escrow_address": "0x" + "11" * 20,
-                "literal_fields": {},
-            }],
+            "accepted_escrows": [
+                {
+                    "chain_name": "anvil",
+                    "escrow_address": "0x" + "11" * 20,
+                    "literal_fields": {},
+                }
+            ],
             "offer_resource": {"gpu_model": "H200"},
         }
         with pytest.raises(EscrowVerificationError, match="Cannot extract token"):
@@ -389,7 +416,9 @@ class TestVerifyHappyPath:
 class TestVerifyRejections:
     @pytest.mark.asyncio
     async def test_rejects_when_no_alkahest_client(self):
-        with pytest.raises(EscrowVerificationError, match="AlkahestClient not configured"):
+        with pytest.raises(
+            EscrowVerificationError, match="AlkahestClient not configured"
+        ):
             await verify_escrow_for_settlement(
                 escrow_uid="0xdead",
                 seller_wallet=SELLER,
@@ -422,12 +451,15 @@ class TestVerifyRejections:
         """If chain config lookups fail (e.g. unknown chain, missing
         anvil addresses file), the verifier should refuse rather than
         try to compare against undefined expected values."""
+
         def _broken(**_kw):
             raise ValueError("no arbiter for this chain")
 
         seams = _make_seams(_good_obligation())
         seams["build_obligation_data_fn"] = _broken
-        with pytest.raises(EscrowVerificationError, match="Cannot construct expected obligation_data"):
+        with pytest.raises(
+            EscrowVerificationError, match="Cannot construct expected obligation_data"
+        ):
             await verify_escrow_for_settlement(
                 escrow_uid="0xdead",
                 seller_wallet=SELLER,
@@ -533,7 +565,9 @@ class TestVerifyRejections:
     async def test_rejects_when_demand_recipient_is_someone_else(self):
         """Buyer encoded a DIFFERENT seller's address as the recipient."""
         att = _good_obligation(demand=_encode_recipient(BUYER))
-        with pytest.raises(EscrowVerificationError, match="obligation_data mismatch") as exc:
+        with pytest.raises(
+            EscrowVerificationError, match="obligation_data mismatch"
+        ) as exc:
             await verify_escrow_for_settlement(
                 escrow_uid="0xdead",
                 seller_wallet=SELLER,
@@ -552,7 +586,9 @@ class TestVerifyRejections:
     @pytest.mark.asyncio
     async def test_rejects_when_token_mismatch(self):
         att = _good_obligation(token="0xdeadbeef00000000000000000000000000000000")
-        with pytest.raises(EscrowVerificationError, match="obligation_data mismatch") as exc:
+        with pytest.raises(
+            EscrowVerificationError, match="obligation_data mismatch"
+        ) as exc:
             await verify_escrow_for_settlement(
                 escrow_uid="0xdead",
                 seller_wallet=SELLER,
@@ -572,7 +608,9 @@ class TestVerifyRejections:
         """Strict equality: underpayment now rejected (was previously
         only checked as floor)."""
         att = _good_obligation(amount=999)
-        with pytest.raises(EscrowVerificationError, match="obligation_data mismatch") as exc:
+        with pytest.raises(
+            EscrowVerificationError, match="obligation_data mismatch"
+        ) as exc:
             await verify_escrow_for_settlement(
                 escrow_uid="0xdead",
                 seller_wallet=SELLER,
@@ -655,10 +693,14 @@ def patched_codec_lookup(monkeypatch):
         return None
 
     monkeypatch.setattr(
-        alkahest_mod, "get_escrow_codec_for", _stub_codec_for,
+        alkahest_mod,
+        "get_escrow_codec_for",
+        _stub_codec_for,
     )
     monkeypatch.setattr(
-        alkahest_mod, "address_to_slot", _stub_address_to_slot,
+        alkahest_mod,
+        "address_to_slot",
+        _stub_address_to_slot,
     )
     return captured
 
@@ -672,9 +714,18 @@ def _build_seams_capturing_token():
     async def _get_obligation(client, uid):
         return _good_obligation()
 
-    def _build(*, demands=None, recipient=None, seller_wallet=None, agreed_amount, duration_seconds,
-               token_contract_address, chain_name, addr_config_path=None,
-               arbiter_kind="recipient_arbiter"):
+    def _build(
+        *,
+        demands=None,
+        recipient=None,
+        seller_wallet=None,
+        agreed_amount,
+        duration_seconds,
+        token_contract_address,
+        chain_name,
+        addr_config_path=None,
+        arbiter_kind="recipient_arbiter",
+    ):
         effective_recipient = recipient or seller_wallet
         captured["token"] = token_contract_address
         captured["arbiter_kind"] = arbiter_kind
@@ -725,10 +776,8 @@ class TestVerifyProposalDispatch:
     @pytest.mark.asyncio
     async def test_reads_recipient_from_literal_fields(self, patched_codec_lookup):
         seams, captured = _build_seams_capturing_token()
-        seams["get_obligation_fn"] = (
-            lambda client, uid: _async_value(
-                _good_obligation(demand=_encode_recipient(RECIPIENT))
-            )
+        seams["get_obligation_fn"] = lambda client, uid: _async_value(
+            _good_obligation(demand=_encode_recipient(RECIPIENT))
         )
         await verify_escrow_for_settlement(
             escrow_uid="0xdead",
@@ -748,7 +797,9 @@ class TestVerifyProposalDispatch:
         assert captured["recipient"] == RECIPIENT
 
     @pytest.mark.asyncio
-    async def test_unpinned_zero_address_falls_back_to_default_kind(self, patched_codec_lookup):
+    async def test_unpinned_zero_address_falls_back_to_default_kind(
+        self, patched_codec_lookup
+    ):
         """A zero-address proposal (escrow contract unpinned during
         negotiation) resolves the codec from the default escrow_kind rather
         than erroring — the buyer escrows against the chain's default kind."""
@@ -799,7 +850,9 @@ class TestVerifyProposalDispatch:
         assert captured["token"] == TOKEN
 
     @pytest.mark.asyncio
-    async def test_raises_when_proposal_has_no_literal_token(self, patched_codec_lookup):
+    async def test_raises_when_proposal_has_no_literal_token(
+        self, patched_codec_lookup
+    ):
         seams, _captured = _build_seams_capturing_token()
         with pytest.raises(EscrowVerificationError, match="omitted token"):
             await verify_escrow_for_settlement(
@@ -812,7 +865,8 @@ class TestVerifyProposalDispatch:
                 chain_name=CHAIN,
                 alkahest_address_config_path=CONFIG_PATH,
                 escrow_proposal=_erc20_proposal(
-                    fields={"token": _TOKEN_LEGACY}, literal_fields={},
+                    fields={"token": _TOKEN_LEGACY},
+                    literal_fields={},
                 ),
                 now_unix=1_700_000_000,
                 **seams,
@@ -847,7 +901,9 @@ class TestVerifyProposalDispatch:
         )
 
     @pytest.mark.asyncio
-    async def test_injected_legacy_builder_still_requires_token(self, patched_codec_lookup):
+    async def test_injected_legacy_builder_still_requires_token(
+        self, patched_codec_lookup
+    ):
         """The legacy injected builder seam is still ERC20-shaped and
         therefore requires a token."""
         seams, _captured = _build_seams_capturing_token()
@@ -873,7 +929,9 @@ class TestVerifyProposalDispatch:
             )
 
     @pytest.mark.asyncio
-    async def test_raises_verification_error_when_codec_lookup_fails(self, patched_codec_lookup):
+    async def test_raises_verification_error_when_codec_lookup_fails(
+        self, patched_codec_lookup
+    ):
         """If the address isn't registered on any codec (misconfigured
         chain config or stale tag), surface an EscrowVerificationError —
         the seller would have to abort and reconcile config off-chain."""
@@ -886,7 +944,9 @@ class TestVerifyProposalDispatch:
             literal_fields={"token": TOKEN},
             expiration_unix=1_800_000_000,
         )
-        with pytest.raises(EscrowVerificationError, match="Cannot resolve escrow codec"):
+        with pytest.raises(
+            EscrowVerificationError, match="Cannot resolve escrow codec"
+        ):
             await verify_escrow_for_settlement(
                 escrow_uid="0xdead",
                 seller_wallet=SELLER,
@@ -925,7 +985,9 @@ class TestVerifyProposalDispatch:
         assert captured["arbiter_kind"] == "recipient_arbiter"
 
     @pytest.mark.asyncio
-    async def test_codec_lookup_uses_proposal_chain_and_address(self, patched_codec_lookup):
+    async def test_codec_lookup_uses_proposal_chain_and_address(
+        self, patched_codec_lookup
+    ):
         """Sanity check: the codec-resolve call gets the proposal's
         (chain, address, config_path) — not the listing's or kwarg's."""
         seams, _captured = _build_seams_capturing_token()
@@ -944,3 +1006,48 @@ class TestVerifyProposalDispatch:
         )
         lookups = patched_codec_lookup["codec_lookups"]
         assert lookups == [(CHAIN, _ERC20_ESCROW_ADDR, CONFIG_PATH)]
+
+
+@pytest.mark.asyncio
+async def test_verification_matches_non_first_plan_obligation(
+    monkeypatch,
+    patched_codec_lookup,
+) -> None:
+    terms = [
+        EscrowTerms(
+            maker="buyer",
+            chain_name=CHAIN,
+            escrow_contract=_ERC20_ESCROW_ADDR,
+            obligation_data=_canonical_obligation_data(agreed_amount=500),
+            expiration_unix=1_800_000_000,
+        ),
+        EscrowTerms(
+            maker="buyer",
+            chain_name=CHAIN,
+            escrow_contract=_ERC20_ESCROW_ADDR,
+            obligation_data=_canonical_obligation_data(agreed_amount=1000),
+            expiration_unix=1_800_000_001,
+        ),
+    ]
+    monkeypatch.setattr(
+        "market_alkahest.alkahest.materialize_escrow_terms_from_proposal",
+        lambda **_kwargs: terms,
+    )
+
+    matched_index = await verify_escrow_for_settlement(
+        escrow_uid="0xdead",
+        seller_wallet=SELLER,
+        agreed_price=1500,
+        agreed_duration_seconds=3600,
+        listing=_good_listing(),
+        alkahest_client=_DUMMY_CLIENT,
+        chain_name=CHAIN,
+        alkahest_address_config_path=CONFIG_PATH,
+        escrow_proposal=_erc20_proposal(literal_fields={"token": TOKEN}),
+        now_unix=1_700_000_000,
+        get_obligation_fn=lambda _client, _uid: _async_value(
+            _good_obligation(amount=1000, expiration_time=1_800_000_001)
+        ),
+    )
+
+    assert matched_index == 1

@@ -1,43 +1,20 @@
-"""Admin API key authentication.
+"""Fail-closed administrator dependency with service-callback bypass."""
 
-Usage on a router::
-
-    from market_storefront.middleware.admin_auth import require_admin_key
-    from fastapi import APIRouter
-
-    router = APIRouter(
-        prefix="/api/v1/admin",
-        dependencies=[Depends(require_admin_key)],
-    )
-
-Or per-endpoint::
-
-    @router.post("/{listing_id}/pause", dependencies=[Depends(require_admin_key)])
-    async def pause(...): ...
-
-"""
 from __future__ import annotations
 
-from fastapi import HTTPException, Security
-from fastapi.security import APIKeyHeader
+from fastapi import HTTPException, Request
 
-from core_storefront.auth import AuthError, verify_admin_key
-from market_storefront.utils.config import settings
 
-_admin_key_header = APIKeyHeader(
-    name="X-Admin-Key",
-    auto_error=False,
-    description="Admin API key. Required for all /admin/* endpoints and admin actions.",
-)
 
-def require_admin_key(key: str | None = Security(_admin_key_header)) -> None:
-    """FastAPI dependency that enforces the X-Admin-Key header.
 
-    When ``settings.admin_api_key`` is not set (local dev), all admin endpoints
-    are unprotected — matching the previous middleware behaviour.
-    """
-    configured = settings.admin_api_key
-    try:
-        verify_admin_key(configured=configured, supplied=key)
-    except AuthError as exc:
-        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
+async def require_admin_key(request: Request) -> None:
+    """Reject legacy admin-key auth; service callbacks are verified upstream."""
+
+    if getattr(request.state, "service_peer_authenticated", False) or getattr(
+        request.state, "administrator_authenticated", False
+    ):
+        return
+    raise HTTPException(
+        status_code=401,
+        detail="Administrator requests require marketplace v2 principal authentication",
+    )

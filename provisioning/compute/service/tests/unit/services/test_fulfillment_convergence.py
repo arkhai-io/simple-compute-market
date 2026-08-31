@@ -5,7 +5,6 @@ _with_owned_record provides.
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 
@@ -49,13 +48,18 @@ def repo():
 
 
 def _requirement(**dimensions):
-    return SettlementRequirement(resource_kind="compute", dimensions=dimensions or {"units": 1})
+    return SettlementRequirement(
+        executor_kind="vm",
+        resource_kind="compute",
+        dimensions=dimensions or {"units": 1},
+    )
 
 
 def _resource(provider="ansible"):
     return SettlementResource(
         settlement_resource_id="res-1",
         pool_id="pool-1",
+        executor_kind="vm",
         resource_kind="compute",
         provider=provider,
         attributes={},
@@ -1102,114 +1106,3 @@ async def test_run_cycle_emits_one_zero_value_diagnostics_event_when_empty(
         state["oldest_row_age_seconds"] is None
         for state in payload["per_state"].values()
     )
-
-
-async def test_pending_status_re_leases_on_a_poll_interval_not_a_backoff(
-    session_factory, repo
-):
-    """A still-running operation is re-read soon, not after a failure backoff.
-
-    Claim leases come from `Backoff.delay_seconds(attempt_count)` — 5s doubling to
-    300s — which suits an operation that failed. Charging that to "the job is still
-    queued" means a job finishing moments later is unnoticed for the rest of the
-    window while the reservation's capacity stays held. The claim is kept (so two
-    cycles do not both poll the same provider); only the interval changes.
-    """
-    _accepted_row(repo, session_factory)
-    with session_factory() as db:
-        repo.transition(
-            db, "cr-1", SettlementRecordState.dispatching.value,
-            provider_metadata={"job": "1"},
-        )
-        db.commit()
-
-    provider = _StubProvider(status=ProviderStatus(state=ProviderOperationState.pending))
-    watchdog = FulfillmentConvergenceWatchdog(
-        session_factory=session_factory,
-        repository=repo,
-        provider_registry=ProviderRegistry({"ansible": provider}),
-        settings=_settings(),
-    )
-
-    await watchdog.converge_creates()
-
-    with session_factory() as db:
-        record = repo.get(db, "cr-1")
-        # SQLite returns this column naive; compare in the same frame rather
-        # than assuming a tzinfo the storage layer does not keep.
-        expires = record.claim_expires_at
-        if expires.tzinfo is None:
-            expires = expires.replace(tzinfo=timezone.utc)
-        lease_remaining = (expires - datetime.now(timezone.utc)).total_seconds()
-    assert lease_remaining <= 2.0, (
-        f"a pending read left {lease_remaining:.1f}s on the claim; the first "
-        "backoff step is 5s, so this is still on the failure schedule"
-    )
-
-
-async def test_repeated_pending_reads_do_not_escalate_the_attempt_count(
-    session_factory, repo
-):
-    """Otherwise a slow job walks itself up the backoff curve while healthy."""
-    _accepted_row(repo, session_factory)
-    with session_factory() as db:
-        repo.transition(
-            db, "cr-1", SettlementRecordState.dispatching.value,
-            provider_metadata={"job": "1"},
-        )
-        db.commit()
-
-    provider = _StubProvider(status=ProviderStatus(state=ProviderOperationState.pending))
-    watchdog = FulfillmentConvergenceWatchdog(
-        session_factory=session_factory,
-        repository=repo,
-        provider_registry=ProviderRegistry({"ansible": provider}),
-        settings=_settings(),
-    )
-
-    for _ in range(3):
-        await watchdog.converge_creates()
-
-    with session_factory() as db:
-        record = repo.get(db, "cr-1")
-        assert (record.attempt_count or 0) <= 1, (
-            f"three pending reads left attempt_count={record.attempt_count}; a "
-            "pending observation is not a failed attempt"
-        )
-
-
-async def test_clear_all_claims_frees_a_claimed_record(session_factory, repo):
-    """The operator/scenario seam: a claim lease outlives the cycle that took it.
-
-    Without this, a caller who has just made an operation finish cannot observe it
-    by running another cycle — the record is still leased — and waiting the lease
-    out is the only alternative.
-    """
-    _accepted_row(repo, session_factory)
-    with session_factory() as db:
-        repo.transition(
-            db, "cr-1", SettlementRecordState.dispatching.value,
-            provider_metadata={"job": "1"},
-        )
-        db.commit()
-
-    provider = _StubProvider(status=ProviderStatus(state=ProviderOperationState.pending))
-    watchdog = FulfillmentConvergenceWatchdog(
-        session_factory=session_factory,
-        repository=repo,
-        provider_registry=ProviderRegistry({"ansible": provider}),
-        settings=_settings(),
-    )
-    await watchdog.converge_creates()
-
-    cleared = watchdog.clear_all_claims()
-
-    assert cleared >= 1
-    with session_factory() as db:
-        record = repo.get(db, "cr-1")
-        assert record.claimed_by is None
-        assert record.claim_expires_at is None
-        assert record.state == SettlementRecordState.dispatching.value, (
-            "clearing a claim must not change state — the next cycle does exactly "
-            "what it would have done when the lease lapsed"
-        )

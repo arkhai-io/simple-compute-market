@@ -1,24 +1,17 @@
-"""Claims-side alkahest primitives: oracle interaction, demand trees,
-collection.
+"""Alkahest conditional-escrow primitives: arbiters and collection.
 
-The alkahest claims half of the settlement lifecycle
-(``docs/development/ARCHITECTURE.md``, "Settlement Lifecycle"):
-everything the deal-servicing engine needs to drive an
-alkahest obligation from fulfilled to collected —
+The settlement-runtime adapter uses this module to drive an Alkahest
+obligation from immutable fulfillment to collection:
 
-* the two arbiter codecs beyond RecipientArbiter that the lifecycle
-  designs use: ``TrustedOracleArbiter`` (asynchronous microcondition;
-  collection gated on an off-chain ``arbitrate()``) and ``AllArbiter``
-  (conjunction of microconditions);
-* thin wrappers over the SDK oracle client — ``request_arbitration``,
-  a bounded non-blocking ``arbitration_status`` probe over
-  ``wait_for_arbitration``, and oracle-side ``arbitrate``;
-* ``collect_escrow_with_codec``, the collection mirror of
-  ``reclaim_expired_escrow_with_codec``.
+* ``TrustedOracleArbiter`` supplies an asynchronous condition whose result is
+  recorded through ``ArbitrationMade``;
+* ``AllArbiter`` recursively composes those conditions with
+  ``RecipientArbiter``;
+* bounded oracle probes let the shared servicing worker poll without blocking;
+* collection dispatches through the same escrow codec registry as reclaim.
 
-This module owns talking *to* the contracts. What conditions a deal
-uses, who operates the oracle, and when to give up are engine/domain
-policy (work items I.3/I.5).
+This module owns contract calls and codecs. Composition roots own the oracle,
+domain evidence, servicing policy, and terminal actions.
 """
 
 from __future__ import annotations
@@ -67,9 +60,9 @@ class TrustedOracleArbiterCodec:
     """``TrustedOracleArbiter.DemandData = (address oracle, bytes data)``.
 
     Collection through this arbiter is asynchronous: ``checkObligation``
-    returns whatever the named oracle last ``arbitrate()``d for the
-    (obligation, demand) key, so the claims engine must request
-    arbitration and watch ``ArbitrationMade`` before collecting.
+    returns the named oracle's latest decision for the (obligation, demand)
+    key, so the settlement adapter requests arbitration once and then polls
+    ``ArbitrationMade`` before collecting.
     """
 
     kind = "trusted_oracle_arbiter"
@@ -211,6 +204,7 @@ register_arbiter_codec(NativeTokenSplitterArbiterCodec())
 # Oracle interaction
 # ---------------------------------------------------------------------------
 
+
 async def request_arbitration(
     client: Any,
     *,
@@ -218,9 +212,11 @@ async def request_arbitration(
     oracle: str,
     demand: bytes | str,
 ) -> Any:
-    """Ask ``oracle`` to arbitrate the fulfillment. Idempotent on-chain
-    (re-requesting emits another ``ArbitrationRequested``); the engine
-    owns retry policy."""
+    """Ask ``oracle`` to arbitrate the fulfillment.
+
+    Re-requesting emits another ``ArbitrationRequested`` event, so the adapter
+    journals a request marker before polling and the shared runtime persists it.
+    """
     return await client.oracle.request_arbitration(
         fulfillment_uid, oracle, _demand_bytes(demand)
     )
@@ -238,9 +234,9 @@ async def arbitration_status(
     """Bounded probe for an ``ArbitrationMade`` event.
 
     Wraps the SDK's ``wait_for_arbitration`` (which scans from
-    ``from_block`` and then subscribes) in a timeout so the claims
-    engine can poll without blocking its sweep: returns the event data
-    when an arbitration exists, ``None`` when none has been made yet.
+    ``from_block`` and then subscribes) in a timeout so shared servicing can
+    poll without blocking its sweep. Returns the event when an arbitration
+    exists and ``None`` while no decision has been made.
     """
     try:
         return await asyncio.wait_for(
@@ -278,6 +274,7 @@ async def arbitrate(
 # ---------------------------------------------------------------------------
 # Collection
 # ---------------------------------------------------------------------------
+
 
 async def collect_escrow_with_codec(
     client: Any,

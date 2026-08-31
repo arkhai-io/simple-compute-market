@@ -1,0 +1,29 @@
+[project]
+name = "arkhai-kit-capacity-publication"
+version = "0.1.0"
+license = "MIT"
+description = "Schema-opaque capacity projection and storefront publication lifecycle."
+requires-python = ">=3.12,<3.14"
+dependencies = [
+    "arkhai-core-storefront==0.3.0",
+    "arkhai-core-registry-client>=0.11.0",
+    "arkhai-kit-site-client",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/market_capacity_publication"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests/unit"]
+asyncio_mode = "auto"
+
+[dependency-groups]
+dev = [
+    "pytest>=8.3.4,<9.0.0",
+    "pytest-asyncio>=0.25,<2.0",
+]

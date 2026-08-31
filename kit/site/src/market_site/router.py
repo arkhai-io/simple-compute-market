@@ -41,7 +41,11 @@ from .http_models import (
     ResourcePoolProjectionResponse,
     CapacityBucketProjectionResponse,
 )
-from .ledger import CapacityConflictError, CapacityLedgerService
+from .ledger import (
+    CapacityConflictError,
+    CapacityLedgerService,
+    UndeclaredOfferingModeError,
+)
 from .projections import SiteProjectionService
 
 logger = logging.getLogger(__name__)
@@ -183,6 +187,8 @@ def make_capacity_router(
                 lease_start_utc=body.lease_start_utc,
                 lease_duration_seconds=body.lease_duration_seconds,
             ))
+        except UndeclaredOfferingModeError as exc:
+            raise HTTPException(status_code=409, detail=str(exc))
         except ValueError as exc:
             raise HTTPException(status_code=422, detail=str(exc))
 
@@ -209,29 +215,14 @@ def make_capacity_router(
                 lease_start_utc=body.lease_start_utc,
                 lease_duration_seconds=body.lease_duration_seconds,
             )
+        except UndeclaredOfferingModeError as exc:
+            raise HTTPException(status_code=409, detail=str(exc))
         except ValueError as exc:
             raise HTTPException(status_code=422, detail=str(exc))
         if reservation is not None:
-            # A reservation commits to this site and to the reserved dimensions,
-            # and to nothing narrower. Scheduling may later rebind it to another
-            # resource, in another pool at this site, without touching the deal
-            # (see market_fulfillment's scheduler, which filters candidates on
-            # resource kind, dimensions, and requirement attributes -- never on
-            # the pool the reservation was admitted against). Reporting the
-            # resource or pool matched here would advertise a placement that is
-            # free to change, so a caller needing either reads it from its own
-            # claim, which is the only place it is durable.
-            # See openspec/specs/site-capacity/spec.md#internal-capacity-accounting.
             reservation = {
                 key: value for key, value in reservation.items()
-                if key not in {
-                    "resource_id",
-                    "pool_id",
-                    "member_id",
-                    "capacity_bucket_id",
-                    "backing_resource_id",
-                    "vm_host",
-                }
+                if key not in {"resource_id", "capacity_bucket_id", "backing_resource_id", "vm_host"}
             }
         return ReservationResponse(reservation=reservation)
 

@@ -4,7 +4,6 @@ CHART_DIR    := .
 RELEASE      := arkhai-node-operator
 NAMESPACE    := default
 VALUES       := values.yaml
-SSH_KEY_FILE ?= $(HOME)/.ssh/id_ed25519
 
 .PHONY: init template deploy test test-render
 
@@ -12,12 +11,8 @@ SSH_KEY_FILE ?= $(HOME)/.ssh/id_ed25519
 init:
 	helm dependency update $(CHART_DIR)
 
-## Install or upgrade the release in the target namespace
-## SSH_KEY_FILE defaults to ~/.ssh/id_ed25519. Override with:
-##   make deploy SSH_KEY_FILE=/path/to/other_key
-## EXTRA_SET_FILE_ARGS is appended verbatim — used by the root Makefile to
-## inject --set-file provisioning.inventory.hostsIni=<path>.
-EXTRA_SET_FILE_ARGS ?=
+## Secret values are provisioned out of band. The chart accepts only names of
+## existing Kubernetes Secrets and never reads credential files into values.
 
 ## RESOURCES_CSV_FILE: path to the compute resource inventory CSV to seed
 ## into the storefront agent on first deploy. Left empty by default — the
@@ -26,13 +21,12 @@ EXTRA_SET_FILE_ARGS ?=
 ##   make deploy RESOURCES_CSV_FILE=./domains/vms/storefront/src/market_storefront/data/kvm1-machine.csv
 RESOURCES_CSV_FILE ?=../domains/vms/storefront/src/market_storefront/data/kvm1-machine.csv
 
-## Render the full parent chart (and all enabled subcharts) to stdout
+## Render the full parent chart (and all enabled subcharts) to stdout.
 template:
 	helm template $(RELEASE) $(CHART_DIR) \
 		--namespace $(NAMESPACE) \
 		--values $(VALUES) \
-		--set-file provisioning.sshKey.sshPrivateKey=$(SSH_KEY_FILE) \
-		$(if $(RESOURCES_CSV_FILE),--set-file storefront.agents[0].secret.resourcesCsvInline=$(RESOURCES_CSV_FILE),) \
+		$(if $(RESOURCES_CSV_FILE),--set-file storefront.agents[0].secret.resourcesCsvInline=$(RESOURCES_CSV_FILE),)
 
 ## Verify structural invariants of the rendered chart without needing
 ## a real cluster. Runs `helm template` against the umbrella chart and
@@ -59,9 +53,7 @@ deploy: init
 		--namespace $(NAMESPACE) \
 		--create-namespace \
 		--values $(VALUES) \
-		--set-file provisioning.sshKey.sshPrivateKey=$(SSH_KEY_FILE) \
 		$(if $(RESOURCES_CSV_FILE),--set-file storefront.agents[0].secret.resourcesCsvInline=$(RESOURCES_CSV_FILE),) \
-		$(EXTRA_SET_FILE_ARGS) \
 		--wait
 
 ## Run helm tests against the deployed release

@@ -1,25 +1,204 @@
-"""Typed client for the credits service's admin-gated issuance surface.
-
-Centralizes what ``issuance.py``'s free functions used to each do
-independently: a fresh ``httpx.AsyncClient`` per call, hand-built
-``X-Admin-Key`` headers, and ad hoc error translation. One
-``CreditsServiceClient`` instance now owns all five operations
-(``submit_credit_issuance``, ``get_key``, ``revoke_key``,
-``adjust_key_balance``, ``rollback_issuance``); ``issuance.py``'s
-existing free functions are kept as thin wrappers over a
-per-call-constructed client so every current caller's signature stays
-exactly as it was — this is an internal centralization, not a wire or
-call-site contract change.
-"""
+"""Strict client contract for the credits authority's issuance surface."""
 
 from __future__ import annotations
 
+import hashlib
 import logging
-from typing import Any
+import re
+from typing import Any, Literal, Self
 
 import httpx
+from market_identity import Identity, canonical_json
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 logger = logging.getLogger(__name__)
+
+ISSUANCE_REQUEST_SCHEMA = "arkhai.api-credits.issuance-request.v1"
+ISSUANCE_RESULT_SCHEMA = "arkhai.api-credits.issuance-result.v1"
+_SAFE_REF = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,254}$")
+
+
+class _CreditsContract(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
+
+
+class CreditKeyTarget(_CreditsContract):
+    """Immutable public key target for one issuance."""
+
+    mode: Literal["new", "existing"]
+    key_id: str | None = Field(default=None, min_length=1, max_length=255)
+
+    @model_validator(mode="after")
+    def validate_target(self) -> Self:
+        if self.mode == "new" and self.key_id is not None:
+            raise ValueError("new key target must not provide key_id")
+        if self.mode == "existing" and self.key_id is None:
+            raise ValueError("existing key target requires key_id")
+        return self
+
+
+def derive_credit_fulfillment_id(obligation_ref: str) -> str:
+    """Derive the mechanism-neutral grant key for one accepted obligation."""
+
+    if not isinstance(obligation_ref, str) or not _SAFE_REF.fullmatch(obligation_ref):
+        raise ValueError("obligation_ref must be a safe opaque reference")
+    digest = hashlib.sha256(
+        canonical_json(
+            {
+                "domain": "api-credits",
+                "obligation_ref": obligation_ref,
+                "version": 1,
+            }
+        )
+    ).hexdigest()
+    return f"api-credit-fulfillment.v1:{digest}"
+
+
+def credit_issuance_request_digest(
+    *,
+    fulfillment_id: str,
+    obligation_ref: str,
+    mechanism: str,
+    owner: Identity,
+    service: str,
+    resource_id: str,
+    quantity: int,
+    key: CreditKeyTarget,
+) -> str:
+    """Digest every authority-owned mutation input, excluding transient quota hints."""
+
+    payload = {
+        "fulfillment_id": fulfillment_id,
+        "key": key.model_dump(mode="json"),
+        "mechanism": mechanism,
+        "obligation_ref": obligation_ref,
+        "owner": owner.model_dump(mode="json"),
+        "quantity": quantity,
+        "resource_id": resource_id,
+        "schema": ISSUANCE_REQUEST_SCHEMA,
+        "service": service,
+    }
+    return "sha256:" + hashlib.sha256(canonical_json(payload)).hexdigest()
+
+
+class CreditIssuanceRequest(_CreditsContract):
+    """Complete immutable command accepted by the credits authority."""
+
+    schema: Literal["arkhai.api-credits.issuance-request.v1"] = ISSUANCE_REQUEST_SCHEMA
+    fulfillment_id: str = Field(min_length=1, max_length=320)
+    obligation_ref: str = Field(min_length=1, max_length=255)
+    mechanism: Literal["alkahest.v1", "fiat.stripe.v1"]
+    owner: Identity
+    service: str = Field(min_length=1, max_length=255)
+    resource_id: str = Field(min_length=1, max_length=255)
+    quantity: int = Field(ge=1)
+    key: CreditKeyTarget
+    request_digest: str = Field(pattern=r"^sha256:[0-9a-f]{64}$")
+    capacity_reservation_id: str | None = Field(
+        default=None,
+        min_length=1,
+        max_length=255,
+    )
+
+    @classmethod
+    def create(
+        cls,
+        *,
+        obligation_ref: str,
+        mechanism: Literal["alkahest.v1", "fiat.stripe.v1"],
+        owner: Identity,
+        service: str,
+        resource_id: str,
+        quantity: int,
+        key: CreditKeyTarget,
+        capacity_reservation_id: str | None = None,
+        fulfillment_id: str | None = None,
+    ) -> Self:
+        resolved_fulfillment_id = fulfillment_id or derive_credit_fulfillment_id(
+            obligation_ref
+        )
+        digest = credit_issuance_request_digest(
+            fulfillment_id=resolved_fulfillment_id,
+            obligation_ref=obligation_ref,
+            mechanism=mechanism,
+            owner=owner,
+            service=service,
+            resource_id=resource_id,
+            quantity=quantity,
+            key=key,
+        )
+        return cls(
+            fulfillment_id=resolved_fulfillment_id,
+            obligation_ref=obligation_ref,
+            mechanism=mechanism,
+            owner=owner,
+            service=service,
+            resource_id=resource_id,
+            quantity=quantity,
+            key=key,
+            request_digest=digest,
+            capacity_reservation_id=capacity_reservation_id,
+        )
+
+    @model_validator(mode="after")
+    def validate_identity_and_digest(self) -> Self:
+        if not _SAFE_REF.fullmatch(self.obligation_ref):
+            raise ValueError("obligation_ref must be a safe opaque reference")
+        if self.fulfillment_id != derive_credit_fulfillment_id(self.obligation_ref):
+            raise ValueError("fulfillment_id does not match obligation_ref")
+        expected = credit_issuance_request_digest(
+            fulfillment_id=self.fulfillment_id,
+            obligation_ref=self.obligation_ref,
+            mechanism=self.mechanism,
+            owner=self.owner,
+            service=self.service,
+            resource_id=self.resource_id,
+            quantity=self.quantity,
+            key=self.key,
+        )
+        if self.request_digest != expected:
+            raise ValueError("request_digest does not match issuance request")
+        return self
+
+
+class CreditIssuanceResult(_CreditsContract):
+    """Committed grant projection; bearer material is excluded from serialization."""
+
+    schema: Literal["arkhai.api-credits.issuance-result.v1"] = ISSUANCE_RESULT_SCHEMA
+    fulfillment_id: str = Field(min_length=1, max_length=320)
+    grant_id: str = Field(min_length=1, max_length=320)
+    obligation_ref: str = Field(min_length=1, max_length=255)
+    mechanism: Literal["alkahest.v1", "fiat.stripe.v1"]
+    owner: Identity | None
+    service: str = Field(min_length=1, max_length=255)
+    resource_id: str = Field(min_length=1, max_length=255)
+    quantity: int = Field(ge=1)
+    key_mode: Literal["new", "existing"]
+    key_id: str = Field(min_length=1, max_length=255)
+    balance: int = Field(ge=0)
+    request_digest: str = Field(pattern=r"^sha256:[0-9a-f]{64}$")
+    committed_at_unix: int = Field(ge=0)
+    capacity_reservation_id: str | None = Field(default=None, max_length=255)
+    already_issued: bool = False
+    secret: str | None = Field(
+        default=None,
+        min_length=1,
+        max_length=512,
+        exclude=True,
+        repr=False,
+    )
+
+    @model_validator(mode="after")
+    def validate_result(self) -> Self:
+        if self.grant_id != self.fulfillment_id:
+            raise ValueError("grant_id must equal fulfillment_id")
+        if self.mechanism == "fiat.stripe.v1" and self.owner is None:
+            raise ValueError("hosted issuance result requires a canonical owner")
+        if self.key_mode == "existing" and self.secret is not None:
+            raise ValueError("existing-key top-up must not return a secret")
+        if self.secret is not None and not self.secret.startswith(f"{self.key_id}."):
+            raise ValueError("issued credential does not match key_id")
+        return self
 
 
 class CreditsServiceError(RuntimeError):
@@ -37,15 +216,20 @@ class CreditsServiceError(RuntimeError):
         self.status_code = status_code
 
 
-class CreditsServiceClient:
-    """One configured client for a single credits-service instance.
+def _service_error(response: httpx.Response) -> CreditsServiceError:
+    try:
+        payload = response.json()
+    except ValueError:
+        payload = {}
+    return CreditsServiceError(
+        str(payload.get("error") or f"http_{response.status_code}"),
+        str(payload.get("detail") or response.text[:200]),
+        status_code=response.status_code,
+    )
 
-    Construction takes ``service_url``/``admin_key`` once; every
-    operation reuses that configuration instead of threading the same
-    two strings through every call. ``timeout`` defaults match what each
-    free function in ``issuance.py`` used individually before this
-    centralization (30s for issuance, 10s for everything else).
-    """
+
+class CreditsServiceClient:
+    """Configured typed client for one credits authority."""
 
     def __init__(
         self,
@@ -66,61 +250,46 @@ class CreditsServiceClient:
 
     async def submit_credit_issuance(
         self,
+        request: CreditIssuanceRequest,
         *,
-        escrow_uid: str,
-        quantity: int,
-        key_mode: str = "new",
-        key_id: str | None = None,
-        buyer_wallet: str | None = None,
-        capacity_reservation_id: str | None = None,
-        resource_id: str | None = None,
         timeout: float = 30.0,
-    ) -> dict[str, Any]:
-        """Issue ``quantity`` credits for a settled escrow.
-
-        Returns the issuance dict ``{key_id, secret?, quantity, balance,
-        capacity_reservation_id, already_issued}``. ``secret`` is present
-        only for a newly created (or rotated-on-retry) key — delivered
-        once, to the buyer, through the settle-status channel.
-
-        Raises :class:`CreditsServiceError` on a market-state refusal and
-        httpx errors on transport failure.
-        """
-        key: dict[str, Any] = {"mode": key_mode}
-        if key_id is not None:
-            key["key_id"] = key_id
-        body: dict[str, Any] = {
-            "escrow_uid": escrow_uid,
-            "quantity": int(quantity),
-            "key": key,
-        }
-        if buyer_wallet:
-            body["buyer"] = {"scheme": "wallet", "id": buyer_wallet}
-        if capacity_reservation_id:
-            body["capacity_reservation_id"] = capacity_reservation_id
-        if resource_id:
-            body["resource_id"] = resource_id
+    ) -> CreditIssuanceResult:
+        """Commit or retrieve exactly the immutable issuance request."""
 
         async with self._http(timeout) as http:
-            resp = await http.post(
+            response = await http.post(
                 f"{self._service_url}/api/v1/issuance",
-                json=body,
+                json=request.model_dump(mode="json", exclude_none=True),
                 headers=self._headers(),
             )
-        if resp.status_code == 200:
-            return resp.json()
-        try:
-            payload = resp.json()
-        except ValueError:
-            payload = {}
-        raise CreditsServiceError(
-            str(payload.get("error") or f"http_{resp.status_code}"),
-            str(payload.get("detail") or resp.text[:200]),
-            status_code=resp.status_code,
-        )
+        if response.status_code == 200:
+            return CreditIssuanceResult.model_validate(response.json())
+        raise _service_error(response)
+
+    async def get_credit_issuance(
+        self,
+        fulfillment_id: str,
+        *,
+        timeout: float = 10.0,
+    ) -> CreditIssuanceResult | None:
+        """Resolve one committed grant without rotating or returning its secret."""
+
+        async with self._http(timeout) as http:
+            response = await http.get(
+                f"{self._service_url}/api/v1/issuance/{fulfillment_id}",
+                headers=self._headers(),
+            )
+        if response.status_code == 404:
+            return None
+        if response.status_code == 200:
+            return CreditIssuanceResult.model_validate(response.json())
+        raise _service_error(response)
 
     async def get_key(
-        self, key_id: str, *, timeout: float = 10.0,
+        self,
+        key_id: str,
+        *,
+        timeout: float = 10.0,
     ) -> dict[str, Any] | None:
         """The key's ownership claim + status, or None when unknown."""
         async with self._http(timeout) as http:
@@ -134,7 +303,10 @@ class CreditsServiceClient:
         return resp.json()
 
     async def revoke_key(
-        self, key_id: str, *, timeout: float = 10.0,
+        self,
+        key_id: str,
+        *,
+        timeout: float = 10.0,
     ) -> dict[str, Any]:
         async with self._http(timeout) as http:
             resp = await http.post(
@@ -145,7 +317,12 @@ class CreditsServiceClient:
         return resp.json()
 
     async def adjust_key_balance(
-        self, key_id: str, *, delta: int, reason: str, timeout: float = 10.0,
+        self,
+        key_id: str,
+        *,
+        delta: int,
+        reason: str,
+        timeout: float = 10.0,
     ) -> dict[str, Any]:
         async with self._http(timeout) as http:
             resp = await http.post(
@@ -157,7 +334,11 @@ class CreditsServiceClient:
         return resp.json()
 
     async def rollback_issuance(
-        self, *, escrow_uid: str, issuance: dict[str, Any], key_mode: str,
+        self,
+        *,
+        escrow_uid: str,
+        issuance: dict[str, Any],
+        key_mode: str,
     ) -> dict[str, Any]:
         """Undo an issuance whose deal failed after the grant landed.
 
@@ -175,14 +356,18 @@ class CreditsServiceClient:
             return out
         try:
             await self.adjust_key_balance(
-                key_id, delta=-quantity, reason=f"rollback:{escrow_uid}",
+                key_id,
+                delta=-quantity,
+                reason=f"rollback:{escrow_uid}",
             )
             out["rolled_back"] = True
         except Exception as exc:
             out["reason"] = f"adjust_failed: {exc}"
             logger.warning(
                 "[ISSUANCE] rollback adjust failed for %s (escrow %s): %s",
-                key_id, escrow_uid, exc,
+                key_id,
+                escrow_uid,
+                exc,
             )
         if key_mode == "new":
             try:
@@ -192,6 +377,8 @@ class CreditsServiceClient:
                 out["revoked"] = False
                 logger.warning(
                     "[ISSUANCE] rollback revoke failed for %s (escrow %s): %s",
-                    key_id, escrow_uid, exc,
+                    key_id,
+                    escrow_uid,
+                    exc,
                 )
         return out

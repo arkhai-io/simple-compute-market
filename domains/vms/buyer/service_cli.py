@@ -8,9 +8,9 @@ reclaim the escrow if it expires uncollected. `market service --from
 <run_id>` is that engine: a foreground loop over the same run-log the
 buy/settle stages share, restartable at any point.
 
-Heartbeats are signed exactly like every other buyer request
-(`deal_heartbeat:<escrow_uid>:<ts>`, EIP-191); the timestamp doubles as
-the heartbeat's claimed send time, which the seller holds to strict
+Heartbeats use the same scheme-neutral, body-bound marketplace v2 request
+contract as every other buyer action. The authenticated timestamp also
+provides the heartbeat's claimed send time, which the seller holds to strict
 per-deal monotonicity.
 """
 
@@ -19,6 +19,7 @@ from __future__ import annotations
 import asyncio
 import time
 from typing import Any, Optional
+from core_buyer.hosted_settlement import HostedSettlementTransport
 
 import typer
 from rich.console import Console
@@ -31,24 +32,30 @@ HEARTBEAT_OPERATION = "deal_heartbeat"
 def send_heartbeat(
     *,
     seller_url: str,
-    escrow_uid: str,
-    buyer_address: str,
-    buyer_private_key: str,
+    deal_ref: str,
+    principal,
+    signer,
+    seller_principal,
+    resolve_seller_principals,
     status: str = "healthy",
 ) -> dict[str, Any]:
-    """Sign and POST one heartbeat; returns the seller's ack body."""
-    from .buyer_client import _post, _sign
+    """Send one v2 body-bound, principal-bound heartbeat."""
+    from core_buyer.orchestration import _signed_json
 
-    sig, ts = _sign(f"{HEARTBEAT_OPERATION}:{escrow_uid}", buyer_private_key)
-    return _post(
-        f"{seller_url.rstrip('/')}/api/v1/deals/{escrow_uid}/heartbeat",
+    return _signed_json(
+        f"{seller_url.rstrip('/')}/api/v1/deals/{deal_ref}/heartbeat",
         {
-            "buyer_address": buyer_address,
+            "buyer_principal": principal.model_dump(mode="json"),
+            "seller_principal": seller_principal.model_dump(mode="json"),
             "payload": {"schema": "vms.heartbeat.v1", "status": status},
         },
-        signature=sig,
-        timestamp=ts,
-        identity_identifier=buyer_address,
+        signer=signer,
+        principal=principal,
+        method="POST",
+        operation=HEARTBEAT_OPERATION,
+        resource=deal_ref,
+        timeout=60.0,
+        resolve_response_principals=resolve_seller_principals,
     )
 
 
@@ -77,14 +84,32 @@ def _deal_expiration_unix(deal) -> Optional[float]:
                     return float(exp)
                 except (TypeError, ValueError):
                     pass
-    return None
+
+
+def _deal_seller_principal(deal):
+    from market_identity import Identity
+
+    plan = getattr(deal, "settlement_plan", None)
+    if isinstance(plan, dict):
+        for obligation in plan.get("obligations") or []:
+            if not isinstance(obligation, dict):
+                continue
+            raw = obligation.get("claimant_principal")
+            if raw is None:
+                continue
+            principal = Identity.model_validate(raw)
+            if deal.publisher_principals.allows(principal):
+                return principal
+    raise ValueError("deal has no trusted claimant principal")
 
 
 async def _service_loop(
     *,
     log,
     deal,
-    chain_settings,
+    signer,
+    chain_settings=None,
+    resolve_seller_principals,
     interval_seconds: float,
     once: bool,
     reclaim: bool,
@@ -94,10 +119,12 @@ async def _service_loop(
     Returns the process exit code.
     """
     escrow_uid = deal.escrow_uid
+    deal_ref = deal.settlement_ref or deal.escrow_uid
     expiration = _deal_expiration_unix(deal)
     beats = 0
     failures = 0
 
+    seller_principal = _deal_seller_principal(deal)
     while True:
         now = time.time()
         if expiration is not None and now >= expiration:
@@ -110,9 +137,11 @@ async def _service_loop(
             ack = await asyncio.to_thread(
                 send_heartbeat,
                 seller_url=deal.seller_url,
-                escrow_uid=escrow_uid,
-                buyer_address=chain_settings.buyer_address,
-                buyer_private_key=chain_settings.buyer_private_key,
+                deal_ref=deal_ref,
+                principal=deal.buyer_principal,
+                signer=signer,
+                seller_principal=seller_principal,
+                resolve_seller_principals=resolve_seller_principals,
             )
             beats += 1
             failures = 0
@@ -144,25 +173,40 @@ async def _service_loop(
 
     # Post-expiry: reclaim if the seller never collected. A revert here
     # normally means collection already happened — report, don't fail.
+    if deal.settlement_ref:
+        transport = HostedSettlementTransport(
+            seller_url=deal.seller_url,
+            principal=deal.buyer_principal,
+            signer=signer,
+            resolve_seller_principals=resolve_seller_principals,
+        )
+        result = await asyncio.to_thread(
+            transport.reclaim,
+            settlement_ref=deal.settlement_ref,
+        )
+        log.event(
+            "hosted_settlement_reclaimed",
+            settlement_ref=deal.settlement_ref,
+            status=result.get("status"),
+        )
+        return 0
+
     from .escrow_cli import _do_reclaim
 
-    console.print("attempting post-expiry reclaim…")
+    console.print("attempting post-expiry EVM reclaim…")
     try:
         codec, receipt = await _do_reclaim(
-            escrow_uid=escrow_uid,
+            escrow_uid=deal.escrow_uid,
             private_key=chain_settings.buyer_private_key,
             rpc_url=chain_settings.rpc_url,
             chain_name=chain_settings.chain_name,
             addr_config_path=getattr(chain_settings, "alkahest_addr_config", None),
         )
-        log.event("escrow_reclaimed", escrow_uid=escrow_uid, codec=str(codec))
+        log.event("escrow_reclaimed", escrow_uid=deal.escrow_uid, codec=str(codec))
         console.print(f"[green]escrow reclaimed[/green] via {codec}")
     except Exception as exc:
-        log.event("reclaim_skipped", escrow_uid=escrow_uid, reason=str(exc))
-        console.print(
-            f"[yellow]reclaim not possible[/yellow] "
-            f"(usually: the seller already collected): {exc}"
-        )
+        log.event("reclaim_skipped", escrow_uid=deal.escrow_uid, reason=str(exc))
+        console.print(f"[yellow]reclaim not possible[/yellow]: {exc}")
     return 0
 
 
@@ -172,57 +216,75 @@ def register(app: typer.Typer) -> None:
     @app.command("service")
     def service(
         run_id: str = typer.Option(
-            ..., "--from", "--run", "-r",
+            ...,
+            "--from",
+            "--run",
+            "-r",
             help="Buyer run-id of a settled deal (see `market logs runs`).",
         ),
         interval: Optional[float] = typer.Option(
-            None, "--interval", "-i",
+            None,
+            "--interval",
+            "-i",
             help="Heartbeat cadence in seconds. Default: the cadence the "
-                 "seller's settlement plan asks for, else 60.",
+            "seller's settlement plan asks for, else 60.",
         ),
         once: bool = typer.Option(
-            False, "--once",
+            False,
+            "--once",
             help="Send a single heartbeat and exit (0 on ack, 1 on failure).",
         ),
         reclaim: bool = typer.Option(
-            True, "--reclaim/--no-reclaim",
+            True,
+            "--reclaim/--no-reclaim",
             help="After expiry, attempt to reclaim the escrow if the "
-                 "seller never collected.",
+            "seller never collected.",
         ),
         seller: Optional[str] = typer.Option(
-            None, "--seller",
+            None,
+            "--seller",
             help="Override the seller URL recorded in the run-log.",
         ),
     ) -> None:
         """Service a settled deal: heartbeat while healthy, reclaim on expiry."""
-        from .common import chain_by_name
-        from .deal_helpers import load_deal_context, resolve_chain_settings
+        from .common import chain_by_name, resolve_recovery_buyer_identity
+        from .deal_helpers import (
+            load_deal_context,
+            make_deal_publisher_trust_resolver,
+            resolve_chain_settings,
+        )
         from .run_log import RunLog
         from .settle_cli import _accepted_proposal_chain, _first_listing_chain
 
-        deal = load_deal_context(run_id)
+        identity = resolve_recovery_buyer_identity(run_id)
+        signer = identity.signer
+        deal = load_deal_context(run_id, signer=signer)
+        resolve_seller_principals = make_deal_publisher_trust_resolver(
+            run_id, deal, signer
+        )
         if seller:
             deal.seller_url = seller
-        if not deal.escrow_uid:
-            console.print(
-                "[red]run-log has no escrow_uid[/red] — settle the deal first "
-                "(`market settle --from ...`)."
-            )
+        if not deal.escrow_uid and not deal.settlement_ref:
+            console.print("[red]run-log has no settlement reference[/red]")
             raise typer.Exit(2)
 
-        chain_name = _accepted_proposal_chain(deal) or _first_listing_chain(deal)
-        chain_cfg = chain_by_name(chain_name)
-        chain_settings = resolve_chain_settings(
-            buyer_address=None,
-            buyer_private_key=None,
-            ssh_public_key=None,
-            chain=chain_cfg,
-            token_contract=deal.token_contract,
-            token_decimals=(
-                int(deal.token_decimals) if deal.token_decimals is not None else None
-            ),
-            require_ssh=False,
-        )
+        chain_settings = None
+        if deal.escrow_uid:
+            chain_name = _accepted_proposal_chain(deal) or _first_listing_chain(deal)
+            chain_cfg = chain_by_name(chain_name)
+            chain_settings = resolve_chain_settings(
+                buyer_address=None,
+                buyer_private_key=None,
+                ssh_public_key=None,
+                chain=chain_cfg,
+                token_contract=deal.token_contract,
+                token_decimals=(
+                    int(deal.token_decimals)
+                    if deal.token_decimals is not None
+                    else None
+                ),
+                require_ssh=False,
+            )
 
         effective_interval = (
             interval
@@ -230,7 +292,11 @@ def register(app: typer.Typer) -> None:
             else (_plan_heartbeat_interval(deal) or 60.0)
         )
 
-        log = RunLog.open(run_id)
+        log = RunLog.open(
+            run_id,
+            signer=signer,
+            profile_id=identity.profile_id,
+        )
         log.event(
             "service_started",
             escrow_uid=deal.escrow_uid,
@@ -241,6 +307,8 @@ def register(app: typer.Typer) -> None:
             _service_loop(
                 log=log,
                 deal=deal,
+                signer=signer,
+                resolve_seller_principals=resolve_seller_principals,
                 chain_settings=chain_settings,
                 interval_seconds=effective_interval,
                 once=once,

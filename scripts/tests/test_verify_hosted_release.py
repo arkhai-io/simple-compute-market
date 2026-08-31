@@ -1,0 +1,1029 @@
+from __future__ import annotations
+
+import copy
+import hashlib
+import importlib.util
+import io
+import json
+import sys
+import zipfile
+from collections.abc import Callable
+from pathlib import Path
+from typing import Any
+
+import pytest
+from eth_account import Account
+from eth_account.messages import encode_defunct
+
+REPO_ROOT = Path(__file__).resolve().parents[2]
+VERIFIER_PATH = REPO_ROOT / "scripts" / "verify-hosted-release.py"
+_SPEC = importlib.util.spec_from_file_location("verify_hosted_release", VERIFIER_PATH)
+assert _SPEC is not None and _SPEC.loader is not None
+verifier = importlib.util.module_from_spec(_SPEC)
+_SPEC.loader.exec_module(verifier)
+PREPARER_PATH = REPO_ROOT / "scripts" / "prepare-hosted-compose.py"
+_PREPARER_SPEC = importlib.util.spec_from_file_location(
+    "prepare_hosted_compose", PREPARER_PATH
+)
+assert _PREPARER_SPEC is not None and _PREPARER_SPEC.loader is not None
+preparer = importlib.util.module_from_spec(_PREPARER_SPEC)
+sys.modules[_PREPARER_SPEC.name] = preparer
+_PREPARER_SPEC.loader.exec_module(preparer)
+
+_AUTHORITY_KEY = "0x" + "11" * 32
+_REQUIRED_CAPABILITIES = [
+    "scheme-tagged-identities.v1",
+    "account-owner-admission.v1",
+    "account-owner-rotation.v1",
+    "account-owner-retirement.v1",
+    "signer-injected-client.v1",
+    "provider-neutral-seller-onboarding.v1",
+    "conditional-escrow.v2",
+    "stripe-connect-separate-charges-transfers.v2",
+    "portable-attestation.v1",
+    "eas-arbiter.v1",
+    "payer-profile.v1",
+    "funding-authorization.v1",
+    "funding-profile.card.v1",
+    "funding-profile.us_bank_transfer.v1",
+    "funding-profile.us_ach_debit.v1",
+    "normalized-funding-reversal.v1",
+    "operator-recovery-redaction.v1",
+]
+_IDENTITY_CONTRACT = {
+    "request_signature_protocol": "arkhai.hosted-request-signature.v2",
+    "response_signature_protocol": "arkhai.hosted-response-signature.v2",
+    "supported_identity_schemes": ["eip191", "ed25519"],
+    "capabilities": _REQUIRED_CAPABILITIES,
+    "account_owner_admission_protocol": "arkhai.account-owner-admission.v1",
+    "account_owner_rotation_protocol": "arkhai.account-owner-rotation.v1",
+    "client_signer_api": "hosted_settlement_client.Signer",
+    "seller_onboarding_api": "hosted_settlement_client.SellerOnboarding",
+    "payer_profile_protocol": "arkhai.payer-profile.v1",
+    "funding_authorization_protocol": "arkhai.funding-authorization.v1",
+    "funding_profiles": ["card.v1", "us_bank_transfer.v1", "us_ach_debit.v1"],
+}
+
+
+def _sha(data: bytes) -> str:
+    return hashlib.sha256(data).hexdigest()
+
+
+def _client_wheel_bytes(
+    *, entry_points: str | None = None, version: str = "0.2.1"
+) -> bytes:
+    dist_info = f"arkhai_hosted_settlement_client-{version}.dist-info"
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, mode="w") as archive:
+        archive.writestr(
+            "hosted_settlement_client/__init__.py",
+            "__all__ = ["
+            "'CreatePayerProfileRequest','FundingAuthorizationRequest',"
+            "'FundingAuthorizationResult','FundingProfile',"
+            "'FundingProfileReadiness','HostedSettlementAsyncClient',"
+            "'HostedSettlementClient','InstrumentListResult',"
+            "'PayerAction','PayerProfileResult','PayerSetupRequest',"
+            "'PayerSetupResult','Signer']\n",
+        )
+        archive.writestr(
+            f"{dist_info}/METADATA",
+            f"Name: arkhai-hosted-settlement-client\nVersion: {version}\n",
+        )
+        archive.writestr(
+            f"{dist_info}/WHEEL",
+            "Wheel-Version: 1.0\nTag: py3-none-any\n",
+        )
+        if entry_points is not None:
+            archive.writestr(
+                f"{dist_info}/entry_points.txt",
+                entry_points,
+            )
+    return buffer.getvalue()
+
+
+def _stage_release(
+    root: Path,
+    *,
+    mutate_payload: Callable[[dict[str, Any]], None] | None = None,
+    mutate_envelope: Callable[[dict[str, Any]], None] | None = None,
+    mutate_trust: Callable[[dict[str, Any]], None] | None = None,
+    client_entry_points: str | None = None,
+    release_version: str = "0.2.1",
+    schema_version: int = 5,
+    capabilities: list[str] | None = None,
+) -> tuple[Path, Path, Path]:
+    capabilities = list(capabilities or _REQUIRED_CAPABILITIES)
+    identity_contract = copy.deepcopy(_IDENTITY_CONTRACT)
+    identity_contract["capabilities"] = list(capabilities)
+    openapi_filename = f"openapi-v{release_version}.json"
+    conformance_filename = f"conformance-v{release_version}.json"
+    migrations_filename = f"migrations-v{schema_version}.json"
+    artifact_contents = {
+        openapi_filename: json.dumps(
+            {"openapi": "3.1.0", "info": {"version": release_version}}
+        ).encode(),
+        conformance_filename: json.dumps(
+            {
+                "api_version": release_version,
+                "schema_version": schema_version,
+                "funding_profiles": [
+                    "card.v1",
+                    "us_bank_transfer.v1",
+                    "us_ach_debit.v1",
+                ],
+                "identity_contract": identity_contract,
+            }
+        ).encode(),
+        migrations_filename: json.dumps(
+            {
+                "schema_version": schema_version,
+                "migrations": [
+                    {"position": position, "migration_id": f"{position:04d}_migration"}
+                    for position in range(1, schema_version + 1)
+                ],
+            }
+        ).encode(),
+        "sbom.spdx.json": b'{"spdxVersion":"SPDX-2.3"}\n',
+        "provenance.intoto.json": b'{"_type":"https://in-toto.io/Statement/v1"}\n',
+    }
+    for filename, contents in artifact_contents.items():
+        (root / filename).write_bytes(contents)
+
+    client_filename = (
+        f"arkhai_hosted_settlement_client-{release_version}-py3-none-any.whl"
+    )
+    client_bytes = _client_wheel_bytes(
+        entry_points=client_entry_points, version=release_version
+    )
+    client_path = root / client_filename
+    client_path.write_bytes(client_bytes)
+    client_sha = _sha(client_bytes)
+    image_digest = "sha256:" + "ab" * 32
+
+    def artifact(filename: str) -> dict[str, str]:
+        return {
+            "filename": filename,
+            "media_type": "application/json",
+            "sha256": "sha256:" + _sha(artifact_contents[filename]),
+        }
+
+    payload: dict[str, Any] = {
+        "contract_version": "arkhai.hosted-settlement-release.v2",
+        "release_version": release_version,
+        "api_version": release_version,
+        "schema_version": schema_version,
+        "funding_profiles": ["card.v1", "us_bank_transfer.v1", "us_ach_debit.v1"],
+        "capabilities": list(capabilities),
+        "identity_contract": copy.deepcopy(identity_contract),
+        "client_wheel": {
+            "filename": client_filename,
+            "distribution": "arkhai-hosted-settlement-client",
+            "version": release_version,
+            "sha256": "sha256:" + client_sha,
+        },
+        "service_wheel": {
+            "filename": (
+                f"arkhai_hosted_settlement_service-{release_version}-py3-none-any.whl"
+            ),
+            "distribution": "arkhai-hosted-settlement-service",
+            "version": release_version,
+            "sha256": "sha256:" + "cd" * 32,
+        },
+        "service_image": {
+            "reference": "ghcr.io/arkhai-io/stripe-settlement-service",
+            "digest": image_digest,
+        },
+        "openapi": artifact(openapi_filename),
+        "conformance": artifact(conformance_filename),
+        "migrations": {
+            **artifact(migrations_filename),
+            "schema_version": schema_version,
+        },
+        "sbom": artifact("sbom.spdx.json"),
+        "provenance": artifact("provenance.intoto.json"),
+        "build": {
+            "repository": "arkhai-io/stripe-settlement-service",
+            "workflow_ref": (
+                f".github/workflows/release.yml@refs/tags/v{release_version}"
+            ),
+            "source_commit": "12" * 20,
+        },
+    }
+    if mutate_payload is not None:
+        mutate_payload(payload)
+
+    account = Account.from_key(_AUTHORITY_KEY)
+    signature = Account.sign_message(
+        encode_defunct(primitive=verifier._canonical_jcs(payload)),
+        private_key=_AUTHORITY_KEY,
+    ).signature.hex()
+    envelope: dict[str, Any] = {
+        "payload": payload,
+        "signature_scheme": "eip191",
+        "authority_id": "release-authority",
+        "authority_address": account.address.lower(),
+        "signature": signature,
+    }
+    if mutate_envelope is not None:
+        mutate_envelope(envelope)
+    manifest_path = root / "release-manifest.json"
+    manifest_path.write_bytes(
+        json.dumps(envelope, separators=(",", ":"), sort_keys=True).encode()
+    )
+
+    trust: dict[str, Any] = {
+        "contract_version": "arkhai.hosted-settlement-release.v2",
+        "release_version": release_version,
+        "api_version": release_version,
+        "schema_version": schema_version,
+        "required_capabilities": list(capabilities),
+        "identity_contract": copy.deepcopy(identity_contract),
+        "manifest_filename": manifest_path.name,
+        "manifest_sha256": _sha(manifest_path.read_bytes()),
+        "authority_id": "release-authority",
+        "authority_address": account.address.lower(),
+        "repository": "arkhai-io/stripe-settlement-service",
+        "workflow_ref": (
+            f".github/workflows/release.yml@refs/tags/v{release_version}"
+        ),
+        "source_commit": "12" * 20,
+        "client_wheel": {
+            "filename": client_filename,
+            "distribution": "arkhai-hosted-settlement-client",
+            "version": release_version,
+            "sha256": client_sha,
+        },
+        "service_image": {
+            "reference": "ghcr.io/arkhai-io/stripe-settlement-service",
+            "digest": image_digest,
+        },
+    }
+    if mutate_trust is not None:
+        mutate_trust(trust)
+    trust_path = root / "marketplace-trust.json"
+    trust_path.write_text(json.dumps(trust), encoding="utf-8")
+    return trust_path, manifest_path, client_path
+
+
+def _marketplace_args(root: Path) -> dict[str, Any]:
+    release_dir = root / "marketplace-release"
+    release_dir.mkdir(exist_ok=True)
+    artifacts: dict[str, dict[str, str]] = {}
+    for name, filename in {
+        "wheelhouse": "marketplace-wheelhouse.tar.gz",
+        "settlement_config_schema": "settlement-config-schema.json",
+        "provenance": "provenance.intoto.json",
+    }.items():
+        path = release_dir / filename
+        path.write_bytes(name.encode())
+        artifacts[name] = {
+            "filename": filename,
+            "sha256": "sha256:" + _sha(path.read_bytes()),
+        }
+    manifest = release_dir / "marketplace-release-manifest.json"
+    manifest.write_text(
+        json.dumps(
+            {
+                "contract": "arkhai.marketplace-release.v1",
+                "repository": "arkhai-io/simple-compute-market",
+                "source_commit": "34" * 20,
+                "workflow_ref": (
+                    ".github/workflows/release.yml@refs/tags/marketplace-v0.2.0"
+                ),
+                "workflow_run_id": "123456",
+                "service_image": {
+                    "reference": "ghcr.io/arkhai-io/simple-compute-market",
+                    "digest": "sha256:" + "cd" * 32,
+                },
+                "artifacts": artifacts,
+            },
+            separators=(",", ":"),
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+    return {
+        "marketplace_manifest_path": manifest,
+        "marketplace_manifest_sha256": "sha256:" + _sha(manifest.read_bytes()),
+        "marketplace_commit": "34" * 20,
+        "marketplace_workflow_ref": (
+            ".github/workflows/release.yml@refs/tags/marketplace-v0.2.0"
+        ),
+        "marketplace_workflow_run_id": "123456",
+        "marketplace_image_digest": "sha256:" + "cd" * 32,
+    }
+
+
+def _verify(root: Path, **kwargs: Any) -> dict[str, Any]:
+    trust_path, manifest_path, client_path = _stage_release(root, **kwargs)
+    return verifier.verify_release(
+        trust_path=trust_path,
+        manifest_path=manifest_path,
+        wheel_path=client_path,
+    )
+
+
+def test_schema_five_expanded_release_is_accepted(tmp_path: Path) -> None:
+    result = _verify(tmp_path)
+
+    assert result["schema_version"] == 5
+    assert result["funding_profiles"] == [
+        "card.v1",
+        "us_bank_transfer.v1",
+        "us_ach_debit.v1",
+    ]
+    assert result["identity_contract"] == _IDENTITY_CONTRACT
+    assert result["capabilities"] == _REQUIRED_CAPABILITIES
+
+
+def test_production_manifest_with_test_fixture_artifact_is_rejected(
+    tmp_path: Path,
+) -> None:
+    def add_fixture(payload: dict[str, Any]) -> None:
+        payload["fixture_wheel"] = {
+            "filename": "arkhai_hosted_settlement_e2e-0.1.0-py3-none-any.whl",
+            "sha256": "sha256:" + "ef" * 32,
+        }
+
+    with pytest.raises(
+        verifier.ReleaseVerificationError,
+        match="test-only hosted artifact",
+    ):
+        _verify(tmp_path, mutate_payload=add_fixture)
+
+
+def test_client_wheel_with_seller_entry_point_is_rejected(tmp_path: Path) -> None:
+    with pytest.raises(
+        verifier.ReleaseVerificationError,
+        match="must not contain console-script entry-point metadata",
+    ):
+        _verify(
+            tmp_path,
+            client_entry_points=(
+                "[console_scripts]\n"
+                "hosted-settlement-seller = hosted_settlement_client.seller:main\n"
+            ),
+        )
+
+
+@pytest.mark.parametrize("schema_version", [1, 3, 4, 6])
+def test_a_trust_config_that_disagrees_with_the_release_is_rejected(
+    tmp_path: Path, schema_version: int
+) -> None:
+    """The trust config names the schema; it does not get to name it wrongly.
+
+    It used to be checked against a literal here, which refused every schema
+    but the one this verifier was written for -- including the next real one.
+    What refuses now is the signature: the trust config pins the manifest, the
+    manifest states the schema, and a trust config claiming a different one
+    contradicts the release it pins.
+    """
+
+    with pytest.raises(
+        verifier.ReleaseVerificationError, match="schema_version does not match"
+    ):
+        _verify(
+            tmp_path,
+            mutate_trust=lambda trust: trust.__setitem__(
+                "schema_version", schema_version
+            ),
+        )
+
+
+def test_a_trust_config_naming_a_later_release_is_verified_against_it(
+    tmp_path: Path,
+) -> None:
+    """A release this verifier has never seen needs no edit here to be bound.
+
+    Nothing about 0.3.0 or schema 6 appears in the verifier. The trust config
+    names them, the signature covers them, and the artifact filenames follow.
+    """
+
+    trust_path, manifest_path, client_path = _stage_release(
+        tmp_path,
+        release_version="0.3.0",
+        schema_version=6,
+        capabilities=[*_REQUIRED_CAPABILITIES, "payer-direct-instrument-setup.v1"],
+    )
+
+    result = verifier.verify_release(
+        trust_path=trust_path, manifest_path=manifest_path, wheel_path=client_path
+    )
+
+    assert result["release_version"] == "0.3.0"
+    assert result["schema_version"] == 6
+    assert "payer-direct-instrument-setup.v1" in result["capabilities"]
+    assert result["artifacts"]["conformance"] == "conformance-v0.3.0.json"
+    assert result["artifacts"]["migrations"] == "migrations-v6.json"
+
+
+def test_missing_identity_capability_is_rejected(tmp_path: Path) -> None:
+    def remove_retirement(payload: dict[str, Any]) -> None:
+        payload["identity_contract"]["capabilities"].remove(
+            "account-owner-retirement.v1"
+        )
+
+    with pytest.raises(verifier.ReleaseVerificationError, match="identity_contract"):
+        _verify(tmp_path, mutate_payload=remove_retirement)
+
+
+def test_old_signature_envelope_is_rejected(tmp_path: Path) -> None:
+    with pytest.raises(verifier.ReleaseVerificationError, match="signature_scheme"):
+        _verify(
+            tmp_path,
+            mutate_envelope=lambda envelope: envelope.__setitem__(
+                "signature_scheme", "ed25519"
+            ),
+        )
+
+
+def test_unsigned_local_manifest_is_rejected(tmp_path: Path) -> None:
+    with pytest.raises(verifier.ReleaseVerificationError, match="signature"):
+        _verify(
+            tmp_path,
+            mutate_envelope=lambda envelope: envelope.__setitem__(
+                "signature", "00" * 65
+            ),
+            mutate_trust=lambda trust: trust.__setitem__("workflow_ref", "local"),
+        )
+
+
+def test_tampered_provenance_is_rejected(tmp_path: Path) -> None:
+    trust_path, manifest_path, client_path = _stage_release(tmp_path)
+    (tmp_path / "provenance.intoto.json").write_bytes(b"{}\n")
+
+    with pytest.raises(
+        verifier.ReleaseVerificationError,
+        match="staged provenance artifact hash does not match",
+    ):
+        verifier.verify_release(
+            trust_path=trust_path,
+            manifest_path=manifest_path,
+            wheel_path=client_path,
+        )
+
+
+def test_compose_env_uses_exact_verified_release_identities(tmp_path: Path) -> None:
+    trust_path, manifest_path, client_path = _stage_release(tmp_path)
+    output_path = tmp_path / "hosted-compose.env"
+    release = verifier.verify_release(
+        trust_path=trust_path,
+        manifest_path=manifest_path,
+        wheel_path=client_path,
+    )
+
+    marketplace_args = _marketplace_args(tmp_path)
+    image = preparer.prepare_compose_env(
+        trust_path=trust_path,
+        manifest_path=manifest_path,
+        wheel_path=client_path,
+        **marketplace_args,
+        output_path=output_path,
+    )
+    values = dict(
+        line.split("=", 1)
+        for line in output_path.read_text(encoding="utf-8").splitlines()
+        if line and not line.startswith("#")
+    )
+
+    assert image == f"ghcr.io/arkhai-io/stripe-settlement-service@sha256:{'ab' * 32}"
+    assert values == {
+        "HOSTED_MARKETPLACE_VERIFIED_ARTIFACT_PROVENANCE_SHA256": (
+            "sha256:" + _sha(b"provenance")
+        ),
+        "HOSTED_MARKETPLACE_VERIFIED_ARTIFACT_SCHEMA_SHA256": (
+            "sha256:" + _sha(b"settlement_config_schema")
+        ),
+        "HOSTED_MARKETPLACE_VERIFIED_ARTIFACT_WHEELHOUSE_SHA256": (
+            "sha256:" + _sha(b"wheelhouse")
+        ),
+        "HOSTED_MARKETPLACE_VERIFIED_IMAGE": (
+            "ghcr.io/arkhai-io/simple-compute-market@sha256:" + "cd" * 32
+        ),
+        "HOSTED_MARKETPLACE_VERIFIED_MANIFEST_SHA256": marketplace_args[
+            "marketplace_manifest_sha256"
+        ],
+        "HOSTED_MARKETPLACE_VERIFIED_REPOSITORY": "arkhai-io/simple-compute-market",
+        "HOSTED_MARKETPLACE_VERIFIED_SOURCE_COMMIT": "34" * 20,
+        "HOSTED_MARKETPLACE_VERIFIED_WORKFLOW_REF": (
+            ".github/workflows/release.yml@refs/tags/marketplace-v0.2.0"
+        ),
+        "HOSTED_MARKETPLACE_VERIFIED_WORKFLOW_RUN_ID": "123456",
+        "HOSTED_SETTLEMENT_VERIFIED_API_VERSION": release["api_version"],
+        "HOSTED_SETTLEMENT_VERIFIED_AUTHORITY_ADDRESS": release["authority_address"],
+        "HOSTED_SETTLEMENT_VERIFIED_AUTHORITY_ID": release["authority_id"],
+        "HOSTED_SETTLEMENT_VERIFIED_AUTHORITY_SCHEME": release["authority_scheme"],
+        "HOSTED_SETTLEMENT_VERIFIED_CAPABILITIES": ",".join(release["capabilities"]),
+        "HOSTED_SETTLEMENT_VERIFIED_CLIENT_WHEEL_SHA256": (
+            "sha256:" + release["client_wheel_sha256"]
+        ),
+        "HOSTED_SETTLEMENT_VERIFIED_CONFORMANCE_SHA256": release["artifact_sha256"][
+            "conformance"
+        ],
+        "HOSTED_SETTLEMENT_VERIFIED_FUNDING_PROFILES": ",".join(
+            release["funding_profiles"]
+        ),
+        "HOSTED_SETTLEMENT_VERIFIED_IMAGE": image,
+        "HOSTED_SETTLEMENT_VERIFIED_MANIFEST_DIGEST": release["manifest_digest"],
+        "HOSTED_SETTLEMENT_VERIFIED_MANIFEST_SHA256": (
+            "sha256:" + release["manifest_sha256"]
+        ),
+        "HOSTED_SETTLEMENT_VERIFIED_MIGRATIONS_SHA256": release["artifact_sha256"][
+            "migrations"
+        ],
+        "HOSTED_SETTLEMENT_VERIFIED_OPENAPI_SHA256": release["artifact_sha256"][
+            "openapi"
+        ],
+        "HOSTED_SETTLEMENT_VERIFIED_PROVENANCE_SHA256": release["artifact_sha256"][
+            "provenance"
+        ],
+        "HOSTED_SETTLEMENT_VERIFIED_RELEASE_DIR": str(manifest_path.resolve().parent),
+        "HOSTED_SETTLEMENT_VERIFIED_RELEASE_VERSION": release["release_version"],
+        "HOSTED_SETTLEMENT_VERIFIED_REPOSITORY": release["repository"],
+        "HOSTED_SETTLEMENT_VERIFIED_SCHEMA_VERSION": str(release["schema_version"]),
+        "HOSTED_SETTLEMENT_VERIFIED_SERVICE_WHEEL_SHA256": (
+            "sha256:" + release["service_wheel_sha256"]
+        ),
+        "HOSTED_SETTLEMENT_VERIFIED_SOURCE_COMMIT": release["source_commit"],
+        "HOSTED_SETTLEMENT_VERIFIED_WORKFLOW_REF": release["workflow_ref"],
+    }
+
+
+def test_the_attested_environment_is_rendered_byte_for_byte(tmp_path: Path) -> None:
+    """The whole file, not just the values a reader happens to parse out.
+
+    Later work moves the producer's keys between a provenance group and a
+    contract group and adds a second way to fill the second one. None of that
+    may reach an attested run, so the attested file is pinned exactly: header,
+    sort order, and trailing newline included.
+    """
+
+    trust_path, manifest_path, client_path = _stage_release(tmp_path)
+    release = verifier.verify_release(
+        trust_path=trust_path,
+        manifest_path=manifest_path,
+        wheel_path=client_path,
+    )
+    marketplace_args = _marketplace_args(tmp_path)
+    output_path = tmp_path / "hosted-compose.env"
+    preparer.prepare_compose_env(
+        trust_path=trust_path,
+        manifest_path=manifest_path,
+        wheel_path=client_path,
+        **marketplace_args,
+        output_path=output_path,
+    )
+
+    expected = "\n".join(
+        [
+            "# Generated by scripts/prepare-hosted-compose.py; do not edit.",
+            "HOSTED_MARKETPLACE_VERIFIED_ARTIFACT_PROVENANCE_SHA256=sha256:"
+            + _sha(b"provenance"),
+            "HOSTED_MARKETPLACE_VERIFIED_ARTIFACT_SCHEMA_SHA256=sha256:"
+            + _sha(b"settlement_config_schema"),
+            "HOSTED_MARKETPLACE_VERIFIED_ARTIFACT_WHEELHOUSE_SHA256=sha256:"
+            + _sha(b"wheelhouse"),
+            "HOSTED_MARKETPLACE_VERIFIED_IMAGE="
+            "ghcr.io/arkhai-io/simple-compute-market@sha256:" + "cd" * 32,
+            "HOSTED_MARKETPLACE_VERIFIED_MANIFEST_SHA256="
+            + marketplace_args["marketplace_manifest_sha256"],
+            "HOSTED_MARKETPLACE_VERIFIED_REPOSITORY=arkhai-io/simple-compute-market",
+            "HOSTED_MARKETPLACE_VERIFIED_SOURCE_COMMIT=" + "34" * 20,
+            "HOSTED_MARKETPLACE_VERIFIED_WORKFLOW_REF="
+            ".github/workflows/release.yml@refs/tags/marketplace-v0.2.0",
+            "HOSTED_MARKETPLACE_VERIFIED_WORKFLOW_RUN_ID=123456",
+            "HOSTED_SETTLEMENT_VERIFIED_API_VERSION=0.2.1",
+            "HOSTED_SETTLEMENT_VERIFIED_AUTHORITY_ADDRESS="
+            + release["authority_address"],
+            "HOSTED_SETTLEMENT_VERIFIED_AUTHORITY_ID=" + release["authority_id"],
+            "HOSTED_SETTLEMENT_VERIFIED_AUTHORITY_SCHEME=eip191",
+            "HOSTED_SETTLEMENT_VERIFIED_CAPABILITIES="
+            + ",".join(_REQUIRED_CAPABILITIES),
+            "HOSTED_SETTLEMENT_VERIFIED_CLIENT_WHEEL_SHA256=sha256:"
+            + release["client_wheel_sha256"],
+            "HOSTED_SETTLEMENT_VERIFIED_CONFORMANCE_SHA256="
+            + release["artifact_sha256"]["conformance"],
+            "HOSTED_SETTLEMENT_VERIFIED_FUNDING_PROFILES="
+            "card.v1,us_bank_transfer.v1,us_ach_debit.v1",
+            "HOSTED_SETTLEMENT_VERIFIED_IMAGE="
+            "ghcr.io/arkhai-io/stripe-settlement-service@sha256:" + "ab" * 32,
+            "HOSTED_SETTLEMENT_VERIFIED_MANIFEST_DIGEST=" + release["manifest_digest"],
+            "HOSTED_SETTLEMENT_VERIFIED_MANIFEST_SHA256=sha256:"
+            + release["manifest_sha256"],
+            "HOSTED_SETTLEMENT_VERIFIED_MIGRATIONS_SHA256="
+            + release["artifact_sha256"]["migrations"],
+            "HOSTED_SETTLEMENT_VERIFIED_OPENAPI_SHA256="
+            + release["artifact_sha256"]["openapi"],
+            "HOSTED_SETTLEMENT_VERIFIED_PROVENANCE_SHA256="
+            + release["artifact_sha256"]["provenance"],
+            "HOSTED_SETTLEMENT_VERIFIED_RELEASE_DIR="
+            + str(manifest_path.resolve().parent),
+            "HOSTED_SETTLEMENT_VERIFIED_RELEASE_VERSION=0.2.1",
+            "HOSTED_SETTLEMENT_VERIFIED_REPOSITORY="
+            "arkhai-io/stripe-settlement-service",
+            "HOSTED_SETTLEMENT_VERIFIED_SCHEMA_VERSION=5",
+            "HOSTED_SETTLEMENT_VERIFIED_SERVICE_WHEEL_SHA256=sha256:"
+            + release["service_wheel_sha256"],
+            "HOSTED_SETTLEMENT_VERIFIED_SOURCE_COMMIT=" + release["source_commit"],
+            "HOSTED_SETTLEMENT_VERIFIED_WORKFLOW_REF=" + release["workflow_ref"],
+        ]
+    ) + "\n"
+
+    assert output_path.read_text(encoding="utf-8") == expected
+
+
+def _stage_local_producer(
+    root: Path, *, version: str = "0.3.0", schema: int = 6
+) -> Path:
+    """What `make artifacts` leaves behind in the producer's checkout."""
+
+    directory = root / "local-artifacts"
+    directory.mkdir(exist_ok=True)
+    (directory / f"conformance-v{version}.json").write_text(
+        json.dumps(
+            {
+                "api_version": version,
+                "schema_version": schema,
+                "funding_profiles": ["card.v1", "us_bank_transfer.v1"],
+                "identity_contract": {
+                    "capabilities": [
+                        "payer-profile.v1",
+                        "payer-direct-instrument-setup.v1",
+                    ]
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    (directory / f"openapi-v{version}.json").write_text("{}", encoding="utf-8")
+    (directory / f"migrations-v{schema}.json").write_text("{}", encoding="utf-8")
+    return directory
+
+
+def _local_producer_env(root: Path, **overrides: Any) -> dict[str, str]:
+    arguments: dict[str, Any] = {
+        "trust_path": None,
+        "manifest_path": None,
+        "wheel_path": None,
+        "marketplace_manifest_path": None,
+        "marketplace_manifest_sha256": "",
+        "marketplace_commit": "",
+        "marketplace_workflow_ref": "",
+        "marketplace_workflow_run_id": "",
+        "marketplace_image_digest": "",
+        "output_path": root / "hosted-compose.env",
+        "release_mode": "local",
+        "local_marketplace_image": "arkhai:storefront",
+        "local_hosted_image": "localhost/arkhai-hosted-settlement-service:0.3.0",
+    }
+    arguments.update(overrides)
+    # Staged only when the caller did not stage its own: a test that removes an
+    # artifact would otherwise have it written back underneath it.
+    if "hosted_artifacts_path" not in arguments:
+        arguments["hosted_artifacts_path"] = _stage_local_producer(root)
+    preparer.prepare_compose_env(**arguments)
+    return dict(
+        line.split("=", 1)
+        for line in arguments["output_path"].read_text(encoding="utf-8").splitlines()
+        if line and not line.startswith("#")
+    )
+
+
+def test_a_locally_built_producer_renders_the_same_key_set(tmp_path: Path) -> None:
+    """No release exists for this version, and the environment still renders."""
+
+    values = _local_producer_env(tmp_path)
+
+    # The contract comes from the build's own artifacts.
+    assert values["HOSTED_SETTLEMENT_VERIFIED_RELEASE_VERSION"] == "0.3.0"
+    assert values["HOSTED_SETTLEMENT_VERIFIED_API_VERSION"] == "0.3.0"
+    assert values["HOSTED_SETTLEMENT_VERIFIED_SCHEMA_VERSION"] == "6"
+    assert (
+        "payer-direct-instrument-setup.v1"
+        in values["HOSTED_SETTLEMENT_VERIFIED_CAPABILITIES"]
+    )
+    # The provenance has no local source and says so by being empty, exactly as
+    # the consumer half already does.
+    for key in preparer._LOCAL_HOSTED_COORDINATES:
+        assert values[key] == "", key
+    # Compose needs an image and hands the authority a digest to report back,
+    # so those are named rather than left empty -- but the image is a name, not
+    # a registry digest, and the digest is a hash of what the build generated.
+    assert (
+        values["HOSTED_SETTLEMENT_VERIFIED_IMAGE"]
+        == "localhost/arkhai-hosted-settlement-service:0.3.0"
+    )
+    assert values["HOSTED_SETTLEMENT_VERIFIED_MANIFEST_DIGEST"].startswith("sha256:")
+    assert values["HOSTED_SETTLEMENT_VERIFIED_MANIFEST_SHA256"] == ""
+
+
+def test_a_locally_built_producer_is_named_by_reference_not_by_digest(
+    tmp_path: Path,
+) -> None:
+    with pytest.raises(preparer.ComposePreparationError, match="not a registry digest"):
+        _local_producer_env(
+            tmp_path, local_hosted_image="localhost/authority@sha256:" + "ab" * 32
+        )
+
+
+@pytest.mark.parametrize(
+    "filename", ["conformance-v0.3.0.json", "openapi-v0.3.0.json", "migrations-v6.json"]
+)
+def test_a_local_producer_without_its_artifacts_fails_closed(
+    tmp_path: Path, filename: str
+) -> None:
+    """It names what is missing rather than borrowing another release's."""
+
+    directory = _stage_local_producer(tmp_path)
+    (directory / filename).unlink()
+
+    with pytest.raises(preparer.ComposePreparationError) as caught:
+        _local_producer_env(tmp_path, hosted_artifacts_path=directory)
+
+    assert "0.2.1" not in str(caught.value)
+
+
+def test_a_local_producer_directory_holding_two_releases_is_not_guessed(
+    tmp_path: Path,
+) -> None:
+    """A build directory accumulates versions, so the run names the one it wants."""
+
+    directory = _stage_local_producer(tmp_path)
+    _stage_local_producer(tmp_path, version="0.4.0", schema=7)
+
+    with pytest.raises(preparer.ComposePreparationError, match="name the version"):
+        _local_producer_env(tmp_path, hosted_artifacts_path=directory)
+
+    values = _local_producer_env(
+        tmp_path, hosted_artifacts_path=directory, hosted_release_version="0.4.0"
+    )
+
+    assert values["HOSTED_SETTLEMENT_VERIFIED_RELEASE_VERSION"] == "0.4.0"
+    assert values["HOSTED_SETTLEMENT_VERIFIED_SCHEMA_VERSION"] == "7"
+
+
+def test_a_local_producer_composes_with_an_attested_consumer(tmp_path: Path) -> None:
+    """One half released and the other built here is a supported combination."""
+
+    marketplace_args = _marketplace_args(tmp_path)
+    values = _local_producer_env(
+        tmp_path,
+        release_mode="attested",
+        local_marketplace_image="",
+        **{
+            key.replace("marketplace_manifest_path", "marketplace_manifest_path"): value
+            for key, value in marketplace_args.items()
+        },
+    )
+
+    assert values["HOSTED_MARKETPLACE_VERIFIED_SOURCE_COMMIT"] == "34" * 20
+    assert values["HOSTED_SETTLEMENT_VERIFIED_SOURCE_COMMIT"] == ""
+
+
+def test_compose_env_rejects_arbitrary_image_override(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    trust_path, manifest_path, client_path = _stage_release(tmp_path)
+    monkeypatch.setenv(
+        "HOSTED_SETTLEMENT_VERIFIED_IMAGE", "attacker.invalid/image:latest"
+    )
+
+    with pytest.raises(
+        preparer.ComposePreparationError,
+        match="HOSTED_SETTLEMENT_VERIFIED_IMAGE does not match",
+    ):
+        preparer.prepare_compose_env(
+            trust_path=trust_path,
+            manifest_path=manifest_path,
+            wheel_path=client_path,
+            **_marketplace_args(tmp_path),
+            output_path=tmp_path / "hosted-compose.env",
+        )
+
+
+def test_compose_env_rejects_tampered_digest_override(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    trust_path, manifest_path, client_path = _stage_release(tmp_path)
+    monkeypatch.setenv("HOSTED_SETTLEMENT_IMAGE_DIGEST", f"sha256:{'00' * 32}")
+
+    with pytest.raises(
+        preparer.ComposePreparationError,
+        match="HOSTED_SETTLEMENT_IMAGE_DIGEST does not match",
+    ):
+        preparer.prepare_compose_env(
+            trust_path=trust_path,
+            manifest_path=manifest_path,
+            wheel_path=client_path,
+            **_marketplace_args(tmp_path),
+            output_path=tmp_path / "hosted-compose.env",
+        )
+
+
+def test_compose_env_rejects_arbitrary_release_directory_override(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    trust_path, manifest_path, client_path = _stage_release(tmp_path)
+    monkeypatch.setenv(
+        "HOSTED_SETTLEMENT_VERIFIED_RELEASE_DIR",
+        str(tmp_path / "unverified-release"),
+    )
+
+    with pytest.raises(
+        preparer.ComposePreparationError,
+        match="HOSTED_SETTLEMENT_VERIFIED_RELEASE_DIR does not match",
+    ):
+        preparer.prepare_compose_env(
+            trust_path=trust_path,
+            manifest_path=manifest_path,
+            wheel_path=client_path,
+            **_marketplace_args(tmp_path),
+            output_path=tmp_path / "hosted-compose.env",
+        )
+
+
+def test_floating_production_image_tag_is_rejected(tmp_path: Path) -> None:
+    with pytest.raises(
+        verifier.ReleaseVerificationError, match="must not contain a floating tag"
+    ):
+        _verify(
+            tmp_path,
+            mutate_payload=lambda payload: payload["service_image"].__setitem__(
+                "reference", "ghcr.io/arkhai-io/stripe-settlement-service:latest"
+            ),
+            mutate_trust=lambda trust: trust["service_image"].__setitem__(
+                "reference", "ghcr.io/arkhai-io/stripe-settlement-service:latest"
+            ),
+        )
+
+
+def test_generated_environment_contains_only_allowlisted_nonsecret_keys(
+    tmp_path: Path,
+) -> None:
+    trust_path, manifest_path, client_path = _stage_release(tmp_path)
+    output = tmp_path / "hosted-compose.env"
+    preparer.prepare_compose_env(
+        trust_path=trust_path,
+        manifest_path=manifest_path,
+        wheel_path=client_path,
+        **_marketplace_args(tmp_path),
+        output_path=output,
+    )
+    keys = {
+        line.split("=", 1)[0]
+        for line in output.read_text(encoding="utf-8").splitlines()
+        if line and not line.startswith("#")
+    }
+    assert keys == {
+        "HOSTED_MARKETPLACE_VERIFIED_ARTIFACT_PROVENANCE_SHA256",
+        "HOSTED_MARKETPLACE_VERIFIED_ARTIFACT_SCHEMA_SHA256",
+        "HOSTED_MARKETPLACE_VERIFIED_ARTIFACT_WHEELHOUSE_SHA256",
+        "HOSTED_MARKETPLACE_VERIFIED_IMAGE",
+        "HOSTED_MARKETPLACE_VERIFIED_MANIFEST_SHA256",
+        "HOSTED_MARKETPLACE_VERIFIED_REPOSITORY",
+        "HOSTED_MARKETPLACE_VERIFIED_SOURCE_COMMIT",
+        "HOSTED_MARKETPLACE_VERIFIED_WORKFLOW_REF",
+        "HOSTED_MARKETPLACE_VERIFIED_WORKFLOW_RUN_ID",
+        "HOSTED_SETTLEMENT_VERIFIED_API_VERSION",
+        "HOSTED_SETTLEMENT_VERIFIED_AUTHORITY_ADDRESS",
+        "HOSTED_SETTLEMENT_VERIFIED_AUTHORITY_ID",
+        "HOSTED_SETTLEMENT_VERIFIED_AUTHORITY_SCHEME",
+        "HOSTED_SETTLEMENT_VERIFIED_CAPABILITIES",
+        "HOSTED_SETTLEMENT_VERIFIED_CLIENT_WHEEL_SHA256",
+        "HOSTED_SETTLEMENT_VERIFIED_CONFORMANCE_SHA256",
+        "HOSTED_SETTLEMENT_VERIFIED_FUNDING_PROFILES",
+        "HOSTED_SETTLEMENT_VERIFIED_IMAGE",
+        "HOSTED_SETTLEMENT_VERIFIED_MANIFEST_DIGEST",
+        "HOSTED_SETTLEMENT_VERIFIED_MANIFEST_SHA256",
+        "HOSTED_SETTLEMENT_VERIFIED_MIGRATIONS_SHA256",
+        "HOSTED_SETTLEMENT_VERIFIED_OPENAPI_SHA256",
+        "HOSTED_SETTLEMENT_VERIFIED_PROVENANCE_SHA256",
+        "HOSTED_SETTLEMENT_VERIFIED_RELEASE_DIR",
+        "HOSTED_SETTLEMENT_VERIFIED_RELEASE_VERSION",
+        "HOSTED_SETTLEMENT_VERIFIED_REPOSITORY",
+        "HOSTED_SETTLEMENT_VERIFIED_SCHEMA_VERSION",
+        "HOSTED_SETTLEMENT_VERIFIED_SERVICE_WHEEL_SHA256",
+        "HOSTED_SETTLEMENT_VERIFIED_SOURCE_COMMIT",
+        "HOSTED_SETTLEMENT_VERIFIED_WORKFLOW_REF",
+    }
+
+
+def test_compose_preparer_rejects_release_mode_selector(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "prepare-hosted-compose.py",
+            "--trust",
+            "trust.json",
+            "--manifest",
+            "release-manifest.json",
+            "--wheel",
+            "client.whl",
+            "--output",
+            "compose.env",
+            "--marketplace-manifest",
+            "marketplace-release-manifest.json",
+            "--marketplace-manifest-sha256",
+            "a" * 64,
+            "--marketplace-source-commit",
+            "b" * 40,
+            "--marketplace-workflow-ref",
+            "refs/tags/v0.2.0",
+            "--marketplace-workflow-run-id",
+            "123456789",
+            "--marketplace-image-digest",
+            "sha256:" + ("c" * 64),
+            "--mode",
+            "hermetic",
+        ],
+    )
+
+    with pytest.raises(SystemExit) as exc_info:
+        preparer.main()
+
+    assert exc_info.value.code == 2
+    assert "unrecognized arguments: --mode hermetic" in capsys.readouterr().err
+
+
+def test_local_compose_env_renders_without_an_attested_consumer(tmp_path: Path) -> None:
+    """A development stack starts; it just has no released consumer to name."""
+
+    trust_path, manifest_path, client_path = _stage_release(tmp_path)
+    output_path = tmp_path / "hosted-compose.env"
+
+    preparer.prepare_compose_env(
+        trust_path=trust_path,
+        manifest_path=manifest_path,
+        wheel_path=client_path,
+        marketplace_manifest_path=None,
+        marketplace_manifest_sha256="",
+        marketplace_commit="",
+        marketplace_workflow_ref="",
+        marketplace_workflow_run_id="",
+        marketplace_image_digest="",
+        output_path=output_path,
+        release_mode="local",
+        local_marketplace_image="arkhai:storefront",
+    )
+    values = dict(
+        line.split("=", 1)
+        for line in output_path.read_text(encoding="utf-8").splitlines()
+        if line and not line.startswith("#")
+    )
+
+    # The producer half is bound exactly as an attested run binds it.
+    assert values["HOSTED_SETTLEMENT_VERIFIED_REPOSITORY"]
+    assert values["HOSTED_SETTLEMENT_VERIFIED_MANIFEST_SHA256"].startswith("sha256:")
+    # The consumer half is structurally present and empty: the environment's
+    # reader requires the exact key set, and a development run reads empty as
+    # "no released coordinate".
+    # Compose refuses a service with no image, so the local environment names
+    # the consumer it actually runs.
+    assert values["HOSTED_MARKETPLACE_VERIFIED_IMAGE"] == "arkhai:storefront"
+    assert values["HOSTED_MARKETPLACE_VERIFIED_MANIFEST_SHA256"] == ""
+    assert values["HOSTED_MARKETPLACE_VERIFIED_SOURCE_COMMIT"] == ""
+    assert (
+        values["HOSTED_MARKETPLACE_VERIFIED_REPOSITORY"]
+        == "arkhai-io/simple-compute-market"
+    )
+
+
+def test_a_local_env_must_name_the_image_it_runs(tmp_path: Path) -> None:
+    trust_path, manifest_path, client_path = _stage_release(tmp_path)
+
+    with pytest.raises(preparer.ComposePreparationError, match="marketplace image"):
+        preparer.prepare_compose_env(
+            trust_path=trust_path,
+            manifest_path=manifest_path,
+            wheel_path=client_path,
+            marketplace_manifest_path=None,
+            marketplace_manifest_sha256="",
+            marketplace_commit="",
+            marketplace_workflow_ref="",
+            marketplace_workflow_run_id="",
+            marketplace_image_digest="",
+            output_path=tmp_path / "hosted-compose.env",
+            release_mode="local",
+        )
+
+
+def test_attested_compose_env_still_requires_its_consumer_release(tmp_path: Path) -> None:
+    trust_path, manifest_path, client_path = _stage_release(tmp_path)
+
+    with pytest.raises(preparer.ComposePreparationError):
+        preparer.prepare_compose_env(
+            trust_path=trust_path,
+            manifest_path=manifest_path,
+            wheel_path=client_path,
+            marketplace_manifest_path=None,
+            marketplace_manifest_sha256="",
+            marketplace_commit="",
+            marketplace_workflow_ref="",
+            marketplace_workflow_run_id="",
+            marketplace_image_digest="",
+            output_path=tmp_path / "hosted-compose.env",
+        )

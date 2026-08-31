@@ -25,7 +25,6 @@ class StorefrontPublicationCommandConfig:
 
     db_path: str
     base_url: str
-    private_key: str | None
     close_stale: bool = True
     skip_open: bool = True
 
@@ -48,7 +47,6 @@ def build_storefront_publication_command(
     return selection.command(
         db_path=config.db_path,
         base_url=config.base_url,
-        private_key=config.private_key,
         build_payload=callbacks.build_payload,
         publish_offer=callbacks.publish_offer,
     )

@@ -11,4 +11,5 @@ integrationTests:
   repository: ""
   name: arkhai
   tag: e2e-tests
+  digest: ""
   pullPolicy: IfNotPresent

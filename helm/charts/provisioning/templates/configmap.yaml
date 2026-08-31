@@ -1,3 +1,7 @@
+{{- $activeIdentity := .Values.global.provisioningIdentity -}}
+{{- if or (ne .Values.identity.principal.scheme $activeIdentity.scheme) (ne .Values.identity.principal.identifier $activeIdentity.identifier) -}}
+{{- fail "provisioning identity principal must match global.provisioningIdentity" -}}
+{{- end -}}
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -7,6 +11,9 @@ metadata:
 data:
   config-production.yml: |
     {{- $config := deepCopy .Values.config -}}
+    {{- $_ := set $config "identity" (dict "principal" .Values.identity.principal) -}}
+    {{- $_ := set $config "storefront_identity" (dict "principals" .Values.storefrontIdentity.principals) -}}
+    {{- $_ := set $config "admin_identity" (dict "principals" .Values.adminIdentity.principals) -}}
     {{- if not $config.storefront_url -}}
       {{- $_ := set $config "storefront_url" (default (printf "http://%s-storefront-%s:%d" .Release.Name .Values.storefront.agentName (int .Values.storefront.port)) .Values.storefront.url) -}}
     {{- end -}}

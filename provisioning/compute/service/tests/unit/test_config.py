@@ -1,76 +1,134 @@
-"""Unit tests for the storefront-TOML admin-key fallback in config.py.
-
-The seller compose mounts the storefront's TOML at
-/etc/arkhai/storefront.toml. When `storefront_admin_key` isn't otherwise
-set, we read `admin_api_key` from that file so the operator writes the
-secret once.
-"""
 from __future__ import annotations
 
-import os
-from pathlib import Path
+import base64
+from types import SimpleNamespace
 
 import pytest
 from dynaconf import Dynaconf
+from market_identity import Ed25519Signer, Eip191Signer
+
+from compute_provisioning_service.identity import (
+    IDENTITY_CREDENTIAL_ENV,
+    resolve_identity_context,
+)
 
 
-@pytest.fixture
-def storefront_toml(tmp_path: Path):
-    """Return a function that writes a TOML at a temp path and registers
-    its location via STOREFRONT_TOML_PATH for the resolver to pick up.
-    """
-    saved = os.environ.get("STOREFRONT_TOML_PATH")
-    target = tmp_path / "storefront.toml"
-
-    def _write(contents: str) -> Path:
-        target.write_text(contents)
-        os.environ["STOREFRONT_TOML_PATH"] = str(target)
-        return target
-
-    yield _write
-
-    if saved is None:
-        os.environ.pop("STOREFRONT_TOML_PATH", None)
-    else:
-        os.environ["STOREFRONT_TOML_PATH"] = saved
+def _credential(scheme: str, seed: bytes) -> str:
+    if scheme == "ed25519":
+        return base64.urlsafe_b64encode(seed).rstrip(b"=").decode()
+    return seed.hex()
 
 
-class TestResolveStorefrontAdminKeyFromMount:
-    def test_returns_key_when_toml_has_admin_api_key(self, storefront_toml):
-        storefront_toml('admin_api_key = "hunter2"\n')
-        from compute_provisioning_service.config import _resolve_storefront_admin_key_from_mount
-        assert _resolve_storefront_admin_key_from_mount() == "hunter2"
+def _settings(service, storefront, **overrides):
+    admin = (
+        Ed25519Signer(b"\x13" * 32)
+        if service.identity.scheme.value == "ed25519"
+        else Eip191Signer(b"\x23" * 32)
+    )
+    values = {
+        "identity.scheme": service.identity.scheme.value,
+        "identity.identifier": service.identity.identifier,
+        "storefront_identity.scheme": storefront.identity.scheme.value,
+        "storefront_identity.identifier": storefront.identity.identifier,
+        "admin_identity.scheme": admin.identity.scheme.value,
+        "admin_identity.identifier": admin.identity.identifier,
+        "storefront_site_id": "default",
+    }
+    values.update(overrides)
+    return SimpleNamespace(_source=values)
 
-    def test_returns_empty_when_admin_key_field_missing(self, storefront_toml):
-        storefront_toml('other_field = "value"\n')
-        from compute_provisioning_service.config import _resolve_storefront_admin_key_from_mount
-        assert _resolve_storefront_admin_key_from_mount() == ""
 
-    def test_returns_empty_when_admin_key_empty_string(self, storefront_toml):
-        storefront_toml('admin_api_key = ""\n')
-        from compute_provisioning_service.config import _resolve_storefront_admin_key_from_mount
-        assert _resolve_storefront_admin_key_from_mount() == ""
+@pytest.mark.parametrize(
+    ("scheme", "service", "storefront", "secret"),
+    (
+        (
+            "ed25519",
+            Ed25519Signer(b"\x11" * 32),
+            Ed25519Signer(b"\x12" * 32),
+            b"\x11" * 32,
+        ),
+        (
+            "eip191",
+            Eip191Signer(b"\x21" * 32),
+            Eip191Signer(b"\x22" * 32),
+            b"\x21" * 32,
+        ),
+    ),
+)
+def test_identity_composition_supports_both_schemes_without_chain_settings(
+    scheme,
+    service,
+    storefront,
+    secret,
+):
+    context = resolve_identity_context(
+        _settings(service, storefront),
+        environ={IDENTITY_CREDENTIAL_ENV: _credential(scheme, secret)},
+    )
 
-    def test_malformed_toml_falls_back_silently(self, storefront_toml):
-        storefront_toml("this = is = not valid TOML\n")
-        from compute_provisioning_service.config import _resolve_storefront_admin_key_from_mount
-        assert _resolve_storefront_admin_key_from_mount() == ""
+    assert context.signer.identity == service.identity
+    assert context.storefront_principal == storefront.identity
+    assert context.admin_principal not in {
+        context.signer.identity,
+        context.storefront_principal,
+    }
+    assert context.storefront_site_id == "default"
 
-    def test_no_file_returns_empty(self, monkeypatch, tmp_path):
-        # Point the override at a non-existent path; default
-        # /etc/arkhai/storefront.toml almost certainly doesn't exist in CI either.
-        monkeypatch.setenv("STOREFRONT_TOML_PATH", str(tmp_path / "missing.toml"))
-        from compute_provisioning_service.config import _resolve_storefront_admin_key_from_mount
-        assert _resolve_storefront_admin_key_from_mount() == ""
 
-    def test_override_path_takes_precedence_over_default(self, storefront_toml):
-        # The fixture sets STOREFRONT_TOML_PATH to a tmp file with our
-        # value; if the resolver hit /etc/arkhai/storefront.toml instead
-        # we wouldn't see "from-override".
-        storefront_toml('admin_api_key = "from-override"\n')
-        from compute_provisioning_service.config import _resolve_storefront_admin_key_from_mount
-        assert _resolve_storefront_admin_key_from_mount() == "from-override"
-
+@pytest.mark.parametrize(
+    ("settings", "environment", "message"),
+    (
+        (
+            SimpleNamespace(_source={}),
+            {},
+            "identity.scheme and identity.identifier are required",
+        ),
+        (
+            _settings(
+                Ed25519Signer(b"\x11" * 32),
+                Ed25519Signer(b"\x12" * 32),
+            ),
+            {},
+            "ARKHAI_IDENTITY_CREDENTIAL is required",
+        ),
+        (
+            _settings(
+                Ed25519Signer(b"\x11" * 32),
+                Ed25519Signer(b"\x12" * 32),
+                storefront_site_id="",
+            ),
+            {IDENTITY_CREDENTIAL_ENV: _credential("ed25519", b"\x11" * 32)},
+            "storefront_site_id is required",
+        ),
+        (
+            _settings(
+                Ed25519Signer(b"\x11" * 32),
+                Ed25519Signer(b"\x12" * 32),
+            ),
+            {IDENTITY_CREDENTIAL_ENV: _credential("ed25519", b"\x13" * 32)},
+            "does not match",
+        ),
+        (
+            _settings(
+                Ed25519Signer(b"\x11" * 32),
+                Ed25519Signer(b"\x12" * 32),
+                **{
+                    "admin_identity.scheme": "",
+                    "admin_identity.identifier": "",
+                },
+            ),
+            {IDENTITY_CREDENTIAL_ENV: _credential("ed25519", b"\x11" * 32)},
+            "admin_identity.scheme and admin_identity.identifier are required",
+        ),
+    ),
+)
+def test_missing_or_mismatched_identity_configuration_fails_startup(
+    settings,
+    environment,
+    message,
+):
+    with pytest.raises(RuntimeError, match=message):
+        resolve_identity_context(settings, environ=environment)
 
 class TestBareMetalReclaimPolicy:
     def test_default_is_remove_lease_key(self):

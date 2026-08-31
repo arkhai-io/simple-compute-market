@@ -14,6 +14,7 @@ from arkhai_vms import (
     VmResult,
     VmTerms,
     make_vm_provision_terms,
+    normalize_vm_provision_terms,
 )
 
 
@@ -78,4 +79,22 @@ def test_vm_message_accepts_provision_terms_carrier() -> None:
 
     assert message.duration_seconds == 3600
     assert message.ssh_public_key == "ssh-ed25519 AAAA test"
+
+def test_vm_provision_normalization_accepts_wire_and_durable_shapes() -> None:
+    payload = {
+        "duration_seconds": 3600,
+        "ssh_public_key": "ssh-ed25519 AAAA test",
+    }
+
+    assert normalize_vm_provision_terms(payload).payload == payload
+    assert normalize_vm_provision_terms(
+        {"kind": "compute.v1", "version": 1, "payload": payload}
+    ).payload == payload
+    assert normalize_vm_provision_terms(
+        {
+            "kind": "compute.v1",
+            **payload,
+            "settlement_selection": None,
+        }
+    ).payload == payload
 

@@ -17,26 +17,22 @@ default install is bisection-only (``[rl]`` extra opts into torch).
 No pufferlib is required at any point; the inline policy runs on
 plain torch.
 """
-
 from __future__ import annotations
 
 import pytest
 
 torch = pytest.importorskip("torch")
 
-import arkhai_vms.negotiation.rl.torch_arkhai_strategy as strat_mod
-from arkhai_vms.negotiation.rl import arkhai_common
-from market_policy import (
-    NegotiationPolicyRequest,
-    PolicyRole,
-    negotiation_catalogue_builder,
-    scalar_escrow_policies,
-)
+import domains.vms.negotiation.rl.torch_arkhai_strategy as strat_mod
+from domains.vms.negotiation.rl import arkhai_common
 from market_policy.negotiation_middleware import (
     NegotiationContext,
+    NegotiationDecision,
     NegotiationRound,
+    load_negotiation_chain,
     run_negotiation_chain,
 )
+
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -56,19 +52,12 @@ def _peer_proposal(amount: int) -> dict:
     return {**_PEER_SKELETON, "fields": {**_PEER_SKELETON["fields"], "amount": amount}}
 
 
-def _round0(
-    direction: str, our_amount: float, their_amount: int
-) -> tuple[list, NegotiationContext]:
+def _round0(direction: str, our_amount: float, their_amount: int) -> tuple[list, NegotiationContext]:
     """Build (history, context) for a round-0 decision against a peer counter."""
     proposal = _peer_proposal(their_amount)
-    history = [
-        NegotiationRound(
-            round_number=0,
-            sender="them",
-            action="initial",
-            proposal=proposal,
-        )
-    ]
+    history = [NegotiationRound(
+        round_number=0, sender="them", action="initial", proposal=proposal,
+    )]
     context = NegotiationContext(
         direction=direction,
         our_reference_amount=float(our_amount),
@@ -125,37 +114,17 @@ def stub_strategy(monkeypatch):
 # ---------------------------------------------------------------------------
 
 
-def _rl_chain(names):
-    """Resolve names against a catalogue composed for a storefront wanting RL.
-
-    The VM domain offers its torch strategy only when the requested set names an
-    RL alias, so the request is what makes the strategy resolvable here.
-    """
-    from arkhai_vms.negotiation.policy_sources import vm_policy_sources
-
-    request = NegotiationPolicyRequest(
-        role=PolicyRole.STOREFRONT, requested_policies=frozenset(names)
-    )
-    return (
-        negotiation_catalogue_builder()
-        .add_loader(scalar_escrow_policies())
-        .add_loaders(vm_policy_sources(request))
-        .build()
-        .resolve(names)
-    )
-
-
 class TestMiddlewareRegistration:
     def test_rl_middleware_registers_under_name_rl(self):
         """``torch_arkhai_strategy`` self-registers at import time so
-        ``_rl_chain(["rl"])`` resolves it without ceremony."""
-        chain = _rl_chain(["rl"])
+        ``load_negotiation_chain(["rl"])`` resolves it without ceremony."""
+        chain = load_negotiation_chain(["rl"])
         assert len(chain) == 1
         assert getattr(chain[0], "__name__", "") == "rl_middleware"
 
     @pytest.mark.parametrize("name", ["erc20_rl", "native_token_rl", "erc1155_rl"])
     def test_rl_middleware_registers_escrow_family_aliases(self, name):
-        chain = _rl_chain([name])
+        chain = load_negotiation_chain([name])
         assert len(chain) == 1
         assert chain[0] is strat_mod.rl_middleware
 
@@ -213,15 +182,13 @@ class TestArkhaiInferencePolicyShape:
         torch.manual_seed(0)
         obs = torch.randn(2, self.OBS_DIM)
         with torch.no_grad():
-            la, _ = a(obs)
-            lb, _ = b(obs)
+            la, _ = a(obs); lb, _ = b(obs)
         assert not torch.equal(la[0], lb[0]), "fresh-init models should differ"
 
         # Round-trip the state_dict
         b.load_state_dict(a.state_dict(), strict=True)
         with torch.no_grad():
-            la, _ = a(obs)
-            lb, _ = b(obs)
+            la, _ = a(obs); lb, _ = b(obs)
         assert torch.equal(la[0], lb[0])
         assert torch.equal(la[1], lb[1])
 
@@ -233,12 +200,9 @@ class TestArkhaiInferencePolicyShape:
         model = arkhai_common.create_model(self.OBS_DIM)
         keys = set(model.state_dict().keys())
         assert keys == {
-            "encoder.0.weight",
-            "encoder.0.bias",
-            "decoder.weight",
-            "decoder.bias",
-            "value.weight",
-            "value.bias",
+            "encoder.0.weight", "encoder.0.bias",
+            "decoder.weight", "decoder.bias",
+            "value.weight", "value.bias",
         }, f"state_dict layout drifted: {keys}"
 
 
@@ -258,7 +222,7 @@ class TestSellerDecisions:
         overrides ``fields["amount"]``."""
         stub_strategy.set_price_idx(5)  # +5% → proposed = 10500
         history, ctx = _round0("maximize", our_amount=10_000, their_amount=9500)
-        chain = _rl_chain(["rl"])
+        chain = load_negotiation_chain(["rl"])
         decision = run_negotiation_chain(chain, history, ctx)
 
         assert decision.action == "counter"
@@ -275,7 +239,7 @@ class TestSellerDecisions:
         stub_strategy.set_price_idx(5)  # +5% → proposed = 10500
         # 10395 = 10500 * (1 - 0.01) — the convergence threshold
         history, ctx = _round0("maximize", our_amount=10_000, their_amount=10400)
-        chain = _rl_chain(["rl"])
+        chain = load_negotiation_chain(["rl"])
         decision = run_negotiation_chain(chain, history, ctx)
 
         assert decision.action == "accept"
@@ -287,7 +251,7 @@ class TestSellerDecisions:
         reasonable=1.5 → floor = 10000 / 1.5 ≈ 6667."""
         stub_strategy.set_price_idx(4)  # 0% multiplier
         history, ctx = _round0("maximize", our_amount=10_000, their_amount=1_000)
-        chain = _rl_chain(["rl"])
+        chain = load_negotiation_chain(["rl"])
         decision = run_negotiation_chain(chain, history, ctx)
 
         assert decision.action == "exit"
@@ -308,7 +272,7 @@ class TestBuyerDecisions:
         """``their <= proposed * (1 + conv)`` → accept at the peer's amount."""
         stub_strategy.set_price_idx(5)  # +5% → proposed = 10500
         history, ctx = _round0("minimize", our_amount=10_000, their_amount=9500)
-        chain = _rl_chain(["rl"])
+        chain = load_negotiation_chain(["rl"])
         decision = run_negotiation_chain(chain, history, ctx)
 
         assert decision.action == "accept"
@@ -327,7 +291,7 @@ class TestBuyerDecisions:
         """
         stub_strategy.set_price_idx(8)  # +20% → proposed = 12000, above ceiling 10000
         history, ctx = _round0("minimize", our_amount=10_000, their_amount=13_000)
-        chain = _rl_chain(["rl"])
+        chain = load_negotiation_chain(["rl"])
         decision = run_negotiation_chain(chain, history, ctx)
 
         assert decision.action == "counter"
@@ -338,7 +302,7 @@ class TestBuyerDecisions:
         reasonable=1.5 → ceiling = 10000 * 1.5 = 15000."""
         stub_strategy.set_price_idx(4)  # 0%
         history, ctx = _round0("minimize", our_amount=10_000, their_amount=20_000)
-        chain = _rl_chain(["rl"])
+        chain = load_negotiation_chain(["rl"])
         decision = run_negotiation_chain(chain, history, ctx)
 
         assert decision.action == "exit"
@@ -355,7 +319,7 @@ class TestEdgeCases:
         """First counter with no peer proposal yet — opens at
         ``our_reference_amount`` with a minimal proposal dict
         (no skeleton to echo)."""
-        chain = _rl_chain(["rl"])
+        chain = load_negotiation_chain(["rl"])
         ctx = NegotiationContext(direction="maximize", our_reference_amount=10_000.0)
         decision = run_negotiation_chain(chain, [], ctx)
 
@@ -369,15 +333,10 @@ class TestEdgeCases:
         # Inject prior "us" counter rounds
         us = _peer_proposal(10_500)
         for i in range(ctx.max_rounds):
-            history.append(
-                NegotiationRound(
-                    round_number=i + 1,
-                    sender="us",
-                    action="counter",
-                    proposal=us,
-                )
-            )
-        chain = _rl_chain(["rl"])
+            history.append(NegotiationRound(
+                round_number=i + 1, sender="us", action="counter", proposal=us,
+            ))
+        chain = load_negotiation_chain(["rl"])
         decision = run_negotiation_chain(chain, history, ctx)
 
         assert decision.action == "exit"
@@ -387,17 +346,11 @@ class TestEdgeCases:
         """Our last two counters identical → exit ``stale_negotiation``."""
         history, ctx = _round0("maximize", our_amount=10_000, their_amount=9500)
         us = _peer_proposal(10_500)
-        history.extend(
-            [
-                NegotiationRound(
-                    round_number=1, sender="us", action="counter", proposal=us
-                ),
-                NegotiationRound(
-                    round_number=2, sender="us", action="counter", proposal=us
-                ),
-            ]
-        )
-        chain = _rl_chain(["rl"])
+        history.extend([
+            NegotiationRound(round_number=1, sender="us", action="counter", proposal=us),
+            NegotiationRound(round_number=2, sender="us", action="counter", proposal=us),
+        ])
+        chain = load_negotiation_chain(["rl"])
         decision = run_negotiation_chain(chain, history, ctx)
 
         assert decision.action == "exit"
@@ -413,7 +366,7 @@ class TestEdgeCases:
         """
         stub_strategy._models = {"maximize": None}
         history, ctx = _round0("maximize", our_amount=10_000, their_amount=9500)
-        chain = _rl_chain(["rl"])
+        chain = load_negotiation_chain(["rl"])
         decision = run_negotiation_chain(chain, history, ctx)
 
         assert decision.action == "exit"

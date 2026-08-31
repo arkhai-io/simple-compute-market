@@ -13,7 +13,7 @@ same way domain modules register theirs. ``market_alkahest`` is a lazy
 call-path import — kit-policy does not hard-depend on kit-alkahest; the
 composition roots that load these chains always ship both.
 
-History: extracted verbatim from ``arkhai_vms.negotiation.policies``
+History: extracted verbatim from ``domains.vms.negotiation.policies``
 when the API-credits domain became the second plugin; the VM module
 re-exports every name from here, so existing import paths keep working.
 """
@@ -21,8 +21,7 @@ re-exports every name from here, so existing import paths keep working.
 from __future__ import annotations
 
 import logging
-from collections.abc import Callable, Sequence
-from typing import Any
+from typing import Any, Optional
 
 from market_policy.negotiation_middleware import (
     NegotiationContext,
@@ -30,6 +29,8 @@ from market_policy.negotiation_middleware import (
     NegotiationMiddleware,
     NegotiationRound,
     NegotiationStep,
+    load_negotiation_chain,
+    register_negotiation_middleware,
     run_negotiation_chain,
     their_last_proposal,
 )
@@ -42,7 +43,7 @@ DEFAULT_REASONABLE_MULTIPLIER = 1.5
 _ZERO_ADDRESS = "0x" + "0" * 40
 
 
-def _amount_from_proposal(proposal: dict[str, Any] | None) -> float | None:
+def _amount_from_proposal(proposal: dict[str, Any] | None) -> Optional[float]:
     """Pull the absolute payment amount out of a VM EscrowProposal dict."""
     if not isinstance(proposal, dict):
         return None
@@ -61,7 +62,7 @@ def _amount_from_proposal(proposal: dict[str, Any] | None) -> float | None:
     return None
 
 
-def their_proposed_amount(history: list[NegotiationRound]) -> float | None:
+def their_proposed_amount(history: list[NegotiationRound]) -> Optional[float]:
     """Most recent absolute amount the other side proposed. None if not yet."""
     for round_ in reversed(history):
         if round_.sender == "them":
@@ -114,7 +115,7 @@ def our_previous_counters(history: list[NegotiationRound]) -> list[float]:
     return out
 
 
-def our_first_proposal(history: list[NegotiationRound]) -> dict[str, Any] | None:
+def our_first_proposal(history: list[NegotiationRound]) -> Optional[dict[str, Any]]:
     """Our earliest proposal in the transcript."""
     for h in history:
         if h.sender == "us" and h.proposal is not None:
@@ -171,6 +172,7 @@ def _opening_proposal(context: NegotiationContext) -> dict[str, Any]:
     return dict(base)
 
 
+@register_negotiation_middleware("bisection")
 def bisection_middleware(
     history: list[NegotiationRound],
     context: NegotiationContext,
@@ -209,7 +211,8 @@ def bisection_middleware(
             )
         if their_amount <= our_amount * reasonable:
             proposed = (our_amount + their_amount) / 2
-            proposed = min(proposed, our_amount)
+            if proposed > our_amount:
+                proposed = our_amount
             return (
                 NegotiationDecision(
                     action="counter",
@@ -248,6 +251,9 @@ def bisection_middleware(
     )
 
 
+@register_negotiation_middleware("erc20_bisection")
+@register_negotiation_middleware("native_token_bisection")
+@register_negotiation_middleware("erc1155_bisection")
 def amount_bisection_middleware(
     history: list[NegotiationRound],
     context: NegotiationContext,
@@ -256,6 +262,7 @@ def amount_bisection_middleware(
     return bisection_middleware(history, context)
 
 
+@register_negotiation_middleware("listed_price")
 def listed_price_middleware(
     history: list[NegotiationRound],
     context: NegotiationContext,
@@ -340,20 +347,9 @@ def _escrow_kind_lookup_keys(kind: str) -> list[str]:
 def make_escrow_kind_dispatch_middleware(
     policies_by_kind: dict[str, list[str]],
     *,
-    resolve: Callable[[Sequence[str]], list[NegotiationMiddleware]],
     chain_config_paths: dict[str, str | None] | None = None,
 ) -> NegotiationMiddleware:
-    """Build a terminal middleware that dispatches by selected escrow kind.
-
-    ``resolve`` turns configured policy names into middlewares. It is required
-    rather than defaulted so that the composed catalogue a role built is the
-    only thing this dispatcher can reach: a default would let a per-escrow-kind
-    chain resolve names the role never authorized.
-
-    Per-kind chains are still resolved on first use, because which kinds a
-    negotiation touches is not known until a proposal arrives. That is a cache
-    of already-authorized items, not discovery.
-    """
+    """Build a terminal middleware that dispatches by selected escrow kind."""
     normalized: dict[str, list[str]] = {
         str(kind).strip(): [str(name).strip() for name in chain if str(name).strip()]
         for kind, chain in policies_by_kind.items()
@@ -369,7 +365,7 @@ def make_escrow_kind_dispatch_middleware(
             if any(name == "escrow_kind_dispatch" for name in names):
                 raise RuntimeError("escrow_kind_dispatch cannot dispatch to itself")
             if key not in chain_cache:
-                chain_cache[key] = resolve(names)
+                chain_cache[key] = load_negotiation_chain(names)
             return key, chain_cache[key]
         return None
 
@@ -530,6 +526,45 @@ def _accepted_escrow_for_proposal(
     return None
 
 
+def _settlement_option_for_selection(
+    listing: dict[str, Any],
+    proposal: dict[str, Any],
+) -> dict[str, Any] | None:
+    selection = proposal.get("settlement_selection")
+    if not isinstance(selection, dict):
+        return None
+    option_id = selection.get("option_id")
+    mechanism = selection.get("mechanism")
+    for option in _loads_json_list(listing.get("settlement_options")):
+        if (
+            isinstance(option, dict)
+            and option.get("option_id") == option_id
+            and option.get("mechanism") == mechanism
+        ):
+            return option
+    return None
+
+
+def option_uses_scalar_amount(option: dict[str, Any] | None) -> bool:
+    """Whether a published settlement option bargains a scalar ``amount``.
+
+    The option shape is the mechanism's declaration to counterparties: an
+    ``amount`` rate means the deal is bargained through ``fields.amount``;
+    its absence means take-it-or-leave-it over the option as published.
+    """
+    if not isinstance(option, dict):
+        return True
+    for rate in option.get("rates") or []:
+        field = (
+            rate.get("field")
+            if isinstance(rate, dict)
+            else getattr(rate, "field", None)
+        )
+        if field == "amount":
+            return True
+    return False
+
+
 def _is_round_zero(history: list[NegotiationRound]) -> bool:
     return (
         len(history) == 1
@@ -565,10 +600,18 @@ def proposal_uses_scalar_amount(
     fields = proposal.get("fields") or {}
     if isinstance(fields, dict) and "amount" in fields:
         return True
+    if isinstance(proposal.get("settlement_selection"), dict):
+        matched_option = _settlement_option_for_selection(listing, proposal)
+        # An unmatched selection stays scalar so the invalid-selection
+        # rejection upstream fires instead of an exact-accept shortcut.
+        if matched_option is None:
+            return True
+        return option_uses_scalar_amount(matched_option)
     matched = _accepted_escrow_for_proposal(listing, proposal)
     return _accepted_entry_uses_scalar_amount(matched)
 
 
+@register_negotiation_middleware("buyer_counter_guard")
 def buyer_counter_guard(
     history: list[NegotiationRound],
     context: NegotiationContext,
@@ -619,6 +662,7 @@ def _peer_proposal(history: list[NegotiationRound]) -> dict[str, Any] | None:
     return their_last_proposal(history)
 
 
+@register_negotiation_middleware("escrow_shape_guard")
 def escrow_shape_guard(
     history: list[NegotiationRound],
     context: NegotiationContext,
@@ -708,6 +752,7 @@ def escrow_shape_guard(
     return None, context
 
 
+@register_negotiation_middleware("accept_exact_listing")
 def accept_exact_listing_middleware(
     history: list[NegotiationRound],
     context: NegotiationContext,
@@ -733,6 +778,46 @@ def accept_exact_listing_middleware(
         )
 
     listing = context.listing or {}
+    if isinstance(proposal.get("settlement_selection"), dict):
+        matched_option = _settlement_option_for_selection(listing, proposal)
+        if matched_option is None:
+            return (
+                NegotiationDecision(
+                    action="reject",
+                    reason="exact_listing:selection_not_in_options",
+                ),
+                context,
+            )
+        if option_uses_scalar_amount(matched_option):
+            expected_amount = int(round(context.our_reference_amount))
+            proposed_amount = _amount_from_proposal(proposal)
+            if proposed_amount is None or int(proposed_amount) != expected_amount:
+                return (
+                    NegotiationDecision(
+                        action="reject",
+                        reason=(
+                            f"exact_listing:amount_mismatch:"
+                            f"{proposed_amount!r}!={expected_amount!r}"
+                        ),
+                    ),
+                    context,
+                )
+            return (
+                NegotiationDecision(
+                    action="accept",
+                    proposal=_set_proposal_amount(proposal, expected_amount),
+                    reason="exact_listing",
+                ),
+                context,
+            )
+        return (
+            NegotiationDecision(
+                action="accept",
+                proposal=dict(proposal),
+                reason="exact_listing",
+            ),
+            context,
+        )
     matched = _accepted_escrow_for_proposal(listing, proposal)
     if matched is None:
         return (
@@ -863,6 +948,7 @@ def accept_exact_listing_middleware(
     )
 
 
+@register_negotiation_middleware("buyer_escrow_shape_guard")
 def buyer_escrow_shape_guard(
     history: list[NegotiationRound],
     context: NegotiationContext,
@@ -875,6 +961,19 @@ def buyer_escrow_shape_guard(
     pinned = context.our_escrow_proposal
     if not isinstance(pinned, dict):
         return None, context
+    pinned_selection = pinned.get("settlement_selection")
+    their_selection = their_proposal.get("settlement_selection")
+    if pinned_selection is not None or their_selection is not None:
+        if _normalize_exact_value(pinned_selection) != _normalize_exact_value(
+            their_selection
+        ):
+            return (
+                NegotiationDecision(
+                    action="reject",
+                    reason="settlement_selection_changed",
+                ),
+                context,
+            )
 
     if pinned.get("chain_name") != their_proposal.get("chain_name"):
         return (
@@ -970,6 +1069,17 @@ __all__ = [
     "our_first_proposal",
     "our_previous_counters",
     "proposal_escrow_kind",
+    "option_uses_scalar_amount",
     "proposal_uses_scalar_amount",
     "their_proposed_amount",
 ]
+
+
+def _backfill_market_policy_compat_exports() -> None:
+    import market_policy.negotiation_middleware as compat
+
+    for name in __all__:
+        setattr(compat, name, globals()[name])
+
+
+_backfill_market_policy_compat_exports()

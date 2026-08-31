@@ -14,12 +14,11 @@ engine here is correct per the testing strategy.
 
 from __future__ import annotations
 
-from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
 from sqlalchemy import create_engine
-from sqlalchemy.orm import Session, sessionmaker
+from sqlalchemy.orm import Session
 from sqlalchemy.pool import StaticPool
 
 from compute_provisioning_service.db.database import create_session_factory
@@ -49,10 +48,17 @@ def db_engine():
     # NULL (see db/migrations.py); mirror that guarantee here since this
     # fixture builds schema directly rather than through the migration.
     with Session(engine) as session:
-        session.add(ResourcePool(
-            id=DEFAULT_POOL_ID, label="Default Pool", provider="ansible",
-            enabled=True, policy_tags={},
-        ))
+        session.add_all([
+            ResourcePool(
+                id=DEFAULT_POOL_ID, label="Default Pool", provider="ansible",
+                enabled=True, policy_tags={},
+            ),
+            ResourcePool(
+                id="whole-host-california", label="Whole Host California",
+                provider="bare_metal.ansible", enabled=True,
+                policy_tags={"deliverable_modes": ["bare_metal"]},
+            ),
+        ])
         session.commit()
     return engine
 
@@ -143,6 +149,15 @@ class TestParseIni:
         assert result[0]["kvm_host"] == "10.0.1.1"
         assert result[0]["ssh_user"] == "root"
 
+    def test_parses_explicit_pool_id(self):
+        ini = (
+            "[bare_metal_nodes]\n"
+            "bm-node-1 ansible_host=10.0.1.1 ansible_user=root "
+            "pool_id=whole-host-california\n"
+        )
+        result = _parse_ini(ini)
+        assert result[0]["pool_id"] == "whole-host-california"
+
     def test_skips_entry_missing_ansible_host(self):
         ini = "bad_entry  ansible_user=ubuntu\n"
         result = _parse_ini(ini)
@@ -191,6 +206,23 @@ class TestSeedFromIni:
         hosts = svc.seed_from_ini(ini, ssh_key_type="path")
         assert hosts[0].gpu_count == 8
         assert hosts[0].gpu_model == "H100"
+
+    def test_explicit_pool_persists_through_seed(self, svc):
+        ini = (
+            "[bare_metal_nodes]\n"
+            "bm-node-1 ansible_host=10.0.1.1 ansible_user=root "
+            "pool_id=whole-host-california\n"
+        )
+        hosts = svc.seed_from_ini(ini, ssh_key_type="path")
+        assert hosts[0].pool_id == "whole-host-california"
+
+    def test_unknown_explicit_pool_is_rejected(self, svc):
+        ini = (
+            "[bare_metal_nodes]\n"
+            "bm-node-1 ansible_host=10.0.1.1 ansible_user=root pool_id=missing\n"
+        )
+        with pytest.raises(ValueError, match="Pool 'missing' does not exist"):
+            svc.seed_from_ini(ini, ssh_key_type="path")
 
     def test_idempotent_on_repeat_call(self, svc):
         svc.seed_from_ini(self._INI, ssh_key_type="path")

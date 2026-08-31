@@ -5,9 +5,9 @@ from __future__ import annotations
 import asyncio
 import inspect
 import logging
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Iterable
+from typing import Any, Protocol
 from datetime import datetime, timedelta, timezone
-from typing import Any
 
 from market_site.authority import SiteAuthorityPort
 
@@ -18,6 +18,44 @@ logger = logging.getLogger(__name__)
 CapacityReleasedNotifier = Callable[[dict[str, Any]], Awaitable[bool] | bool]
 ParseUtc = Callable[[Any], datetime | None]
 
+
+class CapacityReleaseOutboxPort(Protocol):
+    """Durable delivery state for terminal capacity-release callbacks."""
+
+    def reserve(self, capacity_reservation_id: str) -> None: ...
+
+    def pending(self) -> Iterable[str]: ...
+
+    def mark_delivered(self, capacity_reservation_id: str) -> None: ...
+
+    def record_failure(
+        self,
+        capacity_reservation_id: str,
+        error: str,
+    ) -> None: ...
+
+
+class InMemoryCapacityReleaseOutbox:
+    """Process-local implementation for isolated lifecycle consumers/tests."""
+
+    def __init__(self) -> None:
+        self._pending: set[str] = set()
+
+    def reserve(self, capacity_reservation_id: str) -> None:
+        self._pending.add(capacity_reservation_id)
+
+    def pending(self) -> tuple[str, ...]:
+        return tuple(sorted(self._pending))
+
+    def mark_delivered(self, capacity_reservation_id: str) -> None:
+        self._pending.discard(capacity_reservation_id)
+
+    def record_failure(
+        self,
+        capacity_reservation_id: str,
+        error: str,
+    ) -> None:
+        return None
 
 class LeaseLifecycleError(Exception):
     """Base class for lease lifecycle command errors."""
@@ -75,16 +113,18 @@ class LeaseLifecycleService:
         *,
         executor_release: ExecutorReleasePort,
         release_jobs: ReleaseJobPort | None = None,
-        default_executor_kind: str | None = None,
         capacity_released_notifier: CapacityReleasedNotifier | None = None,
+        capacity_release_outbox: CapacityReleaseOutboxPort | None = None,
         parse_utc_value: ParseUtc = parse_utc,
     ) -> None:
         self._settings = settings
         self._site_authority = site_authority
         self._executor_release = executor_release
         self._release_jobs = release_jobs
-        self._default_executor_kind = default_executor_kind
         self._capacity_released_notifier = capacity_released_notifier
+        self._capacity_release_outbox = (
+            capacity_release_outbox or InMemoryCapacityReleaseOutbox()
+        )
         self._parse_utc = parse_utc_value
         self._paused = False
         self._resume_event = asyncio.Event()
@@ -127,7 +167,7 @@ class LeaseLifecycleService:
         attached = self._site_authority.attach_lease_reservation(
             capacity_reservation_id=body.capacity_reservation_id,
             escrow_uid=body.escrow_uid,
-            executor_kind=body.executor_kind or self._default_executor_kind,
+            executor_kind=body.executor_kind,
             executor_target=body.executor_target,
             executor_ref=body.executor_ref,
             lease_start_utc=_datetime_value(body.lease_start_utc),
@@ -137,7 +177,7 @@ class LeaseLifecycleService:
         if attached is None and not body.capacity_reservation_id:
             attached = self._site_authority.attach_lease_reservation(
                 escrow_uid=body.escrow_uid,
-                executor_kind=body.executor_kind or self._default_executor_kind,
+                executor_kind=body.executor_kind,
                 executor_target=body.executor_target,
                 executor_ref=body.executor_ref,
                 lease_start_utc=_datetime_value(body.lease_start_utc),
@@ -245,6 +285,7 @@ class LeaseLifecycleService:
         message = body.reason
         if body.evidence:
             message = f"{body.reason} Evidence: {body.evidence}"
+        self._capacity_release_outbox.reserve(lease_id)
         released = self._site_authority.record_release_success(
             lease_id,
             forced=True,
@@ -253,7 +294,7 @@ class LeaseLifecycleService:
         )
         if released is None:
             raise LeaseNotFoundError(f"Lease '{lease_id}' not found or is not held.")
-        await self._notify_storefront_capacity_released(released)
+        await self._deliver_capacity_release(lease_id)
         return released
 
     async def check_leases(self) -> dict:
@@ -266,6 +307,7 @@ class LeaseLifecycleService:
         return await self._run_cycle()
 
     async def _run_cycle(self) -> dict:
+        await self._drain_capacity_release_outbox()
         now = datetime.now(timezone.utc)
         grace_seconds = int(
             getattr(self._settings, "lease_watchdog_grace_period_seconds", 300)
@@ -405,17 +447,48 @@ class LeaseLifecycleService:
         )
 
     async def _finish_release(self, reservation: dict[str, Any]) -> bool:
+        capacity_reservation_id = reservation["capacity_reservation_id"]
+        self._capacity_release_outbox.reserve(capacity_reservation_id)
         released = self._site_authority.record_release_success(
-            reservation["capacity_reservation_id"],
+            capacity_reservation_id,
         )
         if released is None:
             return False
         logger.info(
             "[LEASE_LIFECYCLE] Reservation %s released (resource=%s escrow=%s)",
-            reservation["capacity_reservation_id"], reservation.get("resource_id"), reservation.get("escrow_uid"),
+            capacity_reservation_id,
+            reservation.get("resource_id"),
+            reservation.get("escrow_uid"),
         )
-        await self._notify_storefront_capacity_released(released)
+        await self._deliver_capacity_release(capacity_reservation_id)
         return True
+
+    async def _drain_capacity_release_outbox(self) -> None:
+        for capacity_reservation_id in self._capacity_release_outbox.pending():
+            await self._deliver_capacity_release(capacity_reservation_id)
+
+    async def _deliver_capacity_release(
+        self,
+        capacity_reservation_id: str,
+    ) -> bool:
+        reservation = self._site_authority.get_reservation(
+            capacity_reservation_id
+        )
+        if reservation is None or str(reservation.get("state")) not in (
+            self.TERMINAL_SUCCESS_STATES
+        ):
+            return False
+        delivered = await self._notify_storefront_capacity_released(reservation)
+        if delivered:
+            self._capacity_release_outbox.mark_delivered(
+                capacity_reservation_id
+            )
+            return True
+        self._capacity_release_outbox.record_failure(
+            capacity_reservation_id,
+            "signed storefront acknowledgement was not received",
+        )
+        return False
 
     async def _notify_storefront_capacity_released(self, reservation: dict[str, Any]) -> bool:
         if self._capacity_released_notifier is None:

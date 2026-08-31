@@ -1,11 +1,12 @@
 [project]
 name = "arkhai-kit-site-client"
-version = "0.1.0"
+version = "0.2.0"
 license = "MIT"
 description = "Typed async clients for a site authority's capacity API: buyer-facing read/reserve/commit (SiteCapacityClient) and operator resource registration/update (SiteCapacityAdminClient)."
 requires-python = ">=3.12"
 dependencies = [
     "httpx>=0.27",
+    "arkhai-kit-identity==0.3.0",
     "pydantic>=2",
 ]
 

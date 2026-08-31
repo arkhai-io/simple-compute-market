@@ -1,24 +1,19 @@
-"""Domain-neutral publication and reservation-hold hint keys.
+"""Domain-neutral Resource Pool policy-tag vocabulary.
 
-Resource Pool `policy_tags` is an opaque dict as far as this package's own
-CRUD/reconciliation logic is concerned (see `service.py`). This module owns
-the stable key names two hints are projected under, plus generic read-side
-interpretation and write-side validation that applies regardless of which
-domain (VM, bare metal, ...) ends up consuming a given tag. Domains own
-their own accepted `listing_mode` values and structural defaults; this
-module never defines or validates a value for that key, only the key's
-name and the fact that an unrecognized value must remain forward-compatible
-opaque metadata rather than a validation failure.
+Resource Pool ``policy_tags`` is the one administration and projection
+channel for pool policy. This module owns the stable key names plus the
+domain-neutral validation that can be applied without knowing a consumer's
+market vocabulary.
 
-`max_reservation_hold_seconds` and `sla` are the two hints with a
-domain-neutral, universally interpretable value (a nonnegative duration and
-a nonnegative percentage-like number, respectively), so they are the ones
-validated for content here. `region` is domain-neutral in the same sense
-`listing_mode` is -- a free-form value with no universal validity rule this
-package can usefully enforce -- so it gets only a bare read, matching
-`raw_listing_mode`. `pricing` is domain-specific (its shape depends on what
-resource-subtype dimensions a domain prices), so it also gets only a bare
-read; the accepting domain owns interpreting and validating its contents.
+``deliverable_modes`` is an authoritative set of opaque offering-mode names.
+This package validates only that the declaration is a JSON-compatible set of
+unique, non-empty strings. Domains decide which names are meaningful. Absence
+and an explicit empty list both mean that the pool declares no deliverable
+mode; neither is a permissive default.
+
+``max_reservation_hold_seconds`` and ``sla`` have universally interpretable
+numeric values and are validated here. ``listing_mode``, ``region``, and
+``pricing`` remain domain-owned values exposed through raw readers.
 """
 
 from __future__ import annotations
@@ -26,11 +21,61 @@ from __future__ import annotations
 from typing import Any, Mapping
 
 
+DELIVERABLE_MODES_POLICY_TAG = "deliverable_modes"
 LISTING_MODE_POLICY_TAG = "listing_mode"
 MAX_RESERVATION_HOLD_SECONDS_POLICY_TAG = "max_reservation_hold_seconds"
 REGION_POLICY_TAG = "region"
 SLA_POLICY_TAG = "sla"
 PRICING_POLICY_TAG = "pricing"
+
+
+def declared_deliverable_modes(policy_tags: Mapping[str, Any]) -> frozenset[str]:
+    """Return the pool's authoritative deliverable-mode declaration.
+
+    The declaration is stored as a JSON list so order is stable in exported
+    pool documents, but its semantics are a set. Unknown mode names remain
+    valid and opaque. Malformed declarations raise rather than widening or
+    silently becoming empty.
+    """
+    if DELIVERABLE_MODES_POLICY_TAG not in policy_tags:
+        return frozenset()
+    raw = policy_tags[DELIVERABLE_MODES_POLICY_TAG]
+    if not isinstance(raw, list):
+        raise ValueError(
+            f"{DELIVERABLE_MODES_POLICY_TAG} must be a list of unique non-empty strings"
+        )
+    modes: list[str] = []
+    for value in raw:
+        if not isinstance(value, str) or not value.strip() or value != value.strip():
+            raise ValueError(
+                f"{DELIVERABLE_MODES_POLICY_TAG} must be a list of unique non-empty strings"
+            )
+        modes.append(value)
+    if len(modes) != len(set(modes)):
+        raise ValueError(
+            f"{DELIVERABLE_MODES_POLICY_TAG} must be a list of unique non-empty strings"
+        )
+    return frozenset(modes)
+
+
+def pool_delivers_offering_mode(
+    policy_tags: Mapping[str, Any],
+    requested_mode: str,
+) -> bool:
+    """The shared reservation/scheduling/provisioning capability predicate."""
+    if not isinstance(requested_mode, str) or not requested_mode.strip():
+        return False
+    return requested_mode in declared_deliverable_modes(policy_tags)
+
+
+def validate_deliverable_modes(policy_tags: Mapping[str, Any]) -> list[str]:
+    """Return a write-side problem for a malformed mode declaration."""
+    try:
+        declared_deliverable_modes(policy_tags)
+    except ValueError as exc:
+        return [str(exc)]
+    return []
+
 
 
 def raw_listing_mode(policy_tags: Mapping[str, Any]) -> Any:

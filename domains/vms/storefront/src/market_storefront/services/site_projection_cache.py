@@ -5,20 +5,15 @@ from __future__ import annotations
 import asyncio
 import logging
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Awaitable, Callable
 
 from core_storefront.site_projections import (
     ProjectionCache,
     ProjectionCacheView,
     ProjectionIdentity,
 )
-
-from market_storefront.services.capacity_client import (
-    build_capacity_client,
-    remote_site_clients,
-)
-from market_storefront.utils.sqlite_client import get_sqlite_client
-from market_storefront.lifecycle import SITE_PROJECTION_POLLER, gate
+from market_capacity_publication import remote_site_clients
+from market_storefront.services.capacity_client import build_capacity_client
 
 logger = logging.getLogger(__name__)
 
@@ -102,7 +97,7 @@ def listing_mode_explanations() -> dict[str, dict[str, str]]:
     publication candidate generation: this only needs each pool's
     projected `policy_tags`, not pricing or availability.
     """
-    from market_storefront.listings.listing_mode import resolve_vm_listing_mode
+    from domains.vms.listings.listing_mode import resolve_vm_listing_mode
 
     result: dict[str, dict[str, str]] = {}
     for site, caches in projection_caches().items():
@@ -140,8 +135,8 @@ def listing_mode_explanations() -> dict[str, dict[str, str]]:
     return result
 
 
-async def load_site_projections() -> None:
-    aggregate = build_capacity_client(lambda: get_sqlite_client())
+async def load_site_projections(sqlite_client: Any) -> None:
+    aggregate = build_capacity_client(lambda: sqlite_client)
     remotes = remote_site_clients(aggregate)
     replacements: dict[str, SiteProjectionCaches] = {}
     for site, remote in remotes.items():
@@ -168,7 +163,7 @@ async def load_site_projections() -> None:
     _caches.update(replacements)
 
 
-async def site_projection_poller_loop() -> None:
+async def site_projection_poller_loop(sqlite_client: Any) -> None:
     from market_storefront.utils import config
 
     interval = float(
@@ -176,15 +171,8 @@ async def site_projection_poller_loop() -> None:
     )
     while True:
         try:
-            if gate(SITE_PROJECTION_POLLER):
-                # A paused storefront serves the projection generation it already
-                # holds. Refreshing it is a state change like any other, and
-                # `POST /api/v1/admin/capacity/projections/refresh` is how a
-                # caller asks for one deliberately.
-                await asyncio.sleep(interval)
-                continue
             if not _caches:
-                await load_site_projections()
+                await load_site_projections(sqlite_client)
             else:
                 await asyncio.gather(
                     *(
@@ -198,10 +186,15 @@ async def site_projection_poller_loop() -> None:
         await asyncio.sleep(interval)
 
 
-async def refresh_after_topology_error(site: str, *, capacity: bool) -> bool:
+async def refresh_after_topology_error(
+    site: str,
+    *,
+    capacity: bool,
+    sqlite_client: Any,
+) -> bool:
     caches = _caches.get(site)
     if caches is None:
-        await load_site_projections()
+        await load_site_projections(sqlite_client)
         caches = _caches.get(site)
         if caches is None:
             return False

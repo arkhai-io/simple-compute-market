@@ -1,0 +1,41 @@
+image:
+  repository: registry.example.com/arkhai
+  name: arkhai
+  tag: bare-metal-storefront
+  digest: sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+  pullPolicy: IfNotPresent
+
+identity:
+  principal:
+    scheme: ed25519
+    identifier: AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+  credentialSecret:
+    name: bare-metal-storefront-identity
+    key: credential
+
+adminPrincipals:
+  - scheme: ed25519
+    identifier: BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB
+
+# This existing Secret owns `sites.json`; the chart does not render authority
+# URLs or routing topology into a ConfigMap or release-managed Secret.
+siteBindingsSecret:
+  name: bare-metal-storefront-sites
+  key: sites.json
+sitePlacement: round_robin
+
+publicUrl: https://bare-metal.example.com
+sellerEvmAddress: ""
+alkahestEnabled: false
+settlementConfigSecret:
+  name: bare-metal-storefront-settlement
+  key: settlement.json
+databasePath: /var/lib/arkhai/bare-metal-storefront.db
+
+persistence:
+  enabled: true
+  existingClaim: ""
+  storageClass: encrypted-rwo
+  size: 10Gi
+  accessMode: ReadWriteOnce
+  mountPath: /var/lib/arkhai

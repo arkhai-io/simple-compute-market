@@ -2,22 +2,28 @@
 
 ## 1. Generalize the e2e fixtures
 
-- [ ] 1.1 Re-verify that no e2e file references bare metal or API credits, and inventory
+- [x] 1.1 Re-verify that no e2e file references bare metal or API credits, and inventory
       the VM assumptions in shared fixtures and helpers.
-- [ ] 1.2 Generalize fixtures and helpers away from VM-specific listing shape,
+- [x] 1.2 Generalize fixtures and helpers away from VM-specific listing shape,
       provisioning, and teardown assumptions.
-- [ ] 1.3 Keep scenarios thin. Copying the VM scenarios and editing them per domain
+- [x] 1.3 Keep scenarios thin. Copying the VM scenarios and editing them per domain
       reproduces, one layer up, exactly the duplication this goal removes.
 
 ## 2. Recompose API credits
+
+Implementation dependency: tasks 2.1-2.2 wait for the final committed interfaces
+from `kit-storefront-composition-seam`, `kit-owned-negotiation-runtime`, and
+`kit-owned-capacity-and-publication`. This change will consume those modules and
+remove the API-credit copies; it will not recreate an absent extraction locally.
+
 
 - [ ] 2.1 Remove every remaining local implementation of a concern the kit extractions
       own, so the domain is configuration and codecs over kit.
 - [ ] 2.2 Confirm no extracted concern retains an API-credits copy. The domain already
       completes deals with its own implementations, so a passing scenario is not evidence
       of recomposition.
-- [ ] 2.3 Add the API-credits end-to-end deal path.
-- [ ] 2.4 Sequenced first deliberately: there is a working implementation to compare
+- [x] 2.3 Add the API-credits end-to-end deal path.
+- [x] 2.4 Sequenced first deliberately: there is a working implementation to compare
       against, so a failure here is a recomposition defect rather than an unknown.
 
 ## 3. Bare-metal deployable stack
@@ -30,14 +36,26 @@
 
 ## 4. Bare-metal deal path
 
-- [ ] 4.1 Add the end-to-end scenario: discovery, negotiation, settlement, delivery,
+The static task 4.1 scenario consumes only the accepted `market bare-metal`
+public command contract. Its live execution remains blocked on the installed
+buyer contribution, sibling storefront's authenticated result/access/teardown
+endpoints, selected-site authority, credentials, and real access target.
+
+
+- [x] 4.1 Add the end-to-end scenario: discovery, negotiation, settlement, delivery,
       teardown.
 - [ ] 4.2 Treat defects this surfaces in bare metal's own behavior as bare-metal
       findings, recorded against its owning change rather than absorbed here.
-- [ ] 4.3 Decide and record whether bare-metal teardown semantics differ from VM's, since
+- [x] 4.3 Decide and record whether bare-metal teardown semantics differ from VM's, since
       whole-machine release is not VM destruction.
 
 ## 5. Validation
+
+External gate: tasks 5.1-5.2 require running API-credit and bare-metal seller
+stacks, role-scoped credentials, the selected site/provisioning authority, and a
+real whole-host access target. Static scenario/configuration work is not live-deal
+evidence. Task 5.3 is intentionally unrun in this delegated lane.
+
 
 - [ ] 5.1 Run both new end-to-end paths against a live service stack. This repository has
       previously recorded e2e work validated only statically because no stack was

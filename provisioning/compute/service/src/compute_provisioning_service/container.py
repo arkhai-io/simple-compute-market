@@ -15,13 +15,24 @@ from vm_provisioning_adapter.runtime import build_vm_runtime
 
 from compute_provisioning_service.config import settings
 from compute_provisioning_service.db.database import create_db_engine, create_session_factory
+from compute_provisioning_service.identity import resolve_identity_context
+from compute_provisioning_service.middleware.auth import (
+    SqlAlchemyProvisioningReplayStore,
+)
 from compute_provisioning_service.services.async_job_queue import AsyncJobQueue
 from compute_provisioning_service.composition import compose_adapter_bundles
 from compute_provisioning_service.services.compute_contract_service import ComputeContractService
-from compute_provisioning_service.services.deal_event_sink import StorefrontLifecycleEventSink, notify_storefront_capacity_released
+from compute_provisioning_service.services.deal_event_sink import (
+    SqlAlchemyCapacityReleaseOutbox,
+    StorefrontLifecycleEventSink,
+    notify_storefront_capacity_released,
+)
 from compute_provisioning_service.services.capacity_reservation_watchdog import CapacityReservationWatchdog
 from compute_provisioning_service.services.fulfillment_convergence import FulfillmentConvergenceWatchdog
 from compute_provisioning_service.services.lease_watchdog import LeaseWatchdog
+from compute_provisioning_service.services.principal_authority import (
+    SqlAlchemyProvisioningPrincipalAuthority,
+)
 from market_fulfillment import (
     PhysicalSettlementScheduler,
     SettlementRepository,
@@ -30,7 +41,6 @@ from market_fulfillment import (
     SqlAlchemyFulfillmentUnitOfWork,
 )
 
-DEFAULT_EXECUTOR_KIND = "vm"
 
 
 def _resolved_job_queue():
@@ -75,34 +85,29 @@ def _runtime_value(runtime, name):
     return getattr(runtime, name)
 
 
-def _vm_fulfillment_provider(runtime, resource_pool_service):
-    return runtime.fulfillment_provider(resource_pool_service)
 
-
-def _vm_bundle(runtime, site_authority, resource_pool_service):
-    return runtime.adapter_bundle(site_authority, resource_pool_service)
+def _vm_bundle(runtime, site_authority):
+    return runtime.adapter_bundle(site_authority)
 
 
 def _bare_metal_bundle(runtime, site_authority):
     return runtime.adapter_bundle(site_authority)
 
 
-def _system_service(runtime, lease_lifecycle_service, fulfillment_convergence_watchdog):
-    return runtime.system_service(
-        lease_lifecycle_service=lease_lifecycle_service,
-        fulfillment_convergence_watchdog=fulfillment_convergence_watchdog,
-    )
+def _system_service(runtime, lease_lifecycle_service):
+    return runtime.system_service(lease_lifecycle_service=lease_lifecycle_service)
 
 
 def _compose_adapters(vm_bundle, bare_metal_bundle):
-    return compose_adapter_bundles(
-        [vm_bundle, bare_metal_bundle],
-        default_executor_kind=DEFAULT_EXECUTOR_KIND,
-    )
+    return compose_adapter_bundles([vm_bundle, bare_metal_bundle])
 
 
 def _provider_registry(composed_adapters):
     return composed_adapters.provider_registry
+
+
+def _pool_config_handlers(composed_adapters):
+    return dict(composed_adapters.pool_config_handlers)
 
 
 def _release_dispatcher(composed_adapters):
@@ -125,7 +130,6 @@ def _make_release_job_dispatcher(vm_runtime, job_service):
             "vm": vm_runtime.release_job_port(),
             "bare_metal": job_service,
         },
-        default_executor_kind=DEFAULT_EXECUTOR_KIND,
     )
 
 
@@ -138,19 +142,24 @@ def _make_compute_contract_service(site_authority, job_service, composed_adapter
 
 
 def _make_lease_lifecycle(
-    cfg, site_authority, release_dispatcher, release_jobs, lifecycle_event_sink
+    cfg,
+    site_authority,
+    release_dispatcher,
+    release_jobs,
+    lifecycle_event_sink,
+    capacity_release_outbox,
 ):
     return LeaseLifecycleService(
         cfg,
         site_authority,
         executor_release=release_dispatcher,
         release_jobs=release_jobs,
-        default_executor_kind=DEFAULT_EXECUTOR_KIND,
         capacity_released_notifier=(
             lambda reservation: notify_storefront_capacity_released(
                 cfg, reservation, sink=lifecycle_event_sink
             )
         ),
+        capacity_release_outbox=capacity_release_outbox,
     )
 
 
@@ -177,6 +186,16 @@ class Container(containers.DeclarativeContainer):
     session_factory = providers.Singleton(
         _make_session_factory,
         engine=db_engine,
+    )
+
+    identity_context = providers.Singleton(
+        resolve_identity_context,
+        settings=config,
+    )
+
+    provisioning_replay_store = providers.Singleton(
+        SqlAlchemyProvisioningReplayStore,
+        session_factory=session_factory,
     )
 
     # ------------------------------------------------------------------
@@ -236,12 +255,6 @@ class Container(containers.DeclarativeContainer):
         name=providers.Object("host_operations_service"),
     )
 
-    resource_pool_service = providers.Singleton(
-        ResourcePoolService,
-        session_factory=session_factory,
-        handlers=providers.Dict(ansible=ansible_pool_config_handler),
-    )
-
     capacity_ledger_service = providers.Singleton(
         CapacityLedgerService,
         session_factory=session_factory,
@@ -253,6 +266,58 @@ class Container(containers.DeclarativeContainer):
             lambda repository: repository.abandon_if_assigned,
             repository=settlement_repository,
         ),
+    )
+
+    site_authority = providers.Singleton(
+        LedgerSiteAuthority,
+        ledger=capacity_ledger_service,
+    )
+
+    bare_metal_runtime = providers.Singleton(
+        build_bare_metal_runtime,
+        site_authority=site_authority,
+        job_service=job_service,
+        job_queue_provider=providers.Object(_resolved_job_queue),
+        config=config,
+        host_service=host_service,
+    )
+    bare_metal_lease_service = providers.Callable(
+        _runtime_value,
+        runtime=bare_metal_runtime,
+        name=providers.Object("lease_service"),
+    )
+    bare_metal_operations_service = providers.Callable(
+        _runtime_value,
+        runtime=bare_metal_runtime,
+        name=providers.Object("operations_service"),
+    )
+
+    vm_adapter_bundle = providers.Singleton(
+        _vm_bundle,
+        runtime=vm_runtime,
+        site_authority=site_authority,
+    )
+
+    bare_metal_adapter_bundle = providers.Singleton(
+        _bare_metal_bundle,
+        runtime=bare_metal_runtime,
+        site_authority=site_authority,
+    )
+
+    composed_adapters = providers.Singleton(
+        _compose_adapters,
+        vm_bundle=vm_adapter_bundle,
+        bare_metal_bundle=bare_metal_adapter_bundle,
+    )
+
+    composed_pool_config_handlers = providers.Singleton(
+        _pool_config_handlers,
+        composed_adapters=composed_adapters,
+    )
+    resource_pool_service = providers.Singleton(
+        ResourcePoolService,
+        session_factory=session_factory,
+        handlers=composed_pool_config_handlers,
     )
 
     scheduling_unit_of_work = providers.Singleton(
@@ -281,64 +346,15 @@ class Container(containers.DeclarativeContainer):
     # Fulfillment orchestration takes an already-selected SettlementResource as
     # input and never calls the scheduler itself.
     # ------------------------------------------------------------------
-    ansible_fulfillment_provider = providers.Singleton(
-        _vm_fulfillment_provider,
-        runtime=vm_runtime,
-        resource_pool_service=resource_pool_service,
-    )
-
     capacity_reservation_watchdog = providers.Singleton(
         CapacityReservationWatchdog,
         capacity_ledger_service=capacity_ledger_service,
         settings=config,
     )
 
-    site_authority = providers.Singleton(
-        LedgerSiteAuthority,
-        ledger=capacity_ledger_service,
-    )
-
-    bare_metal_runtime = providers.Singleton(
-        build_bare_metal_runtime,
-        site_authority=site_authority,
-        job_service=job_service,
-        job_queue_provider=providers.Object(_resolved_job_queue),
-        config=config,
-        host_service=host_service,
-    )
-    bare_metal_lease_service = providers.Callable(
-        _runtime_value,
-        runtime=bare_metal_runtime,
-        name=providers.Object("lease_service"),
-    )
-    bare_metal_operations_service = providers.Callable(
-        _runtime_value,
-        runtime=bare_metal_runtime,
-        name=providers.Object("operations_service"),
-    )
-
     executor_lease_service = providers.Singleton(
         ExecutorLeaseService,
         site_authority=site_authority,
-    )
-
-    vm_adapter_bundle = providers.Singleton(
-        _vm_bundle,
-        runtime=vm_runtime,
-        site_authority=site_authority,
-        resource_pool_service=resource_pool_service,
-    )
-
-    bare_metal_adapter_bundle = providers.Singleton(
-        _bare_metal_bundle,
-        runtime=bare_metal_runtime,
-        site_authority=site_authority,
-    )
-
-    composed_adapters = providers.Singleton(
-        _compose_adapters,
-        vm_bundle=vm_adapter_bundle,
-        bare_metal_bundle=bare_metal_adapter_bundle,
     )
 
     provider_registry = providers.Singleton(
@@ -377,10 +393,25 @@ class Container(containers.DeclarativeContainer):
         unit_of_work=fulfillment_unit_of_work,
     )
 
+    principal_authority = providers.Singleton(
+        SqlAlchemyProvisioningPrincipalAuthority,
+        session_factory=session_factory,
+        bootstrap=identity_context,
+    )
+
     lifecycle_event_sink = providers.Singleton(
         StorefrontLifecycleEventSink,
         settings=config,
+        identity=identity_context,
+        principal_authority=principal_authority,
     )
+
+
+    capacity_release_outbox = providers.Singleton(
+        SqlAlchemyCapacityReleaseOutbox,
+        session_factory=session_factory,
+    )
+
 
     lease_lifecycle_service = providers.Singleton(
         _make_lease_lifecycle,
@@ -389,6 +420,7 @@ class Container(containers.DeclarativeContainer):
         release_dispatcher=release_dispatcher,
         release_jobs=release_job_dispatcher,
         lifecycle_event_sink=lifecycle_event_sink,
+        capacity_release_outbox=capacity_release_outbox,
     )
 
     lease_watchdog = providers.Singleton(
@@ -409,10 +441,6 @@ class Container(containers.DeclarativeContainer):
         _system_service,
         runtime=vm_runtime,
         lease_lifecycle_service=lease_lifecycle_service,
-        # The one-cycle convergence control is only reachable when the service
-        # holds the same watchdog instance the timer drives — a manual cycle must
-        # invoke the production handler, not an alternate path.
-        fulfillment_convergence_watchdog=fulfillment_convergence_watchdog,
     )
 
 

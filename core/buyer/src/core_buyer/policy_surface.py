@@ -1,8 +1,8 @@
 """Buyer-side scalar policy objects.
 
-Concrete ``BuyerPolicy`` registrations for the scalar-amount escrow
-formats every Alkahest market domain trades in (ARCHITECTURE.md, "Buyer
-negotiation policy surface"). Both scalar policies share the same
+Concrete ``BuyerPolicy`` registrations for scalar-amount settlement formats
+shared by market domains (ARCHITECTURE.md, "Buyer negotiation policy surface").
+Both scalar policies share the same
 parameter surface and format compatibility; they differ only in the
 middleware terminal:
 
@@ -27,44 +27,45 @@ same names would silently shadow each other).
 from __future__ import annotations
 
 import json
-from typing import Any
+from typing import Any, Optional
 
 import typer
-from market_policy import (
-    Catalogue,
-    InlineSource,
-    UnknownCatalogueEntryError,
-)
-from market_policy.buyer_policy import (
-    BuyerPolicy,
-    PolicyParam,
-    buyer_policy_catalogue_builder,
-)
 from rich.console import Console
 from rich.table import Table
 
+from market_policy.buyer_policy import (
+    BuyerPolicy,
+    PolicyParam,
+    register_buyer_policy,
+)
 
-def extract_seller_min_price(listing: dict[str, Any]) -> float | None:
-    """Pull the seller's per-unit floor out of a registry listing dict.
 
-    Reads the primary rate on ``accepted_escrows[0]`` — the per-unit
-    token rate advertised on the seller's first accepted escrow tuple.
-    Returns ``None`` for hidden-reserve listings (empty ``rates``).
-    """
-    from market_alkahest.schemas import primary_rate_value
+def extract_seller_min_price(listing: dict[str, Any]) -> Optional[float]:
+    """Return the primary per-unit rate from the first settlement choice."""
+    from market_core.schemas import primary_rate_value
 
     accepted = listing.get("accepted_escrows") or []
     if isinstance(accepted, str):
         try:
             accepted = json.loads(accepted)
         except (ValueError, TypeError):
-            return None
-    if not isinstance(accepted, list) or not accepted:
+            accepted = []
+    options = listing.get("settlement_options") or []
+    if isinstance(options, str):
+        try:
+            options = json.loads(options)
+        except (ValueError, TypeError):
+            options = []
+    choices = (
+        accepted
+        if isinstance(accepted, list) and accepted
+        else options
+        if isinstance(options, list)
+        else []
+    )
+    if not choices or not isinstance(choices[0], dict):
         return None
-    first = accepted[0]
-    if not isinstance(first, dict):
-        return None
-    amount = primary_rate_value(first)
+    amount = primary_rate_value(choices[0])
     return float(amount) if amount is not None else None
 
 
@@ -125,7 +126,7 @@ def derive_scalar_prices(
     matches: list[dict],
     console: Console,
     interactive: bool = False,
-) -> tuple[int | None, int | None]:
+) -> tuple[Optional[int], Optional[int]]:
     """Fill missing (initial_price, max_price) from the advertised price.
 
     The scalar policies' shared derivation: with no explicit flags both
@@ -148,20 +149,24 @@ def derive_scalar_prices(
     because no candidate carries a usable advertised rate
     (hidden-reserve listings).
     """
-    initial_price: float | None = params.get("initial_price")
-    max_price: float | None = params.get("max_price")
+    raw_initial_price = params.get("initial_price")
+    raw_max_price = params.get("max_price")
+    initial_price = int(raw_initial_price) if raw_initial_price is not None else None
+    max_price = int(raw_max_price) if raw_max_price is not None else None
     price_markup = float(params.get("price_markup") or 1.5)
 
     if initial_price is not None and max_price is not None:
         return initial_price, max_price
 
-    anchor: int | None = None
-    priced = [(extract_seller_min_price(m), m) for m in matches]
+    anchor: Optional[int] = None
+    priced_candidates = [(extract_seller_min_price(m), m) for m in matches]
     # Keep listings with amount=0 (free) as legitimate anchors; only filter
     # out None (hidden reserve) where we genuinely have no price signal.
-    priced = [(p, m) for p, m in priced if p is not None]
+    priced: list[tuple[float, dict[str, Any]]] = [
+        (price, match) for price, match in priced_candidates if price is not None
+    ]
     if priced:
-        priced.sort(key=lambda pm: pm[0])
+        priced.sort(key=lambda item: item[0])
         anchor = int(priced[0][0])
 
     if max_price is None and anchor is not None:
@@ -206,42 +211,25 @@ def derive_scalar_prices(
     return initial_price, max_price
 
 
-LISTED_PRICE_POLICY = BuyerPolicy(
-    name="listed_price",
-    middlewares=("listed_price",),
-    cli_params=_SCALAR_PARAMS,
-    compatible=entry_uses_scalar_amount,
-    derive_prices=derive_scalar_prices,
-)
-
-BISECTION_POLICY = BuyerPolicy(
-    name="bisection",
-    middlewares=("bisection",),
-    cli_params=_SCALAR_PARAMS,
-    compatible=entry_uses_scalar_amount,
-    derive_prices=derive_scalar_prices,
-)
-
-#: The buyer policies this package implements, offered as a source.
-CORE_BUYER_POLICIES = {
-    LISTED_PRICE_POLICY.name: LISTED_PRICE_POLICY,
-    BISECTION_POLICY.name: BISECTION_POLICY,
-}
-
-
-def buyer_policy_catalogue() -> Catalogue[BuyerPolicy]:
-    """Compose the buyer policies available to this invocation.
-
-    Composed per call rather than at import. No domain currently offers a buyer
-    policy; when one does, its source joins here and a duplicate name becomes a
-    composition error instead of silently overwriting, which is what the
-    superseded registry's last-write-wins registration allowed.
-    """
-    return (
-        buyer_policy_catalogue_builder()
-        .add_loader(InlineSource(CORE_BUYER_POLICIES, label="core-buyer"))
-        .build()
+LISTED_PRICE_POLICY = register_buyer_policy(
+    BuyerPolicy(
+        name="listed_price",
+        middlewares=("listed_price",),
+        cli_params=_SCALAR_PARAMS,
+        compatible=entry_uses_scalar_amount,
+        derive_prices=derive_scalar_prices,
     )
+)
+
+BISECTION_POLICY = register_buyer_policy(
+    BuyerPolicy(
+        name="bisection",
+        middlewares=("bisection",),
+        cli_params=_SCALAR_PARAMS,
+        compatible=entry_uses_scalar_amount,
+        derive_prices=derive_scalar_prices,
+    )
+)
 
 
 def configured_buyer_policy(*, strict: bool = False) -> BuyerPolicy:
@@ -260,11 +248,10 @@ def configured_buyer_policy(*, strict: bool = False) -> BuyerPolicy:
     negotiating under a policy the user never chose is worse than
     failing.
     """
-    from market_policy.buyer_policy import DEFAULT_BUYER_POLICY
+    from market_policy.buyer_policy import DEFAULT_BUYER_POLICY, get_buyer_policy
 
     from .buyer_config import resolve_config_value
 
-    catalogue = buyer_policy_catalogue()
     try:
         name = (
             resolve_config_value(
@@ -278,8 +265,8 @@ def configured_buyer_policy(*, strict: bool = False) -> BuyerPolicy:
             raise
         name = DEFAULT_BUYER_POLICY
     try:
-        return catalogue[name]
-    except UnknownCatalogueEntryError:
+        return get_buyer_policy(name)
+    except KeyError:
         if strict:
             raise
-        return catalogue[DEFAULT_BUYER_POLICY]
+        return get_buyer_policy(DEFAULT_BUYER_POLICY)

@@ -26,17 +26,28 @@ The storefront's quota snapshot is advisory. It can prevent obviously infeasible
 
 ## Commercial and usage identity
 
-A buyer wallet authorizes a market purchase or top-up. A bearer secret authorizes API use. These are deliberately different identities:
+A canonical marketplace principal authorizes a market purchase or top-up. It
+may be an Ed25519 identity in a wallet-free hosted deployment or an EVM identity
+for Alkahest. A bearer secret authorizes API use. These are deliberately
+different identities:
 
-- wallet signatures prove who may negotiate and fund the purchase;
-- key ownership determines who may top up an already owned key;
-- the bearer secret admits an online request without requiring a wallet signature per call.
+- marketplace signatures prove who may negotiate and authorize the purchase;
+- canonical principal ownership determines who may top up an existing key;
+- the bearer secret admits an online request without a market signature per call.
 
-An active unowned key can receive an open top-up, while a wallet-owned key can be topped up only by its owner. The credits service repeats ownership and status checks during issuance because negotiation views may be stale and operator controls may bypass ordinary policy.
+An active unowned key can receive an open top-up, while an owned key can be
+topped up only by its canonical marketplace owner. The credits service repeats
+ownership and status checks during issuance because negotiation views may be
+stale and operator controls may bypass ordinary policy.
 
 ## Idempotency boundaries
 
-Settlement `escrow_uid` identifies one credit grant. Retrying issuance under that identity must not reserve quota or increase balance twice. A newly issued but unused key may rotate its secret on retry, invalidating the earlier secret; after use, retries do not reveal a bearer secret.
+Alkahest settlement `escrow_uid` and hosted deterministic `fulfillment_id` each
+identify one credit grant. The credits authority stores the mechanism-neutral
+fulfillment reference plus an immutable canonical request digest; retrying
+unchanged issuance returns the same grant, while changed reuse conflicts before
+quota, key, or balance mutation. A newly issued but unused key may rotate its
+secret on an authorized retry; after use, retries do not reveal a bearer secret.
 
 Online consumption has an independent idempotency boundary scoped to the key and caller-supplied consumption key. This makes middleware retries safe without coupling request admission to settlement identity.
 
@@ -95,3 +106,35 @@ API credits intentionally has no compute-provisioning capability. A non-physical
 - [Settlement servicing](../settlement-servicing/spec.md)
 - [Site capacity](../site-capacity/spec.md)
 - [Storefront publication](../storefront-publication/spec.md)
+
+## Hosted issuance and evidence
+
+The shared servicing worker reaches the API-credit fulfillment callback only
+after the hosted adapter projects authoritative `funded`. The callback submits
+one credits-authority issuance request keyed by
+`derive_credit_fulfillment_id(obligation_ref)`, retrieves by that identity
+after uncertain acknowledgement, then stores the authenticated buyer-only
+credential separately from the public result.
+
+`ApiCreditsIssuanceEvidenceService` signs a canonical evidence body with the
+marketplace seller signer and publishes the same bytes through the configured
+portable resolver. The public fulfillment reference is the evidence digest and
+condition anchor; it contains service, quantity, public key identity, grant and
+attestation references, but never the bearer secret. The shared runtime cannot
+collect until that evidence resolves and satisfies the accepted condition.
+
+Reclaim runs through the same shared route service. Its API-credit callback
+queries the credits authority before financial reclaim: an unknown grant leaves
+reclaim eligible, a committed grant is completed into durable fulfillment and
+therefore excludes reclaim, and mismatched reuse is a recovery conflict rather
+than permission to issue or collect again.
+
+## Hosted composition
+
+The API-credit buyer registers Alkahest and hosted Stripe through the shared
+settlement configuration registry. A hosted-only policy constructs neither a
+wallet nor a chain client. The API-credit storefront uses
+`HostedSettlementRouteService` with domain callbacks for accepted-state load,
+plan reservation, exact-once issuance, projection, quota cleanup, and
+before-reclaim reconciliation; it does not import VM routes or the hosted
+released client.

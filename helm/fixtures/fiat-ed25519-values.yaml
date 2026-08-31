@@ -1,0 +1,208 @@
+global:
+  rpc:
+    enabled: false
+  integrationTests:
+    digest: sha256:4444444444444444444444444444444444444444444444444444444444444444
+  registryIdentity:
+    authority: registry-a
+    principal:
+      scheme: ed25519
+      identifier: NLTZBDFWy23PC-sKKUm3VZyUDSvLbb6MU6mzAnjjp0Y
+  provisioningIdentity:
+    scheme: ed25519
+    identifier: xoImN8fTEOxXYnvgC6JZ0lN0n0qvZERwz_vlOjX3MkI
+
+registry:
+  image:
+    digest: sha256:1111111111111111111111111111111111111111111111111111111111111111
+  identity:
+    authority: registry-a
+    principal:
+      scheme: ed25519
+      identifier: NLTZBDFWy23PC-sKKUm3VZyUDSvLbb6MU6mzAnjjp0Y
+    credentialSecret:
+      name: fiat-registry-identity
+      key: credential
+
+provisioning:
+  server:
+    image:
+      digest: sha256:2222222222222222222222222222222222222222222222222222222222222222
+  identity:
+    principal:
+      scheme: ed25519
+      identifier: xoImN8fTEOxXYnvgC6JZ0lN0n0qvZERwz_vlOjX3MkI
+    credentialSecret:
+      name: fiat-provisioning-identity
+      key: credential
+  storefrontIdentity:
+    principals:
+      - scheme: ed25519
+        identifier: 0EqyMnQrtKs6E2i9RhXk5tAiSrcaAWuvhSCjMsl3hzc
+  adminIdentity:
+    principals:
+      - scheme: ed25519
+        identifier: 5zTqbCtiV95yNV5HKqBaTEh-a0Y8Ap7TBt8vAbVja1g
+  storefront:
+    agentName: fiat-bob
+
+dev-env:
+  enabled: false
+
+validate-contracts:
+  enabled: false
+
+e2e-tests:
+  enabled: false
+  createSecret: false
+  secretName: arkhai-e2e-unused
+
+storefront:
+  image:
+    digest: sha256:3333333333333333333333333333333333333333333333333333333333333333
+  agents:
+    - name: fiat-bob
+      port: 8001
+      component: seller
+      autoRegister: false
+      identity:
+        principal:
+          scheme: ed25519
+          identifier: 0EqyMnQrtKs6E2i9RhXk5tAiSrcaAWuvhSCjMsl3hzc
+        credentialSecret:
+          name: fiat-bob-marketplace-identity
+          key: credential
+        servicePeers:
+          provisioning_default:
+            role: service
+            siteId: default
+            principals:
+              - scheme: ed25519
+                identifier: xoImN8fTEOxXYnvgC6JZ0lN0n0qvZERwz_vlOjX3MkI
+        administrators:
+          operator:
+            principals:
+              - scheme: ed25519
+                identifier: 5zTqbCtiV95yNV5HKqBaTEh-a0Y8Ap7TBt8vAbVja1g
+      secret:
+        createSecret: false
+        secretName: ""
+        configKey: storefront.secrets.toml
+      config:
+        storefrontDomains:
+          - contribution: vms
+            offeringMode: vm
+            domainIdentity: compute.v1
+            contractVersion: "1.0"
+          - contribution: bare_metal
+            offeringMode: bare_metal
+            domainIdentity: bare_metal.v1
+            contractVersion: "1.0"
+        registryAuthority:
+          authority: registry-a
+          principals:
+            - scheme: ed25519
+              identifier: NLTZBDFWy23PC-sKKUm3VZyUDSvLbb6MU6mzAnjjp0Y
+        seller:
+          agentId: fiat-bob
+          dbPath: /var/lib/arkhai/agent.db
+          logFilePath: ./logs/fiat-bob.log
+          resourcesCsvPath: ""
+          enableEventQueue: false
+          provisioning:
+            mode: mock
+            identity:
+              principals:
+                - scheme: ed25519
+                  identifier: xoImN8fTEOxXYnvgC6JZ0lN0n0qvZERwz_vlOjX3MkI
+          negotiation:
+            policies:
+              - has_matching_inventory_guard
+              - escrow_shape_guard
+              - bisection
+          integrations: {}
+        pricing:
+          default_min_price: "100"
+          default_token_address: ""
+          default_max_duration_seconds: 0
+          settlements:
+            - mechanism: fiat.stripe.v1
+              asset: usd
+              rate: "100"
+              per: hour
+              mechanism_input:
+                funding_profile: card.v1
+                interaction: interactive
+                funds_flow: separate_charges_transfers
+            - mechanism: fiat.stripe.v1
+              asset: usd
+              rate: "100"
+              per: hour
+              mechanism_input:
+                funding_profile: us_bank_transfer.v1
+                interaction: interactive
+                funds_flow: separate_charges_transfers
+            - mechanism: fiat.stripe.v1
+              asset: usd
+              rate: "100"
+              per: hour
+              mechanism_input:
+                funding_profile: us_ach_debit.v1
+                interaction: interactive
+                funds_flow: separate_charges_transfers
+        settlement:
+          schema_version: 1
+          priority: ["fiat.stripe.v1"]
+          stripe:
+            enabled: true
+            base_url: https://hosted-settlement.example.test
+            authority_id: hosted-authority
+            environment: test
+            account_ref: account-protected
+            authority:
+              principals:
+                - scheme: ed25519
+                  identifier: 6yzxO_euOl9hQWih-wknLTl3HsS4UjcngV5GbK-O4WM
+            expected_manifest_digest: sha256:4859b12cb8703a3c1db85c9636be903f493ae9a9ad1795ffb18a8f801a843a7e
+            expected_api_version: 0.2.1
+            expected_schema_version: 5
+            required_capabilities:
+              - scheme-tagged-identities.v1
+              - account-owner-admission.v1
+              - account-owner-rotation.v1
+              - account-owner-retirement.v1
+              - signer-injected-client.v1
+              - provider-neutral-seller-onboarding.v1
+              - conditional-escrow.v2
+              - stripe-connect-separate-charges-transfers.v2
+              - portable-attestation.v1
+              - eas-arbiter.v1
+              - payer-profile.v1
+              - funding-authorization.v1
+              - funding-profile.card.v1
+              - funding-profile.us_bank_transfer.v1
+              - funding-profile.us_ach_debit.v1
+              - normalized-funding-reversal.v1
+              - operator-recovery-redaction.v1
+            currency: usd
+            country: US
+            condition_profile: vm-fulfillment
+            request_timeout_seconds: 10.0
+            preflight_timeout_seconds: 5.0
+            allow_insecure_loopback: false
+            condition_profiles:
+              vm-fulfillment:
+                condition_id: vm-fulfillment
+                evaluator:
+                  kind: builtin.v1
+                  version: trivial.v1
+                  resolver_id: vm-portable
+                  params:
+                    kind: trivial
+                demand:
+                  encoding: application/jcs+json
+                  value: {}
+            resolvers:
+              vm-portable:
+                chain_name: fiat.stripe.v1
+                evidence_mode: portable-remote.v1

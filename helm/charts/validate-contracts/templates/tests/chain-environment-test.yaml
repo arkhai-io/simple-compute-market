@@ -3,11 +3,13 @@
 {{- if and (not $repo) .Values.global -}}
   {{- $repo = .Values.global.imageRepository | default "" -}}
 {{- end -}}
-{{- $itImage := "" -}}
+{{- $itImageName := $it.name -}}
 {{- if $repo -}}
-  {{- $itImage = printf "%s/%s:%s" $repo $it.name $it.tag -}}
-{{- else -}}
-  {{- $itImage = printf "%s:%s" $it.name $it.tag -}}
+  {{- $itImageName = printf "%s/%s" $repo $it.name -}}
+{{- end -}}
+{{- $itImage := printf "%s:%s" $itImageName $it.tag -}}
+{{- if $it.digest -}}
+  {{- $itImage = printf "%s@%s" $itImageName $it.digest -}}
 {{- end -}}
 {{- $profiles := .Values.activeProfiles | default (include "validate-contracts.smokeTestActiveProfiles" .) -}}
 apiVersion: v1

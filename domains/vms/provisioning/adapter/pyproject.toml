@@ -1,17 +1,17 @@
 [project]
 name = "arkhai-vms-provisioning-adapter"
-version = "0.1.0"
+version = "0.2.0"
 license = "MIT"
 description = "VM and Ansible adapter for the compute provisioning service"
 requires-python = ">=3.12"
 dependencies = [
-    "arkhai-compute-provisioning>=0.5.0",
-    "arkhai-compute-provisioning-service>=0.1.0",
+    "arkhai-compute-provisioning>=0.6.0",
+    "arkhai-compute-provisioning-service>=0.2.0",
     "arkhai-vms-provisioning-operator-client>=0.3.0",
     "arkhai-vms>=0.2.0",
     "arkhai-bare-metal>=0.2.0",
-    "arkhai-kit-resource-pools>=0.1.0",
-    "arkhai-kit-fulfillment>=0.1.0",
+    "arkhai-kit-resource-pools>=0.2.0",
+    "arkhai-kit-fulfillment>=0.2.0",
     "dependency-injector>=4.41.0",
     "pydantic>=2.7",
     "sqlalchemy>=2.0",
@@ -35,3 +35,6 @@ dev = [
     "pytest>=9.0.2",
     "pytest-asyncio>=0.23",
 ]
+
+[tool.uv]
+find-links = ["../../../../.dist"]

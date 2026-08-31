@@ -16,6 +16,7 @@ class ListingRequest:
     listing_id: str
     offer: dict[str, Any]
     accepted_escrows: list[dict[str, Any]]
+    settlement_options: list[dict[str, Any]]
     demands: list[dict[str, Any]]
     max_duration_seconds: int | None
     storefront_url: str | None
@@ -24,7 +25,6 @@ class ListingRequest:
 @dataclass
 class UpdateListingRequest:
     updates: dict[str, Any]
-    private_key: str
 
 
 class FakeRegistryClient:
@@ -43,10 +43,7 @@ class FakeRegistryClient:
     async def publish_listing_per_registry(
         self,
         payloads: dict[str, ListingRequest],
-        *,
-        private_key: str,
     ) -> list[dict[str, Any]]:
-        assert private_key == "0xkey"
         self.published = payloads
         return [
             {
@@ -98,11 +95,11 @@ def test_publish_listing_to_registries_builds_payload_and_records_results() -> N
                 "accepted_escrows": "[]",
                 "demands": "[]",
                 "max_duration_seconds": 3600,
+                "storefront_url": "http://seller",
             },
             enabled=True,
             registry_client_factory=lambda: client,
             listing_request_factory=ListingRequest,
-            private_key="0xkey",
             storefront_url="http://seller",
             record_publications=lambda listing_id, results: _record(
                 recorded,
@@ -122,6 +119,29 @@ def test_publish_listing_to_registries_builds_payload_and_records_results() -> N
     assert events[0]["offer_resource"] == {"gpu_model": "H200"}
 
 
+def test_publish_listing_rejects_legacy_seller_locator() -> None:
+    client = FakeRegistryClient()
+
+    async def run() -> dict[str, Any]:
+        return await publish_listing_to_registries(
+            {
+                "listing_id": "L1",
+                "seller": "http://seller",
+                "offer_resource": {},
+            },
+            enabled=True,
+            registry_client_factory=lambda: client,
+            listing_request_factory=ListingRequest,
+            storefront_url="http://seller",
+        )
+
+    result = asyncio.run(run())
+
+    assert result["status"] == "error"
+    assert "storefront_url is required" in result["message"]
+    assert client.published is None
+
+
 def test_close_listing_in_registries_updates_selected_targets() -> None:
     client = FakeRegistryClient()
     recorded: list[tuple[str, list[dict[str, Any]]]] = []
@@ -132,7 +152,6 @@ def test_close_listing_in_registries_updates_selected_targets() -> None:
             enabled=True,
             registry_client_factory=lambda: client,
             update_listing_request_factory=UpdateListingRequest,
-            private_key="0xkey",
             select_target_registries=lambda _listing_id, _fallback: _select(
                 ["http://r2"]
             ),

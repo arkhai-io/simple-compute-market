@@ -18,3 +18,8 @@ The bare-metal storefront MUST be buildable, configurable, migratable, and deplo
 
 - **WHEN** the bare-metal storefront distribution is installed from its built wheel or image
 - **THEN** it starts without editable sibling-package paths and includes the declared domain and shared-role runtime dependencies
+
+#### Scenario: One-domain Helm role is rendered
+
+- **WHEN** an operator supplies public identity, pinned image, persistent volume, and existing signer/site-binding Secret references to the dedicated bare-metal storefront chart
+- **THEN** it renders one unprivileged storefront with `/health` probes and no VM storefront wait, volume, or service reference

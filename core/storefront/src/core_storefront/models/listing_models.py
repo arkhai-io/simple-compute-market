@@ -2,11 +2,14 @@
 
 Domain types (ComputeResource, TokenResource, Listing) live in domain_models.py.
 """
+
 from __future__ import annotations
 
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
+from market_identity import Identity
+
 
 from market_core.schemas import EscrowDemand
 
@@ -16,14 +19,26 @@ from market_core.schemas import EscrowDemand
 # listing_id is in the URL path for all lifecycle operations.
 # ---------------------------------------------------------------------------
 
+
 class CreateListingRequest(BaseModel):
     """Body for POST /api/v1/listings/create."""
+
+    model_config = ConfigDict(extra="forbid")
+
     offer: dict[str, Any] = Field(description="Offered compute resource dict")
     accepted_escrows: list[dict[str, Any]] = Field(
+        default_factory=list,
+        description="Mechanism-specific Alkahest settlement choices.",
+    )
+    settlement_options: list[dict[str, Any]] = Field(
+        default_factory=list,
+        description="Mechanism-neutral settlement choices.",
+    )
+    settlement_config: dict[str, Any] | None = Field(
+        default=None,
         description=(
-            "List of escrow shapes the seller will accept for this listing. "
-            "Each entry: {chain_name, escrow_address, literal_fields, rates}. "
-            "Must be non-empty."
+            "Schema-opaque settlement configuration interpreted by the "
+            "storefront composition."
         ),
     )
     demands: list[EscrowDemand] = Field(
@@ -42,37 +57,53 @@ class CreateListingRequest(BaseModel):
         ),
     )
 
+    @model_validator(mode="after")
+    def require_settlement_choice(self) -> "CreateListingRequest":
+        if (
+            not self.accepted_escrows
+            and not getattr(self, "settlements", ())
+            and not self.settlement_options
+            and self.settlement_config is None
+        ):
+            raise ValueError("at least one settlement choice is required")
+        return self
+
 
 class RefundRequest(BaseModel):
-    """Body for POST /api/v1/listings/{listing_id}/refund.
-    listing_id is in the path; this body contains the payment details only.
+    """Explicit EVM refund inputs bound to the authenticated buyer principal."""
 
-    ``buyer_address`` defaults to the listing's recorded buyer (the
-    storefront DB knows it once a deal closes); pass explicitly to
-    override. ``token`` (when given) is a 0x contract address. ``amount``
-    is a non-negative decimal-digit string in base units (uint256-safe);
-    Python int is accepted too for in-process callers. Human-decimal
-    scaling is a client concern — the storefront expects already-scaled
-    base-unit values.
-    """
-    buyer_address: str | None = None
+    model_config = ConfigDict(extra="forbid")
+
+    buyer_principal: Identity
+    buyer_evm_address: str
     amount: str | int | None = None
     token: str | None = None
 
 
 class ClaimRequest(BaseModel):
     """Body for POST /api/v1/listings/{listing_id}/claim."""
+
+    model_config = ConfigDict(extra="forbid")
+
     escrow_uid: str
+    claimant_principal: Identity
     fulfillment_uid: str
 
 
 class ReclaimRequest(BaseModel):
     """Body for POST /api/v1/listings/{listing_id}/reclaim."""
+
+    model_config = ConfigDict(extra="forbid")
+
     escrow_uid: str
+    payer_principal: Identity
 
 
 class ArbitrateRequest(BaseModel):
     """Body for POST /api/v1/listings/{listing_id}/arbitrate."""
+
+    model_config = ConfigDict(extra="forbid")
+
     escrow_uid: str | None = None
     fulfillment_uid: str | None = None
     decision: bool = True
@@ -82,21 +113,32 @@ class ArbitrateRequest(BaseModel):
 # Response models
 # ---------------------------------------------------------------------------
 
+
 class ListingResponse(BaseModel):
     """Single listing — returned by GET /api/v1/listings/{id}."""
+
     listing_id: str
     status: str
     paused: bool = False
-    offer_resource: Any = None    # dict or JSON string from SQLite
+    offer_resource: Any = None  # dict or JSON string from SQLite
     accepted_escrows: list[dict[str, Any]] | None = None
     demands: list[dict[str, Any]] | None = None
     max_duration_seconds: int | None = None
-    seller: str | None = None
+    storefront_url: str
+    seller_principal: Identity
     model_config = ConfigDict(extra="allow")
+
+    @model_validator(mode="before")
+    @classmethod
+    def reject_legacy_seller_alias(cls, value: Any) -> Any:
+        if isinstance(value, dict) and "seller" in value:
+            raise ValueError("listing seller alias is not accepted")
+        return value
 
 
 class ListingListResponse(BaseModel):
     """Response for GET /api/v1/listings."""
+
     listings: list[dict[str, Any]]
     count: int
     limit: int
@@ -106,6 +148,7 @@ class ListingListResponse(BaseModel):
 
 class PauseListingResponse(BaseModel):
     """Response for POST /api/v1/listings/{id}/pause and /resume."""
+
     listing_id: str
     paused: bool
     registry_status: str = ""
@@ -114,6 +157,7 @@ class PauseListingResponse(BaseModel):
 
 class CreateListingResponse(BaseModel):
     """Response for POST /api/v1/listings/create."""
+
     status: str
     listing_id: str | None = None
     root_agent_response: str = ""
@@ -121,6 +165,7 @@ class CreateListingResponse(BaseModel):
 
 class CloseListingResponse(BaseModel):
     """Response for POST /api/v1/listings/{listing_id}/close."""
+
     status: str
     listing_id: str
     root_agent_response: str = ""
@@ -128,6 +173,7 @@ class CloseListingResponse(BaseModel):
 
 class RefundResponse(BaseModel):
     """Response for POST /api/v1/listings/{listing_id}/refund."""
+
     status: str
     listing_id: str
     tx_hash: str | None = None
@@ -140,6 +186,7 @@ class RefundResponse(BaseModel):
 
 class ClaimResponse(BaseModel):
     """Response for POST /api/v1/listings/{listing_id}/claim."""
+
     status: str
     listing_id: str
     escrow_uid: str | None = None
@@ -150,6 +197,7 @@ class ClaimResponse(BaseModel):
 
 class ReclaimResponse(BaseModel):
     """Response for POST /api/v1/listings/{listing_id}/reclaim."""
+
     status: str
     listing_id: str
     escrow_uid: str | None = None
@@ -159,6 +207,7 @@ class ReclaimResponse(BaseModel):
 
 class ArbitrateResponse(BaseModel):
     """Response for POST /api/v1/listings/{listing_id}/arbitrate."""
+
     status: str
     listing_id: str
     fulfillment_uid: str | None = None
@@ -169,6 +218,7 @@ class ArbitrateResponse(BaseModel):
 
 class EvaluateNegotiateRequest(BaseModel):
     """Body for POST /api/v1/admin/listings/{listing_id}/evaluate-negotiate."""
+
     proposal: dict[str, Any] = Field(
         description=(
             "The buyer's full EscrowProposal-shaped dict to evaluate, with "
@@ -184,10 +234,7 @@ class EvaluateNegotiateRequest(BaseModel):
             "Defaults to 1 hour when omitted."
         ),
     )
-    buyer_address: str = Field(
-        default="",
-        description="Buyer wallet address (used for logging/context only; not auth-checked)",
-    )
+    buyer_principal: Identity
 
 
 class EvaluateNegotiateResponse(BaseModel):
@@ -197,13 +244,16 @@ class EvaluateNegotiateResponse(BaseModel):
     buyer's opening proposal at this listing — without creating any negotiation
     thread or writing to the database.
     """
+
     listing_id: str
-    our_reference_amount: int        # Seller's absolute reference (per-hour × duration / 3600)
-    their_proposed_amount: int       # Echoed back from the request's proposal.fields.amount
-    direction: str                   # "maximize" (seller always maximises amount)
-    strategy: str                    # e.g. "bisection" or "rl"
-    decision: str                    # "accept" | "counter" | "exit"
+    our_reference_amount: (
+        int  # Seller's absolute reference (per-hour × duration / 3600)
+    )
+    their_proposed_amount: int  # Echoed back from the request's proposal.fields.amount
+    direction: str  # "maximize" (seller always maximises amount)
+    strategy: str  # e.g. "bisection" or "rl"
+    decision: str  # "accept" | "counter" | "exit"
     decision_amount: int | None = None
     decision_proposal: dict[str, Any] | None = None
     decision_reason: str | None = None
-    would_negotiate: bool            # True when decision != "exit"
+    would_negotiate: bool  # True when decision != "exit"

@@ -26,6 +26,19 @@ class Settings(BaseSettings):
     # Helm values overlay in the ops repo.
     root_path: str = ""
 
+    registry_authority_id: str | None = Field(
+        default=None, validation_alias="REGISTRY_AUTHORITY_ID",
+    )
+    registry_authority_scheme: str | None = Field(
+        default=None, validation_alias="REGISTRY_AUTHORITY_SCHEME",
+    )
+    registry_authority_identifier: str | None = Field(
+        default=None, validation_alias="REGISTRY_AUTHORITY_IDENTIFIER",
+    )
+    registry_authority_credential_file: str | None = Field(
+        default=None, validation_alias="REGISTRY_AUTHORITY_CREDENTIAL_FILE",
+    )
+
     # Optional ZeroTier configuration (used by deployment/Makefile, not by app logic)
     zerotier_network: str | None = Field(default=None, env="ZEROTIER_NETWORK")
 

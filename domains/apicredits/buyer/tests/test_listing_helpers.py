@@ -1,11 +1,8 @@
-"""Filter mapping + rendering helpers for `market credits listing`."""
+"""Rendering helpers for `market credits listing`."""
 
 from __future__ import annotations
 
-from domains.apicredits.buyer.common import (
-    build_token_filter_params,
-    resolve_key_disposition,
-)
+from domains.apicredits.buyer.common import resolve_key_disposition
 from domains.apicredits.buyer.listing_cli import (
     format_accepted_escrows,
     format_offer,
@@ -33,11 +30,6 @@ _LISTING = {
 }
 
 
-def test_filter_params_map_service_name():
-    assert build_token_filter_params(service_name="weather") == {
-        "service_name": "weather",
-    }
-    assert build_token_filter_params() == {}
 
 
 def test_offer_and_unit_price_rendering():

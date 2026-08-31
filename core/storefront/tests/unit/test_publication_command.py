@@ -17,7 +17,7 @@ def _source(candidate: dict[str, Any] | None = None) -> PublicationSource:
     return PublicationSource(
         name="test",
         open_keys=lambda _db: {"open-r1"},
-        close_stale=lambda _db, _url, _key: ["stale-1"],
+        close_stale=lambda _db, _url: ["stale-1"],
         available_candidates=lambda _db: [candidate],
         skip_keys=lambda c: {str(c["resource_id"])},
         offer_resource=lambda c: {"resource_id": c["resource_id"]},
@@ -28,12 +28,9 @@ def _source(candidate: dict[str, Any] | None = None) -> PublicationSource:
 
 
 def test_build_storefront_publication_command_wraps_selection() -> None:
-    selection = PublicationSourceSelection(source_names=())
-    config = StorefrontPublicationCommandConfig(
-        db_path="db.sqlite",
-        base_url="http://seller",
-        private_key=None,
-    )
+    selection = PublicationSourceSelection(sources=())
+    config = StorefrontPublicationCommandConfig(db_path="db.sqlite",
+    base_url="http://seller", )
     callbacks = StorefrontPublicationCommandCallbacks(
         build_payload=lambda *_args: ([{}], [], None),
         publish_offer=lambda *_args: {"status": "published"},
@@ -50,25 +47,13 @@ def test_build_storefront_publication_command_wraps_selection() -> None:
     assert command.base_url == "http://seller"
 
 
-def test_run_storefront_publication_command_uses_config_flags(monkeypatch) -> None:
-    import core_storefront.publication_runner as runner
-
-    monkeypatch.setattr(
-        runner,
-        "build_publication_source",
-        lambda name, **kwargs: _source({"resource_id": name, **kwargs}),
-    )
+def test_run_storefront_publication_command_uses_config_flags() -> None:
     selection = PublicationSourceSelection(
-        source_names=("vms",),
-        source_kwargs_by_name={"vms": {"price": "2"}},
+        sources=(_source({"resource_id": "vms", "price": "2"}),),
     )
-    config = StorefrontPublicationCommandConfig(
-        db_path="db.sqlite",
-        base_url="http://seller",
-        private_key=None,
-        close_stale=False,
-        skip_open=False,
-    )
+    config = StorefrontPublicationCommandConfig(db_path="db.sqlite",
+    base_url="http://seller", close_stale=False,
+    skip_open=False,)
     callbacks = StorefrontPublicationCommandCallbacks(
         build_payload=lambda *_args: ([{}], [], None),
         publish_offer=lambda offer, *_args: {
@@ -94,23 +79,14 @@ def test_run_storefront_publication_command_uses_config_flags(monkeypatch) -> No
     }
 
 
-def test_run_storefront_publication_command_honors_skip_ids(monkeypatch) -> None:
-    import core_storefront.publication_runner as runner
-
-    monkeypatch.setattr(
-        runner,
-        "build_publication_source",
-        lambda name, **_kwargs: _source({"resource_id": name}),
-    )
+def test_run_storefront_publication_command_honors_skip_ids() -> None:
     result = run_storefront_publication_command(
-        PublicationSourceSelection(source_names=("vms",)),
-        config=StorefrontPublicationCommandConfig(
-            db_path="db.sqlite",
-            base_url="http://seller",
-            private_key=None,
-            close_stale=False,
-            skip_open=False,
+        PublicationSourceSelection(
+            sources=(_source({"resource_id": "vms"}),)
         ),
+        config=StorefrontPublicationCommandConfig(db_path="db.sqlite",
+        base_url="http://seller", close_stale=False,
+        skip_open=False,),
         callbacks=StorefrontPublicationCommandCallbacks(
             build_payload=lambda *_args: ([{}], [], None),
             publish_offer=lambda *_args: {"status": "published"},

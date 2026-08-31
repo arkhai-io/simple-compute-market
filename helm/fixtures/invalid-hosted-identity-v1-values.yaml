@@ -1,0 +1,47 @@
+storefront:
+  agents:
+    - name: stale-hosted
+      identity:
+        principal:
+          scheme: ed25519
+          identifier: AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+        credentialSecret:
+          name: stale-hosted-identity
+          key: credential
+      config:
+        storefrontDomains:
+          - contribution: vms
+            offeringMode: vm
+            domainIdentity: compute.v1
+            contractVersion: "1.0"
+        registryAuthority:
+          authority: registry-a
+          principals:
+            - scheme: eip191
+              identifier: "0x90f79bf6eb2c4f870365e785982e1f101e93b906"
+        settlement:
+          schema_version: 1
+          priority: ["fiat.stripe.v1"]
+          stripe:
+            enabled: true
+            base_url: https://hosted-settlement.example.test
+            authority:
+              principals:
+                - scheme: ed25519
+                  identifier: gTl3Dqh9F19Wo1Rmw0x-zMuNipG07jeiXfYPW4_Js5Q
+            expected_manifest_digest: sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+            expected_api_version: 0.1.0
+            expected_schema_version: 3
+            required_capabilities:
+              - conditional-escrow.v1
+              - stripe-connect-separate-charges-transfers.v1
+              - portable-attestation.v1
+              - eas-arbiter.v1
+              - scheme-tagged-identities.v1
+              - account-owner-admission.v1
+              - account-owner-rotation.v1
+              - account-owner-retirement.v1
+              - signer-injected-client.v1
+              - provider-neutral-seller-onboarding.v1
+          alkahest:
+            enabled: false

@@ -41,6 +41,7 @@ def _resource(**overrides) -> SettlementResource:
     values = {
         "settlement_resource_id": "kvm1",
         "pool_id": "pool-1",
+        "executor_kind": "vm",
         "resource_kind": "vm",
         "provider": "ansible",
         "attributes": {"vm_host": "kvm1"},
@@ -338,7 +339,9 @@ class TestExtraVarsCollision:
 
     def test_reserved_var_keys_matches_what_build_vm_vars_actually_emits(self):
         ansible_service = AnsibleService(settings=MagicMock())
-        params = AnsibleJobParams(vm_host="kvm1", vm_action="create")
+        params = AnsibleJobParams(
+            vm_host="kvm1", vm_action="create", executor_kind="vm"
+        )
         reserved = ansible_service.reserved_var_keys(params)
         assert "executor_kind" in reserved
         assert "vm_host" in reserved

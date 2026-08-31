@@ -38,7 +38,7 @@ class VmProvisioningRuntime:
     settlement_repository: Any
     teardown_port: Any
 
-    def fulfillment_provider(self, resource_pool_service):
+    def fulfillment_provider(self):
         return AnsibleFulfillmentProvider(
             job_service=self.job_service,
             job_queue_provider=self.job_queue_provider,
@@ -47,7 +47,7 @@ class VmProvisioningRuntime:
     def readiness(self) -> dict[str, bool]:
         return {"ansible_service": self.ansible_service is not None}
 
-    def adapter_bundle(self, site_authority, resource_pool_service):
+    def adapter_bundle(self, site_authority):
         return build_vm_adapter_bundle(
             compute_adapter=VmComputeAdapter(
                 site_authority,
@@ -58,16 +58,15 @@ class VmProvisioningRuntime:
                 session_factory=self.session_factory,
                 teardown_port=self.teardown_port,
             ),
-            fulfillment_provider=self.fulfillment_provider(resource_pool_service),
+            fulfillment_provider=self.fulfillment_provider(),
+            pool_config_handler=self.pool_config_handler,
             readiness_check=self.readiness,
         )
 
     def release_job_port(self) -> VmFulfillmentReleaseJobPort:
         return VmFulfillmentReleaseJobPort(self.teardown_port)
 
-    def system_service(
-        self, *, lease_lifecycle_service, fulfillment_convergence_watchdog=None,
-    ):
+    def system_service(self, *, lease_lifecycle_service):
         from vm_provisioning_adapter.services.system_service import SystemService
 
         return SystemService(
@@ -77,7 +76,6 @@ class VmProvisioningRuntime:
             session_factory=self.session_factory,
             job_queue_provider=self.job_queue_provider,
             lease_lifecycle_service=lease_lifecycle_service,
-            fulfillment_convergence_watchdog=fulfillment_convergence_watchdog,
         )
 
 

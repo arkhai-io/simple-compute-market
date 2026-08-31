@@ -28,14 +28,20 @@ Admin evaluation (X-Admin-Key, no side effects):
 from __future__ import annotations
 
 import logging
+from typing import Any
 
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi_utils.cbv import cbv
+from pydantic import ValidationError
+
+import market_storefront.container as _container
+from market_storefront.middleware.admin_auth import require_admin_key
 from core_storefront.models.listing_models import (
     ArbitrateRequest,
     ArbitrateResponse,
     ClaimRequest,
     ClaimResponse,
     CloseListingResponse,
-    CreateListingRequest,
     CreateListingResponse,
     EvaluateNegotiateRequest,
     EvaluateNegotiateResponse,
@@ -47,13 +53,7 @@ from core_storefront.models.listing_models import (
     RefundRequest,
     RefundResponse,
 )
-from fastapi import APIRouter, Depends, HTTPException, Query
-from fastapi_utils.cbv import cbv
-from pydantic import ValidationError
-
-import market_storefront.container as _container
-from market_storefront.middleware.admin_auth import require_admin_key
-from market_storefront.middleware.seller_auth import make_seller_auth_dep
+from market_storefront.models.listing_models import VmCreateListingRequest
 
 logger = logging.getLogger(__name__)
 
@@ -153,7 +153,7 @@ class ListingsController:
                 status_code=404, detail=f"Listing {listing_id} not found"
             )
 
-        from arkhai_vms.listing_models import Listing
+        from domains.vms.listings.models import Listing
 
         try:
             listing = Listing.model_validate(row)
@@ -177,7 +177,10 @@ class ListingsController:
             publish_order_to_registry,
         )
 
-        publish_result = await publish_order_to_registry(listing)
+        publish_result = await publish_order_to_registry(
+            listing,
+            sqlite_client=self._db,
+        )
         registry_status = publish_result.get("status", "unknown")
         return PauseListingResponse(
             listing_id=listing_id,
@@ -190,9 +193,8 @@ class ListingsController:
         "/listings/create",
         response_model=CreateListingResponse,
         summary="Create a new listing (seller auth)",
-        dependencies=[Depends(make_seller_auth_dep("create_listing"))],
     )
-    async def create_listing(self, body: CreateListingRequest) -> CreateListingResponse:
+    async def create_listing(self, body: VmCreateListingRequest) -> CreateListingResponse:
         try:
             result = await self._listing_svc.create_listing(body)
         except ValueError as exc:
@@ -206,7 +208,6 @@ class ListingsController:
         "/listings/{listing_id}/close",
         response_model=CloseListingResponse,
         summary="Close a listing (seller auth)",
-        dependencies=[Depends(make_seller_auth_dep("close_listing"))],
     )
     async def close_listing(self, listing_id: str) -> CloseListingResponse:
         try:
@@ -222,7 +223,6 @@ class ListingsController:
         "/listings/{listing_id}/refund",
         response_model=RefundResponse,
         summary="Direct token refund to buyer (seller auth)",
-        dependencies=[Depends(make_seller_auth_dep("refund_listing"))],
     )
     async def refund(self, listing_id: str, body: RefundRequest) -> RefundResponse:
         status_code, result = await self._listing_svc.refund(
@@ -238,7 +238,6 @@ class ListingsController:
         "/listings/{listing_id}/claim",
         response_model=ClaimResponse,
         summary="Seller claims on-chain escrow (seller auth)",
-        dependencies=[Depends(make_seller_auth_dep("claim_listing"))],
     )
     async def claim(self, listing_id: str, body: ClaimRequest) -> ClaimResponse:
         status_code, result = await self._listing_svc.claim(
@@ -253,8 +252,7 @@ class ListingsController:
     @router.post(
         "/listings/{listing_id}/reclaim",
         response_model=ReclaimResponse,
-        summary="Buyer reclaims expired escrow (seller auth)",
-        dependencies=[Depends(make_seller_auth_dep("reclaim_listing"))],
+        summary="Buyer reclaims expired escrow (buyer auth)",
     )
     async def reclaim(self, listing_id: str, body: ReclaimRequest) -> ReclaimResponse:
         status_code, result = await self._listing_svc.reclaim(
@@ -270,7 +268,6 @@ class ListingsController:
         "/listings/{listing_id}/arbitrate",
         response_model=ArbitrateResponse,
         summary="Oracle arbitration (seller auth)",
-        dependencies=[Depends(make_seller_auth_dep("arbitrate_listing"))],
     )
     async def arbitrate(
         self, listing_id: str, body: ArbitrateRequest
@@ -309,10 +306,8 @@ class AdminListingsController:
     ) -> EvaluateNegotiateResponse:
         """Dry-run the seller's round-0 negotiation decision without creating a thread.
 
-        Delegates to ``ListingService.evaluate_negotiate``, which calls
-        ``_compute_round_zero_decision`` — the same pure-compute function used
-        by the real ``/negotiate/new`` flow. The result is identical to what
-        round 0 of a real negotiation would produce for the given price.
+        Delegates to ``ListingService.evaluate_negotiate`` and the same
+        domain policy adapter used by round zero of the shared runtime.
 
         Returns HTTP 404 if the listing doesn't exist or has no usable strategy.
         """

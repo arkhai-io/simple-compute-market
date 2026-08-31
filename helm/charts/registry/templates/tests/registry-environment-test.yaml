@@ -9,13 +9,16 @@
   {{- $itRepo = .Values.global.imageRepository | default "" -}}
 {{- end -}}
 {{- $itName := $rootIt.name | default ($itValues.name | default "arkhai") -}}
-{{- $itTag  := $rootIt.tag  | default ($itValues.tag  | default "e2e-tests") -}}
+{{- $itTag := $rootIt.tag | default ($itValues.tag | default "e2e-tests") -}}
+{{- $itDigest := $rootIt.digest | default ($itValues.digest | default "") -}}
 {{- $itPull := $rootIt.pullPolicy | default ($itValues.pullPolicy | default "IfNotPresent") -}}
-{{- $itImage := "" -}}
+{{- $itImageName := $itName -}}
 {{- if $itRepo -}}
-  {{- $itImage = printf "%s/%s:%s" $itRepo $itName $itTag -}}
-{{- else -}}
-  {{- $itImage = printf "%s:%s" $itName $itTag -}}
+  {{- $itImageName = printf "%s/%s" $itRepo $itName -}}
+{{- end -}}
+{{- $itImage := printf "%s:%s" $itImageName $itTag -}}
+{{- if $itDigest -}}
+  {{- $itImage = printf "%s@%s" $itImageName $itDigest -}}
 {{- end -}}
 {{- $profiles := $tests.activeProfiles | default (include "registry.smokeTestActiveProfiles" .) -}}
 apiVersion: v1

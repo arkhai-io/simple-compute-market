@@ -1,20 +1,62 @@
 from __future__ import annotations
 
+import pytest
+
 from market_resource_pools.hints import (
+    DELIVERABLE_MODES_POLICY_TAG,
     LISTING_MODE_POLICY_TAG,
     MAX_RESERVATION_HOLD_SECONDS_POLICY_TAG,
     PRICING_POLICY_TAG,
     REGION_POLICY_TAG,
     SLA_POLICY_TAG,
     capped_hold_seconds,
+    declared_deliverable_modes,
     max_reservation_hold_seconds,
+    pool_delivers_offering_mode,
     raw_listing_mode,
     raw_pricing,
     raw_region,
     sla_value,
+    validate_deliverable_modes,
     validate_hold_preference,
     validate_sla_preference,
 )
+
+
+class TestDeclaredDeliverableModes:
+    def test_declared_set_resolves_without_interpreting_names(self):
+        tags = {DELIVERABLE_MODES_POLICY_TAG: ["vm", "future.domain.v2"]}
+
+        assert declared_deliverable_modes(tags) == frozenset(
+            {"vm", "future.domain.v2"}
+        )
+        assert pool_delivers_offering_mode(tags, "vm") is True
+        assert pool_delivers_offering_mode(tags, "bare_metal") is False
+
+    def test_absent_and_explicit_empty_declarations_deliver_nothing(self):
+        assert declared_deliverable_modes({}) == frozenset()
+        assert declared_deliverable_modes(
+            {DELIVERABLE_MODES_POLICY_TAG: []}
+        ) == frozenset()
+        assert pool_delivers_offering_mode({}, "vm") is False
+
+    @pytest.mark.parametrize(
+        "raw",
+        [
+            "vm",
+            {"vm": True},
+            ["vm", "vm"],
+            ["vm", ""],
+            [" vm"],
+            ["vm", 1],
+        ],
+    )
+    def test_malformed_declaration_is_rejected_by_reader_and_validator(self, raw):
+        tags = {DELIVERABLE_MODES_POLICY_TAG: raw}
+
+        with pytest.raises(ValueError, match=DELIVERABLE_MODES_POLICY_TAG):
+            declared_deliverable_modes(tags)
+        assert validate_deliverable_modes(tags)
 
 
 class TestRawListingMode:

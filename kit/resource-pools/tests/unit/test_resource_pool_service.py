@@ -678,6 +678,54 @@ pools:
         assert response.valid is True
         assert response.diff is not None
 
+    def test_deliverable_modes_projects_through_authoritative_document(self, svc):
+        response = svc.validate_pools("""
+pools:
+  - id: default
+    label: Default Pool
+    provider: ansible
+    policy_tags:
+      deliverable_modes: [vm, bare_metal]
+    provider_config:
+      playbook_path: playbooks/vm-operations.yaml
+      inventory_group: kvm_hosts
+""")
+
+        assert response.valid is True
+        assert response.diff is not None
+        svc.import_pools("""
+pools:
+  - id: default
+    label: Default Pool
+    provider: ansible
+    policy_tags:
+      deliverable_modes: [vm, bare_metal]
+    provider_config:
+      playbook_path: playbooks/vm-operations.yaml
+      inventory_group: kvm_hosts
+""")
+        assert svc.get_pool("default").policy_tags["deliverable_modes"] == [
+            "vm",
+            "bare_metal",
+        ]
+
+    def test_malformed_deliverable_modes_rejected_by_document_validation(self, svc):
+        response = svc.validate_pools("""
+pools:
+  - id: default
+    label: Default Pool
+    provider: ansible
+    policy_tags:
+      deliverable_modes: vm
+    provider_config:
+      playbook_path: playbooks/vm-operations.yaml
+      inventory_group: kvm_hosts
+""")
+
+        assert response.valid is False
+        assert response.diff is None
+        assert "invalid_deliverable_modes" in {p.code for p in response.problems}
+
     def test_invalid_sla_rejected(self, svc):
         response = svc.validate_pools("""
 pools:

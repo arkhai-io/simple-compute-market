@@ -24,15 +24,25 @@ CHAINS = {
 }
 
 
-def _settings(**overrides):
-    base = {
-        "oracle_gated_listings": False,
-        "trusted_oracle_address": "",
-        "interruptible_listings": False,
-        "interruptible_oracle_address": "",
+def _settings(
+    *,
+    oracle_gated: bool = False,
+    trusted_oracle_addresses: list[str] | None = None,
+    interruptible: bool = False,
+    interruptible_oracle_addresses: list[str] | None = None,
+):
+    return {
+        "settlement": {
+            "alkahest": {
+                "oracle_gated": oracle_gated,
+                "trusted_oracle_addresses": trusted_oracle_addresses or [],
+                "interruptible": interruptible,
+                "interruptible_oracle_addresses": (
+                    interruptible_oracle_addresses or []
+                ),
+            }
+        }
     }
-    base.update(overrides)
-    return SimpleNamespace(**base)
 
 
 def _chains(config_path):
@@ -58,7 +68,7 @@ def test_gated_posture_publishes_third_party_oracle_demands():
 
     with patch(
         "market_storefront.utils.config.settings",
-        _settings(oracle_gated_listings=True, trusted_oracle_address=ORACLE),
+        _settings(oracle_gated=True, trusted_oracle_addresses=[ORACLE]),
     ):
         demands = _demands_for_chains(CHAINS, {"base_sepolia"}, WALLET)
     assert demands[0]["arbiter"] == get_trusted_oracle_arbiter("base_sepolia").lower()
@@ -72,9 +82,9 @@ def test_gated_posture_requires_an_oracle():
 
     with patch(
         "market_storefront.utils.config.settings",
-        _settings(oracle_gated_listings=True),
+        _settings(oracle_gated=True),
     ):
-        with pytest.raises(ValueError, match="trusted_oracle_address"):
+        with pytest.raises(ValueError, match="requires a trusted oracle"):
             _demands_for_chains(CHAINS, {"base_sepolia"}, WALLET)
 
 
@@ -86,9 +96,9 @@ def test_gated_posture_rejects_self_oracle():
 
     with patch(
         "market_storefront.utils.config.settings",
-        _settings(oracle_gated_listings=True, trusted_oracle_address=WALLET),
+        _settings(oracle_gated=True, trusted_oracle_addresses=[WALLET]),
     ):
-        with pytest.raises(ValueError, match="self-oracle|gates nothing"):
+        with pytest.raises(ValueError, match="equals the storefront wallet"):
             _demands_for_chains(CHAINS, {"base_sepolia"}, WALLET)
 
 
@@ -105,13 +115,12 @@ def test_interruptible_posture_publishes_splitter_demands(tmp_path):
     _load_override_config_cached.cache_clear()
     with patch(
         "market_storefront.utils.config.settings",
-        _settings(interruptible_listings=True),
+        _settings(interruptible=True),
     ):
         demands = _demands_for_chains(_chains(path), {"base_sepolia"}, WALLET)
-    assert (
-        demands[0]["arbiter"]
-        == get_erc20_splitter("base_sepolia", config_path=str(path)).lower()
-    )
+    assert demands[0]["arbiter"] == get_erc20_splitter(
+        "base_sepolia", config_path=str(path)
+    ).lower()
     assert demands[0]["demand_data"] == {"oracle": WALLET.lower(), "data": "0x"}
 
 
@@ -129,8 +138,8 @@ def test_interruptible_posture_allows_explicit_refund_authority(tmp_path):
     with patch(
         "market_storefront.utils.config.settings",
         _settings(
-            interruptible_listings=True,
-            interruptible_oracle_address=ORACLE,
+            interruptible=True,
+            interruptible_oracle_addresses=[ORACLE],
         ),
     ):
         demands = _demands_for_chains(_chains(path), {"base_sepolia"}, WALLET)
@@ -145,9 +154,9 @@ def test_interruptible_and_oracle_gated_are_mutually_exclusive():
     with patch(
         "market_storefront.utils.config.settings",
         _settings(
-            oracle_gated_listings=True,
-            trusted_oracle_address=ORACLE,
-            interruptible_listings=True,
+            oracle_gated=True,
+            trusted_oracle_addresses=[ORACLE],
+            interruptible=True,
         ),
     ):
         with pytest.raises(ValueError, match="mutually exclusive"):
@@ -158,6 +167,7 @@ def test_interruptible_offer_resource_is_marked():
     from market_storefront.cli_publish import _offer_resource_for_listing
 
     resource = {
+        "offering_mode": "vm",
         "pool_id": "pool-a",
         "resource_id": "machine-a",
         "gpu_model": "A100",
@@ -167,7 +177,7 @@ def test_interruptible_offer_resource_is_marked():
     }
     with patch(
         "market_storefront.utils.config.settings",
-        _settings(interruptible_listings=True),
+        _settings(interruptible=True),
     ):
         offer = _offer_resource_for_listing(resource)
     assert offer["interruptible"] is True
@@ -175,7 +185,7 @@ def test_interruptible_offer_resource_is_marked():
 
 
 def _artifacts(demands, heartbeat_interval=60, chain_config_paths=None):
-    from market_alkahest.proposals import (
+    from domains.vms.settlement.proposals import (
         accepted_escrow_artifacts_from_proposal,
     )
 
@@ -199,13 +209,11 @@ def _artifacts(demands, heartbeat_interval=60, chain_config_paths=None):
 
 
 def test_oracle_gated_plan_carries_heartbeat_service_terms():
-    demands = [
-        {
-            "chain_name": "base_sepolia",
-            "arbiter": get_trusted_oracle_arbiter("base_sepolia"),
-            "demand_data": {"oracle": WALLET.lower(), "data": "0x"},
-        }
-    ]
+    demands = [{
+        "chain_name": "base_sepolia",
+        "arbiter": get_trusted_oracle_arbiter("base_sepolia"),
+        "demand_data": {"oracle": WALLET.lower(), "data": "0x"},
+    }]
     out = _artifacts(demands)
     plan = out["settlement_plan"]
     assert plan["service_terms"]["heartbeat"] == {
@@ -220,13 +228,11 @@ def test_oracle_gated_plan_carries_heartbeat_service_terms():
 
 
 def test_recipient_gated_plan_has_no_heartbeat_terms():
-    demands = [
-        {
-            "chain_name": "base_sepolia",
-            "arbiter": get_recipient_arbiter("base_sepolia"),
-            "demand_data": {"recipient": WALLET.lower()},
-        }
-    ]
+    demands = [{
+        "chain_name": "base_sepolia",
+        "arbiter": get_recipient_arbiter("base_sepolia"),
+        "demand_data": {"recipient": WALLET.lower()},
+    }]
     out = _artifacts(demands)
     assert out["settlement_plan"]["service_terms"] == {}
 
@@ -245,13 +251,11 @@ def test_splitter_plan_carries_interruptible_service_terms(tmp_path):
     path = tmp_path / "alkahest_override.json"
     path.write_text(json.dumps(override), encoding="utf-8")
     _load_override_config_cached.cache_clear()
-    demands = [
-        {
-            "chain_name": "base_sepolia",
-            "arbiter": get_erc20_splitter("base_sepolia", config_path=str(path)),
-            "demand_data": {"oracle": WALLET.lower(), "data": "0x"},
-        }
-    ]
+    demands = [{
+        "chain_name": "base_sepolia",
+        "arbiter": get_erc20_splitter("base_sepolia", config_path=str(path)),
+        "demand_data": {"oracle": WALLET.lower(), "data": "0x"},
+    }]
     out = _artifacts(
         demands,
         chain_config_paths={"base_sepolia": str(path)},
@@ -261,4 +265,6 @@ def test_splitter_plan_carries_interruptible_service_terms(tmp_path):
         "schema": "vms.interruptible.v1",
         "refund_authority": "seller_declared",
     }
-    assert plan["obligations"][0]["params"]["obligation_data"]["arbiter"] == (SPLITTER)
+    assert plan["obligations"][0]["params"]["obligation_data"]["arbiter"] == (
+        SPLITTER
+    )

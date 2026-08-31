@@ -41,6 +41,10 @@ spec:
           value: "helm,e2e-secret"
         - name: CONFIG_DIRECTORY
           value: /app/config
+        - name: XDG_DATA_HOME
+          value: /var/lib/arkhai-buyer
+        - name: XDG_STATE_HOME
+          value: /var/lib/arkhai-buyer-state
       volumeMounts:
         - name: test-config
           mountPath: /app/config/config-helm.yml
@@ -50,6 +54,14 @@ spec:
           mountPath: /app/config/config-e2e-secret.yml
           subPath: config-e2e-secret.yml
           readOnly: true
+        - name: buyer-profile-store
+          mountPath: {{ required "buyer profile-store mountPath is required" .Values.buyer.profileStore.mountPath | quote }}
+        - name: buyer-run-state
+          mountPath: /var/lib/arkhai-buyer-state
+        - name: buyer-credential
+          mountPath: {{ required "buyer credential mountPath is required" .Values.buyer.credentialSecret.mountPath | quote }}
+          subPath: credential
+          readOnly: true
   volumes:
     - name: test-config
       configMap:
@@ -57,3 +69,14 @@ spec:
     - name: e2e-secret
       secret:
         secretName: {{ include "e2e-tests.secretName" . }}
+    - name: buyer-profile-store
+      persistentVolumeClaim:
+        claimName: {{ required "buyer profile-store existingClaim is required" .Values.buyer.profileStore.existingClaim | quote }}
+    - name: buyer-run-state
+      emptyDir: {}
+    - name: buyer-credential
+      secret:
+        secretName: {{ required "buyer credential Secret name is required" .Values.buyer.credentialSecret.name | quote }}
+        items:
+          - key: {{ required "buyer credential Secret key is required" .Values.buyer.credentialSecret.key | quote }}
+            path: credential

@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import json
+import os
+from collections.abc import Mapping
+from typing import Any
 
 import typer
-
 from market_config.config_loader import (
     get_dotted,
     load_user_config,
@@ -12,9 +14,63 @@ from market_config.config_loader import (
     user_config_file,
     write_user_config,
 )
-
+from market_config.settlement_migration import (
+    BUYER_MIGRATION_COMMAND,
+    SettlementMigrationError,
+    format_migration_result,
+    migrate_settlement_config,
+    reject_legacy_settlement_path,
+)
+from market_settlement_runtime import SettlementRole
 
 config_app = typer.Typer(no_args_is_help=True)
+
+
+def _validate_settlement_candidate(
+    document: Mapping[str, Any], role: SettlementRole
+) -> None:
+    from market_alkahest import create_alkahest_registration
+    from market_hosted_settlement import create_stripe_registration
+    from market_settlement_runtime import SettlementConfigurationRegistry
+
+    registry = SettlementConfigurationRegistry(
+        [create_alkahest_registration(), create_stripe_registration()]
+    )
+    registry.resolve(document.get("Settlement", {}), role=role)
+
+
+_REMOVED_IDENTITY_ROOTS = {
+    "identity",
+    "identity_credential",
+    "buyer_private_key",
+    "marketplace_private_key",
+    "marketplace_seed",
+    "marketplace_mnemonic",
+}
+
+
+def _reject_removed_identity_document(document: Mapping[str, Any]) -> None:
+    present = sorted(
+        str(key)
+        for key in document
+        if str(key).casefold() in _REMOVED_IDENTITY_ROOTS
+    )
+    if present:
+        raise typer.BadParameter(
+            "direct buyer identity fields are import-only: "
+            + ", ".join(present)
+            + "; run `market profile import --check`, import explicitly, "
+            "then remove them"
+        )
+
+
+def _reject_removed_identity_path(path: str) -> None:
+    root = path.partition(".")[0].casefold()
+    if root in _REMOVED_IDENTITY_ROOTS:
+        raise typer.BadParameter(
+            f"{path!r} is import-only; run `market profile import --check` "
+            "and remove the legacy field"
+        )
 
 
 @config_app.command("path")
@@ -32,7 +88,8 @@ def config_path() -> None:
 @config_app.command("show")
 def config_show(
     raw: bool = typer.Option(
-        False, "--raw",
+        False,
+        "--raw",
         help="Print the TOML file verbatim instead of the loaded mapping.",
     ),
 ) -> None:
@@ -41,17 +98,20 @@ def config_show(
     if not p.exists():
         typer.secho(f"No user config at {p}.", fg=typer.colors.YELLOW)
         raise typer.Exit(1)
+    document = load_user_config(p)
+    _reject_removed_identity_document(document)
     if raw:
         typer.echo(p.read_text())
         return
-    cfg = load_user_config(p)
-    typer.echo(json.dumps(cfg, indent=2, sort_keys=True))
+    typer.echo(json.dumps(document, indent=2, sort_keys=True))
 
 
 @config_app.command("set")
 def config_set(
     key: str = typer.Argument(..., help="Dotted config key, e.g. 'chain.rpc_url'."),
-    value: str = typer.Argument(..., help="Value to assign (coerced to int/float/bool when possible)."),
+    value: str = typer.Argument(
+        ..., help="Value to assign (coerced to int/float/bool when possible)."
+    ),
 ) -> None:
     """Set a single value in the buyer.toml.
 
@@ -59,10 +119,16 @@ def config_set(
     float-looking strings → float, otherwise left as strings. Use quotes around
     strings that look numeric if you want to keep them as text.
     """
+    _reject_removed_identity_path(key)
+    try:
+        reject_legacy_settlement_path(key, command=BUYER_MIGRATION_COMMAND)
+    except SettlementMigrationError as exc:
+        typer.secho(str(exc), err=True, fg=typer.colors.RED)
+        raise typer.Exit(2) from exc
     coerced: object = value
     low = value.strip().lower()
     if low in ("true", "false"):
-        coerced = (low == "true")
+        coerced = low == "true"
     else:
         try:
             coerced = int(value)
@@ -98,37 +164,85 @@ def config_get(
         typer.echo(str(val))
 
 
+@config_app.command("migrate")
+def config_migrate(
+    scope: str = typer.Option(..., "--scope", help="Configuration scope to migrate."),
+    check: bool = typer.Option(
+        False,
+        "--check",
+        help="Preview redacted settlement changes without writing.",
+    ),
+    write: bool = typer.Option(
+        False,
+        "--write",
+        help="Validate, back up, and atomically write the migrated file.",
+    ),
+    backup: bool = typer.Option(
+        False,
+        "--backup",
+        help="Create the required same-directory backup in write mode.",
+    ),
+) -> None:
+    """Migrate settlement config; buyer identity uses explicit profile import."""
+
+    if scope == "identity":
+        typer.secho(
+            "Identity migration is explicit: run `market profile import --check "
+            "<buyer.toml> --name <name> --provider <kind> --reference <locator>`, "
+            "then repeat without --check and remove [Identity].",
+            err=True,
+            fg=typer.colors.YELLOW,
+        )
+        raise typer.Exit(2)
+    if scope != "settlement":
+        typer.secho(
+            "Only --scope settlement or identity is supported.",
+            err=True,
+            fg=typer.colors.RED,
+        )
+        raise typer.Exit(2)
+    try:
+        result = migrate_settlement_config(
+            user_config_file(),
+            role="buyer",
+            check=check,
+            write=write,
+            backup=backup,
+            environ=os.environ,
+            validator=_validate_settlement_candidate,
+        )
+    except SettlementMigrationError as exc:
+        typer.secho(str(exc), err=True, fg=typer.colors.RED)
+        raise typer.Exit(1) from exc
+    for line in format_migration_result(result):
+        typer.echo(line)
+
+
 _INIT_USER_TEMPLATE = """\
 # arkhai buyer config — see `market config path` for this file's location
-# ($XDG_CONFIG_HOME/arkhai/buyer.toml). Every key is optional; the resolver
-# falls back to built-in defaults when a key is missing. The storefront
-# server and `market-storefront` CLI read a separate `storefront.toml` in
-# the same dir.
+# Marketplace signing identity comes only from the selected durable buyer
+# profile. Metadata defaults to $XDG_DATA_HOME/arkhai/buyer/profiles.json;
+# credentials remain in the exact keyring.v1, secret_file.v1, or
+# environment.v1 provider recorded by `market profile create|import`.
+# Run `market profile --help`; direct [Identity], raw seed, mnemonic, and
+# ARKHAI_IDENTITY_CREDENTIAL inputs are rejected rather than used as fallback.
+#
+# [BuyerProfile]
+# store_path = "/absolute/override/profiles.json"  # optional; XDG is preferred
 
-[wallet]
-# private_key = "0x..."
+
+[provisioning]
 # ssh_public_key = "ssh-ed25519 AAAA... user@host"
 
-# One [chains.<name>] table per chain the buyer wants to transact on.
-# A single buy/negotiate run targets one chain — the buyer picks it from
-# the intersection of this config and the listing's accepted_escrows,
-# either interactively or via `--chain <name>` (required with --yes when
-# there's more than one match). The table key is the canonical name used
-# in alkahest_py + the registry's accepted_escrows[].chain_name field.
-
-[chains.ethereum_sepolia]
-# rpc_url = "https://sepolia.infura.io/v3/<project_id>"
-# chain_id = 11155111                          # optional; auto-fills for the canonical chain names
-                                                # (anvil | base_sepolia | ethereum_sepolia |
-                                                # ethereum_mainnet | filecoin_calibration).
-# alkahest_address_config_path = "/path/to/alkahest.json"  # required for anvil
-
-# Add additional chains by uncommenting and customizing:
-# [chains.base_sepolia]
-# rpc_url = "https://sepolia.base.org"
 
 [registry]
 # urls = ["http://localhost:8080"]             # one or more indexer URLs to discover listings from.
+# [registry.authorities."http://localhost:8080"]
+# authority = "registry"
+# identities = [
+#   { scheme = "ed25519", identifier = "<registry-public-key>" },
+# ]
+
 
 [registry.auth]
 # Free-form table of {url = "bearer-token"}. Keys must match `urls` above
@@ -151,6 +265,69 @@ _INIT_USER_TEMPLATE = """\
                                                 # deadline are cancelled and the lowest agreed price among
                                                 # those that completed wins. Unset = wait for all.
 
+[Settlement]
+schema_version = 1
+priority = []
+
+[Settlement.stripe]
+enabled = false
+# base_url = "https://settlement.example"
+# authority_id = "hosted-authority"
+# environment = "production"
+# expected_manifest_digest = "sha256:<released-manifest-digest>"
+# expected_api_version = "0.2.1"
+# expected_schema_version = 5
+# required_capabilities = [
+#   "scheme-tagged-identities.v1",
+#   "account-owner-admission.v1",
+#   "account-owner-rotation.v1",
+#   "account-owner-retirement.v1",
+#   "signer-injected-client.v1",
+#   "provider-neutral-seller-onboarding.v1",
+#   "conditional-escrow.v2",
+#   "stripe-connect-separate-charges-transfers.v2",
+#   "portable-attestation.v1",
+#   "eas-arbiter.v1",
+#   "payer-profile.v1",
+#   "funding-authorization.v1",
+#   "funding-profile.card.v1",
+#   "funding-profile.us_bank_transfer.v1",
+#   "funding-profile.us_ach_debit.v1",
+#   "normalized-funding-reversal.v1",
+#   "operator-recovery-redaction.v1",
+# ]
+# request_timeout_seconds = 10.0
+# preflight_timeout_seconds = 5.0
+# allow_insecure_loopback = false
+# authorization_journal_path = "/var/lib/arkhai/buyer/funding-authorizations.jsonl"
+# [Settlement.stripe.off_session_policy]
+# enabled = false
+# mode = "saved_instrument"
+# authority_id = "hosted-authority"
+# environment = "production"
+# funding_profile = "card.v1" # card.v1 or us_ach_debit.v1
+# currency = "usd"
+# max_purchase_minor_units = 10000
+# max_aggregate_minor_units = 50000
+# window_kind = "rolling" # rolling or fixed
+# window_seconds = 86400
+# fixed_window_anchor_unix = 0 # required only for fixed windows
+# seller_principals = [
+#   { scheme = "ed25519", identifier = "<seller-public-key>" },
+# ]
+# [Settlement.stripe.authority]
+# principals = [
+#   { scheme = "ed25519", identifier = "<authority-public-key>" },
+# ]
+
+[Settlement.alkahest]
+enabled = false
+# address_config_path = "/path/to/alkahest.json"
+# oracle_gated = false
+# trusted_oracle_addresses = []
+# interruptible = false
+# interruptible_oracle_addresses = []
+
 [negotiation]
 # policies = ["buyer_escrow_shape_guard", "bisection"]
 #                                              # ordered policy chain; terminal policy is
@@ -169,12 +346,31 @@ _INIT_USER_TEMPLATE = """\
 #                                              # when `policies` is absent)
 """
 
+_EVM_RESOURCE_TEMPLATE = """\
+
+# Shared EVM resources are separate from mechanism policy and are omitted
+# unless `market config init-user --include-evm-resources` is requested.
+[Wallet]
+# address = "0x..."
+# private_key = "0x..."
+
+[Chains.ethereum_sepolia]
+# rpc_url = "https://sepolia.infura.io/v3/<project_id>"
+# chain_id = 11155111
+"""
+
 
 @config_app.command("init-user")
 def config_init_user(
     overwrite: bool = typer.Option(
-        False, "--overwrite",
+        False,
+        "--overwrite",
         help="Replace an existing buyer.toml instead of refusing.",
+    ),
+    include_evm_resources: bool = typer.Option(
+        False,
+        "--include-evm-resources",
+        help="Include optional [Wallet] and [Chains] placeholders for EVM mechanisms.",
     ),
 ) -> None:
     """Scaffold the buyer.toml with placeholders for every known key.
@@ -187,11 +383,15 @@ def config_init_user(
     if path.exists() and not overwrite:
         typer.secho(
             f"{path} already exists. Pass --overwrite to replace it.",
-            err=True, fg=typer.colors.RED,
+            err=True,
+            fg=typer.colors.RED,
         )
         raise typer.Exit(1)
 
     user_config_dir().mkdir(parents=True, exist_ok=True)
-    path.write_text(_INIT_USER_TEMPLATE)
+    template = _INIT_USER_TEMPLATE
+    if include_evm_resources:
+        template += _EVM_RESOURCE_TEMPLATE
+    path.write_text(template)
     typer.echo(f"Wrote {path}")
     typer.echo("Edit it, or use `market config set <key> <value>` to populate.")

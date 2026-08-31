@@ -85,9 +85,13 @@ class ImmutableCodecCapability:
         return self.normalize_result(value)
 
 
+BUYER_IDENTITY_INJECTION_CONTRACT = "core.resolved-buyer-identity.v1"
+
+
 @runtime_checkable
 class BuyerCapability(Protocol):
     """Buyer command and schema-specific orchestration hooks."""
+    identity_injection_contract: str
 
     register_commands: DomainCallable
     build_provision_terms: DomainCallable
@@ -97,6 +101,7 @@ class BuyerCapability(Protocol):
 
 @dataclass(frozen=True)
 class ImmutableBuyerCapability:
+    identity_injection_contract: str
     register_commands: DomainCallable
     build_provision_terms: DomainCallable
     select_policy: DomainCallable
@@ -144,27 +149,6 @@ class ImmutableSettlementCapability:
 
 
 @runtime_checkable
-class NegotiationCapability(Protocol):
-    """Domain negotiation-policy discovery hook.
-
-    Declared only to offer policies a role's configuration may name. A domain
-    that composes its negotiation middlewares as values, exposing no names to
-    configuration, does not declare this capability.
-
-    ``policy_sources`` returns the discovery mechanisms the domain permits.
-    The composing role uses those and no others, so operator configuration can
-    parameterise a declared mechanism but cannot introduce one.
-    """
-
-    policy_sources: DomainCallable
-
-
-@dataclass(frozen=True)
-class ImmutableNegotiationCapability:
-    policy_sources: DomainCallable
-
-
-@runtime_checkable
 class FulfillmentCapability(Protocol):
     """Domain fulfillment hook."""
 
@@ -199,7 +183,6 @@ class DomainCapability(str, Enum):
     SETTLEMENT = "settlement"
     FULFILLMENT = "fulfillment"
     COMPUTE_PROVISIONING = "compute_provisioning"
-    NEGOTIATION = "negotiation"
 
 
 _CAPABILITY_ATTRIBUTES: dict[DomainCapability, str] = {
@@ -209,7 +192,6 @@ _CAPABILITY_ATTRIBUTES: dict[DomainCapability, str] = {
     DomainCapability.SETTLEMENT: "settlement",
     DomainCapability.FULFILLMENT: "fulfillment",
     DomainCapability.COMPUTE_PROVISIONING: "compute_provisioning",
-    DomainCapability.NEGOTIATION: "negotiation",
 }
 
 _CAPABILITY_HOOKS: dict[DomainCapability, tuple[str, ...]] = {
@@ -224,7 +206,6 @@ _CAPABILITY_HOOKS: dict[DomainCapability, tuple[str, ...]] = {
     DomainCapability.SETTLEMENT: ("verify", "build_plan"),
     DomainCapability.FULFILLMENT: ("fulfill",),
     DomainCapability.COMPUTE_PROVISIONING: ("provision",),
-    DomainCapability.NEGOTIATION: ("policy_sources",),
 }
 
 
@@ -242,13 +223,12 @@ class MarketDomainContract:
     settlement: SettlementCapability | None = None
     fulfillment: FulfillmentCapability | None = None
     compute_provisioning: ComputeProvisioningCapability | None = None
-    negotiation: NegotiationCapability | None = None
 
     def has_capability(self, capability: DomainCapability) -> bool:
         return capability in self.declared_capabilities
 
     def capability(self, capability: DomainCapability) -> object | None:
-        return getattr(self, _CAPABILITY_ATTRIBUTES[capability])
+        return cast(object | None, getattr(self, _CAPABILITY_ATTRIBUTES[capability]))
 
 
 class DomainContractValidationError(ValueError):
@@ -308,6 +288,15 @@ def validate_domain_contract(
             raise DomainContractValidationError(
                 f"domain {contract.identity!s} capability {capability.value!r} "
                 f"is incomplete; missing callable hooks: {', '.join(missing)}"
+            )
+        if (
+            capability is DomainCapability.BUYER
+            and getattr(implementation, "identity_injection_contract", None)
+            != BUYER_IDENTITY_INJECTION_CONTRACT
+        ):
+            raise DomainContractValidationError(
+                f"domain {contract.identity!s} buyer capability must require "
+                f"{BUYER_IDENTITY_INJECTION_CONTRACT}"
             )
     return contract
 

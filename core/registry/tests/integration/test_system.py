@@ -18,31 +18,21 @@ class TestHealth:
         health = await registry_client.get_health()
         assert health.extra.get("checks", {}).get("database") == "ok"
 
-    async def test_503_raises_registry_client_error(self, db_session):
-        from unittest.mock import MagicMock
-        from src.main import app
-        from src.db.database import get_db
+    async def test_503_raises_registry_client_error(
+        self,
+        registry_client,
+        monkeypatch,
+    ):
+        from sqlalchemy import text as sql_text
 
-        def _broken_db():
-            mock_session = MagicMock()
-            mock_session.execute.side_effect = Exception("disk I/O error")
-            try:
-                yield mock_session
-            finally:
-                pass
-
-        import httpx
-        app.dependency_overrides[get_db] = _broken_db
-        try:
-            async with RegistryClient(
-                "http://test", transport=httpx.ASGITransport(app=app)
-            ) as client:
-                with pytest.raises(RegistryClientError) as exc_info:
-                    await client.get_health()
-            assert exc_info.value.status_code == 503
-            assert "degraded" in exc_info.value.body
-        finally:
-            app.dependency_overrides.clear()
+        monkeypatch.setattr(
+            "src.api.system_routes.text",
+            lambda _statement: sql_text("SELECT * FROM missing_health_table"),
+        )
+        with pytest.raises(RegistryClientError) as exc_info:
+            await registry_client.get_health()
+        assert exc_info.value.status_code == 503
+        assert "degraded" in exc_info.value.body
 
 
 class TestSystemStats:

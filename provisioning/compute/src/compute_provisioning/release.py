@@ -23,14 +23,11 @@ class ExecutorReleaseDispatcher:
     def __init__(
         self,
         executors: dict[str, ExecutorReleasePort],
-        *,
-        default_executor_kind: str | None = None,
     ) -> None:
         self._executors = dict(executors)
-        self._default_executor_kind = default_executor_kind
 
     async def submit_release(self, reservation: dict[str, Any]) -> str | None:
-        executor_kind = reservation.get("executor_kind") or self._default_executor_kind
+        executor_kind = reservation.get("executor_kind")
         executor = self._executors.get(str(executor_kind)) if executor_kind else None
         if executor is None:
             logger.warning(
@@ -59,17 +56,15 @@ class ReleaseJobDispatcher:
     def __init__(
         self,
         jobs: dict[str, ReleaseJobPort],
-        *,
-        default_executor_kind: str | None = None,
     ) -> None:
         self._jobs = dict(jobs)
-        self._default_executor_kind = default_executor_kind
 
-    def get_job(self, job_id: str, *, executor_kind: str | None = None) -> Any:
-        kind = executor_kind or self._default_executor_kind
-        port = self._jobs.get(str(kind)) if kind else None
+    def get_job(
+        self, job_id: str, *, executor_kind: str | None = None
+    ) -> Any:
+        port = self._jobs.get(executor_kind)
         if port is None:
             raise LookupError(
-                f"no release job port registered for executor_kind={kind!r}"
+                f"no release job port registered for executor_kind={executor_kind!r}"
             )
         return port.get_job(job_id)

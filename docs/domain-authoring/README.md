@@ -174,6 +174,22 @@ For scarce resources, keep the boundary explicit. Storefront policy may
 consult an inventory, quota service, or provisioning service, but the
 domain should document which component is authoritative for availability.
 
+### Hosted conditional settlement
+
+Domains that expose `fiat.stripe.v1` publish a deterministic
+`SettlementOption` containing only account reference, card-only
+separate-charge/transfer policy, currency/rate, and one released typed
+condition descriptor. Acceptance pins an exact option and emits one
+buyer-funded, seller-claimed obligation. Core and domain code must not copy
+the hosted wire models or serialize arbitrary fulfillment results.
+
+The domain owns a versioned evidence projection. It may emit only the selected
+condition's allowlisted resolver ID and fulfillment UID/proof fields.
+Credentials, SSH material, connection details, arbitrary provider fields,
+URLs, and headers are forbidden. Provider `false` remains pending; only a
+durably reserved satisfied result can authorize collection, and reclaim races
+that reservation through the shared runtime.
+
 ### Settlement and fulfillment
 
 Settlement turns an accepted negotiation into an executable outcome. The

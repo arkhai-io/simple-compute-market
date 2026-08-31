@@ -12,9 +12,9 @@ from pathlib import Path
 
 import pytest
 from dynaconf import Dynaconf
+from market_identity import TrustedIdentitySet, create_signer
 
 from market_storefront.utils import config as agent_config
-
 
 # ---------------------------------------------------------------------------
 # settings.toml defaults — the committed schema is the source of truth.
@@ -33,6 +33,7 @@ def test_settings_toml_provides_baseline_defaults():
     assert s.registry.discovery_timeout == 5.0
     assert s.provisioning.service_url == "http://localhost:8085"
     assert s.provisioning.timeout == 3600
+    assert list(s.provisioning.identity.principals) == []
     # Default policy chain ends in "bisection" (not "rl") — prevents
     # silent RL failures when torch is unavailable.
     assert s.negotiation.policies == [
@@ -41,34 +42,196 @@ def test_settings_toml_provides_baseline_defaults():
         "bisection",
     ]
     assert s.pricing.publish_priceless is False
+    assert list(s.pricing.settlements) == []
     # On by default -- the projection path has parity with the local-table
     # path it supersedes. A staged/canary rollout sets this false
     # explicitly rather than relying on a default that no longer matches.
     assert s.capacity.use_site_projection_for_listings is True
 
 
+def test_structured_settlement_publication_defaults_are_validated() -> None:
+    source = Dynaconf(environments=False)
+    source.set(
+        "settlement",
+        {
+            "schema_version": 1,
+            "priority": ["alkahest.v1"],
+            "alkahest": {"enabled": True},
+        },
+    )
+    source.set(
+        "pricing.settlements",
+        [
+            {
+                "mechanism": "alkahest.v1",
+                "asset": "0x" + "11" * 20,
+                "rate": "2.00",
+                "per": "hour",
+                "mechanism_input": {
+                    "chain": "base_sepolia",
+                    "escrow_kind": "erc20_escrow_obligation_default",
+                },
+            }
+        ],
+    )
+
+    clauses = agent_config.settlement_publication_defaults(source)
+
+    assert len(clauses) == 1
+    assert clauses[0].mechanism == "alkahest.v1"
+    assert clauses[0].rate == "2.00"
+    assert clauses[0].mechanism_input == {
+        "chain": "base_sepolia",
+        "escrow_kind": "erc20_escrow_obligation_default",
+    }
+
+
+def test_structured_publication_defaults_reject_partial_or_secret_input() -> None:
+    source = Dynaconf(environments=False)
+    source.set(
+        "settlement",
+        {
+            "schema_version": 1,
+            "priority": ["alkahest.v1"],
+            "alkahest": {"enabled": True},
+        },
+    )
+    source.set(
+        "pricing.settlements",
+        [
+            {
+                "mechanism": "alkahest.v1",
+                "asset": "0x" + "11" * 20,
+                "rate": "2",
+                "per": "hour",
+                "mechanism_input": {
+                    "chain": "base_sepolia",
+                    "escrow_kind": "erc20_escrow_obligation_default",
+                    "private_key": "must-not-cross",
+                },
+            }
+        ],
+    )
+
+    with pytest.raises(ValueError, match="not public metadata"):
+        agent_config.settlement_publication_defaults(source)
+
+
 def test_use_site_projection_for_listings_can_still_be_disabled_explicitly(
-    tmp_path, monkeypatch,
+    tmp_path,
+    monkeypatch,
 ):
     """The default flip doesn't remove the ability to opt back out for a
     staged/canary rollout -- an explicit override still wins."""
     monkeypatch.setenv(
-        "STOREFRONT_CAPACITY__USE_SITE_PROJECTION_FOR_LISTINGS", "false",
+        "STOREFRONT_CAPACITY__USE_SITE_PROJECTION_FOR_LISTINGS",
+        "false",
     )
     cfg = _build_isolated(tmp_path, [])
     assert cfg.capacity.use_site_projection_for_listings is False
 
 
-def test_unset_sensitive_keys_are_empty_strings():
-    """settings.toml uses "" placeholders for fields populated by the Secret
-    overlay (wallet.private_key, admin_api_key, gemini_api_key). Truthy
-    checks distinguish set-vs-unset.
-    """
+def test_public_identity_defaults_do_not_include_secret_or_wallet_values():
     s = agent_config.settings
-    assert s.wallet.private_key == ""
-    assert s.wallet.address == ""
-    assert s.admin_api_key == ""
+    assert s.identity.principal.scheme == ""
+    assert s.identity.principal.identifier == ""
+    assert s.get("wallet") is None
     assert s.integrations.gemini_api_key == ""
+
+
+def _identity_source(principal):
+    source = Dynaconf(environments=False)
+    source.set("identity.principal", principal.model_dump(mode="json"))
+    return source
+
+
+def test_resolve_marketplace_signer_matches_public_ed25519_principal(monkeypatch):
+    credential = "AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE"
+    principal = create_signer("ed25519", credential).identity
+    monkeypatch.setenv(agent_config.IDENTITY_CREDENTIAL_ENV, credential)
+
+    signer = agent_config.resolve_marketplace_signer(_identity_source(principal))
+
+    assert signer.identity == principal
+
+
+def test_resolve_marketplace_signer_rejects_mismatched_credential():
+    expected = create_signer("ed25519", b"\x01" * 32).identity
+
+    with pytest.raises(ValueError, match="does not match"):
+        agent_config.resolve_marketplace_signer(
+            _identity_source(expected),
+            credential=b"\x02" * 32,
+        )
+
+
+def test_resolve_marketplace_signer_requires_secret_boundary(monkeypatch):
+    principal = create_signer("ed25519", b"\x01" * 32).identity
+    monkeypatch.delenv(agent_config.IDENTITY_CREDENTIAL_ENV, raising=False)
+
+    with pytest.raises(ValueError, match=agent_config.IDENTITY_CREDENTIAL_ENV):
+        agent_config.resolve_marketplace_signer(_identity_source(principal))
+
+
+def test_public_administrator_binding_is_scheme_tagged():
+    administrator = create_signer("ed25519", b"\x05" * 32).identity
+    source = Dynaconf(environments=False)
+    source.set(
+        "identity.administrators",
+        {
+            "operator": {
+                "principals": [administrator.model_dump(mode="json")],
+            }
+        },
+    )
+
+    assert agent_config.get_administrator_configs(source) == {
+        "operator": TrustedIdentitySet(identities=(administrator,))
+    }
+
+
+def test_public_provisioning_authorities_and_service_peer_bindings_are_structured():
+    current = create_signer("ed25519", b"\x03" * 32).identity
+    next_authority = create_signer("ed25519", b"\x06" * 32).identity
+    principals = [
+        current.model_dump(mode="json"),
+        next_authority.model_dump(mode="json"),
+    ]
+    source = Dynaconf(environments=False)
+    source.set("provisioning.identity.principals", principals)
+    source.set(
+        "identity.service_peers",
+        {
+            "provisioning_default": {
+                "role": "service",
+                "site_id": "default",
+                "principals": principals,
+            }
+        },
+    )
+
+    trust = TrustedIdentitySet(identities=(current, next_authority))
+    assert agent_config.get_provisioning_authorities(source) == trust
+    assert agent_config.get_service_peer_configs(source) == {
+        "provisioning_default": ("service", "default", trust)
+    }
+
+
+def test_service_peer_binding_rejects_missing_site():
+    authority = create_signer("ed25519", b"\x04" * 32).identity
+    source = Dynaconf(environments=False)
+    source.set(
+        "identity.service_peers",
+        {
+            "provisioning_default": {
+                "role": "service",
+                "principals": [authority.model_dump(mode="json")],
+            }
+        },
+    )
+
+    with pytest.raises(ValueError, match="site_id"):
+        agent_config.get_service_peer_configs(source)
 
 
 # ---------------------------------------------------------------------------
@@ -184,19 +347,16 @@ rpc_url = "http://localhost:8545"
 def test_secrets_overlay_wins_over_storefront_toml(tmp_path):
     base = tmp_path / "storefront.toml"
     base.write_text("""
-[wallet]
-address = "0xpublic"
+[integrations]
+gemini_api_key = "public-placeholder"
 """)
     secret = tmp_path / "storefront.secrets.toml"
     secret.write_text("""
-[wallet]
-private_key = "0xdeadbeef"
-address     = "0xfrom-secret"
+[integrations]
+gemini_api_key = "secret-value"
 """)
     cfg = _build_isolated(tmp_path, [base, secret])
-    # Secrets overlay wins on address (it's the later layer).
-    assert cfg.wallet.address == "0xfrom-secret"
-    assert cfg.wallet.private_key == "0xdeadbeef"
+    assert cfg.integrations.gemini_api_key == "secret-value"
 
 
 def test_env_var_wins_over_overlay_files(tmp_path, monkeypatch):
@@ -217,57 +377,38 @@ def test_nested_env_var_via_double_underscore(tmp_path, monkeypatch):
 
 
 # ---------------------------------------------------------------------------
-# _build_settings derivation: wallet.address from private_key, chain.name
-# from rpc_url. These run the production builder so the post-process logic
-# is covered end-to-end.
+# EVM wallet settings are optional, explicit mechanism inputs. Marketplace
+# configuration never derives an address from a private key.
 # ---------------------------------------------------------------------------
 
 
 _ANVIL_KEY = "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80"
-_ANVIL_ADDR = "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
 
 
-def test_build_settings_derives_wallet_address_from_private_key(tmp_path, monkeypatch):
-    """When wallet.private_key is set but wallet.address is empty, the
-    builder fills wallet.address with the derived value. No RPC needed."""
+def test_build_settings_leaves_wallet_absent_for_hosted_only_profile(
+    tmp_path, monkeypatch
+):
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
+    cfg = agent_config._build_settings()
+    assert cfg.get("wallet") is None
+    assert agent_config.get_evm_wallet_address(cfg) == ""
+    assert agent_config.get_evm_wallet_private_key(cfg) == ""
+
+
+def test_evm_wallet_helpers_return_only_explicit_values(tmp_path, monkeypatch):
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
     cfg_dir = tmp_path / "arkhai"
     cfg_dir.mkdir(parents=True)
     (cfg_dir / "storefront.toml").write_text(f"""
 [wallet]
 private_key = "{_ANVIL_KEY}"
+address = "0xdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef"
 """)
     cfg = agent_config._build_settings()
-    assert cfg.wallet.address == _ANVIL_ADDR
-    assert cfg.wallet.private_key == _ANVIL_KEY
-
-
-def test_build_settings_preserves_explicit_wallet_address(tmp_path, monkeypatch, caplog):
-    """When both wallet.address and wallet.private_key are set and they
-    disagree, the configured address wins but a warning is logged."""
-    import logging
-
-    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
-    cfg_dir = tmp_path / "arkhai"
-    cfg_dir.mkdir(parents=True)
-    (cfg_dir / "storefront.toml").write_text(f"""
-[wallet]
-private_key = "{_ANVIL_KEY}"
-address     = "0xdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef"
-""")
-    with caplog.at_level(logging.WARNING, logger="market_storefront.utils.config"):
-        cfg = agent_config._build_settings()
-    assert cfg.wallet.address == "0xdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef"
-    assert any("does not match" in rec.message for rec in caplog.records)
-
-
-def test_build_settings_skips_derivation_when_both_unset(tmp_path, monkeypatch):
-    """Empty wallet.private_key → no derivation; wallet.address stays empty."""
-    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
-    # No overlay file at all.
-    cfg = agent_config._build_settings()
-    assert cfg.wallet.address == ""
-    assert cfg.wallet.private_key == ""
+    assert agent_config.get_evm_wallet_address(cfg) == (
+        "0xdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef"
+    )
+    assert agent_config.get_evm_wallet_private_key(cfg) == _ANVIL_KEY
 
 
 def test_build_chains_uses_known_chain_id_when_omitted(tmp_path, monkeypatch):

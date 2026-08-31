@@ -11,12 +11,11 @@ Handles all pool-registry operations:
     POST   /api/v1/pools/import           Bulk-import from pool-definitions YAML
     POST   /api/v1/pools/validate         Dry-run the same import, no writes
 
-No ``/admin`` prefix and no per-route auth dependency: the provisioning
-service has exactly one caller (the storefront) behind one shared secret
-for every route, gated by StorefrontAuthMiddleware — unlike the storefront
-itself, which serves multiple distinct audiences and uses ``/admin/`` to
-separate one of them out. This mirrors ``/api/v1/hosts/``, the other
-fully-operator-owned resource in this service.
+No ``/admin`` prefix and no per-route authentication dependency: the
+provisioning boundary authenticates its exact configured storefront principal
+and seller role centrally with the body-bound version 2 marketplace contract.
+This mirrors ``/api/v1/hosts/``, the other fully operator-owned resource in
+this service.
 """
 
 from __future__ import annotations

@@ -1,0 +1,80 @@
+{
+  "contract_version": "arkhai.hosted-settlement-release.v2",
+  "release_version": "0.2.1",
+  "api_version": "0.2.1",
+  "schema_version": 5,
+  "required_capabilities": [
+    "scheme-tagged-identities.v1",
+    "account-owner-admission.v1",
+    "account-owner-rotation.v1",
+    "account-owner-retirement.v1",
+    "signer-injected-client.v1",
+    "provider-neutral-seller-onboarding.v1",
+    "conditional-escrow.v2",
+    "stripe-connect-separate-charges-transfers.v2",
+    "portable-attestation.v1",
+    "eas-arbiter.v1",
+    "payer-profile.v1",
+    "funding-authorization.v1",
+    "funding-profile.card.v1",
+    "funding-profile.us_bank_transfer.v1",
+    "funding-profile.us_ach_debit.v1",
+    "normalized-funding-reversal.v1",
+    "operator-recovery-redaction.v1"
+  ],
+  "identity_contract": {
+    "request_signature_protocol": "arkhai.hosted-request-signature.v2",
+    "response_signature_protocol": "arkhai.hosted-response-signature.v2",
+    "supported_identity_schemes": [
+      "eip191",
+      "ed25519"
+    ],
+    "capabilities": [
+      "scheme-tagged-identities.v1",
+      "account-owner-admission.v1",
+      "account-owner-rotation.v1",
+      "account-owner-retirement.v1",
+      "signer-injected-client.v1",
+      "provider-neutral-seller-onboarding.v1",
+      "conditional-escrow.v2",
+      "stripe-connect-separate-charges-transfers.v2",
+      "portable-attestation.v1",
+      "eas-arbiter.v1",
+      "payer-profile.v1",
+      "funding-authorization.v1",
+      "funding-profile.card.v1",
+      "funding-profile.us_bank_transfer.v1",
+      "funding-profile.us_ach_debit.v1",
+      "normalized-funding-reversal.v1",
+      "operator-recovery-redaction.v1"
+    ],
+    "account_owner_admission_protocol": "arkhai.account-owner-admission.v1",
+    "account_owner_rotation_protocol": "arkhai.account-owner-rotation.v1",
+    "client_signer_api": "hosted_settlement_client.Signer",
+    "seller_onboarding_api": "hosted_settlement_client.SellerOnboarding",
+    "payer_profile_protocol": "arkhai.payer-profile.v1",
+    "funding_authorization_protocol": "arkhai.funding-authorization.v1",
+    "funding_profiles": [
+      "card.v1",
+      "us_bank_transfer.v1",
+      "us_ach_debit.v1"
+    ]
+  },
+  "manifest_filename": "release-manifest.json",
+  "manifest_sha256": "fc24d69e56a8f1a4aaed4711d06d67e0414e47cb996ce4865a7d4439c7de0644",
+  "authority_id": "hosted-settlement-release-v0.2",
+  "authority_address": "0x0810bdefeef3b8b85aa6c689f5e907e03328c9ac",
+  "repository": "arkhai-io/stripe-settlement-service",
+  "workflow_ref": ".github/workflows/release.yml@refs/tags/v0.2.1",
+  "source_commit": "bb68a08bf717d13326641be4405831bc23229c95",
+  "client_wheel": {
+    "filename": "arkhai_hosted_settlement_client-0.2.1-py3-none-any.whl",
+    "distribution": "arkhai-hosted-settlement-client",
+    "version": "0.2.1",
+    "sha256": "0d57c91249855798d6485b8850e4a7470033a896b721460123d9b9dc6cd57a07"
+  },
+  "service_image": {
+    "reference": "ghcr.io/arkhai-io/stripe-settlement-service",
+    "digest": "sha256:c7f70fb4755db1010c6a6e6731e7da7fc7a5d7f464d9577a1bed4a0826908f6c"
+  }
+}

@@ -31,7 +31,9 @@ COPY core/registry/pyproject.toml core/registry/uv.lock ./
 RUN sed -E -i 's|registry = "[^"]*\.dist"|registry = "/.dist"|' uv.lock
 
 RUN --mount=type=cache,target=/root/.cache/uv \
-    uv sync --no-sources --no-dev --no-install-project --find-links /.dist
+    uv sync --no-sources --no-dev --no-install-project --find-links /.dist \
+        --refresh-package arkhai-core-registry-client \
+        --refresh-package arkhai-kit-identity
 
 # Stage 2: Lean runtime image
 FROM --platform=linux/amd64 python:${PYTHON_VERSION}-slim AS runtime

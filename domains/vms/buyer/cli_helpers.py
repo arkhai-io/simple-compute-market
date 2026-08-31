@@ -3,13 +3,15 @@
 Lives next to the per-command modules in ``groups/`` rather than at the
 package root so callers don't see it as part of the public API.
 """
-from __future__ import annotations
 
-from typing import Optional
+from __future__ import annotations
+import json
+
+from typing import Any, Optional
 
 from rich.console import Console
-
-from core_buyer.cli import parse_filter_options  # noqa: F401 — moved to core
+from core_buyer import format_buyer_explanation
+import typer
 
 
 def resolve_prices_from_matches(
@@ -40,3 +42,10 @@ def resolve_prices_from_matches(
     )
 
 
+def emit_buyer_explanation(payload: dict[str, Any]) -> None:
+    """Print human evidence followed by one stable machine-readable JSON line."""
+
+    for line in format_buyer_explanation(payload):
+        typer.echo(line)
+    typer.echo("Explanation JSON:")
+    typer.echo(json.dumps(payload, sort_keys=True, separators=(",", ":")))

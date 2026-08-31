@@ -15,32 +15,36 @@ This module owns what is genuinely API-credits vocabulary:
   quantity ≤ the quota resource's available units in the captured
   capacity snapshot. Advisory, like every negotiation-time check —
   issuance re-reserves authoritatively.
-* ``key_owned_by_buyer_wallet`` — the seller-default ownership guard
-  (ARCHITECTURE.md, "API-credits market domain — Key ownership"): for an existing-key
-  claim, the captured key record's ``wallet`` owner must equal the
-  negotiation's signing wallet. Free — the wallet-signed negotiation is
-  the possession proof. The guard is the interface, not the
-  enforcement: issuance re-checks the claim at grant time.
+* ``key_owned_by_buyer_principal`` — the seller-default ownership guard:
+  for an existing-key claim, the captured key record's canonical owner
+  must equal the authenticated negotiation principal. The guard is
+  advisory; issuance repeats the exact-principal check authoritatively.
 """
 
 from __future__ import annotations
 
 import logging
+import re
 
-from market_policy.negotiation_middleware import (
-    NegotiationContext,
-    NegotiationDecision,
-    NegotiationRound,
-    NegotiationStep,
-    their_last_proposal,
+from market_identity import Identity, IdentityScheme
+from market_alkahest.schemas import (
+    EscrowProposal,
+    normalize_proposal_against_accepted_escrows,
 )
+from domains.apicredits.listings.models import coerce_resource_dict
 from market_policy.scalar_policies import (  # shared alkahest-scalar vocabulary
     _amount_from_proposal,
     _loads_json_list,
     proposal_uses_scalar_amount,
 )
-
-from domains.apicredits.listings.models import coerce_resource_dict
+from market_policy.negotiation_middleware import (
+    NegotiationContext,
+    NegotiationDecision,
+    NegotiationRound,
+    NegotiationStep,
+    register_negotiation_middleware,
+    their_last_proposal,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -61,6 +65,7 @@ def _is_round_zero(history: list[NegotiationRound]) -> bool:
     )
 
 
+@register_negotiation_middleware("api_credits_round_zero_guard")
 def api_credits_round_zero_guard(
     history: list[NegotiationRound],
     context: NegotiationContext,
@@ -107,34 +112,79 @@ def api_credits_round_zero_guard(
         )
 
     proposal = their_last_proposal(history)
-    accepted = _loads_json_list(listing.get("accepted_escrows"))
     accepted_proposal_dict = None
-    if isinstance(proposal, dict):
+    if isinstance(proposal, dict) and proposal.get("settlement_selection") is not None:
         try:
-            from market_alkahest.schemas import (
-                EscrowProposal,
-                normalize_proposal_against_accepted_escrows,
-            )
-
-            accepted_proposal = normalize_proposal_against_accepted_escrows(
-                proposal=EscrowProposal.model_validate(proposal),
-                accepted_escrows=accepted if accepted else None,
-            )
-            accepted_proposal_dict = accepted_proposal.model_dump()
+            selection = proposal["settlement_selection"]
+            if not isinstance(selection, dict) or set(selection) != {
+                "mechanism",
+                "option_id",
+                "expiration_unix",
+            }:
+                raise ValueError("selection has invalid fields")
+            mechanism = selection["mechanism"]
+            option_id = selection["option_id"]
+            expiration_unix = selection["expiration_unix"]
+            if not isinstance(mechanism, str) or not mechanism:
+                raise ValueError("selection mechanism is required")
+            if (
+                not isinstance(option_id, str)
+                or re.fullmatch(r"[0-9a-f]{64}", option_id) is None
+            ):
+                raise ValueError("selection option_id is invalid")
+            if (
+                isinstance(expiration_unix, bool)
+                or not isinstance(expiration_unix, int)
+                or expiration_unix <= 0
+            ):
+                raise ValueError("selection expiration is invalid")
+            options = _loads_json_list(listing.get("settlement_options"))
+            matches = [
+                option
+                for option in options
+                if isinstance(option, dict)
+                and option.get("option_id") == option_id
+                and option.get("mechanism") == mechanism
+            ]
+            if len(matches) != 1:
+                raise ValueError("selection does not exact-match one listing option")
+            context.intermediate["accepted_settlement_selection"] = dict(selection)
+            context.intermediate["accepted_settlement_option"] = matches[0]
         except Exception as exc:
             return (
                 NegotiationDecision(
                     action="reject",
-                    reason=f"invalid_escrow_proposal:{exc}",
+                    reason=f"invalid_settlement_selection:{exc}",
                 ),
                 context,
             )
+    else:
+        accepted = _loads_json_list(listing.get("accepted_escrows"))
+        if isinstance(proposal, dict):
+            try:
+                accepted_proposal = normalize_proposal_against_accepted_escrows(
+                    proposal=EscrowProposal.model_validate(proposal),
+                    accepted_escrows=accepted if accepted else None,
+                )
+                accepted_proposal_dict = accepted_proposal.model_dump()
+            except Exception as exc:
+                return (
+                    NegotiationDecision(
+                        action="reject",
+                        reason=f"invalid_escrow_proposal:{exc}",
+                    ),
+                    context,
+                )
 
-    if accepted_proposal_dict is not None:
-        context.intermediate["accepted_escrow_proposal"] = accepted_proposal_dict
+        if accepted_proposal_dict is not None:
+            context.intermediate["accepted_escrow_proposal"] = accepted_proposal_dict
 
     proposal_for_scalar = (
-        accepted_proposal_dict if accepted_proposal_dict is not None else proposal
+        proposal
+        if context.intermediate.get("accepted_settlement_selection") is not None
+        else accepted_proposal_dict
+        if accepted_proposal_dict is not None
+        else proposal
     )
     uses_scalar_amount = proposal_uses_scalar_amount(listing, proposal_for_scalar)
     context.intermediate["uses_scalar_amount"] = uses_scalar_amount
@@ -150,6 +200,7 @@ def api_credits_round_zero_guard(
     return None, context
 
 
+@register_negotiation_middleware("credit_quota_guard")
 def credit_quota_guard(
     history: list[NegotiationRound],
     context: NegotiationContext,
@@ -186,17 +237,12 @@ def credit_quota_guard(
     )
 
 
-def key_owned_by_buyer_wallet(
+@register_negotiation_middleware("key_owned_by_buyer_principal")
+def key_owned_by_buyer_principal(
     history: list[NegotiationRound],
     context: NegotiationContext,
 ) -> NegotiationStep:
-    """Reject an existing-key claim unless the buyer's wallet owns the key.
-
-    Consults the captured key record (the credits-service lookup the
-    round hook snapshots, exactly like the inventory snapshot) and the
-    negotiation's signing wallet. New-key deals pass untouched. A seller
-    who wants open top-up omits this guard from their chain.
-    """
+    """Reject an existing-key claim unless its canonical owner is the buyer."""
     if (context.intermediate.get("key_mode") or "new") != "existing":
         return None, context
 
@@ -220,33 +266,31 @@ def key_owned_by_buyer_wallet(
         )
 
     owner_scheme = record.get("owner_scheme")
-    if owner_scheme is None:
-        return None, context  # unowned key: anyone may top it up
-
-    buyer_wallet = str(context.intermediate.get("buyer_wallet") or "")
-    if owner_scheme == "wallet":
-        owner_id = str(record.get("owner_id") or "")
-        if buyer_wallet and owner_id and buyer_wallet.lower() == owner_id.lower():
-            return None, context
+    owner_identifier = record.get("owner_id")
+    if owner_scheme is None and owner_identifier is None:
+        return None, context
+    try:
+        owner = Identity(
+            scheme=IdentityScheme(str(owner_scheme)),
+            identifier=str(owner_identifier),
+        )
+        buyer = Identity.model_validate(context.intermediate.get("buyer_principal"))
+    except (TypeError, ValueError):
         return (
             NegotiationDecision(
                 action="reject",
-                reason=(
-                    f"{KEY_NOT_OWNED}: key {key_id!r} is bound to a different wallet"
-                ),
+                reason=f"{KEY_NOT_OWNED}: key {key_id!r} has no matching principal",
             ),
             context,
         )
-
-    # Non-wallet ownership (e.g. ed25519) needs the possession-challenge
-    # middleware, which is the planned second scheme — this guard cannot
-    # verify it and must not silently credit.
+    if owner == buyer:
+        return None, context
     return (
         NegotiationDecision(
             action="reject",
             reason=(
-                f"{KEY_NOT_OWNED}: key {key_id!r} ownership scheme "
-                f"{owner_scheme!r} is not verifiable by the wallet guard"
+                f"{KEY_NOT_OWNED}: key {key_id!r} is bound to a different "
+                "marketplace principal"
             ),
         ),
         context,
@@ -259,6 +303,6 @@ __all__ = [
     "KEY_REVOKED",
     "QUOTA_EXHAUSTED",
     "api_credits_round_zero_guard",
+    "key_owned_by_buyer_principal",
     "credit_quota_guard",
-    "key_owned_by_buyer_wallet",
 ]

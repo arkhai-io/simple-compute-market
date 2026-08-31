@@ -96,6 +96,7 @@ def _reserve_bare_metal(escrow_uid: str) -> dict:
         )
     reserved = ledger.reserve(
         claim={
+            "executor_kind": "bare_metal",
             "physical_host_id": "host-physical-1",
             "allocation_mode": ALLOCATION_MODE_EXCLUSIVE,
         },

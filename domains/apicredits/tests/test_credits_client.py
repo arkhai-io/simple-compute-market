@@ -11,16 +11,59 @@ import json
 
 import httpx
 import pytest
+from market_identity import Identity, IdentityScheme
 
 from domains.apicredits.settlement.credits_client import (
+    CreditIssuanceRequest,
+    CreditKeyTarget,
     CreditsServiceClient,
     CreditsServiceError,
 )
 
+_PRINCIPAL = Identity(
+    scheme=IdentityScheme.EIP191,
+    identifier="0xabcdef0000000000000000000000000000000001",
+)
+
+
+def _request(quantity: int = 10) -> CreditIssuanceRequest:
+    return CreditIssuanceRequest.create(
+        obligation_ref="esc-1",
+        mechanism="alkahest.v1",
+        owner=_PRINCIPAL,
+        service="test-service",
+        resource_id="quota-main",
+        quantity=quantity,
+        key=CreditKeyTarget(mode="new"),
+    )
+
+
+def _result_payload(request: CreditIssuanceRequest) -> dict:
+    return {
+        "schema": "arkhai.api-credits.issuance-result.v1",
+        "fulfillment_id": request.fulfillment_id,
+        "grant_id": request.fulfillment_id,
+        "obligation_ref": request.obligation_ref,
+        "mechanism": request.mechanism,
+        "owner": request.owner.model_dump(mode="json"),
+        "service": request.service,
+        "resource_id": request.resource_id,
+        "quantity": request.quantity,
+        "key_mode": request.key.mode,
+        "key_id": "k1",
+        "balance": request.quantity,
+        "request_digest": request.request_digest,
+        "committed_at_unix": 2_000_000_000,
+        "capacity_reservation_id": "quota-reservation",
+        "already_issued": False,
+        "secret": "k1.private",
+    }
+
 
 def _client(handler, admin_key: str = "test-admin-key") -> CreditsServiceClient:
     return CreditsServiceClient(
-        "http://credits-service:8082", admin_key,
+        "http://credits-service:8082",
+        admin_key,
         transport=httpx.MockTransport(handler),
     )
 
@@ -28,38 +71,41 @@ def _client(handler, admin_key: str = "test-admin-key") -> CreditsServiceClient:
 @pytest.mark.asyncio
 async def test_submit_credit_issuance_sends_expected_request():
     captured = {}
+    issuance_request = _request()
 
     def handle(request: httpx.Request) -> httpx.Response:
         captured["method"] = request.method
         captured["path"] = request.url.path
         captured["headers"] = dict(request.headers)
         captured["body"] = json.loads(request.content)
-        return httpx.Response(200, json={"key_id": "k1", "quantity": 10})
+        return httpx.Response(200, json=_result_payload(issuance_request))
 
     client = _client(handle)
-    result = await client.submit_credit_issuance(
-        escrow_uid="esc-1", quantity=10, buyer_wallet="0xabc",
-    )
+    result = await client.submit_credit_issuance(issuance_request)
 
     assert captured["method"] == "POST"
     assert captured["path"] == "/api/v1/issuance"
     assert captured["headers"]["x-admin-key"] == "test-admin-key"
-    assert captured["body"]["escrow_uid"] == "esc-1"
-    assert captured["body"]["quantity"] == 10
-    assert captured["body"]["buyer"] == {"scheme": "wallet", "id": "0xabc"}
-    assert result == {"key_id": "k1", "quantity": 10}
+    assert captured["body"] == issuance_request.model_dump(
+        mode="json",
+        exclude_none=True,
+    )
+    assert result.fulfillment_id == issuance_request.fulfillment_id
+    assert result.secret == "k1.private"
+    assert "secret" not in result.model_dump(mode="json")
 
 
 @pytest.mark.asyncio
 async def test_submit_credit_issuance_raises_typed_error_with_service_reason():
     def handle(request: httpx.Request) -> httpx.Response:
         return httpx.Response(
-            409, json={"error": "quota_exhausted", "detail": "no capacity left"},
+            409,
+            json={"error": "quota_exhausted", "detail": "no capacity left"},
         )
 
     client = _client(handle)
     with pytest.raises(CreditsServiceError) as excinfo:
-        await client.submit_credit_issuance(escrow_uid="esc-1", quantity=10)
+        await client.submit_credit_issuance(_request())
 
     assert excinfo.value.reason == "quota_exhausted"
     assert excinfo.value.detail == "no capacity left"
@@ -157,9 +203,13 @@ async def test_rollback_issuance_is_a_no_op_with_nothing_to_roll_back():
 
     client = _client(handle)
     result = await client.rollback_issuance(
-        escrow_uid="esc-1", issuance={}, key_mode="new",
+        escrow_uid="esc-1",
+        issuance={},
+        key_mode="new",
     )
 
     assert result == {
-        "key_id": "", "rolled_back": False, "reason": "nothing_to_roll_back",
+        "key_id": "",
+        "rolled_back": False,
+        "reason": "nothing_to_roll_back",
     }

@@ -3,11 +3,14 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 import typer
+from market_identity import Ed25519Signer
 
 from storefront_client.fixtures.escrow import build_claim_response, build_refund_response
 from tests._settings_overrides import settings_overrides
 
 from .conftest import fake_chain
+
+_BUYER_PRINCIPAL = Ed25519Signer(b"\x41" * 32).identity
 
 
 def test_escrow_claim_storefront_error(monkeypatch, runner, app):
@@ -19,7 +22,18 @@ def test_escrow_claim_storefront_error(monkeypatch, runner, app):
         lambda *_args, **_kwargs: (_ for _ in ()).throw(typer.Exit(1)),
     )
 
-    result = runner.invoke(app, ["escrow", "claim", "listing-001"])
+    result = runner.invoke(
+        app,
+        [
+            "escrow",
+            "claim",
+            "listing-001",
+            "--escrow-uid",
+            "0xESCROW",
+            "--fulfillment-uid",
+            "0xFULF",
+        ],
+    )
 
     assert result.exit_code == 1
 
@@ -29,12 +43,23 @@ def test_escrow_claim_bad_status(monkeypatch, runner, app):
 
     monkeypatch.setattr(escrow_group, "_submit_claim", lambda *_args, **_kwargs: {"status": "error"})
 
-    result = runner.invoke(app, ["escrow", "claim", "listing-001"])
+    result = runner.invoke(
+        app,
+        [
+            "escrow",
+            "claim",
+            "listing-001",
+            "--escrow-uid",
+            "0xESCROW",
+            "--fulfillment-uid",
+            "0xFULF",
+        ],
+    )
 
     assert result.exit_code == 7
 
 
-def test_escrow_claim_happy_path_propagates_arguments(monkeypatch, runner, app, private_key):
+def test_escrow_claim_happy_path_propagates_arguments(monkeypatch, runner, app):
     import market_storefront.groups.escrow as escrow_group
 
     calls: list[tuple] = []
@@ -44,15 +69,26 @@ def test_escrow_claim_happy_path_propagates_arguments(monkeypatch, runner, app, 
         lambda *args: calls.append(args) or build_claim_response(),
     )
 
-    with settings_overrides(**{"wallet.private_key": private_key}):
-        result = runner.invoke(
-            app,
-            ["escrow", "claim", "listing-001", "--fulfillment-uid", "0xFULF", "--storefront-url", "http://seller.test"],
-        )
+    result = runner.invoke(
+        app,
+        [
+            "escrow",
+            "claim",
+            "listing-001",
+            "--escrow-uid",
+            "0xESCROW",
+            "--fulfillment-uid",
+            "0xFULF",
+            "--storefront-url",
+            "http://seller.test",
+        ],
+    )
 
     assert result.exit_code == 0
     assert "claimed" in result.output.lower()
-    assert calls == [("http://seller.test", "listing-001", "0xFULF", private_key)]
+    assert calls == [
+        ("http://seller.test", "listing-001", "0xESCROW", "0xFULF")
+    ]
 
 
 def test_escrow_refund_storefront_error(monkeypatch, runner, app):
@@ -64,7 +100,20 @@ def test_escrow_refund_storefront_error(monkeypatch, runner, app):
         lambda *_args, **_kwargs: (_ for _ in ()).throw(typer.Exit(1)),
     )
 
-    result = runner.invoke(app, ["escrow", "refund", "listing-001", "--buyer", "0xBUYER"])
+    result = runner.invoke(
+        app,
+        [
+            "escrow",
+            "refund",
+            "listing-001",
+            "--buyer",
+            "0xBUYER",
+            "--buyer-scheme",
+            _BUYER_PRINCIPAL.scheme.value,
+            "--buyer-identifier",
+            _BUYER_PRINCIPAL.identifier,
+        ],
+    )
 
     assert result.exit_code == 1
 
@@ -74,12 +123,25 @@ def test_escrow_refund_bad_status(monkeypatch, runner, app):
 
     monkeypatch.setattr(escrow_group, "_submit_refund", lambda *_args, **_kwargs: {"status": "error"})
 
-    result = runner.invoke(app, ["escrow", "refund", "listing-001", "--buyer", "0xBUYER"])
+    result = runner.invoke(
+        app,
+        [
+            "escrow",
+            "refund",
+            "listing-001",
+            "--buyer",
+            "0xBUYER",
+            "--buyer-scheme",
+            _BUYER_PRINCIPAL.scheme.value,
+            "--buyer-identifier",
+            _BUYER_PRINCIPAL.identifier,
+        ],
+    )
 
     assert result.exit_code == 6
 
 
-def test_escrow_refund_happy_path_propagates_arguments(monkeypatch, runner, app, private_key):
+def test_escrow_refund_happy_path_propagates_arguments(monkeypatch, runner, app):
     import market_storefront.groups.escrow as escrow_group
 
     calls: list[tuple] = []
@@ -90,27 +152,39 @@ def test_escrow_refund_happy_path_propagates_arguments(monkeypatch, runner, app,
     )
     monkeypatch.setattr("market_alkahest.token.render_token", lambda _token, **_kwargs: "MOCK")
 
-    with settings_overrides(**{"wallet.private_key": private_key}):
-        result = runner.invoke(
-            app,
-            [
-                "escrow",
-                "refund",
-                "listing-001",
-                "--buyer",
-                "0xBUYER",
-                "--amount",
-                "1000",
-                "--token",
-                "0xTOKEN",
-                "--storefront-url",
-                "http://seller.test",
-            ],
-        )
+    result = runner.invoke(
+        app,
+        [
+            "escrow",
+            "refund",
+            "listing-001",
+            "--buyer",
+            "0xBUYER",
+            "--buyer-scheme",
+            _BUYER_PRINCIPAL.scheme.value,
+            "--buyer-identifier",
+            _BUYER_PRINCIPAL.identifier,
+            "--amount",
+            "1000",
+            "--token",
+            "0xTOKEN",
+            "--storefront-url",
+            "http://seller.test",
+        ],
+    )
 
     assert result.exit_code == 0
     assert "refunded" in result.output.lower()
-    assert calls == [("http://seller.test", "listing-001", "0xBUYER", "1000", "0xTOKEN", private_key)]
+    assert calls == [
+        (
+            "http://seller.test",
+            "listing-001",
+            _BUYER_PRINCIPAL,
+            "0xBUYER",
+            "1000",
+            "0xTOKEN",
+        )
+    ]
 
 
 def test_escrow_show_no_chains(monkeypatch, runner, app):

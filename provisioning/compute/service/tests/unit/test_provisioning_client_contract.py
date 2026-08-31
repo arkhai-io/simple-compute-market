@@ -10,6 +10,10 @@ from __future__ import annotations
 
 import inspect
 
+import time
+
+import pytest
+from market_identity import Ed25519Signer, Eip191Signer, TrustedIdentitySet
 from vm_provisioning_operator import ProvisioningClient, SyncProvisioningClient
 
 
@@ -27,3 +31,51 @@ def test_async_and_sync_clients_have_matching_public_operations_and_signatures()
 
     assert set(async_methods) == set(sync_methods)
     assert async_methods == sync_methods
+
+
+@pytest.mark.parametrize("signer_type", (Ed25519Signer, Eip191Signer))
+def test_operator_client_retry_fresh_signs_and_rejects_changed_context(
+    monkeypatch,
+    signer_type,
+) -> None:
+    caller = signer_type(b"\x11" * 32)
+    authority = signer_type(b"\x12" * 32)
+    now = int(time.time())
+    timestamps = iter((now, now + 1))
+    monkeypatch.setattr(
+        "compute_provisioning.client._unix_time",
+        lambda: next(timestamps, now + 1),
+    )
+    client = SyncProvisioningClient(
+        "https://provisioning.example",
+        signer=caller,
+        expected_authorities=TrustedIdentitySet(
+            identities=(authority.identity,)
+        ),
+    )
+    try:
+        first, _, _, first_id = client._authentication(
+            "POST",
+            "/api/v1/system/check-leases",
+            {},
+            request_id="stable-request",
+        )
+        second, _, _, second_id = client._authentication(
+            "POST",
+            "/api/v1/system/check-leases",
+            {},
+            request_id="stable-request",
+        )
+        with pytest.raises(ValueError, match="changed request content"):
+            client._authentication(
+                "POST",
+                "/api/v1/system/check-leases",
+                {"changed": True},
+                request_id="stable-request",
+            )
+    finally:
+        client.close()
+
+    assert first_id == second_id == "stable-request"
+    assert first["X-Market-Timestamp"] != second["X-Market-Timestamp"]
+    assert first["X-Market-Signature"] != second["X-Market-Signature"]

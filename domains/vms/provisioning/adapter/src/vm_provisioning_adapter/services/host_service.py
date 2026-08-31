@@ -22,7 +22,6 @@ SSH key handling
 from __future__ import annotations
 
 import logging
-import re
 from typing import Optional
 
 from sqlalchemy.orm import Session, sessionmaker
@@ -245,6 +244,7 @@ class HostService:
 
                 existing = db.query(Host).filter(Host.name == entry["name"]).one_or_none()
                 if existing is not None:
+                    self._require_pool_exists(db, entry["pool_id"])
                     existing.kvm_host = entry["kvm_host"]
                     existing.public_host = entry["public_host"]
                     existing.ssh_user = entry["ssh_user"]
@@ -252,7 +252,9 @@ class HostService:
                     existing.ssh_key_value = key_value
                     existing.gpu_count = entry["gpu_count"]
                     existing.gpu_model = entry.get("gpu_model")
+                    existing.pool_id = entry["pool_id"]
                 else:
+                    self._require_pool_exists(db, entry["pool_id"])
                     db.add(Host(
                         name=entry["name"],
                         kvm_host=entry["kvm_host"],
@@ -263,6 +265,7 @@ class HostService:
                         gpu_count=entry["gpu_count"],
                         gpu_model=entry.get("gpu_model"),
                         enabled=True,
+                        pool_id=entry["pool_id"],
                     ))
 
                 upserted_names.append(entry["name"])
@@ -346,14 +349,15 @@ def _parse_ini(ini_text: str) -> list[dict]:
     service itself, not machines the provisioning service sells.
 
     Returns a list of ``{"name", "kvm_host", "ssh_user", "gpu_count",
-    "gpu_model", "ansible_ssh_private_key_file"}`` dicts.  Entries missing
-    ``ansible_host`` or ``ansible_user`` are skipped with a warning.
+    "gpu_model", "pool_id", "ansible_ssh_private_key_file"}`` dicts. Entries
+    missing ``ansible_host`` or ``ansible_user`` are skipped with a warning.
 
     Variable mapping:
         ``gpus=``                         → ``gpu_count`` (int, default 0)
         ``gpu_model=``                    → ``gpu_model`` (str, default None)
         ``public_host=``                  → ``public_host`` (tenant-facing addr)
         ``ansible_ssh_private_key_file=`` → preserved verbatim
+        ``pool_id=``                      → Resource Pool id (default "default")
         All other variables              → ignored
     """
     results = []
@@ -405,6 +409,7 @@ def _parse_ini(ini_text: str) -> list[dict]:
             "ssh_user": ssh_user,
             "gpu_count": gpu_count,
             "gpu_model": host_vars.get("gpu_model"),
+            "pool_id": host_vars.get("pool_id") or DEFAULT_POOL_ID,
             "ansible_ssh_private_key_file": host_vars.get(
                 "ansible_ssh_private_key_file", _DEFAULT_KEY_PATH
             ),

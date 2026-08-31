@@ -7,17 +7,64 @@ and the cosmetic offer_resource_type tag the registry-client still reads.
 """
 
 from __future__ import annotations
+import json
+import time
+import uuid
 
 import httpx
 import pytest
+from market_identity import (
+    Ed25519Signer,
+    RequestEnvelope,
+    canonical_body_hash,
+    sign_request,
+)
 
 from src.main import app
+from src.api.validate_model import ValidatePublishRequest
+
+
+class _ValidationAuth(httpx.Auth):
+    def __init__(self) -> None:
+        self.signer = Ed25519Signer(bytes(range(32)))
+
+    def auth_flow(self, request):
+        body = ValidatePublishRequest.model_validate(
+            json.loads(request.content)
+        ).model_dump(mode="json")
+        authenticated = sign_request(
+            signer=self.signer,
+            envelope=RequestEnvelope(
+                role="buyer",
+                principal=self.signer.identity,
+                method="POST",
+                operation="listing.validate",
+                resource="listings",
+                request_id=uuid.uuid4().hex,
+                timestamp=int(time.time()),
+                body_hash=canonical_body_hash(body),
+            ),
+        )
+        request.headers.update(
+            {
+                "X-Market-Signature-Version": authenticated.protocol,
+                "X-Market-Identity-Scheme": authenticated.principal.scheme.value,
+                "X-Market-Identity-Identifier": authenticated.principal.identifier,
+                "X-Market-Role": authenticated.role,
+                "X-Market-Request-ID": authenticated.request_id,
+                "X-Market-Timestamp": str(authenticated.timestamp),
+                "X-Market-Signature": authenticated.proof.value,
+            }
+        )
+        yield request
 
 
 def _client() -> httpx.AsyncClient:
-    """Plain httpx.AsyncClient over the FastAPI app — no auth, no DB needed."""
+    """Raw JSON client with canonical buyer authentication."""
     return httpx.AsyncClient(
-        transport=httpx.ASGITransport(app=app), base_url="http://test"
+        transport=httpx.ASGITransport(app=app),
+        base_url="http://test",
+        auth=_ValidationAuth(),
     )
 
 
@@ -53,6 +100,30 @@ async def test_valid_listing_passes() -> None:
 
 
 @pytest.mark.asyncio
+async def test_hosted_settlement_option_passes_without_alkahest_choice() -> None:
+    payload = _valid_payload(
+        accepted_escrows=[],
+        settlement_options=[
+            {
+                "option_id": "a" * 64,
+                "mechanism": "fiat.stripe.v1",
+                "asset": "usd",
+                "rates": [{"field": "amount", "per": "hour", "value": "125"}],
+                "params": {"account_ref": "acct-seller"},
+            }
+        ],
+    )
+    async with _client() as c:
+        resp = await c.post("/api/v1/listings/validate-publish", json=payload)
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["valid"] is True
+    assert body["accepted_escrows_count"] == 0
+    assert body["settlement_options_count"] == 1
+
+
+@pytest.mark.asyncio
 async def test_missing_offer_resource_rejected() -> None:
     payload = _valid_payload()
     del payload["offer_resource"]["gpu_model"]
@@ -81,7 +152,9 @@ async def test_empty_accepted_escrows_rejected() -> None:
 @pytest.mark.asyncio
 async def test_accepted_escrow_missing_required_keys_rejected() -> None:
     payload = _valid_payload(
-        accepted_escrows=[{"escrow_address": "0x" + "11" * 20}]  # missing chain_name + literal_fields
+        accepted_escrows=[
+            {"escrow_address": "0x" + "11" * 20}
+        ]  # missing chain_name + literal_fields
     )
     async with _client() as c:
         resp = await c.post("/api/v1/listings/validate-publish", json=payload)
