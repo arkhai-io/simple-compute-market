@@ -1,0 +1,20 @@
+[Unit]
+Description=Bind audited passthrough devices to vfio-pci
+Documentation=man:vfio-pci(4)
+# Ordered before libvirtd so devices are in place before any guest is defined.
+# Not a hard requirement of libvirtd: a failed bind must leave the host running
+# with libvirt available and one fewer passthrough device, rather than taking
+# virtualization down with it.
+After=multi-user.target
+Before=libvirtd.service
+ConditionPathExists={{ vfio_bind_state_path }}
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart={{ vfio_bind_script_path }}
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

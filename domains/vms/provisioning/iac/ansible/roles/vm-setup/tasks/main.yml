@@ -29,6 +29,19 @@
     - host_setup
     - always
 
+- name: Include GPU passthrough viability audit
+  include_tasks:
+    file: passthrough-audit.yml
+    apply:
+      tags:
+        - passthrough_audit
+        - gpu_passthrough
+        - host_setup
+  tags:
+    - passthrough_audit
+    - gpu_passthrough
+    - host_setup
+
 - name: Include GPU passthrough configuration
   include_tasks:
     file: gpu-passthrough.yml
@@ -37,6 +50,19 @@
         - gpu_passthrough
         - host_setup
   tags:
+    - gpu_passthrough
+    - host_setup
+
+- name: Include rescue boot entry installation
+  include_tasks:
+    file: rescue-boot-entry.yml
+    apply:
+      tags:
+        - rescue_boot
+        - gpu_passthrough
+        - host_setup
+  tags:
+    - rescue_boot
     - gpu_passthrough
     - host_setup
 
@@ -136,6 +162,8 @@
   debug:
     msg:
       - "=== KVM Installation & Security Hardening Complete ==="
+      - "0. GPU passthrough was audited; only GPUs whose entire IOMMU group"
+      - "   belongs to the card were bound. See the audit report above."
       - "1. Users have been added to libvirt and kvm groups"
       - "2. Nested virtualization has been enabled (if supported)"
       - "3. Default libvirt network has been configured"
@@ -191,9 +219,15 @@
 # Reboot System
 # ============================================
 
+# This reboot exists for the IOMMU kernel parameter and the initramfs rebuild,
+# neither of which binds a device. It must never be made to carry a device
+# binding: a binding applied from the boot configuration can remove the host's
+# network path with no opportunity to observe or undo it, which is why
+# vfio-bind.service applies bindings after boot instead. See
+# openspec/specs/physical-provisioning/architecture.md.
 - name: Reboot the system to apply all changes
   reboot:
-    msg: "Rebooting to apply KVM and security configuration changes"
+    msg: "Rebooting to apply KVM and IOMMU configuration changes"
     connect_timeout: 5
     reboot_timeout: 600
     pre_reboot_delay: 0

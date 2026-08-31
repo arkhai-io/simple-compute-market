@@ -125,8 +125,41 @@ why the field's keys are named `relay_*` rather than `frp_*`.
 
 **The relay token travels in the provisioning secrets profile, not storefront
 settings.** It is a credential; the storefront's role is to say which relay to
-use, not to hold the key to it. This also matches how `ssh_decryption_key` and
-`storefront_admin_key` already reach the service.
+use, not to hold the key to it.
+
+That profile is not a new mechanism to build. Secret material in this
+repository reaches a service as a rendered `config-<profile>.yml` file inside a
+Kubernetes Secret, mounted at `CONFIG_DIRECTORY` and named in `ACTIVE_PROFILES`
+alongside the non-secret profiles — Dynaconf sees no difference between a file
+projected from a Secret and one from a ConfigMap. The provisioning service
+already runs that way: `ACTIVE_PROFILES` is `production,provisioning-secrets`
+(plus `mock` when enabled), and `config-provisioning-secrets.yml` is mounted by
+`subPath` into both the migrate init container and the application container,
+carrying `ssh_decryption_key`, `storefront_admin_key`, and `inventory_ini`.
+
+So the token is one more key in a file that already exists, on a path that
+already exists. There is no new Secret Manager shell, no new ExternalSecret, no
+new volume, no chart edit, and no values change in any environment. The whole
+delivery change is an added line where that profile is rendered.
+
+The alternative — projecting the existing rendezvous token shell as a second
+mounted file and reading it by path — was rejected on those grounds. It needs
+an ExternalSecret, a volume, a mount, and values edits per environment, to
+deliver a value the existing profile can carry for free, and it reads a raw
+credential from a path rather than through the configuration system every other
+setting uses.
+
+The service reads it with a default rather than requiring it, so an environment
+whose profile predates the key loads normally. An absent token is a valid state:
+a deployment with no relay uses the direct-NAT path. What must fail is a
+*partial* relay configuration, which is a separate guard.
+
+**The rendezvous token and the relay token are the same value in dev and are
+not the same setting.** The management tunnel's token is consumed by node
+initialization directly, and never by this service; the buyer-facing relay's
+token is what this profile carries. Today both address one relay and one shell
+supplies both. Keeping them distinct settings is what allows the buyer-facing
+relay to become a different server without re-plumbing anything.
 
 **The template's fallback token is removed rather than changed.**
 `frp_auth_token | default('password123456789')` currently means a host
@@ -218,13 +251,15 @@ safety net beneath whichever authority is chosen.
 
 ## Migration
 
-No host has yet been initialized against the relay deployed in the operations
-repository's dev environment, so there may be no host carrying accumulated
-proxy stanzas at all. If one exists, its `/etc/frp/frpc.toml` holds both the
-management posture and VM proxies in one file, and the split needs either a
-drain or a one-time transcription of existing stanzas into `frpc-vms.toml`.
-Confirm which case applies before planning; do not write a migration for a
-population that is empty.
+None. The dev cluster has never run a live-fire provisioning test and is
+deployed in mock mode, so no host has been initialized against the relay and
+none carries an accumulated `/etc/frp/frpc.toml`. The split into two client
+configurations has no existing population to move.
+
+Recorded rather than left implicit because the question is reasonable and the
+answer is not obvious from the code: a reader seeing one configuration file
+become two would expect a migration, and its absence is a fact about the
+deployment rather than an oversight.
 
 ## Verification
 

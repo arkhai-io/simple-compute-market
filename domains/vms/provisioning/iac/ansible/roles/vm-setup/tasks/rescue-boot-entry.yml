@@ -1,0 +1,77 @@
+---
+# Install a boot entry that contends for no device.
+#
+# With binding applied at runtime, a wrong bind list no longer survives a
+# reboot as an unreachable machine — the unit fails and the host stays up. This
+# entry covers the remaining case: a bind list that is wrong *and* correct
+# enough to take the host's network with it before anyone can intervene. From a
+# console, selecting this entry yields a host with every device on its normal
+# driver.
+#
+# It is selected by an operator, not automatically. An automatic reverter can
+# only revert to a state that has already been installed, and an installed
+# state that has not been proven correct is not a safe target -- a boot
+# configuration that binds no device is safe by construction, which is why this
+# entry is fixed rather than derived.
+
+- name: Install rescue boot entry generator
+  become: yes
+  template:
+    src: 09_rescue_novfio.j2
+    dest: /etc/grub.d/09_rescue_novfio
+    mode: '0755'
+  register: rescue_entry_installed
+  tags:
+    - rescue_boot
+    - gpu_passthrough
+    - host_setup
+
+- name: Preserve the selected boot entry across reboots
+  become: yes
+  lineinfile:
+    path: /etc/default/grub
+    regexp: '^GRUB_DEFAULT='
+    line: 'GRUB_DEFAULT=saved'
+    create: no
+  register: grub_default_saved
+  tags:
+    - rescue_boot
+    - gpu_passthrough
+    - host_setup
+
+- name: Keep the boot menu visible
+  become: yes
+  lineinfile:
+    path: /etc/default/grub
+    regexp: '^GRUB_TIMEOUT_STYLE='
+    line: 'GRUB_TIMEOUT_STYLE=menu'
+    create: no
+  register: grub_menu_visible
+  tags:
+    - rescue_boot
+    - gpu_passthrough
+    - host_setup
+
+- name: Regenerate GRUB configuration
+  become: yes
+  command: update-grub
+  when: >-
+    rescue_entry_installed.changed
+    or grub_default_saved.changed
+    or grub_menu_visible.changed
+  tags:
+    - rescue_boot
+    - gpu_passthrough
+    - host_setup
+
+- name: Report rescue boot entry
+  debug:
+    msg:
+      - "Rescue boot entry installed: '{{ rescue_boot_entry_title }}'"
+      - "Select it from the console to boot with no device bound to vfio-pci."
+      - "It carries '{{ rescue_cmdline_token }}' on the kernel command line,"
+      - "which the vfio-bind unit treats as an instruction to do nothing."
+  tags:
+    - rescue_boot
+    - gpu_passthrough
+    - host_setup

@@ -21,3 +21,22 @@ vm_ssh_authorized_keys: []
 # The user account whose authorized_keys file will be updated.
 # Defaults to the connection user (ansible_user).
 vm_ssh_key_user: "{{ ansible_user }}"
+
+# ============================================
+# GPU passthrough
+# ============================================
+
+# Where vfio-bind.service reads its list of PCI addresses. The list is data the
+# unit reads rather than code it embeds, so a topology change rewrites a file
+# instead of a script.
+vfio_bind_state_path: /etc/vfio-bind/devices
+
+vfio_bind_script_path: /usr/local/sbin/vfio-bind
+
+# Kernel command-line token carried only by the rescue boot entry. The bind
+# script treats its presence as an instruction to bind nothing, which is the
+# entire mechanism by which that entry is inert -- same kernel, same initramfs,
+# no device claimed.
+rescue_cmdline_token: novfiobind
+
+rescue_boot_entry_title: "Ubuntu (no vfio binding)"

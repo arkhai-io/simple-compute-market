@@ -134,12 +134,17 @@ the old keys must be reconfigured; the relay token moves into the provisioning
 secrets profile rather than storefront settings, because it is a credential and
 the storefront has no reason to hold it.
 
-**Host state.** A host initialized before this change has a single
-`/etc/frp/frpc.toml` carrying accumulated VM proxy stanzas. Re-running host
-setup produces `frpc-vms.toml` alongside it. Whether existing stanzas are
-migrated or the host is drained first is a migration question recorded in
-`design.md`; no host has yet been initialized against the deployed relay, so
-the answer may be "none exist".
+**Host state.** None to migrate. The dev cluster has never run a live-fire
+provisioning test and is deployed in mock mode, so no host has been initialized
+against the relay and none carries accumulated VM proxy stanzas in a single
+`/etc/frp/frpc.toml`.
+
+**Delivery.** The relay token is one more key in the `provisioning-secrets`
+dynaconf profile, which is already rendered, already projected by External
+Secrets, and already mounted into the provisioning service. No new Secret
+Manager shell, no new ExternalSecret, no new volume or mount, and no chart or
+values change in any environment. The operations-repository delta is an added
+line where that profile is rendered.
 
 **Documentation.** `docs/seller-frp-setup.md` describes the dashboard, the
 wildcard record, and the three storefront keys, and instructs sellers to expect

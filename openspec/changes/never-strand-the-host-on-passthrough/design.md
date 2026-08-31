@@ -218,13 +218,35 @@ Needs real hardware, verified from supplied logs:
 
 ## Open questions
 
-**Does an unbindable GPU affect declared capacity, and where?** A host whose
-cards are all unbindable prepares successfully and has zero passthrough
-capacity. Whether that is reported, and whether any consumer currently infers
-GPU capacity from successful preparation rather than from an explicit count,
-needs checking against the capacity administration path before planning.
-Recording it here rather than assuming the audit's output has no downstream
-consumer.
+*Resolved — capacity counts passthrough-capable cards, and this change closes
+the gap it opens.*
+
+The host capacity check counted GPUs with
+`lspci -nn | grep -iE 'vga|3d|display' | grep -E '\[10de:|\[1002:'`: every
+NVIDIA or AMD card present, whether or not it could be handed to a guest. While
+the role bound every card it found, that count was approximately right. Once
+cards in unsafe groups are deliberately skipped, it over-reports — the host
+publishes capacity that no create job can satisfy, and the failure surfaces at
+VM creation as a GPU attachment error rather than at the point the capacity was
+claimed.
+
+The discrepancy is created here, so it is closed here rather than deferred: the
+count and the GPU details now report cards bound to `vfio-pci`, which is
+exactly the set that can be attached to a guest. Only `.0` functions are
+counted, preserving parity with the allocation logic in the same task, which
+treats a card's audio and USB functions as bound alongside it rather than
+separately allocatable.
+
+This also reads correctly on a host prepared by the previous mechanism: a card
+bound through a command-line `ids=` list is still `vfio-pci`-bound, so it still
+counts. And it reads correctly between enabling the IOMMU and the reboot that
+activates it — nothing is bound yet, the host reports zero, and that is true.
+
+Whether declared *sellable* capacity, as opposed to this host-level count,
+should also derive from the audit remains owned by
+`capacity-resource-administration`. The relationship is now a narrow one: this
+change makes the host-level number honest, and that change decides what is
+published from it.
 
 **Does the rented node's BMC console survive `vfio-pci` claiming the ASPEED
 VGA?** On the affected machine `1a03:2000` was in the bind list. The BMC is a
