@@ -206,6 +206,43 @@ restore-issue-discovery-thin-runner ──► add-harness-scenario-contract ─�
 
 Two dependencies point outside this campaign. Nothing the harness exercises can complete a buyer journey until [`compose-domain-wheels-and-policies`](compose-domain-wheels-and-policies/) closes, and no scenario can assert that the GPU reserved is the GPU received until [`fix-vm-fulfillment-capacity-boundary`](fix-vm-fulfillment-capacity-boundary/) does. The `reinit` coverage gap the harness surfaced is owned by [`remove-relative-uv-sources`](remove-relative-uv-sources/) task 2.5, not by this campaign.
 
+## Lesser goal — Reach hosts and VMs that have no inbound route
+
+A rented node typically sits behind a firewall or NAT with nothing listening
+from outside. Two consequences run through the provisioning path and neither is
+currently satisfied: the provisioner cannot name a host whose SSH answers on a
+tunnel port, and the VM-creation path coordinates buyer tunnels through a relay
+management dashboard that a relay is not obliged to expose. Both are defects in
+how the existing mechanism is built rather than new market capability — the
+product already sells VMs on hosts it reaches by tunnel; it simply cannot do so
+against a relay deployed without a management surface.
+
+```text
+never-strand-the-host-on-passthrough ──► (prerequisite for exercising either below on real hardware)
+add-host-ssh-port (independent)
+relay-vm-access-without-a-dashboard ──► add-buyer-vm-connectivity-terms
+```
+
+| Change | Status | Acceptance boundary |
+|---|---|---|
+| [`never-strand-the-host-on-passthrough`](never-strand-the-host-on-passthrough/) | planned | Host preparation cannot render a rented machine unreachable. Passthrough viability is audited read-only before anything is written, unsafe IOMMU groups are refused rather than bound, device binding is scoped to a PCI address and applied after boot, and the rollback target is a state that contends for no device |
+| [`add-host-ssh-port`](add-host-ssh-port/) | design phase; not yet planned | The host registry records the SSH port the provisioner connects on, `ansible_port` survives INI import instead of being silently discarded, and both inventory renderers emit it. Takes no position on where a port value comes from |
+| [`relay-vm-access-without-a-dashboard`](relay-vm-access-without-a-dashboard/) | design phase; not yet planned; design questions resolved | VM tunnel allocation and verification stop depending on a relay dashboard, DNS name, certificate, and second credential. Splits the host's management and buyer tunnel clients, forwards the relay token as a secret, and stops restarting the tunnel client — and with it every buyer's live session — on each VM creation |
+
+`never-strand-the-host-on-passthrough` shares no code with the other two and
+blocks neither. It is sequenced first because both are verified by preparing
+and provisioning a real rented host, and host preparation is the step that can
+lose the machine.
+
+`add-buyer-vm-connectivity-terms` is listed under Goal 2, where its negotiation
+impact places it. It populates the same `connectivity` field this campaign
+reshapes, and should follow rather than precede: settling what the field
+contains is cheaper than negotiating a shape that carries a dashboard
+credential no longer in use.
+
+No roadmap goal currently covers this work. Whether one is warranted is a
+closeout decision for the second change rather than an omission here.
+
 ## Independent active changes
 
 Changes with no campaign; each stands alone.
