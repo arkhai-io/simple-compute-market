@@ -77,6 +77,20 @@ def make_vm_provision_terms(
         payload["compute_resource"] = compute_resource
     return VmProvisionTerms(payload=payload)
 
+def normalize_vm_provision_terms(terms: Any) -> VmProvisionTerms:
+    """Validate a wire envelope, VM payload, or durably decoded VM message."""
+
+    if isinstance(terms, dict) and "payload" in terms:
+        return VmProvisionTerms.model_validate(terms)
+    durable = dict(terms) if isinstance(terms, dict) else terms
+    if isinstance(durable, dict):
+        kind = durable.pop("kind", VM_PROVISION_KIND)
+        if kind != VM_PROVISION_KIND:
+            raise ValueError("durable VM provision terms have an unsupported kind")
+        durable.pop("settlement_selection", None)
+    payload = VmProvisionPayload.model_validate(durable).model_dump(exclude_none=True)
+    return VmProvisionTerms(payload=payload)
+
 
 # ---------------------------------------------------------------------------
 # compute.v1 payload accessors

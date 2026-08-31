@@ -73,7 +73,11 @@ async def test_policy_accepts_ssh_request_at_duration_boundaries(duration) -> No
     [
         ({}, {"duration_seconds": 899}, "bare_metal_duration_below_listing_min"),
         ({}, {"duration_seconds": 7201}, "bare_metal_duration_above_listing_max"),
-        ({}, {"access_method": "ipmi", "ssh_public_key": None}, "bare_metal_access_method_not_listed"),
+        (
+            {},
+            {"access_method": "ipmi", "ssh_public_key": None},
+            "bare_metal_access_method_not_listed",
+        ),
         (
             {"offer_resource": {"access_methods": ["ssh", "ipmi"]}},
             {"access_method": "ipmi", "ssh_public_key": None},

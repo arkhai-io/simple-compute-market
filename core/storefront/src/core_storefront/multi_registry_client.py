@@ -9,8 +9,8 @@ registry the seller decided to broadcast to, so the union seen by
 buyers stays complete even if one registry is offline.
 
 This module exposes ``MultiRegistryClient`` with the same async
-context-manager surface and method signatures as
-``registry_client.RegistryClient``:
+context-manager operations as ``registry_client.RegistryClient`` and
+keyword-only publication arguments:
 
   * **Reads** (``list_listings``, ``get_listing``) fan in across every
     configured registry concurrently. Per-registry failures are swallowed
@@ -23,14 +23,19 @@ context-manager surface and method signatures as
     logged. Callers that need stricter convergence should layer a
     reconcile loop on top.
 
-Method signatures intentionally mirror ``RegistryClient`` so call
-sites (and the tests that mock them) don't change shape.
+Every underlying client receives the storefront signer, the exact ``seller``
+caller role, and the separately configured public authority pin for that URL.
 """
 from __future__ import annotations
 
 import asyncio
 import logging
+from collections.abc import Mapping
+from dataclasses import dataclass
 from typing import Any, TypedDict
+
+from market_identity import Signer, TrustedIdentitySet
+
 
 from registry_client import (
     RegistryClient,
@@ -46,14 +51,27 @@ from registry_client.models import (
 logger = logging.getLogger(__name__)
 
 
+@dataclass(frozen=True, slots=True)
+class RegistryAuthorityTrust:
+    """Stable registry authority name and its bounded rotation trust set."""
+
+    authority: str
+    principals: TrustedIdentitySet
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.authority, str) or not self.authority.strip():
+            raise ValueError("registry authority name must be non-empty text")
+        if not isinstance(self.principals, TrustedIdentitySet):
+            raise TypeError("registry authority principals must be a TrustedIdentitySet")
+
+
 class PublishResult(TypedDict):
     """Per-registry outcome of a fan-out write.
 
     Returned by the per-registry write methods so callers can persist
     a ``publications`` row reflecting the actual shape of the payload
-    sent to each registry. ``payload`` is the exact dict transmitted —
-    useful when the wrapper built it from a uniform request (back-compat
-    fan-out) and the caller wants to record it.
+    sent to each registry. ``payload`` is the exact dict transmitted when
+    the wrapper built it from a uniform request.
     """
     registry_url: str
     success: bool
@@ -70,6 +88,9 @@ class MultiRegistryClient:
         self,
         urls: list[str],
         *,
+        signer: Signer,
+        caller_role: str,
+        expected_registries: Mapping[str, RegistryAuthorityTrust],
         timeout: float | None = None,
         auth: dict[str, str] | None = None,
     ) -> None:
@@ -88,15 +109,61 @@ class MultiRegistryClient:
         # case mismatches between [registry] urls and [registry.auth]
         # keys don't silently drop the token.
         self._auth: dict[str, str] = dict(auth or {})
+        self._signer = signer
+        if caller_role != "seller":
+            raise ValueError("storefront registry caller_role must be 'seller'")
+        from market_config.registry_url import normalize_registry_url
+        if any(not isinstance(url, str) or not url.strip() for url in self._urls):
+            raise ValueError("configured registry URLs must be non-empty text")
+        normalized_urls = [normalize_registry_url(url) for url in self._urls]
+        if len(set(normalized_urls)) != len(normalized_urls):
+            raise ValueError("configured registry URLs must be unique after normalization")
+
+        normalized_expected: dict[str, RegistryAuthorityTrust] = {}
+        for raw_url, trust in expected_registries.items():
+            if not isinstance(raw_url, str) or not raw_url.strip():
+                raise ValueError("registry authority URL must be non-empty text")
+            if not isinstance(trust, RegistryAuthorityTrust):
+                raise TypeError(
+                    "expected registry authority must be a RegistryAuthorityTrust"
+                )
+            normalized_url = normalize_registry_url(raw_url)
+            if normalized_url in normalized_expected:
+                raise ValueError(
+                    f"duplicate expected registry authority for {normalized_url!r}"
+                )
+            normalized_expected[normalized_url] = trust
+        missing = [
+            url
+            for url in self._urls
+            if normalize_registry_url(url) not in normalized_expected
+        ]
+        if missing:
+            raise ValueError(
+                f"missing expected registry authority for {missing!r}"
+            )
+        self._caller_role = caller_role
+        self._expected_registries = normalized_expected
 
     @property
     def urls(self) -> list[str]:
         return list(self._urls)
 
     async def __aenter__(self) -> "MultiRegistryClient":
-        from market_config.registry_url import lookup_registry_auth
+        from market_config.registry_url import (
+            lookup_registry_auth,
+            normalize_registry_url,
+        )
         for url in self._urls:
-            client = RegistryClient(url, api_key=lookup_registry_auth(self._auth, url))
+            trust = self._expected_registries[normalize_registry_url(url)]
+            client = RegistryClient(
+                url,
+                api_key=lookup_registry_auth(self._auth, url),
+                signer=self._signer,
+                caller_role=self._caller_role,
+                expected_registries=trust.principals,
+                registry_authority=trust.authority,
+            )
             await client.__aenter__()
             self._clients.append(client)
         return self
@@ -201,31 +268,31 @@ class MultiRegistryClient:
     # Writes — fan-out, best-effort
     # ------------------------------------------------------------------
 
-    async def publish_listing(
-        self, listing: ListingRequest, private_key: str,
-    ) -> dict:
-        """Fan out the same ``listing`` payload to every configured
-        registry. Back-compat wrapper around
-        :meth:`publish_listing_per_registry`. Returns the first
-        registry's successful response."""
+    async def publish_listing(self, *, listing: ListingRequest) -> dict:
+        """Fan out the same signed-principal listing to every registry."""
         payloads = {url: listing for url in self._urls}
-        results = await self.publish_listing_per_registry(payloads, private_key)
+        results = await self.publish_listing_per_registry(payloads=payloads)
         return _first_ok_response(results, op="publish_listing")
 
     async def update_listing(
-        self, listing_id: str, request: UpdateListingRequest,
+        self,
+        *,
+        listing_id: str,
+        request: UpdateListingRequest,
     ) -> dict:
-        """Fan out the same ``request`` to every configured registry.
-        Back-compat wrapper around :meth:`update_listing_per_registry`."""
+        """Fan out the same ``request`` to every configured registry."""
         payloads = {url: request for url in self._urls}
-        results = await self.update_listing_per_registry(listing_id, payloads)
+        results = await self.update_listing_per_registry(
+            listing_id=listing_id,
+            payloads=payloads,
+        )
         return _first_ok_response(results, op="update_listing")
 
-    async def delete_listing(self, listing_id: str, private_key: str) -> None:
-        """Fan out a delete to every configured registry. At least one
-        must succeed or the call raises."""
+    async def delete_listing(self, *, listing_id: str) -> None:
+        """Fan out a delete under the injected signer."""
         results = await self.delete_listing_per_registry(
-            listing_id, self._urls, private_key,
+            listing_id=listing_id,
+            registry_urls=self._urls,
         )
         if not any(r["success"] for r in results):
             raise RuntimeError(
@@ -234,8 +301,8 @@ class MultiRegistryClient:
 
     async def publish_listing_per_registry(
         self,
+        *,
         payloads: dict[str, ListingRequest],
-        private_key: str,
     ) -> list[PublishResult]:
         """Publish a (possibly distinct) ``ListingRequest`` payload to each
         registry independently. Returns one :class:`PublishResult` per entry
@@ -249,11 +316,12 @@ class MultiRegistryClient:
         return await self._fanout_per_registry(
             "publish_listing",
             payloads,
-            lambda client, payload: client.publish_listing(payload, private_key),
+            lambda client, payload: client.publish_listing(listing=payload),
         )
 
     async def update_listing_per_registry(
         self,
+        *,
         listing_id: str,
         payloads: dict[str, UpdateListingRequest],
     ) -> list[PublishResult]:
@@ -262,14 +330,17 @@ class MultiRegistryClient:
         return await self._fanout_per_registry(
             "update_listing",
             payloads,
-            lambda client, payload: client.update_listing(listing_id, payload),
+            lambda client, payload: client.update_listing(
+                listing_id=listing_id,
+                request=payload,
+            ),
         )
 
     async def delete_listing_per_registry(
         self,
+        *,
         listing_id: str,
         registry_urls: list[str],
-        private_key: str,
     ) -> list[PublishResult]:
         """Delete a listing from a specific subset of registries (typically
         the ones recorded in the ``publications`` table for this listing).
@@ -280,9 +351,7 @@ class MultiRegistryClient:
         return await self._fanout_per_registry(
             "delete_listing",
             synthetic,
-            lambda client, _payload: client.delete_listing(
-                listing_id, private_key,
-            ),
+            lambda client, _payload: client.delete_listing(listing_id=listing_id),
         )
 
     async def _fanout_per_registry(
@@ -403,8 +472,8 @@ def _payload_to_dict(payload: Any) -> dict | None:
 def _first_ok_response(results: list[PublishResult], *, op: str) -> dict:
     """Return the first successful response dict or raise if all failed.
 
-    Used by the back-compat fan-out wrappers (``publish_listing`` /
-    ``update_listing``) that only surface a single response shape.
+    Uniform fan-out writes expose the same response shape as one registry;
+    callers needing the complete outcome set use the per-registry methods.
     """
     for r in results:
         if r["success"] and r["response"] is not None:

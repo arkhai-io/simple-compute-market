@@ -20,6 +20,7 @@ class CapturingLogger:
 async def test_storefront_lifespan_builds_services_populates_container_and_runs_startup():
     events: list[str] = []
     db = SimpleNamespace(db_path="/tmp/storefront.db")
+    signer = SimpleNamespace(identity=object(), sign=lambda _: b"proof")
     container: dict[str, object] = {}
     logger = CapturingLogger()
 
@@ -29,6 +30,7 @@ async def test_storefront_lifespan_builds_services_populates_container_and_runs_
     lifespan = build_storefront_lifespan(
         StorefrontLifecycleCallbacks(
             get_sqlite_client=lambda: events.append("db") or db,
+            resolve_identity_signer=lambda: events.append("identity") or signer,
             set_stage_event_db_path=lambda path: events.append(f"stage:{path}"),
             build_alkahest_clients=lambda: events.append("alkahest") or {"chain": object()},
             build_listing_service=lambda **kwargs: events.append("listing") or {"listing": kwargs},
@@ -45,6 +47,7 @@ async def test_storefront_lifespan_builds_services_populates_container_and_runs_
 
     assert events == [
         "db",
+        "identity",
         "stage:/tmp/storefront.db",
         "alkahest",
         "listing",
@@ -56,6 +59,7 @@ async def test_storefront_lifespan_builds_services_populates_container_and_runs_
     ]
     assert container["sqlite_client"] is db
     assert container["alkahest_clients"]
+    assert container["marketplace_signer"] is signer
     assert logger.messages == [
         "[STARTUP] Singletons initialized",
         "[STARTUP] Background tasks started",

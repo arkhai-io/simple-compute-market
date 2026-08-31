@@ -14,25 +14,26 @@ out with the buyer-as-pure-client refactor.
 
 from __future__ import annotations
 
-import json
-import urllib.error
-import urllib.parse
-import urllib.request
 
 import typer
 from rich import box
 from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
+from core_buyer import build_buyer_explanation, explain_registry_query
 
-from .listing_helpers import (
-    build_vm_filter_params,
+from .buy_orchestrator import query_registry_for_matches_multi
+from .cli_helpers import emit_buyer_explanation
+from .settlement_composition import resolve_buyer_settlement_policy
+from domains.vms.listings import (
     format_accepted_escrows,
     format_demands,
     format_resource,
     short_ts,
     shorten,
 )
+from market_settlement_runtime import settlement_clause_descriptors
+
 
 listing_app = typer.Typer(no_args_is_help=True)
 
@@ -46,23 +47,55 @@ def _normalize_registry_url(raw_url: str) -> str:
     return raw_url.rstrip("/")
 
 
-def _fetch_json(url: str) -> dict:
-    """GET a JSON document from the listing registry."""
-    try:
-        request = urllib.request.Request(url, headers={"Accept": "application/json"})
-        with urllib.request.urlopen(request, timeout=10) as response:
-            return json.loads(response.read().decode("utf-8"))
-    except urllib.error.HTTPError as exc:
-        detail = exc.read().decode("utf-8") if exc.fp else str(exc)
-        typer.secho(
-            f"Registry error ({exc.code}): {detail}", err=True, fg=typer.colors.RED
-        )
-        raise typer.Exit(code=1)
-    except Exception as exc:
-        typer.secho(
-            f"Failed to fetch from registry: {exc}", err=True, fg=typer.colors.RED
-        )
-        raise typer.Exit(code=1)
+def settlement_clause_error_message(exc: ValueError, policy) -> str:
+    """Render a clause failure with the generated buyer field vocabulary."""
+
+    descriptors = settlement_clause_descriptors(policy.registry, role="buyer")
+    accepted = sorted(
+        {
+            name
+            for descriptor in descriptors
+            for name in (descriptor.name, *descriptor.aliases)
+        }
+    )
+    return f"{exc}. Accepted settlement fields: {', '.join(accepted)}"
+
+
+def _registry_context(
+    *,
+    registry_urls: str | None,
+    discovery_timeout: float | None,
+):
+    """Resolve one signer-authenticated, authority-pinned registry set."""
+    from .common import (
+        VMS_SCHEMA_ID,
+        resolve_discovery_timeout,
+        resolve_fresh_buyer_identity,
+        resolve_indexer_urls,
+        resolve_indexer_urls_for_schema,
+        resolve_registry_api_keys,
+        resolve_registry_authorities,
+    )
+
+    identity = resolve_fresh_buyer_identity()
+    signer = identity.signer
+    configured_urls = resolve_indexer_urls(override=registry_urls)
+    authorities = resolve_registry_authorities(configured_urls)
+    deadline = resolve_discovery_timeout(override=discovery_timeout)
+    urls = resolve_indexer_urls_for_schema(
+        VMS_SCHEMA_ID,
+        signer=signer,
+        registry_authorities=authorities,
+        override=registry_urls,
+        timeout=deadline,
+    )
+    authorities = {url: authorities[url] for url in urls}
+    api_keys = {
+        url: key
+        for url, key in resolve_registry_api_keys().items()
+        if url in authorities
+    }
+    return identity, signer, urls, authorities, api_keys, deadline
 
 
 # ---------------------------------------------------------------------------
@@ -86,63 +119,22 @@ def listing_list(
         help="Per-registry deadline in seconds (default: "
         "registry.discovery_timeout from config.toml, fallback 5).",
     ),
-    listing_id: str | None = typer.Option(
-        None, "--listing-id", help="Filter by listing ID."
-    ),
-    # Spec filters — slice fields
-    gpu_model: str | None = typer.Option(
-        None, "--gpu-model", help="Filter by GPU model (e.g., H200, RTX 5080)."
-    ),
-    gpu_count_min: int | None = typer.Option(
-        None, "--gpu-count-min", help="Minimum slice GPU count."
-    ),
-    vcpu_count_min: int | None = typer.Option(
-        None, "--vcpu-min", help="Minimum slice vCPU count."
-    ),
-    ram_gb_min: int | None = typer.Option(
-        None, "--ram-gb-min", help="Minimum slice RAM (GB)."
-    ),
-    disk_gb_min: int | None = typer.Option(
-        None, "--disk-gb-min", help="Minimum slice disk (GB)."
-    ),
-    region: str | None = typer.Option(None, "--region", help="Filter by region."),
-    virtualization_type: str | None = typer.Option(
+    resource_query: str | None = typer.Option(
         None,
-        "--virt",
-        help="Virtualization mode (bare_metal|vm|container).",
+        "--resource",
+        help="Typed resource constraints, for example "
+        "'gpu_model in [H200,A100] ram_gb>=64 static_ip=true'.",
     ),
-    # Spec filters — host context
-    cpu_type: str | None = typer.Option(
-        None, "--cpu-type", help="Filter by host CPU model string."
-    ),
-    host_cpu_cores_min: int | None = typer.Option(
-        None, "--host-cores-min", help="Minimum host CPU cores."
-    ),
-    host_ram_gb_min: int | None = typer.Option(
-        None, "--host-ram-gb-min", help="Minimum host RAM (GB)."
-    ),
-    gpu_interconnect: str | None = typer.Option(
+    settlement: list[str] | None = typer.Option(
         None,
-        "--interconnect",
-        help="GPU interconnect (nvlink|nvswitch|pcie_only|infiniband).",
+        "--settlement",
+        help="Repeatable typed settlement alternative, for example "
+        "'mechanism=stripe asset=usd stripe.method=card'.",
     ),
-    datacenter_grade: bool | None = typer.Option(
-        None,
-        "--datacenter/--no-datacenter",
-        help="Restrict to datacenter-grade hosts.",
-    ),
-    static_ip: bool | None = typer.Option(
-        None,
-        "--static-ip/--no-static-ip",
-        help="Restrict to hosts with static public IP.",
-    ),
-    raw_filters: list[str] | None = typer.Option(
-        None,
-        "--filter",
-        "-f",
-        help="Registry filter-spec parameter as name=value. Repeatable. "
-        "Use this for schema-specific filters that do not have a "
-        "compute convenience flag.",
+    explain: bool = typer.Option(
+        False,
+        "--explain",
+        help="Render a read-only selection plan and stop before negotiation.",
     ),
     # Pagination
     limit: int = typer.Option(
@@ -150,97 +142,76 @@ def listing_list(
     ),
     offset: int = typer.Option(0, "--offset", "-o", help="Pagination offset."),
 ) -> None:
-    """List open listings from the listing registry.
-
-    Spec filters mirror the registry API: equality for strings/enums/bools,
-    `_min` semantics for numerics. Without any filters, returns all open
-    listings up to ``--limit``.
-    """
-    from .common import (
-        VMS_SCHEMA_ID,
-        resolve_discovery_timeout,
-        resolve_indexer_auth,
-        resolve_indexer_urls_for_schema,
+    """List open listings matching an optional typed resource query."""
+    try:
+        settlement_policy = resolve_buyer_settlement_policy()
+    except ValueError as exc:
+        raise typer.BadParameter(str(exc)) from exc
+    try:
+        settlement_clauses = settlement_policy.compile_clauses(settlement or ())
+    except ValueError as exc:
+        raise typer.BadParameter(
+            settlement_clause_error_message(exc, settlement_policy)
+        ) from exc
+    identity, signer, urls, authorities, api_keys, deadline = _registry_context(
+        registry_urls=registry_urls,
+        discovery_timeout=discovery_timeout,
     )
-
-    urls = [
-        _normalize_registry_url(u)
-        for u in resolve_indexer_urls_for_schema(VMS_SCHEMA_ID, override=registry_urls)
-    ]
-    deadline = resolve_discovery_timeout(override=discovery_timeout)
-    auth = resolve_indexer_auth()
+    try:
+        settlement_policy = resolve_buyer_settlement_policy(identity=identity)
+    except ValueError as exc:
+        raise typer.BadParameter(str(exc)) from exc
     if limit < 1 or limit > 200:
         raise typer.BadParameter("limit must be between 1 and 200")
     if offset < 0:
         raise typer.BadParameter("offset must be >= 0")
 
-    query_params: dict[str, str | int] = {
-        "status": "open",
-        "limit": limit,
-        "offset": offset,
-    }
-    if listing_id:
-        query_params["listing_id"] = listing_id
-
-    query_params.update(
-        build_vm_filter_params(
-            gpu_model=gpu_model,
-            gpu_count_min=gpu_count_min,
-            vcpu_count_min=vcpu_count_min,
-            ram_gb_min=ram_gb_min,
-            disk_gb_min=disk_gb_min,
-            region=region,
-            virtualization_type=virtualization_type,
-            cpu_type=cpu_type,
-            host_cpu_cores_min=host_cpu_cores_min,
-            host_ram_gb_min=host_ram_gb_min,
-            gpu_interconnect=gpu_interconnect,
-            datacenter_grade=datacenter_grade,
-            static_ip=static_ip,
+    discovery = None
+    if explain:
+        discovery = explain_registry_query(
+            urls,
+            timeout=deadline,
+            signer=signer,
+            registry_authorities=authorities,
+            resource_query=resource_query,
+            limit=limit,
+            offset=offset,
+            api_keys=api_keys,
         )
+        rows = list(discovery.listings)
+    else:
+        rows = query_registry_for_matches_multi(
+            urls,
+            timeout=deadline,
+            signer=signer,
+            registry_authorities=authorities,
+            resource_query=resource_query,
+            limit=limit,
+            offset=offset,
+            api_keys=api_keys,
+        )
+
+    if explain:
+        assert discovery is not None
+
+        trace = settlement_policy.explain_listings(
+            rows,
+            expiration_unix=2_000_000_000,
+            clauses=settlement_clauses,
+        )
+        emit_buyer_explanation(build_buyer_explanation(discovery, trace))
+        return
+
+    selected_rows = settlement_policy.select_listings(
+        rows,
+        expiration_unix=2_000_000_000,
+        clauses=settlement_clauses,
     )
-    from .cli_helpers import parse_filter_options
-
-    query_params.update(parse_filter_options(raw_filters))
-    params = urllib.parse.urlencode(query_params)
-
-    # Fan-in across every configured registry; dedupe by listing_id.
-    # First-seen wins so the operator's preferred registry (listed
-    # first in registry.urls) takes precedence on collisions.
-    merged: dict[str, dict] = {}
-    successes = 0
-    last_error: Exception | None = None
-    for base in urls:
-        url = f"{base}/listings?{params}"
-        try:
-            req_headers = {"Accept": "application/json"}
-            if auth.get(base):
-                req_headers["Authorization"] = f"Bearer {auth[base]}"
-            req = urllib.request.Request(url, headers=req_headers)
-            with urllib.request.urlopen(req, timeout=deadline) as response:
-                payload = json.loads(response.read().decode("utf-8"))
-        except Exception as exc:
-            typer.secho(
-                f"[registry] {base}: {exc}",
-                err=True,
-                fg=typer.colors.YELLOW,
-            )
-            last_error = exc
-            continue
-        successes += 1
-        for row in payload.get("items", []):
-            lid = row.get("listing_id") or row.get("id")
-            if lid is None:
-                continue
-            merged.setdefault(str(lid), row)
-    if successes == 0:
-        typer.secho(
-            f"All {len(urls)} configured registries failed; last error: {last_error}",
-            err=True,
-            fg=typer.colors.RED,
-        )
-        raise typer.Exit(code=1)
-    items = list(merged.values())
+    items = []
+    for row, selected in selected_rows:
+        normalized = dict(row)
+        normalized["_selected_settlement"] = selected
+        items.append(normalized)
     console = Console()
     table = Table(title="Open Listings", box=box.SIMPLE_HEAVY, expand=True)
     table.add_column("Listing ID", style="bold", overflow="fold")
@@ -248,6 +219,7 @@ def listing_list(
     table.add_column("Storefront URL")
     table.add_column("Offer")
     table.add_column("Accepted escrows")
+    table.add_column("Settlement")
     table.add_column("Demands")
     table.add_column("Created", justify="right")
 
@@ -255,6 +227,7 @@ def listing_list(
         offer_display = format_resource(row.get("offer_resource", {}))
         accepted_display = format_accepted_escrows(row.get("accepted_escrows", []))
         demands_display = format_demands(row.get("demands", []))
+        selected = row["_selected_settlement"].option
         table.add_row(
             str(row.get("listing_id", "-")),
             str(row.get("publisher_id", "-")),
@@ -263,6 +236,7 @@ def listing_list(
             accepted_display
             if "\n" in accepted_display
             else shorten(accepted_display, 120),
+            f"{selected.mechanism} {selected.asset}",
             demands_display
             if "\n" in demands_display
             else shorten(demands_display, 120),
@@ -301,22 +275,21 @@ def listing_show(
 ) -> None:
     """Show a single listing by ID, fetched from the configured
     listing registries — the first one that knows the listing wins."""
-    from .buy_orchestrator import fetch_listing_dict_multi
-    from .common import (
-        VMS_SCHEMA_ID,
-        resolve_discovery_timeout,
-        resolve_indexer_auth,
-        resolve_indexer_urls_for_schema,
+    _identity, signer, urls, authorities, api_keys, deadline = _registry_context(
+        registry_urls=registry_urls,
+        discovery_timeout=discovery_timeout,
     )
+    from .buy_orchestrator import fetch_listing_dict_multi
 
-    urls = [
-        _normalize_registry_url(u)
-        for u in resolve_indexer_urls_for_schema(VMS_SCHEMA_ID, override=registry_urls)
-    ]
-    deadline = resolve_discovery_timeout(override=discovery_timeout)
-    auth = resolve_indexer_auth()
     try:
-        found = fetch_listing_dict_multi(urls, listing_id, timeout=deadline, auth=auth)
+        found = fetch_listing_dict_multi(
+            urls,
+            listing_id,
+            timeout=deadline,
+            signer=signer,
+            registry_authorities=authorities,
+            api_keys=api_keys,
+        )
     except RuntimeError as exc:
         typer.secho(str(exc), err=True, fg=typer.colors.RED)
         raise typer.Exit(code=1)

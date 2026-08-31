@@ -76,6 +76,26 @@ class FakeProvider(FulfillmentProvider):
         return VersionedEnvelope(kind="vm.fulfillment.result.v1", schema_version=1, payload={"credentials": []})
 
 
+class FakePoolConfigHandler:
+    def __init__(self, provider: str) -> None:
+        self.provider = provider
+
+    def validate_config(self, config):
+        return dict(config)
+
+    def validate_config_problems(self, config):
+        return dict(config), ()
+
+    def read_config(self, unit_of_work, pool_id):
+        return {}
+
+    def replace_config(self, unit_of_work, pool_id, config):
+        return None
+
+    def delete_config(self, unit_of_work, pool_id):
+        return None
+
+
 def contribution(kind: str, *actions: str) -> ExecutorAdapterContribution:
     return ExecutorAdapterContribution(
         adapter=FakeAdapter(kind),
@@ -86,24 +106,24 @@ def contribution(kind: str, *actions: str) -> ExecutorAdapterContribution:
 
 def test_composes_executor_and_provider_namespaces_independently():
     provider = FakeProvider()
-    composed = compose_adapter_bundles(
-        [
-            ExecutorAdapterBundle(
-                name="vm",
-                executors=(contribution("vm", "create"),),
-                fulfillment_providers={"ansible": provider},
-            ),
-            ExecutorAdapterBundle(
-                name="bare-metal",
-                executors=(contribution("bare_metal", "grant_access"),),
-            ),
-        ],
-        default_executor_kind="vm",
-    )
+    handler = FakePoolConfigHandler("ansible")
+    composed = compose_adapter_bundles([
+        ExecutorAdapterBundle(
+            name="vm",
+            executors=(contribution("vm", "create"),),
+            fulfillment_providers={"ansible": provider},
+            pool_config_handlers={"ansible": handler},
+        ),
+        ExecutorAdapterBundle(
+            name="bare-metal",
+            executors=(contribution("bare_metal", "grant_access"),),
+        ),
+    ])
 
     assert composed.executor_registry.get("vm").executor_kind == "vm"
     assert composed.executor_registry.get("bare_metal").executor_kind == "bare_metal"
     assert composed.provider_registry.require("ansible") is provider
+    assert composed.pool_config_handlers["ansible"] is handler
     with pytest.raises(ProviderNotFoundError):
         composed.provider_registry.require("vm")
 
@@ -126,6 +146,7 @@ def test_duplicate_executor_identifies_both_bundles():
 
 def test_duplicate_provider_identifies_both_bundles_independently_of_executors():
     provider = FakeProvider()
+    handler = FakePoolConfigHandler("ansible")
     with pytest.raises(
         ValueError,
         match="duplicate fulfillment provider 'ansible'.*'vm'.*'bare-metal'",
@@ -136,12 +157,49 @@ def test_duplicate_provider_identifies_both_bundles_independently_of_executors()
                     name="vm",
                     executors=(contribution("vm", "create"),),
                     fulfillment_providers={"ansible": provider},
+                    pool_config_handlers={"ansible": handler},
                 ),
                 ExecutorAdapterBundle(
                     name="bare-metal",
                     executors=(contribution("bare_metal", "grant_access"),),
                     fulfillment_providers={"ansible": provider},
+                    pool_config_handlers={"ansible": handler},
                 ),
+            ]
+        )
+
+
+def test_provider_without_pool_config_handler_is_rejected_before_startup():
+    with pytest.raises(
+        ValueError,
+        match="missing pool config handler.*'ansible'",
+    ):
+        compose_adapter_bundles(
+            [
+                ExecutorAdapterBundle(
+                    name="vm",
+                    executors=(contribution("vm", "create"),),
+                    fulfillment_providers={"ansible": FakeProvider()},
+                )
+            ]
+        )
+
+
+def test_handler_identity_must_match_provider_identity():
+    with pytest.raises(
+        ValueError,
+        match="declares provider 'other'",
+    ):
+        compose_adapter_bundles(
+            [
+                ExecutorAdapterBundle(
+                    name="vm",
+                    executors=(contribution("vm", "create"),),
+                    fulfillment_providers={"ansible": FakeProvider()},
+                    pool_config_handlers={
+                        "ansible": FakePoolConfigHandler("other"),
+                    },
+                )
             ]
         )
 

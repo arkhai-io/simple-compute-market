@@ -42,10 +42,14 @@ falls back to global.imageRepository, then bare image name.
 {{- if and (not $repo) .Values.global -}}
   {{- $repo = .Values.global.imageRepository | default "" -}}
 {{- end -}}
+{{- $name := .Values.integrationTests.name -}}
 {{- if $repo -}}
-{{- printf "%s/%s:%s" $repo .Values.integrationTests.name .Values.integrationTests.tag -}}
+  {{- $name = printf "%s/%s" $repo $name -}}
+{{- end -}}
+{{- if .Values.integrationTests.digest -}}
+{{- printf "%s@%s" $name .Values.integrationTests.digest -}}
 {{- else -}}
-{{- printf "%s:%s" .Values.integrationTests.name .Values.integrationTests.tag -}}
+{{- printf "%s:%s" $name .Values.integrationTests.tag -}}
 {{- end -}}
 {{- end }}
 
@@ -53,5 +57,5 @@ falls back to global.imageRepository, then bare image name.
 Name of the e2e credentials Secret.
 */}}
 {{- define "e2e-tests.secretName" -}}
-{{- printf "%s-e2e-secret" (include "e2e-tests.fullname" .) -}}
+{{- required "e2e-tests.secretName must reference a pre-existing Secret" .Values.secretName -}}
 {{- end }}

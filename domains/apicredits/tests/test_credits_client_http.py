@@ -6,40 +6,77 @@ import json
 
 import httpx
 import pytest
+from market_identity import Identity, IdentityScheme
 
 from domains.apicredits.settlement.credits_client import (
+    CreditIssuanceRequest,
+    CreditKeyTarget,
     CreditsServiceClient,
     CreditsServiceError,
 )
+
+_PRINCIPAL = Identity(
+    scheme=IdentityScheme.EIP191,
+    identifier="0xabcdef0000000000000000000000000000000001",
+)
+
+
+def _request(quantity: int = 2) -> CreditIssuanceRequest:
+    return CreditIssuanceRequest.create(
+        obligation_ref="e1",
+        mechanism="alkahest.v1",
+        owner=_PRINCIPAL,
+        service="service-main",
+        resource_id="q1",
+        quantity=quantity,
+        key=CreditKeyTarget(mode="new"),
+        capacity_reservation_id="r1",
+    )
+
+
+def _response(request: CreditIssuanceRequest) -> dict:
+    return {
+        "schema": "arkhai.api-credits.issuance-result.v1",
+        "fulfillment_id": request.fulfillment_id,
+        "grant_id": request.fulfillment_id,
+        "obligation_ref": request.obligation_ref,
+        "mechanism": request.mechanism,
+        "owner": request.owner.model_dump(mode="json"),
+        "service": request.service,
+        "resource_id": request.resource_id,
+        "quantity": request.quantity,
+        "key_mode": "new",
+        "key_id": "k1",
+        "balance": request.quantity,
+        "request_digest": request.request_digest,
+        "committed_at_unix": 2_000_000_000,
+        "capacity_reservation_id": "r1",
+        "already_issued": False,
+        "secret": "k1.private",
+    }
 
 
 @pytest.mark.asyncio
 async def test_issue_contract_and_auth_header():
     seen: dict[str, httpx.Request] = {}
+    issuance_request = _request()
 
     async def handler(request: httpx.Request) -> httpx.Response:
         seen["request"] = request
-        return httpx.Response(200, json={"key_id": "k1", "quantity": 2})
+        return httpx.Response(200, json=_response(issuance_request))
 
     client = CreditsServiceClient(
         "http://credits",
         "secret",
         transport=httpx.MockTransport(handler),
     )
-    result = await client.submit_credit_issuance(
-        escrow_uid="e1",
-        quantity=2,
-        key_mode="new",
-        buyer_wallet="0x1",
-        capacity_reservation_id="r1",
-        resource_id="q1",
-    )
+    result = await client.submit_credit_issuance(issuance_request)
 
     request = seen["request"]
     assert request.url.path == "/api/v1/issuance"
     assert request.headers["X-Admin-Key"] == "secret"
     assert json.loads(request.content)["capacity_reservation_id"] == "r1"
-    assert result["key_id"] == "k1"
+    assert result.key_id == "k1"
 
 
 @pytest.mark.asyncio
@@ -69,10 +106,7 @@ async def test_http_issuance_error_maps_reason_and_detail():
     )
 
     with pytest.raises(CreditsServiceError) as exc_info:
-        await client.submit_credit_issuance(
-            escrow_uid="e",
-            quantity=1,
-        )
+        await client.submit_credit_issuance(_request(quantity=1))
 
     assert exc_info.value.reason == "quota_exhausted"
     assert exc_info.value.detail == "full"

@@ -55,11 +55,11 @@ The shared storefront remains opaque to machine IDs, SSH access details, and bar
 
 ### Expose a truthful pre-fulfillment HTTP contract
 
-The runnable application exposes shared listing and negotiation wire carriers, bare-metal-owned commercial-settlement carriers, health, and persistent operator pause/resume state before POOLS-7 fulfillment lands. Negotiation uses a bare-metal-owned orchestrator around schema-opaque core persistence and the injected domain hooks; VM and API-credit controllers are templates only and are not imported. Domain-invalid opening requests fail before a thread or bare-metal artifact is persisted.
+The runnable application exposes shared listing and negotiation wire carriers, bare-metal-owned commercial settlement, accepted POOLS-7 fulfillment begin/status/result/teardown, health, and persistent operator pause/resume state. Negotiation uses a bare-metal-owned orchestrator around schema-opaque core persistence and the injected domain hooks; VM and API-credit controllers are not imported. Domain-invalid opening requests fail before a thread or domain artifact is persisted, and authenticated lifecycle routes resolve the durable thread/listing/site binding before state-changing calls.
 
-A successful settlement endpoint means only that the persisted accepted agreement and escrow have been verified and a valid settlement plan has been rebuilt. It returns `status="settlement_verified"` and `fulfillment_available=false`; it does not return a provisioning job, credential, receipt, access result, reservation, or other fulfillment claim. Settlement input cannot replace the SSH key or other provision terms accepted during negotiation. Identical settlement retries are idempotent, while conflicting reuse of an escrow identity is rejected.
+A successful settlement endpoint means only that the persisted accepted agreement and escrow have been verified and a valid settlement plan has been rebuilt. It returns `status="settlement_verified"` and `fulfillment_available=true` because the installed POOLS-7 lifecycle is callable, but it does not claim that fulfillment has begun and does not return a provisioning job, credential, receipt, access result, reservation, or other fulfillment artifact. Settlement input cannot replace the SSH key or other provision terms accepted during negotiation. Identical settlement retries are idempotent, while conflicting reuse of an escrow identity is rejected.
 
-Global pause/resume state is stored in the storefront database so it survives process restart. Public health reports only authorities actually composed; before trusted projection polling and POOLS-7 wiring it reports those capabilities as unavailable rather than healthy. Negotiation read routes retain the existing shared unauthenticated compatibility contract in this increment; changing their privacy boundary requires a coordinated client and protocol change. Buyer mutation routes continue to use shared signed-request verification, and operator mutation/status routes use the configured admin key.
+Global pause/resume state is stored in the storefront database so it survives process restart. Health reports the canonical seller principal, local commercial/database state, and only the redacted identifiers of actually composed site authorities; projection or fulfillment dependency failure produces a degraded check rather than false readiness. Negotiation read routes retain the existing shared unauthenticated compatibility contract; changing their privacy boundary requires a coordinated client and protocol change. Buyer mutation routes use shared signed-request verification, and operator mutation/status routes use signed configured administrator principals.
 
 Reusing VM-shaped settle models was rejected because they accept settlement-time SSH input and advertise provisioning jobs or tenant credentials. Delaying all settlement HTTP until POOLS-7 was also rejected because commercial verification and durable agreement state can be exposed truthfully without claiming fulfillment.
 
@@ -73,7 +73,7 @@ Specific-resource exposure is operator-controlled. A producer emits only resourc
 
 A missing or incomplete generation closes nothing. A retained complete generation may continue to drive publication while marked stale under normal projection policy. An authoritative complete empty generation closes prior derived listings for that site. Capacity and allowlisted capability maps must not contain conflicting values.
 
-This change owns this bare-metal-specific producer/interpreter contract so composition can proceed before POOLS-7. POOLS-8 remains responsible for generic durable projection consumption, commercial mapping, and advisory hints. The exact durable scheduling repository and lifecycle calls are supplied by POOLS-7; before that dependency lands, composition tests use injected lifecycle ports, but production cutover cannot claim completion.
+The implementation consumes POOLS-8's exact `AggregateCapacityClient.reserve(site=...)` path and POOLS-7's released scheduling, fulfillment, status/result, and teardown clients. The common storefront registry, listing/thread bindings, and lifecycle contexts own domain selection; the bare-metal contribution owns only its contract, policy, and adapter hooks.
 
 A URL or admin key embedded in buyer-controlled terms or copied through opaque deal metadata is not an ownership authority. Reverse delivery and credential lookup remain separately owned by the result-delivery change.
 
@@ -85,13 +85,13 @@ Negotiation, agreement, settlement, and lifecycle correlation use the shared sto
 
 ### Package and deploy the role independently
 
-The repository will build and test a bare-metal storefront distribution and image independently from the VM storefront. Deployment configuration selects the bare-metal role, database, registry identity, seller identity, and one or more trusted site bindings. VM and bare-metal storefront roles may share a compute provisioner but do not share a writable storefront database.
+The repository builds the bare-metal storefront distribution and a dedicated unprivileged image independently from the VM storefront. The dedicated image is selected because the standalone role needs the bare-metal domain and compute/site clients but must not install VM storefront services; staged-wheel installation and import-boundary tests exercise that exact package graph. `helm/charts/bare-metal-storefront` deploys the one-domain image with one persistent SQLite boundary, health probes, public seller identity, externally Secret-referenced signer material, and externally Secret-referenced site routing JSON so authority URLs are not rendered into ConfigMaps. Compose stacks consume the same environment contract. VM and bare-metal storefront roles may share a compute provisioner but do not share a writable storefront database.
 
 Deployment rendering must prove that disabling either storefront does not leave waits or service references to that role. A gateway may present both roles under one operator-controlled host, but gateway consolidation is not required.
 
 ### Use pull reconciliation as the baseline
 
-The composition will use POOLS-7 scheduling, fulfillment status, result, and teardown calls. Push delivery is optional acceleration and is not required to complete a bare-metal agreement. This keeps correctness independent of reverse reachability.
+The composition uses POOLS-7 scheduling, fulfillment status, result, and teardown calls. Push delivery is not required: the storefront persists opaque correlations and pulls through the recorded site/client after restart, while the compute provisioner remains the job and convergence authority.
 
 ## Risks / Trade-offs
 
@@ -142,11 +142,11 @@ The initial application shell injects and validates only capabilities with real 
 
 Bare-metal buyer provision input uses the versioned `{kind: "bare_metal.v1", version: 1, payload: ...}` envelope. Version 1 permits SSH with a nonblank public key and forbids unknown payload fields. The domain codec unwraps and validates that envelope before policy execution; canonical agreed `BareMetalTerms` then adds machine and Physical Resource identities from the trusted listing rather than buyer input.
 
-## Open Questions
+## Resolved implementation questions
 
-- Does the initial deployment use a dedicated bare-metal storefront image or one shared storefront image with separate composition entry points? Packaging evidence should decide before implementation tasks for deployment begin.
-- What buyer-visible representation should carry short-lived access results once POOLS-7 finalizes credential/result retrieval semantics?
-- **Added 2026-08-03:** this change's Section 3 now has a real dependency on POOLS-8's Section 4 (the `reserve(site=...)` routing fix), not just POOLS-7 — should `proposal.md`'s "Dependencies and Related Changes" name that explicitly, and does Section 3.2 block on POOLS-8 landing in production, or is it safe to build against POOLS-8's design/interface before its own implementation is merged (mirroring how this change already builds POOLS-7-dependent work behind injected ports)?
+- The initial deployment uses the dedicated bare-metal storefront image. Its staged-wheel dependency set and import boundary omit VM storefront code and permit the role to be installed and operated independently.
+- The buyer-visible result is the validated `BareMetalAccessResult`: stable accounting identities, lease bounds, SSH user, and an opaque/public access reference only. It excludes private SSH material, authority URLs, credentials, and provider payloads.
+- POOLS-8 Section 4 was a hard production dependency and is now consumed directly through `AggregateCapacityClient.reserve(site=...)`; no equivalent selector was copied into the domain.
 
 ## Permanent Documentation Promotion
 
@@ -156,3 +156,5 @@ Bare-metal buyer provision input uses the versioned `{kind: "bare_metal.v1", ver
 | Complete bare-metal seller hooks and schema-opaque core boundary | `openspec/specs/storefront-publication/spec.md` and `architecture.md` |
 | Independently deployable bare-metal role and trusted site bindings | `openspec/specs/deployment-state/spec.md` and `architecture.md` |
 | Pull-based selected-site lifecycle and remaining result-delivery limitation | `openspec/specs/physical-provisioning/architecture.md` and `openspec/specs/fulfillment/architecture.md` |
+
+Promotion record (2026-08-15): the permanent market-composition documents now describe the installed contribution and common immutable bindings; storefront-publication documents own the selected-site seller lifecycle and buyer-safe result; deployment documents own the dedicated staged-wheel/image role and independent persistence; physical-provisioning and fulfillment documents own the pull-based POOLS-7 boundary. Protected real-site and combined deployment evidence remains an explicit acceptance blocker and is not represented as completed by this record.

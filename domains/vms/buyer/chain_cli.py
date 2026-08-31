@@ -8,9 +8,9 @@ Subcommands:
 Surfaces TOML typos, wrong-chain-vs-RPC mismatches, and stale post-
 redeploy addresses before the operator wastes time on a transaction.
 """
+
 from __future__ import annotations
 
-import asyncio
 from typing import Optional
 
 import typer
@@ -23,9 +23,10 @@ chain_app = typer.Typer(no_args_is_help=True)
 @chain_app.command("check")
 def chain_check(
     chain_name: Optional[str] = typer.Option(
-        None, "--chain",
+        None,
+        "--chain",
         help="Only probe one chain by name. When omitted, probes every "
-             "configured [chains.<name>] entry.",
+        "configured [chains.<name>] entry.",
     ),
 ) -> None:
     """Probe configured contract addresses for deployed bytecode.
@@ -43,7 +44,8 @@ def chain_check(
     if not chains:
         typer.secho(
             "No [chains.<name>] tables configured in buyer.toml.",
-            err=True, fg=typer.colors.RED,
+            err=True,
+            fg=typer.colors.RED,
         )
         raise typer.Exit(2)
 
@@ -51,7 +53,8 @@ def chain_check(
         if chain_name not in chains:
             typer.secho(
                 f"Chain {chain_name!r} not configured. Available: {sorted(chains)}",
-                err=True, fg=typer.colors.RED,
+                err=True,
+                fg=typer.colors.RED,
             )
             raise typer.Exit(2)
         targets = {chain_name: chains[chain_name]}
@@ -67,21 +70,28 @@ def chain_check(
         addresses: dict[str, str] = {}
         try:
             cfg = resolve_alkahest_address_config(
-                name, config_path=chain.alkahest_address_config_path,
+                name,
+                config_path=chain.alkahest_address_config_path,
             )
         except Exception as exc:
             typer.secho(
                 f"chain={name!r} could not resolve alkahest config: {exc}",
-                err=True, fg=typer.colors.YELLOW,
+                err=True,
+                fg=typer.colors.YELLOW,
             )
             cfg = None
 
         if cfg is not None:
             for path, label in (
-                (("arbiters_addresses", "recipient_arbiter"), "alkahest.recipient_arbiter"),
+                (
+                    ("arbiters_addresses", "recipient_arbiter"),
+                    "alkahest.recipient_arbiter",
+                ),
                 (("arbiters_addresses", "eas"), "alkahest.eas"),
-                (("erc20_addresses", "escrow_obligation_default"),
-                 "alkahest.erc20_escrow_obligation"),
+                (
+                    ("erc20_addresses", "escrow_obligation_default"),
+                    "alkahest.erc20_escrow_obligation",
+                ),
             ):
                 obj: object | None = cfg
                 for attr in path:
@@ -94,11 +104,14 @@ def chain_check(
         if not addresses:
             typer.secho(
                 f"chain={name!r}: no contract addresses to probe.",
-                err=True, fg=typer.colors.YELLOW,
+                err=True,
+                fg=typer.colors.YELLOW,
             )
             continue
 
-        typer.echo(f"Probing {len(addresses)} address(es) on {chain.rpc_url} (chain={name})…")
+        typer.echo(
+            f"Probing {len(addresses)} address(es) on {chain.rpc_url} (chain={name})…"
+        )
         results = probe_addresses_sync(chain.rpc_url, addresses)
         all_results[name] = results
 

@@ -11,40 +11,86 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
+    from market_core import MarketDomainContract
     from core_storefront.services.negotiation_service import NegotiationService
-    from market_policy import NegotiationCatalogue
+    from market_negotiation_runtime import NegotiationRuntime
+    from market_settlement_runtime import (
+        FailurePolicy,
+        SettlementJobCoordinator,
+        SettlementRuntime,
+        SettlementServicingWorker,
+        SettlementSQLiteRepository,
+    )
+    from apicredits_storefront.services.issuance_evidence import (
+        ApiCreditPrivateResultRepository,
+        ApiCreditsIssuanceEvidenceService,
+    )
+    from apicredits_storefront.settlement_composition import (
+        ApiCreditsSettlementComposition,
+    )
+    from market_identity import Signer
 
     from apicredits_storefront.services.listing_service import ListingService
     from apicredits_storefront.services.system_service import SystemService
     from apicredits_storefront.utils.sqlite_client import SQLiteClient
 
-resolved_sqlite_client: SQLiteClient | None = None
+resolved_market_domain: "MarketDomainContract | None" = None
+resolved_sqlite_client: "SQLiteClient | None" = None
+resolved_settlement_repository: "SettlementSQLiteRepository | None" = None
+resolved_settlement_runtime: "SettlementRuntime | None" = None
+resolved_settlement_worker: "SettlementServicingWorker | None" = None
+resolved_settlement_coordinator: "SettlementJobCoordinator | None" = None
+resolved_failure_policy: "FailurePolicy | None" = None
+resolved_settlement_composition: "ApiCreditsSettlementComposition | None" = None
+resolved_issuance_evidence_service: "ApiCreditsIssuanceEvidenceService | None" = None
+resolved_private_result_repository: "ApiCreditPrivateResultRepository | None" = None
 resolved_alkahest_clients: dict[str, Any] = {}
-resolved_listing_service: ListingService | None = None
-resolved_negotiation_service: NegotiationService | None = None
-resolved_system_service: SystemService | None = None
-
-# The negotiation policy catalogue this role composed. Resolved once during
-# lifespan startup, so a source that cannot load, a malformed middleware, or a
-# name two sources both offer fails before the application serves traffic rather
-# than on the first negotiation that reaches it. Immutable once built.
-resolved_policy_catalogue: NegotiationCatalogue | None = None
+resolved_listing_service: "ListingService | None" = None
+resolved_negotiation_service: "NegotiationService | None" = None
+resolved_negotiation_runtime: "NegotiationRuntime | None" = None
+resolved_system_service: "SystemService | None" = None
+resolved_marketplace_signer: "Signer | None" = None
 
 
-def policy_catalogue() -> NegotiationCatalogue:
-    """The composed negotiation policy catalogue.
+def clear_lifespan_state(*, domain: "MarketDomainContract") -> None:
+    """Clear API-credit service state owned by one shared lifespan."""
 
-    Raises rather than composing on demand: a catalogue built here would be
-    built from whatever configuration happened to be loaded, and would move the
-    failure this design exists to surface at startup back into a request.
-    """
-    if resolved_policy_catalogue is None:
+    global resolved_market_domain
+    global resolved_sqlite_client
+    global resolved_settlement_repository
+    global resolved_settlement_runtime
+    global resolved_settlement_worker
+    global resolved_settlement_coordinator
+    global resolved_failure_policy
+    global resolved_settlement_composition
+    global resolved_issuance_evidence_service
+    global resolved_private_result_repository
+    global resolved_alkahest_clients
+    global resolved_listing_service
+    global resolved_negotiation_service
+    global resolved_system_service
+    global resolved_marketplace_signer
+
+    if resolved_market_domain is not None and resolved_market_domain is not domain:
         raise RuntimeError(
-            "negotiation policy catalogue is unresolved — the storefront "
-            "composes it during lifespan startup; a caller reaching this "
-            "before startup has bypassed application composition"
+            "cannot clear a dependency container owned by a different "
+            "market-domain contract"
         )
-    return resolved_policy_catalogue
+    resolved_market_domain = None
+    resolved_sqlite_client = None
+    resolved_settlement_repository = None
+    resolved_settlement_runtime = None
+    resolved_settlement_worker = None
+    resolved_settlement_coordinator = None
+    resolved_failure_policy = None
+    resolved_settlement_composition = None
+    resolved_issuance_evidence_service = None
+    resolved_private_result_repository = None
+    resolved_alkahest_clients = {}
+    resolved_listing_service = None
+    resolved_negotiation_service = None
+    resolved_system_service = None
+    resolved_marketplace_signer = None
 
 
 def get_alkahest_client(chain_name: str) -> Any | None:

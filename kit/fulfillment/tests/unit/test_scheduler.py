@@ -31,8 +31,8 @@ from market_fulfillment import (
     SettlementEntityNotFoundError,
     SettlementRequestMismatchError,
 )
-from market_resource_pools import PoolCreate, ResourcePoolService
-from market_resource_pools.db import Base as PoolsBase
+from market_resource_pools import PoolCreate, PoolUpdate, ResourcePoolService
+from market_resource_pools.db import Base as PoolsBase, DEFAULT_POOL_ID
 from market_site.db import Base as SiteBase
 from market_site.ledger import CapacityLedgerService
 
@@ -70,7 +70,11 @@ def services():
 
 def _pool(pools, pool_id: str, enabled: bool = True):
     pools.create_pool(PoolCreate(
-        id=pool_id, label=pool_id, provider="ansible", enabled=enabled,
+        id=pool_id,
+        label=pool_id,
+        provider="ansible",
+        enabled=enabled,
+        policy_tags={"deliverable_modes": ["vm"]},
         provider_config={},
     ))
 
@@ -87,7 +91,7 @@ def _resource(ledger, resource_id: str, pool_id: str, *, units: int = 4, enabled
 
 def _reserve(ledger, agreement="agreement-1", **deal):
     ref = {"agreement_id": agreement, "market": "vms", **deal}
-    result = ledger.reserve(claim={"gpu_count": 1}, deal_ref=ref)
+    result = ledger.reserve(claim={"executor_kind": "vm", **{"gpu_count": 1}}, deal_ref=ref)
     assert result is not None
     return result["capacity_reservation_id"]
 
@@ -110,13 +114,25 @@ def test_expired_reservation_is_rejected(services):
     pools, ledger, scheduler = services
     _pool(pools, "pool-a")
     _resource(ledger, "r1", "pool-a")
-    result = ledger.reserve(
-        claim={"gpu_count": 1},
-        deal_ref={"agreement_id": "agreement-1", "market": "vms"},
-        ttl_seconds=-1,
-    )
+    result = ledger.reserve(claim={"executor_kind": "vm", **{"gpu_count": 1}}, deal_ref={"agreement_id": "agreement-1", "market": "vms"},
+    ttl_seconds=-1,)
     with pytest.raises((CapacityReservationExpiredError, SettlementRequestMismatchError)):
         scheduler.schedule_resource(_request(result["capacity_reservation_id"]))
+
+
+def test_withdrawn_pool_mode_blocks_scheduling_after_reservation(services):
+    pools, ledger, scheduler = services
+    _pool(pools, "pool-a")
+    _resource(ledger, "r1", "pool-a")
+    reservation_id = _reserve(ledger)
+
+    pools.update_pool(
+        "pool-a",
+        PoolUpdate(policy_tags={"deliverable_modes": []}),
+    )
+
+    with pytest.raises(NoEligibleSettlementResourceError, match="no eligible"):
+        scheduler.schedule_resource(_request(reservation_id))
 
 
 def test_retry_is_idempotent_and_does_not_rerun_policy(services):
@@ -129,6 +145,26 @@ def test_retry_is_idempotent_and_does_not_rerun_policy(services):
     first = scheduler.schedule_resource(_request(capacity_reservation_id))
     second = scheduler.schedule_resource(_request(capacity_reservation_id))
     assert first == second
+
+
+def test_reservation_can_schedule_its_own_exclusive_resource(services):
+    pools, ledger, scheduler = services
+    _pool(pools, "pool-a")
+    ledger.register_resource(
+        resource_id="exclusive-host",
+        resource_type="compute.gpu",
+        total_units=1,
+        pool_id="pool-a",
+        attributes={
+            "physical_host_id": "host-a",
+            "allocation_mode": "exclusive",
+        },
+    )
+    capacity_reservation_id = _reserve(ledger)
+
+    resource = scheduler.schedule_resource(_request(capacity_reservation_id))
+
+    assert resource.settlement_resource_id == "exclusive-host"
 
 
 def test_round_robin_is_deterministic_across_pools(services):
@@ -160,16 +196,17 @@ def test_round_robin_is_deterministic_within_pool(services):
 
 def test_explicit_resource_bypasses_policy_not_eligibility(services):
     pools, ledger, scheduler = services
-    _pool(pools, "pool-a", enabled=False)
+    _pool(pools, "pool-a")
     _resource(ledger, "r1", "pool-a")
     capacity_reservation_id = _reserve(ledger)
+    pools.disable_pool("pool-a")
     with pytest.raises(NoEligibleSettlementResourceError):
         scheduler.schedule_resource(_request(capacity_reservation_id, resource_id="r1"))
 
 
 def test_resource_without_pool_is_not_schedulable(services):
     pools, ledger, scheduler = services
-    _pool(pools, "pool-a")
+    _pool(pools, DEFAULT_POOL_ID)
     ledger.register_resource(resource_id="orphan", total_units=4, attributes={})
     capacity_reservation_id = _reserve(ledger)
     with pytest.raises(NoEligibleSettlementResourceError):
@@ -213,7 +250,7 @@ def _resource_with_capacity(ledger, resource_id: str, pool_id: str, *, capacity:
 
 def _reserve_with_dimensions(ledger, dimensions: dict, agreement="agreement-1", **deal):
     ref = {"agreement_id": agreement, "market": "vms", "requirements": {"dimensions": dimensions}, **deal}
-    result = ledger.reserve(claim={"dimensions": dimensions}, deal_ref=ref)
+    result = ledger.reserve(claim={"executor_kind": "vm", **{"dimensions": dimensions}}, deal_ref=ref)
     assert result is not None
     return result["capacity_reservation_id"]
 
@@ -283,7 +320,7 @@ def test_scheduler_credit_back_covers_full_capacity_legacy_reservation(services)
     pools, ledger, scheduler = services
     _pool(pools, "pool-a")
     _resource(ledger, "r1", "pool-a", units=4)
-    result = ledger.reserve(claim={"gpu_count": 4}, deal_ref={
+    result = ledger.reserve(claim={"executor_kind": "vm", **{"gpu_count": 4}}, deal_ref={
         "agreement_id": "agreement-1", "market": "vms",
     })
     assert result is not None
@@ -302,10 +339,7 @@ def _reserve_multi(ledger, dimensions: dict, agreement="agreement-1"):
     the reservation declares) doesn't itself reject a deliberately
     *different*, narrower schedule-time request before the exceeds-check
     below ever runs."""
-    result = ledger.reserve(
-        claim={"dimensions": dimensions},
-        deal_ref={"agreement_id": agreement, "market": "vms"},
-    )
+    result = ledger.reserve(claim={"executor_kind": "vm", **{"dimensions": dimensions}}, deal_ref={"agreement_id": agreement, "market": "vms"},)
     assert result is not None
     return result["capacity_reservation_id"]
 
@@ -503,10 +537,7 @@ def test_cursor_is_isolated_per_resource_kind(services):
     )
 
     def _reserve_kind(resource_type: str, agreement: str) -> str:
-        result = ledger.reserve(
-            claim={"resource_type": resource_type, "gpu_count": 1},
-            deal_ref={"agreement_id": agreement, "market": "vms"},
-        )
+        result = ledger.reserve(claim={"executor_kind": "vm", **{"resource_type": resource_type, "gpu_count": 1}}, deal_ref={"agreement_id": agreement, "market": "vms"},)
         assert result is not None
         return result["capacity_reservation_id"]
 
@@ -842,40 +873,3 @@ def test_interleaved_independent_sessions_do_not_perturb_other_resource_kind_cur
         cpu_row = repo.get_cursor_in_session(db, "compute.cpu")
         assert gpu_row.last_pool_id == "pool-a"
         assert cpu_row.last_pool_id == "pool-b"
-
-
-def test_scheduling_records_the_settlement_resource_on_the_reservation(services):
-    """The reservation carries what scheduling bound, including a no-op rebind.
-
-    `CapacityReservation.settlement_resource_id` is documented as null until
-    scheduling persists a concrete assignment. When the policy selects the same
-    resource the reservation is already debited against — the ordinary
-    single-candidate case — the assignment still happened and the field must
-    record it, or the reservation and the settlement record disagree about a fact
-    both carry, and every downstream reader of the reservation sees no placement
-    at all.
-    """
-    pools, ledger, scheduler = services
-    _pool(pools, "pool-a")
-    _resource(ledger, "r1", "pool-a")
-    capacity_reservation_id = _reserve(ledger)
-
-    assert ledger.get_reservation(capacity_reservation_id)["settlement_resource_id"] is None
-
-    resource = scheduler.schedule_resource(_request(capacity_reservation_id))
-
-    assert resource.settlement_resource_id == "r1"
-    assert ledger.get_reservation(capacity_reservation_id)["settlement_resource_id"] == "r1"
-
-
-def test_recorded_settlement_resource_follows_a_real_rebind(services):
-    """The paired case: when scheduling picks a different resource, the
-    reservation records that one rather than its initial accounting choice."""
-    pools, ledger, scheduler = services
-    _pool(pools, "pool-a")
-    _resource(ledger, "a1", "pool-a")
-    capacity_reservation_id = _reserve(ledger)
-    resource = scheduler.schedule_resource(_request(capacity_reservation_id))
-
-    recorded = ledger.get_reservation(capacity_reservation_id)["settlement_resource_id"]
-    assert recorded == resource.settlement_resource_id

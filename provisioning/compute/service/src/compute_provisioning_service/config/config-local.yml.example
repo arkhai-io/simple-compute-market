@@ -12,9 +12,18 @@
 # inventory_path: "/home/you/code/domains/vms/provisioning/iac/ansible/inventory/hosts"
 # management_vars_path: "/home/you/code/domains/vms/provisioning/iac/ansible/inventory/management-vars.yaml"
 
-# Shared admin key with the storefront (X-Admin-Key gate + callback secret).
-# Leave unset locally to disable auth; set to match the storefront's admin_api_key.
-# storefront_admin_key: "dev-shared-secret"
+# Public marketplace identity and exact storefront trust pin. Supply the
+# matching service signer only through ARKHAI_IDENTITY_CREDENTIAL.
+# storefront_site_id: "default"
+# identity:
+#   scheme: "ed25519"
+#   identifier: "<unpadded-base64url-public-key>"
+# storefront_identity:
+#   scheme: "ed25519"
+#   identifier: "<unpadded-base64url-public-key>"
+# admin_identity:
+#   scheme: "ed25519"
+#   identifier: "<distinct-unpadded-base64url-public-key>"
 
 # Golden image credentials for local testing:
 # golden_root_ssh_filename: "id_ed25519"

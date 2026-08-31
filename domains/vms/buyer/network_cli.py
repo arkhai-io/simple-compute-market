@@ -27,6 +27,7 @@ def network_join(
 ) -> None:
     """Join a ZeroTier network."""
     from .common import resolve_config_value
+
     network_id = network_id or resolve_config_value(
         toml_path="seller.zerotier_network",
     )
@@ -35,7 +36,8 @@ def network_join(
             "No network_id provided and seller.zerotier_network is not set in config.toml. "
             "Pass the network ID explicitly or run "
             "`market config set seller.zerotier_network <id>` first.",
-            err=True, fg=typer.colors.RED,
+            err=True,
+            fg=typer.colors.RED,
         )
         raise typer.Exit(2)
     run_step(

@@ -223,59 +223,6 @@ writing it when the caller declared capacity explicitly. Retiring the scalar is 
 change touching every legacy single-quantity caller, and is recorded below as deferred
 rather than folded in.
 
-### Pool membership is executor-derived, and one-per-executor is enforced on write (added 2026-08-11)
-
-Two related defects surfaced while tracing an e2e capacity failure, and both belong here
-because this change already rewrites `register_resource` and `capacity_inventory.py`.
-
-**One declaration per executor is enforced in a read path.**
-`load_capacity_resource_inventory` raises `ValueError` when two capacity resources
-correlate to the same host identity. The invariant is right — `site-capacity`'s internal
-accounting states one current bucket per host for the VM domain, and a second
-declaration on one machine sells the same hardware twice — but a read path is the wrong
-place to hold it. One bad write makes `GET /site-resource-pools` return 500 for every
-reader at that site, for every pool, indefinitely, and a storefront cannot distinguish
-that from the site being unreachable. Rejection moves to registration. The read-path
-check degrades to a logged warning that omits the ambiguous correlation, so a row that
-predates the write-time guard cannot take a whole site's projection down; an
-under-reported row is recoverable, a poisoned projection is not.
-
-**Pool membership has two independently writable homes.** `Host.pool_id` is `NOT NULL`
-and defaults to the system pool; `CapacityBucket.pool_id` is nullable and set only when a
-caller supplies it. `_project_host` reconciles them for the resource-pool projection with
-`resource.get("pool_id") or host.pool_id`, while admission reads
-`resource_feasibility_view(pool_id=resource.pool_id)`, which falls back to
-`pool_id or resource_id`. One declaration can therefore have three pool identities at
-once — the host's pool in the projection, its own id at admission, and whatever an
-operator wrote into `attributes["pool_id"]`, which nothing reads at all.
-
-Accepted: a declaration correlated to an executor inherits that executor's pool, and a
-declaration naming a different pool is refused rather than silently overridden. Adding
-the executor to a pool becomes the single act that establishes membership. A declaration
-with no executor — a logical quota, for instance — keeps whatever pool it declared, so
-non-physical domains are untouched.
-
-`attributes["pool_id"]` is rejected outright rather than hoisted into the field. Hoisting
-would leave two spellings working forever and preserve exactly the ambiguity above; the
-error tells the operator which field to use. Rejecting it also makes
-`resource_feasibility_view`'s overwrite unreachable-by-conflict, so the
-`pool_id or resource_id` fallback stays as it is — it remains load-bearing for the
-structural listing-mode default, where a declaration with no pool is its own
-single-member pool.
-
-`kit/site` must not learn what a host is. The executor correlation is injected at
-composition, matching the two providers `make_capacity_router` already accepts, and the
-attribute naming the executor is composed in the way `unit_claim_keys` already is —
-`ledger.py` reads `attributes["vm_host"]` directly in two places today, which is a
-pre-existing domain leak this section removes rather than adds a third instance to.
-
-Rejected — resolve membership only through the executor and drop
-`CapacityBucket.pool_id`. Logical resources have no executor and would lose pool identity
-entirely, and `capacity_bucket_projection` needs a grouping key.
-
-Rejected — require `pool_id` on every declaration. The API-credits composition registers
-a quota with no pool, so requiring it breaks a non-physical domain to tidy a physical one.
-
 ## Risks / Trade-offs
 
 - **[Derivation produces capacity resources an operator did not intend]** → Derive
@@ -341,22 +288,3 @@ ignored by the restored reader.
   the deprecation window's length is a deployment-policy question this repository has
   deliberately declined to fix in advance elsewhere (see `pools-9`'s note on having
   no fleet-wide deployment signal). Decide when the `DROP` follow-up is opened.
-- **Should host capacity be gathered rather than declared by hand?** (Repository owner,
-  2026-08-11.) This change gives an operator an authoritative place to declare
-  multi-dimensional capacity, but asking a datacenter administrator to type vCPU, RAM,
-  and disk totals per machine is a poor operator experience when Ansible can read them
-  off the host. Most of the machinery already exists:
-  `domains/vms/provisioning/iac/ansible/roles/vm-management/tasks/vm-check.yml` already
-  returns per-host total, allocated, and available vCPU, RAM in MB, GPU count, and GPU
-  model strings as structured JSON, and `check_capacity` already exposes it through the
-  job queue as a diagnostic read. Nothing writes that output into a declaration. Wiring
-  it to propose a declaration for operator confirmation would close the ergonomic gap
-  without reintroducing the host as a capacity authority — the gatherer writes the one
-  authority, it does not become a second record read at projection time, which is the
-  same role this design already assigns the INI's `gpus=` variable. Two caveats before
-  this is scoped: `lspci`-derived model strings are not the categorical `gpu_model`
-  vocabulary a claim matches on, so a mapping step is required rather than a copy; and
-  gathered totals describe the machine, not the portion of it a seller intends to sell,
-  so the operator confirmation step is the substance of the feature rather than a
-  formality. Deferrable: the declaration surface is the prerequisite and gathering is
-  purely additive to it.

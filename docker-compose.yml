@@ -8,10 +8,22 @@
 # Domains are independent: bring just one up with its wrapper instead —
 #   docker compose -f compose.vms.yml up
 #   docker compose -f compose.apicredits.yml up
-# Each domain owns its services in domains/<domain>/compose.yml; compose.dev.yml
-# owns the shared Anvil chain. `include:` merges them (an included file's
-# relative paths resolve against its own directory).
+# Domain wrappers own explicit signer/wallet secret references. The full stack
+# repeats the API-credits override because that domain compose stays reusable.
 include:
-  - compose.dev.yml
-  - domains/vms/compose.yml
+  - compose.vms.yml
   - domains/apicredits/compose.yml
+
+services:
+  api-credits-registry:
+    environment:
+      - REGISTRY_AUTHORITY_ID=api-credits-registry
+      - REGISTRY_AUTHORITY_SCHEME=ed25519
+      - REGISTRY_AUTHORITY_IDENTIFIER=skkdlQKuKGMKK6yy4MdFEP_N0yjDNP8-E5PnWy0x59w
+      - REGISTRY_AUTHORITY_CREDENTIAL_FILE=/run/secrets/arkhai/registry-identity/credential
+    volumes:
+      - ${APICREDITS_REGISTRY_IDENTITY_CREDENTIAL_FILE:?set API-credits registry signer credential file}:/run/secrets/arkhai/registry-identity/credential:ro
+  credits-storefront:
+    env_file:
+      - ${APICREDITS_IDENTITY_ENV_FILE:?set API-credits signer credential environment file}
+      - ${APICREDITS_EVM_WALLET_ENV_FILE:?set API-credits EVM wallet environment file}

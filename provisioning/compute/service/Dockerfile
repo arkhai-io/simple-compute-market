@@ -59,6 +59,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends curl \
 USER appuser
 RUN mkdir -p /tmp/galaxy-tarballs && \
     for col in \
+        "ansible-posix-1.5.4" \
         "community-general-4.8.7" \
         "community-docker-2.7.2" \
         "community-crypto-2.5.0" \
@@ -72,6 +73,7 @@ RUN mkdir -p /tmp/galaxy-tarballs && \
             || (echo "Failed to fetch ${col}.tar.gz" && exit 1); \
     done && \
     /home/appuser/ansible-venv/bin/ansible-galaxy collection install \
+        /tmp/galaxy-tarballs/ansible-posix-1.5.4.tar.gz \
         /tmp/galaxy-tarballs/community-crypto-2.5.0.tar.gz \
         /tmp/galaxy-tarballs/community-docker-2.7.2.tar.gz \
         /tmp/galaxy-tarballs/community-general-4.8.7.tar.gz
@@ -85,7 +87,18 @@ COPY --chown=appuser:appuser .dist/ /dist/
 RUN --mount=type=cache,target=/home/appuser/.cache/uv,uid=${APPUSER_UID} \
     uv venv /app/.venv && \
     uv pip install --python /app/.venv/bin/python --find-links /dist \
-        'arkhai-compute-provisioning-service[adapters]==0.1.0'
+        --refresh-package arkhai-compute-provisioning-service \
+        --refresh-package arkhai-vms-provisioning-adapter \
+        --refresh-package arkhai-bare-metal-provisioning-adapter \
+        --refresh-package arkhai-bare-metal \
+        --refresh-package arkhai-kit-site \
+        --refresh-package arkhai-kit-resource-pools \
+        --refresh-package arkhai-kit-fulfillment \
+        --refresh-package arkhai-compute-provisioning \
+        --refresh-package arkhai-core-storefront-client \
+        --refresh-package arkhai-kit-identity \
+        --refresh-package arkhai-kit-site-client \
+        'arkhai-compute-provisioning-service[adapters]==0.2.0'
 
 # Stage 2: Runtime
 FROM --platform=linux/amd64 python:${PYTHON_VERSION}-slim AS runtime
@@ -117,6 +130,7 @@ RUN mkdir -p /app/data
 COPY --chown=appuser:appuser domains/vms/provisioning/iac /opt/domains/vms/provisioning/iac
 
 ENV PATH="/app/.venv/bin:/home/appuser/ansible-venv/bin:$PATH"
+ENV ANSIBLE_COLLECTIONS_PATH="/home/appuser/.ansible/collections:/usr/share/ansible/collections"
 
 # ---------------------------------------------------------------------------
 # Activate the docker profile so config/config-docker.yml is loaded.

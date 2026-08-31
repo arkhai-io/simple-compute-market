@@ -4,10 +4,9 @@ Stage 07 of the full-deal scenario needs an EAS attestation that the
 storefront's pre-settlement verifier (commit 03e47bf) can resolve. A
 placeholder uid would be rejected by alkahest's ``get_obligation``
 call. So we drive alkahest-py against the local Anvil from the
-buyer's wallet, the same way
-``core_buyer.escrow_client.make_create_escrow_fn`` does in
-production — but inlined here because e2e-tests doesn't
-depend on the buyer wheel.
+buyer's wallet, the same way the VM buyer's domain escrow adapter does in
+production — but inlined here because e2e-tests doesn't depend on the buyer
+wheel.
 
 Token distribution is baked into the chain state (account #1 holds
 MockERC20 — see dev-env/generate_state.py). Escrow creation is runtime: in production

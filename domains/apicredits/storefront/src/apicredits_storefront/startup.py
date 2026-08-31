@@ -7,8 +7,17 @@ import logging
 
 from apicredits_storefront.utils import config
 from apicredits_storefront.utils.config import BASE_URL_OVERRIDE, settings
+from core_storefront.escrow_identity import backfill_escrow_obligation_records
+from core_storefront.stage_log import stage_event
+from market_core import MarketDomainContract
+from market_storefront_kit import (
+    NegotiationWatchdogPolicy,
+    run_negotiation_watchdog,
+)
 
-logging.basicConfig(level=getattr(logging, str(settings.log_level).upper(), logging.INFO))
+logging.basicConfig(
+    level=getattr(logging, str(settings.get("log_level", "INFO")).upper(), logging.INFO)
+)
 
 logger = logging.getLogger(__name__)
 
@@ -56,11 +65,26 @@ async def _preflight_credits_service() -> None:
     logger.error(msg + " Continuing because fail_on_unreachable=false.")
 
 
-async def _startup_tasks() -> None:
-    """Initialize background tasks. Called from server.py lifespan."""
+def _negotiation_watchdog_policy() -> NegotiationWatchdogPolicy:
+    return NegotiationWatchdogPolicy(
+        timeout_seconds=float(settings.negotiation_timeout_seconds),
+        interval_seconds=float(settings.negotiation_watchdog_interval),
+        log_loop_start=False,
+        log_cutoff=False,
+    )
+
+
+async def _startup_tasks(*, domain: MarketDomainContract) -> None:
+    """Initialize background tasks for the exact app-selected domain."""
     import apicredits_storefront.container as _container
     from market_policy.identity import Identity
     from market_policy.negotiation_thread import get_thread_store
+
+    if _container.resolved_market_domain is not domain:
+        raise RuntimeError(
+            "API-credit startup is not bound to the app-selected "
+            "market-domain contract object"
+        )
 
     storefront_url = BASE_URL_OVERRIDE or f"http://localhost:{settings.port}"
     get_thread_store(
@@ -72,20 +96,41 @@ async def _startup_tasks() -> None:
         storefront_url,
     )
 
-    from apicredits_storefront.negotiation_watchdog import watchdog_loop
-
-    asyncio.create_task(watchdog_loop())
+    watchdog_policy = _negotiation_watchdog_policy()
+    asyncio.create_task(
+        run_negotiation_watchdog(
+            _container.resolved_sqlite_client,
+            watchdog_policy,
+            emit_stage_event=stage_event,
+            logger=logger,
+        )
+    )
     logger.info(
         "[STARTUP] Negotiation watchdog started (interval=%ds, timeout=%ds)",
-        settings.negotiation_watchdog_interval,
-        settings.negotiation_timeout_seconds,
+        watchdog_policy.interval_seconds,
+        watchdog_policy.timeout_seconds,
     )
 
-    from apicredits_storefront.services.claims_runtime import claims_engine_loop
+    settlement_runtime = _container.resolved_settlement_runtime
+    marketplace_signer = _container.resolved_marketplace_signer
+    if settlement_runtime is not None and marketplace_signer is not None:
+        backfilled = await backfill_escrow_obligation_records(
+            sqlite_client=_container.resolved_sqlite_client,
+            settlement_runtime=settlement_runtime,
+            local_principal=marketplace_signer.identity,
+        )
+        if backfilled:
+            logger.info(
+                "[STARTUP] Backfilled %d legacy escrow obligation records",
+                backfilled,
+            )
 
-    asyncio.create_task(claims_engine_loop())
+    settlement_worker = _container.resolved_settlement_worker
+    if settlement_worker is None:
+        raise RuntimeError("settlement servicing worker is not initialized")
+    asyncio.create_task(settlement_worker.run())
     logger.info(
-        "[STARTUP] Claims engine started (interval=%ss)",
+        "[STARTUP] Settlement servicing worker started (interval=%ss)",
         settings.get("claims_sweep_interval", 30),
     )
 
@@ -101,12 +146,20 @@ async def _startup_tasks() -> None:
     logger.info("[STARTUP] Quota capacity event poller started")
 
 
-def _capacity_authority_url() -> str:
-    """Where the quota ledger lives — capacity.authority_url, else the
-    credits service (which hosts the ledger in the single-seller setup)."""
-    return str(
-        settings.get("capacity.authority_url", "") or config.credits_service_url()
-    ).rstrip("/")
+def _capacity_authority_site():
+    """Resolve the explicitly pinned site used for demo quota registration."""
+    from apicredits_storefront.services.capacity_client import _capacity_settings
+
+    sites, _ = _capacity_settings()
+    selected = str(settings.get("capacity.seed_site", "") or "")
+    if selected:
+        try:
+            return sites[selected]
+        except KeyError as exc:
+            raise RuntimeError(f"unknown capacity.seed_site {selected!r}") from exc
+    if len(sites) != 1:
+        raise RuntimeError("capacity.seed_site is required with multiple sites")
+    return next(iter(sites.values()))
 
 
 async def _register_seed_quota(*, resource_id: str, total_units: int) -> None:
@@ -119,19 +172,34 @@ async def _register_seed_quota(*, resource_id: str, total_units: int) -> None:
     """
     from market_site_client import SiteCapacityAdminClient, SiteCapacityAdminClientError
 
-    authority = _capacity_authority_url()
-    admin_client = SiteCapacityAdminClient(authority, config.credits_admin_key())
+    import apicredits_storefront.container as container
+
+    site = _capacity_authority_site()
+    signer = container.resolved_marketplace_signer
+    if signer is None:
+        raise RuntimeError("marketplace signer is unavailable for quota registration")
+    admin_client = SiteCapacityAdminClient(
+        site.url,
+        signer=signer,
+        expected_authorities=site.expected_authorities,
+        timeout=30.0,
+        transport=None,
+        max_timestamp_skew=300,
+    )
     try:
         await admin_client.register_resource(
-            resource_id, total_units=total_units, resource_type="api_credits",
+            resource_id,
+            total_units=total_units,
+            resource_type="api_credits",
         )
     except SiteCapacityAdminClientError as exc:
         raise RuntimeError(
-            f"quota registration for {resource_id!r} at {authority!r} failed: {exc}"
+            f"quota registration for {resource_id!r} at {site.url!r} failed: {exc}"
         ) from exc
     logger.info(
         "[STARTUP] Seeded quota resource %s (total_units=%d) in the ledger",
-        resource_id, total_units,
+        resource_id,
+        total_units,
     )
 
 
@@ -152,7 +220,6 @@ async def _seed_demo_listing() -> None:
     resource_id = str(seed["resource_id"])
     try:
         import apicredits_storefront.container as _container
-        from apicredits_storefront.services.listing_service import ListingService
         from apicredits_storefront.utils.config import CHAINS
 
         db = _container.resolved_sqlite_client
@@ -162,6 +229,7 @@ async def _seed_demo_listing() -> None:
             offer = row.get("offer_resource") or {}
             if isinstance(offer, str):
                 import json as _json
+
                 try:
                     offer = _json.loads(offer)
                 except (ValueError, TypeError):
@@ -169,7 +237,8 @@ async def _seed_demo_listing() -> None:
             if isinstance(offer, dict) and offer.get("resource_id") == resource_id:
                 logger.info(
                     "[STARTUP] Demo listing for resource %s already present; "
-                    "skipping seed", resource_id,
+                    "skipping seed",
+                    resource_id,
                 )
                 return
 
@@ -187,18 +256,25 @@ async def _seed_demo_listing() -> None:
             from market_alkahest.alkahest import (
                 get_erc20_escrow_obligation_default,
             )
+
             escrow_address = get_erc20_escrow_obligation_default(
-                chain, config_path=chain_cfg.alkahest_address_config_path,
+                chain,
+                config_path=chain_cfg.alkahest_address_config_path,
             )
         price = str(seed.get("price_per_token", "1"))
-        accepted_escrows = [{
-            "chain_name": chain,
-            "escrow_address": str(escrow_address).lower(),
-            "literal_fields": {"token": str(seed["token"])},
-            "rates": [{"field": "amount", "per": "token", "value": price}],
-        }]
+        accepted_escrows = [
+            {
+                "chain_name": chain,
+                "escrow_address": str(escrow_address).lower(),
+                "literal_fields": {"token": str(seed["token"])},
+                "rates": [{"field": "amount", "per": "token", "value": price}],
+            }
+        ]
 
-        result = await ListingService(sqlite_client=db).publish_from_quota(
+        listing_service = _container.resolved_listing_service
+        if listing_service is None:
+            raise RuntimeError("listing service is not initialized")
+        result = await listing_service.publish_from_quota(
             resource_id=resource_id,
             service_name=str(seed.get("service_name", "service")),
             accepted_escrows=accepted_escrows,
@@ -208,7 +284,8 @@ async def _seed_demo_listing() -> None:
         )
         logger.info(
             "[STARTUP] Seeded demo listing %s (service=%s, registry=%s)",
-            result.get("listing_id"), seed.get("service_name"),
+            result.get("listing_id"),
+            seed.get("service_name"),
             result.get("registry_status"),
         )
     except Exception as exc:  # noqa: BLE001 — seed must not crash the storefront

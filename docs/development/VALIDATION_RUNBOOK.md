@@ -246,37 +246,6 @@ The old `domains/vms/tests` integration suite was removed in the latest pull;
 future training or RL validation should be documented separately when runnable
 tests are added back.
 
-## 5b. Running The E2E Suite In CI From A Terminal
-
-The E2E suite runs nightly and on demand. It is heavy enough that reproducing it
-locally is impractical on most machines, so the practical loop is to dispatch it
-against a pushed branch and pull the evidence back.
-
-```bash
-make e2e-dispatch    # run the workflow against the current branch on origin
-make e2e-watch       # follow it to completion
-make e2e-logs        # download the evidence and print a summary
-make e2e-status      # list recent runs for this branch
-```
-
-`make e2e-logs` writes to `.e2e-logs/<run-id>/` and prints the pass/fail counts
-and the failing scenario names. Two files land there and both matter:
-
-| File | Contains |
-|---|---|
-| `scenario-output.txt` | the pytest run — which scenarios failed and their assertions |
-| `compose-logs.txt` | `docker compose logs` for the whole stack |
-
-Read both. A scenario assertion usually says what did not happen, while the
-reason is in a service's own log: an inventory or capacity failure surfaces to
-the scenario as a bare refusal and to the storefront log as the query that
-returned nothing.
-
-Dispatch requires the branch to exist on `origin` and warns when local `HEAD`
-differs from the pushed commit, because the workflow runs the pushed ref rather
-than the working tree. Requires the GitHub CLI, authenticated with
-`gh auth login`.
-
 ## 6. Known Exclusions For Local Mock Validation
 
 These are not covered by the standard local run above:

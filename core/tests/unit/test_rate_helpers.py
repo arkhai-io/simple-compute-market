@@ -20,7 +20,9 @@ from market_core.schemas import (
     RateValue,
     accepted_token_address,
     compute_rate_total,
+    compute_rate_unit_total,
     primary_rate_value,
+    rate_scales_by_time,
 )
 
 
@@ -128,3 +130,30 @@ def test_compute_rate_total_unknown_unit_raises():
 
 def test_per_unit_seconds_includes_hour():
     assert PER_UNIT_SECONDS["hour"] == 3600
+
+
+def test_rate_scales_by_time_distinguishes_counted_units():
+    assert rate_scales_by_time(RateValue(field="amount", per="hour", value=1))
+    assert not rate_scales_by_time(RateValue(field="amount", per="credit", value=1))
+
+
+def test_compute_rate_unit_total_scales_by_count():
+    rate = RateValue(field="amount", per="credit", value=100)
+    assert compute_rate_unit_total(rate, 1) == 100
+    assert compute_rate_unit_total(rate, 25) == 2500
+
+
+def test_compute_rate_unit_total_rejects_time_units_and_bad_counts():
+    time_rate = RateValue(field="amount", per="hour", value=100)
+    with pytest.raises(ValueError, match="scales by duration"):
+        compute_rate_unit_total(time_rate, 5)
+    counted = RateValue(field="amount", per="credit", value=100)
+    for bad in (0, -1, True, "5", None):
+        with pytest.raises(ValueError, match="unit count"):
+            compute_rate_unit_total(counted, bad)
+
+
+def test_compute_rate_unit_total_guards_uint256_overflow():
+    rate = RateValue(field="amount", per="credit", value=2**255)
+    with pytest.raises(ValueError, match="uint256"):
+        compute_rate_unit_total(rate, 4)

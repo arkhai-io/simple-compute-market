@@ -47,6 +47,7 @@ def _base_params(**overrides) -> AnsibleJobParams:
         vm_host="kvm1",
         vm_target="test-vm",
         vm_action="create",
+        executor_kind="vm",
     )
     defaults.update(overrides)
     return AnsibleJobParams(**defaults)
@@ -87,7 +88,14 @@ class TestBuildVmVarsRequired:
 
     def test_vm_target_absent_when_none(self):
         svc = _make_service()
-        yaml = svc._build_vm_vars(AnsibleJobParams(vm_host="kvm1", vm_target=None, vm_action="list"))
+        yaml = svc._build_vm_vars(
+            AnsibleJobParams(
+                vm_host="kvm1",
+                vm_target=None,
+                vm_action="list",
+                executor_kind="vm",
+            )
+        )
         assert "vm_target" not in yaml
 
     def test_scratch_mode_adds_not_provided_credentials(self):

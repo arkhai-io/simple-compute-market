@@ -36,8 +36,7 @@ fix-vm-fulfillment-capacity-boundary (independent)
 ```text
 publish-multidimensional-listing-shape ──┐
 structured-capacity-requirements ────────┴──► capacity-shape-pricing ──► negotiation-driven-capacity-resize §2
-capacity-shape-envelope, negotiation-capacity-feasibility-probe,
-revalidate-deal-requirements-at-scheduling (independent)
+capacity-shape-envelope, negotiation-capacity-feasibility-probe (independent)
 ```
 
 | Change | Status | Acceptance boundary |
@@ -48,7 +47,6 @@ revalidate-deal-requirements-at-scheduling (independent)
 | [`capacity-shape-envelope`](capacity-shape-envelope/) | active; independent | Kit-level admissibility: whether a whole shape is one the seller will consider, and what range remains admissible for one dimension given the rest, behind an interface shaped for the occupancy-dependent feasible region expected later |
 | [`negotiation-capacity-feasibility-probe`](negotiation-capacity-feasibility-probe/) | active; independent | Verifies a requested shape against the authoritative site before terms are agreed, consuming nothing, reporting unservable distinctly from seller-declined. Shared prerequisite: also required before a held reservation can be billed |
 | [`negotiation-driven-capacity-resize`](negotiation-driven-capacity-resize/) | Sections 0–1 complete; Section 2 unblocked 2026-08-06, not yet planned | Round-0 shape-mismatch guard shipped. Section 2 — a revised-terms field carrying a shape change between rounds, and `resize_reservation`'s first caller — was parked until seller policy could price an alternative shape; `capacity-shape-pricing` now owns that policy |
-| [`revalidate-deal-requirements-at-scheduling`](revalidate-deal-requirements-at-scheduling/) | design phase; not yet planned | Makes the categorical requirements a deal was admitted against binding through scheduling, as its committed dimensions already are, without re-pinning placement to a pool. Records the gap and the questions that decide its shape; no scenario fails on it today |
 | [`add-buyer-vm-connectivity-terms`](add-buyer-vm-connectivity-terms/) | design phase; not yet planned | Buyer-specified, negotiated VM connectivity terms replacing storefront-operator-only configuration; depends on POOLS-7 Section 9's `connectivity` field shape |
 
 ## Roadmap goal — One storefront serving several compute-family domains
@@ -99,6 +97,17 @@ capacity-reservation-lifecycle-hardening ──► billable-capacity-reservation
 | [`capacity-reservation-lifecycle-hardening`](capacity-reservation-lifecycle-hardening/) | active; no blocking dependency | Fixes three reservation-row defects: holds placed during negotiation bypass the idempotency guard, expiry scans all held rows on every ledger operation, and terminal reservations accumulate without bound |
 | [`billable-capacity-reservations`](billable-capacity-reservations/) | active; depends on `capacity-shape-pricing` and `capacity-reservation-lifecycle-hardening` | A hold carries a burn rate from the commercial rate structure; maximum duration derives from committed funds rather than a configured TTL; held time is charged as a serviced obligation with the remainder returned |
 | [`negotiation-time-capacity-hold`](negotiation-time-capacity-hold/) | active; depends on `billable-capacity-reservations` and `capacity-reservation-lifecycle-hardening` | Moves the hold from terms acceptance to the counterparty's first differing-terms proposal, one superseded reservation per negotiation, released on abandonment. Inquiry stays unheld and unfunded |
+
+## Roadmap goal — Make the settlement mechanism a composed choice
+
+```text
+finish-settlement-mechanism-neutrality ──► contact-exchange-settlement-mechanism
+```
+
+| Change | Status | Acceptance boundary |
+|---|---|---|
+| [`finish-settlement-mechanism-neutrality`](finish-settlement-mechanism-neutrality/) | design phase; core/kit-alkahest sections independent, hosted-surface sections coordinate with `consume-expanded-stripe-funding` | Pre-terms mechanism dispatch, verification, and negotiation scalar participation become registration-owned with no per-domain mechanism conditionals; every deal gains the neutral `obligation_ref` identity; Alkahest-shaped carriers move to `kit/alkahest` while `RateValue` stays core; option-aware discovery filters; residual mechanism literals removed |
+| [`contact-exchange-settlement-mechanism`](contact-exchange-settlement-mechanism/) | design phase; blocked only on the declinable-scalar and accepted-plan `service_terms` items of `finish-settlement-mechanism-neutrality` | A `contact-exchange.v1` peer mechanism completing a deal by durable, authenticated, idempotent contact reveal — no payment, no provisioning — with the introduction package in persisted `service_terms`, plus a loose-listing registry profile; composed first on bare metal |
 
 ## Lesser goal — POOLS capacity and fulfillment foundation
 
@@ -174,8 +183,7 @@ remove-relative-uv-sources ──► finish-buyer-cli-residue ──► type-cor
 
 | Change | Status | Acceptance boundary |
 |---|---|---|
-| [`storefront-lifecycle-pause-and-advance`](archive/2026-08-13-storefront-lifecycle-pause-and-advance/) | **archived 2026-08-13** | A paused storefront halts every timer loop, and a manual cycle advances one on demand. Scenarios drive lifecycle by pause-verify-advance instead of waiting for convergence. Requirements promoted to `storefront-publication`, `test-compatibility`, and `settlement-servicing` |
-| [`refactor-e2e-fulfillment-lifecycle`](refactor-e2e-fulfillment-lifecycle/) | active; archival audited 2026-08-13 and blocked — task 3.3 names a test file absent from the repository, and two Section 3 decisions are unclassified | Scenarios assert on fulfillment identity rather than provisioning job identity. Its three open tasks are all blocked on a live docker-compose run, unavailable since 2026-07-29 |
+| [`refactor-e2e-fulfillment-lifecycle`](refactor-e2e-fulfillment-lifecycle/) | active; 22 of 25 tasks complete | Scenarios assert on fulfillment identity rather than provisioning job identity. Its three open tasks are all blocked on a live docker-compose run, unavailable since 2026-07-29 |
 | [`extract-e2e-project`](extract-e2e-project/) | deferred | Activate only for a named external consumer, compatibility profile, and release owner |
 
 ## Lesser goal — Support an external qualification suite
@@ -208,10 +216,8 @@ Changes with no campaign; each stands alone.
 | Change | Status | Audited scope |
 |---|---|---|
 | [`pools-6-fair-scheduling-policy`](pools-6-fair-scheduling-policy/) | design-gated; POOLS-7 blocker cleared 2026-08-06 | Fairness policy over contended capacity. Its stated blocker — transactional assignment state — has landed, but its design inputs changed: negotiable shapes and negotiation-time holds alter what contention means, so the fairness subject should be chosen against those rather than against July's inputs |
-| [`add-development-roadmap`](archive/2026-08-13-add-development-roadmap/) | **archived 2026-08-13** | Establishes `docs/development/ROADMAP.md`, the governance permitting it, and the closeout roadmap-currency step. Requirements promoted to `planning-governance` |
+| [`add-development-roadmap`](add-development-roadmap/) | implemented 2026-08-06; pending archive | Establishes `docs/development/ROADMAP.md`, the governance permitting it, and the closeout roadmap-currency step |
 | [`fix-golden-image-config`](fix-golden-image-config/) | active | Align generated and consumed keys and deliver secrets through the provisioning Secret profile |
-| [`declare-interruptible-on-a-compute-offer`](declare-interruptible-on-a-compute-offer/) | design phase; not yet planned | An offer cannot declare itself interruptible, so the admin interrupt control is unusable and infers the answer from the escrow's splitter posture instead |
-| [`monotonic-listing-reconciliation`](monotonic-listing-reconciliation/) | design phase; not yet planned | A capacity-delta reconciliation may reopen a derived listing using an availability view older than a reservation it does not yet know about, briefly advertising capacity the site cannot serve. Reproduced end to end; the freshness constraint's home is the open question |
 | [`deduplicate-dynaconf-bootstrap`](deduplicate-dynaconf-bootstrap/) | active | Parameterized kit/config construction with exact provisioning and e2e parity; storefront loader excluded. Useful precedent for the kit-composition extractions |
 
 ## Archived and superseded

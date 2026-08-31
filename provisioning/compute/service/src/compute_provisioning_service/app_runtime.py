@@ -38,6 +38,7 @@ def initialise_container_resources() -> None:
     obvious startup error rather than a query hitting a missing column
     later.
     """
+    container.identity_context()
     container.init_resources()
     check_schema_version(container.db_engine())
     logger.info("Database schema check passed")
@@ -186,10 +187,10 @@ def startup_steps() -> tuple[ComputeProvisioningStartupStep, ...]:
             "resolve-request-path-services",
             resolve_request_path_services,
         ),
-        ComputeProvisioningStartupStep("seed-inventory", seed_inventory_if_empty),
         ComputeProvisioningStartupStep(
             "import-pool-definitions", import_pool_definitions_if_configured
         ),
+        ComputeProvisioningStartupStep("seed-inventory", seed_inventory_if_empty),
         ComputeProvisioningStartupStep("create-job-queue", create_job_queue),
     )
 
@@ -299,8 +300,16 @@ def background_tasks() -> tuple[ComputeProvisioningBackgroundTask, ...]:
     return tuple(tasks)
 
 
+async def close_storefront_client() -> None:
+    await container.lifecycle_event_sink().close()
+
+
 def shutdown_steps() -> tuple[ComputeProvisioningShutdownStep, ...]:
     return (
+        ComputeProvisioningShutdownStep(
+            "close-storefront-client",
+            close_storefront_client,
+        ),
         ComputeProvisioningShutdownStep(
             "shutdown-container-resources",
             container.shutdown_resources,

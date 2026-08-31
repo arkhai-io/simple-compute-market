@@ -41,7 +41,6 @@ async def publish_listing_to_registries(
     enabled: bool,
     registry_client_factory: RegistryClientFactory,
     listing_request_factory: ListingRequestFactory,
-    private_key: str,
     storefront_url: str | None,
     record_publications: RecordPublications | None = None,
     on_published: PublishEvent | None = None,
@@ -60,23 +59,31 @@ async def publish_listing_to_registries(
 
     offer_resource = ensure_json_obj(listing_dict.get("offer_resource"), {})
     accepted_escrows = ensure_json_obj(listing_dict.get("accepted_escrows"), [])
+    settlement_options = ensure_json_obj(listing_dict.get("settlement_options"), [])
     demands = ensure_json_obj(listing_dict.get("demands"), [])
     max_duration_seconds = listing_dict.get("max_duration_seconds")
 
     try:
+        listing_storefront_url = listing_dict.get("storefront_url")
+        if not isinstance(listing_storefront_url, str) or not listing_storefront_url:
+            raise ValueError("listing storefront_url is required for publication")
+        if storefront_url is not None and listing_storefront_url != storefront_url:
+            raise ValueError(
+                "listing storefront_url differs from configured storefront URL"
+            )
         async with registry_client_factory() as registry_client:
             request = listing_request_factory(
                 listing_id=listing_id,
                 offer=offer_resource,
                 accepted_escrows=accepted_escrows,
+                settlement_options=settlement_options,
                 demands=demands,
                 max_duration_seconds=max_duration_seconds,
-                storefront_url=listing_dict.get("seller") or storefront_url,
+                storefront_url=listing_storefront_url,
             )
             payloads = {url: request for url in registry_client.urls}
             results = await registry_client.publish_listing_per_registry(
-                payloads,
-                private_key=private_key,
+                payloads=payloads,
             )
         if record_publications is not None:
             await record_publications(listing_id, results)
@@ -86,8 +93,11 @@ async def publish_listing_to_registries(
                 await _maybe_await(
                     on_published(
                         listing_id=listing_id,
+                        storefront_url=listing_storefront_url,
+                        seller_principal=listing_dict.get("seller_principal"),
                         offer_resource=offer_resource,
                         accepted_escrows=accepted_escrows,
+                        settlement_options=settlement_options,
                         demands=demands,
                         max_duration_seconds=max_duration_seconds,
                     )
@@ -112,7 +122,6 @@ async def close_listing_in_registries(
     enabled: bool,
     registry_client_factory: RegistryClientFactory,
     update_listing_request_factory: UpdateListingRequestFactory,
-    private_key: str,
     select_target_registries: RegistryTargetSelector,
     record_publications: RecordPublications | None = None,
 ) -> dict[str, Any]:
@@ -130,14 +139,11 @@ async def close_listing_in_registries(
                 listing_id,
                 registry_client.urls,
             )
-            request = update_listing_request_factory(
-                updates={"status": "closed"},
-                private_key=private_key,
-            )
+            request = update_listing_request_factory(updates={"status": "closed"})
             payloads = {url: request for url in target_urls}
             results = await registry_client.update_listing_per_registry(
-                listing_id,
-                payloads,
+                listing_id=listing_id,
+                payloads=payloads,
             )
         if record_publications is not None:
             await record_publications(listing_id, results)

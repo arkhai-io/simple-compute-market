@@ -40,7 +40,7 @@ policies = [
 # Optional directories scanned at startup for custom policies.
 # Each immediate subdirectory is treated as a policy named after the
 # folder; the subdir must contain a policy.py exposing
-# `middleware`. See "Custom policies" below.
+# `factory(cfg) -> NegotiationMiddleware`. See "Custom policies" below.
 # extra_policy_paths = []
 
 # Legacy back-compat key (synthesized into a default chain when
@@ -88,7 +88,7 @@ or `policy = "..."` is used when one escrow kind needs its own sequence.
 | `max_rounds_guard` | Guard | every | Exits with `max_rounds_reached` once `len(history) >= [negotiation].max_rounds` (default 5). |
 | `bisection` | Decider | every | Bisects between the seller's floor (`accepted_escrows[0]` primary rate × duration) and the peer's latest offer; accepts within ~1% convergence, counters at midpoint, exits with `price_unreasonable` when the peer's offer is below `floor / 1.5`. No ML dependencies. |
 | `listed_price` | Decider | every | Accepts the peer's proposal when its amount is within the side's bound (≥ the floor in `maximize`, ≤ the ceiling in `minimize`); exits with `price_above_bound` otherwise. Never counters beyond the opening; accepts amountless escrow shapes as proposed. |
-| `rl` | Decider | every | Loads the trained pufferlib checkpoint `arkhai_negotiator_seller.pt`, shipped inside the installed `arkhai-vms` distribution under `arkhai_vms/negotiation/rl/models/`, and produces the next move. Requires that distribution's `[rl]` extra (`arkhai-vms[rl]`, which pins torch). Exits with `torch_unavailable` if torch isn't installed; exits with `model_missing` if the checkpoint isn't at the configured path. |
+| `rl` | Decider | every | Loads the trained pufferlib checkpoint at `domains/vms/negotiation/rl/models/arkhai_negotiator_seller.pt` and produces the next move. Requires the `[rl]` extra (torch + pufferlib). Exits with `torch_unavailable` if torch isn't installed; exits with `model_missing` if the checkpoint isn't at the configured path. |
 | `erc20_bisection`, `native_token_bisection`, `erc1155_bisection` | Decider | every | Escrow-family names for the same scalar-`amount` bisection policy. Useful in `[negotiation.policies]` dispatch tables. |
 | `erc20_rl`, `native_token_rl`, `erc1155_rl` | Decider | every | Escrow-family names for the same scalar-`amount` RL policy. Requires the same torch/checkpoint setup as `rl`. |
 | `accept_exact_listing` | Decider | every | Accepts only when the buyer proposal exactly matches the selected listing escrow entry, listing-level demands, and concrete amount; rejects all mismatches and never counters. |
@@ -156,17 +156,18 @@ without recomputing.
 
 ### Custom policies
 
-Two ways to supply one.
+Two ways to register:
 
-**1. A market domain offers it.** A domain declares the negotiation capability
-and returns the policies it offers for the requesting role. The storefront
-composes those with the policy kit's own into one catalogue at startup, and a
-name offered twice is a startup error rather than a silent override. This is how
-every in-repo policy is supplied:
+**1. Decorator (in-process):** any Python module imported by the
+storefront can register a middleware:
 
 ```python
-from market_policy import InlineSource, NegotiationDecision
+from market_policy import (
+    NegotiationDecision,
+    register_negotiation_middleware,
+)
 
+@register_negotiation_middleware("region_lock")
 def region_lock(history, context):
     if context.listing.get("offer_resource", {}).get("region") not in {"California, US"}:
         return (
@@ -176,33 +177,22 @@ def region_lock(history, context):
     return None, context
 ```
 
-Offer it from the domain's policy-source hook, then list `"region_lock"` in
-`[negotiation] policies`:
-
-```python
-def my_domain_policy_sources(request):
-    return (InlineSource({"region_lock": region_lock}, label="my-domain"),)
-```
+Then list `"region_lock"` in `[negotiation] policies`.
 
 **2. File discovery (no Python packaging):** drop a policy folder under
 `$XDG_CONFIG_HOME/arkhai/policies/<policy_name>/policy.py` (or under a
 directory listed in `[negotiation] extra_policy_paths`). The file must
-expose a `middleware` callable with the negotiation middleware signature.
-The storefront loads them at startup; the folder name becomes the policy
-name listed in `[negotiation] policies`.
-
-Note that the buyer's aggregation policies use a different file contract:
-those expose `factory(cfg) -> AggregationPolicy`. The two are separate
-mechanisms with separate directories, described under "Buyer: aggregation
-policy" below.
+expose `factory(cfg) -> NegotiationMiddleware`. The storefront
+discovers and registers them at startup; the folder name becomes the
+policy name listed in `[negotiation] policies`.
 
 ---
 
 ## Buyer: negotiation policy
 
 The buyer runs the **same middleware shape** as the seller — same
-`(history, context) -> (Maybe<Response>, Context)` contract, resolved from a
-catalogue the buyer role composes. But the buyer's primary config
+`(history, context) -> (Maybe<Response>, Context)` contract, same
+`load_negotiation_chain()` registry. But the buyer's primary config
 surface is one level up: a named **buyer policy** (a `BuyerPolicy`
 object) that bundles the middleware chain with everything around it —
 which escrow formats it can negotiate (escrow tuple selection offers
@@ -265,17 +255,10 @@ default = "accept_exact_listing"
 
 ### Bundled middlewares usable on the buyer side
 
-Each role composes its own catalogue, so a name resolvable here is not
-automatically resolvable on the seller side and vice versa. The generic escrow
-vocabulary in the seller's "Bundled policies" table is offered to both roles by
-the policy kit, so those names work in an explicit `[negotiation] policies` chain
-here too; a domain's own policies are offered per role, and a seller-side guard
-naming inventory the buyer does not own is deliberately not resolvable here.
-
-The buyer authorizes no filesystem or entry-point mechanism, so nothing in
-`buyer.toml` causes a policy to be loaded from disk.
-
-The kit policies that make sense buyer-side:
+The same registry serves both sides — every middleware listed in the
+seller's "Bundled policies" table above is importable in an explicit
+`[negotiation] policies` chain here too. The ones that make sense
+buyer-side:
 
 | Name | Why on the buyer side |
 |---|---|
@@ -283,7 +266,7 @@ The kit policies that make sense buyer-side:
 | `max_rounds_guard` | Same as seller — exits after `[negotiation].max_rounds`. |
 | `listed_price` *(default decider)* | Accepts any seller number within the buyer's ceiling (`minimize` direction); exits otherwise. |
 | `bisection` | Symmetric — bisects from the buyer's side (`minimize` direction). |
-| `rl` | Symmetric — loads the buyer's trained checkpoint `arkhai_negotiator_buyer.pt` from the same installed distribution. |
+| `rl` | Symmetric — loads the buyer's trained checkpoint at `domains/vms/negotiation/rl/models/arkhai_negotiator_buyer.pt`. |
 | `erc20_bisection`, `native_token_bisection`, `erc1155_bisection` | Symmetric aliases for the scalar-`amount` bisection decider. |
 | `erc20_rl`, `native_token_rl`, `erc1155_rl` | Symmetric aliases for the scalar-`amount` RL decider. |
 | `accept_exact_listing` | Useful for non-negotiated exact-match escrow kinds. |
@@ -293,10 +276,9 @@ The seller-only guards (`has_matching_inventory_guard`,
 on the buyer's chain — they're no-ops on the buyer side and shouldn't
 be listed.
 
-Custom policies come from a domain's declared negotiation capability, exactly as
-described in the seller section. The buyer authorizes no filesystem mechanism:
-`[negotiation] extra_policy_paths` is a seller-side setting, and nothing in
-`buyer.toml` causes a policy to be loaded from disk.
+Custom policies — register via `@register_negotiation_middleware(...)`
+or drop into `[negotiation] extra_policy_paths` exactly as described in
+the seller section.
 
 ---
 

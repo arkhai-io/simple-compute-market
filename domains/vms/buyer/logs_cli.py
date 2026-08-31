@@ -104,7 +104,8 @@ def _print_event_line(ev: dict, *, indent: int = 0) -> None:
     ts = _short_ts(ev.get("ts"))
     name = ev.get("event", "?")
     body = {
-        k: v for k, v in ev.items()
+        k: v
+        for k, v in ev.items()
         if k not in ("ts", "run_id", "event", "listing_id", "negotiation_id")
     }
     prefix = "  " * indent
@@ -163,10 +164,7 @@ def _print_run_events(run_id_prefix: str, raw: bool) -> None:
                 current_key = key
                 lid = ev.get("listing_id") or "?"
                 nid = lid_to_neg_id.get(lid)
-                heading = (
-                    f"{nid}  (listing={lid})" if nid
-                    else f"listing={lid}"
-                )
+                heading = f"{nid}  (listing={lid})" if nid else f"listing={lid}"
                 console.print(f"[cyan]┌── negotiation: {heading}[/cyan]")
             _print_event_line(ev, indent=1)
 

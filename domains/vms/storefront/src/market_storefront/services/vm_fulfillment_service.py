@@ -10,10 +10,12 @@ from collections.abc import Awaitable, Callable
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
+from domains.vms.settlement import submit_compute_fulfillment
+
 from market_storefront.services.vm_fulfillment_planner import build_vm_fulfillment_plan
-from market_storefront.settlement import submit_compute_fulfillment
 
 logger = logging.getLogger(__name__)
+_background_tasks: set[asyncio.Task[None]] = set()
 
 StageEventFn = Callable[..., Any]
 SQLiteClientFactory = Callable[[], Any]
@@ -106,6 +108,7 @@ def _lease_window_strings(
 async def _commit_capacity_hold(
     *,
     capacity: Any,
+    binding: Any,
     held_reservation: dict[str, Any] | None,
     escrow_uid: str,
     duration_seconds: int,
@@ -132,7 +135,10 @@ async def _commit_capacity_hold(
         duration_seconds=duration_seconds,
     )
     try:
+        if held_reservation.get("site") != binding.site_id:
+            raise RuntimeError("accepted capacity hold site does not match listing")
         await capacity.commit(
+            binding,
             resource_id=held_reservation.get("resource_id"),
             capacity_reservation_id=str(held_reservation["capacity_reservation_id"]),
             lease_start_utc=lease_start_utc,
@@ -161,6 +167,7 @@ async def _commit_capacity_hold(
 async def _commit_fresh_reservation(
     *,
     capacity: Any,
+    binding: Any,
     reserved: dict[str, Any],
     escrow_uid: str,
     duration_seconds: int,
@@ -177,6 +184,7 @@ async def _commit_fresh_reservation(
         duration_seconds=duration_seconds,
     )
     await capacity.commit(
+        binding,
         resource_id=resource_id,
         capacity_reservation_id=str(capacity_reservation_id),
         lease_start_utc=lease_start_utc,
@@ -213,11 +221,13 @@ async def _build_vm_fulfillment_context(
     listing_id: str | None,
     seller_order_id: str | None,
     chain_configs: dict[str, Any] | None,
+    settlement_mechanism: str,
 ) -> tuple[Any, dict[str, Any]]:
     """Build the immutable VM request and its restart-recovery envelope."""
     plan = build_vm_fulfillment_plan(
         order=order,
         duration_seconds=duration_seconds,
+        settlement_mechanism=settlement_mechanism,
         chain_configs=chain_configs,
     )
     connectivity = None
@@ -261,6 +271,7 @@ async def _build_vm_fulfillment_context(
 async def _reserve_capacity_for_obligation(
     *,
     capacity: Any,
+    binding: Any,
     held_reservation: dict[str, Any] | None,
     escrow_uid: str,
     listing_id: str | None,
@@ -282,6 +293,7 @@ async def _reserve_capacity_for_obligation(
     """
     reserved = await _commit_capacity_hold(
         capacity=capacity,
+        binding=binding,
         held_reservation=held_reservation,
         escrow_uid=escrow_uid,
         duration_seconds=duration_seconds,
@@ -289,16 +301,19 @@ async def _reserve_capacity_for_obligation(
         stage_event=stage_event,
     )
     if reserved is None:
+        claim = dict(required_attributes or {})
+        claim["executor_kind"] = "vm"
         reserved = await capacity.reserve(
-            claim=required_attributes or None,
+            binding,
+            claim=claim,
             deal_ref={"listing_id": listing_id or order_id, "escrow_uid": escrow_uid},
             lease_start_utc=start_utc,
             lease_duration_seconds=duration_seconds,
-            site=site_id,
         )
         if reserved:
             await _commit_fresh_reservation(
                 capacity=capacity,
+                binding=binding,
                 reserved=reserved,
                 escrow_uid=escrow_uid,
                 duration_seconds=duration_seconds,
@@ -321,6 +336,7 @@ async def fulfill_vm_obligation(
     listing_id: str | None = None,
     seller_order_id: str | None = None,
     chain_configs: dict[str, Any] | None = None,
+    settlement_mechanism: str = "alkahest.v1",
     base_url: str | None = None,
     get_sqlite_client: SQLiteClientFactory,
     capacity: CapacityClientLike,
@@ -350,7 +366,7 @@ async def fulfill_vm_obligation(
     vm_target = f"tenant-{uuid.uuid4().hex[:4]}"
 
     logger.info(
-        "[ALKAHEST] Order for fulfillment: type=%s keys=%s",
+        "[SETTLEMENT] Order for fulfillment: type=%s keys=%s",
         type(order).__name__,
         sorted(order.keys()) if isinstance(order, dict) else "n/a",
     )
@@ -366,6 +382,7 @@ async def fulfill_vm_obligation(
             listing_id=listing_id,
             seller_order_id=seller_order_id,
             chain_configs=chain_configs,
+            settlement_mechanism=settlement_mechanism,
         )
         order_id = plan.order_id
         required_attributes = plan.required_attributes
@@ -375,9 +392,19 @@ async def fulfill_vm_obligation(
             fulfillment_context=json.dumps(recovery_context, sort_keys=True),
             fulfillment_phase="context_persisted",
         )
+        if not listing_id:
+            raise RuntimeError("VM fulfillment requires a durably bound listing")
+        from market_storefront.services.capacity_client import (
+            capacity_binding_for_listing,
+        )
+
+        binding = await capacity_binding_for_listing(get_sqlite_client(), listing_id)
+        if site_id is not None and site_id != binding.site_id:
+            raise RuntimeError("requested fulfillment site differs from listing binding")
 
         reserved = await _reserve_capacity_for_obligation(
             capacity=capacity,
+            binding=binding,
             held_reservation=held_reservation,
             escrow_uid=escrow_uid,
             listing_id=listing_id,
@@ -411,11 +438,6 @@ async def fulfill_vm_obligation(
         # -- removing it from every call site is a larger signature change
         # than stripping it from the API response requires.
         reserved_vm_host = reserved.get("vm_host")
-        # `pool_id` and `member_id` in the stage event below are stripped by the
-        # same boundary and are likewise always None now. They stay as emitted
-        # keys rather than being deleted: a reservation genuinely has no pool of
-        # its own, and an always-absent field states that more usefully to a log
-        # reader than a silently missing one.
         await persist_escrow_fields_with_retry(
             get_sqlite_client,
             escrow_uid=escrow_uid,
@@ -517,7 +539,7 @@ async def fulfill_vm_obligation(
                     policy_err,
                 )
         logger.error(
-            "[ALKAHEST] Provisioning failed, skipping obligation fulfillment: %s",
+            "[SETTLEMENT] Provisioning failed, skipping obligation fulfillment: %s",
             error,
         )
         stage_event(
@@ -552,6 +574,7 @@ async def fulfill_vm_obligation(
         # reservation, which is the common case, not an edge case.
         try:
             await capacity.commit(
+                binding,
                 resource_id=reserved_resource_id,
                 capacity_reservation_id=reserved_capacity_reservation_id,
                 lease_start_utc=lease_start_utc,
@@ -658,7 +681,9 @@ async def fulfill_vm_obligation(
                 shutdown_err,
             )
 
-    asyncio.create_task(_schedule_shutdown_best_effort())
+    shutdown_task = asyncio.create_task(_schedule_shutdown_best_effort())
+    _background_tasks.add(shutdown_task)
+    shutdown_task.add_done_callback(_background_tasks.discard)
 
     try:
         fulfillment_uid = await submit_compute_fulfillment(
@@ -668,7 +693,7 @@ async def fulfill_vm_obligation(
         )
     except Exception as error:
         logger.error(
-            "[ALKAHEST] EVENT=settlement_failed_after_provisioning "
+            "[SETTLEMENT] EVENT=settlement_failed_after_provisioning "
             "escrow_uid=%s listing_id=%s resource_id=%s capacity_reservation_id=%s "
             "error=%s",
             escrow_uid,
@@ -688,7 +713,7 @@ async def fulfill_vm_obligation(
         )
         return {
             "status": "error",
-            "message": f"On-chain fulfillment failed after provisioning: {error}",
+            "message": f"Fulfillment evidence publication failed after provisioning: {error}",
             "escrow_uid": escrow_uid,
             "connection_details": None,
             "ssh_public_key": ssh_public_key,

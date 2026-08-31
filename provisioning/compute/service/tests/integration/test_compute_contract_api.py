@@ -16,6 +16,17 @@ from compute_provisioning_service.main import app
 from vm_provisioning_adapter.services.ansible_service import AnsibleError
 
 from vm_provisioning_operator.models import HostCreate
+from .conftest import SERVICE_AUTHORITIES, STOREFRONT_SIGNER
+
+
+def _compute_provisioning_client(base_url: str, *, transport):
+    return ComputeProvisioningClient(
+        base_url,
+        signer=STOREFRONT_SIGNER,
+        caller_role="seller",
+        expected_authorities=SERVICE_AUTHORITIES,
+        transport=transport,
+    )
 
 
 def _leased_vm_reservation() -> dict:
@@ -26,6 +37,7 @@ def _leased_vm_reservation() -> dict:
         attributes={"vm_host": "kvm1"},
     )
     reserved = ledger.reserve(
+        claim={"executor_kind": "vm"},
         deal_ref={"escrow_uid": "escrow-contract", "listing_id": "listing-1"},
         lease_duration_seconds=3600,
     )
@@ -49,6 +61,7 @@ def _leased_bare_metal_reservation() -> dict:
     )
     reserved = ledger.reserve(
         claim={
+            "executor_kind": "bare_metal",
             "physical_host_id": "physical-contract-1",
             "allocation_mode": ALLOCATION_MODE_EXCLUSIVE,
         },
@@ -96,9 +109,7 @@ async def test_contract_submission_is_idempotent_and_correlated(client_and_queue
     ))
     reservation = _leased_vm_reservation()
 
-    async with ComputeProvisioningClient(
-        "http://test", transport=ASGITransport(app=app)
-    ) as client:
+    async with _compute_provisioning_client("http://test", transport=ASGITransport(app=app)) as client:
         first = await client.submit_action(_vm_action(reservation))
         duplicate = await client.submit_action(_vm_action(reservation))
         job = await client.poll_until_complete(first.job_id, timeout=5, poll_interval=0.01)
@@ -133,9 +144,7 @@ async def test_bare_metal_uses_same_executor_neutral_client(client_and_queue):
         parameters={"access_ref": {"ssh_user": "tenant"}},
     )
 
-    async with ComputeProvisioningClient(
-        "http://test", transport=ASGITransport(app=app)
-    ) as client:
+    async with _compute_provisioning_client("http://test", transport=ASGITransport(app=app)) as client:
         accepted = await client.submit_action(action)
         job = await client.poll_until_complete(
             accepted.job_id, timeout=5, poll_interval=0.01
@@ -151,9 +160,7 @@ async def test_bare_metal_uses_same_executor_neutral_client(client_and_queue):
 @pytest.mark.asyncio
 async def test_executor_mismatch_fails_before_job_submission(client_and_queue):
     reservation = _leased_vm_reservation()
-    async with ComputeProvisioningClient(
-        "http://test", transport=ASGITransport(app=app)
-    ) as client:
+    async with _compute_provisioning_client("http://test", transport=ASGITransport(app=app)) as client:
         with pytest.raises(ComputeProvisioningError) as exc_info:
             await client.submit_action(_vm_action(reservation, executor_kind="bare_metal"))
     assert exc_info.value.status_code == 409
@@ -186,9 +193,7 @@ async def test_terminal_executor_error_uses_structured_contract_envelope(
         },
     )
 
-    async with ComputeProvisioningClient(
-        "http://test", transport=ASGITransport(app=app)
-    ) as client:
+    async with _compute_provisioning_client("http://test", transport=ASGITransport(app=app)) as client:
         accepted = await client.submit_action(action)
         job = await client.get_job(accepted.job_id)
 
@@ -253,12 +258,14 @@ async def test_contract_lease_view_serializes_every_reachable_reservation_state(
     for raw_state, want in expected.items():
         view = _lease_view({
             "capacity_reservation_id": "reservation-1",
+            "executor_kind": "vm",
             "state": raw_state,
             "lease_end_utc": "2099-01-01T00:00:00Z",
         })
         assert view.status == want, f"{raw_state!r} should map to {want!r}"
         vm_view = _vm_lease_view({
             "capacity_reservation_id": "reservation-1",
+            "executor_kind": "vm",
             "resource_id": "resource-1",
             "state": raw_state,
             "lease_end_utc": "2099-01-01T00:00:00Z",
@@ -323,9 +330,7 @@ async def test_begin_fulfillment_teardown_client_drives_the_real_aggregate_idemp
         reservation["capacity_reservation_id"], fulfillment_id=fulfillment_id,
     )
 
-    async with ComputeProvisioningClient(
-        "http://test", transport=ASGITransport(app=app)
-    ) as client:
+    async with _compute_provisioning_client("http://test", transport=ASGITransport(app=app)) as client:
         first = await client.begin_fulfillment_teardown(fulfillment_id)
         repeated = await client.begin_fulfillment_teardown(fulfillment_id)
 
@@ -343,9 +348,7 @@ async def test_begin_fulfillment_teardown_client_drives_the_real_aggregate_idemp
 async def test_begin_fulfillment_teardown_client_maps_unknown_fulfillment_to_404(
     client_and_queue,
 ):
-    async with ComputeProvisioningClient(
-        "http://test", transport=ASGITransport(app=app)
-    ) as client:
+    async with _compute_provisioning_client("http://test", transport=ASGITransport(app=app)) as client:
         with pytest.raises(ComputeProvisioningError) as exc_info:
             await client.begin_fulfillment_teardown("no-such-fulfillment")
 
@@ -363,9 +366,7 @@ async def test_begin_fulfillment_teardown_client_maps_non_active_aggregate_to_40
         state="failed",
     )
 
-    async with ComputeProvisioningClient(
-        "http://test", transport=ASGITransport(app=app)
-    ) as client:
+    async with _compute_provisioning_client("http://test", transport=ASGITransport(app=app)) as client:
         with pytest.raises(ComputeProvisioningError) as exc_info:
             await client.begin_fulfillment_teardown(fulfillment_id)
 
@@ -389,9 +390,7 @@ async def test_contract_register_lease_never_sends_executor_ref_and_it_self_heal
 
     reservation = _leased_vm_reservation()
     transport = ASGITransport(app=app)
-    async with ComputeProvisioningClient(
-        "http://test", transport=transport
-    ) as client:
+    async with _compute_provisioning_client("http://test", transport=transport) as client:
         registration = LeaseRegistration(
             capacity_reservation_id=reservation["capacity_reservation_id"],
             deal_ref={"escrow_uid": "escrow-contract"},

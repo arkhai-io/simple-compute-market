@@ -1,113 +1,109 @@
 # Implementation Tasks
 
-## 1. Registry and identity configuration
+## 1. Shared identity contract
 
-- [ ] 1.1 Re-verify `design.md`'s Context, particularly that `storefront_admin_key` is
-      still dual-purpose and that `Eip191Verifier` still compares the recovered value to
-      `identity.identifier`.
-- [ ] 1.2 Define the site registry as an interface returning `(site_id, url, identity)`,
-      config-backed initially. Consumers must not read configuration directly —
-      `design.md` records that as what turns admin management into a rewrite.
-- [ ] 1.3 Store the identity as `market_identity.Identity`, not a scheme-specific field.
-      For `eip191` the identifier is the lowercase 0x **address**, which is a hash of the
-      public key and not the key itself; a field named for a public key would be wrong.
-- [ ] 1.4 Give the authority the storefront's identity, singular — that direction is
-      one-to-one.
-- [ ] 1.5 Focused tests: registry resolves by site; an identity registered for one site
-      does not authenticate another; a non-default scheme's identifier form round-trips.
+- [ ] 1.1 Pin the released `arkhai-kit-identity` artifact and require
+      `arkhai.market-request-signature.v2`, the matching response protocol,
+      strict scheme-tagged principals, and exact capability checks.
+- [ ] 1.2 Remove service-local canonicalization, EIP-191-only assumptions,
+      private-key/address derivation, caller-selected expected identities, and
+      legacy version 1 or shared-key fallback.
+- [ ] 1.3 Add focused contract tests for Ed25519/EIP-191 parity, every bound
+      request and response field, malformed proofs, cross-role/principal replay,
+      stale timestamps, and exact sync/async bytes.
 
-## 2. Sign storefront-to-authority calls
+## 2. Registry and authority configuration
 
-- [ ] 2.1 Check whether `verify_signed_identity`'s (operation, resource_id, timestamp)
-      canonicalization transfers to every service call, including projection polling and
-      capacity-release callbacks, which may have no natural `resource_id`. If it does
-      not, extend the canonicalization once rather than forking a second signed-request
-      format.
-- [ ] 2.2 Sign outbound storefront calls; verify them at the authority against the
-      registered storefront identity.
-- [ ] 2.3 Keep the shared key accepted throughout, so this section is independently
-      deployable.
-- [ ] 2.4 Focused tests: valid signature accepted; wrong identity rejected; replay
-      outside the skew bound rejected; verification performs no network call.
+- [ ] 2.1 Define the site registry as an interface returning
+      `(site_id, url, principal)`, config-backed initially, with consumers
+      independent of the backing source.
+- [ ] 2.2 Give each storefront site an exact scheme-tagged authority principal
+      and give each authority its one configured storefront principal.
+- [ ] 2.3 Inject signer/verifier protocols at composition roots; keep public
+      principals in ordinary configuration and private signer material in
+      Secret-backed inputs.
+- [ ] 2.4 Prove wallet-free Ed25519 profiles render and run without chain, RPC,
+      EAS, wallet, or EVM private-key configuration.
 
-## 3. Sign authority-to-storefront calls
+## 3. Storefront-to-authority authentication
 
-- [ ] 3.1 Sign outbound authority calls with the authority's own material; verify at the
-      storefront against the site registry.
-- [ ] 3.2 Confirm the authority no longer signs with material any caller holds — the
-      specific defect this change exists to close.
-- [ ] 3.3 Focused tests: a compromised storefront credential cannot produce a call the
-      storefront accepts as authority-originated; an unregistered site's call is
-      rejected.
+- [ ] 3.1 Sign outbound storefront requests over role, principal, method,
+      semantic operation and resource, request ID, timestamp, and canonical
+      body; verify them before authority route dispatch.
+- [ ] 3.2 Persist replay reservations by principal and request identity so
+      exact retries may recover the stored result while changed reuse fails
+      closed.
+- [ ] 3.3 Sign authority mutation responses and require clients to verify the
+      configured authority, request identity, status, timestamp, and body
+      before accepting an acknowledgement.
+- [ ] 3.4 Cover every service route, including projection, capacity release,
+      provisioning lifecycle, and seller/listing lifecycle operations.
 
-## 4. Rotation
+## 4. Authority-to-storefront authentication
 
-- [ ] 4.1 Accept a set of valid identities per counterparty rather than one.
-- [ ] 4.2 Prove the three-step rotation: introduce, adopt, retire — each independently
-      deployable, with no instant where both sides must change together.
-- [ ] 4.3 Focused tests: both identities accepted during overlap; retired identity
-      rejected.
+- [ ] 4.1 Sign every authority-originated storefront request with the
+      authority's injected signer and verify it against the site registry
+      before route dispatch.
+- [ ] 4.2 Sign storefront mutation responses and require authority clients to
+      verify the configured storefront principal and all bound response fields.
+- [ ] 4.3 Prove a principal registered for one site cannot authenticate another
+      site, a compromised storefront cannot sign as an authority, and unsigned
+      or wrong-authority acknowledgements fail closed.
 
-## 5. Freeze the shared key
+## 5. Rotation and disablement
 
-The behavioral boundary. After this, an unsigned caller is refused.
+- [ ] 5.1 Require active-principal and replacement-principal proofs over one
+      bounded rotation statement and persist the overlap atomically.
+- [ ] 5.2 Accept both principals only during overlap; retire the old principal
+      on expiry or explicit retirement and reject it thereafter.
+- [ ] 5.3 Keep operator disablement distinct from rotation and prove disablement
+      revokes authority without transferring it.
 
-- [ ] 5.1 Stop accepting `storefront_admin_key` as an authentication primitive; do not
-      delete the setting in this change.
-- [ ] 5.2 Document that rollback past this section is a coordinated redeploy of both
-      services rather than a code revert, which is why the freeze is separate from
-      Sections 2 and 3.
+## 6. Deployment cutover
 
-## 6. Deployment and infrastructure
-
-- [ ] 6.1 Private keys through each service's Secret profile; identities through ordinary
-      configuration. Identities are not secret, so the sensitive surface shrinks rather
-      than grows.
-- [ ] 6.2 Record key placement rules in `docs/development/DEPLOYMENT_AND_CONFIG.md`.
-- [ ] 6.3 Coordinate key generation and distribution with the infrastructure repository.
-      This change cannot land operationally without it.
-- [ ] 6.4 Deployment render tests for both directions and for the rotation overlap.
+- [ ] 6.1 Render scheme-tagged public principals and Secret-injected signer
+      credentials for both peers, with exact startup validation.
+- [ ] 6.2 Remove `storefront_admin_key`, legacy signature configuration,
+      address/private-key aliases, and mixed-generation deployment paths.
+- [ ] 6.3 Add deployment and package checks for exact identity-kit version and
+      protocol capabilities, dual-scheme profiles, public/private separation,
+      and rejection of stale artifacts.
 
 ## 7. Validation
 
-- [ ] 7.1 Run the provisioning middleware and event-sink suites, storefront site-client
-      suites, `kit/identity` suites, and deployment render tests. Disclose any suite not
-      run.
-- [ ] 7.2 Measure per-request verification cost. ecrecover is local and cheap but not
-      free, and it now runs on every inter-service call including projection polls —
-      which is an independent argument for replacing polling with push.
-- [ ] 7.3 Run `openspec validate --all --strict` against the baseline current at
-      implementation time.
+- [ ] 7.1 Run focused identity, provisioning middleware/event-sink,
+      storefront/site-client, domain composition, migration, replay, rotation,
+      and deployment-render suites.
+- [ ] 7.2 Exercise an end-to-end Ed25519 service flow and an explicit EIP-191
+      flow, including signed acknowledgements and a changed-replay rejection.
+- [ ] 7.3 Run strict OpenSpec validation against the baseline current at
+      implementation time and disclose any suite not run.
 
 ## 8. Closeout
 
 Per `openspec/README.md#plan-closeout-requirements`.
 
-- [ ] 8.1 **Comment hygiene.** Run `make check-comment-hygiene`. Read
-      `settings.toml`'s `storefront_admin_key` comment and `middleware/auth.py`'s
-      docstring directly; both describe the dual-purpose shared secret this change
-      replaces.
-- [ ] 8.2 **Import placement.** Review imports this change adds; the provisioning service
-      gains a `kit/identity` dependency.
-- [ ] 8.3 **Documentation compliance.** Confirm the signing rules landed in
-      `physical-provisioning` and `storefront-publication`, the eip191 rationale in
-      `storefront-publication/architecture.md`, key placement in
-      `DEPLOYMENT_AND_CONFIG.md`, and that `ARCHITECTURE.md`'s site-authority section no
-      longer says one shared key does both jobs.
-- [ ] 8.4 **Narrative compression.** Compress completed-task notes to final behavior,
-      validation evidence, and promotion destinations.
-- [ ] 8.5 **Roadmap currency.** Record the disposition; this change closes no roadmap
-      goal's gap on its own.
+- [ ] 8.1 **Comment hygiene.** Run `make check-comment-hygiene`; remove comments
+      and docstrings describing shared-key, version 1, address-derived, or
+      migration-only behavior.
+- [ ] 8.2 **Import placement.** Review every touched package against the
+      documented dependency layers; service and domain packages consume
+      identity protocols without importing signer implementations upward.
+- [ ] 8.3 **Documentation compliance.** Promote version 2 request/response,
+      replay, registry, rotation, dual-scheme, and credential-placement
+      decisions to the owning permanent specifications and architecture docs.
+- [ ] 8.4 **Narrative compression.** Compress completed-task notes to final
+      behavior, validation evidence, and promotion destinations.
+- [ ] 8.5 **Roadmap currency.** Record the final roadmap disposition.
 - [ ] 8.6 **Promotion.** Complete the design-promotion record below.
 
 ## Design promotion record
 
 | Accepted decision | Permanent location |
 |---|---|
-| Service calls are authenticated by counterparty signature; no party holds material letting it sign as another; verification is local and replay-bounded | `openspec/specs/physical-provisioning/spec.md` — "Service calls are authenticated by counterparty signature" |
-| Counterparty identities rotate through overlapping acceptance | `openspec/specs/physical-provisioning/spec.md` — "Counterparty identities rotate without coordinated downtime" |
-| Storefronts hold a registry of site identities, in scheme-tagged form, reached through an interface | `openspec/specs/storefront-publication/spec.md` — "Storefronts hold a registry of site identities" |
-| Why an eip191 identity rather than a bare signing key | `openspec/specs/storefront-publication/architecture.md` |
-| The dual-purpose key and what replaces it | `docs/development/ARCHITECTURE.md`, site authority |
-| Private key placement versus non-secret identity configuration | `docs/development/DEPLOYMENT_AND_CONFIG.md` |
-| Why an address is not a public key, and why the registry holds an `Identity` | This change's `design.md` |
+| Service peers use the shared body-bound version 2 request and response contracts with exact configured principals | `openspec/specs/marketplace-identity/{spec,architecture}.md`; `openspec/specs/physical-provisioning/spec.md` |
+| Request identities are durably reserved and exact retries are distinct from changed replay | `openspec/specs/marketplace-identity/spec.md`; `openspec/specs/physical-provisioning/spec.md` |
+| Ed25519 is wallet-free by default and EIP-191 remains explicit under one scheme-tagged protocol | `openspec/specs/marketplace-identity/{spec,architecture}.md`; `docs/development/ARCHITECTURE.md` |
+| Storefronts resolve exact site authority principals through an interface and verify signed acknowledgements | `openspec/specs/storefront-publication/{spec,architecture}.md` |
+| Counterparty rotation requires dual proof and bounded overlap; disablement never transfers authority | `openspec/specs/{marketplace-identity,physical-provisioning,storefront-publication}/spec.md` |
+| Public principals and private signer credentials have separate deployment ownership | `docs/development/DEPLOYMENT_AND_CONFIG.md` |

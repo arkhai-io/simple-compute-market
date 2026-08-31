@@ -79,7 +79,8 @@ def test_authoritative_empty_projection_closes_tracked_listing(tmp_path):
             """
             CREATE TABLE listings (
               listing_id TEXT PRIMARY KEY,
-              status TEXT NOT NULL
+              status TEXT NOT NULL,
+              updated_at TEXT
             );
             CREATE TABLE derived_bare_metal_listings (
               listing_id TEXT PRIMARY KEY,
@@ -107,14 +108,26 @@ def test_authoritative_empty_projection_closes_tracked_listing(tmp_path):
     calls = []
     source = bare_metal_publication_adapter(
         projection_snapshot=lambda: [_projection(resources=False)],
-        close_listing=lambda base_url, listing_id, private_key: (
-            calls.append((base_url, listing_id, private_key))
+        close_listing=lambda base_url, listing_id: (
+            calls.append((base_url, listing_id))
             or {"status": "closed"}
         ),
         publish_existing_listing=lambda **kwargs: kwargs,
     )
 
-    closed = source.close_stale(path, "https://seller", "private-key")
+    closed = source.close_stale(path, "https://seller")
 
     assert closed == ["listing-1"]
-    assert calls == [("https://seller", "listing-1", "private-key")]
+    assert calls == [("https://seller", "listing-1")]
+    # The local listings row is closed in the same pass as the derived
+    # row -- the storefront's own view can't outlive the projection that
+    # justified it.
+    conn = sqlite3.connect(path)
+    try:
+        row = conn.execute(
+            "SELECT status, updated_at FROM listings WHERE listing_id = 'listing-1'"
+        ).fetchone()
+    finally:
+        conn.close()
+    assert row[0] == "closed"
+    assert row[1]

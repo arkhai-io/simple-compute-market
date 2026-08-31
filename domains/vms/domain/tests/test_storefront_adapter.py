@@ -100,6 +100,7 @@ def test_vm_publication_adapter_fills_core_publication_source_slots() -> None:
 
 def test_vm_offer_resource_for_listing_builds_domain_payload() -> None:
     offer = vm_offer_resource_for_listing({
+        "offering_mode": "vm",
         "pool_id": "pool-a",
         "resource_id": "host-a",
         "gpu_model": "H200",
@@ -109,6 +110,7 @@ def test_vm_offer_resource_for_listing_builds_domain_payload() -> None:
     })
 
     assert offer == {
+        "virtualization_type": "vm",
         "pool_id": "pool-a",
         "resource_id": "host-a",
         "gpu_model": "H200",
@@ -121,6 +123,7 @@ def test_vm_offer_resource_for_listing_builds_domain_payload() -> None:
 def test_vm_offer_resource_for_listing_marks_interruptible() -> None:
     offer = vm_offer_resource_for_listing(
         {
+            "offering_mode": "vm",
             "pool_id": "pool-a",
             "gpu_model": "H200",
             "gpu_count": 2,

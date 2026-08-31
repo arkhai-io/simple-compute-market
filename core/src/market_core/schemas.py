@@ -26,6 +26,9 @@ coercion into the envelope (work item I.1 of
 """
 
 from __future__ import annotations
+import hashlib
+import json
+import re
 
 from typing import Any, Literal
 
@@ -86,13 +89,11 @@ def _parse_uint256_str(v: Any, field_name: str) -> int | None:
             return None
         if not s.isdigit():
             raise ValueError(
-                f"{field_name}: must be a non-negative decimal-digit string, "
-                f"got {v!r}"
+                f"{field_name}: must be a non-negative decimal-digit string, got {v!r}"
             )
         return int(s)
     raise ValueError(
-        f"{field_name}: must be int, decimal string, or None — got "
-        f"{type(v).__name__}"
+        f"{field_name}: must be int, decimal string, or None — got {type(v).__name__}"
     )
 
 
@@ -311,6 +312,22 @@ class SettlementObligation(BaseModel):
             "bond: seller posts, buyer claims."
         ),
     )
+    payer_principal: dict[str, str] | None = Field(
+        default=None,
+        description=(
+            "Canonical scheme-tagged principal authorized to fund this "
+            "obligation. Required by mechanisms that do not derive authority "
+            "from a mechanism-specific wallet."
+        ),
+    )
+    claimant_principal: dict[str, str] | None = Field(
+        default=None,
+        description=(
+            "Canonical scheme-tagged principal authorized to collect this "
+            "obligation. Required by mechanisms that do not derive authority "
+            "from a mechanism-specific wallet."
+        ),
+    )
     amount: int | None = Field(
         default=None,
         description=(
@@ -428,6 +445,14 @@ class SettlementPlan(BaseModel):
     obligations: list[SettlementObligation] = Field(
         description="Every obligation the deal materializes.",
     )
+    buyer_principal: dict[str, str] | None = Field(
+        default=None,
+        description="Canonical scheme-tagged buyer principal bound at acceptance.",
+    )
+    seller_principal: dict[str, str] | None = Field(
+        default=None,
+        description="Canonical scheme-tagged seller principal bound at acceptance.",
+    )
     service_terms: dict[str, Any] = Field(
         default_factory=dict,
         description=(
@@ -500,6 +525,66 @@ class RateValue(BaseModel):
         return _serialize_uint256_str(v) or "0"
 
 
+_SETTLEMENT_OPTION_ID = re.compile(r"^[0-9a-f]{64}$")
+
+
+def derive_settlement_option_id(
+    *,
+    mechanism: str,
+    asset: str,
+    rates: list[RateValue],
+    params: dict[str, Any],
+) -> str:
+    payload = {
+        "mechanism": mechanism,
+        "asset": asset,
+        "rates": [rate.model_dump(mode="json") for rate in rates],
+        "params": params,
+    }
+    encoded = json.dumps(
+        payload, ensure_ascii=False, separators=(",", ":"), sort_keys=True
+    ).encode()
+    return hashlib.sha256(encoded).hexdigest()
+
+
+class SettlementOption(BaseModel):
+    """One immutable, mechanism-tagged settlement choice on a listing."""
+
+    model_config = {"extra": "forbid"}
+
+    option_id: str
+    mechanism: str = Field(min_length=1)
+    asset: str = Field(min_length=1)
+    rates: list[RateValue] = Field(default_factory=list)
+    params: dict[str, Any] = Field(default_factory=dict)
+
+    @model_validator(mode="after")
+    def validate_identity(self) -> "SettlementOption":
+        if not _SETTLEMENT_OPTION_ID.fullmatch(self.option_id):
+            raise ValueError("settlement option ID must be lowercase SHA-256")
+        expected = derive_settlement_option_id(
+            mechanism=self.mechanism,
+            asset=self.asset,
+            rates=self.rates,
+            params=self.params,
+        )
+        if self.option_id != expected:
+            raise ValueError(
+                "settlement option ID does not match its canonical payload"
+            )
+        return self
+
+
+class SettlementSelection(BaseModel):
+    """Buyer selection of one exact listing settlement option."""
+
+    model_config = {"extra": "forbid"}
+
+    mechanism: str = Field(min_length=1)
+    option_id: str = Field(pattern=r"^[0-9a-f]{64}$")
+    expiration_unix: int = Field(gt=0)
+
+
 def compute_rate_total(rate: RateValue, duration_seconds: int) -> int:
     """Multiply a rate by the negotiated duration.
 
@@ -513,6 +598,34 @@ def compute_rate_total(rate: RateValue, duration_seconds: int) -> int:
     return rate.value * duration_seconds // divisor
 
 
+def rate_scales_by_time(rate: RateValue) -> bool:
+    """True when ``rate.per`` is a time unit settled against a duration."""
+
+    return rate.per in PER_UNIT_SECONDS
+
+
+def compute_rate_unit_total(rate: RateValue, unit_count: int) -> int:
+    """Multiply a counted-unit rate by the negotiated unit count.
+
+    Counted units (``per="credit"``, ``"token"``, ``"request"``, …) scale
+    by an exact negotiated count carried on the deal rather than by
+    elapsed time; time-unit rates must go through ``compute_rate_total``.
+    """
+
+    if rate.per in PER_UNIT_SECONDS:
+        raise ValueError(
+            f"time-unit rate {rate.per!r} scales by duration, not unit count"
+        )
+    if isinstance(unit_count, bool) or not isinstance(unit_count, int):
+        raise ValueError("counted rate requires an integer unit count")
+    if unit_count < 1:
+        raise ValueError("counted rate requires a positive unit count")
+    total = rate.value * unit_count
+    if total > 2**256 - 1:
+        raise ValueError("counted rate total exceeds uint256")
+    return total
+
+
 # ---------------------------------------------------------------------------
 # AcceptedEscrow / EscrowProposal accessors
 # ---------------------------------------------------------------------------
@@ -520,6 +633,16 @@ def compute_rate_total(rate: RateValue, duration_seconds: int) -> int:
 # round-trip through SQLite or the wire); these accessors operate on
 # either a Pydantic model OR a dict so the only change at the call site
 # is the accessor name.
+#
+# Ownership note: the Alkahest-shaped carriers below (AcceptedEscrow,
+# EscrowProposal, EscrowDemand, and the accepted_* accessors) have their
+# single authoritative definition in ``market_alkahest.schemas`` — core
+# cannot import the mechanism kit, so these stay as verbatim transitional
+# aliases only for the wire models core still types (negotiation and
+# listing carriers), to be retired with a contract change. New consumers
+# import from the kit. ``RateValue``, ``SettlementOption``,
+# ``compute_rate_total`` and ``primary_rate_value`` are mechanism-neutral
+# and deliberately stay core.
 
 
 def primary_rate_value(accepted_or_proposal: Any) -> int | None:
@@ -726,14 +849,11 @@ class EscrowProposal(BaseModel):
     """
 
     chain_name: str = Field(
-        description=(
-            "Chain identifier; must match the picked accepted_escrows entry."
-        ),
+        description=("Chain identifier; must match the picked accepted_escrows entry."),
     )
     escrow_address: str = Field(
         description=(
-            "Escrow contract address; must match the picked "
-            "accepted_escrows entry."
+            "Escrow contract address; must match the picked accepted_escrows entry."
         ),
     )
     fields: dict[str, Any] = Field(

@@ -4,7 +4,11 @@ from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from compute_provisioning_service.db.database import run_migrations
-from compute_provisioning_service.db.migrations import SchemaDriftError, check_schema_version
+from compute_provisioning_service.db.migrations import (
+    MIGRATIONS,
+    SchemaDriftError,
+    check_schema_version,
+)
 from compute_provisioning_service.db.models import AnsibleJob, AnsiblePoolConfig, DEFAULT_POOL_ID, Host, ResourcePool
 from market_site.ledger import CapacityLedgerService
 
@@ -362,6 +366,62 @@ def test_run_migrations_applies_versioned_migrations_to_old_sqlite_schema():
         column["name"] for column in inspector.get_columns("hosts")
     }
     assert "gpu_model" in host_migration_columns
+    replay_columns = {
+        column["name"]
+        for column in inspector.get_columns("provisioning_replay_reservations")
+    }
+    assert {
+        "principal_scheme",
+        "principal_identifier",
+        "request_id",
+        "dispatch_lease_expires_at",
+        "dispatch_attempt_count",
+        "request_hash",
+        "response_status",
+        "response_body",
+        "response_body_empty",
+        "response_media_type",
+    }.issubset(replay_columns)
+    assert {
+        "role",
+        "principal_scheme",
+        "principal_identifier",
+        "generation",
+        "valid_until",
+    }.issubset(
+        {
+            column["name"]
+            for column in inspector.get_columns(
+                "provisioning_trusted_principals"
+            )
+        }
+    )
+    assert {
+        "nonce",
+        "role",
+        "current_identifier",
+        "replacement_identifier",
+        "overlap_seconds",
+    }.issubset(
+        {
+            column["name"]
+            for column in inspector.get_columns(
+                "provisioning_identity_rotation_audit"
+            )
+        }
+    )
+    assert {
+        "capacity_reservation_id",
+        "attempt_count",
+        "delivered_at",
+    }.issubset(
+        {
+            column["name"]
+            for column in inspector.get_columns(
+                "capacity_release_callback_outbox"
+            )
+        }
+    )
 
     with engine.begin() as connection:
         migration_ids = {
@@ -383,6 +443,8 @@ def test_run_migrations_applies_versioned_migrations_to_old_sqlite_schema():
         "20260724_002_drop_vm_leases_table",
         "20260803_001_ansible_pool_config_vm_size_defaults",
         "20260804_001_hosts_gpu_model",
+        "20260811_001_provisioning_replay_reservations",
+        "20260815_001_pool_declared_offering_modes",
     }
 
 
@@ -442,7 +504,7 @@ def test_run_migrations_is_idempotent():
         migration_count = connection.execute(
             text("SELECT COUNT(*) FROM schema_migrations")
         ).scalar_one()
-    assert migration_count == 13
+    assert migration_count == 15
 
 
 # ---------------------------------------------------------------------------
@@ -464,12 +526,13 @@ class TestCheckSchemaVersion:
     def test_raises_when_behind_the_latest_migration(self):
         engine = _sqlite_memory_engine()
         run_migrations(engine)
-        # Simulate an older DB that's missing the most recent migration.
+        # Simulate an older DB that's missing whatever migration this code
+        # currently treats as the latest.
         with engine.begin() as connection:
-            connection.execute(text(
-                "DELETE FROM schema_migrations WHERE id = "
-                "'20260804_001_hosts_gpu_model'"
-            ))
+            connection.execute(
+                text("DELETE FROM schema_migrations WHERE id = :migration_id"),
+                {"migration_id": MIGRATIONS[-1].id},
+            )
         with pytest.raises(SchemaDriftError):
             check_schema_version(engine)
 

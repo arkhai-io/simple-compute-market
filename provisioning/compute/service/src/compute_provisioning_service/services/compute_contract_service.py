@@ -50,7 +50,11 @@ class ComputeContractService:
                 f"reservation {envelope.capacity_reservation_id!r} is "
                 f"{reservation.get('state')!r}, not 'leased'"
             )
-        expected_executor = str(reservation.get("executor_kind") or "vm")
+        expected_executor = reservation.get("executor_kind")
+        if not expected_executor:
+            raise ExecutorMismatchError(
+                "reservation has no explicit executor identity"
+            )
         if envelope.executor_kind != expected_executor:
             raise ExecutorMismatchError(
                 f"reservation executor is {expected_executor!r}, "

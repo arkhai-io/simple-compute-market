@@ -11,9 +11,13 @@ from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+from market_identity import Ed25519Signer
 
 from market_storefront.services.system_service import SystemService
+from market_storefront.domain_runtime import build_vm_storefront_domain, build_vm_storefront_registry
 from market_storefront.utils.sqlite_client import SQLiteClient
+
+MARKETPLACE_SIGNER = Ed25519Signer(b"\x41" * 32)
 
 
 # ---------------------------------------------------------------------------
@@ -22,19 +26,18 @@ from market_storefront.utils.sqlite_client import SQLiteClient
 
 @pytest.fixture
 def db(tmp_path) -> SQLiteClient:
-    return SQLiteClient(db_path=str(tmp_path / "system_service_test.db"))
+    return SQLiteClient(db_path=str(tmp_path / "system_service_test.db"), registry=build_vm_storefront_registry(build_vm_storefront_domain()))
 
 
 def _make_service(
     db: SQLiteClient,
-    registry: dict | None = None,
     *,
     projection_status_provider=None,
     listing_mode_explanation_provider=None,
 ) -> SystemService:
-    """``registry`` arg kept for compat with older test invocations; ignored."""
     return SystemService(
         sqlite_client=db,
+        marketplace_signer=MARKETPLACE_SIGNER,
         agent_id="test-agent",
         projection_status_provider=projection_status_provider,
         listing_mode_explanation_provider=listing_mode_explanation_provider,
@@ -84,7 +87,7 @@ class TestSeedResourcesIfEmpty:
         """When the resources table is empty, the CSV is imported."""
         from market_storefront.utils.sqlite_client import SQLiteClient
 
-        db = SQLiteClient(db_path=str(tmp_path / "seed_test.db"))
+        db = SQLiteClient(db_path=str(tmp_path / "seed_test.db"), registry=build_vm_storefront_registry(build_vm_storefront_domain()))
 
         # Minimal valid kvm1-style CSV row.
         csv_file = tmp_path / "resources.csv"

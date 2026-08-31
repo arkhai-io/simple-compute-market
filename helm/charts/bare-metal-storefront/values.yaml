@@ -1,0 +1,61 @@
+global:
+  imageRepository: ""
+
+image:
+  repository: ""
+  name: arkhai
+  tag: bare-metal-storefront
+  digest: ""
+  pullPolicy: IfNotPresent
+
+replicaCount: 1
+
+service:
+  type: ClusterIP
+  port: 8000
+
+identity:
+  principal:
+    scheme: eip191
+    identifier: "0x0000000000000000000000000000000000000000"
+  credentialSecret:
+    name: bare-metal-storefront-identity
+    key: credential
+
+adminPrincipals:
+  - scheme: eip191
+    identifier: "0x0000000000000000000000000000000000000000"
+
+# Existing Secret containing one JSON array under `key`. Each entry is exactly:
+# {"site_id":"...","authority_url":"https://...","authority_principal":
+#  {"scheme":"eip191|ed25519","identifier":"..."}}.
+# URLs and routing topology therefore never enter chart-generated ConfigMaps.
+siteBindingsSecret:
+  name: bare-metal-storefront-sites
+  key: sites.json
+sitePlacement: fill_first
+
+publicUrl: http://bare-metal-storefront:8000
+sellerEvmAddress: ""
+alkahestEnabled: false
+
+# Strict shared Settlement configuration JSON. Hosted credentials remain in the
+# independently deployed hosted authority; this Secret contains only public
+# authority/trust/account references and release pins.
+settlementConfigSecret:
+  name: bare-metal-storefront-settlement
+  key: settlement.json
+databasePath: /var/lib/arkhai/bare-metal-storefront.db
+
+persistence:
+  enabled: true
+  existingClaim: ""
+  storageClass: ""
+  size: 1Gi
+  accessMode: ReadWriteOnce
+  mountPath: /var/lib/arkhai
+
+resources: {}
+nodeSelector: {}
+tolerations: []
+affinity: {}

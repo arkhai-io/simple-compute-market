@@ -7,6 +7,7 @@ registry:
 
 # Update for each client and then create file as Kubernetes secret
 buyer:
+  marketplace_credential:
   private_key:
   wallet_address: "0x0000000000000000000000000000000000000000"
 

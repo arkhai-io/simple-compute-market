@@ -1,15 +1,25 @@
-"""VM storefront executable package.
-
-This package initializer deliberately does nothing. It previously inserted the
-monorepo checkout root into ``sys.path`` so that ``domains.vms.*`` modules would
-resolve when the storefront ran outside Docker. Listing, settlement, and
-storefront-side negotiation code now lives inside this package, and the shared
-negotiation policies come from the installed ``arkhai-vms`` distribution, so
-nothing here resolves from a repository subtree.
-
-Restoring that path insertion would let an undeclared dependency or an omitted
-wheel module work in a checkout and fail once installed, which is the class of
-defect this layout exists to prevent.
-"""
+"""VM storefront executable package."""
 
 from __future__ import annotations
+
+import sys
+from pathlib import Path
+
+
+def _add_checkout_root_to_path() -> None:
+    """Support local editable installs after moving under domains/vms.
+
+    Docker sets ``PYTHONPATH=/app`` before importing the storefront. Host-side
+    ``uv run market-storefront`` from this package does not, so domain imports
+    like ``domains.vms.listings`` need the monorepo root on ``sys.path``.
+    """
+
+    for parent in Path(__file__).resolve().parents:
+        if (parent / "domains" / "vms").is_dir():
+            root = str(parent)
+            if root not in sys.path:
+                sys.path.insert(0, root)
+            return
+
+
+_add_checkout_root_to_path()

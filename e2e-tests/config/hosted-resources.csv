@@ -1,0 +1,2 @@
+resource_id,resource_type,resource_subtype,unit,value,state,min_price,token,max_duration_seconds,attribute.gpu_model,attribute.sla,attribute.region,attribute.vm_host
+hosted-e2e-vm-001,compute.gpu,h100,count,1,available,2000,,,H100,99.9,local,kvm1

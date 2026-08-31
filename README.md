@@ -1,8 +1,8 @@
 # Simple Compute Market
 
-Simple Compute Market is a reference implementation of an open compute market. Buyers find sellers through federated listing registries, negotiate prices peer-to-peer with seller storefronts over signed HTTP, and settle on-chain with escrow-backed obligations via [Alkahest](https://github.com/arkhai-io/alkahest). Buyers run a CLI; sellers run a storefront server; the registry is only a listings index; provisioning stays with the seller's own service.
+Simple Compute Market is a reference implementation of an open compute market. Buyers find sellers through federated listing registries, negotiate prices peer-to-peer with seller storefronts over signed HTTP, and settle through either escrow-backed obligations via [Alkahest](https://github.com/arkhai-io/alkahest) or hosted fiat payments via Stripe. The hosted Stripe path supports exact `card.v1`, US/USD `us_bank_transfer.v1`, and US/USD `us_ach_debit.v1` funding profiles without requiring a buyer or hosted-only seller to configure a wallet, chain, RPC endpoint, gas, or token balance. Buyers run a CLI; sellers run a storefront server; the registry is only a listings index; provisioning stays with the seller's own service.
 
-Compute is the concrete domain, but the goal is the pattern: independent userland buyer, storefront, registry, and seller resource-service roles with peer-to-peer negotiation and escrowed settlement. There is no canonical platform role that owns both discovery and fulfillment. Another asset class should be able to reuse that shape by substituting its own resource schemas, escrow contracts, and execution modules.
+Compute is the concrete domain, but the goal is the pattern: independent userland buyer, storefront, registry, hosted financial authority, and seller resource-service roles with peer-to-peer negotiation and independently owned settlement and fulfillment. There is no canonical platform role that owns discovery, payment, and fulfillment together. Another asset class can reuse that shape by substituting its own resource schemas, settlement mechanisms, and execution modules.
 
 ## Design notes
 
@@ -14,6 +14,7 @@ Simple Compute Market is inspired by [Compositional Game Theory (CGT)](https://g
 - `domains/vms/storefront/` — VM seller server + admin CLI (`market-storefront` console script)
 - `provisioning/compute/service/` — VM provisioning microservice
 - `kit/alkahest/`, `kit/config/`, `kit/identity/` — Shared from-below helpers for chain settlement, config, and identity
+- `kit/hosted-settlement/` — Provider-neutral hosted fiat consumer, payer authorization, and settlement adapter
 - `kit/policy/` — Shared negotiation middleware machinery
 - `core/registry/` — Listing registry API (FastAPI)
 - `core/registry-client/` — Async + sync Python client for the registry HTTP API
@@ -42,11 +43,14 @@ Pick the role you're standing up:
 A typical buy, once `buyer.toml` is in place:
 
 ```bash
-market listing list --gpu-model H200
-market buy --gpu-model H200 --duration-hours 1
+market listing list --resource 'gpu_model=H200'
+market buy --resource 'gpu_model=H200' --duration-hours 1
 ```
 
-The CLI handles negotiation rounds, creates the on-chain escrow, polls for provisioning, and prints the connection + tenant credentials when the VM is ready.
+The CLI compiles the resource query against the registry's advertised schema,
+selects a compatible advertised settlement option, negotiates, settles through
+the accepted mechanism, and prints the connection and tenant credentials when
+the VM is ready.
 
 Validation and issue-discovery docs:
 

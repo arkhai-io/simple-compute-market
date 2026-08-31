@@ -7,6 +7,8 @@ multi-domain provisioner later.
 
 from __future__ import annotations
 
+import hashlib
+
 from collections.abc import Callable
 from typing import Any, TYPE_CHECKING
 
@@ -40,6 +42,11 @@ def _access_value(access_ref: dict[str, Any] | None, *keys: str) -> str | None:
     return None
 
 
+def _stable_operation_id(action: str, *parts: object) -> str:
+    material = "\0".join((action, *(str(part or "") for part in parts)))
+    return "bare-metal:" + hashlib.sha256(material.encode()).hexdigest()
+
+
 class BareMetalOperationsService:
     """Submit bare-metal access grant/reclaim jobs."""
 
@@ -61,9 +68,24 @@ class BareMetalOperationsService:
         body: BareMetalLeaseCreate,
         *,
         contract: ExecutorActionEnvelope | None = None,
+        operation_id: str | None = None,
     ) -> JobSubmitResponse:
         self._validate_machine(body.machine_id)
         access_ref = dict(body.access_ref or {})
+        resolved_operation_id = operation_id
+        if resolved_operation_id is None and contract is not None:
+            resolved_operation_id = _stable_operation_id(
+                "executor_contract",
+                contract.idempotency_key,
+            )
+        if resolved_operation_id is None:
+            resolved_operation_id = _stable_operation_id(
+                NODE_GRANT_ACCESS_ACTION,
+                body.capacity_reservation_id,
+                body.escrow_uid,
+                body.machine_id,
+                body.physical_host_id,
+            )
         return await self._job_service.submit(
             AnsibleJobParams(
                 vm_host=body.machine_id,
@@ -86,6 +108,7 @@ class BareMetalOperationsService:
             ),
             self._job_queue_provider(),
             contract=contract,
+            operation_id=resolved_operation_id,
         )
 
     async def reclaim_access_for_reservation(
@@ -99,10 +122,30 @@ class BareMetalOperationsService:
             return None
         return submit.job_id
 
-    async def reclaim_access(self, reservation: dict[str, Any]) -> JobSubmitResponse:
+    async def reclaim_access(
+        self,
+        reservation: dict[str, Any],
+        *,
+        contract: ExecutorActionEnvelope | None = None,
+        operation_id: str | None = None,
+    ) -> JobSubmitResponse:
         machine_id = str(reservation.get("executor_target") or "")
         self._validate_machine(machine_id)
         access_ref = bare_metal_access_ref(reservation)
+        resolved_operation_id = operation_id
+        if resolved_operation_id is None and contract is not None:
+            resolved_operation_id = _stable_operation_id(
+                "executor_contract",
+                contract.idempotency_key,
+            )
+        if resolved_operation_id is None:
+            resolved_operation_id = _stable_operation_id(
+                NODE_RECLAIM_ACCESS_ACTION,
+                reservation.get("capacity_reservation_id"),
+                reservation.get("escrow_uid"),
+                machine_id,
+                get_physical_host_id(reservation),
+            )
         return await self._job_service.submit(
             AnsibleJobParams(
                 vm_host=machine_id,
@@ -122,6 +165,8 @@ class BareMetalOperationsService:
                 bare_metal_reclaim_policy=self._reclaim_policy(),
             ),
             self._job_queue_provider(),
+            contract=contract,
+            operation_id=resolved_operation_id,
         )
 
     def _reclaim_policy(self) -> str:

@@ -5,14 +5,105 @@ import asyncio
 import tempfile
 import os
 import sqlite3
-from pathlib import Path
 
+from core_storefront.domain_registry import (
+    StorefrontListingBinding,
+    StorefrontThreadBinding,
+    build_storefront_derivation_key,
+)
+from market_identity import create_signer
+from market_storefront.domain_runtime import build_vm_storefront_domain, build_vm_storefront_registry
 from market_storefront.utils.sqlite_client import SQLiteClient
 from market_policy.identity import Identity
 from market_policy.negotiation_thread import get_thread_store, NegotiationThreadStore
 
 
 _TEST_IDENTITY = Identity(agent_url="test-agent-url", agent_id="test-agent-id")
+
+
+_BUYER_SIGNER = create_signer("ed25519", b"\x11" * 32)
+_SELLER_SIGNER = create_signer("ed25519", b"\x22" * 32)
+_BUYER_PRINCIPAL = _BUYER_SIGNER.identity
+_SELLER_PRINCIPAL = _SELLER_SIGNER.identity
+_OWNED_NEGOTIATION_IDS = (
+    "test-123",
+    "test-multi",
+    "test-success",
+    "test-failure",
+    "test-timeout",
+    "test-not-terminal",
+    "test-not-terminal-2",
+    "test-clear",
+    "test-persist",
+    "test-none",
+    "test-direct",
+    "test-large-direct",
+    "test-large-agreed",
+    "test-order",
+    "test-terminal",
+    "test-delete",
+)
+
+
+async def _seed_owned_threads(client: SQLiteClient) -> None:
+    registration = client.domain_registry.resolve_mode("vm")
+    binding = registration.binding
+    assert client.domain_registry.resolve(binding) is registration.contract
+    source = {
+        "kind": "compute.listing_source",
+        "schema_version": 1,
+        "payload": {
+            "site_id": "site-1",
+            "pool_id": "pool-1",
+            "gpu_count": 1,
+        },
+    }
+    listing_binding = StorefrontListingBinding.from_source_envelope(
+        listing_id="listing-1",
+        site_id="site-1",
+        binding=binding,
+        derivation_key=build_storefront_derivation_key(
+            site_id="site-1",
+            offering_mode=binding.offering_mode,
+            binding=binding,
+            source_identity=source,
+        ),
+        source_envelope=source,
+        last_reconciled_at="2026-08-15T00:00:00Z",
+        pool_id="pool-1",
+    )
+    await client.upsert_listing_with_binding(
+        binding=listing_binding,
+        status="open",
+        created_at="2026-08-15T00:00:00Z",
+        updated_at="2026-08-15T00:00:00Z",
+        offer_resource={
+            "virtualization_type": "vm",
+            "pool_id": "pool-1",
+            "gpu_count": 1,
+        },
+        fulfillment_resource=None,
+        max_duration_seconds=3600,
+        storefront_url="http://seller",
+        seller_principal=_SELLER_PRINCIPAL,
+    )
+    for negotiation_id in _OWNED_NEGOTIATION_IDS:
+        await client.create_negotiation_thread(
+            negotiation_id=negotiation_id,
+            our_listing_id="listing-1",
+            their_listing_id="",
+            our_agent_id="seller-agent",
+            their_agent_id="buyer-agent",
+            buyer_principal=_BUYER_PRINCIPAL,
+            seller_principal=_SELLER_PRINCIPAL,
+            owner_id="seller-agent",
+            binding=StorefrontThreadBinding(
+                negotiation_id=negotiation_id,
+                listing_id="listing-1",
+                site_id="site-1",
+                binding=binding,
+            ),
+        )
 
 
 @pytest.fixture
@@ -28,8 +119,14 @@ def temp_db():
 
 @pytest.fixture
 def sqlite_client(temp_db):
-    """Create a SQLiteClient instance with temporary database."""
-    return SQLiteClient(db_path=temp_db)
+    """Create a SQLiteClient with canonically owned negotiation fixtures."""
+    domain = build_vm_storefront_domain()
+    registry = build_vm_storefront_registry(domain)
+    binding = registry.resolve_mode("vm").binding
+    assert registry.resolve(binding) is domain
+    client = SQLiteClient(db_path=temp_db, registry=registry)
+    asyncio.run(_seed_owned_threads(client))
+    return client
 
 
 @pytest.fixture
@@ -47,7 +144,8 @@ class TestNegotiationThreadStore:
         # Save a message
         round_num = await thread_store.add_message(
             negotiation_id="test-123",
-            sender="agent-1",
+            sender_principal=_BUYER_PRINCIPAL,
+            sender_role="buyer",
             our_price=100,
             their_price=120,
             proposed_price=110,
@@ -62,7 +160,10 @@ class TestNegotiationThreadStore:
         
         assert len(thread) == 1
         assert thread[0]["round"] == 0
-        assert thread[0]["sender"] == "agent-1"
+        assert thread[0]["sender_principal"] == _BUYER_PRINCIPAL.model_dump(
+            mode="json"
+        )
+        assert thread[0]["sender_role"] == "buyer"
         assert thread[0]["our_price"] == 100
         assert thread[0]["their_price"] == 120
         assert thread[0]["proposed_price"] == 110
@@ -77,7 +178,10 @@ class TestNegotiationThreadStore:
         for i in range(3):
             round_num = await thread_store.add_message(
                 negotiation_id="test-multi",
-                sender=f"agent-{i % 2}",
+                sender_principal=(
+                    _BUYER_PRINCIPAL if i % 2 == 0 else _SELLER_PRINCIPAL
+                ),
+                sender_role="buyer" if i % 2 == 0 else "seller",
                 our_price=100 + i * 10,
                 their_price=120 + i * 10,
                 proposed_price=None,
@@ -92,9 +196,15 @@ class TestNegotiationThreadStore:
         assert thread[0]["round"] == 0
         assert thread[1]["round"] == 1
         assert thread[2]["round"] == 2
-        assert thread[0]["sender"] == "agent-0"
-        assert thread[1]["sender"] == "agent-1"
-        assert thread[2]["sender"] == "agent-0"
+        assert thread[0]["sender_principal"] == _BUYER_PRINCIPAL.model_dump(
+            mode="json"
+        )
+        assert thread[1]["sender_principal"] == _SELLER_PRINCIPAL.model_dump(
+            mode="json"
+        )
+        assert thread[2]["sender_principal"] == _BUYER_PRINCIPAL.model_dump(
+            mode="json"
+        )
     
     @pytest.mark.asyncio
     async def test_empty_thread(self, thread_store):
@@ -107,10 +217,10 @@ class TestNegotiationThreadStore:
         """Test ACCEPT-ACCEPT terminal condition (success)."""
         # Add two ACCEPT_OFFER messages
         await thread_store.add_message(
-            "test-success", "agent-1", 100, 100, None, "ACCEPT_OFFER", "proposal"
+            "test-success", _BUYER_PRINCIPAL, "buyer", 100, 100, None, "ACCEPT_OFFER", "proposal"
         )
         await thread_store.add_message(
-            "test-success", "agent-2", 100, 100, None, "ACCEPT_OFFER", "proposal"
+            "test-success", _SELLER_PRINCIPAL, "seller", 100, 100, None, "ACCEPT_OFFER", "proposal"
         )
         
         is_terminal, state = await thread_store.check_terminal("test-success")
@@ -122,10 +232,10 @@ class TestNegotiationThreadStore:
         """Test REJECT-REJECT terminal condition (failure)."""
         # Add two REJECT_OFFER messages
         await thread_store.add_message(
-            "test-failure", "agent-1", 100, 150, None, "REJECT_OFFER", "proposal"
+            "test-failure", _BUYER_PRINCIPAL, "buyer", 100, 150, None, "REJECT_OFFER", "proposal"
         )
         await thread_store.add_message(
-            "test-failure", "agent-2", 100, 150, None, "REJECT_OFFER", "proposal"
+            "test-failure", _SELLER_PRINCIPAL, "seller", 100, 150, None, "REJECT_OFFER", "proposal"
         )
         
         is_terminal, state = await thread_store.check_terminal("test-failure")
@@ -137,7 +247,7 @@ class TestNegotiationThreadStore:
         """Test EXIT_NEGOTIATION terminal condition (timeout)."""
         # Add EXIT_NEGOTIATION message
         await thread_store.add_message(
-            "test-timeout", "agent-1", 100, 120, None, "EXIT_NEGOTIATION", "exit"
+            "test-timeout", _BUYER_PRINCIPAL, "buyer", 100, 120, None, "EXIT_NEGOTIATION", "exit"
         )
         
         is_terminal, state = await thread_store.check_terminal("test-timeout")
@@ -149,7 +259,7 @@ class TestNegotiationThreadStore:
         """Test that non-terminal conditions return False."""
         # Add single message (not terminal)
         await thread_store.add_message(
-            "test-not-terminal", "agent-1", 100, 120, 110, "COUNTER_OFFER", "proposal"
+            "test-not-terminal", _BUYER_PRINCIPAL, "buyer", 100, 120, 110, "COUNTER_OFFER", "proposal"
         )
         
         is_terminal, state = await thread_store.check_terminal("test-not-terminal")
@@ -158,10 +268,10 @@ class TestNegotiationThreadStore:
         
         # Add ACCEPT then COUNTER (not terminal - need both to accept)
         await thread_store.add_message(
-            "test-not-terminal-2", "agent-1", 100, 100, None, "ACCEPT_OFFER", "proposal"
+            "test-not-terminal-2", _BUYER_PRINCIPAL, "buyer", 100, 100, None, "ACCEPT_OFFER", "proposal"
         )
         await thread_store.add_message(
-            "test-not-terminal-2", "agent-2", 100, 100, 110, "COUNTER_OFFER", "proposal"
+            "test-not-terminal-2", _SELLER_PRINCIPAL, "seller", 100, 100, 110, "COUNTER_OFFER", "proposal"
         )
         
         is_terminal, state = await thread_store.check_terminal("test-not-terminal-2")
@@ -173,10 +283,10 @@ class TestNegotiationThreadStore:
         """Test clearing a thread removes all messages."""
         # Add messages
         await thread_store.add_message(
-            "test-clear", "agent-1", 100, 120, None, "ACCEPT_OFFER", "proposal"
+            "test-clear", _BUYER_PRINCIPAL, "buyer", 100, 120, None, "ACCEPT_OFFER", "proposal"
         )
         await thread_store.add_message(
-            "test-clear", "agent-2", 100, 120, None, "ACCEPT_OFFER", "proposal"
+            "test-clear", _SELLER_PRINCIPAL, "seller", 100, 120, None, "ACCEPT_OFFER", "proposal"
         )
         
         # Verify thread exists
@@ -196,11 +306,14 @@ class TestNegotiationThreadStore:
         # Create first store and add message
         store1 = NegotiationThreadStore(sqlite_client=sqlite_client, identity=_TEST_IDENTITY)
         await store1.add_message(
-            "test-persist", "agent-1", 100, 120, 110, "COUNTER_OFFER", "proposal"
+            "test-persist", _BUYER_PRINCIPAL, "buyer", 100, 120, 110, "COUNTER_OFFER", "proposal"
         )
         
         # Create second store with same database
-        client2 = SQLiteClient(db_path=temp_db)
+        client2 = SQLiteClient(
+            db_path=temp_db,
+            registry=sqlite_client.domain_registry,
+        )
         store2 = NegotiationThreadStore(sqlite_client=client2, identity=_TEST_IDENTITY)
         
         # Load thread from second store
@@ -213,7 +326,7 @@ class TestNegotiationThreadStore:
     async def test_none_prices(self, thread_store):
         """Test handling of None prices."""
         await thread_store.add_message(
-            "test-none", "agent-1", None, None, None, "EXIT_NEGOTIATION", "exit"
+            "test-none", _BUYER_PRINCIPAL, "buyer", None, None, None, "EXIT_NEGOTIATION", "exit"
         )
         
         thread = await thread_store.get_thread("test-none")
@@ -276,38 +389,31 @@ class TestSQLiteClientNegotiationMethods:
     @pytest.mark.asyncio
     async def test_save_negotiation_message(self, sqlite_client):
         """Test saving a negotiation message directly."""
-        await sqlite_client.save_negotiation_message(
-            negotiation_id="test-direct",
-            round=0,
-            sender="agent-1",
-            our_price=100,
-            their_price=120,
-            proposed_price=110,
-            action_taken="COUNTER_OFFER",
-            message_type="proposal",
-            timestamp="2025-01-01T00:00:00"
-        )
+        await sqlite_client.save_negotiation_message(negotiation_id="test-direct", round=0, sender_principal=_BUYER_PRINCIPAL, sender_role="buyer", our_price=100,
+        their_price=120,
+        proposed_price=110,
+        action_taken="COUNTER_OFFER",
+        message_type="proposal",
+        timestamp="2025-01-01T00:00:00")
         
         # Verify message was saved
         thread = await sqlite_client.load_negotiation_thread(negotiation_id="test-direct")
         assert len(thread) == 1
-        assert thread[0]["sender"] == "agent-1"
+        assert thread[0]["sender_principal"] == _BUYER_PRINCIPAL.model_dump(
+            mode="json"
+        )
+        assert thread[0]["sender_role"] == "buyer"
 
     @pytest.mark.asyncio
     async def test_save_negotiation_message_uint256_amounts(self, sqlite_client):
         """Raw token amounts can exceed SQLite's signed 64-bit INTEGER range."""
         large_amount = 150 * 10**18
-        await sqlite_client.save_negotiation_message(
-            negotiation_id="test-large-direct",
-            round=0,
-            sender="agent-1",
-            our_price=large_amount,
-            their_price=large_amount + 1,
-            proposed_price=large_amount + 2,
-            action_taken="COUNTER_OFFER",
-            message_type="proposal",
-            timestamp="2025-01-01T00:00:00",
-        )
+        await sqlite_client.save_negotiation_message(negotiation_id="test-large-direct", round=0, sender_principal=_BUYER_PRINCIPAL, sender_role="buyer", our_price=large_amount,
+        their_price=large_amount + 1,
+        proposed_price=large_amount + 2,
+        action_taken="COUNTER_OFFER",
+        message_type="proposal",
+        timestamp="2025-01-01T00:00:00",)
 
         thread = await sqlite_client.load_negotiation_thread(
             negotiation_id="test-large-direct",
@@ -333,17 +439,12 @@ class TestSQLiteClientNegotiationMethods:
     @pytest.mark.asyncio
     async def test_commit_agreed_terms_uint256_amount(self, sqlite_client):
         large_amount = 150 * 10**18
-        await sqlite_client.save_negotiation_message(
-            negotiation_id="test-large-agreed",
-            round=0,
-            sender="agent-1",
-            our_price=large_amount,
-            their_price=large_amount,
-            proposed_price=large_amount,
-            action_taken="ACCEPT_OFFER",
-            message_type="accepted",
-            timestamp="2025-01-01T00:00:00",
-        )
+        await sqlite_client.save_negotiation_message(negotiation_id="test-large-agreed", round=0, sender_principal=_BUYER_PRINCIPAL, sender_role="buyer", our_price=large_amount,
+        their_price=large_amount,
+        proposed_price=large_amount,
+        action_taken="ACCEPT_OFFER",
+        message_type="accepted",
+        timestamp="2025-01-01T00:00:00",)
         await sqlite_client.commit_agreed_terms(
             negotiation_id="test-large-agreed",
             agreed_price=large_amount,
@@ -375,11 +476,28 @@ class TestSQLiteClientNegotiationMethods:
         conn = sqlite3.connect(db_path)
         try:
             conn.executescript(
-                """
-                CREATE TABLE negotiation_threads (
-                  negotiation_id TEXT PRIMARY KEY,
+                f"""
+                CREATE TABLE listings (
+                  listing_id TEXT PRIMARY KEY,
+                  status TEXT NOT NULL,
                   created_at TEXT NOT NULL,
                   updated_at TEXT NOT NULL,
+                  offer_resource TEXT NOT NULL,
+                  seller TEXT NOT NULL
+                );
+                INSERT INTO listings (
+                  listing_id, status, created_at, updated_at,
+                  offer_resource, seller
+                ) VALUES (
+                  'legacy-listing', 'open', '2025-01-01T00:00:00',
+                  '2025-01-01T00:00:00', '{{}}', 'http://seller'
+                );
+                CREATE TABLE negotiation_threads (
+                  negotiation_id TEXT PRIMARY KEY,
+                  our_listing_id TEXT,
+                  created_at TEXT NOT NULL,
+                  updated_at TEXT NOT NULL,
+                  buyer TEXT,
                   agreed_price INTEGER
                 );
                 CREATE TABLE negotiation_local_state (
@@ -403,8 +521,13 @@ class TestSQLiteClientNegotiationMethods:
                   UNIQUE(negotiation_id, round)
                 );
                 INSERT INTO negotiation_threads (
-                  negotiation_id, created_at, updated_at, agreed_price
-                ) VALUES ('legacy-neg', '2025-01-01T00:00:00', '2025-01-01T00:00:00', 9000);
+                  negotiation_id, created_at, updated_at, buyer,
+                  our_listing_id, agreed_price
+                ) VALUES (
+                  'legacy-neg', '2025-01-01T00:00:00', '2025-01-01T00:00:00',
+                  '0x1111111111111111111111111111111111111111',
+                  'legacy-listing', 9000
+                );
                 INSERT INTO negotiation_local_state (
                   negotiation_id, owner_id, our_initial_price, our_strategy
                 ) VALUES ('legacy-neg', 'owner', 8000, 'maximize');
@@ -412,7 +535,7 @@ class TestSQLiteClientNegotiationMethods:
                   negotiation_id, round, sender, our_price, their_price,
                   proposed_price, action_taken, message_type, timestamp
                 ) VALUES (
-                  'legacy-neg', 0, 'agent-1', 8000, 9000, 8500,
+                  'legacy-neg', 0, '0x1111111111111111111111111111111111111111', 8000, 9000, 8500,
                   'COUNTER_OFFER', 'proposal', '2025-01-01T00:00:00'
                 );
                 """
@@ -421,8 +544,19 @@ class TestSQLiteClientNegotiationMethods:
         finally:
             conn.close()
 
-        migrated = SQLiteClient(db_path=str(db_path))
+        domain = build_vm_storefront_domain()
+        registry = build_vm_storefront_registry(domain)
+        binding = registry.resolve_mode("vm").binding
+        assert registry.resolve(binding) is domain
+        migrated = SQLiteClient(
+            db_path=str(db_path),
+            registry=registry,
+            local_listing_principal=_SELLER_PRINCIPAL,
+            expected_legacy_sellers=("http://seller",),
+        )
 
+        assert migrated.domain_registry is registry
+        assert asyncio.run(migrated.list_storefront_domain_bindings()) == ()
         conn = sqlite3.connect(migrated.db_path)
         try:
             thread_types = {
@@ -460,23 +594,76 @@ class TestSQLiteClientNegotiationMethods:
         assert info["our_initial_price"] == 8000
         assert row is not None
         assert row["agreed_price"] == 9000
+
+        assert row["buyer_principal"] == {
+            "scheme": "eip191",
+            "identifier": "0x1111111111111111111111111111111111111111",
+        }
+        assert row["seller_principal"] == _SELLER_PRINCIPAL.model_dump(mode="json")
+
+    def test_legacy_population_rejects_missing_seller_ownership_transactionally(
+        self, tmp_path
+    ):
+        db_path = tmp_path / "legacy-missing-seller.db"
+        conn = sqlite3.connect(db_path)
+        try:
+            conn.executescript(
+                """
+                CREATE TABLE negotiation_threads (
+                  negotiation_id TEXT PRIMARY KEY,
+                  created_at TEXT NOT NULL,
+                  updated_at TEXT NOT NULL,
+                  buyer TEXT,
+                  agreed_price INTEGER
+                );
+                INSERT INTO negotiation_threads (
+                  negotiation_id, created_at, updated_at, buyer, agreed_price
+                ) VALUES (
+                  'malformed-neg', '2025-01-01T00:00:00',
+                  '2025-01-01T00:00:00',
+                  '0x1111111111111111111111111111111111111111', 9000
+                );
+                """
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+        domain = build_vm_storefront_domain()
+        registry = build_vm_storefront_registry(domain)
+        binding = registry.resolve_mode("vm").binding
+        assert registry.resolve(binding) is domain
+        with pytest.raises(ValueError, match="has no seller ownership"):
+            SQLiteClient(db_path=str(db_path), registry=registry)
+
+        conn = sqlite3.connect(db_path)
+        try:
+            row = conn.execute(
+                "SELECT buyer, agreed_price FROM negotiation_threads "
+                "WHERE negotiation_id='malformed-neg'"
+            ).fetchone()
+            columns = {
+                column[1]
+                for column in conn.execute("PRAGMA table_info(negotiation_threads)")
+            }
+        finally:
+            conn.close()
+
+        assert row == ("0x1111111111111111111111111111111111111111", "9000")
+        assert "buyer" in columns
+        assert "buyer_scheme" not in columns
     
     @pytest.mark.asyncio
     async def test_load_negotiation_thread_ordered(self, sqlite_client):
         """Test that messages are loaded in round order."""
         # Save messages in reverse order
         for i in range(3):
-            await sqlite_client.save_negotiation_message(
-                negotiation_id="test-order",
-                round=i,
-                sender=f"agent-{i}",
-                our_price=100,
-                their_price=120,
-                proposed_price=None,
-                action_taken="COUNTER_OFFER",
-                message_type="proposal",
-                timestamp=f"2025-01-01T00:00:0{i}"
-            )
+            await sqlite_client.save_negotiation_message(negotiation_id="test-order", round=i, sender_principal=_BUYER_PRINCIPAL, sender_role="buyer", our_price=100,
+            their_price=120,
+            proposed_price=None,
+            action_taken="COUNTER_OFFER",
+            message_type="proposal",
+            timestamp=f"2025-01-01T00:00:0{i}")
         
         # Load and verify order
         thread = await sqlite_client.load_negotiation_thread(negotiation_id="test-order")
@@ -489,17 +676,12 @@ class TestSQLiteClientNegotiationMethods:
     async def test_update_negotiation_thread_terminal(self, sqlite_client):
         """Test updating terminal state."""
         # Create thread
-        await sqlite_client.save_negotiation_message(
-            negotiation_id="test-terminal",
-            round=0,
-            sender="agent-1",
-            our_price=100,
-            their_price=100,
-            proposed_price=None,
-            action_taken="ACCEPT_OFFER",
-            message_type="proposal",
-            timestamp="2025-01-01T00:00:00"
-        )
+        await sqlite_client.save_negotiation_message(negotiation_id="test-terminal", round=0, sender_principal=_BUYER_PRINCIPAL, sender_role="buyer", our_price=100,
+        their_price=100,
+        proposed_price=None,
+        action_taken="ACCEPT_OFFER",
+        message_type="proposal",
+        timestamp="2025-01-01T00:00:00")
         
         # Update terminal state
         await sqlite_client.update_negotiation_thread_terminal(
@@ -524,17 +706,12 @@ class TestSQLiteClientNegotiationMethods:
         """Test deleting a negotiation thread."""
         # Create thread with messages
         for i in range(2):
-            await sqlite_client.save_negotiation_message(
-                negotiation_id="test-delete",
-                round=i,
-                sender=f"agent-{i}",
-                our_price=100,
-                their_price=120,
-                proposed_price=None,
-                action_taken="COUNTER_OFFER",
-                message_type="proposal",
-                timestamp=f"2025-01-01T00:00:0{i}"
-            )
+            await sqlite_client.save_negotiation_message(negotiation_id="test-delete", round=i, sender_principal=_BUYER_PRINCIPAL, sender_role="buyer", our_price=100,
+            their_price=120,
+            proposed_price=None,
+            action_taken="COUNTER_OFFER",
+            message_type="proposal",
+            timestamp=f"2025-01-01T00:00:0{i}")
         
         # Verify exists
         thread = await sqlite_client.load_negotiation_thread(negotiation_id="test-delete")

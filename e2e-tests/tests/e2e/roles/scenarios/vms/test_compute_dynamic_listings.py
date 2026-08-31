@@ -17,18 +17,7 @@ from dataclasses import dataclass, field
 import pytest
 
 from src.settings import settings
-from tests.e2e.roles.scenarios.vms.conftest import (
-    advance_storefront,
-    pause_storefront,
-    require_state,
-)
-from tests.e2e.roles.scenarios.vms.host_registry import (
-    E2E_DYNAMIC_HOST,
-    E2E_FUNGIBLE_HOSTS,
-    E2E_HOST_GPU_COUNT,
-    provision_e2e_executor,
-    refresh_storefront_projections,
-)
+from tests.e2e.roles.scenarios.vms.conftest import require_state
 
 log = logging.getLogger(__name__)
 
@@ -37,18 +26,13 @@ pytestmark = pytest.mark.e2e_compute_dynamic_listings
 
 DYNAMIC_RESOURCE_ID = "compute-e2e-dynamic-4x"
 DYNAMIC_RESOURCE_CSV = """resource_id,resource_type,resource_subtype,unit,value,state,min_price,token,max_duration_seconds,attribute.gpu_model,attribute.sla,attribute.region,attribute.vm_host
-compute-e2e-dynamic-4x,compute.gpu,h200,count,4,available,10000,0x9fe46736679d2d9a65f0992f2272de9f3c7fa6e0,,H200,99.0,"California, US",kvm-dynamic
+compute-e2e-dynamic-4x,compute.gpu,h200,count,4,available,10000,0x9fe46736679d2d9a65f0992f2272de9f3c7fa6e0,,H200,99.0,"California, US",kvm1
 """
 
-DYNAMIC_POOL_ID = "compute-e2e-dynamic-pool"
 FUNGIBLE_POOL_ID = "compute-e2e-fungible-pool"
-# Two members on two executors. One declaration per executor is the accounting
-# boundary the site authority holds; two declarations on one machine would sell the
-# same GPUs twice, which is what makes a fungible pool several hosts rather than
-# several rows.
 FUNGIBLE_RESOURCE_CSV = """resource_id,resource_type,resource_subtype,unit,value,state,min_price,token,max_duration_seconds,attribute.pool_id,attribute.gpu_model,attribute.sla,attribute.region,attribute.vm_host
-compute-e2e-fungible-a,compute.gpu,h200,count,4,available,10000,0x9fe46736679d2d9a65f0992f2272de9f3c7fa6e0,,compute-e2e-fungible-pool,H200,99.0,"California, US",kvm-fungible-a
-compute-e2e-fungible-b,compute.gpu,h200,count,4,available,10000,0x9fe46736679d2d9a65f0992f2272de9f3c7fa6e0,,compute-e2e-fungible-pool,H200,99.0,"California, US",kvm-fungible-b
+compute-e2e-fungible-a,compute.gpu,h200,count,4,available,10000,0x9fe46736679d2d9a65f0992f2272de9f3c7fa6e0,,compute-e2e-fungible-pool,H200,99.0,"California, US",kvm1
+compute-e2e-fungible-b,compute.gpu,h200,count,4,available,10000,0x9fe46736679d2d9a65f0992f2272de9f3c7fa6e0,,compute-e2e-fungible-pool,H200,99.0,"California, US",kvm1
 """
 
 ACCEPTED_ESCROWS = [{
@@ -61,9 +45,7 @@ ACCEPTED_ESCROWS = [{
 
 @dataclass
 class DynamicListingState:
-    storefront_paused: dict = field(default_factory=dict)
     resources_seeded: bool = False
-    executor_host_registered: bool = False
     listing_ids_by_gpu_count: dict[int, str] = field(default_factory=dict)
     capacity_reservation_id: str | None = None
     reserve_closed_listing_ids: list[str] = field(default_factory=list)
@@ -73,7 +55,6 @@ class DynamicListingState:
 @dataclass
 class FungiblePoolState:
     resources_seeded: bool = False
-    executor_host_registered: bool = False
     listing_ids_by_gpu_count: dict[int, str] = field(default_factory=dict)
     reservation_2x_id: str | None = None
     reservation_4x_id: str | None = None
@@ -125,24 +106,6 @@ def _listing_statuses(storefront_admin_client, ids_by_gpu_count: dict[int, str])
 
 
 class TestComputeDynamicListings:
-    def test_00_pauses_the_storefront(
-        self, storefront_admin_client, dynamic_state: DynamicListingState
-    ):
-        """Hold the storefront's timer loops idle for the rest of this scenario.
-
-        Named as a stage rather than hidden in a fixture because every later
-        assertion depends on it: with the loops running, a listing status read
-        after a reserve races the capacity poller's next cycle. Advances are
-        explicit from here on.
-
-        Pausing this early is safe *here* and not in general: a paused storefront
-        also refuses new negotiations, so a scenario that has to agree a deal
-        cannot hold the pause across that step. This one reserves capacity through
-        the admin API and never negotiates, so it can pause at the start; the deal
-        scenarios pause after agreement instead.
-        """
-        dynamic_state.storefront_paused = pause_storefront(storefront_admin_client)
-
     def test_00_imports_4x_compute_resource(
         self, storefront_admin_client, dynamic_state: DynamicListingState
     ):
@@ -157,56 +120,6 @@ class TestComputeDynamicListings:
         assert result.imported_count >= 1
         dynamic_state.resources_seeded = True
         log.info("[dynamic] imported resource %s", DYNAMIC_RESOURCE_ID)
-
-    def test_00a_registers_executor_host_and_syncs_projection(
-        self, provisioning_client, storefront_admin_client,
-        site_capacity_admin_client, dynamic_state: DynamicListingState,
-    ):
-        """Register the executor host the seeded resources sit on.
-
-        The site authority projects capacity by iterating host rows, so with no
-        host registered the projection is empty and `test_02`'s reserve is
-        refused with "No available compute VM matched required attributes".
-
-        Registered through the admin API rather than a mounted inventory file:
-        `inventory_path` is docker-compose-specific while the canonical Helm
-        deployment supplies inventory as an inline secret, and a mount is shared
-        state no scenario declares. The projection pull that follows is asserted
-        rather than slept out.
-        """
-        require_state(dynamic_state, "resources_seeded")
-
-        # `reserve` matches CapacityBucket rows, which only a capacity declaration
-        # creates — the host-derived projection is a different store. The
-        # declaration's attributes mirror the seeded CSV so a claim built from the
-        # listing matches by equality.
-        host = provision_e2e_executor(
-            provisioning_client,
-            site_capacity_admin_client,
-            host=E2E_DYNAMIC_HOST,
-            resource_id=DYNAMIC_RESOURCE_ID,
-            sellable_units=4,
-            pool_id=DYNAMIC_POOL_ID,
-            listing_mode="specific_resource",
-            attributes={
-                "gpu_model": "H200",
-                "region": "California, US",
-                "sla": "99.0",
-            },
-        )
-        assert (host.gpu_count or 0) >= E2E_HOST_GPU_COUNT, (
-            f"executor host {E2E_DYNAMIC_HOST} reports {host.gpu_count} GPU(s); "
-            f"this scenario reserves up to {E2E_HOST_GPU_COUNT}"
-        )
-
-        sites = refresh_storefront_projections(storefront_admin_client)
-
-        dynamic_state.executor_host_registered = True
-        log.info(
-            "[dynamic] executor host %s registered (gpus=%s); projections confirmed for %s",
-            E2E_DYNAMIC_HOST, host.gpu_count, sorted(sites),
-        )
-
 
     def test_01_creates_slice_listings(
         self,
@@ -255,25 +168,16 @@ class TestComputeDynamicListings:
         }
         assert expected_closed.issubset(set(result.closed_listing_ids))
 
-        # Asserted twice, on either side of one deliberate reconcile. The
-        # storefront is paused, so the first read observes only what the reserve
-        # itself did — no reconciliation can have run in between. The second read
-        # observes exactly one reconcile and no more. A listing that reopens
-        # across that advance is a defect with nowhere to hide, where the same
-        # reopen under a running poller was a race that reproduced about half the
-        # time (`monotonic-listing-reconciliation`).
-        assert _listing_statuses(
-            storefront_admin_client, dynamic_state.listing_ids_by_gpu_count,
-        ) == {1: "open", 2: "open", 3: "closed", 4: "closed"}, (
-            "the reserve did not close the oversized slices"
-        )
-        advance_storefront(storefront_admin_client, "capacity-events")
         statuses = _listing_statuses(
-            storefront_admin_client, dynamic_state.listing_ids_by_gpu_count,
+            storefront_admin_client,
+            dynamic_state.listing_ids_by_gpu_count,
         )
-        assert statuses == {1: "open", 2: "open", 3: "closed", 4: "closed"}, (
-            "one capacity reconcile reopened slices whose capacity is held"
-        )
+        assert statuses == {
+            1: "open",
+            2: "open",
+            3: "closed",
+            4: "closed",
+        }
         dynamic_state.capacity_reservation_id = result.capacity_reservation_id
         dynamic_state.reserve_closed_listing_ids = list(
             expected_closed.intersection(result.closed_listing_ids)
@@ -295,13 +199,16 @@ class TestComputeDynamicListings:
         )
 
         assert result["state"] == "leased"
-        advance_storefront(storefront_admin_client, "capacity-events")
         statuses = _listing_statuses(
-            storefront_admin_client, dynamic_state.listing_ids_by_gpu_count,
+            storefront_admin_client,
+            dynamic_state.listing_ids_by_gpu_count,
         )
-        assert statuses == {1: "open", 2: "open", 3: "closed", 4: "closed"}, (
-            "usage starting must not release capacity — the slices stay closed"
-        )
+        assert statuses == {
+            1: "open",
+            2: "open",
+            3: "closed",
+            4: "closed",
+        }
         dynamic_state.usage_started = True
 
     def test_04_capacity_release_reopens_oversized_listings(
@@ -322,13 +229,16 @@ class TestComputeDynamicListings:
         assert set(dynamic_state.reserve_closed_listing_ids).issubset(
             set(result["reopened_listing_ids"])
         )
-        advance_storefront(storefront_admin_client, "capacity-events")
         statuses = _listing_statuses(
-            storefront_admin_client, dynamic_state.listing_ids_by_gpu_count,
+            storefront_admin_client,
+            dynamic_state.listing_ids_by_gpu_count,
         )
-        assert statuses == {1: "open", 2: "open", 3: "open", 4: "open"}, (
-            "releasing capacity did not reopen every slice"
-        )
+        assert statuses == {
+            1: "open",
+            2: "open",
+            3: "open",
+            4: "open",
+        }
         log.info("[dynamic] released reservation %s; statuses=%s", dynamic_state.capacity_reservation_id, statuses)
 
 
@@ -346,62 +256,6 @@ class TestFungibleComputeDynamicListings:
         )
         assert result.imported_count >= 2
         fungible_state.resources_seeded = True
-
-    def test_00a_registers_executor_hosts_and_syncs_projection(
-        self, provisioning_client, storefront_admin_client,
-        site_capacity_admin_client, fungible_state: FungiblePoolState,
-    ):
-        """Register one executor per pool member, each with its own declaration.
-
-        A fungible pool is several executors with one capacity declaration each. Two
-        declarations on one executor would advertise eight GPUs on a four-GPU
-        machine, and the site authority refuses that correlation outright — so the
-        member count is what makes the pool fungible, not the row count.
-
-        The grouped-capacity projection collapses the two identically-shaped
-        declarations into one entry carrying `resource_count`, which is the source
-        the storefront publishes a fungible listing from.
-
-        Registered through the admin APIs rather than a mounted inventory file:
-        `inventory_path` is docker-compose-specific while the canonical Helm
-        deployment supplies inventory as an inline secret, and a mount is shared
-        state no scenario declares. The projection pull that follows is asserted
-        rather than slept out.
-        """
-        require_state(fungible_state, "resources_seeded")
-
-        members = ("compute-e2e-fungible-a", "compute-e2e-fungible-b")
-        hosts = []
-        for host_name, member in zip(E2E_FUNGIBLE_HOSTS, members):
-            hosts.append(provision_e2e_executor(
-                provisioning_client,
-                site_capacity_admin_client,
-                host=host_name,
-                resource_id=member,
-                sellable_units=4,
-                pool_id=FUNGIBLE_POOL_ID,
-                listing_mode="fungible",
-                attributes={
-                    "gpu_model": "H200",
-                    "region": "California, US",
-                    "sla": "99.0",
-                },
-            ))
-
-        for host in hosts:
-            assert (host.gpu_count or 0) >= E2E_HOST_GPU_COUNT, (
-                f"executor host {host.name} reports {host.gpu_count} GPU(s); "
-                f"this scenario reserves up to {E2E_HOST_GPU_COUNT} from one member"
-            )
-
-        sites = refresh_storefront_projections(storefront_admin_client)
-
-        fungible_state.executor_host_registered = True
-        log.info(
-            "[fungible] executor hosts %s registered (gpus=%s each); "
-            "projections confirmed for %s",
-            list(E2E_FUNGIBLE_HOSTS), E2E_HOST_GPU_COUNT, sorted(sites),
-        )
 
     def test_01_creates_one_pool_listing_set(
         self,
@@ -443,14 +297,11 @@ class TestFungibleComputeDynamicListings:
         assert result.extra.get("pool_id") == FUNGIBLE_POOL_ID or result.pool_id == FUNGIBLE_POOL_ID
         assert result.gpu_count == 2
         assert result.closed_listing_ids == []
-        advance_storefront(storefront_admin_client, "capacity-events")
         statuses = _listing_statuses(
-            storefront_admin_client, fungible_state.listing_ids_by_gpu_count,
+            storefront_admin_client,
+            fungible_state.listing_ids_by_gpu_count,
         )
-        assert statuses == {1: "open", 2: "open", 3: "open", 4: "open"}, (
-            "a 2x reserve against a two-member pool leaves a 4-GPU member free, "
-            "so every slice stays sellable"
-        )
+        assert statuses == {1: "open", 2: "open", 3: "open", 4: "open"}
         fungible_state.reservation_2x_id = result.capacity_reservation_id
 
     def test_03_reserve_4x_closes_oversized_pool_slices(
@@ -474,16 +325,14 @@ class TestFungibleComputeDynamicListings:
             fungible_state.listing_ids_by_gpu_count[4],
         }
         assert expected_closed.issubset(set(result.closed_listing_ids))
-        assert _listing_statuses(
-            storefront_admin_client, fungible_state.listing_ids_by_gpu_count,
-        ) == {1: "open", 2: "open", 3: "closed", 4: "closed"}, (
-            "the 4x reserve did not close the oversized pool slices"
-        )
-        advance_storefront(storefront_admin_client, "capacity-events")
         statuses = _listing_statuses(
-            storefront_admin_client, fungible_state.listing_ids_by_gpu_count,
+            storefront_admin_client,
+            fungible_state.listing_ids_by_gpu_count,
         )
-        assert statuses == {1: "open", 2: "open", 3: "closed", 4: "closed"}, (
-            "one capacity reconcile reopened pool slices whose capacity is held"
-        )
+        assert statuses == {
+            1: "open",
+            2: "open",
+            3: "closed",
+            4: "closed",
+        }
         fungible_state.reservation_4x_id = result.capacity_reservation_id

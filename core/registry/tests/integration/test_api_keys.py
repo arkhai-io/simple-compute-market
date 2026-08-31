@@ -8,10 +8,18 @@ the ``settings.require_read_api_key`` / ``require_write_api_key``
 toggles per test so each gate's on-vs-off branches are exercised.
 """
 from __future__ import annotations
+import time
+import uuid
 
 import httpx
 import pytest
 import pytest_asyncio
+from market_identity import (
+    Ed25519Signer,
+    RequestEnvelope,
+    canonical_body_hash,
+    sign_request,
+)
 from src.config import settings
 from src.db.database import get_db
 from src.main import app
@@ -129,15 +137,73 @@ class TestApiKeyLifecycle:
 # Bearer-token gate on non-admin routes
 # ---------------------------------------------------------------------------
 
-# DELETE on a nonexistent listing: the write gate runs first, then the
-# route 404s on the missing listing (before its signature check). So 401
-# (no key) / 403 (read key) come from the gate; 404 means the gate let the
-# request through. Avoids needing a signed payload to probe the gate.
-_WRITE_PROBE = "/listings/gate-probe-nonexistent"
+async def _probe_read(raw_client, headers=None):
+    signer = Ed25519Signer(bytes(range(32)))
+    body = {"query": []}
+    envelope = RequestEnvelope(
+        role="buyer",
+        principal=signer.identity,
+        method="GET",
+        operation="listing.list",
+        resource="listings",
+        request_id=uuid.uuid4().hex,
+        timestamp=int(time.time()),
+        body_hash=canonical_body_hash(body),
+    )
+    authenticated = sign_request(signer=signer, envelope=envelope)
+    request_headers = {
+        "X-Market-Signature-Version": authenticated.protocol,
+        "X-Market-Identity-Scheme": authenticated.principal.scheme.value,
+        "X-Market-Identity-Identifier": authenticated.principal.identifier,
+        "X-Market-Role": authenticated.role,
+        "X-Market-Request-ID": authenticated.request_id,
+        "X-Market-Timestamp": str(authenticated.timestamp),
+        "X-Market-Signature": authenticated.proof.value,
+    }
+    request_headers.update(headers or {})
+    return await raw_client.get("/listings", headers=request_headers)
 
 
+# A valid signed publication isolates the bearer-token gate from publisher
+# authentication. A blocked key fails before dispatch; an accepted key reaches
+# the route and creates the listing.
 async def _probe_write(raw_client, headers=None):
-    return await raw_client.delete(_WRITE_PROBE, headers=headers or {})
+    signer = Ed25519Signer(bytes(range(32)))
+    body = {
+        "listing_id": f"gate-probe-{uuid.uuid4().hex}",
+        "storefront_url": "http://gate-probe/",
+        "offer_resource": {},
+        "accepted_escrows": [],
+        "settlement_options": [],
+        "demands": [],
+        "max_duration_seconds": None,
+    }
+    envelope = RequestEnvelope(
+        role="seller",
+        principal=signer.identity,
+        method="POST",
+        operation="listing.publish",
+        resource="listings",
+        request_id=uuid.uuid4().hex,
+        timestamp=int(time.time()),
+        body_hash=canonical_body_hash(body),
+    )
+    authenticated = sign_request(signer=signer, envelope=envelope)
+    request_headers = {
+        "X-Market-Signature-Version": authenticated.protocol,
+        "X-Market-Identity-Scheme": authenticated.principal.scheme.value,
+        "X-Market-Identity-Identifier": authenticated.principal.identifier,
+        "X-Market-Role": authenticated.role,
+        "X-Market-Request-ID": authenticated.request_id,
+        "X-Market-Timestamp": str(authenticated.timestamp),
+        "X-Market-Signature": authenticated.proof.value,
+    }
+    request_headers.update(headers or {})
+    return await raw_client.post(
+        "/listings",
+        json=body,
+        headers=request_headers,
+    )
 
 
 class _GateBase:
@@ -159,9 +225,8 @@ class TestGatesDisabled(_GateBase):
         """Default public registry — neither direction needs a key."""
         monkeypatch.setattr(settings, "require_read_api_key", False)
         monkeypatch.setattr(settings, "require_write_api_key", False)
-        assert (await raw_client.get("/listings")).status_code == 200
-        # Write gate off → request reaches the route (404 for unknown listing).
-        assert (await _probe_write(raw_client)).status_code == 404
+        assert (await _probe_read(raw_client)).status_code == 200
+        assert (await _probe_write(raw_client)).status_code == 201
 
 
 class TestReadGate(_GateBase):
@@ -171,44 +236,35 @@ class TestReadGate(_GateBase):
         monkeypatch.setattr(settings, "require_write_api_key", False)
 
     async def test_401_without_key(self, raw_client):
-        resp = await raw_client.get("/listings")
+        resp = await _probe_read(raw_client)
         assert resp.status_code == 401
         assert "API key" in resp.json()["detail"]
 
     async def test_200_with_read_key(self, raw_client):
         raw, _ = await self._mint(raw_client, scope="read")
-        resp = await raw_client.get(
-            "/listings", headers={"Authorization": f"Bearer {raw}"},
-        )
+        resp = await _probe_read(raw_client, headers={"Authorization": f"Bearer {raw}"})
         assert resp.status_code == 200
 
     async def test_200_with_write_key(self, raw_client):
         """A write key implies read access."""
         raw, _ = await self._mint(raw_client, scope="write")
-        resp = await raw_client.get(
-            "/listings", headers={"Authorization": f"Bearer {raw}"},
-        )
+        resp = await _probe_read(raw_client, headers={"Authorization": f"Bearer {raw}"})
         assert resp.status_code == 200
 
     async def test_401_after_revocation(self, raw_client):
         raw, key_id = await self._mint(raw_client, scope="read")
-        ok = await raw_client.get(
-            "/listings", headers={"Authorization": f"Bearer {raw}"},
-        )
+        ok = await _probe_read(raw_client, headers={"Authorization": f"Bearer {raw}"})
         assert ok.status_code == 200
 
         await raw_client.delete(
             f"/admin/api-keys/{key_id}",
             headers={"Authorization": "Bearer admin-token"},
         )
-        gone = await raw_client.get(
-            "/listings", headers={"Authorization": f"Bearer {raw}"},
-        )
+        gone = await _probe_read(raw_client, headers={"Authorization": f"Bearer {raw}"})
         assert gone.status_code == 401
 
     async def test_writes_open_when_only_read_gated(self, raw_client):
-        """Read-gated but write-open: a write needs no key, reaches the route."""
-        assert (await _probe_write(raw_client)).status_code == 404
+        assert (await _probe_write(raw_client)).status_code == 201
 
 
 class TestWriteGate(_GateBase):
@@ -219,7 +275,7 @@ class TestWriteGate(_GateBase):
         monkeypatch.setattr(settings, "require_write_api_key", True)
 
     async def test_reads_open_when_only_write_gated(self, raw_client):
-        assert (await raw_client.get("/listings")).status_code == 200
+        assert (await _probe_read(raw_client)).status_code == 200
 
     async def test_write_401_without_key(self, raw_client):
         resp = await _probe_write(raw_client)
@@ -233,11 +289,12 @@ class TestWriteGate(_GateBase):
         assert "write-scoped" in resp.json()["detail"]
 
     async def test_write_passes_gate_with_write_key(self, raw_client):
-        """Write key clears the gate; 404 is the route rejecting an
-        unknown listing, not the gate rejecting the key."""
         raw, _ = await self._mint(raw_client, scope="write")
-        resp = await _probe_write(raw_client, headers={"Authorization": f"Bearer {raw}"})
-        assert resp.status_code == 404
+        resp = await _probe_write(
+            raw_client,
+            headers={"Authorization": f"Bearer {raw}"},
+        )
+        assert resp.status_code == 201
 
 
 class TestHealthAlwaysOpen(_GateBase):

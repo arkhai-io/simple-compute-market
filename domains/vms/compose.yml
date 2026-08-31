@@ -1,14 +1,10 @@
 # VM compute (vms.compute) market — domain stack.
 #
-# The seller side of the VM compute market: two registry/indexer instances
-# (public + private), Bob's and Alice's storefronts, the Redis job queue, and
-# the provisioning service. Chain-touching services gate on a service named
-# `anvil` (the local dev chain) which this file does NOT define — the root
-# `compose.dev.yml` supplies it. Bring this domain up with that overlay via
-# the repo-root wrapper:
-#   docker compose -f compose.vms.yml up
-# (compose.vms.yml just `include:`s compose.dev.yml + this file.) The full
-# multi-domain stack is the root `docker-compose.yml`.
+# The seller side of the VM compute market: two registry/indexer instances,
+# Bob's and Alice's storefronts, the Redis job queue, and provisioning. The
+# domain stack has no unconditional chain dependency. An explicit Alkahest
+# storefront profile may add Anvil through the root development overlay;
+# a hosted-only profile composes without it.
 #
 # Paths below are relative to THIS file's directory (domains/vms/) — Compose
 # `include:` resolves an included file's relative paths against its own
@@ -18,9 +14,6 @@ services:
   # 1. Registry/Indexer service (vms.compute filter-spec — the image default).
   registry:
     image: arkhai:registry
-    depends_on:
-      anvil:
-        condition: service_healthy
     ports:
       - "8080:8080"
     env_file:
@@ -41,17 +34,10 @@ services:
       retries: 3
       start_period: 10s
 
-  # 1b. Second Registry/Indexer — a "private" registry alongside the
-  # public one, exercising the multi-registry code paths permanently
-  # in CI. Same image, same chain, independent SQLite. Both EventSync
-  # the same chain so the seller's on-chain agent registration is
-  # picked up by both; publish/discover fan-out and fan-in against
-  # the union (domains/vms/storefront/.../utils/multi_registry_client.py).
+  # 1b. Second Registry/Indexer — a private registry alongside the public
+  # one, exercising authenticated multi-registry publication and discovery.
   registry-b:
     image: arkhai:registry
-    depends_on:
-      anvil:
-        condition: service_healthy
     ports:
       - "8082:8080"
     env_file:
@@ -64,12 +50,12 @@ services:
       # startup (write implies read) so the storefront can publish to
       # registry-b on a fresh ``compose up`` without an out-of-band mint
       # step, and the buyer can discover from it with the same token.
-      # Bob's storefront.bob.toml carries the matching token in
-      # [registry.auth].
+      # Operator-provided secret values; never commit them to this Compose file
+      # or the public storefront profile.
       - REGISTRY_REQUIRE_READ_API_KEY=true
       - REGISTRY_REQUIRE_WRITE_API_KEY=true
-      - REGISTRY_ADMIN_API_KEY=test-admin-token
-      - REGISTRY_BOOTSTRAP_API_KEY=test-buyer-token
+      - REGISTRY_ADMIN_API_KEY=${VMS_REGISTRY_ADMIN_API_KEY:?set VMS_REGISTRY_ADMIN_API_KEY}
+      - REGISTRY_BOOTSTRAP_API_KEY=${VMS_REGISTRY_BOOTSTRAP_API_KEY:?set VMS_REGISTRY_BOOTSTRAP_API_KEY}
     volumes:
       - ../../shared-env:/app/shared-env
     restart: unless-stopped
@@ -85,12 +71,10 @@ services:
       start_period: 10s
 
   # 2. Bob's storefront — the primary test seller.
-  # Buyers are pure HTTP clients (the `market` CLI / domains.vms.buyer
-  # library). The buyer-side e2e runs as a one-shot container on this same
-  # network (the e2e-tests image, which bundles the `market`
-  # binary), so discovery resolves the seller's registry-advertised URL
-  # (bob-storefront:8001) and reaches it the way a real remote buyer would.
-  # See `make test-buyer-machine`.
+  # Buyers are pure HTTP clients. The root overlay supplies the one-shot
+  # `market` container with separate persistent XDG profile/run directories,
+  # public config, and strict provider-secret mounts; this seller stack does
+  # not own or inspect buyer profile state.
   bob-storefront:
     image: arkhai:storefront
     platform: linux/amd64
@@ -118,15 +102,15 @@ services:
       # e2e-mock-happy). Wired into the storefront runtime via TOML override.
       - ARKHAI_PROVISIONING_MODE=${PROVISIONING_MODE:-http}
       - MOCK_PROVISIONING_SUCCESS=${MOCK_PROVISIONING_SUCCESS:-true}
-      # /app/src carries the market_storefront package. The domains/ tree is no
-      # longer on the path: negotiation policies come from the installed
-      # arkhai-vms wheel, not from a source tree.
-      - PYTHONPATH=/app/src
+      # The storefront's policy discovery needs `domains/` on PYTHONPATH
+      # so it can find domains.vms.negotiation.rl callables.
+      - PYTHONPATH=/app:/app/src
     volumes:
       # Chain-/seller-specific config is the one environment-supplied mount;
       # override $VMS_BOB_STOREFRONT_CONFIG to point at a different chain's
       # TOML (the default is the dev/anvil seller config).
       - ${VMS_BOB_STOREFRONT_CONFIG:-./storefront/storefront.bob.toml}:/etc/arkhai/storefront.toml:ro
+      - ${VMS_BOB_STOREFRONT_SECRETS_FILE:?set VMS_BOB_STOREFRONT_SECRETS_FILE}:/etc/arkhai/storefront.secrets.toml:ro
       # Compute inventory seed CSV — storefront.bob.toml's
       # seller.resources_csv_path expects this at /app/resources.csv.
       - ./storefront/src/market_storefront/data/kvm1-machine.csv:/app/resources.csv:ro
@@ -134,12 +118,8 @@ services:
       resources:
         limits:
           memory: 512m
-    # /ready, not /health: `docker compose up -d --wait` gates the e2e run on
-    # this, and /health passes as soon as the routes are mounted — which is
-    # earlier than the timer loops begin cycling. A scenario that paused a
-    # storefront in that window was told loops had stopped that had not started.
     healthcheck:
-      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8001/ready')\" || exit 1"]
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8001/health')\" || exit 1"]
       interval: 10s
       timeout: 5s
       retries: 6
@@ -171,7 +151,7 @@ services:
       - XDG_CONFIG_HOME=/etc
       - ARKHAI_PROVISIONING_MODE=${PROVISIONING_MODE:-http}
       - MOCK_PROVISIONING_SUCCESS=${MOCK_PROVISIONING_SUCCESS:-true}
-      - PYTHONPATH=/app/src
+      - PYTHONPATH=/app:/app/src
     volumes:
       - ${VMS_ALICE_STOREFRONT_CONFIG:-./storefront/storefront.alice.toml}:/etc/arkhai/storefront.toml:ro
       # Reuses Bob's seed CSV — the multi-registry test seeds inventory
@@ -183,9 +163,8 @@ services:
       resources:
         limits:
           memory: 512m
-    # /ready for the same reason as Bob's, immediately above.
     healthcheck:
-      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8002/ready')\" || exit 1"]
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8002/health')\" || exit 1"]
       interval: 10s
       timeout: 5s
       retries: 6
@@ -228,7 +207,6 @@ services:
       # storefront resource available. Must match the bob-storefront service
       # name and port defined in this compose file.
       - PROVISIONING_STOREFRONT_URL=http://bob-storefront:8001
-      - PROVISIONING_STOREFRONT_ADMIN_KEY=${STOREFRONT_ADMIN_KEY:-test-api-key}
     volumes:
       - ./provisioning/iac:/opt/domains/vms/provisioning/iac
       - ${HOME}/.ssh/id_ed25519:/home/appuser/.ssh/id_ed25519:ro

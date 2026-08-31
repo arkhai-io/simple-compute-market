@@ -8,7 +8,6 @@ import os
 import sys
 from pathlib import Path
 
-
 # Best-effort: add the repo root to sys.path so imports resolve when
 # the script is run from a host checkout. Inside the container the
 # market_storefront wheel is already on the venv path, so this is a
@@ -21,6 +20,11 @@ try:
 except IndexError:
     pass
 
+from arkhai_vms.domain_runtime import market_domain
+from market_core import validate_domain_contract
+from market_storefront.settlement_composition import (
+    build_storefront_publication_clause_compiler,
+)
 from market_storefront.utils.sqlite_client import SQLiteClient
 
 
@@ -45,12 +49,20 @@ def _resolve_db_path(cli_db_path: str | None) -> str:
     # and the running storefront always write/read the same database when no
     # explicit path is supplied.
     from market_storefront.utils.config import settings
+
     return settings.db_path
 
 
 async def _run(csv_path: str, db_path: str, dry_run: bool) -> int:
-    client = SQLiteClient(db_path=db_path)
-    report = await client.upsert_resources_from_csv(csv_path=csv_path, dry_run=dry_run)
+    client = SQLiteClient(
+        db_path=db_path,
+        domain=validate_domain_contract(market_domain()),
+    )
+    report = await client.upsert_resources_from_csv(
+        csv_path=csv_path,
+        dry_run=dry_run,
+        settlement_compiler=build_storefront_publication_clause_compiler(),
+    )
 
     summary = {
         "csv_path": report.get("csv_path"),
@@ -76,11 +88,25 @@ async def _run(csv_path: str, db_path: str, dry_run: bool) -> int:
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Import resource portfolio rows from CSV into the storefront DB.")
+    parser = argparse.ArgumentParser(
+        description="Import resource portfolio rows from CSV into the storefront DB."
+    )
     parser.add_argument("--csv", required=True, help="Path to CSV file.")
-    parser.add_argument("--db-path", default=None, help="Path to storefront SQLite DB. Defaults to STOREFRONT_DB_PATH or /tmp/agent.db.")
-    parser.add_argument("--env-file", default=".env", help="Optional env file to load before resolving STOREFRONT_DB_PATH.")
-    parser.add_argument("--dry-run", action="store_true", help="Validate and report without writing to DB.")
+    parser.add_argument(
+        "--db-path",
+        default=None,
+        help="Path to storefront SQLite DB. Defaults to STOREFRONT_DB_PATH or /tmp/agent.db.",
+    )
+    parser.add_argument(
+        "--env-file",
+        default=".env",
+        help="Optional env file to load before resolving STOREFRONT_DB_PATH.",
+    )
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Validate and report without writing to DB.",
+    )
     args = parser.parse_args()
 
     _load_env_file(args.env_file)

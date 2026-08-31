@@ -9,8 +9,10 @@ import yaml
 from sqlalchemy.orm import Session, sessionmaker
 
 from .hints import (
+    DELIVERABLE_MODES_POLICY_TAG,
     MAX_RESERVATION_HOLD_SECONDS_POLICY_TAG,
     SLA_POLICY_TAG,
+    validate_deliverable_modes,
     validate_hold_preference,
     validate_sla_preference,
 )
@@ -113,18 +115,17 @@ class ResourcePoolService:
         pool.provider_config = self._handler(pool.provider).read_config(db, pool.id)
 
     def _require_valid_policy_tag_hints(self, policy_tags: Mapping[str, Any]) -> None:
-        """Reject an invalid `max_reservation_hold_seconds` or `sla` before
-        any write.
+        """Reject malformed domain-neutral policy hints before any write.
 
-        Shared by every individual-pool write path (`create_pool`,
-        `replace_pool`, `update_pool`) so these hints are enforced
-        identically regardless of which one an operator uses -- the bulk
-        YAML pool-document path (`_validate_document`) enforces the same
-        rules via the same `hints.validate_hold_preference`/
-        `validate_sla_preference`, independently, since it reports problems
-        rather than raising.
+        Every individual-pool write path and the bulk YAML path uses these
+        same validators, so declaration semantics do not depend on which
+        administration surface an operator chooses.
         """
-        problems = validate_hold_preference(policy_tags) + validate_sla_preference(policy_tags)
+        problems = (
+            validate_deliverable_modes(policy_tags)
+            + validate_hold_preference(policy_tags)
+            + validate_sla_preference(policy_tags)
+        )
         if problems:
             raise PoolValidationError("; ".join(problems))
 
@@ -401,6 +402,15 @@ class ResourcePoolService:
                 )
                 entry_valid = False
             else:
+                for mode_problem in validate_deliverable_modes(tags):
+                    problems.append(
+                        PoolValidationProblem(
+                            path=f"{base}.policy_tags.{DELIVERABLE_MODES_POLICY_TAG}",
+                            code="invalid_deliverable_modes",
+                            message=mode_problem,
+                        )
+                    )
+                    entry_valid = False
                 for hold_problem in validate_hold_preference(tags):
                     problems.append(
                         PoolValidationProblem(

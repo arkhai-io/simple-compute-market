@@ -31,7 +31,9 @@ the ``/hosts/{host}/...`` tree.
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, status
+import hashlib
+
+from fastapi import APIRouter, Depends, Request, status
 from fastapi_utils.cbv import cbv
 
 from compute_provisioning_service import container as _container_module
@@ -45,6 +47,29 @@ _POLL_NOTE = (
     "Terminal statuses: ``succeeded``, ``failed``, ``cancelled``."
 )
 
+
+def _request_operation_id(
+    request: Request,
+    *,
+    action: str,
+    host: str,
+    vm_name: str | None = None,
+) -> str | None:
+    principal = getattr(request.state, "marketplace_principal", None)
+    request_id = getattr(request.state, "marketplace_request_id", None)
+    if principal is None or not isinstance(request_id, str) or not request_id:
+        return None
+    material = "\0".join(
+        (
+            principal.scheme.value,
+            principal.identifier,
+            request_id,
+            action,
+            host,
+            vm_name or "",
+        )
+    )
+    return "market-request:" + hashlib.sha256(material.encode()).hexdigest()
 
 @cbv(router)
 class VmController:
@@ -68,6 +93,7 @@ class VmController:
     )
     async def create_vm(
         self,
+        request: Request,
         host: str,
         body: CreateVmRequest,
     ) -> JobSubmitResponse:
@@ -82,7 +108,15 @@ class VmController:
         Credentials are stored separately — fetch with
         ``GET /api/v1/jobs/{job_id}/credentials``.
         """
-        return await self._vm_operations.create_vm(host=host, body=body)
+        return await self._vm_operations.create_vm(
+            host=host,
+            body=body,
+            operation_id=_request_operation_id(
+                request,
+                action="create",
+                host=host,
+            ),
+        )
 
     @router.get(
         "/",
@@ -92,6 +126,7 @@ class VmController:
     )
     async def list_vms(
         self,
+        request: Request,
         host: str,
         body: VmActionRequest = Depends(),
     ) -> JobSubmitResponse:
@@ -101,7 +136,15 @@ class VmController:
 
         On success, ``result`` contains the list of VM names and their states.
         """
-        return await self._vm_operations.list_vms(host=host, body=body)
+        return await self._vm_operations.list_vms(
+            host=host,
+            body=body,
+            operation_id=_request_operation_id(
+                request,
+                action="list",
+                host=host,
+            ),
+        )
 
     # ------------------------------------------------------------------
     # Single-VM lifecycle actions
@@ -115,6 +158,7 @@ class VmController:
     )
     async def start_vm(
         self,
+        request: Request,
         host: str,
         vm_name: str,
         body: VmActionRequest,
@@ -127,6 +171,12 @@ class VmController:
             host=host,
             vm_name=vm_name,
             body=body,
+            operation_id=_request_operation_id(
+                request,
+                action="start",
+                host=host,
+                vm_name=vm_name,
+            ),
         )
 
     @router.post(
@@ -137,6 +187,7 @@ class VmController:
     )
     async def shutdown_vm(
         self,
+        request: Request,
         host: str,
         vm_name: str,
         body: VmActionRequest,
@@ -151,6 +202,12 @@ class VmController:
             host=host,
             vm_name=vm_name,
             body=body,
+            operation_id=_request_operation_id(
+                request,
+                action="shutdown",
+                host=host,
+                vm_name=vm_name,
+            ),
         )
 
     @router.post(
@@ -161,6 +218,7 @@ class VmController:
     )
     async def reboot_vm(
         self,
+        request: Request,
         host: str,
         vm_name: str,
         body: VmActionRequest,
@@ -173,6 +231,12 @@ class VmController:
             host=host,
             vm_name=vm_name,
             body=body,
+            operation_id=_request_operation_id(
+                request,
+                action="reboot",
+                host=host,
+                vm_name=vm_name,
+            ),
         )
 
     @router.post(
@@ -183,6 +247,7 @@ class VmController:
     )
     async def destroy_vm(
         self,
+        request: Request,
         host: str,
         vm_name: str,
         body: VmActionRequest,
@@ -200,6 +265,12 @@ class VmController:
             host=host,
             vm_name=vm_name,
             body=body,
+            operation_id=_request_operation_id(
+                request,
+                action="destroy",
+                host=host,
+                vm_name=vm_name,
+            ),
         )
 
     @router.post(
@@ -210,6 +281,7 @@ class VmController:
     )
     async def undefine_vm(
         self,
+        request: Request,
         host: str,
         vm_name: str,
         body: VmActionRequest,
@@ -226,6 +298,12 @@ class VmController:
             host=host,
             vm_name=vm_name,
             body=body,
+            operation_id=_request_operation_id(
+                request,
+                action="undefine",
+                host=host,
+                vm_name=vm_name,
+            ),
         )
 
     @router.get(
@@ -236,6 +314,7 @@ class VmController:
     )
     async def monitor_vm(
         self,
+        request: Request,
         host: str,
         vm_name: str,
         body: VmActionRequest = Depends(),
@@ -253,6 +332,12 @@ class VmController:
             host=host,
             vm_name=vm_name,
             body=body,
+            operation_id=_request_operation_id(
+                request,
+                action="monitor",
+                host=host,
+                vm_name=vm_name,
+            ),
         )
 
     @router.post(
@@ -263,6 +348,7 @@ class VmController:
     )
     async def reset_password(
         self,
+        request: Request,
         host: str,
         vm_name: str,
         body: VmActionRequest,
@@ -277,6 +363,12 @@ class VmController:
             host=host,
             vm_name=vm_name,
             body=body,
+            operation_id=_request_operation_id(
+                request,
+                action="reset_password",
+                host=host,
+                vm_name=vm_name,
+            ),
         )
 
     @classmethod

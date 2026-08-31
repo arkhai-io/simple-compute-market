@@ -84,7 +84,16 @@ def trusted_bare_metal_projection(
             raw_view = views.get(BARE_METAL_PUBLICATION_VIEW)
             if raw_view is None:
                 continue
-            view = BareMetalResourceProjection.model_validate(raw_view)
+            view = BareMetalResourceProjection.model_validate(
+                {
+                    **raw_view,
+                    "pool_id": (
+                        raw_view.get("pool_id")
+                        or pool.get("resource_pool_id")
+                        or raw_resource.get("pool_id")
+                    ),
+                }
+            )
             projected_id = str(
                 raw_resource.get("physical_resource_id") or "",
             )

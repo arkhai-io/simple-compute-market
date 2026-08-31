@@ -2,24 +2,24 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Mapping
 from typing import Any
 
+from .domain_registry import StorefrontDomainRegistry
+from .publication_plugins import build_registry_publication_sources
 from .publication_runner import PublicationSourceSelection
 
 
 def build_storefront_publication_selection(
-    domain_names: Sequence[str],
+    registry: StorefrontDomainRegistry,
     *,
-    source_kwargs_by_name: Mapping[str, Mapping[str, Any]] | None = None,
+    source_kwargs_by_contribution: Mapping[str, Mapping[str, Any]] | None = None,
 ) -> PublicationSourceSelection:
-    """Build a publication selection from installed domain entry-point names."""
-    kwargs_by_name = source_kwargs_by_name or {}
+    """Build all sources once from the already validated startup registry."""
+
     return PublicationSourceSelection(
-        source_names=tuple(domain_names),
-        source_kwargs_by_name={
-            name: dict(kwargs_by_name[name])
-            for name in domain_names
-            if name in kwargs_by_name
-        },
+        sources=build_registry_publication_sources(
+            registry,
+            source_kwargs_by_contribution=source_kwargs_by_contribution,
+        )
     )

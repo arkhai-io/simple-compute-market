@@ -29,6 +29,8 @@ class ApiCreditsResource(BaseModel):
         default=None,
         description="Quota resource this listing derives from (seller-side).",
     )
+    capacity_site_id: str = Field(min_length=1)
+    offering_mode: str = Field(default="api_credits", pattern="^api_credits$")
 
 
 def coerce_resource_dict(value: Any) -> dict[str, Any]:

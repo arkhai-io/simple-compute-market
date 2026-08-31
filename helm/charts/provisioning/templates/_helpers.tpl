@@ -38,35 +38,30 @@ Supports an optional global.imageRepository passed down from the parent chart.
 {{- if and (not $repo) .Values.global -}}
   {{- $repo = .Values.global.imageRepository -}}
 {{- end -}}
+{{- $name := .Values.server.image.name -}}
 {{- if $repo -}}
-{{- printf "%s/%s:%s" $repo .Values.server.image.name .Values.server.image.tag -}}
+  {{- $name = printf "%s/%s" $repo $name -}}
+{{- end -}}
+{{- if .Values.server.image.digest -}}
+{{- printf "%s@%s" $name .Values.server.image.digest -}}
 {{- else -}}
-{{- printf "%s:%s" .Values.server.image.name .Values.server.image.tag -}}
+{{- printf "%s:%s" $name .Values.server.image.tag -}}
 {{- end -}}
 {{- end }}
 
 {{/*
-Resolve the Secret name for the SSH private key (default mounted key).
+Resolve the required pre-existing Secret name for the SSH private key.
 */}}
 {{- define "provisioning.sshKeySecretName" -}}
-{{- if .Values.sshKey.secretName -}}
-{{- .Values.sshKey.secretName -}}
-{{- else -}}
-{{- printf "%s-ssh-key" (include "provisioning.fullname" .) -}}
-{{- end -}}
+{{- required "provisioning.sshKey.secretName must reference a pre-existing Secret" .Values.sshKey.secretName -}}
 {{- end }}
 
 {{/*
-Resolve the Secret name for the provisioning-secrets profile file.
-This Secret contains config-provisioning-secrets.yml, which is mounted as a
-dynaconf profile and carries ssh_decryption_key and inventory_ini.
+Resolve the required pre-existing Secret containing
+config-provisioning-secrets.yml.
 */}}
 {{- define "provisioning.sshDecryptionKeySecretName" -}}
-{{- if .Values.sshDecryptionKey.secretName -}}
-{{- .Values.sshDecryptionKey.secretName -}}
-{{- else -}}
-{{- printf "%s-provisioning-secrets" (include "provisioning.fullname" .) -}}
-{{- end -}}
+{{- required "provisioning.sshDecryptionKey.secretName must reference a pre-existing Secret" .Values.sshDecryptionKey.secretName -}}
 {{- end }}
 
 {{/*

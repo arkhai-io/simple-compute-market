@@ -8,8 +8,8 @@ spec carries two things:
   listing.  Drives the structural check on ``POST /agents/{id}/listings``
   and ``POST /api/v1/listings/validate-publish``.
 * ``filters`` — vocabulary the registry honours at ``GET /listings``
-  query time.  Each filter is `{name, path (JSONPath), op, value_type,
-  alias_kind?, on_missing}`.
+  query time. Each filter declares its canonical HTTP ``name`` and may
+  expose a friendly ``query_name`` plus explicit ``query_aliases``.
 
 The endpoint returns the spec verbatim plus an ``etag`` (sha256 over
 canonical-JSON-encoded ``{version, listing_shape, filters}``).  Buyers
@@ -22,13 +22,26 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 from functools import lru_cache
 from pathlib import Path
 from typing import Any, Literal
 
 import yaml
-from fastapi import APIRouter, Response
+from fastapi import APIRouter, Depends, Request, Response
 from pydantic import BaseModel, ConfigDict, Field
+from sqlalchemy.orm import Session
+
+from src.api.api_key_auth import require_read_access
+from src.api.publisher_auth import (
+    authenticate_publisher_request,
+    cached_response,
+    canonical_query_body,
+    complete_authenticated_request,
+    registry_authority_signer,
+    signed_response,
+)
+from src.db.database import get_db
 
 
 # ---------------------------------------------------------------------------
@@ -40,6 +53,8 @@ Op = Literal["in", "range", "not_in", "exists"]
 AliasKind = Literal["lower_bound", "upper_bound"]
 OnMissing = Literal["fail", "pass"]
 
+_QUERY_NAME_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_.-]*")
+
 
 class FilterDecl(BaseModel):
     """One filter declaration in the registry's filter spec."""
@@ -50,6 +65,15 @@ class FilterDecl(BaseModel):
     path: str = Field(
         min_length=1,
         description="JSONPath (RFC 9535) into the listing document.",
+    )
+    query_name: str | None = Field(
+        default=None,
+        min_length=1,
+        description="Primary field name exposed by the buyer resource DSL.",
+    )
+    query_aliases: list[str] = Field(
+        default_factory=list,
+        description="Additional explicit buyer resource DSL field names.",
     )
     op: Op
     value_type: ValueType
@@ -134,11 +158,29 @@ def load_filter_spec(path: Path | None = None) -> FilterSpec:
         raw = yaml.safe_load(fh)
     spec = FilterSpec.model_validate(raw)
 
-    seen: set[str] = set()
-    for f in spec.filters:
-        if f.name in seen:
-            raise ValueError(f"duplicate filter name in spec: {f.name!r}")
-        seen.add(f.name)
+    seen_filters: set[str] = set()
+    seen_queries: set[str] = set()
+    for declaration in spec.filters:
+        if declaration.name in seen_filters:
+            raise ValueError(f"duplicate filter name in spec: {declaration.name!r}")
+        seen_filters.add(declaration.name)
+        query_names = (
+            declaration.query_name or declaration.name,
+            *declaration.query_aliases,
+        )
+        if len(set(query_names)) != len(query_names):
+            raise ValueError(
+                f"duplicate query name on filter {declaration.name!r}"
+            )
+        for query_name in query_names:
+            if not _QUERY_NAME_RE.fullmatch(query_name):
+                raise ValueError(
+                    f"invalid query name on filter {declaration.name!r}: "
+                    f"{query_name!r}"
+                )
+            if query_name in seen_queries:
+                raise ValueError(f"duplicate query name in spec: {query_name!r}")
+            seen_queries.add(query_name)
     return spec
 
 
@@ -183,11 +225,38 @@ def _spec_body(spec: FilterSpec) -> dict[str, Any]:
         "surfaces as 412 Precondition Failed instead of a silent shape change."
     ),
 )
-async def get_filter_spec() -> Response:
+async def get_filter_spec(
+    request: Request,
+    db: Session = Depends(get_db),
+) -> Response:
+    authenticated = authenticate_publisher_request(
+        request=request,
+        db=db,
+        method="GET",
+        operation="filter.get",
+        resource="filter-spec",
+        body=canonical_query_body(request),
+        allowed_roles=frozenset({"buyer", "seller", "service"}),
+    )
+    require_read_access(request, db)
+    signer = registry_authority_signer(request)
+    replay = cached_response(authenticated, signer=signer)
+    if replay is not None:
+        return replay
     spec = get_loaded_spec()
     body = _spec_body(spec)
-    return Response(
-        content=json.dumps(body),
-        media_type="application/json",
-        headers={"ETag": f'"{body["etag"]}"'},
+    complete_authenticated_request(
+        authenticated=authenticated,
+        db=db,
+        status=200,
+        body=body,
     )
+    db.commit()
+    response = signed_response(
+        authenticated=authenticated,
+        signer=signer,
+        status=200,
+        body=body,
+    )
+    response.headers["ETag"] = f'"{body["etag"]}"'
+    return response

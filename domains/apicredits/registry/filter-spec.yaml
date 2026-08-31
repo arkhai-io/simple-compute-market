@@ -12,7 +12,7 @@
 # Bump `version` on backwards-incompatible changes; add filters freely
 # (etag changes, clients re-fetch).
 
-version: 1
+version: 2
 
 schema:
   id: api_credits
@@ -42,7 +42,6 @@ listing_shape:
         resource_id: {type: [string, "null"]}
     accepted_escrows:
       type: array
-      minItems: 1
       items:
         type: object
         required: [chain_name, escrow_address, literal_fields]
@@ -67,6 +66,26 @@ listing_shape:
                 # absolute amount at negotiation.
                 per: {type: string}
                 value: {type: string}
+    settlement_options:
+      type: array
+      items:
+        type: object
+        required: [option_id, mechanism, asset, rates, params]
+        additionalProperties: false
+        properties:
+          option_id: {type: string, minLength: 64, maxLength: 64}
+          mechanism: {type: string}
+          asset: {type: string}
+          rates: {type: array}
+          params:
+            type: object
+            additionalProperties: true
+            properties:
+              funding_profile: {type: string}
+              interaction: {type: string}
+              country: {type: string}
+              authority_id: {type: string}
+              environment: {type: string}
 
 filters:
   # service_name equality. The registry has no substring op, so v1 is
@@ -79,3 +98,10 @@ filters:
   # advertises no token from vanishing on a token-scoped query.
   - {name: token,         path: "$.accepted_escrows[*].literal_fields.token", op: in,     value_type: string, on_missing: pass}
   - {name: token_exclude, path: "$.accepted_escrows[*].literal_fields.token", op: not_in, value_type: string, on_missing: pass}
+
+  # Mechanism-neutral hosted projections remain independent of legacy escrow
+  # entries, so hosted-only listings are discoverable without a wallet query.
+  - {name: settlement_mechanism, path: "$.settlement_options[*].mechanism", op: in, value_type: string, on_missing: pass}
+  - {name: settlement_asset, path: "$.settlement_options[*].asset", op: in, value_type: string, on_missing: pass}
+  - {name: funding_profile, path: "$.settlement_options[*].params.funding_profile", op: in, value_type: string, on_missing: pass}
+  - {name: funding_interaction, path: "$.settlement_options[*].params.interaction", op: in, value_type: string, on_missing: pass}

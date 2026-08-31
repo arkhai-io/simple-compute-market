@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import logging
 from typing import Any
 
@@ -10,7 +11,7 @@ from arkhai_bare_metal import (
     BareMetalLeaseCreate,
     BareMetalLeaseView,
 )
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi_utils.cbv import cbv
 
 from compute_provisioning_service import container as _container_module
@@ -53,6 +54,40 @@ def _lease_view(reservation: dict[str, Any]) -> BareMetalLeaseView:
     )
 
 
+def _request_operation_id(
+    request: Request,
+    *,
+    action: str,
+    target: str,
+) -> str | None:
+    """Derive one stable downstream effect ID from authenticated semantics."""
+    principal = getattr(request.state, "marketplace_principal", None)
+    request_id = getattr(request.state, "marketplace_request_id", None)
+    operation = getattr(request.state, "marketplace_operation", None)
+    resource = getattr(request.state, "marketplace_resource", None)
+    if (
+        principal is None
+        or not isinstance(request_id, str)
+        or not request_id
+        or not isinstance(operation, str)
+        or not operation
+        or not isinstance(resource, str)
+    ):
+        return None
+    material = "\0".join(
+        (
+            principal.scheme.value,
+            principal.identifier,
+            request_id,
+            operation,
+            resource,
+            action,
+            target,
+        )
+    )
+    return "market-request:" + hashlib.sha256(material.encode()).hexdigest()
+
+
 def _http_error(exc: Exception) -> HTTPException:
     if isinstance(exc, LeaseNotFoundError):
         return HTTPException(status_code=404, detail=str(exc))
@@ -89,10 +124,21 @@ class BareMetalLeasesController:
         status_code=201,
         summary="Register a bare-metal lease on its reservation",
     )
-    async def create_lease(self, body: BareMetalLeaseCreate) -> BareMetalLeaseView:
+    async def create_lease(
+        self,
+        request: Request,
+        body: BareMetalLeaseCreate,
+    ) -> BareMetalLeaseView:
         try:
             if not body.create_job_id:
-                grant = await self._operations.grant_access(body)
+                grant = await self._operations.grant_access(
+                    body,
+                    operation_id=_request_operation_id(
+                        request,
+                        action="grant_access",
+                        target=body.machine_id,
+                    ),
+                )
                 body = body.model_copy(update={"create_job_id": grant.job_id})
             attached = self._leases.register_lease(body)
         except (LeaseNotFoundError, BareMetalHostValidationError) as exc:

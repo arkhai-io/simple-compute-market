@@ -7,18 +7,25 @@ without an HTTP request/response cycle.
 from __future__ import annotations
 
 import asyncio
-import httpx
 import logging
 import os
-import time
-from typing import Any, Callable
+from collections.abc import Callable
+from typing import Any
+
+import httpx
+from market_identity import Signer
 
 import market_storefront.container as _container
+from market_storefront.settlement_composition import (
+    build_storefront_publication_clause_compiler,
+)
+from market_storefront.negotiation_runtime import load_storefront_chain
 from market_storefront.utils.config import (
+    AGENT_ID,
     CHAINS,
     ESCROW_TEMPLATES,
+    get_evm_wallet_address,
     settings,
-    AGENT_ID,
 )
 
 logger = logging.getLogger(__name__)
@@ -32,22 +39,11 @@ def _default_projection_status_provider() -> dict[str, Any]:
     exercises `include_registry=True` pays no import cost, and a test can
     substitute a fake via the constructor without patching this module.
     """
-    from market_storefront.services.site_projection_cache import projection_status_summary
+    from market_storefront.services.site_projection_cache import (
+        projection_status_summary,
+    )
 
     return projection_status_summary()
-
-
-def _default_loop_health_provider() -> str:
-    """Real production source for the timer loops' health value.
-
-    Resolved inside the function rather than imported at module scope for the
-    same reason as the providers below, and for one more: `lifecycle` and
-    `server` already reference each other, and importing `lifecycle` at this
-    module's scope would draw a service into that cycle.
-    """
-    from market_storefront.lifecycle import loops_check
-
-    return loops_check()
 
 
 def _default_listing_mode_explanation_provider() -> dict[str, dict[str, str]]:
@@ -55,7 +51,9 @@ def _default_listing_mode_explanation_provider() -> dict[str, dict[str, str]]:
     explanations. Same lazy-resolution and constructor-injection rationale
     as `_default_projection_status_provider`, immediately above.
     """
-    from market_storefront.services.site_projection_cache import listing_mode_explanations
+    from market_storefront.services.site_projection_cache import (
+        listing_mode_explanations,
+    )
 
     return listing_mode_explanations()
 
@@ -64,6 +62,7 @@ def _default_listing_mode_explanation_provider() -> dict[str, dict[str, str]]:
 # Service
 # ---------------------------------------------------------------------------
 
+
 class SystemService:
     """Business logic for storefront health and connectivity checks."""
 
@@ -71,21 +70,21 @@ class SystemService:
         self,
         *,
         sqlite_client,
+        marketplace_signer: Signer,
         agent_id: str | None = None,
         projection_status_provider: Callable[[], dict[str, Any]] | None = None,
-        listing_mode_explanation_provider: Callable[[], dict[str, dict[str, str]]] | None = None,
-        loop_health_provider: Callable[[], str] | None = None,
+        listing_mode_explanation_provider: Callable[[], dict[str, dict[str, str]]]
+        | None = None,
     ) -> None:
         self._db = sqlite_client
+        self._marketplace_signer = marketplace_signer
         self._agent_id = agent_id or AGENT_ID or "agent"
-        self._loop_health_provider = (
-            loop_health_provider or _default_loop_health_provider
-        )
         self._projection_status_provider = (
             projection_status_provider or _default_projection_status_provider
         )
         self._listing_mode_explanation_provider = (
-            listing_mode_explanation_provider or _default_listing_mode_explanation_provider
+            listing_mode_explanation_provider
+            or _default_listing_mode_explanation_provider
         )
 
     # ------------------------------------------------------------------
@@ -120,16 +119,6 @@ class SystemService:
             checks["registry"] = await self.registry_check()
             checks["negotiation_strategy"] = self.negotiation_strategy_check()
 
-        # Present on every health surface, including the fast liveness probe:
-        # whether the background work is running is part of whether this
-        # storefront is healthy, and a caller diagnosing a failing probe reads it
-        # here. Which conditions fail which probe is the controller's decision,
-        # not this value's.
-        try:
-            checks["loops"] = self._loop_health_provider()
-        except Exception as exc:
-            checks["loops"] = f"error: {exc}"
-
         # alkahest configured?
         configured = _container.configured_chain_names()
         if configured:
@@ -161,22 +150,26 @@ class SystemService:
         result: dict = {"status": "ok" if all_ok else "degraded", "checks": checks}
 
         if include_registry:
-            # Top-level diagnostic facts. Identity is the wallet (eip191),
-            # a single chain-agnostic operator-assigned value.
-            # ``agent_id`` is the identity the storefront presents to the
-            # provisioning service (X-Agent-ID); consumers read it here to
-            # address jobs the storefront owns. ``identities`` keeps the
-            # per-chain breakdown for multi-chain operators.
-            wallet = (settings.wallet.address or "").lower() or None
-            result["agent_id"] = wallet
-            identities: dict[str, dict[str, Any]] = {}
-            for name, chain in CHAINS.items():
-                identities[name] = {
-                    "chain_id": chain.chain_id,
-                    "identity": wallet,
-                    "scheme": "eip191" if wallet else None,
+            principal = self._marketplace_signer.identity
+            result["agent_id"] = self._agent_id
+            result["marketplace_principal"] = principal.model_dump(mode="json")
+            result["storefront_domains"] = tuple(
+                {
+                    "contribution_id": item.contribution_id,
+                    "offering_mode": item.offering_mode,
+                    "domain_identity": item.domain_identity,
+                    "contract_version": item.contract_version,
                 }
-            result["identities"] = identities
+                for item in self._db.domain_registry.projection()
+            )
+            wallet = get_evm_wallet_address().lower() if CHAINS else ""
+            result["evm_mechanisms"] = {
+                name: {
+                    "chain_id": chain.chain_id,
+                    "address": wallet or None,
+                }
+                for name, chain in CHAINS.items()
+            }
             try:
                 resources = await self._db.list_resources()
                 result["resource_count"] = len(resources)
@@ -230,7 +223,6 @@ class SystemService:
             except Exception as exc:
                 return f"error: {exc}"
 
-        import asyncio
         results = await asyncio.gather(*[_probe(u) for u in urls])
         if any(r == "ok" for r in results):
             return "ok"
@@ -277,27 +269,38 @@ class SystemService:
                 "[RESOURCE SEED] Skipping — %d resource(s) already in DB",
                 len(existing),
             )
-            return {"seeded": False, "imported_count": len(existing), "source": "already_populated"}
+            return {
+                "seeded": False,
+                "imported_count": len(existing),
+                "source": "already_populated",
+            }
 
         if csv_inline:
             report = await self._db.upsert_resources_from_csv_content(
                 csv_content=csv_inline,
                 source_label="resources_csv_inline (config)",
                 templates=ESCROW_TEMPLATES,
+                settlement_compiler=build_storefront_publication_clause_compiler(),
             )
             source = "resources_csv_inline (config)"
         elif csv_path:
             report = await self._db.upsert_resources_from_csv(
-                csv_path=csv_path, templates=ESCROW_TEMPLATES,
+                csv_path=csv_path,
+                templates=ESCROW_TEMPLATES,
+                settlement_compiler=build_storefront_publication_clause_compiler(),
             )
             source = csv_path
         elif os.path.exists(self._DEFAULT_CSV_PATH):
             report = await self._db.upsert_resources_from_csv(
-                csv_path=self._DEFAULT_CSV_PATH, templates=ESCROW_TEMPLATES,
+                csv_path=self._DEFAULT_CSV_PATH,
+                templates=ESCROW_TEMPLATES,
+                settlement_compiler=build_storefront_publication_clause_compiler(),
             )
             source = f"{self._DEFAULT_CSV_PATH} (auto-discovered)"
         else:
-            logger.info("[RESOURCE SEED] No resource source configured — starting with empty inventory")
+            logger.info(
+                "[RESOURCE SEED] No resource source configured — starting with empty inventory"
+            )
             return {"seeded": False, "imported_count": 0, "source": None}
 
         imported = report.get("imported_count", 0)
@@ -305,7 +308,8 @@ class SystemService:
         if failed:
             logger.warning(
                 "[RESOURCE SEED] %d row(s) failed to import from %s",
-                failed, source,
+                failed,
+                source,
             )
         logger.info("[RESOURCE SEED] Imported %d resource(s) from %s", imported, source)
         return {"seeded": True, "imported_count": imported, "source": source}
@@ -331,25 +335,28 @@ class SystemService:
                 NegotiationRound,
                 run_negotiation_chain,
             )
-            from market_storefront.utils.sync_negotiation import _load_storefront_chain
 
-            chain = _load_storefront_chain()
+            chain = load_storefront_chain()
             label = f"chain[{len(chain)}]"
-            history = [NegotiationRound(
-                round_number=0, sender="them", action="initial",
-                # Minimal structurally-valid opening proposal: the VM
-                # opening guard validates the full EscrowProposal shape
-                # (chain_name/escrow_address/expiration_unix required).
-                # The zero escrow address keeps the shape guard's legacy
-                # carve-out applicable, so the probe needs no
-                # accepted-escrows context on a listing.
-                proposal={
-                    "chain_name": "probe",
-                    "escrow_address": "0x" + "00" * 20,
-                    "fields": {"amount": 10_000},
-                    "expiration_unix": 4_102_444_800,  # 2100-01-01
-                },
-            )]
+            history = [
+                NegotiationRound(
+                    round_number=0,
+                    sender="them",
+                    action="initial",
+                    # Minimal structurally-valid opening proposal: the VM
+                    # opening guard validates the full EscrowProposal shape
+                    # (chain_name/escrow_address/expiration_unix required).
+                    # The zero escrow address keeps the shape guard's legacy
+                    # carve-out applicable, so the probe needs no
+                    # accepted-escrows context on a listing.
+                    proposal={
+                        "chain_name": "probe",
+                        "escrow_address": "0x" + "00" * 20,
+                        "fields": {"amount": 10_000},
+                        "expiration_unix": 4_102_444_800,  # 2100-01-01
+                    },
+                )
+            ]
             context = NegotiationContext(
                 direction="maximize",
                 our_reference_amount=10_000.0,

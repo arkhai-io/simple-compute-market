@@ -23,21 +23,12 @@ class ReserveCapacityRequest(BaseModel):
 
 
 class ReserveCapacityResponse(BaseModel):
-    """Response from POST /api/v1/admin/portfolio/reservations.
-
-    `pool_id` and `resource_id` echo whichever the request's claim pinned. A
-    pool-scoped claim reports its pool and no resource; a resource-pinned claim
-    reports its resource and no pool; a claim pinning neither reports neither.
-    Both are absent rather than empty in that case, because the site authority
-    does not report the resource it matched or that resource's pool -- a
-    reservation commits to a site and a shape, and scheduling may rebind it
-    within that site.
-    """
+    """Response from POST /api/v1/admin/portfolio/reservations."""
 
     capacity_reservation_id: str
     pool_id: str | None = None
     member_id: str | None = None
-    resource_id: str | None = None
+    resource_id: str
     gpu_count: int
     resource_state: str | None = None
     closed_listing_ids: list[str] = Field(default_factory=list)
@@ -92,6 +83,7 @@ class ResourcePatchResponse(BaseModel):
 
 class FulfillmentStartedEventRequest(BaseModel):
     capacity_reservation_id: str
+    site_id: str
     escrow_uid: str | None = None
     provider_id: str | None = None
     provider_job_id: str | None = None
@@ -101,6 +93,7 @@ class FulfillmentStartedEventRequest(BaseModel):
 
 class FulfillmentFailedEventRequest(BaseModel):
     capacity_reservation_id: str
+    site_id: str
     escrow_uid: str | None = None
     provider_id: str | None = None
     provider_job_id: str | None = None
@@ -112,6 +105,7 @@ class FulfillmentFailedEventRequest(BaseModel):
 
 class UsageStartedEventRequest(BaseModel):
     capacity_reservation_id: str
+    site_id: str
     escrow_uid: str | None = None
     provider_id: str | None = None
     provider_lease_id: str | None = None
@@ -124,12 +118,14 @@ class UsageStartedEventRequest(BaseModel):
 
 class ReleaseStartedEventRequest(BaseModel):
     capacity_reservation_id: str
+    site_id: str
     provider_lease_id: str | None = None
     vm_remove_job_id: str | None = None
 
 
 class CapacityReleasedEventRequest(BaseModel):
     capacity_reservation_id: str
+    site_id: str
     provider_lease_id: str | None = None
     resource_id: str | None = None
     released_at: str | None = None

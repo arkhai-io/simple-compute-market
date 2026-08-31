@@ -1,11 +1,10 @@
 """Dry-run validation routes for the registry service.
 
 POST /api/v1/listings/validate-publish
-    Checks whether a listing payload would be accepted by
-    POST /agents/{agent_id}/listings without writing anything to the
-    database or requiring auth.  Used by the e2e test suite (stage 03a)
-    to confirm a listing is structurally publishable before calling
-    resume on the storefront.
+    Authenticates a canonical v2 marketplace request, then checks whether
+    a listing payload would be structurally accepted by POST /listings without
+    writing listing or publisher state. Used by composition smoke tests before
+    a storefront attempts publication.
 
 Validation is driven by the registry's filter-spec ``listing_shape``
 (JSON Schema, draft 2020-12) — the same schema buyers see at
@@ -18,12 +17,22 @@ from __future__ import annotations
 from functools import lru_cache
 from typing import Any
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends, Request
 from jsonschema import Draft202012Validator
 from jsonschema.exceptions import ValidationError
 
 from src.api.filter_spec import get_loaded_spec
 from src.api.validate_model import ValidatePublishRequest, ValidatePublishResponse
+from src.api.api_key_auth import require_read_access
+from src.api.publisher_auth import (
+    authenticate_publisher_request,
+    cached_response,
+    complete_authenticated_request,
+    registry_authority_signer,
+    signed_response,
+)
+from src.db.database import get_db
+from sqlalchemy.orm import Session
 
 router = APIRouter(prefix="/api/v1/listings", tags=["validate"])
 
@@ -81,25 +90,61 @@ def _derive_offer_resource_type(offer_resource: dict[str, Any]) -> str | None:
         "agent registration and auth)."
     ),
 )
-async def validate_publish(body: ValidatePublishRequest) -> ValidatePublishResponse:
+async def validate_publish(
+    request: Request,
+    body: ValidatePublishRequest,
+    db: Session = Depends(get_db),
+):
+    request_body = body.model_dump(mode="json")
+    authenticated = authenticate_publisher_request(
+        request=request,
+        db=db,
+        method="POST",
+        operation="listing.validate",
+        resource="listings",
+        body=request_body,
+        allowed_roles=frozenset({"buyer", "seller", "service"}),
+    )
+    require_read_access(request, db)
+    signer = registry_authority_signer(request)
+    replay = cached_response(authenticated, signer=signer)
+    if replay is not None:
+        return replay
     candidate: dict[str, Any] = {
         "listing_id": body.listing_id,
         "storefront_url": body.storefront_url,
         "offer_resource": body.offer_resource,
         "accepted_escrows": body.accepted_escrows,
+        "settlement_options": body.settlement_options,
         "demands": body.demands,
         "max_duration_seconds": body.max_duration_seconds,
     }
 
     errors = [
         f"{_format_path(err)}: {err.message}"
-        for err in sorted(_validator().iter_errors(candidate), key=lambda e: list(e.absolute_path))
+        for err in sorted(
+            _validator().iter_errors(candidate), key=lambda e: list(e.absolute_path)
+        )
     ]
 
-    return ValidatePublishResponse(
+    response_body = ValidatePublishResponse(
         valid=not errors,
         listing_id=body.listing_id,
         offer_resource_type=_derive_offer_resource_type(body.offer_resource),
         accepted_escrows_count=len(body.accepted_escrows),
+        settlement_options_count=len(body.settlement_options),
         errors=errors,
+    ).model_dump(mode="json")
+    complete_authenticated_request(
+        authenticated=authenticated,
+        db=db,
+        status=200,
+        body=response_body,
+    )
+    db.commit()
+    return signed_response(
+        authenticated=authenticated,
+        signer=signer,
+        status=200,
+        body=response_body,
     )

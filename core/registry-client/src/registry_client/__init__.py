@@ -9,7 +9,11 @@ Both accept a ``transport=`` kwarg for in-process test injection.
 """
 
 from registry_client.client import RegistryClient, SyncRegistryClient
-from registry_client.auth import sign_eip191, build_auth_headers, RegistryClientError
+from registry_client.auth import (
+    RegistryClientError,
+    authenticate_request,
+    authentication_headers,
+)
 from registry_client.models import (
     FilterSpecResponse,
     HealthResponse,
@@ -24,13 +28,20 @@ from registry_client.models import (
     ValidatePublishRequest,
     ValidatePublishResponse,
 )
+from registry_client.query import (
+    CompiledResourceQuery,
+    FilterVocabularyError,
+    ResourceQueryCompilationError,
+    compile_resource_query,
+    resource_query_descriptors,
+)
 
 __all__ = [
     "RegistryClient",
     "SyncRegistryClient",
     "RegistryClientError",
-    "sign_eip191",
-    "build_auth_headers",
+    "authenticate_request",
+    "authentication_headers",
     "FilterSpecResponse",
     "HealthResponse",
     "ListingListResponse",
@@ -43,4 +54,9 @@ __all__ = [
     "UpdateListingRequest",
     "ValidatePublishRequest",
     "ValidatePublishResponse",
+    "CompiledResourceQuery",
+    "FilterVocabularyError",
+    "ResourceQueryCompilationError",
+    "compile_resource_query",
+    "resource_query_descriptors",
 ]

@@ -25,13 +25,15 @@ def network_join(
     """Join a ZeroTier network."""
     if not network_id:
         from ..utils.config import settings
+
         network_id = settings.zerotier_network
     if not network_id:
         typer.secho(
             "No network_id provided and seller.zerotier_network is not set in config.toml. "
             "Pass the network ID explicitly or run "
             "`market-storefront config set seller.zerotier_network <id>` first.",
-            err=True, fg=typer.colors.RED,
+            err=True,
+            fg=typer.colors.RED,
         )
         raise typer.Exit(2)
     run_step(

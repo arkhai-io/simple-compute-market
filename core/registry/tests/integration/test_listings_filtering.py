@@ -52,11 +52,13 @@ def _make_listing(db_session, publisher, listing_id: str, **offer_extras) -> Lis
         listing_id=listing_id,
         publisher_id=publisher.publisher_id,
         offer_resource=offer,
-        accepted_escrows=[{
-            "chain_name": "anvil",
-            "escrow_address": "0x" + "11" * 20,
-            "literal_fields": {"token": "0x" + "ab" * 20},
-        }],
+        accepted_escrows=[
+            {
+                "chain_name": "anvil",
+                "escrow_address": "0x" + "11" * 20,
+                "literal_fields": {"token": "0x" + "ab" * 20},
+            }
+        ],
         max_duration_seconds=3600,
         status=OrderStatusEnum.open,
     )
@@ -67,7 +69,9 @@ def _make_listing(db_session, publisher, listing_id: str, **offer_extras) -> Lis
 
 
 @pytest.mark.asyncio
-async def test_gpu_model_filter_narrows_results(_raw_client, db_session, maker_publisher):
+async def test_gpu_model_filter_narrows_results(
+    _raw_client, db_session, maker_publisher
+):
     _make_listing(db_session, maker_publisher, "a100-listing", gpu_model="A100")
     _make_listing(db_session, maker_publisher, "h200-listing", gpu_model="H200")
 
@@ -88,22 +92,25 @@ async def test_filters_match_double_encoded_offer_resource(
     *strings* (a publisher that double-encoded them) is still filterable and
     comes back decoded on the wire.
 
-    Regression for the discovery break: the storefront forwarded its
-    stringified offer_resource SQLite column into the registry's JSON
-    column, so the JSONPath filter ($.offer_resource.gpu_model) resolved to
-    nothing and on_missing:fail dropped every listing — a buyer's
-    ``market buy --gpu-model`` matched zero sellers. order_to_dict now
-    decodes on read so discovery (and the response shape) stay correct.
+    Regression for a discovery break where the storefront forwarded its
+    stringified ``offer_resource`` SQLite column into the registry's JSON
+    column. The ``$.offer_resource.gpu_model`` predicate resolved to nothing,
+    so ``on_missing: fail`` dropped every listing and
+    ``market buy --resource gpu_model=A100`` matched no seller.
     """
     row = Listing(
         listing_id="stringified-offer",
         publisher_id=maker_publisher.publisher_id,
         offer_resource=json.dumps({"gpu_model": "A100", "region": "us-west"}),
-        accepted_escrows=json.dumps([{
-            "chain_name": "anvil",
-            "escrow_address": "0x" + "11" * 20,
-            "literal_fields": {"token": "0x" + "ab" * 20},
-        }]),
+        accepted_escrows=json.dumps(
+            [
+                {
+                    "chain_name": "anvil",
+                    "escrow_address": "0x" + "11" * 20,
+                    "literal_fields": {"token": "0x" + "ab" * 20},
+                }
+            ]
+        ),
         max_duration_seconds=3600,
         status=OrderStatusEnum.open,
     )
@@ -178,12 +185,24 @@ async def test_token_array_projection_filter(_raw_client, db_session, maker_publ
 
     a = _make_listing(db_session, maker_publisher, "usdc-only", gpu_model="A100")
     a.accepted_escrows = [
-        {"chain_name": "anvil", "escrow_address": "0x" + "11" * 20, "literal_fields": {"token": usdc}},
+        {
+            "chain_name": "anvil",
+            "escrow_address": "0x" + "11" * 20,
+            "literal_fields": {"token": usdc},
+        },
     ]
     b = _make_listing(db_session, maker_publisher, "both", gpu_model="A100")
     b.accepted_escrows = [
-        {"chain_name": "anvil", "escrow_address": "0x" + "22" * 20, "literal_fields": {"token": usdc}},
-        {"chain_name": "anvil", "escrow_address": "0x" + "33" * 20, "literal_fields": {"token": weth}},
+        {
+            "chain_name": "anvil",
+            "escrow_address": "0x" + "22" * 20,
+            "literal_fields": {"token": usdc},
+        },
+        {
+            "chain_name": "anvil",
+            "escrow_address": "0x" + "33" * 20,
+            "literal_fields": {"token": weth},
+        },
     ]
     db_session.commit()
 
@@ -246,18 +265,24 @@ async def test_set_form_not_in_excludes_token(_raw_client, db_session, maker_pub
 
     a = _make_listing(db_session, maker_publisher, "usdc-listing", gpu_model="A100")
     a.accepted_escrows = [
-        {"chain_name": "anvil", "escrow_address": "0x" + "11" * 20, "literal_fields": {"token": usdc}},
+        {
+            "chain_name": "anvil",
+            "escrow_address": "0x" + "11" * 20,
+            "literal_fields": {"token": usdc},
+        },
     ]
     b = _make_listing(db_session, maker_publisher, "weth-listing", gpu_model="A100")
     b.accepted_escrows = [
-        {"chain_name": "anvil", "escrow_address": "0x" + "22" * 20, "literal_fields": {"token": weth}},
+        {
+            "chain_name": "anvil",
+            "escrow_address": "0x" + "22" * 20,
+            "literal_fields": {"token": weth},
+        },
     ]
     db_session.commit()
 
     async with _raw_client as c:
-        resp = await c.get(
-            "/listings", params={"token_exclude": f"not_in:[{usdc}]"}
-        )
+        resp = await c.get("/listings", params={"token_exclude": f"not_in:[{usdc}]"})
     body = resp.json()
     ids = {item["listing_id"] for item in body["items"]}
     assert "weth-listing" in ids
@@ -289,7 +314,9 @@ async def test_strict_token_tightens_default(_raw_client, db_session, maker_publ
 
     a = _make_listing(db_session, maker_publisher, "no-escrows", gpu_model="A100")
     a.accepted_escrows = []
-    _make_listing(db_session, maker_publisher, "has-escrows", gpu_model="A100")  # default usdc-stand-in
+    _make_listing(
+        db_session, maker_publisher, "has-escrows", gpu_model="A100"
+    )  # default usdc-stand-in
     db_session.commit()
 
     async with _raw_client as c:
@@ -308,7 +335,9 @@ async def test_strict_token_tightens_default(_raw_client, db_session, maker_publ
 
 
 @pytest.mark.asyncio
-async def test_strict_unknown_filter_returns_400(_raw_client, db_session, maker_publisher):
+async def test_strict_unknown_filter_returns_400(
+    _raw_client, db_session, maker_publisher
+):
     _make_listing(db_session, maker_publisher, "x", gpu_model="A100")
     async with _raw_client as c:
         resp = await c.get("/listings", params={"strict.banana": "true"})
@@ -317,7 +346,9 @@ async def test_strict_unknown_filter_returns_400(_raw_client, db_session, maker_
 
 
 @pytest.mark.asyncio
-async def test_set_form_op_mismatch_returns_400(_raw_client, db_session, maker_publisher):
+async def test_set_form_op_mismatch_returns_400(
+    _raw_client, db_session, maker_publisher
+):
     """``gpu_model`` declares op: in; not_in:[...] in set-form must 400."""
     _make_listing(db_session, maker_publisher, "x", gpu_model="A100")
     async with _raw_client as c:

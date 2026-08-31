@@ -41,3 +41,8 @@ async def test_worker_runs_background_tasks_and_cancels_them_cleanly(monkeypatch
     await asyncio.wait_for(running, timeout=1)
 
     assert cancelled.is_set()
+
+
+def test_runtime_imports_pools_before_seeding_inventory():
+    names = [step.name for step in worker.app_runtime.startup_steps()]
+    assert names.index("import-pool-definitions") < names.index("seed-inventory")

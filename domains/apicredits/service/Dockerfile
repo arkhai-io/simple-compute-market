@@ -28,7 +28,9 @@ RUN sed -E -i 's|registry = "[^"]*\.dist"|registry = "/.dist"|' uv.lock || true
 # the generic `units` capacity claim key).
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --no-sources --no-dev --no-install-project --find-links /.dist \
-        --refresh-package arkhai-kit-site
+        --refresh-package arkhai-kit-site \
+        --refresh-package arkhai-apicredits-domain \
+        --refresh-package arkhai-kit-identity
 
 # Stage 2: lean runtime.
 FROM --platform=linux/amd64 python:${PYTHON_VERSION}-slim AS runtime

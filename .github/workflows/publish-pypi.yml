@@ -8,6 +8,7 @@ on:
       - 'core/**'
       - 'domains/vms/**'
       - 'domains/apicredits/**'
+      - 'domains/bare_metal/**'
       - '.github/workflows/publish-pypi.yml'
   workflow_dispatch:
 
@@ -71,6 +72,9 @@ jobs:
             kit-config: ['kit/config/**', '.github/workflows/publish-pypi.yml']
             kit-identity: ['kit/identity/**', '.github/workflows/publish-pypi.yml']
             kit-policy: ['kit/policy/**', '.github/workflows/publish-pypi.yml']
+            kit-settlement-runtime: ['kit/settlement-runtime/**', '.github/workflows/publish-pypi.yml']
+            kit-negotiation-runtime: ['kit/negotiation-runtime/**', '.github/workflows/publish-pypi.yml']
+            kit-hosted-settlement: ['kit/hosted-settlement/**', 'manifests/**', '.github/workflows/publish-pypi.yml']
             core: ['core/src/**', 'core/pyproject.toml', 'core/README.md', '.github/workflows/publish-pypi.yml']
             core-buyer: ['core/buyer/**', '.github/workflows/publish-pypi.yml']
             core-storefront: ['core/storefront/**', '.github/workflows/publish-pypi.yml']
@@ -78,13 +82,16 @@ jobs:
             core-registry-client: ['core/registry-client/**', '.github/workflows/publish-pypi.yml']
             core-registry: ['core/registry/**', '.github/workflows/publish-pypi.yml']
             kit-site: ['kit/site/**', '.github/workflows/publish-pypi.yml']
+            kit-site-client: ['kit/site-client/**', '.github/workflows/publish-pypi.yml']
             bare-metal: ['domains/bare_metal/pyproject.toml', 'domains/bare_metal/src/**', 'domains/bare_metal/tests/**', '.github/workflows/publish-pypi.yml']
+            bare-metal-storefront: ['domains/bare_metal/storefront/**', '.github/workflows/publish-pypi.yml']
             bare-metal-provisioning-adapter: ['domains/bare_metal/provisioning/adapter/**', '.github/workflows/publish-pypi.yml']
             vms: ['domains/vms/domain/**', '.github/workflows/publish-pypi.yml']
             vms-buyer: ['domains/vms/buyer/**', '.github/workflows/publish-pypi.yml']
             vms-provisioning-adapter: ['domains/vms/provisioning/adapter/**', '.github/workflows/publish-pypi.yml']
             compute-provisioning-service: ['provisioning/compute/service/**', '.github/workflows/publish-pypi.yml']
             vms-storefront: ['domains/vms/storefront/**', '.github/workflows/publish-pypi.yml']
+            apicredits-domain: ['domains/apicredits/pyproject.toml', 'domains/apicredits/src/**', 'domains/apicredits/tests/**', '.github/workflows/publish-pypi.yml']
             apicredits-buyer: ['domains/apicredits/buyer/**', '.github/workflows/publish-pypi.yml']
             apicredits-middleware: ['domains/apicredits/middleware/python/**', '.github/workflows/publish-pypi.yml']
             apicredits-storefront: ['domains/apicredits/storefront/**', '.github/workflows/publish-pypi.yml']
@@ -104,6 +111,9 @@ jobs:
             {"key": "kit-config",             "path": "kit/config",                       "dist": "arkhai-kit-config"},
             {"key": "kit-identity",           "path": "kit/identity",                     "dist": "arkhai-kit-identity"},
             {"key": "kit-policy",             "path": "kit/policy",                       "dist": "arkhai-kit-policy"},
+            {"key": "kit-settlement-runtime", "path": "kit/settlement-runtime",               "dist": "arkhai-kit-settlement-runtime"},
+            {"key": "kit-negotiation-runtime", "path": "kit/negotiation-runtime",             "dist": "arkhai-kit-negotiation-runtime"},
+            {"key": "kit-hosted-settlement",  "path": "kit/hosted-settlement",            "dist": "arkhai-kit-hosted-settlement"},
             {"key": "core",                   "path": "core",                             "dist": "arkhai-core"},
             {"key": "core-buyer",             "path": "core/buyer",                       "dist": "arkhai-core-buyer"},
             {"key": "core-storefront",        "path": "core/storefront",                  "dist": "arkhai-core-storefront"},
@@ -111,13 +121,16 @@ jobs:
             {"key": "core-registry-client",   "path": "core/registry-client",             "dist": "arkhai-core-registry-client"},
             {"key": "core-registry",          "path": "core/registry",                    "dist": "arkhai-core-registry"},
             {"key": "kit-site",              "path": "kit/site",                        "dist": "arkhai-kit-site"},
+            {"key": "kit-site-client",       "path": "kit/site-client",                 "dist": "arkhai-kit-site-client"},
             {"key": "bare-metal",            "path": "domains/bare_metal",              "dist": "arkhai-bare-metal"},
+            {"key": "bare-metal-storefront", "path": "domains/bare_metal/storefront",   "dist": "arkhai-bare-metal-storefront"},
             {"key": "bare-metal-provisioning-adapter", "path": "domains/bare_metal/provisioning/adapter", "dist": "arkhai-bare-metal-provisioning-adapter"},
             {"key": "vms",                   "path": "domains/vms/domain",              "dist": "arkhai-vms"},
             {"key": "vms-buyer",              "path": "domains/vms/buyer",                "dist": "arkhai-vms-buyer", "wheel_only": true},
             {"key": "vms-provisioning-adapter", "path": "domains/vms/provisioning/adapter", "dist": "arkhai-vms-provisioning-adapter"},
             {"key": "compute-provisioning-service", "path": "provisioning/compute/service", "dist": "arkhai-compute-provisioning-service"},
-            {"key": "vms-storefront",         "path": "domains/vms/storefront",           "dist": "arkhai-vms-storefront"},
+            {"key": "vms-storefront",         "path": "domains/vms/storefront",           "dist": "arkhai-vms-storefront", "wheel_only": true},
+            {"key": "apicredits-domain",       "path": "domains/apicredits",               "dist": "arkhai-apicredits-domain"},
             {"key": "apicredits-buyer",        "path": "domains/apicredits/buyer",          "dist": "arkhai-apicredits-buyer", "wheel_only": true},
             {"key": "apicredits-middleware",   "path": "domains/apicredits/middleware/python", "dist": "arkhai-apicredits-middleware"},
             {"key": "apicredits-storefront",   "path": "domains/apicredits/storefront",     "dist": "arkhai-apicredits-storefront"},
@@ -171,6 +184,61 @@ jobs:
             echo "skip=false" >> "$GITHUB_OUTPUT"
             echo "::notice::publishing ${DIST} ${version}"
           fi
+      # Read the trust configuration for the version this source pins, not one
+      # named here. Naming the file was already half-derived -- the repository,
+      # the tag and the artifact names came out of the JSON -- so the filename
+      # was the only stale part, and it was enough: it kept pointing at v0.2.1
+      # after the pin moved to v0.4.2, which would have staged one release's
+      # assets for a wheel built against another and failed in the verifier.
+      - name: Select the hosted release this source binds
+        id: hosted
+        if: steps.check.outputs.skip == 'false' && matrix.dist == 'arkhai-kit-hosted-settlement'
+        run: python scripts/select-hosted-client-channel.py >>"$GITHUB_OUTPUT"
+      # The producer repository is private and this one is public, so the
+      # workspace token cannot see it: GitHub answers a private release with
+      # `release not found`, which reads as a missing tag and is really a
+      # missing permission. `release.yml` has always used the producer token
+      # for exactly this; this job was reaching for the release with the one
+      # token that cannot reach it.
+      - name: Download exact hosted release assets
+        if: steps.hosted.outputs.channel == 'release'
+        env:
+          GH_TOKEN: ${{ secrets.HOSTED_RELEASE_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [ -z "${GH_TOKEN}" ]; then
+            echo "::error::HOSTED_RELEASE_TOKEN is unset; the private producer release cannot be read"
+            exit 1
+          fi
+          mkdir -p .dist
+          gh release download "v${{ steps.hosted.outputs.version }}" \
+            --repo "${{ steps.hosted.outputs.repository }}" --dir .dist \
+            --pattern "${{ steps.hosted.outputs.manifest }}" \
+            --pattern "${{ steps.hosted.outputs.wheel }}" \
+            --pattern "openapi-v${{ steps.hosted.outputs.version }}.json" \
+            --pattern "conformance-v${{ steps.hosted.outputs.version }}.json" \
+            --pattern "migrations-v${{ steps.hosted.outputs.schema_version }}.json" \
+            --pattern "sbom.spdx.json" \
+            --pattern "provenance.intoto.json"
+      # An unsigned pin has nothing signed to verify. `make verify-hosted-release`
+      # says exactly that and succeeds, so the wheel this job publishes is built
+      # against a client it cannot vouch for -- which is the internal channel
+      # working as designed, not something to hide behind a passing step.
+      - name: Verify staged hosted client release
+        if: steps.check.outputs.skip == 'false' && matrix.dist == 'arkhai-kit-hosted-settlement'
+        run: make verify-hosted-release HOSTED_RELEASE_TRUST="${{ steps.hosted.outputs.trust }}"
+      # Four published packages point `tool.uv.find-links` at the repository's
+      # .dist so a local build resolves sibling arkhai-* wheels from there.
+      # uv reads that directory even under --no-sources, and a fresh checkout
+      # has no .dist at all, so the build died before it started -- reported as
+      # a bare `No such file or directory (os error 2)` naming a path nobody
+      # asked for. Empty is the right state here rather than merely a tolerable
+      # one: a published wheel must record plain PyPI dependencies, so there is
+      # nothing a publish build should be resolving locally. The hosted client
+      # job fills the same directory on purpose, and only it should.
+      - name: Ensure the local wheel directory exists but is empty
+        if: steps.check.outputs.skip == 'false' && matrix.dist != 'arkhai-kit-hosted-settlement'
+        run: mkdir -p .dist
       - name: Build distribution
         if: steps.check.outputs.skip == 'false'
         working-directory: ${{ matrix.path }}

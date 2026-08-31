@@ -571,96 +571,22 @@ class EscrowTemplate:
     rate_slots: dict[str, RateSlot]
 
 
-# Maps the ``auto:<obligation-kind>`` suffix to ``(category_attr, field)``
-# on the alkahest address config tree. Keep in sync with
-# ``market_alkahest.alkahest._ADDRESS_CATEGORIES``. The default /
-# unconditional split mirrors Alkahest escrow semantics; attestation
-# reference escrows live in the same ``attestation_addresses`` category.
-_AUTO_ESCROW_LOOKUP: dict[str, tuple[str, str]] = {
-    "erc20_default":                 ("erc20_addresses", "escrow_obligation_default"),
-    "erc20_unconditional":           ("erc20_addresses", "escrow_obligation_unconditional"),
-    "erc721_default":                ("erc721_addresses", "escrow_obligation_default"),
-    "erc721_unconditional":          ("erc721_addresses", "escrow_obligation_unconditional"),
-    "erc1155_default":               ("erc1155_addresses", "escrow_obligation_default"),
-    "erc1155_unconditional":         ("erc1155_addresses", "escrow_obligation_unconditional"),
-    "native_token_default":          ("native_token_addresses", "escrow_obligation_default"),
-    "native_token_unconditional":    ("native_token_addresses", "escrow_obligation_unconditional"),
-    "token_bundle_default":          ("token_bundle_addresses", "escrow_obligation_default"),
-    "token_bundle_unconditional":    ("token_bundle_addresses", "escrow_obligation_unconditional"),
-    "attestation_default":           ("attestation_addresses", "escrow_obligation_default"),
-    "attestation_unconditional":     ("attestation_addresses", "escrow_obligation_unconditional"),
-    "attestation_reference_default":          ("attestation_addresses", "attestation_reference_escrow_obligation_default"),
-    "attestation_reference_unconditional":    ("attestation_addresses", "attestation_reference_escrow_obligation_unconditional"),
-}
-
-
-def _resolve_auto_escrow(
-    auto_key: str,
-    chain: ChainConfig,
-) -> str:
-    """Resolve an ``auto:<obligation-kind>`` reference to a concrete address.
-
-    Raises ``ValueError`` when the auto key is unrecognised, the chain
-    lacks alkahest support, or the resolved address slot is the zero
-    address (contract not deployed on this chain).
-    """
-    if auto_key not in _AUTO_ESCROW_LOOKUP:
-        valid = ", ".join(sorted(_AUTO_ESCROW_LOOKUP))
-        raise ValueError(
-            f"unknown auto: escrow kind {auto_key!r}; expected one of: {valid}"
-        )
-    category, field = _AUTO_ESCROW_LOOKUP[auto_key]
-    from market_alkahest.alkahest import (
-        _load_override_config,
-        _sdk_addresses_for_chain,
-        get_alkahest_network,
-        NETWORK_ANVIL,
-    )
-
-    override = _load_override_config(chain.alkahest_address_config_path)
-    if override is not None:
-        cat = override.get(category)
-        if not isinstance(cat, dict) or field not in cat:
-            raise ValueError(
-                f"auto:{auto_key} not present in {chain.alkahest_address_config_path} "
-                f"(missing {category}.{field})"
-            )
-        addr = str(cat[field])
-    else:
-        selected = get_alkahest_network(chain.name)
-        if selected == NETWORK_ANVIL:
-            raise ValueError(
-                f"auto:{auto_key} on chain {chain.name!r}: anvil requires "
-                f"alkahest_address_config_path"
-            )
-        cfg = _sdk_addresses_for_chain(selected)
-        category_obj = getattr(cfg, category, None)
-        if category_obj is None or not hasattr(category_obj, field):
-            raise ValueError(
-                f"auto:{auto_key}: alkahest SDK has no {category}.{field} for "
-                f"chain {chain.name!r}"
-            )
-        addr = str(getattr(category_obj, field))
-    if not addr.startswith("0x") or int(addr, 16) == 0:
-        raise ValueError(
-            f"auto:{auto_key} on chain {chain.name!r}: resolved to zero address "
-            "(contract not deployed)"
-        )
-    return addr
+EscrowAddressResolver = Callable[[str, ChainConfig], str]
 
 
 def escrow_templates_from_config(
     config: Optional[dict[str, Any]] = None,
     *,
     chains: Optional[dict[str, ChainConfig]] = None,
+    address_resolver: Optional[EscrowAddressResolver] = None,
 ) -> dict[str, EscrowTemplate]:
     """Return every ``[escrow_templates.<name>]`` table from the merged TOML.
 
     Each template's ``chain`` must match a key in ``chains``; templates
     referencing an unknown chain are dropped with a stderr warning so a
     typo never silently changes which escrow the publish path picks.
-    ``escrow_address`` values starting with ``auto:`` resolve through the
-    chain's alkahest address config; literal ``0x...`` values pass
+    ``escrow_address`` values starting with ``auto:`` are delegated to the
+    installed mechanism's injected address resolver; literal values pass
     through unchanged.
 
     Invalid templates (missing chain, unresolvable auto: key, malformed
@@ -703,7 +629,13 @@ def escrow_templates_from_config(
             continue
         if raw_addr.startswith("auto:"):
             try:
-                escrow_address = _resolve_auto_escrow(raw_addr[len("auto:"):], chain_cfg)
+                if address_resolver is None:
+                    raise ValueError(
+                        "auto: escrow address requires a mechanism-provided resolver"
+                    )
+                escrow_address = address_resolver(
+                    raw_addr[len("auto:"):], chain_cfg
+                )
             except ValueError as exc:
                 print(
                     f"[config] escrow_templates.{name}: {exc}; skipping",

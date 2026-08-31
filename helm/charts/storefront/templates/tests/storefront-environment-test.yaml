@@ -9,13 +9,16 @@
   {{- $itRepo = .Values.global.imageRepository | default "" -}}
 {{- end -}}
 {{- $itName := $rootIt.name | default ($itValues.name | default "arkhai") -}}
-{{- $itTag  := $rootIt.tag  | default ($itValues.tag  | default "e2e-tests") -}}
+{{- $itTag := $rootIt.tag | default ($itValues.tag | default "e2e-tests") -}}
+{{- $itDigest := $rootIt.digest | default ($itValues.digest | default "") -}}
 {{- $itPull := $rootIt.pullPolicy | default ($itValues.pullPolicy | default "IfNotPresent") -}}
-{{- $itImage := "" -}}
+{{- $itImageName := $itName -}}
 {{- if $itRepo -}}
-  {{- $itImage = printf "%s/%s:%s" $itRepo $itName $itTag -}}
-{{- else -}}
-  {{- $itImage = printf "%s:%s" $itName $itTag -}}
+  {{- $itImageName = printf "%s/%s" $itRepo $itName -}}
+{{- end -}}
+{{- $itImage := printf "%s:%s" $itImageName $itTag -}}
+{{- if $itDigest -}}
+  {{- $itImage = printf "%s@%s" $itImageName $itDigest -}}
 {{- end -}}
 {{- if not .Values.agents -}}
   {{- fail "storefront smoke test requires at least one configured agent" -}}
@@ -35,6 +38,9 @@
   {{- end -}}
 {{- end -}}
 {{- $component := $targetAgent.component | default $targetAgent.name -}}
+{{- $agentSecret := $targetAgent.secret | default dict -}}
+{{- $secretName := $tests.secretName | default ($agentSecret.secretName | default "") -}}
+{{- $hasSelectedSecret := ne $secretName "" -}}
 {{- $globalSecretEnabled := false -}}
 {{- if and .Values.global .Values.global.smokeTests .Values.global.smokeTests.secret -}}
   {{- $globalSecretEnabled = .Values.global.smokeTests.secret.enabled | default false -}}
@@ -51,11 +57,12 @@
         {{- $profileList = append $profileList $profile -}}
       {{- end -}}
     {{- end -}}
+    {{- if $hasSelectedSecret -}}
     {{- $profileList = append $profileList (printf "%s-secret" $component) -}}
+    {{- end -}}
     {{- $profiles = join "," $profileList -}}
   {{- end -}}
 {{- end -}}
-{{- $secretName := $tests.secretName | default (include "storefront.agentSecretName" (dict "root" $ "agent" $targetAgent)) -}}
 {{- $secretKey := $tests.secretKey | default (printf "config-%s-secret.yml" $component) -}}
 apiVersion: v1
 kind: Pod
@@ -83,7 +90,7 @@ spec:
         {{- include "storefront.smokeTestConfigVolumeMounts" . | nindent 8 }}
         {{- if $globalSecretEnabled }}
         {{- include "storefront.smokeTestSecretVolumeMounts" . | nindent 8 }}
-        {{- else }}
+        {{- else if $hasSelectedSecret }}
         - name: selected-storefront-secret-config
           mountPath: /app/config/{{ $secretKey }}
           subPath: {{ $secretKey }}
@@ -95,7 +102,7 @@ spec:
         name: {{ .Release.Name }}-test-config
     {{- if $globalSecretEnabled }}
     {{- include "storefront.smokeTestSecretVolume" . | nindent 4 }}
-    {{- else }}
+    {{- else if $hasSelectedSecret }}
     - name: selected-storefront-secret-config
       secret:
         secretName: {{ $secretName }}

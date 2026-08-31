@@ -3,20 +3,18 @@
 from __future__ import annotations
 
 import pytest
-from market_policy import (
-    InlineSource,
-    UnknownCatalogueEntryError,
-    negotiation_catalogue_builder,
-)
+
 from market_policy.negotiation_middleware import (
     NegotiationContext,
     NegotiationDecision,
+    load_negotiation_chain,
     normalize_policies_by_escrow_kind_config,
+    register_negotiation_middleware,
     run_negotiation_chain,
 )
 
 
-def _proposal_with_amount(amount: float) -> dict:
+def _proposal_with_amount(amount: int | float) -> dict:
     return {"fields": {"amount": int(round(amount))}}
 
 
@@ -39,23 +37,19 @@ def test_to_dict_omits_none_fields():
 
 
 def test_normalize_policies_by_escrow_kind_config_accepts_string_and_nested_chain():
-    assert normalize_policies_by_escrow_kind_config(
-        {
-            "erc20": "erc20_bisection",
-            "erc721": {"chain": ["accept_exact_listing"]},
-            "erc1155": {"policy": "erc1155_bisection"},
-        }
-    ) == {
+    assert normalize_policies_by_escrow_kind_config({
+        "erc20": "erc20_bisection",
+        "erc721": {"chain": ["accept_exact_listing"]},
+        "erc1155": {"policy": "erc1155_bisection"},
+    }) == {
         "erc20": ["erc20_bisection"],
         "erc721": ["accept_exact_listing"],
         "erc1155": ["erc1155_bisection"],
     }
 
 
-def test_a_composed_policy_is_resolvable_and_runnable():
-    """Replaces registration-then-load. A source offers the policy; the
-    catalogue the role composed is the only thing that resolves it."""
-
+def test_register_negotiation_middleware_makes_it_loadable():
+    @register_negotiation_middleware("test.fake")
     def _fake(history, context):
         return (
             NegotiationDecision(
@@ -65,13 +59,7 @@ def test_a_composed_policy_is_resolvable_and_runnable():
             context,
         )
 
-    catalogue = (
-        negotiation_catalogue_builder()
-        .add_loader(InlineSource({"test.fake": _fake}, label="test"))
-        .build()
-    )
-
-    chain = catalogue.resolve(["test.fake"])
+    chain = load_negotiation_chain(["test.fake"])
     assert len(chain) == 1
     ctx = NegotiationContext(direction="maximize", our_reference_amount=42)
     d = run_negotiation_chain(chain, [], ctx)
@@ -79,22 +67,12 @@ def test_a_composed_policy_is_resolvable_and_runnable():
     assert _decision_amount(d) == 42
 
 
-def test_an_unresolvable_name_raises_with_an_actionable_message():
-    catalogue = (
-        negotiation_catalogue_builder()
-        .add_loader(InlineSource({"present": lambda h, c: None}, label="test"))
-        .build()
-    )
-
-    with pytest.raises(UnknownCatalogueEntryError) as exc_info:
-        catalogue.resolve(["does.not.exist"])
-
+def test_load_negotiation_chain_unknown_raises_with_actionable_message():
+    with pytest.raises(KeyError) as exc_info:
+        load_negotiation_chain(["does.not.exist"])
     msg = str(exc_info.value)
     assert "does.not.exist" in msg
-    # The superseded message said "Registered:", naming a process-global
-    # registry. A composed catalogue names what it was composed with.
-    assert "Offered by the composed catalogue" in msg
-    assert "present" in msg
+    assert "Registered:" in msg
 
 
 def test_chain_terminates_on_first_decision():

@@ -4,9 +4,9 @@
 # speaking the api_credits schema, the credits service (keys / prepaid credits /
 # quota ledger), the credits storefront (self-seeds one quota-backed listing on
 # startup), and a sample gated app behind the Python token-gating middleware.
-# The buyer drives it with `market credits buy`; its schema filter routes
-# discovery to the api-credits registry and leaves the vms.compute registry
-# alone.
+# The buyer drives it with `market credits buy` through the root overlay's
+# one-shot buyer service. Mutable XDG profile/run state and the strict
+# provider-secret mount are separate from this seller-only domain stack.
 #
 # Chain-touching services gate on a service named `anvil` (the local dev
 # chain) which this file does NOT define — the root `compose.dev.yml` supplies
@@ -55,16 +55,15 @@ services:
     ports:
       - "8092:8082"
     environment:
-      - APICREDITS_STOREFRONT_ADMIN_KEY=test-api-key
+      - APICREDITS_STOREFRONT_ADMIN_KEY_FILE=/run/secrets/arkhai/api-credits-admin-key
+    volumes:
+      - ${APICREDITS_ADMIN_KEY_FILE:?set API-credits admin credential file}:/run/secrets/arkhai/api-credits-admin-key:ro
+      - api-credits-service-data:/app/data
     restart: unless-stopped
     deploy:
       resources:
         limits:
           memory: 384m
-    # /health, where the VM storefronts use /ready. Deliberate, not an oversight:
-    # readiness there reports whether the timer loops have begun cycling, and
-    # this storefront's runtime has no lifecycle registry to report from, so the
-    # route does not exist here. A copied /ready would 404 and fail the stack.
     healthcheck:
       test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8082/health')\" || exit 1"]
       interval: 10s
@@ -83,7 +82,7 @@ services:
       - "8095:8085"
     environment:
       - APICREDITS_MIDDLEWARE_SERVICE_URL=http://credits-service:8082
-      - APICREDITS_MIDDLEWARE_ADMIN_KEY=test-api-key
+      - APICREDITS_MIDDLEWARE_ADMIN_KEY_FILE=/run/secrets/arkhai/api-credits-admin-key
       - APICREDITS_MIDDLEWARE_AMOUNT_PER_REQUEST=1
       # Short verify cache so a re-purchase (top-up) becomes visible to
       # the gate quickly — the e2e polls through this window.
@@ -91,6 +90,8 @@ services:
       - APICREDITS_MIDDLEWARE_PURCHASE_SERVICE_NAME=weather-api
       - APICREDITS_MIDDLEWARE_PURCHASE_STOREFRONT_URL=http://credits-storefront:8000
       - APICREDITS_MIDDLEWARE_PURCHASE_REGISTRY_URL=http://api-credits-registry:8080
+    volumes:
+      - ${APICREDITS_ADMIN_KEY_FILE:?set API-credits admin credential file}:/run/secrets/arkhai/api-credits-admin-key:ro
     restart: unless-stopped
     deploy:
       resources:
@@ -122,7 +123,6 @@ services:
       - "8093:8000"
     environment:
       - XDG_CONFIG_HOME=/etc
-      - PYTHONPATH=/app
     volumes:
       # Chain-/seller-specific config is the one environment-supplied mount;
       # override $APICREDITS_STOREFRONT_CONFIG to point at a different chain's
@@ -132,6 +132,8 @@ services:
       # the VM storefront's data tree (the canonical anvil address book). A
       # non-Anvil deployment supplies its own address book here.
       - ../vms/storefront/src/market_storefront/data/alkahest_anvil_addresses.json:/app/alkahest_anvil_addresses.json:ro
+      - ${APICREDITS_ADMIN_KEY_FILE:?set API-credits admin credential file}:/run/secrets/arkhai/api-credits-admin-key:ro
+      - api-credits-storefront-data:/app/data
     restart: unless-stopped
     deploy:
       resources:
@@ -143,3 +145,7 @@ services:
       timeout: 5s
       retries: 6
       start_period: 15s
+
+volumes:
+  api-credits-service-data:
+  api-credits-storefront-data:

@@ -1,8 +1,8 @@
-"""Compatibility shim — settle-time escrow verification moved to
-``core_storefront.escrow_verification`` when the API-credits domain
-became the second storefront composition root."""
+"""Compatibility shim — settle-time escrow verification is owned by the
+Alkahest mechanism kit (``market_alkahest.escrow_verification``) and
+reached through its registration's ``settlement_verifier`` hook."""
 
-from core_storefront.escrow_verification import (  # noqa: F401
+from market_alkahest.escrow_verification import (  # noqa: F401
     EscrowVerificationError,
     _extract_token_contract_from_listing,
     _normalize_address,

@@ -13,6 +13,17 @@ from httpx import ASGITransport, AsyncClient
 
 from market_site.ledger import ALLOCATION_MODE_EXCLUSIVE, ALLOCATION_MODE_SHAREABLE
 from compute_provisioning_service.main import app
+from market_site_client import SiteCapacityClient
+from .conftest import SERVICE_AUTHORITIES, STOREFRONT_SIGNER
+
+
+def _site_capacity_client(base_url: str, *, transport):
+    return SiteCapacityClient(
+        base_url,
+        STOREFRONT_SIGNER,
+        SERVICE_AUTHORITIES,
+        transport=transport,
+    )
 
 
 class CapacityApi:
@@ -109,11 +120,15 @@ async def test_reserve_commit_release_lifecycle(capacity: CapacityApi):
     )
 
     assert (await capacity.snapshot())[0]["available_units"] == 8
-    assert await capacity.probe({"gpu_model": "H200", "vm_host": "kvm1"}) is not None
-    assert await capacity.probe({"gpu_model": "A100"}) is None
+    assert await capacity.probe(
+        {"executor_kind": "vm", "gpu_model": "H200", "vm_host": "kvm1"}
+    ) is not None
+    assert await capacity.probe(
+        {"executor_kind": "vm", "gpu_model": "A100"}
+    ) is None
 
     reserved = await capacity.reserve(
-        {"gpu_count": 3, "vm_host": "kvm1"},
+        {"executor_kind": "vm", "gpu_count": 3, "vm_host": "kvm1"},
         {"listing_id": "lst-1", "escrow_uid": "0xesc"},
     )
     # vm_host is intentionally opaque across this boundary (see
@@ -155,7 +170,7 @@ async def test_reserve_commit_release_lifecycle(capacity: CapacityApi):
 
 @pytest.mark.asyncio
 async def test_no_capacity_is_a_null_answer_not_an_error(capacity: CapacityApi):
-    assert await capacity.reserve({"gpu_count": 1}, {}) is None
+    assert await capacity.reserve({"executor_kind": "vm", "gpu_count": 1}, {}) is None
     assert await capacity.release(capacity_reservation_id="missing") is None
 
 
@@ -170,9 +185,12 @@ async def test_vm_and_bare_metal_claims_use_domain_attributes(capacity: Capacity
         },
     )
 
-    assert await capacity.probe({"gpu_count": 1, "vm_host": "kvm1"}) is None
+    assert await capacity.probe(
+        {"executor_kind": "vm", "gpu_count": 1, "vm_host": "kvm1"}
+    ) is None
     reserved = await capacity.reserve(
         {
+            "executor_kind": "bare_metal",
             "physical_host_id": "host-physical-1",
             "allocation_mode": ALLOCATION_MODE_EXCLUSIVE,
         },
@@ -214,7 +232,7 @@ async def test_capacity_snapshot_blocks_cross_mode_siblings(capacity: CapacityAp
     assert initial["bare-metal-node-1"]["available_units"] == 1
 
     reserved = await capacity.reserve(
-        {"gpu_count": 2, "vm_host": "kvm1"},
+        {"executor_kind": "vm", "gpu_count": 2, "vm_host": "kvm1"},
         {"escrow_uid": "0xvm-cross-mode"},
     )
 
@@ -223,6 +241,7 @@ async def test_capacity_snapshot_blocks_cross_mode_siblings(capacity: CapacityAp
     assert blocked["compute-host-1"]["available_units"] == 6
     assert blocked["bare-metal-node-1"]["available_units"] == 0
     assert await capacity.probe({
+        "executor_kind": "bare_metal",
         "physical_host_id": "host-physical-1",
         "allocation_mode": ALLOCATION_MODE_EXCLUSIVE,
     }) is None
@@ -244,7 +263,7 @@ async def test_register_lease_attaches_to_ledger_reservation(capacity: CapacityA
         "compute-kvm1-001", total_units=8, attributes={"vm_host": "kvm1"},
     )
     reserved = await capacity.reserve(
-        {"gpu_count": 1, "vm_host": "kvm1"},
+        {"executor_kind": "vm", "gpu_count": 1, "vm_host": "kvm1"},
         {"escrow_uid": "0xlease"},
     )
 
@@ -364,7 +383,7 @@ async def test_site_resource_pools_projection_surfaces_pool_metadata(
         attributes={"vm_host": "kvm1", "gpu_model": "H200"},
     )
 
-    remote = SiteCapacityClient("http://test", transport=ASGITransport(app=app))
+    remote = _site_capacity_client("http://test", transport=ASGITransport(app=app))
     data = await remote.resource_pool_projection()
     rows = data["resource_pools"]
     pool_row = next(row for row in rows if row["resource_pool_id"] == "hetzner-eu")
@@ -439,7 +458,7 @@ async def test_site_resource_pools_projection_surfaces_region_sla_pricing_policy
         attributes={"vm_host": "kvm1", "gpu_model": "H200"},
     )
 
-    remote = SiteCapacityClient("http://test", transport=ASGITransport(app=app))
+    remote = _site_capacity_client("http://test", transport=ASGITransport(app=app))
     data = await remote.resource_pool_projection()
     rows = data["resource_pools"]
     pool_row = next(row for row in rows if row["resource_pool_id"] == "hetzner-eu")
@@ -476,7 +495,7 @@ async def test_site_resource_pools_projection_omits_pool_views_with_no_defaults(
         attributes={"vm_host": "kvm1"},
     )
 
-    remote = SiteCapacityClient("http://test", transport=ASGITransport(app=app))
+    remote = _site_capacity_client("http://test", transport=ASGITransport(app=app))
     data = await remote.resource_pool_projection()
     rows = data["resource_pools"]
     default_row = next(row for row in rows if row["resource_pool_id"] == "default")
@@ -497,7 +516,7 @@ async def test_site_capacity_projection_version_endpoints_through_the_real_clien
     from compute_provisioning_service.container import container
     from compute_provisioning_service.db.models import Host
 
-    remote = SiteCapacityClient("http://test", transport=ASGITransport(app=app))
+    remote = _site_capacity_client("http://test", transport=ASGITransport(app=app))
 
     pool_version_before = await remote.resource_pool_projection_version()
     bucket_version_before = await remote.capacity_bucket_projection_version()
@@ -561,7 +580,7 @@ async def test_site_capacity_buckets_projection_through_the_real_client(
         attributes={"vm_host": "kvm1-b", "gpu_model": "H200"},
     )
 
-    remote = SiteCapacityClient("http://test", transport=ASGITransport(app=app))
+    remote = _site_capacity_client("http://test", transport=ASGITransport(app=app))
     data = await remote.capacity_bucket_projection()
     buckets = [
         b for b in data["capacity_buckets"] if b.get("resource_pool_id") == "hetzner-eu"

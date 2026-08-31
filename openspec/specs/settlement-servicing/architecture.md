@@ -14,7 +14,7 @@ SettlementPlan
 active obligations ── evaluate ── collect / abandon / expire
 ```
 
-Core owns restartable lifecycle structure and stable claim state. It does not understand an oracle predicate, token transfer, or domain-specific evidence. This lets persistence, retries, and operator inspection remain consistent while mechanism implementations evolve independently.
+The settlement-runtime kit owns restartable lifecycle structure and stable obligation state. It does not understand an oracle predicate, token transfer, or domain-specific evidence. Core supplies schema-opaque carriers and storefront composition contracts; persistence adapters, retries, and operator inspection remain consistent while mechanism implementations evolve independently.
 
 ## Plan and codec boundary
 
@@ -22,26 +22,141 @@ A plan carries lifecycle-universal fields and versioned mechanism payloads. Kit 
 
 Keeping codecs explicit is safer than generic dispatch on an arbitrary escrow-kind string: each supported `(kind, schema_version)` has an owning validator and materializer, and unknown versions fail instead of being guessed into a current model.
 
-## Claims and persisted hook state
+## Conditional-escrow clients and durable mechanism state
 
-Claim servicing records enough state to retry condition checks and collection without reconstructing decisions from mutable configuration. Hook scratch state is part of the servicing record when a mechanism needs a cursor, receipt, or retry token. It is not an invitation to persist arbitrary provider objects.
+Mechanism implementations satisfy one `ConditionalEscrowClient` port for
+materialize, authoritative status, check, collect, and expired reclaim. They
+receive a stable operation reference and may return only public-safe opaque
+references, actions, anchors, receipts, and mechanism state. The repository
+persists returned mechanism state even when a condition remains pending. This
+is what makes request-once/poll workflows survive restart without repeating an
+external mutation.
 
 Condition interpretation and collection remain separate because an asynchronous condition may be false many times before collection is valid. Same-wallet chain operations may need serialization to avoid nonce races, but that mechanism constraint does not become a generic marketplace lock.
+
+## Obligation identity and competing terminal effects
+
+Plan identity stays out of the negotiation wire carrier. The servicing
+repository combines a stable agreement reference, ordered obligation index,
+and canonical validated obligation snapshot to derive an immutable
+`obligation_ref`. This keeps legacy model dumps stable while giving every
+mechanism operation one durable idempotency boundary.
+
+Materialization, condition evaluation, collection, and reclaim have separate
+state because their failure and recovery semantics differ. Mutation attempts
+are journaled before external I/O; uncertain acknowledgement is retained so a
+restart retries the same operation rather than inventing a new effect.
+Collection and reclaim use one database serialization point because they are
+financially exclusive even when separate workers and roles initiate them.
+
+Aggregate status is derived from obligation rows rather than stored as another
+authority. Partial completion is a normal inspectable state: a completed
+payment does not erase a bond that needs repair, and a failed bond does not
+replay a completed payment.
+
+## Interval and bond policy
+
+Intervals allocate accepted integer value in proportion to each interval's
+duration, then distribute the bounded rounding remainder to the earliest
+intervals. This rule is deterministic on both sides and conserves the accepted
+total without zero-value mechanism obligations.
+
+A penalty bond is an ordinary directional obligation, not a special runtime
+branch. Policy changes payer and claimant to seller and buyer while preserving
+the accepted mechanism demand. The same materialize/check/collect/reclaim
+engine therefore handles payment intervals and bonds.
 
 ## Heartbeat evidence
 
 A heartbeat timestamp serves two purposes: it is part of the signed value and the monotonic replay key for one deal. Signature verification proves authorship; bounded clock skew and strict monotonicity prevent capture of an older valid heartbeat from extending an obligation after a newer one was accepted. Domain code owns the heartbeat payload's meaning, while core owns authentication and replay protection.
 
+Heartbeat authorization resolves the signer as the complete scheme-tagged
+principal assigned to the deal buyer. Matching identifier text under another
+scheme does not authenticate evidence even when the signature itself is
+cryptographically valid for that other principal.
+
 ## Capacity coupling
 
 Commercial abandonment may request early physical termination, but it does not directly free capacity. Settlement servicing shortens or ends the relevant lease intent; physical provisioning must still prove teardown before the site authority releases capacity.
 
+## Principal and mechanism boundaries
+
+Marketplace authorization binds payer, claimant, storefront, and service actors as complete scheme-tagged principals throughout plans, fulfillment references, heartbeats, start/status/reclaim requests, claims, and operation-journal reservations. Bare identifiers, hosted account references, provider identifiers, and EVM addresses inside mechanism payloads are resources or effect inputs, not credentials.
+
+A principal is a credential identity, while agreement, obligation, account, and
+provider references remain stable subjects or resources. The mechanism-neutral
+runtime therefore carries principals opaquely and never derives or persists a
+wallet or private-key alias from them.
+
+Wallet and chain configuration is mechanism-scoped. A hosted non-EVM obligation materializes, checks, collects, reclaims, and reconciles through an injected marketplace signer without an EVM wallet or RPC dependency. An Alkahest transaction or explicitly EVM-tagged condition validates its own address, wallet, RPC, chain, and contract inputs inside the owning adapter and never reinterprets an Ed25519 principal.
+
+## Hosted identity ownership
+
+The hosted adapter passes the marketplace signer through the exact manifest-pinned hosted client identity interface. Hosted canonicalization, headers, scheme wrappers, response verification, account-link behavior, and provider models remain owned by that released client. The adapter neither reproduces those bytes nor persists its private credential. Startup and publication preflight require the released manifest to advertise the configured principal scheme and contract version; otherwise the hosted mechanism remains unavailable.
+
+## Configuration and durable runtime state
+
+Typed mechanism registration controls which clients are constructed and which new options may be published. It does not create another runtime or status authority: every enabled client dispatches through the same obligation identity, operation journal, leases, retries, claim engine, and aggregate projection.
+
+Configuration and readiness are admission inputs, not durable-plan interpreters. Once Terms are accepted, the stored canonical mechanism, exact parameters, payer/claimant direction, and operation identities govern recovery. Disabling or deprioritizing a mechanism may stop new publication, but funded obligations continue authoritative status, collection, and reclaim convergence through their original client.
+
+## Profile-bound hosted servicing
+
+New hosted settlement records bind the accepted funding profile and the operation-scoped authorization reference without changing the already derived agreement or obligation identity. The binding is immutable and participates in the materialization operation fingerprint, so an exact retry can converge after an unknown acknowledgement while changed reuse fails before another financial effect.
+
+Only the hosted authority's normalized `funded` result after the selected profile's success and availability gate releases the selected domain fulfillment hook. Redirect completion, confirmation, transfer instructions, pending ACH, webhook timing, and local policy are not funding evidence. Provider-neutral reason, deadline, and action metadata may be projected, but raw URLs and provider payloads are transient and authority-owned.
+
+Reclaim uses the same opaque settlement and operation identity and never asks marketplace code to choose refund, return, reversal, or dispute behavior. A pre-collection return blocks collection; a post-fulfillment/pre-collection return preserves fulfillment attribution while domain teardown and hosted financial recovery converge independently. A post-collection loss becomes operator-required state rather than rewriting completed marketplace identities.
+
+## Accepted domain continuity
+
+The accepted negotiation binding is a second routing dimension beside the
+settlement mechanism. It selects the domain plan builder and schema-opaque
+fulfillment hook while the mechanism registry selects financial effects. Core
+carriers retain the accepted buyer, site, mode, domain payload, and public
+operation identity without provider configuration or credentials. Hooks return
+validated lifecycle projections, including a domain result that is decoded by
+only the selected contract.
+
+Fulfillment contexts persist the exact binding and site. Restart, result
+retrieval, failure handling, and teardown compare those values before any call;
+they do not consult current listings or payload kinds. Provisioning remains the
+executor authority and dispatches teardown from its durable executor kind, so
+the storefront never derives VM versus bare-metal teardown locally.
+
+## Bare-metal hosted servicing
+
+The bare-metal callback reconstructs one immutable accepted binding before hosted preparation. Funding deadline is already bounded by the signed option and physical feasibility; pending funding neither renews a hold nor selects current capacity. After `funded`, the callback reserves and commits at the accepted site and begins one fulfillment under deterministic identities. It polls provisioning-owned state, signs credential-free lease-ready evidence, and lets the shared runtime collect only after authoritative evidence.
+
+Reclaim consults the same journal and physical lifecycle. Successful access evidence, reserved or unknown collection, and any uncertain physical authority block a contradictory reclaim. A pre-collection return blocks collection and converges financial recovery with independent teardown; a post-collection loss records operator-required state. Lease teardown never becomes a second financial operation.
+
+## API-credit hosted servicing
+
+The shared worker remains the only driver of materialize/status/check/collect
+and reclaim operation leases. Once status persists authoritative hosted
+`ready`, the API-credit fulfillment callback derives the obligation-scoped
+fulfillment ID and asks the credits authority to issue. Commit-then-fail is
+reconciled through the authority's fulfillment lookup before another mutation.
+The resulting credential goes to the private buyer result repository, while a
+seller-signed portable evidence digest becomes the public fulfillment
+reference. Condition evaluation precedes collection.
+
+The before-reclaim callback uses that same fulfillment ID to resolve any
+uncertain issuance. A committed grant is persisted as fulfillment and makes the
+shared reclaim service reject; an unknown grant leaves reclaim eligible.
+Operation journals, immutable grant digests, and evidence idempotency together
+close restart and acknowledgement-loss races without a cross-authority
+transaction.
+
 ## Current limits
 
-The baseline does not provide a universal `service(plan) → receipt` implementation, arbitrary plan materialization, or generic reclaim for every future mechanism. Compatibility coercions for older plan shapes are not the enduring extension model.
+Heartbeat evidence remains persisted but is not an automated adjudication
+policy. Evidence freshness, neutral oracle authority, disputed outcomes, and
+splitter/oracle contract selection require a separate accepted design.
 
 ## Related contracts
 
+- [Marketplace identity](../marketplace-identity/spec.md)
 - [Negotiation protocol](../negotiation-protocol/spec.md)
 - [Physical provisioning](../physical-provisioning/spec.md)
 - [Buyer orchestration](../buyer-orchestration/spec.md)

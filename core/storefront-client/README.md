@@ -1,88 +1,148 @@
 # storefront-client
 
 Async and synchronous HTTP clients for the Arkhai storefront REST API.
+The immutable public package is `arkhai-core-storefront-client==0.17.0`.
 
-Distributed as a pure-Python wheel (`arkhai_storefront_client-*.whl`) via
-the monorepo `.dist/` directory.
+## Identity configuration
 
-## Usage
-
-### Async (application code)
+Authenticated calls use the marketplace identity v2 contract from
+`arkhai-kit-identity==0.3.0`. Inject a scheme-neutral `market_identity.Signer`,
+the one caller role used by that client, and the exact storefront publisher
+principal trusted to sign responses.
 
 ```python
+from market_identity import Ed25519Signer, Identity, TrustedIdentitySet
 from storefront_client import StorefrontClient
 
-client = StorefrontClient("http://seller-storefront:8001", private_key="0x...")
-async with client:
-    reg = await client.get_registration()
-    resp = await client.create_listing(
-        agent_wallet_address="0xSellerWallet",
-        offer={...},
-        demand={...},
-    )
+signer = Ed25519Signer(service_seed)
+publisher = Identity(scheme="ed25519", identifier=configured_publisher_key)
+
+client = StorefrontClient(
+    "http://seller-storefront:8001",
+    signer=signer,
+    caller_role="service",
+    expected_publishers=TrustedIdentitySet(identities=(publisher,)),
+)
 ```
 
-### Sync (CLI commands, smoke tests, scripts)
+`Ed25519Signer` and `Eip191Signer` use the same client interface. The client
+takes the identity scheme and identifier only from `signer.identity`; callers
+cannot provide separate identity tags. A configured signer always requires an
+explicit `caller_role` and `expected_publishers` pin.
+
+For a `seller` client, the signer principal must belong to the pinned publisher
+set; the constructor rejects a mismatch. The set supports one active principal
+or two explicitly pinned principals during a credential-rotation overlap.
+
+Create separate clients for different roles. Authenticated methods reject a
+client whose configured role does not match the route contract:
+
+- `seller`: listing create, close, refund, and claim.
+- `buyer`: negotiation and settlement calls.
+- `admin`: operator writes and reads, including events, negotiation inspection,
+  inventory, and settlement evaluation.
+- `service`: system status and fulfillment lifecycle callbacks.
+
+`get_health`, `list_listings`, and `get_listing` remain public reads and can be
+called by a client without identity configuration.
+
+## Async seller example
 
 ```python
-from storefront_client import SyncStorefrontClient
+from market_identity import Ed25519Signer, Identity, TrustedIdentitySet
+from storefront_client import StorefrontClient
 
-with SyncStorefrontClient("http://seller-storefront:8001", private_key="0x...") as client:
-    reg = client.get_registration()
-    resp = client.create_listing(
-        agent_wallet_address="0xSellerWallet",
+signer = Ed25519Signer(seller_seed)
+publisher = Identity(scheme="ed25519", identifier=configured_publisher_key)
+
+async with StorefrontClient(
+    "http://seller-storefront:8001",
+    signer=signer,
+    caller_role="seller",
+    expected_publishers=TrustedIdentitySet(identities=(publisher,)),
+) as client:
+    created = await client.create_listing(
         offer={...},
-        demand={...},
+        capacity_source={
+            "site_id": "site-a",
+            "resource_id": "resource-1",
+            "gpu_count": 1,
+        },
+        accepted_escrows=[...],
+        request_id="publish-20260811-1",
+    )
+    closed = await client.close_listing(
+        created.listing_id,
+        request_id="close-20260811-1",
     )
 ```
 
-## Surface
+## Sync service example
 
-Both clients cover:
+```python
+from market_identity import Eip191Signer, Identity, TrustedIdentitySet
+from storefront_client import SyncStorefrontClient
 
-- `POST /listings/create`                            → `create_listing`
-- `POST /api/v1/listings/{listing_id}/close`         → `close_listing`
-- `POST /listings/refund`                            → `refund_listing`
-- `POST /listings/claim`                             → `claim_listing`
-- `POST /listings/discover`                          → `discover_listings`
-- `POST /alerts/resource`                          → `send_resource_alert`
+signer = Eip191Signer(service_secret)
+publisher = Identity(scheme="ed25519", identifier=configured_publisher_key)
 
-Responses parse into typed dataclasses (`StorefrontOrderCreateResponse`,
-etc.); the raw JSON is preserved on each model's `.extra` field for
-forward-compat with new server fields.
+with SyncStorefrontClient(
+    "http://seller-storefront:8001",
+    signer=signer,
+    caller_role="service",
+    expected_publishers=TrustedIdentitySet(identities=(publisher,)),
+) as client:
+    status = client.get_system_status(request_id="status-20260811-1")
+    client.notify_capacity_released(
+        "reservation-1",
+        site_id="site-1",
+        resource_id="gpu-1",
+        request_id="release-20260811-1",
+    )
+```
+
+## Identity rotation
+
+Admin-role clients expose `admin_initiate_identity_rotation`,
+`admin_complete_identity_rotation`, and `admin_get_identity_status`. Initiation
+builds the kit-owned `RotationRequest` and binds both current and replacement
+possession proofs into the signed request body. Completion accepts that same
+`RotationRequest`, retiring its current principal by rotation nonce. For
+`storefront.administrator`, initiation must use a client signed by the current
+principal and completion a client signed by the replacement principal.
+`storefront.service-peer` rotations remain outer-authenticated by an active
+administrator. Authority and subject are percent-encoded into the canonical
+mutation resource, while status binds the sorted effective query.
+
+
+## Authentication guarantees
+
+For every authenticated request, the client binds the signer principal, caller
+role, HTTP method, operation, semantic resource, request ID, timestamp, and
+canonical body hash into an `arkhai.market-request-signature.v2` proof. JSON is
+canonicalized once and those same bytes are sent by both the async and sync
+clients. Empty request bodies use the protocol's `EMPTY_BODY` value. Multipart
+CSV imports sign a canonical descriptor containing the filename, media type,
+size, and SHA-256 digest.
+
+Supplying `request_id` enables safe retry. Every attempt gets a fresh timestamp
+and proof, including retries from the same client instance, while changed role,
+method, operation, resource, or body is rejected locally. A new process likewise
+re-signs the same semantic request ID. The storefront replay contract returns
+the cached outcome after comparing the principal, role, method, operation,
+resource, and canonical body hash.
+
+Every authenticated response must carry an
+`arkhai.market-response-signature.v2` proof from `expected_publishers`, with the
+seller response role and the exact request method, operation, resource, and
+request ID. Missing, legacy, unknown-version, stale, body-mutated, or
+principal-mismatched responses fail closed.
 
 ## Versioning policy
 
-**`storefront-client` versioning must stay in lockstep with the
-storefront API.** Two contracts are not enforced by Python's type
-system — mismatches produce silent 403s or unexpected response shapes
-at runtime, not import errors:
+The client version tracks the released storefront API and identity contract.
+When an operation, resource, body, response, or authentication binding changes:
 
-### 1. Auth message format
-
-```
-create_listing   →  "create_listing:<agent_wallet_address>:<timestamp>"
-close_listing    →  "close_listing:<listing_id>:<timestamp>"
-refund_listing   →  "refund_listing:<listing_id>:<timestamp>"
-claim_listing    →  "claim_listing:<listing_id>:<timestamp>"
-discover_listings → "discover_listings:<listing_id>:<timestamp>"
-```
-
-If this format changes in `domains/vms/storefront/src/market_storefront/agent.py`,
-bump `storefront-client` version and update `_build_auth_headers` in
-`client.py` in the same commit.
-
-### 2. Endpoint signatures
-
-`/api/v1/listings/create`, `/api/v1/listings/{listing_id}/close`,
-`/api/v1/listings/{listing_id}/refund`, `/listings/{claim,discover}`,
-and `/alerts/resource` request and response shapes. If any field is
-added, removed, or renamed, bump the version and update the
-corresponding method in `client.py`.
-
-### Version bump checklist
-
-1. Update `client.py` and `models.py` to match the new server behaviour.
-2. Bump `version` in `core/storefront-client/pyproject.toml`.
-3. Run `make dist-storefront-client` to rebuild the wheel.
-4. Run `make reinit` in each consuming project to pick up the new wheel.
+1. Update the sync and async methods and response models together.
+2. Update focused behavioral tests for byte parity and verification failures.
+3. Publish a new immutable package version; never replace an existing release.

@@ -1,17 +1,14 @@
-"""Unit tests for market_storefront.listings.pricing_resolution."""
+"""Unit tests for domains.vms.listings.pricing_resolution."""
 
 from __future__ import annotations
 
-from market_storefront.listings.pricing_resolution import (
+from domains.vms.listings.pricing_resolution import (
     GpuPricingFields,
     resolve_gpu_pricing,
 )
 
 _FLAT_DEFAULT = GpuPricingFields(
-    min_price="1.00",
-    token="0xflat",
-    max_duration_seconds=60,
-    accepted_escrows="flat",
+    min_price="1.00", token="0xflat", max_duration_seconds=60, accepted_escrows="flat",
 )
 _NO_OVERRIDE = GpuPricingFields()
 
@@ -19,10 +16,8 @@ _NO_OVERRIDE = GpuPricingFields()
 class TestResolveGpuPricing:
     def test_storefront_override_wins_for_every_field(self):
         override = GpuPricingFields(
-            min_price="9.99",
-            token="0xoverride",
-            max_duration_seconds=7200,
-            accepted_escrows="override",
+            min_price="9.99", token="0xoverride",
+            max_duration_seconds=7200, accepted_escrows="override",
         )
         result = resolve_gpu_pricing(
             {"pricing": {"gpu": {"H100": {"min_price": "5.00"}}}},
@@ -58,11 +53,8 @@ class TestResolveGpuPricing:
 
     def test_flat_default_used_as_last_resort(self):
         result = resolve_gpu_pricing(
-            {},
-            gpu_model="A100",
-            storefront_override=_NO_OVERRIDE,
-            config_defaults_by_model={},
-            flat_default=_FLAT_DEFAULT,
+            {}, gpu_model="A100", storefront_override=_NO_OVERRIDE,
+            config_defaults_by_model={}, flat_default=_FLAT_DEFAULT,
         )
         assert result == _FLAT_DEFAULT
 

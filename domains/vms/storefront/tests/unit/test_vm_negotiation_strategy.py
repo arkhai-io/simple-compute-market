@@ -3,23 +3,22 @@
 from __future__ import annotations
 
 import pytest
-from market_policy.scalar_policies import (
-    accept_exact_listing_middleware,
-    amount_bisection_middleware,
-    bisection_middleware,
-    listed_price_middleware,
-    make_escrow_kind_dispatch_middleware,
-)
-from market_policy import (
-    negotiation_catalogue_builder,
-    scalar_escrow_policies,
-)
+
 from market_policy.negotiation_middleware import (
     NegotiationContext,
     NegotiationDecision,
     NegotiationRound,
+    load_negotiation_chain,
     run_negotiation_chain,
 )
+from domains.vms.negotiation.policies import (
+    listed_price_middleware,
+    accept_exact_listing_middleware,
+    amount_bisection_middleware,
+    bisection_middleware,
+    make_escrow_kind_dispatch_middleware,
+)
+
 
 _SKELETON = {
     "chain_name": "anvil",
@@ -71,14 +70,12 @@ def _decision_amount(d: NegotiationDecision) -> int | None:
 def _decide_minimize(their, our_amount=100, history=None, max_rounds=10):
     history = list(history or [])
     if their is not None:
-        history.append(
-            NegotiationRound(
-                round_number=len(history),
-                sender="them",
-                action="counter",
-                proposal=_proposal_with_amount(their),
-            )
-        )
+        history.append(NegotiationRound(
+            round_number=len(history),
+            sender="them",
+            action="counter",
+            proposal=_proposal_with_amount(their),
+        ))
     ctx = NegotiationContext(
         direction="minimize",
         our_reference_amount=our_amount,
@@ -91,14 +88,12 @@ def _decide_minimize(their, our_amount=100, history=None, max_rounds=10):
 def _decide_maximize(their, our_amount=100, history=None):
     history = list(history or [])
     if their is not None:
-        history.append(
-            NegotiationRound(
-                round_number=len(history),
-                sender="them",
-                action="counter",
-                proposal=_proposal_with_amount(their),
-            )
-        )
+        history.append(NegotiationRound(
+            round_number=len(history),
+            sender="them",
+            action="counter",
+            proposal=_proposal_with_amount(their),
+        ))
     ctx = NegotiationContext(
         direction="maximize",
         our_reference_amount=our_amount,
@@ -113,20 +108,6 @@ def _our_counter(round_n, amount):
         sender="us",
         action="counter",
         proposal=_proposal_with_amount(amount),
-    )
-
-
-def _kit_chain(names):
-    """Resolve names against a catalogue of the policy kit's own offerings.
-
-    Each caller composes what it needs. There is no shared registry to populate,
-    so a name a test resolves is one its own catalogue was composed with.
-    """
-    return (
-        negotiation_catalogue_builder()
-        .add_loader(scalar_escrow_policies())
-        .build()
-        .resolve(names)
     )
 
 
@@ -207,14 +188,14 @@ def test_first_round_opens_with_our_reference():
     assert _decision_amount(d) == 100
 
 
-def test_the_catalogue_resolves_bisection():
-    chain = _kit_chain(["bisection"])
+def test_load_negotiation_chain_resolves_bisection():
+    chain = load_negotiation_chain(["bisection"])
     assert len(chain) == 1
     assert chain[0] is bisection_middleware
 
 
-def test_the_catalogue_resolves_accept_exact_listing():
-    chain = _kit_chain(["accept_exact_listing"])
+def test_load_negotiation_chain_resolves_accept_exact_listing():
+    chain = load_negotiation_chain(["accept_exact_listing"])
     assert len(chain) == 1
     assert chain[0] is accept_exact_listing_middleware
 
@@ -223,8 +204,8 @@ def test_the_catalogue_resolves_accept_exact_listing():
     "name",
     ["erc20_bisection", "native_token_bisection", "erc1155_bisection"],
 )
-def test_the_catalogue_resolves_amount_bisection_aliases(name):
-    chain = _kit_chain([name])
+def test_load_negotiation_chain_resolves_amount_bisection_aliases(name):
+    chain = load_negotiation_chain([name])
     assert len(chain) == 1
     assert chain[0] is amount_bisection_middleware
 
@@ -247,9 +228,7 @@ def test_native_token_bisection_uses_amount_field():
     assert decision.action == "counter"
     assert _decision_amount(decision) == 90
     assert decision.proposal["literal_fields"] == {}
-    assert decision.proposal["rates"] == [
-        {"field": "amount", "per": "hour", "value": "100"}
-    ]
+    assert decision.proposal["rates"] == [{"field": "amount", "per": "hour", "value": "100"}]
 
 
 def test_erc1155_bisection_preserves_token_literals():
@@ -286,10 +265,9 @@ def test_escrow_kind_dispatch_uses_family_policy(monkeypatch):
             "native_token_escrow_obligation_default"
         ),
     )
-    dispatch = make_escrow_kind_dispatch_middleware(
-        {"native_token": ["native_token_bisection"]},
-        resolve=_kit_chain,
-    )
+    dispatch = make_escrow_kind_dispatch_middleware({
+        "native_token": ["native_token_bisection"],
+    })
     history = [
         NegotiationRound(
             round_number=0,
@@ -320,10 +298,9 @@ def test_escrow_kind_dispatch_rejects_unmapped_kind(monkeypatch):
             "erc721_escrow_obligation_default"
         ),
     )
-    dispatch = make_escrow_kind_dispatch_middleware(
-        {"erc20": ["erc20_bisection"]},
-        resolve=_kit_chain,
-    )
+    dispatch = make_escrow_kind_dispatch_middleware({
+        "erc20": ["erc20_bisection"],
+    })
     history = [
         NegotiationRound(
             round_number=0,
@@ -340,15 +317,9 @@ def test_escrow_kind_dispatch_rejects_unmapped_kind(monkeypatch):
     )
 
 
-@pytest.mark.parametrize(
-    "their,expected",
-    [
-        (100, "accept"),
-        (101, "accept"),
-        (105, "counter"),
-        (151, "exit"),
-    ],
-)
+@pytest.mark.parametrize("their,expected", [
+    (100, "accept"), (101, "accept"), (105, "counter"), (151, "exit"),
+])
 def test_minimize_boundaries(their, expected):
     d = _decide_minimize(their=their)
     assert d.action == expected
@@ -359,18 +330,15 @@ def test_minimize_boundaries(their, expected):
 # accept within the bound, never counter.
 # ---------------------------------------------------------------------------
 
-
 def _decide_listed_price(their, our_amount=100, direction="minimize"):
     history = []
     if their is not None:
-        history.append(
-            NegotiationRound(
-                round_number=0,
-                sender="them",
-                action="counter",
-                proposal=_proposal_with_amount(their),
-            )
-        )
+        history.append(NegotiationRound(
+            round_number=0,
+            sender="them",
+            action="counter",
+            proposal=_proposal_with_amount(their),
+        ))
     ctx = NegotiationContext(
         direction=direction,
         our_reference_amount=our_amount,
@@ -405,18 +373,11 @@ def test_listed_price_maximize_mirrors():
 def test_listed_price_accepts_amountless_proposals():
     """Exact escrows carry no scalar amount; the pinned-shape guard
     upstream is the protection, the price policy just accepts."""
-    history = [
-        NegotiationRound(
-            round_number=0,
-            sender="them",
-            action="counter",
-            proposal={
-                "chain_name": "anvil",
-                "escrow_address": "0x" + "11" * 20,
-                "fields": {"token": "0x" + "22" * 20, "tokenId": "7"},
-            },
-        )
-    ]
+    history = [NegotiationRound(
+        round_number=0, sender="them", action="counter",
+        proposal={"chain_name": "anvil", "escrow_address": "0x" + "11" * 20,
+                  "fields": {"token": "0x" + "22" * 20, "tokenId": "7"}},
+    )]
     ctx = NegotiationContext(
         direction="minimize",
         our_reference_amount=100,
@@ -433,8 +394,8 @@ def test_listed_price_restates_bound_when_nothing_from_them():
     assert _decision_amount(d) == 100
 
 
-def test_the_catalogue_resolves_listed_price():
-    chain = _kit_chain(["listed_price"])
+def test_load_negotiation_chain_resolves_listed_price():
+    chain = load_negotiation_chain(["listed_price"])
     assert chain == [listed_price_middleware]
 
 

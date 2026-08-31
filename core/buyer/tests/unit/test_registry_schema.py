@@ -1,20 +1,12 @@
-"""Schema-scoped registry resolution.
-
-With several registries configured, a schema plugin's discovery verbs
-must only query registries whose ``/filter-spec`` declares the plugin's
-schema id. The matching is lenient by design: only an *explicit
-mismatch* drops a registry — undeclared identity (pre-identity
-deployments) and spec-fetch failures keep the registry in the list, so
-existing single-registry setups behave exactly as before.
-"""
+"""Schema-scoped discovery through signed, authority-pinned registry clients."""
 
 from __future__ import annotations
 
-import io
-import json
+from types import SimpleNamespace
 from unittest.mock import patch
 
 import pytest
+from market_identity import Ed25519Signer, TrustedIdentitySet
 
 from core_buyer import registry_config
 from core_buyer.registry_config import (
@@ -23,112 +15,258 @@ from core_buyer.registry_config import (
 )
 
 
-class _SpecResponse(io.BytesIO):
-    """Minimal context-manager body for a mocked urlopen."""
+class _FakeRegistryClient:
+    calls: list[dict] = []
+    schemas: dict[str, str | None] = {}
+    failures: set[str] = set()
+
+    def __init__(self, base_url: str, **kwargs) -> None:
+        self.base_url = base_url
+        self.calls.append({"base_url": base_url, **kwargs})
 
     def __enter__(self):
         return self
 
-    def __exit__(self, *exc):
-        return False
+    def __exit__(self, *_exc):
+        return None
 
-
-def _spec(schema: dict | None) -> _SpecResponse:
-    body: dict = {"version": 1, "etag": "e", "listing_shape": {}, "filters": []}
-    if schema is not None:
-        body["schema"] = schema
-    return _SpecResponse(json.dumps(body).encode("utf-8"))
+    def get_filter_spec(self):
+        if self.base_url in self.failures:
+            raise OSError("refused")
+        return SimpleNamespace(schema_id=self.schemas.get(self.base_url))
 
 
 @pytest.fixture(autouse=True)
 def _fresh_cache():
     registry_config.reset_schema_id_cache()
+    _FakeRegistryClient.calls = []
+    _FakeRegistryClient.schemas = {}
+    _FakeRegistryClient.failures = set()
     yield
     registry_config.reset_schema_id_cache()
 
 
-def test_declared_id_is_parsed():
-    with patch(
-        "urllib.request.urlopen",
-        return_value=_spec({"id": "vms.compute", "version": 1}),
-    ):
-        assert registry_schema_id("http://r:8080/") == "vms.compute"
+def _signer(seed: int) -> Ed25519Signer:
+    return Ed25519Signer(bytes([seed]) * 32)
 
 
-def test_undeclared_and_failed_fetches_read_as_none():
-    with patch("urllib.request.urlopen", return_value=_spec(None)):
-        assert registry_schema_id("http://undeclared:8080") is None
-    with patch("urllib.request.urlopen", side_effect=OSError("refused")):
-        assert registry_schema_id("http://down:8080") is None
+def _authority(name: str, signer: Ed25519Signer) -> registry_config.RegistryAuthority:
+    return registry_config.RegistryAuthority(
+        authority=name,
+        principals=TrustedIdentitySet(identities=(signer.identity,)),
+    )
 
 
-def test_schema_id_is_cached_per_url():
-    with patch(
-        "urllib.request.urlopen",
-        return_value=_spec({"id": "vms.compute"}),
-    ) as urlopen:
-        registry_schema_id("http://r:8080")
-        registry_schema_id("http://r:8080/")  # same registry, trailing slash
-    assert urlopen.call_count == 1
+def _authorities(urls: list[str]) -> dict:
+    return {
+        url: _authority(f"registry-{index}", _signer(index + 10))
+        for index, url in enumerate(urls)
+    }
+
+
+def test_declared_id_is_read_with_buyer_signer_and_authority_pin():
+    buyer = _signer(1)
+    authority = _authority("registry-r", _signer(2))
+    _FakeRegistryClient.schemas["http://r:8080"] = "vms.compute"
+
+    with patch.object(registry_config, "SyncRegistryClient", _FakeRegistryClient):
+        assert registry_schema_id(
+            "http://r:8080/",
+            signer=buyer,
+            registry_authority=authority,
+        ) == "vms.compute"
+
+    call = _FakeRegistryClient.calls[0]
+    assert call["signer"] is buyer
+    assert call["caller_role"] == "buyer"
+    assert call["expected_registries"] == authority.principals
+    assert call["registry_authority"] == authority.authority
+
+
+def test_undeclared_and_failed_signed_fetches_read_as_none():
+    buyer = _signer(3)
+    authority = _authority("registry", _signer(4))
+    _FakeRegistryClient.failures.add("http://down:8080")
+    with patch.object(registry_config, "SyncRegistryClient", _FakeRegistryClient):
+        assert registry_schema_id(
+            "http://undeclared:8080",
+            signer=buyer,
+            registry_authority=authority,
+        ) is None
+        assert registry_schema_id(
+            "http://down:8080",
+            signer=buyer,
+            registry_authority=authority,
+        ) is None
+
+
+def test_schema_id_cache_is_bound_to_url_and_authority():
+    buyer = _signer(5)
+    first = _authority("registry", _signer(6))
+    second = _authority("registry", _signer(7))
+    _FakeRegistryClient.schemas["http://r:8080"] = "vms.compute"
+    with patch.object(registry_config, "SyncRegistryClient", _FakeRegistryClient):
+        registry_schema_id(
+            "http://r:8080",
+            signer=buyer,
+            registry_authority=first,
+        )
+        registry_schema_id(
+            "http://r:8080/",
+            signer=buyer,
+            registry_authority=first,
+        )
+        registry_schema_id(
+            "http://r:8080",
+            signer=buyer,
+            registry_authority=second,
+        )
+    assert len(_FakeRegistryClient.calls) == 2
 
 
 def test_only_explicit_mismatch_drops_a_registry(capsys):
-    responses = {
-        "http://vms:8080/filter-spec": _spec({"id": "vms.compute"}),
-        "http://tokens:8080/filter-spec": _spec({"id": "tokens.api"}),
-        "http://legacy:8080/filter-spec": _spec(None),
+    urls = [
+        "http://vms:8080",
+        "http://tokens:8080",
+        "http://legacy:8080",
+        "http://down:8080",
+    ]
+    buyer = _signer(8)
+    authorities = _authorities(urls)
+    _FakeRegistryClient.schemas = {
+        "http://vms:8080": "vms.compute",
+        "http://tokens:8080": "tokens.api",
+        "http://legacy:8080": None,
     }
+    _FakeRegistryClient.failures.add("http://down:8080")
 
-    def fake_urlopen(req, timeout=None):
-        url = req.full_url
-        if url not in responses:
-            raise OSError("refused")
-        return responses[url]
-
-    with patch("urllib.request.urlopen", side_effect=fake_urlopen), \
-         patch.object(registry_config, "resolve_indexer_auth", return_value={}):
+    with (
+        patch.object(registry_config, "SyncRegistryClient", _FakeRegistryClient),
+        patch.object(registry_config, "resolve_registry_api_keys", return_value={}),
+    ):
         kept = resolve_indexer_urls_for_schema(
             "vms.compute",
-            override="http://vms:8080,http://tokens:8080,http://legacy:8080,http://down:8080",
+            signer=buyer,
+            registry_authorities=authorities,
+            override=",".join(urls),
         )
 
     assert kept == ["http://vms:8080", "http://legacy:8080", "http://down:8080"]
-    # The drop is visible, not silent — a buyer staring at "no matches"
-    # can see why a configured registry wasn't asked.
     err = capsys.readouterr().err
     assert "tokens:8080" in err and "tokens.api" in err
 
 
-def test_auth_token_rides_the_spec_fetch():
-    seen_headers: list[dict] = []
-
-    def fake_urlopen(req, timeout=None):
-        seen_headers.append(dict(req.header_items()))
-        return _spec({"id": "vms.compute"})
-
-    with patch("urllib.request.urlopen", side_effect=fake_urlopen), \
-         patch.object(
-             registry_config, "resolve_indexer_auth",
-             return_value={"http://r:8080": "tok-1"},
-         ):
+def test_api_key_is_additional_to_signed_identity():
+    urls = ["http://r:8080", "http://other:8080"]
+    buyer = _signer(20)
+    authorities = _authorities(urls)
+    with (
+        patch.object(registry_config, "SyncRegistryClient", _FakeRegistryClient),
+        patch.object(
+            registry_config,
+            "resolve_registry_api_keys",
+            return_value={"http://r:8080": "tok-1"},
+        ),
+    ):
         resolve_indexer_urls_for_schema(
-            "vms.compute", override="http://r:8080,http://other:8080",
+            "vms.compute",
+            signer=buyer,
+            registry_authorities=authorities,
+            override=",".join(urls),
         )
 
-    assert any(
-        v == "Bearer tok-1"
-        for h in seen_headers
-        for k, v in h.items()
-        if k.lower() == "authorization"
-    )
+    first = _FakeRegistryClient.calls[0]
+    assert first["api_key"] == "tok-1"
+    assert first["signer"] is buyer
+    assert first["expected_registries"] == authorities["http://r:8080"].principals
+    assert first["registry_authority"] == "registry-0"
 
 
 def test_singleton_registry_list_is_returned_without_fetching():
-    """One configured registry → nothing to choose among → no spec fetch."""
-    with patch("urllib.request.urlopen") as urlopen, \
-         patch.object(registry_config, "resolve_indexer_auth", return_value={}):
+    urls = ["http://only:8080"]
+    with patch.object(registry_config, "SyncRegistryClient", _FakeRegistryClient):
         kept = resolve_indexer_urls_for_schema(
-            "vms.compute", override="http://only:8080",
+            "vms.compute",
+            signer=_signer(30),
+            registry_authorities=_authorities(urls),
+            override=urls[0],
         )
-    assert kept == ["http://only:8080"]
-    urlopen.assert_not_called()
+    assert kept == urls
+    assert not _FakeRegistryClient.calls
+
+
+def test_schema_resolution_rejects_missing_authority_pin():
+    with pytest.raises(RuntimeError, match="exactly match"):
+        resolve_indexer_urls_for_schema(
+            "vms.compute",
+            signer=_signer(31),
+            registry_authorities={},
+            override="http://one:8080,http://two:8080",
+        )
+
+
+def test_registry_authority_config_is_structured_and_exact() -> None:
+    registry = _signer(40)
+    configured = {
+        "http://registry/": {
+            "authority": "registry-production",
+            "identities": [registry.identity.model_dump(mode="json")],
+        },
+    }
+    with (
+        patch(
+            "market_config.config_loader.load_user_config",
+            return_value={},
+        ),
+        patch(
+            "market_config.config_loader.get_dotted",
+            return_value=configured,
+        ),
+    ):
+        assert registry_config.resolve_registry_authorities(
+            ["http://registry"]
+        ) == {
+            "http://registry": _authority("registry-production", registry),
+        }
+
+
+def test_registry_authority_config_rejects_unknown_or_malformed_pins() -> None:
+    with (
+        patch(
+            "market_config.config_loader.load_user_config",
+            return_value={},
+        ),
+        patch(
+            "market_config.config_loader.get_dotted",
+            return_value={
+                "http://registry": {
+                    "authority": "registry-production",
+                    "identities": [
+                        {
+                            "scheme": "ed25519",
+                            "identifier": "not-a-public-key",
+                        }
+                    ],
+                }
+            },
+        ),
+        pytest.raises(RuntimeError, match="invalid authority"),
+    ):
+        registry_config.resolve_registry_authorities(["http://registry"])
+
+    extra = {
+        "authority": "other",
+        "identities": [_signer(41).identity.model_dump(mode="json")],
+    }
+    with (
+        patch(
+            "market_config.config_loader.load_user_config",
+            return_value={},
+        ),
+        patch(
+            "market_config.config_loader.get_dotted",
+            return_value={"http://other": extra},
+        ),
+        pytest.raises(RuntimeError, match="exactly match"),
+    ):
+        registry_config.resolve_registry_authorities(["http://registry"])

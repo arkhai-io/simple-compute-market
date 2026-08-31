@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import importlib
 import ast
 from collections.abc import Iterable
 from pathlib import Path
@@ -83,3 +84,13 @@ def test_bare_metal_storefront_does_not_import_vm_implementations() -> None:
         "the bare-metal composition must not reuse VM implementations:\n"
         + "\n".join(violations)
     )
+
+
+def test_settlement_composition_imports_publication_payload_from_runtime_owner() -> (
+    None
+):
+    module = importlib.import_module(
+        "arkhai_bare_metal_storefront.settlement_composition"
+    )
+
+    assert module.BareMetalStorefrontSettlementComposition is not None

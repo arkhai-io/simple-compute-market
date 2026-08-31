@@ -1,15 +1,24 @@
 [project]
 name = "arkhai-bare-metal-storefront"
-version = "0.2.0"
+version = "0.2.5"
 license = "MIT"
 description = "Seller-side storefront composition for the Arkhai bare-metal domain."
 requires-python = ">=3.12"
 dependencies = [
     "arkhai-bare-metal>=0.2.0",
+    "arkhai-kit-delivery==0.1.0",
+    "arkhai-kit-contact-exchange==0.1.2",
+    "arkhai-compute-provisioning>=0.6.0",
     "arkhai-core>=0.2.0",
-    "arkhai-core-storefront>=0.2.0",
+    "arkhai-core-storefront>=0.3.0",
+    "arkhai-hosted-settlement-client==0.4.2",
     "arkhai-kit-alkahest",
     "arkhai-kit-policy",
+    "arkhai-kit-identity==0.3.0",
+    "arkhai-kit-hosted-settlement==0.1.4",
+    "arkhai-kit-site-client>=0.2.0",
+    "arkhai-kit-settlement-runtime>=0.1.0",
+    "arkhai-kit-storefront==0.1.0",
     "fastapi~=0.115.8",
     "typer>=0.12.0",
     "uvicorn~=0.34.0",
@@ -17,6 +26,9 @@ dependencies = [
 
 [project.scripts]
 bare-metal-storefront = "arkhai_bare_metal_storefront.cli:app"
+
+[project.entry-points."market.storefront_contributions"]
+bare_metal = "arkhai_bare_metal_storefront.contribution:BARE_METAL_STOREFRONT_CONTRIBUTION"
 
 [dependency-groups]
 dev = [

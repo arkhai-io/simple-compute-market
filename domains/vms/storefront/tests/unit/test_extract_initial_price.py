@@ -10,20 +10,21 @@ Tristate semantics:
     ``[pricing].default_min_price``; raises ValueError if that's also
     unset (sync_negotiation translates to a 409 refusal).
 """
-
 from __future__ import annotations
 
 import pytest
-from arkhai_vms.listing_models import (
+
+from domains.vms.listings.models import (
     ComputeResource,
     GPUModel,
     Listing,
     Region,
 )
-
-from market_storefront.listings.pricing import extract_initial_price_from_order
+from domains.vms.listings.pricing import extract_initial_price_from_order
+from market_identity import Ed25519Signer
 from market_storefront.utils.config import settings
 from tests._settings_overrides import settings_overrides
+
 
 _TOKEN_ADDR = "0x1234567890123456789012345678901234567890"
 
@@ -45,15 +46,14 @@ def _make_listing(*, demand_amount: int | None) -> Listing:
     return Listing(
         listing_id="lst-1",
         offer_resource=compute,
-        accepted_escrows=[
-            {
-                "chain_name": "test_chain",
-                "escrow_address": "0x" + "11" * 20,
-                "literal_fields": {"token": _TOKEN_ADDR},
-                "rates": rates,
-            }
-        ],
-        seller="http://seller:8001",
+        accepted_escrows=[{
+            "chain_name": "test_chain",
+            "escrow_address": "0x" + "11" * 20,
+            "literal_fields": {"token": _TOKEN_ADDR},
+            "rates": rates,
+        }],
+        storefront_url="http://seller:8001",
+        seller_principal=Ed25519Signer(b"\x31" * 32).identity,
     )
 
 

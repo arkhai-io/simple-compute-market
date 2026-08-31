@@ -29,7 +29,7 @@ Built-in control-flow flavors:
 - ``random_shuffle`` — shuffle for load spreading, sequential-first-agreed.
 
 Settlement-shape-specific policies are owned by their kit packages and loaded
-through entry points, e.g. Alkahest scalar ``best_price``/``cheapest_first``.
+through entry points, such as scalar ``best_price``/``cheapest_first``.
 
 Forward compatibility: returning ``tuple | None`` rather than a list
 means today's single-settlement orchestrator can consume the result as
@@ -65,6 +65,7 @@ Three places ``load_aggregation_policy`` looks, in order:
    (the pre-hoist ``domains.vms.buyer.aggregation_policies`` group is
    still scanned for compatibility).
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -123,6 +124,7 @@ def _load_buyer_config() -> dict[str, Any]:
     """
     try:
         from market_config.config_loader import load_user_config
+
         return load_user_config() or {}
     except Exception as exc:
         logger.debug("[AGG-POLICY] config load failed (%s); using empty dict", exc)
@@ -172,7 +174,9 @@ def _register_file_policy(folder: Path, cfg: dict[str, Any]) -> bool:
     except Exception as exc:
         logger.warning(
             "[AGG-POLICY] failed to import file policy %s from %s: %s",
-            name, policy_file, exc,
+            name,
+            policy_file,
+            exc,
         )
         return False
 
@@ -189,7 +193,8 @@ def _register_file_policy(folder: Path, cfg: dict[str, Any]) -> bool:
     except Exception as exc:
         logger.warning(
             "[AGG-POLICY] factory() raised in %s: %s",
-            policy_file, exc,
+            policy_file,
+            exc,
         )
         return False
 
@@ -221,7 +226,10 @@ def _discover_file_policies(force: bool = False) -> None:
     _FILE_POLICIES_DISCOVERED = True
 
     cfg = _load_buyer_config()
-    candidates = [_default_policy_dir(), *(Path(p) for p in _resolve_extra_policy_paths(cfg))]
+    candidates = [
+        _default_policy_dir(),
+        *(Path(p) for p in _resolve_extra_policy_paths(cfg)),
+    ]
 
     for root in candidates:
         if not root.is_dir():
@@ -241,9 +249,11 @@ def register_aggregation_policy(
     Names must be unique within a process. Re-registering overwrites —
     useful for tests and for local override of built-ins.
     """
+
     def _decorator(fn: AggregationPolicy) -> AggregationPolicy:
         _REGISTRY[name] = fn
         return fn
+
     return _decorator
 
 
@@ -266,6 +276,7 @@ def load_aggregation_policy(name: str | None) -> AggregationPolicy:
     eps: list = []
     try:
         import importlib.metadata as md
+
         for group in (
             "market.buyer_aggregation_policies",
             # Pre-hoist group name, kept so installed policy packages
@@ -308,6 +319,7 @@ async def gather_outcomes(
     chooses. The orchestrator never silently swallows; this helper is
     opt-in for policies that explicitly want resilient comparison.
     """
+
     async def _one(
         c: dict[str, Any],
     ) -> tuple[dict[str, Any], NegotiationOutcome | BaseException]:
@@ -390,7 +402,8 @@ async def _fastest_agreed(
     try:
         while pending:
             done, pending = await asyncio.wait(
-                pending, return_when=asyncio.FIRST_COMPLETED,
+                pending,
+                return_when=asyncio.FIRST_COMPLETED,
             )
             for task in done:
                 c, outcome = task.result()

@@ -398,7 +398,12 @@ def test_escrow_templates_unknown_auto_key_drops_template(capsys):
             },
         },
     }
-    out = config_loader.escrow_templates_from_config(cfg)
+    def reject_unknown(auto_key, chain):
+        raise ValueError(f"unknown auto: escrow kind {auto_key!r}")
+
+    out = config_loader.escrow_templates_from_config(
+        cfg, address_resolver=reject_unknown
+    )
     assert out == {}
     err = capsys.readouterr().err
     assert "unknown auto:" in err

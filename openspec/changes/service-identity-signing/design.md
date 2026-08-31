@@ -2,153 +2,123 @@
 
 ## Context
 
-Verified by inspection 2026-08-06; re-verify before implementing.
+The original plan predated the repository-wide non-chain identity cutover. It
+assumed an EIP-191-only `(operation, resource_id, timestamp)` signature and a
+freeze window for `storefront_admin_key`. Those assumptions are no longer
+valid.
 
-- `provisioning/compute/service/.../settings.toml`: `storefront_admin_key` is
-  "Dual purpose: signs the outbound lease-watchdog callback to the storefront, and gates
-  every inbound request (the storefront presents it as X-Admin-Key)."
-- `middleware/auth.py` compares the presented header to the configured key with
-  `secrets.compare_digest`. There is no caller identity beyond "holds the secret."
-- `kit/identity` exposes an `IdentityVerifier` protocol (`name`,
-  `verify_signature(identity, message, proof)`), a registry rejecting duplicate scheme
-  registration, and an `Identity` model of `scheme` + `identifier`. Its docstring
-  anticipates non-wallet schemes: DIDs, OIDC `sub` claims, "any other scheme-defined
-  identifier."
-- `Eip191Verifier.verify_signature` calls `Account.recover_message` and compares the
-  recovered value to `identity.identifier`. That recovered value is an **address**, not
-  a public key: an address is the last 20 bytes of the keccak-256 hash of the public
-  key, and the derivation is one-way. Verification is pure ecrecover — offline, no RPC,
-  no chain configuration. `kit/identity` depends only on `eth-account` and `pydantic`.
-- `core_storefront.auth.verify_signed_identity` already parses `X-Signature` and
-  `X-Timestamp`, enforces `DEFAULT_MAX_TIMESTAMP_SKEW`, resolves the verifier by scheme,
-  and verifies over a canonical (operation, resource_id, timestamp) message. Every buyer
-  request uses it.
-- The storefront already configures sites through `[capacity.sites]`, so the registry
-  extends an existing shape rather than introducing a new configuration channel.
+`kit/identity` now owns strict `Principal` values, injected signers/verifiers,
+Ed25519 and EIP-191 dispatch, canonical request and response bodies, replay
+reservations, and two-proof rotation. All marketplace peers must share that
+contract. A service-specific format or compatibility fallback would create a
+second security boundary with weaker body and authority binding.
 
 ## Goals / Non-Goals
 
-**Goals:** no party holds material that lets it sign as another; rotation without
-downtime; a site identity that is also a wallet.
+**Goals:** exact counterparty attribution; body-bound requests; signed
+acknowledgements; wallet-free Ed25519 operation; explicit EIP-191 operation;
+bounded rotation; no shared impersonation material.
 
-**Non-Goals:** collateral, admin site management, many-to-many ownership, a second
-scheme, buyer-side changes.
+**Non-Goals:** collateral, admin site management, many-to-many ownership,
+chain-derived identity, or a second service signature protocol.
 
 ## Decisions
 
-### Reuse `verify_signed_identity`, do not write a second signed-request format
+### Reuse the identity kit's version 2 contract
 
-The buyer path already solves canonical message construction, replay bounding, and
-scheme dispatch, and it is exercised on every buyer request in production. A separate
-service-to-service format would be a second thing to get right, a second thing to
-review, and a second place for a skew or canonicalization bug to hide.
+Service requests use `arkhai.market-request-signature.v2`. The canonical bytes
+bind the signer role and principal, HTTP method, semantic operation and
+resource, request ID, timestamp, and canonical body hash. Mutation responses
+bind the configured authority principal, request identity, HTTP status,
+timestamp, and canonical response body.
 
-Whether the (operation, resource_id) pairing transfers unchanged needs checking against
-the real callback and admin surfaces rather than assuming — a projection poll or a
-capacity-release callback may not have a natural `resource_id`. If it does not, the
-right move is extending the canonicalization once, not forking it.
+Callers never choose the identity against which they are checked. Route and
+registry context select the expected role and principal. A body mutation,
+cross-role replay, principal substitution, changed retry, or version 1
+signature therefore fails closed.
 
-### `eip191`, chosen for where it leads rather than for reuse
+### One protocol supports Ed25519 and EIP-191
 
-A plain Ed25519 scheme would be cleaner in isolation: no chain semantics, no address
-derivation, no wallet vocabulary on an infrastructure boundary. It was rejected, and the
-reason is not that the eip191 verifier already exists.
+Ed25519 is the mandatory wallet-free scheme and uses an unpadded base64url
+32-byte public key. EIP-191 remains available for an explicitly configured EVM
+principal whose identifier is a lowercase 20-byte address. Scheme dispatch is
+local; neither mode needs RPC for message verification.
 
-Pairing a site identity with a wallet is what makes site-owner collateral expressible as
-a registration prerequisite without a second identity mapping — the address that signs
-requests is the address that can hold a stake. Under a bare signing key, collateral would
-need a wallet bound *to* the key, which is a second mapping that can drift, and drifting
-is exactly what an identity binding must not do.
+Code outside `kit/identity` handles only scheme-tagged principals and injected
+signer/verifier protocols. It does not derive addresses, inspect private keys,
+or branch on signature encoding.
 
-The objection that this drags chain dependencies into infrastructure does not hold:
-verification is ecrecover, entirely local.
+### The registry holds principals behind an interface
 
-### The registry holds an `Identity`, not an address or a public key
+A storefront resolves `(site_id, url, principal)` through a registry interface.
+Its initial source may be configuration, but callers do not read configuration
+directly. The many side is sites per storefront; each site identity remains
+scoped to its site and cannot authenticate another.
 
-Three candidate field shapes were considered and the distinction matters enough to
-record, because two of them are subtly wrong.
+A provisioning authority has one configured storefront counterparty. This
+matches the deployed one-to-one direction without inventing per-record
+ownership.
 
-`wallet_address` is correct for eip191 and wrong as a contract: it names one scheme's
-identifier form in a registry meant to outlive that scheme.
+### Authentication covers requests and acknowledgements
 
-`public_key` is scheme-neutral but **factually wrong for eip191**: an address is a hash
-of a public key, not the key, and the recovery path yields the address. A field named
-`public_key` would either hold something that is not one, or hold something the verifier
-cannot compare against.
+Request verification happens before route dispatch and before a state change.
+The service reserves `(principal, request_id)` with the request digest and
+semantic operation. An exact retry may return the stored signed response; the
+same identity with changed content or operation is a replay conflict.
 
-`Identity(scheme, identifier)` is scheme-neutral *and* correct, and it is already the
-repository's vocabulary for exactly this. The registry entry is
-`(site_id, url, identity)`.
+Clients verify signed mutation responses before treating a remote operation as
+acknowledged. A valid unsigned status code is not sufficient proof that the
+configured authority accepted the operation.
 
-### The registry is an interface, config-backed for now
+### Rotation is proof-bound and time-bounded
 
-Site management moves to storefront admin later. If callers read configuration directly,
-that move is a rewrite; if they read a registry that happens to be configuration-backed,
-it is a second implementation behind an unchanged interface.
+Changing a counterparty principal requires signatures from both the active and
+replacement principals over one bounded rotation statement. During the overlap,
+both authenticate the same authority binding. Expiry retires the old principal;
+explicit retirement may close the overlap earlier. Disablement is a distinct
+operator action and never transfers authority.
 
-This is the same lesson as `capacity-shape-envelope`'s predicate interface, and it costs
-nothing now.
+### Clean cutover removes legacy authentication
 
-### Cardinality follows the topology instead of fighting it
-
-The shared secret forced two relationships with different cardinality through one
-mechanism. Asymmetric identity lets each be what it is: a storefront holds many site
-identities, because it aggregates many sites; an authority holds one storefront
-identity, because it serves one storefront.
-
-This is worth stating because "a registry of identities" reads like multi-tenancy. It is
-not — the many side is sites-per-storefront, which already exists and is unchanged.
-
-### Rotation is overlapping acceptance, not a coordinated flip
-
-A verifier accepts a set of counterparty identities rather than one, so a new key can be
-introduced, adopted, and the old one retired in three independent steps. Under the shared
-secret, both sides had to change in the same instant, which is why rotation has never
-been operationally possible.
-
-### Retire the shared key by freeze-then-redirect
-
-`storefront_admin_key` stops being the authentication primitive but is not deleted in
-the same change, matching the pattern the POOLS campaign uses. Removing it abruptly makes
-rollback a coordinated redeploy of two services rather than a code revert.
+The version 2 deployment is one coordinated cutover. It removes shared-key
+acceptance, version 1 messages, address/private-key derivation, caller-selected
+identity fields, and unsigned-response acceptance. Leaving any of those paths
+would preserve the impersonation or downgrade defect the change exists to
+remove.
 
 ## Risks / Trade-offs
 
-- **[Private key material is mishandled in deployment]** → The sensitive surface shrinks
-  — one secret per service, identities in ordinary configuration — but private keys are
-  now per-service rather than shared, which the infrastructure repository must generate
-  and distribute. Placement rules belong in `DEPLOYMENT_AND_CONFIG.md`, not in this
-  change's documents.
-- **[Canonicalization does not transfer to every service call]** → Named above; check
-  before assuming, extend once rather than forking.
-- **[Wallet vocabulary confuses an infrastructure boundary]** → Accepted, and the reason
-  is recorded so a future reader does not "simplify" it back to a bare key and silently
-  remove the collateral path.
-- **[Signature verification cost per request]** → ecrecover is local and cheap, but it is
-  not free and now runs on every inter-service call including projection polls. Worth
-  measuring rather than assuming, and an argument for replacing polling with push
-  independently of this change.
-- **[Both directions are signed but the middleware still accepts the shared key]** →
-  Intended during the freeze window, and the window must be closed deliberately rather
-  than left open indefinitely.
+- **Mismatched capability deployment** — clients and services advertise and
+  pin version 2 capabilities; deployment and package checks reject mixed
+  protocol versions.
+- **Signer credentials leak into public configuration** — public principals
+  belong in ConfigMaps or ordinary settings; private signer material is
+  Secret-injected and never serialized into logs, manifests, or responses.
+- **Replay state is lost or bypassed** — reservations are durable and written
+  atomically with operation outcomes; verification before dispatch is not a
+  substitute for durable replay classification.
+- **A chain wallet is accidentally made mandatory** — Ed25519-only profiles
+  render and run without chain, RPC, EAS, or wallet values. EIP-191 profiles
+  require their explicit chain-facing settings.
 
 ## Migration Plan
 
-1. Registry interface and identity configuration, both directions, unused.
-2. Sign and verify storefront-to-authority calls; shared key still accepted.
-3. Sign and verify authority-to-storefront calls; shared key still accepted.
-4. Overlapping-identity rotation.
-5. Freeze the shared key as an authentication primitive.
+1. Release and pin the shared identity kit version containing the version 2
+   request, response, replay, and rotation contract.
+2. Render exact public principals and Secret-backed signer credentials for both
+   peers; reject mixed or legacy configuration.
+3. Deploy clients and services together with body-bound request verification
+   and signed-response verification enabled.
+4. Exercise exact retry, changed replay, cross-role rejection, dual-scheme
+   operation, and rotation overlap before accepting traffic.
+5. Remove obsolete shared-key settings, code paths, comments, and deployment
+   values in the same cutover.
 
-Steps 2 and 3 are independently deployable because the shared key remains accepted
-throughout. Step 5 is the boundary: after it, an unsigned caller is refused.
+Rollback is an artifact rollback of both peers and their configuration, not a
+runtime fallback that accepts both authentication generations.
 
 ## Open Questions
 
-- **Does the service-to-service canonical message need an operation vocabulary distinct
-  from the buyer path's?** Buyer operations are named per endpoint; service calls may
-  want coarser or finer granularity. Deferrable — it changes the message construction,
-  not the requirement that calls be signed and replay-bounded.
-- **Should a site's identity be verifiable against on-chain state at registration?**
-  That is the collateral path, and it is deliberately not built here. Deferrable, and
-  this change is what makes it possible without a second mapping.
+None. The shared version 2 identity contract resolves the earlier
+canonicalization, identity-scheme, response-authentication, and rotation
+questions.

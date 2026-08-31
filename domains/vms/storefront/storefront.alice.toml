@@ -1,8 +1,7 @@
-# Alice (seller) — second storefront in the local docker-compose stack.
-# Anvil default account #4. Used by the multi-registry e2e scenario to
-# exercise heterogeneous registry topologies: Alice publishes to the
-# public registry only, while Bob fans out to both. DO NOT use these
-# keys on any public network.
+# Alice (seller) local Compose profile. Public marketplace identity and EVM
+# mechanism address are configuration; signing credentials are injected by
+# Compose env files through ARKHAI_IDENTITY_CREDENTIAL and
+# STOREFRONT_WALLET__PRIVATE_KEY. Never use these Anvil values publicly.
 #
 # Account #4 (not #3): account #3 (0x90F7...b906) is reserved as a
 # sentinel agent. Reusing it for Alice would collide — her
@@ -18,29 +17,46 @@ port                = 8002
 base_url            = "http://alice-storefront:8002/"
 db_path             = "./src/market_storefront/data/storefront/agent.db"
 log_file_path       = "./logs/alice.log"
-admin_api_key       = "test-api-key"
 resources_csv_path  = "/app/resources.csv"
 
-# Timer-loop intervals, shortened for this stack only. A scenario pauses the
-# storefront and then advances each loop deliberately, and a pause is observed
-# when a loop next reaches its gate — which it can only do at the end of an
-# interval. The shipped defaults (60s watchdog, 30s sweeps) would make a
-# scenario wait that long before it could assert anything. Shortening them here
-# changes nothing about what a loop does, only how soon it notices it has been
-# asked to stop. Production keeps the shipped values.
-negotiation_watchdog_interval     = 2
-claims_sweep_interval             = 2
-fulfillment_resume_sweep_interval = 2
+[[storefront_domains]]
+contribution = "vms"
+offering_mode = "vm"
+domain_identity = "compute.v1"
+contract_version = "1.0"
 
-[wallet]
+
+[Identity.principal]
+scheme = "eip191"
+identifier = "0x15d34aaf54267db7d7c367839aaf71a00a2c6a65"
+
+[Identity.administrators.operator]
+principal = { scheme = "eip191", identifier = "0x15d34aaf54267db7d7c367839aaf71a00a2c6a65" }
+
+[Identity.service_peers.provisioning_default]
+role = "service"
+site_id = "default"
+principal = { scheme = "eip191", identifier = "0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266" }
+
+[Settlement]
+schema_version = 1
+priority = ["alkahest.v1"]
+
+[Settlement.alkahest]
+enabled = true
+address_config_path = "/app/src/market_storefront/data/alkahest_anvil_addresses.json"
+oracle_gated = false
+trusted_oracle_addresses = []
+interruptible = false
+interruptible_oracle_addresses = []
+
+[Wallet]
 address     = "0x15d34AAf54267DB7D7c367839AAf71A00a2C6A65"
-private_key = "0x47e179ec197488593b187f80a00eb0da91f1b9d0b13f8733639f19c30a34926a"
 ssh_public_key = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIDemoPublicKeyForComputeAccess alice@example.com"
 
-[chains.anvil]
+[Chains.anvil]
 rpc_url = "ws://anvil:8545"
 chain_id = 31337
-alkahest_address_config_path = "/app/src/market_storefront/data/alkahest_anvil_addresses.json"
 
 [registry]
 # Single-registry topology — Alice only publishes to the public
@@ -50,6 +66,12 @@ alkahest_address_config_path = "/app/src/market_storefront/data/alkahest_anvil_a
 # in registry-A. No [registry.auth] subsection because we don't talk
 # to registry-b at all.
 urls                      = ["http://registry:8080"]
+
+[registry.authorities."http://registry:8080"]
+authority = "registry"
+principals = [
+  { scheme = "eip191", identifier = "0x90f79bf6eb2c4f870365e785982e1f101e93b906" },
+]
 
 [provisioning]
 # Shares Bob's provisioning service for now. The multi-registry test
@@ -61,10 +83,18 @@ service_url   = "http://provisioning:8081"
 mode          = "http"
 poll_interval = 1
 
+[provisioning.identity]
+principals = [
+  { scheme = "eip191", identifier = "0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266" },
+]
+
 [negotiation]
 policies = ["has_matching_inventory_guard", "escrow_shape_guard", "bisection"]
 
 [pricing]
+settlements = [
+  { mechanism = "alkahest.v1", asset = "0x9fe46736679d2d9a65f0992f2272de9f3c7fa6e0", rate = "100", per = "hour", mechanism_input = { chain = "anvil", escrow_kind = "erc20_escrow_obligation_default" } },
+]
 default_min_price            = "100"
 default_token_address        = "0x9fe46736679d2d9a65f0992f2272de9f3c7fa6e0"
 default_max_duration_seconds = 0
