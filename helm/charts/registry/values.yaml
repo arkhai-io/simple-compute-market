@@ -28,6 +28,16 @@ identity:
     name: arkhai-registry-identity
     key: credential
 
+# Public, operator-authored registry identity. Authority principals and schema
+# identity are derived inside the service from the active signer and filter
+# specification; they are intentionally not duplicated here.
+descriptor:
+  baseUrl: "http://localhost:8080"
+  displayName: "Local VM Compute Registry"
+  operatorIdentity: "Arkhai local development"
+  # Required only when config.requireReadApiKey is true.
+  accessAcquisitionPointer: ""
+
 service:
   type: ClusterIP
   port: 8080

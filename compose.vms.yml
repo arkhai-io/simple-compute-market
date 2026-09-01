@@ -12,6 +12,9 @@ services:
       - REGISTRY_AUTHORITY_SCHEME=eip191
       - REGISTRY_AUTHORITY_IDENTIFIER=0x90f79bf6eb2c4f870365e785982e1f101e93b906
       - REGISTRY_AUTHORITY_CREDENTIAL_FILE=/run/secrets/arkhai/registry-identity/credential
+      - REGISTRY_DESCRIPTOR_BASE_URL=http://localhost:8080
+      - REGISTRY_DESCRIPTOR_DISPLAY_NAME=Local VM Compute Registry
+      - REGISTRY_DESCRIPTOR_OPERATOR_IDENTITY=Arkhai local development
     volumes:
       - ${VMS_REGISTRY_IDENTITY_CREDENTIAL_FILE:?set registry signer credential file}:/run/secrets/arkhai/registry-identity/credential:ro
   registry-b:
@@ -20,6 +23,10 @@ services:
       - REGISTRY_AUTHORITY_ID=registry-b
       - REGISTRY_AUTHORITY_IDENTIFIER=0x15d34aaf54267db7d7c367839aaf71a00a2c6a65
       - REGISTRY_AUTHORITY_CREDENTIAL_FILE=/run/secrets/arkhai/registry-identity/credential
+      - REGISTRY_DESCRIPTOR_BASE_URL=http://localhost:8082
+      - REGISTRY_DESCRIPTOR_DISPLAY_NAME=Local Private VM Compute Registry
+      - REGISTRY_DESCRIPTOR_OPERATOR_IDENTITY=Arkhai local development
+      - REGISTRY_DESCRIPTOR_ACCESS_ACQUISITION_POINTER=http://localhost:8082/docs#/admin/create_api_key
     volumes:
       - ${VMS_REGISTRY_B_IDENTITY_CREDENTIAL_FILE:?set private registry signer credential file}:/run/secrets/arkhai/registry-identity/credential:ro
   bob-storefront:

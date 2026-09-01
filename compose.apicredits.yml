@@ -13,6 +13,9 @@ services:
       - REGISTRY_AUTHORITY_SCHEME=ed25519
       - REGISTRY_AUTHORITY_IDENTIFIER=skkdlQKuKGMKK6yy4MdFEP_N0yjDNP8-E5PnWy0x59w
       - REGISTRY_AUTHORITY_CREDENTIAL_FILE=/run/secrets/arkhai/registry-identity/credential
+      - REGISTRY_DESCRIPTOR_BASE_URL=http://localhost:8090
+      - REGISTRY_DESCRIPTOR_DISPLAY_NAME=Local API Credits Registry
+      - REGISTRY_DESCRIPTOR_OPERATOR_IDENTITY=Arkhai local development
     volumes:
       - ${APICREDITS_REGISTRY_IDENTITY_CREDENTIAL_FILE:?set API-credits registry signer credential file}:/run/secrets/arkhai/registry-identity/credential:ro
   credits-storefront:

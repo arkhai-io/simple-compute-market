@@ -110,6 +110,23 @@ separate mechanism resources and never determine profile selection. ConfigMaps,
 arguments, image layers, run logs, evidence, output, and examples contain no
 resolved signing value.
 
+## Registry descriptor configuration
+
+The registry is a Pydantic-settings service rather than a Dynaconf role. Its
+Helm and Compose surfaces set the public descriptor fields through
+`REGISTRY_DESCRIPTOR_BASE_URL`, `REGISTRY_DESCRIPTOR_DISPLAY_NAME`, and
+`REGISTRY_DESCRIPTOR_OPERATOR_IDENTITY`. When
+`REGISTRY_REQUIRE_READ_API_KEY=true`, the deployment must also set
+`REGISTRY_DESCRIPTOR_ACCESS_ACQUISITION_POINTER`; a public registry must omit
+that pointer. Startup rejects missing fields and either posture mismatch.
+
+These values are public operator assertions. The service derives the
+descriptor's authority principal from the credential-backed active signer and
+derives its schema identity from the loaded filter specification. Helm keeps
+the descriptor values in ordinary values while mounting the signer credential
+from a Secret. Compose wrappers likewise carry public descriptor values beside
+public identity pins and keep signer credentials in role-owned file mounts.
+
 ## Per-domain stack composition
 
 Each domain stack owns its public topology while consuming shared core/kit

@@ -32,6 +32,7 @@ RUN sed -E -i 's|registry = "[^"]*\.dist"|registry = "/.dist"|' uv.lock
 
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --no-sources --no-dev --no-install-project --find-links /.dist \
+        --refresh-package arkhai-core \
         --refresh-package arkhai-core-registry-client \
         --refresh-package arkhai-kit-identity
 

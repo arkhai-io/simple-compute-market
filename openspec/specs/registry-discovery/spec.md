@@ -132,6 +132,41 @@ Resource-query explanation MUST identify which canonical predicates are evaluate
 - **WHEN** a valid DSL comparison compiles to a declared filter whose `indexed` marker is absent or behaviorally inert
 - **THEN** the registry evaluates it with current filter semantics and explanation makes no indexing claim
 
+### Requirement: Registry self-description is authority-authenticated
+
+A registry MUST publish one strict descriptor containing its public base URL,
+display name, operator identity, stable authority name and active principal set,
+listing schema identity and version, and access posture. It MUST return the
+descriptor at `/.well-known/arkhai/registry-descriptor.json` through the shared
+version 2 authenticated request and signed-response contract.
+
+The authority principal MUST come from the active registry signer, the schema
+identity MUST come from the active filter specification, and the access posture
+MUST come from the active read gate. Operator-authored public fields MUST remain
+ordinary configuration. Signer credentials and read keys MUST NOT enter the
+descriptor. A bootstrap client MUST verify the signed response against the
+principal set carried in the validated descriptor before returning it.
+
+#### Scenario: Client inspects a public registry
+
+- **WHEN** an authenticated buyer, seller, or service requests the well-known descriptor
+- **THEN** the registry returns the complete descriptor under a response proof from the principal named in that descriptor
+
+#### Scenario: Registry reads require a key
+
+- **WHEN** the registry requires a read key
+- **THEN** the descriptor remains readable without that key and declares `key-gated` posture with an acquisition pointer
+
+#### Scenario: Descriptor configuration contradicts access policy
+
+- **WHEN** a key-gated registry has no acquisition pointer or a public registry configures one
+- **THEN** startup fails before the registry serves a contradictory descriptor
+
+#### Scenario: Descriptor is used as a trust bootstrap
+
+- **WHEN** a client verifies the signed response against the principal carried in the descriptor
+- **THEN** the proof establishes credential possession but does not by itself establish third-party endorsement of the operator or URL
+
 ## Evidence
 
 - Schema loading, validation, and ETag behavior: `core/registry/tests/unit/test_filter_spec.py`, `core/registry/tests/integration/test_filter_spec.py`, and `core/registry/tests/integration/test_validate_publish.py`.
@@ -139,3 +174,5 @@ Resource-query explanation MUST identify which canonical predicates are evaluate
 - Injected dual-scheme publisher identity, stable listing ownership, body-bound requests, signed responses, and replay behavior: `core/registry/tests/integration/test_identity_publish.py`, `core/registry/tests/integration/test_listings.py`, `core/registry/tests/unit/test_publisher_auth.py`, and `core/registry-client/tests/test_auth.py`.
 - Publisher rotation and stable-subject ownership: `core/registry/tests/integration/test_publisher_rotation.py`.
 - Atomic canonical-principal migration and rollback: `core/registry/tests/unit/test_principal_migrations.py`.
+- Strict descriptor carriers, startup derivation, access posture, signed reads, and durable replay: `core/tests/unit/test_registry_descriptor.py`, `core/registry/tests/unit/test_registry_descriptor.py`, and `core/registry/tests/integration/test_registry_descriptor.py`.
+- Helm descriptor configuration and Secret separation: `helm/scripts/test-render.sh`.

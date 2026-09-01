@@ -36,7 +36,7 @@ The JSON body uses stable camel-case field names:
 }
 ```
 
-The shared core carrier validates this shape without importing identity-kit or role packages. The registry client converts descriptor principals to identity-kit values only at its trust boundary.
+The shared core carrier validates this shape without importing identity-kit or role packages. The registry client's explicit bootstrap method converts descriptor principals to identity-kit values at its trust boundary and verifies the response against those advertised pins before returning the body. Ordinary client instances remain externally pinned and use the same method as other reads.
 
 ### Derive facts that already have an authority
 

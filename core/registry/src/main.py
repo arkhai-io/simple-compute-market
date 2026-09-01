@@ -13,11 +13,13 @@ from src.api.publisher_auth import (
 )
 from src.config import settings
 from src.db.database import init_db
+from src.api.filter_spec import get_loaded_spec
+from src.registry_descriptor import build_registry_descriptor
 
 # Configure logging
 logging.basicConfig(
     level=getattr(logging, settings.log_level.upper()),
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
 )
 logger = logging.getLogger(__name__)
 
@@ -39,20 +41,34 @@ async def lifespan(app: FastAPI):
         and settings.registry_authority_identifier
         and settings.registry_authority_credential_file
     ):
-        raise RuntimeError("registry authority principal and credential file are required")
+        raise RuntimeError(
+            "registry authority principal and credential file are required"
+        )
     expected_registry = Identity(
         scheme=settings.registry_authority_scheme,
         identifier=settings.registry_authority_identifier,
     )
-    credential = Path(
-        settings.registry_authority_credential_file
-    ).read_text(encoding="utf-8").strip()
+    credential = (
+        Path(settings.registry_authority_credential_file)
+        .read_text(encoding="utf-8")
+        .strip()
+    )
     registry_signer = create_signer(expected_registry.scheme, credential)
     if registry_signer.identity != expected_registry:
         raise RuntimeError(
             "registry authority credential does not match configured principal"
         )
     app.state.registry_authority_signer = registry_signer
+    app.state.registry_descriptor = build_registry_descriptor(
+        base_url=settings.registry_descriptor_base_url,
+        display_name=settings.registry_descriptor_display_name,
+        operator_identity=settings.registry_descriptor_operator_identity,
+        authority_name=settings.registry_authority_id,
+        authority_principal=registry_signer.identity,
+        filter_spec=get_loaded_spec(),
+        require_read_api_key=settings.require_read_api_key,
+        acquisition_pointer=(settings.registry_descriptor_access_acquisition_pointer),
+    )
     logger.info("Database initialized")
 
     # Bootstrap a single API key from env if configured AND the table
@@ -63,6 +79,7 @@ async def lifespan(app: FastAPI):
         from src.api.api_key_auth import _hash_key
         from src.db.database import SessionLocal
         from src.db.models import ApiKey
+
         with SessionLocal() as session:
             if session.query(ApiKey).count() == 0:
                 # Write scope: the bootstrap key is the operator's own
@@ -74,9 +91,13 @@ async def lifespan(app: FastAPI):
                 )
                 session.add(seed)
                 session.commit()
-                logger.info("[BOOTSTRAP] seeded api_keys with the env-provided write key")
+                logger.info(
+                    "[BOOTSTRAP] seeded api_keys with the env-provided write key"
+                )
             else:
-                logger.info("[BOOTSTRAP] api_keys table not empty; bootstrap key ignored")
+                logger.info(
+                    "[BOOTSTRAP] api_keys table not empty; bootstrap key ignored"
+                )
 
     logger.info(f"Listing registry server ready on {settings.host}:{settings.port}")
 
@@ -121,6 +142,7 @@ async def authenticated_http_error(request: Request, error: HTTPException):
         body={"detail": error.detail},
     )
 
+
 # Add CORS middleware
 app.add_middleware(
     CORSMiddleware,
@@ -138,6 +160,7 @@ def _custom_openapi():
     if app.openapi_schema:
         return app.openapi_schema
     from fastapi.openapi.utils import get_openapi
+
     schema = get_openapi(
         title=app.title,
         version=app.version,
@@ -157,6 +180,7 @@ app.openapi = _custom_openapi
 
 if __name__ == "__main__":
     import uvicorn
+
     uvicorn.run(
         "src.main:app",
         host=settings.host,

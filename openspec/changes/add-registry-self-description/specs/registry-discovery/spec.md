@@ -6,6 +6,8 @@ A registry MUST publish one strict descriptor containing its public base URL, di
 
 The authority principal MUST come from the active registry signer, the schema identity MUST come from the active filter specification, and the access posture MUST come from the active read gate. Operator-authored public fields MUST remain ordinary configuration, and signer credentials or read keys MUST NOT enter the descriptor.
 
+A bootstrap client MUST verify the signed response against the principal set carried in the validated descriptor before returning it.
+
 #### Scenario: Client inspects a public registry
 
 - **WHEN** an authenticated buyer, seller, or service requests the well-known descriptor

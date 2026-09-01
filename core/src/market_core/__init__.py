@@ -55,6 +55,15 @@ from .query_dsl import (
     render_field_reference,
     validate_query,
 )
+from .registry_descriptor import (
+    KeyGatedRegistryAccess,
+    PublicRegistryAccess,
+    RegistryAccess,
+    RegistryAuthorityDescriptor,
+    RegistryDescriptor,
+    RegistryPrincipal,
+    RegistrySchemaDescriptor,
+)
 
 __all__ = [
     "MARKET_DOMAIN_CONTRACT_VERSION",
@@ -106,5 +115,11 @@ __all__ = [
     "render_canonical_query",
     "render_field_reference",
     "validate_query",
+    "KeyGatedRegistryAccess",
+    "PublicRegistryAccess",
+    "RegistryAccess",
+    "RegistryAuthorityDescriptor",
+    "RegistryDescriptor",
+    "RegistryPrincipal",
+    "RegistrySchemaDescriptor",
 ]
-

@@ -121,6 +121,12 @@ registry:
       name: arkhai-registry-identity
       key: credential
 
+  descriptor:
+    baseUrl: "http://localhost:8080"
+    displayName: "Local VM Compute Registry"
+    operatorIdentity: "Arkhai local development"
+    accessAcquisitionPointer: ""
+
   service:
     type: NodePort
     port: 8080
