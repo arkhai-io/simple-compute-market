@@ -116,6 +116,7 @@ def _bare_metal_publication_view(
     available = dict(resource.get("available") or {})
     return project_bare_metal_resource({
         "physical_resource_id": str(resource.get("resource_id") or ""),
+        "pool_id": str(resource.get("pool_id") or host.pool_id),
         "physical_host_id": str(raw_config.get("physical_host_id") or ""),
         "machine_id": str(raw_config.get("machine_id") or ""),
         "available": (
