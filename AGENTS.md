@@ -194,4 +194,7 @@ Use the five default triage labels. See `docs/agents/triage-labels.md`.
 
 ### Domain docs
 
-Single-context. See `docs/agents/domain.md`.
+Multi-context: one platform context over `core/`, `kit/`, and `provisioning/`, plus a
+subcontext per market domain under `domains/`. ADRs are dated decision records and live in
+`docs/adr/`, separate from the current-state contracts in `openspec/specs/`. See
+`docs/agents/domain.md`.
