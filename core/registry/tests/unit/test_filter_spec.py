@@ -86,8 +86,9 @@ def test_etag_changes_when_filter_added(tmp_path: Path) -> None:
       - {name: gpu_model, path: $.offer_resource.gpu_model, op: in, value_type: string, on_missing: fail}
       - {name: region,    path: $.offer_resource.region,    op: in, value_type: string, on_missing: fail}
     """
-    assert compute_etag(load_filter_spec(_write(tmp_path, one_filter))) != \
-        compute_etag(load_filter_spec(_write(tmp_path, two_filters)))
+    assert compute_etag(load_filter_spec(_write(tmp_path, one_filter))) != compute_etag(
+        load_filter_spec(_write(tmp_path, two_filters))
+    )
 
 
 def test_duplicate_filter_names_rejected(tmp_path: Path) -> None:
@@ -154,11 +155,8 @@ def test_query_names_and_aliases_are_explicit_and_unique(tmp_path: Path) -> None
 def test_invalid_query_vocabulary_is_rejected(
     tmp_path: Path, declarations: str, message: str
 ) -> None:
-    body = (
-        "version: 1\n"
-        "listing_shape: {type: object}\n"
-        "filters:\n"
-        + textwrap.indent(textwrap.dedent(declarations).strip(), "  ")
+    body = "version: 1\nlisting_shape: {type: object}\nfilters:\n" + textwrap.indent(
+        textwrap.dedent(declarations).strip(), "  "
     )
     path = _write(tmp_path, body)
     with pytest.raises(ValueError, match=message):
@@ -351,8 +349,9 @@ def test_etag_changes_when_schema_identity_added(tmp_path: Path) -> None:
     filters:
       - {name: region, path: $.offer_resource.region, op: in, value_type: string}
     """
-    assert compute_etag(load_filter_spec(_write(tmp_path, without))) != \
-        compute_etag(load_filter_spec(_write(tmp_path, with_schema)))
+    assert compute_etag(load_filter_spec(_write(tmp_path, without))) != compute_etag(
+        load_filter_spec(_write(tmp_path, with_schema))
+    )
 
 
 def _authenticated_filter_client(app, db_session):
@@ -396,8 +395,11 @@ def _authenticated_filter_client(app, db_session):
         "X-Market-Timestamp": str(request.timestamp),
         "X-Market-Signature": request.proof.value,
     }
-    return TestClient(app), request, headers, TrustedIdentitySet(
-        identities=(registry.identity,)
+    return (
+        TestClient(app),
+        request,
+        headers,
+        TrustedIdentitySet(identities=(registry.identity,)),
     )
 
 
@@ -457,9 +459,11 @@ def test_etag_present_on_endpoint(
     )
     monkeypatch.setenv("REGISTRY_FILTER_SPEC_PATH", str(path))
     from src.api import filter_spec as fs_mod
+
     fs_mod.reset_cache()
 
     from fastapi import FastAPI
+
     app = FastAPI()
     app.include_router(fs_mod.router)
     client, request, headers, registry_principals = _authenticated_filter_client(
@@ -481,7 +485,6 @@ def test_endpoint_serves_schema_identity(
     tmp_path: Path,
     db_session,
 ) -> None:
-
     path = _write(
         tmp_path,
         """
@@ -497,9 +500,11 @@ def test_endpoint_serves_schema_identity(
     )
     monkeypatch.setenv("REGISTRY_FILTER_SPEC_PATH", str(path))
     from src.api import filter_spec as fs_mod
+
     fs_mod.reset_cache()
 
     from fastapi import FastAPI
+
     app = FastAPI()
     app.include_router(fs_mod.router)
     client, request, headers, registry_principals = _authenticated_filter_client(
