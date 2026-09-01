@@ -232,6 +232,23 @@ def test_repo_default_spec_loads() -> None:
     assert spec.schema_identity.version >= 1
 
 
+def test_repo_api_credits_spec_loads() -> None:
+    """The second filter specification packaged in the image is valid."""
+    repo_root = Path(__file__).resolve().parents[4]
+    path = repo_root / "domains/apicredits/registry/filter-spec.yaml"
+
+    spec = load_filter_spec(path)
+
+    assert spec.schema_identity is not None
+    assert spec.schema_identity.id == "api_credits"
+    assert spec.schema_identity.version >= 1
+    assert {declaration.name for declaration in spec.filters} >= {
+        "service_name",
+        "settlement_mechanism",
+        "funding_profile",
+    }
+
+
 def test_schema_identity_parses_and_defaults_version(tmp_path: Path) -> None:
     path = _write(
         tmp_path,

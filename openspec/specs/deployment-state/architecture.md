@@ -8,6 +8,15 @@ Registry, seller stack, and buyer are independently operable roles. A buyer is n
 
 Local development composes domain stacks with development-only dependencies such as the local chain. Deployment charts compose the same roles conditionally without making test fixtures part of the production authority model.
 
+One umbrella release may instantiate the schema-opaque registry role more than
+once. The primary `registry` instance selects the compute filter specification;
+the optional `api-credits-registry` alias selects the API-credit specification.
+The alias changes Kubernetes resource identity, while instance-local values
+keep signer authority, credential reference, descriptor, API-key posture, and
+SQLite volume independent. `global.registryIdentity` remains a compute
+storefront trust input rather than a shared signer constraint on every
+registry.
+
 ## State ownership
 
 Each stateful service owns its database and migration history. Cross-service relationships use public identifiers and APIs rather than foreign keys into another service's database. This keeps backup, rollout, failure, and authority boundaries aligned.

@@ -70,3 +70,15 @@ The normative topology belongs in `openspec/specs/deployment-state`; rationale
 belongs in its architecture page. Operator-facing value behavior belongs in
 `docs/development/DEPLOYMENT_AND_CONFIG.md`, and the role map belongs in
 `docs/development/ARCHITECTURE.md`.
+
+## Design promotion record
+
+| Accepted decision | Permanent location |
+|---|---|
+| One release may compose schema-isolated registry aliases | `openspec/specs/deployment-state/spec.md#requirement-schema-isolated-registry-composition` |
+| Registry signer and filter selection are instance-local | `openspec/specs/deployment-state/architecture.md#role-separated-topology` |
+| Compute and API-credit image paths and values behavior | `docs/development/DEPLOYMENT_AND_CONFIG.md#registry-descriptor-configuration` |
+| Registry aliases retain independent Kubernetes coordinates | `docs/development/ARCHITECTURE.md#production-and-staging` |
+
+This change does not alter a product roadmap goal. It makes an already-defined
+role topology deployable, so `docs/development/ROADMAP.md` needs no update.

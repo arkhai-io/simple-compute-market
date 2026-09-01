@@ -127,6 +127,16 @@ the descriptor values in ordinary values while mounting the signer credential
 from a Secret. Compose wrappers likewise carry public descriptor values beside
 public identity pins and keep signer credentials in role-owned file mounts.
 
+The umbrella chart enables the compute registry by default and keeps the
+`api-credits-registry` alias disabled. Enabling the alias instantiates the same
+schema-opaque registry chart a second time. The compute instance selects
+`/app/filter-spec.yaml` (`vms.compute`); the API-credits instance selects
+`/app/filter-spec-apicredits.yaml` (`api_credits`). Both specifications are
+packaged in the registry image, but each process loads exactly one. Identity,
+credential Secret, descriptor, API-key Secret references, Service, and PVC
+values are instance-local. `global.registryIdentity` continues to configure
+the compute storefront's trust pin and does not constrain the alias signer.
+
 ## Per-domain stack composition
 
 Each domain stack owns its public topology while consuming shared core/kit
