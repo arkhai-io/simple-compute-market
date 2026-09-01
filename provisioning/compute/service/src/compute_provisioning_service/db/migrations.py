@@ -352,6 +352,18 @@ def _migrate_hosts_public_host(engine: Engine) -> None:
     _add_column_if_missing(engine, "hosts", "public_host", "VARCHAR")
 
 
+def _migrate_hosts_ssh_port(engine: Engine) -> None:
+    """Add the port the provisioner connects to, defaulting to 22.
+
+    NOT NULL with a default in the same statement, so pre-existing rows
+    backfill as part of the ALTER rather than through a second pass that a
+    partially-applied migration could skip.
+    """
+    _add_column_if_missing(
+        engine, "hosts", "ssh_port", "INTEGER NOT NULL DEFAULT 22"
+    )
+
+
 def _migrate_vm_leases_table(engine: Engine) -> None:
     """Historical step, kept for correct replay against any DB still
     catching up from scratch. vm_leases was dropped for good by
@@ -1655,5 +1667,9 @@ MIGRATIONS: tuple[Migration, ...] = (
     Migration(
         "20260815_001_pool_declared_offering_modes",
         _migrate_executor_identities_and_pool_modes,
+    ),
+    Migration(
+        "20260901_001_hosts_ssh_port",
+        _migrate_hosts_ssh_port,
     ),
 )

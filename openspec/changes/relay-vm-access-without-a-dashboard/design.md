@@ -12,7 +12,7 @@ different authorities and carry different traffic.
 | Relay | the operator's relay | the site's relay, which may differ |
 | Proxies | one, static, written at initialization | one per VM, added and removed continuously |
 | Token supplied by | node initialization, out of band | the provisioning service, at VM creation |
-| Written by | the operations repository's playbook | this repository's role |
+| Written by | host provisioning, outside this repository | this repository's role |
 
 They cannot share a process. `frpc.toml` carries exactly one `serverAddr`,
 one `serverPort`, and one `auth.token` at the top level, and a proxy cannot

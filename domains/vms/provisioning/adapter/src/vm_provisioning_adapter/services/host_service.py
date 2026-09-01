@@ -121,6 +121,7 @@ class HostService:
             kvm_host=data.kvm_host,
             public_host=data.public_host,
             ssh_user=data.ssh_user,
+            ssh_port=data.ssh_port,
             ssh_key_type=data.ssh_key_type,
             ssh_key_value=key_value,
             gpu_count=data.gpu_count,
@@ -153,6 +154,8 @@ class HostService:
                 host.public_host = data.public_host
             if data.ssh_user is not None:
                 host.ssh_user = data.ssh_user
+            if data.ssh_port is not None:
+                host.ssh_port = data.ssh_port
             if data.gpu_count is not None:
                 host.gpu_count = data.gpu_count
             if data.gpu_model is not None:
@@ -248,6 +251,7 @@ class HostService:
                     existing.kvm_host = entry["kvm_host"]
                     existing.public_host = entry["public_host"]
                     existing.ssh_user = entry["ssh_user"]
+                    existing.ssh_port = entry["ssh_port"]
                     existing.ssh_key_type = ssh_key_type
                     existing.ssh_key_value = key_value
                     existing.gpu_count = entry["gpu_count"]
@@ -260,6 +264,7 @@ class HostService:
                         kvm_host=entry["kvm_host"],
                         public_host=entry["public_host"],
                         ssh_user=entry["ssh_user"],
+                        ssh_port=entry["ssh_port"],
                         ssh_key_type=ssh_key_type,
                         ssh_key_value=key_value,
                         gpu_count=entry["gpu_count"],
@@ -316,9 +321,14 @@ class HostService:
             else:
                 key_ref = f"__embedded_key_{host.name}__"
 
+            # ansible_port is emitted for every host, including port 22.
+            # The column is NOT NULL, so the registry always holds a port;
+            # rendering it unconditionally means the INI states what the
+            # registry holds rather than leaving 22 implied by an absent line.
             lines.append(
                 f"{host.name}"
                 f"  ansible_host={host.kvm_host}"
+                f"  ansible_port={host.ssh_port}"
                 f"  ansible_user={host.ssh_user}"
                 f"  ansible_ssh_private_key_file={key_ref}"
             )
@@ -348,11 +358,13 @@ def _parse_ini(ini_text: str) -> list[dict]:
     skipped — they describe infrastructure that manages the provisioning
     service itself, not machines the provisioning service sells.
 
-    Returns a list of ``{"name", "kvm_host", "ssh_user", "gpu_count",
-    "gpu_model", "pool_id", "ansible_ssh_private_key_file"}`` dicts. Entries
-    missing ``ansible_host`` or ``ansible_user`` are skipped with a warning.
+    Returns a list of ``{"name", "kvm_host", "ssh_user", "ssh_port",
+    "gpu_count", "gpu_model", "pool_id", "ansible_ssh_private_key_file"}``
+    dicts. Entries missing ``ansible_host`` or ``ansible_user`` are skipped
+    with a warning.
 
     Variable mapping:
+        ``ansible_port=``                 → ``ssh_port`` (int, default 22)
         ``gpus=``                         → ``gpu_count`` (int, default 0)
         ``gpu_model=``                    → ``gpu_model`` (str, default None)
         ``public_host=``                  → ``public_host`` (tenant-facing addr)
@@ -397,16 +409,37 @@ def _parse_ini(ini_text: str) -> list[dict]:
             )
             continue
 
+        # A malformed gpus= degrades to 0: a wrong capacity hint produces a
+        # wrong listing, which is visible. A malformed ansible_port= instead
+        # skips the entry, because substituting 22 would turn an operator's
+        # typo into a host that cannot be reached at all — a failure that
+        # looks like a network problem rather than a bad inventory line.
         try:
             gpu_count = int(host_vars.get("gpus", 0))
         except ValueError:
             gpu_count = 0
+
+        ssh_port = 22
+        if "ansible_port" in host_vars:
+            try:
+                ssh_port = int(host_vars["ansible_port"])
+            except ValueError:
+                ssh_port = -1
+            if not 1 <= ssh_port <= 65535:
+                logger.warning(
+                    "seed_from_ini: skipping '%s' — ansible_port '%s' is not a "
+                    "port number between 1 and 65535",
+                    name,
+                    host_vars["ansible_port"],
+                )
+                continue
 
         results.append({
             "name": name,
             "kvm_host": kvm_host,
             "public_host": host_vars.get("public_host"),
             "ssh_user": ssh_user,
+            "ssh_port": ssh_port,
             "gpu_count": gpu_count,
             "gpu_model": host_vars.get("gpu_model"),
             "pool_id": host_vars.get("pool_id") or DEFAULT_POOL_ID,

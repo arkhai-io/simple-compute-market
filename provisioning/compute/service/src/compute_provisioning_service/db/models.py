@@ -225,6 +225,12 @@ class Host(Base):
         Hosts are never hard-deleted (append-only) so that job history FKs
         (vm_host name references) remain resolvable.
 
+    ssh_port:
+        Port the provisioner connects to, defaulting to 22. The registry is
+        the authority for how a host is reached — address, user, key, and
+        port — and every execution path derives its connection from a
+        rendered inventory rather than constructing one.
+
     pool_id:
         Resource pool this host belongs to. Every host has a pool — there is
         no "unassigned" state. New rows default to the system-created
@@ -244,6 +250,11 @@ class Host(Base):
     # kvm_host in tenant-facing connection info.
     public_host = Column(String, nullable=True)
     ssh_user = Column(String, nullable=False)  # SSH login user on the KVM host
+    # Port the provisioner connects to. Non-default when the host answers
+    # through a reverse tunnel, a NAT forward, or a bastion rather than on 22
+    # at kvm_host. NOT NULL with a server default so the registry never holds
+    # an "unspecified" state that each reader would resolve independently.
+    ssh_port = Column(Integer, nullable=False, default=22, server_default="22")
     ssh_key_type = Column(String, nullable=False, default="path")  # "path" | "embedded"
     ssh_key_value = Column(String, nullable=False)  # path string or encrypted PEM
     gpu_count = Column(Integer, nullable=False, default=0)

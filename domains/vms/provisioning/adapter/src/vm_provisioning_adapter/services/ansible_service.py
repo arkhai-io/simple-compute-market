@@ -363,10 +363,16 @@ class AnsibleService:
                 if getattr(host, "public_host", None)
                 else ""
             )
+            # ansible_port is emitted for every host, matching
+            # HostService.render_inventory_ini. These are two renderings of
+            # the same registry row and must not drift: a host that connects
+            # differently depending on which path built its inventory is a
+            # defect that only appears on one code path.
             lines.append(
                 f"{host.name}"
                 f"  ansible_host={host.kvm_host}"
                 f"{public_seg}"
+                f"  ansible_port={host.ssh_port}"
                 f"  ansible_user={host.ssh_user}"
                 f"  ansible_ssh_private_key_file={key_ref}"
             )

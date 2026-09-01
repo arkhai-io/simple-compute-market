@@ -58,7 +58,8 @@ None.
 - Do not decide how a tunnel port is allocated, by whom, or from what window.
   This change makes a port storable and renderable; it takes no position on
   where the value comes from. See `relay-vm-access-without-a-dashboard` for the
-  VM-facing half and the infrastructure repository for the host-facing half.
+  VM-facing half; the host-facing half is a deployment concern outside this
+  repository.
 - Do not change buyer-facing connection strings. `public_host` remains the
   tenant-facing address and is untouched here.
 - Do not add a bastion, jump-host, or `ProxyCommand` concept. A single

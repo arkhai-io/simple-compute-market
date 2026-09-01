@@ -101,8 +101,8 @@ see `design.md` for why, and for the revisit trigger.
 - [ ] 4.1 Rework `ansible/roles/vm-setup/tasks/frp-client.yml` to install the
       binary and the **VM-facing** client only: `/etc/frp/frpc-vms.toml` and
       `frpc-vms.service`. The host's management tunnel is written by the
-      operations repository's node-initialization playbook and is never touched
-      by a VM operation.
+      host preparation, outside this repository, and is never touched by a VM
+      operation.
 - [ ] 4.2 Rename `ansible/roles/vm-setup/templates/frpc.toml.j2` to
       `frpc-vms.toml.j2` and `frpc.service.j2` to `frpc-vms.service.j2`. Two
       files, two units, no shared write target — which also removes the hazard
@@ -225,6 +225,11 @@ Requires a rented, initialized host and the deployed relay.
 - [ ] 9.3 Record that section 2's migration makes `check_schema_version` require
       it before startup, and that applying it to a deployed database is an
       operator step this change does not perform.
+- [ ] 9.5 Record what a deployment must supply for the relay path to work: the
+      four `connectivity` fields, and a `relay_token` key in the
+      `provisioning-secrets` dynaconf profile. State it as a configuration
+      contract — what the service reads and what happens when it is absent —
+      rather than as instructions for any particular deployment.
 - [ ] 9.4 No host migration. The dev cluster has never run a live-fire
       provisioning test and is deployed in mock mode, so no host has been
       initialized against the relay and none carries an accumulated
@@ -232,50 +237,24 @@ Requires a rented, initialized host and the deployed relay.
       Host inventory automation and the non-mock redeploy are separate later
       work.
 
-## 10. Paired operations-repository work
+## 10. Closeout
 
-Declared in the operations repository, not here, and named so the dependency is
-explicit rather than discovered at deploy time. This change's code cannot be
-exercised until these land.
-
-- [ ] 10.1 Render `relay_token` into the provisioning secrets profile. One
-      added line in the `printf` that builds
-      `config-provisioning-secrets.yml`; the value comes from the existing
-      `simple-compute-market-frp-token` shell.
-- [ ] 10.2 Allow the relay token to differ from the rendezvous token. In dev
-      both layers address one relay, so defaulting to the existing shell is
-      right; the buyer-facing relay may be a different server with a different
-      token, and the renderer should accept an override rather than assume they
-      are the same value forever.
-- [ ] 10.3 **Stop regenerating the Fernet key on every run.** The bootstrap
-      script generates a new `ssh_decryption_key` unconditionally, so re-running
-      it to add the relay token rotates the key and invalidates every
-      `embedded` host SSH key already encrypted in the database. Today that is
-      harmless because no hosts are registered — which is precisely why it
-      should be fixed now rather than after the first one is. Preserve an
-      existing value when the secret already has a version; generate only when
-      absent.
-- [ ] 10.4 Re-run the bootstrap for each environment whose profile needs the
-      key. This mutates cloud state and needs its own authorized packet.
-
-## 11. Closeout
-
-- [ ] 11.1 **Comment hygiene.** `make check-comment-hygiene` from the
+- [ ] 10.1 **Comment hygiene.** `make check-comment-hygiene` from the
       repository root, then read the touched files for what the target cannot
       catch. The invariant belongs in the comment — the token never reaches a
       buyer-controlled machine; allocation is the service's and the playbook
       applies what it is given — never the change that introduced it.
-- [ ] 11.2 **Import placement.** Check each import added for a real reason to
+- [ ] 10.2 **Import placement.** Check each import added for a real reason to
       be local before moving it; verify with `make test`.
-- [ ] 11.3 **Documentation compliance.** Re-read `openspec/README.md`'s
+- [ ] 10.3 **Documentation compliance.** Re-read `openspec/README.md`'s
       placement rules and apply them directly.
-- [ ] 11.4 **Narrative compression.** Shorten completed-task notes to final
+- [ ] 10.4 **Narrative compression.** Shorten completed-task notes to final
       behaviour, material evidence, and unresolved work.
-- [ ] 11.5 **Roadmap currency.** Decide once for all three changes in this
+- [ ] 10.5 **Roadmap currency.** Decide once for all three changes in this
       campaign whether `docs/development/ROADMAP.md` warrants a goal covering
       reaching hosts and VMs without an inbound route, and record the
       disposition either way.
-- [ ] 11.6 **Promotion.**
+- [ ] 10.6 **Promotion.**
 
 | Accepted decision | Permanent location |
 |---|---|

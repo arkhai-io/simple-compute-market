@@ -68,8 +68,8 @@ wildcard DNS record and certificate it implies are not needed.
   the client.
 - **Split the host's relay clients in two.** This repository's role owns the
   VM-facing client (`/etc/frp/frpc-vms.toml`, `frpc-vms.service`); the host's
-  own management tunnel is written by the infrastructure repository's
-  node-initialization playbook and is never touched by a VM operation. Two
+  own management tunnel is written when the host is prepared, outside this
+  repository, and is never touched by a VM operation. Two
   files, two units, no shared write target — which also removes the hazard that
   re-running host setup re-templates one file and erases live VM proxies.
 - **Reshape the `connectivity` field** to `relay_addr`, `relay_port`,
@@ -107,9 +107,9 @@ None.
   `add-buyer-vm-connectivity-terms`, which extends the negotiation envelope.
   This change alters what the field contains, not who supplies it; the two
   interact and are sequenced in Dependencies below.
-- Do not write, own, or configure the host's management tunnel. That belongs to
-  the infrastructure repository's node-initialization playbook. This change only
-  stops the VM path from writing the file that tunnel lives in.
+- Do not write, own, or configure the host's management tunnel. It is
+  established when the host is prepared, outside this repository. This change
+  only stops the VM path from writing the file that tunnel lives in.
 - Do not replace FRP. Whether a reverse-tunnel relay is the right mechanism at
   all is a separate question; this change makes the existing mechanism work
   against a relay that exposes no management surface.
@@ -143,8 +143,8 @@ against the relay and none carries accumulated VM proxy stanzas in a single
 dynaconf profile, which is already rendered, already projected by External
 Secrets, and already mounted into the provisioning service. No new Secret
 Manager shell, no new ExternalSecret, no new volume or mount, and no chart or
-values change in any environment. The operations-repository delta is an added
-line where that profile is rendered.
+values change in any environment. Delivering the key is a matter of rendering
+one more line into that profile, wherever it is rendered.
 
 **Documentation.** `docs/seller-frp-setup.md` describes the dashboard, the
 wildcard record, and the three storefront keys, and instructs sellers to expect
@@ -160,14 +160,14 @@ is rewritten as part of this change rather than left to contradict the code.
   and not yet planned. This change should land first: it is cheaper to settle
   the field's contents once and then decide who supplies them than to negotiate
   a shape containing a dashboard credential that no longer exists.
-- Paired infrastructure work — the relay itself, its port windows, its token,
-  and the host management tunnel are declared in the operations repository. The
-  windows this change reads from configuration are that repository's to choose.
+- The relay itself, its port windows, its token, and the host management
+  tunnel are deployment concerns outside this repository. The windows this
+  change reads from configuration are chosen there, not here.
 
 ## Impact
 
 - A relay with no dashboard, no DNS name, and no certificate becomes usable,
-  which is the deployment shape the operations repository has already built.
+  which is the deployment shape a relay is free to take.
 - Buyers holding live SSH sessions stop losing them when an unrelated VM is
   provisioned on the same host.
 - A host can reach a management relay and a buyer relay independently, so the

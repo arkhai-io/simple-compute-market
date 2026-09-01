@@ -105,9 +105,20 @@ this change is exercisable without cloud state.
 - Migration: applied against a database holding rows created before the column,
   every row reads 22.
 
-Live evidence that a connection actually reaches a tunnel port belongs to the
-infrastructure repository's node-initialization work, not here — this change
-can be fully verified without a host existing.
+Live evidence that a connection actually reaches a tunnel port belongs to
+whoever prepares the host, not here — this change can be fully verified without
+a host existing.
+
+## Deployment consequence
+
+`check_schema_version` compares the database against `MIGRATIONS[-1]` and raises
+`SchemaDriftError` at startup when the last declared migration is not recorded.
+Appending `20260901_001_hosts_ssh_port` therefore means every deployed database
+must have migrations applied before an image carrying this code starts — through
+the Helm init container, `compute-provisioning-migrate`, or `make migrate`.
+
+This change does not run them. Applying a migration to a deployed database
+mutates persistent state and needs its own authorized packet.
 
 ## Open questions
 

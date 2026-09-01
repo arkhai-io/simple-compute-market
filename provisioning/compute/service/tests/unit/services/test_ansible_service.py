@@ -431,11 +431,14 @@ class TestExtractAnsibleJson:
 
 
 class _FakeHost:
-    def __init__(self, name, kvm_host, public_host=None):
+    """Stands in for a Host row; carries every attribute the renderer reads."""
+
+    def __init__(self, name, kvm_host, public_host=None, ssh_port=22):
         self.name = name
         self.kvm_host = kvm_host
         self.public_host = public_host
         self.ssh_user = "ubuntu"
+        self.ssh_port = ssh_port
         self.ssh_key_type = "path"
         self.ssh_key_value = "/home/appuser/.ssh/id_ed25519"
 

@@ -36,6 +36,16 @@ class HostCreate(BaseModel):
         ),
     )
     ssh_user: str = Field(default="root", description="SSH user on the KVM host.")
+    ssh_port: int = Field(
+        default=22,
+        ge=1,
+        le=65535,
+        description=(
+            "Port the provisioner connects to. Set it when the host answers "
+            "SSH somewhere other than port 22 at kvm_host — through a reverse "
+            "tunnel, a NAT forward, or a bastion."
+        ),
+    )
     ssh_key_type: Literal["path", "embedded"] = Field(
         default="path",
         description=(
@@ -66,6 +76,9 @@ class HostUpdate(BaseModel):
     kvm_host: Optional[str] = Field(default=None, description="Updated IP/hostname.")
     public_host: Optional[str] = Field(default=None, description="Updated public address.")
     ssh_user: Optional[str] = Field(default=None, description="Updated SSH user.")
+    ssh_port: Optional[int] = Field(
+        default=None, ge=1, le=65535, description="Updated SSH port.",
+    )
     ssh_key_type: Optional[Literal["path", "embedded"]] = Field(default=None)
     ssh_key_value: Optional[str] = Field(default=None, description="Updated key path or material.")
     gpu_count: Optional[int] = Field(default=None, ge=0)
@@ -85,6 +98,7 @@ class HostResponse(BaseModel):
     kvm_host: str
     public_host: Optional[str] = None
     ssh_user: str
+    ssh_port: int
     ssh_key_type: str
     gpu_count: int
     gpu_model: Optional[str] = None
