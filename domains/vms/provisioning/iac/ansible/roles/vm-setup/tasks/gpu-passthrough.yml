@@ -1,31 +1,24 @@
 ---
-# GPU passthrough configuration.
+# GPU passthrough, phase one: prepare the boot configuration.
 #
-# Acts only on GPUs the audit reported bindable. A GPU sharing an IOMMU group
-# with a device the host needs is left on its normal driver: passing it would
-# require passing that device with it, and there is no configuration that
-# avoids the requirement.
+# This phase changes what the machine boots into and binds nothing. The IOMMU
+# kernel parameter needs a reboot to take effect and claims no device, so it
+# cannot remove the host's network path. Everything that does claim a device
+# happens in gpu-bind.yml, after the reboot, while Ansible holds a live
+# connection to the host.
 #
-# Two things are deliberately absent here, and their absence is the point.
+# Two things are deliberately absent, and their absence is the point.
 #
 # There is no `vfio-pci.ids=` on the kernel command line and no `ids=` in
 # /etc/modprobe.d/vfio.conf. Both bind by vendor:device, which matches every
 # device presenting that ID anywhere in the machine rather than the one the
-# decision was made about. Binding is done by PCI address instead, from
-# vfio-bind.service.
+# decision was made about. Binding is done by PCI address instead.
 #
-# There is no reboot triggered by a binding decision. The only reboot this role
-# performs exists to enable the IOMMU, which binds nothing and therefore cannot
-# remove the host's network path. Every decision about which devices go to
-# guests takes effect without one, so a wrong decision leaves a reachable
-# machine rather than an unreachable one.
-
-- name: Set GPU passthrough availability flag
-  set_fact:
-    gpu_passthrough_available: >-
-      {{ passthrough_audit.assessable
-         and (passthrough_audit.bind_addresses | length) > 0 }}
-  tags: gpu_passthrough
+# vfio-bind.service is installed here but not enabled. A unit enabled before
+# any evidence that its bind list works on this machine would reapply a wrong
+# list on every subsequent boot, with no live connection at the moment it takes
+# the network away. Enabling is the last step of phase two, after a bind has
+# been applied and verified with the host reachable.
 
 - name: Determine IOMMU kernel parameter for this CPU vendor
   set_fact:
@@ -36,6 +29,24 @@
   tags:
     - gpu_passthrough
     - rescue_boot
+
+# The blacklist is all-or-nothing: modprobe blacklists a module, not a device.
+# Applying it when the audit deliberately left a GPU on its normal driver would
+# strand that card for the host as well, which contradicts the per-address
+# decision the audit just made. So it applies only when every detected GPU is
+# bindable -- when this host is genuinely dedicating its GPUs to guests.
+#
+# Its absence does not prevent binding. vfio-bind sets driver_override and
+# unbinds the incumbent driver, which succeeds whenever nothing holds the
+# device open; the blacklist only removes the race with a driver that would
+# otherwise claim it at boot.
+- name: Set GPU driver blacklist policy
+  set_fact:
+    blacklist_host_gpu_drivers: >-
+      {{ passthrough_audit.assessable
+         and (passthrough_audit.gpus | length) > 0
+         and (passthrough_audit.gpus | rejectattr('bindable') | list | length) == 0 }}
+  tags: gpu_passthrough
 
 # ============================================
 # IOMMU enablement — the one reboot-requiring change
@@ -92,7 +103,6 @@
       vfio_pci
     mode: '0644'
   register: vfio_modules_configured
-  when: gpu_passthrough_available
   tags: gpu_passthrough
 
 - name: Remove vendor-ID vfio binding from modprobe configuration
@@ -103,11 +113,6 @@
   register: vfio_modprobe_removed
   tags: gpu_passthrough
 
-# The blacklists are what make the runtime unbind uncontested: with no host
-# driver holding the card, vfio-bind.service does not have to wrestle a driver
-# that may be in use. They are written whenever any GPU is bindable, rather
-# than only when a particular vendor's GPU is present, because a mixed-vendor
-# host still needs both.
 - name: Blacklist host NVIDIA drivers
   become: yes
   copy:
@@ -121,7 +126,7 @@
       options nouveau modeset=0
     mode: '0644'
   register: nvidia_blacklisted
-  when: gpu_passthrough_available
+  when: blacklist_host_gpu_drivers
   tags: gpu_passthrough
 
 - name: Blacklist host AMD GPU drivers
@@ -133,7 +138,19 @@
       blacklist radeon
     mode: '0644'
   register: amd_blacklisted
-  when: gpu_passthrough_available
+  when: blacklist_host_gpu_drivers
+  tags: gpu_passthrough
+
+- name: Remove host GPU driver blacklists when a GPU stays on its own driver
+  become: yes
+  file:
+    path: "/etc/modprobe.d/{{ item }}"
+    state: absent
+  loop:
+    - blacklist-nvidia.conf
+    - blacklist-amd.conf
+  register: blacklists_removed
+  when: not blacklist_host_gpu_drivers
   tags: gpu_passthrough
 
 # A blacklist in /etc/modprobe.d has no effect on a module the initramfs loads
@@ -149,6 +166,7 @@
     or vfio_modprobe_removed.changed
     or nvidia_blacklisted.changed
     or amd_blacklisted.changed
+    or blacklists_removed.changed
   register: initramfs_updated
   tags: gpu_passthrough
 
@@ -159,7 +177,7 @@
   tags: gpu_passthrough
 
 # ============================================
-# Address-scoped binding, applied after boot
+# Install the bind mechanism, disabled
 # ============================================
 
 - name: Create the vfio bind state directory
@@ -170,30 +188,12 @@
     mode: '0755'
   tags: gpu_passthrough
 
-# The bind list is data the unit reads, not code it embeds, so re-running the
-# role after a topology change rewrites a file rather than a script.
-- name: Write the vfio bind list
-  become: yes
-  copy:
-    dest: "{{ vfio_bind_state_path }}"
-    content: |
-      # PCI addresses bound to vfio-pci by vfio-bind.service.
-      # Every address here was reported bindable by the passthrough audit:
-      # its entire IOMMU group is this card and its own functions.
-      {% for address in passthrough_audit.bind_addresses %}
-      {{ address }}
-      {% endfor %}
-    mode: '0644'
-  register: vfio_bind_list
-  tags: gpu_passthrough
-
 - name: Install the vfio bind script
   become: yes
   template:
     src: vfio-bind.sh.j2
     dest: "{{ vfio_bind_script_path }}"
     mode: '0755'
-  register: vfio_bind_script
   tags: gpu_passthrough
 
 - name: Install the vfio bind service
@@ -205,47 +205,21 @@
   register: vfio_bind_unit
   tags: gpu_passthrough
 
-- name: Enable the vfio bind service
+- name: Reload systemd for the vfio bind service
   become: yes
   systemd:
-    name: vfio-bind
-    enabled: yes
     daemon_reload: yes
+  when: vfio_bind_unit.changed
   tags: gpu_passthrough
 
-# No ignore_errors: a failed bind must be visible. It leaves a running,
-# reachable host with one fewer passthrough device, which is a condition worth
-# reporting rather than absorbing.
-- name: Apply the vfio bindings
-  become: yes
-  systemd:
-    name: vfio-bind
-    state: restarted
-  when:
-    - gpu_passthrough_available
-    - not initramfs_updated.changed
-  tags: gpu_passthrough
-
-- name: Report GPU passthrough state
+- name: Report passthrough boot configuration
   debug:
     msg:
-      - "=== GPU passthrough ==="
-      - "Bindable GPUs: {{ passthrough_audit.gpus | selectattr('bindable') | list | length }} of {{ passthrough_audit.gpus | length }}"
-      - "Skipped GPUs: {{ passthrough_audit.gpus | rejectattr('bindable') | map(attribute='address') | list }}"
-      - "Addresses bound to vfio-pci: {{ passthrough_audit.bind_addresses }}"
+      - "=== GPU passthrough: boot configuration ==="
+      - "IOMMU parameter: {{ iommu_cmdline_param }}"
+      - "Host GPU drivers blacklisted: {{ blacklist_host_gpu_drivers }}"
+      - "Reboot required: {{ initramfs_updated.changed | default(false) }}"
       - >-
-        {% if initramfs_updated.changed %}
-        A reboot is required to enable the IOMMU. Binding is applied by
-        vfio-bind.service after that reboot; it is not part of the boot
-        configuration and cannot make this host unreachable.
-        {% else %}
-        Bindings applied without a reboot.
-        {% endif %}
-      - >-
-        {% if not passthrough_audit.assessable %}
-        WARNING: passthrough could not be assessed and no device was bound.
-        {% elif (passthrough_audit.bind_addresses | length) == 0 %}
-        WARNING: this host has no passthrough-capable GPU. It was prepared
-        successfully and provides no GPU capacity.
-        {% endif %}
+        No device is bound yet. Binding is applied after the reboot, by
+        gpu-bind.yml, while this connection is live.
   tags: gpu_passthrough

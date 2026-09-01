@@ -99,12 +99,12 @@ reported rather than deferred.
       present before an override is applied.
 - [x] 3.5 Add `ansible/roles/vm-setup/templates/vfio-bind.sh.j2` and
       `vfio-bind.service.j2`. The unit is `Type=oneshot`,
-      `RemainAfterExit=yes`, `Before=libvirtd.service`,
-      `After=multi-user.target`. For each address in the bind list the script
-      writes `vfio-pci` to `driver_override`, unbinds the current driver if one
-      is bound, and triggers `drivers_probe`. It reads its address list from a
-      file rendered by the role, so re-running the role changes data rather
-      than code.
+      `RemainAfterExit=yes`, `After=systemd-modules-load.service`,
+      `Before=libvirtd.service`, with no `Requires=` or `BindsTo=`. For each
+      address in the bind list the script writes `vfio-pci` to
+      `driver_override`, unbinds the current driver if one is bound, and
+      triggers `drivers_probe`. It reads its address list from a file rendered
+      by the role, so re-running the role changes data rather than code.
 - [x] 3.6 Make the script a no-op when `/proc/cmdline` carries the rescue
       token. This is what makes the rescue entry inert without a second
       initramfs.
@@ -154,6 +154,34 @@ reported rather than deferred.
       is not permitted to carry. A reboot that only enables the IOMMU cannot
       strand the host; a reboot that also applies a binding can, and the
       comment is what stops the second being reintroduced.
+
+## 5a. Sequencing: bind after the reboot, persist after verification
+
+Added after review found that installing an *enabled* unit and then rebooting
+put the first application of an unverified bind list inside the boot path — the
+hazard the change exists to remove, one level up.
+
+- [x] 5a.1 Split `gpu-passthrough.yml` to phase one only: boot configuration,
+      no bind list, no `systemctl start`, no `enabled: yes`.
+- [x] 5a.2 Add `ansible/roles/vm-setup/tasks/gpu-bind.yml` as phase two,
+      included from `main.yml` **after** the reboot task.
+- [x] 5a.3 Re-run the audit in phase two. An IOMMU disabled in firmware exposes
+      no groups, so a pre-reboot audit cannot classify anything; re-auditing is
+      what makes a first preparation converge in one pass.
+- [x] 5a.4 Assert before binding that the bind list contains neither the route
+      device nor the root device, so one classifier defect cannot strand a host.
+- [x] 5a.5 Apply with `systemctl start`, confirm every audited address reports
+      `vfio-pci`, and confirm the route device's driver is unchanged.
+- [x] 5a.6 Enable the unit last, only after those confirmations.
+- [x] 5a.7 Scope the host GPU driver blacklist to hosts where every detected GPU
+      is bindable. `modprobe` blacklists a module, not a device, so applying it
+      while the audit deliberately left a card on its own driver strands that
+      card for the host too.
+- [x] 5a.8 Cover the sequencing in `tests/test_ansible_structure.py`: phase one
+      binds nothing and writes no bind list; apply precedes verification
+      precedes enable; the pre-bind assertion names both critical devices;
+      `gpu-bind.yml` runs after the reboot in `main.yml`; the unit is not
+      ordered after the target that wants it; the blacklist is conditional.
 - [x] 5.4 Report skipped GPUs prominently in the role's closing debug output —
       count, address, and reason. A host prepared with zero bindable cards must
       not read as a fully successful preparation.
@@ -243,14 +271,17 @@ checked against it here.
       is a deliberate finding.
 - [ ] 8.6 **Promotion.** Complete the design-promotion record:
 
-| Accepted decision | Permanent location |
-|---|---|
-| No configuration change that can remove the host's network path may require a reboot to take effect or to be undone | `openspec/specs/physical-provisioning/architecture.md` |
-| A rollback target must be a state that cannot fail, not the most recent state that has not yet failed | `openspec/specs/physical-provisioning/architecture.md` |
-| Device binding is scoped to a PCI address, never a vendor/device ID | `openspec/specs/physical-provisioning/spec.md` |
-| An absent or disabled IOMMU fails closed | `openspec/specs/physical-provisioning/spec.md` |
-| A GPU sharing an IOMMU group with a host-critical device is reported unavailable rather than bound | `openspec/specs/physical-provisioning/spec.md` |
-| ACS override is rejected, and why | `openspec/specs/physical-provisioning/architecture.md` |
+| Accepted decision | Permanent location | State |
+|---|---|---|
+| No configuration change that can remove the host's network path may require a reboot to take effect or to be undone | `openspec/specs/physical-provisioning/architecture.md` | Applied |
+| A rollback target must be a state that cannot fail, not the most recent state that has not yet failed | `openspec/specs/physical-provisioning/architecture.md` | Applied |
+| A binding is not persisted across reboots until applied and verified on that machine | `openspec/specs/physical-provisioning/spec.md` | Applied |
+| Device binding is scoped to a PCI address, never a vendor/device ID | `openspec/specs/physical-provisioning/spec.md` | Applied |
+| An absent or disabled IOMMU fails closed | `openspec/specs/physical-provisioning/spec.md` | Applied |
+| A GPU sharing an IOMMU group with a host-critical device is reported unavailable rather than bound | `openspec/specs/physical-provisioning/spec.md` | Applied |
+| Declared GPU capacity counts assignable devices, not present ones | `openspec/specs/physical-provisioning/spec.md` | Applied |
+| ACS override is rejected, and why | `openspec/specs/physical-provisioning/architecture.md` | Applied |
+| The blacklist is all-or-nothing, so it applies only when every GPU is bindable | `design.md` — implementation rationale, not a permanent contract | Recorded |
 
 ## Out of scope, observed
 
@@ -310,7 +341,7 @@ a working tree.
 
 | Command | Where | Result |
 |---|---|---|
-| `make test` (`uv run pytest tests -q`) | authoring env | **45 passed** — 11 pre-existing, 34 added |
+| `make test` (`uv run pytest tests -q`) | authoring env | **52 passed** — 11 pre-existing, 41 added |
 | `make check-comment-hygiene` | authoring env, repository root | **OK**, no matches outside `openspec/` |
 | YAML parse of every new and modified task, defaults, and playbook file | authoring env | **OK** (6 files) |
 | `bash -n` over both shell templates with Jinja expressions substituted | authoring env | **OK** (2 files) |

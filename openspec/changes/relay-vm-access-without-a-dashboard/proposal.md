@@ -62,6 +62,11 @@ wildcard DNS record and certificate it implies are not needed.
   chooses nothing. This replaces dashboard coordination with an authority that
   can reclaim what it allocated, and puts allocation behind a surface that can
   later report which ports are held by which VM on which host.
+- **Scope the lease to the relay, not the host.** A `tcp` proxy's `remotePort`
+  binds a listening socket on the relay, so hosts sharing a relay share one port
+  namespace. The lease is unique on relay and port; the host is an attribute.
+  Releases attach to every terminal outcome rather than to teardown alone, with
+  a reconciliation sweep bounding whatever path is missed.
 - **Replace the dashboard online-check with `frpc`'s admin API, bound to
   `127.0.0.1`.** The same interface supplies `reload`, which applies a proxy
   diff and leaves unchanged proxies untouched, so adding a VM stops restarting

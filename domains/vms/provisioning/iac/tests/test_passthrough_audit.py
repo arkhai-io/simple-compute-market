@@ -31,6 +31,17 @@ from shell_harness import (
 )
 
 
+def _unit_directives(text: str) -> str:
+    """Directive lines only.
+
+    The unit explains in comments which dependency types it deliberately does
+    not declare, so a literal search over the whole file matches the prose that
+    says a directive is absent. Assertions here are about what systemd reads.
+    """
+    return "\n".join(
+        line for line in text.splitlines() if not line.strip().startswith("#")
+    )
+
 ROOT = Path(__file__).resolve().parents[1]
 AUDIT_TASK = ROOT / "ansible/roles/vm-setup/tasks/passthrough-audit.yml"
 
@@ -452,12 +463,13 @@ class TestRenderedArtifacts(unittest.TestCase):
 
     def test_bind_service_does_not_take_libvirtd_down_with_it(self) -> None:
         """A failed bind degrades capacity; it must not disable virtualization."""
-        text = (
-            ROOT / "ansible/roles/vm-setup/templates/vfio-bind.service.j2"
-        ).read_text(encoding="utf-8")
-        self.assertIn("Before=libvirtd.service", text)
-        self.assertNotIn("Requires=", text)
-        self.assertNotIn("BindsTo=", text)
+        directives = _unit_directives(
+            (ROOT / "ansible/roles/vm-setup/templates/vfio-bind.service.j2")
+            .read_text(encoding="utf-8")
+        )
+        self.assertIn("Before=libvirtd.service", directives)
+        self.assertNotIn("Requires=", directives)
+        self.assertNotIn("BindsTo=", directives)
 
 
 class TestCapacityReflectsPassthrough(unittest.TestCase):

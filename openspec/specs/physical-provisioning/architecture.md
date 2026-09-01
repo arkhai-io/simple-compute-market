@@ -134,6 +134,51 @@ Provider-to-executor linkage and universal multi-storefront event routing are
 not inferred. Optional notification adapters are delivery mechanisms, not
 ownership authorities.
 
+## Host preparation cannot cost the machine
+
+Two rules govern how a rented host is prepared for passthrough, and both exist
+because the failure they prevent is unrecoverable in band.
+
+**No configuration change that can remove the host's network path may require a
+reboot to take effect, or a reboot to be undone.** Enabling the IOMMU is exempt:
+it claims no device. Every decision about which devices go to guests is applied
+from userspace, so a wrong decision fails an operation on a running machine
+rather than producing one that cannot be reached to correct it. A host that has
+lost its network interface cannot be recovered by any in-band mechanism — a
+tunnel, a second SSH daemon, an agent, or a self-healing loop all require the
+interface that was taken.
+
+**A rollback target must be a state that cannot fail, not the most recent state
+that has not yet failed.** A configuration that boots correctly by winning a
+driver race is an unobserved failure, not a known-good baseline, and reverting
+to it delivers the machine into a coin flip at the moment reliability matters
+most. The rescue boot entry therefore binds no device at all: its correctness
+follows from what it does rather than from history. For the same reason a
+binding is not made to persist across reboots until it has been applied and
+verified on that machine.
+
+Refusing an ambiguous topology is preferred to working around it. An IOMMU group
+is the hardware's unit of DMA isolation, so a GPU grouped with a network or
+storage controller cannot be assigned without assigning that controller too. The
+ACS override patch would split such a group by asserting an isolation property
+the hardware does not have, and its failure mode is silent cross-guest DMA. In a
+marketplace renting isolation to strangers, the correct outcome is an accurate
+report that the device is unavailable.
+
+## The host registry owns the connection
+
+Address, user, key material, and port are one descriptor and live together in
+the host registry, because a rendered inventory must be reproducible from the
+registry alone. Splitting any part into service configuration would make the
+connection unreproducible and would express one value for every host, which is
+wrong as soon as two hosts sit behind different tunnels.
+
+The port renders explicitly even at its default, so an inventory line states
+what the registry holds rather than leaving the default implied by an absent
+one. A malformed port fails its entry rather than degrading to a default: an
+unreachable host is not a degraded host, and a substituted value turns an
+operator's typo into a failure that resembles a network fault.
+
 ## Related contracts
 
 - [Fulfillment](../fulfillment/spec.md)

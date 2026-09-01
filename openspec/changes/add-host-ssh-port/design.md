@@ -74,7 +74,7 @@ entry points agree.
 
 **Encode the port in `kvm_host` as `host:port`.** Requires no schema change and
 is how a human would write it. Ansible does not parse it — `ansible_host` is a
-hostname, and `1.2.3.4:6000` is treated as a literal name that fails to
+hostname, and `203.0.113.5:6000` is treated as a literal name that fails to
 resolve. Every consumer of `kvm_host` would need to learn to split it, and
 `public_host` would face the same question with a different answer.
 

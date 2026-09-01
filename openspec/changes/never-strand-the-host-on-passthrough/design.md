@@ -116,18 +116,73 @@ equivalent and persists the override via udev; whether to depend on the
 `driverctl` package or write the sysfs sequence directly is an implementation
 choice, not a design one.
 
-A systemd unit applies the overrides after boot, ordered `Before=libvirtd.service`
-so the devices are in place before anything tries to use them. If a bind fails
-— the device is held by something, the address moved, the card is absent — the
-unit fails, the host is up and reachable, and the failure is a log line.
+A systemd unit applies the overrides after boot, ordered
+`After=systemd-modules-load.service` so `vfio-pci` exists and
+`Before=libvirtd.service` so the devices are in place before anything tries to
+use them. It declares no `Requires=` or `BindsTo=`: a failed bind must cost a
+device, not virtualization. If a bind fails — the device is held by something,
+the address moved, the card is absent — the unit fails, the host is up and
+reachable, and the failure is a log line.
 
-Blacklisting `nouveau` and not installing a host NVIDIA driver removes the
-circular dependency that previously forced a reboot to release the card. With
-no driver holding the GPU, the unbind step is uncontested. The host does not
-need a GPU driver: for passthrough the card belongs to the guest, and the
-driver belongs there too. The consequence is that `gpu-detection-service.yml`'s
-`nvidia-smi` MIG branch cannot run on such a host, which is already true today
-and should be stated rather than left as a silent no-op.
+**Applying at runtime is necessary but not sufficient.** An *enabled* unit is
+part of the boot path: every subsequent boot replays its bind list, and if that
+list is wrong the host comes up, loses its network when the unit runs, and comes
+up the same way again. Installing an enabled unit and then rebooting puts the
+first application of an unverified bind list inside a boot nobody is watching —
+the property this change set out to remove, reintroduced one level up.
+
+So the work is split across the reboot:
+
+| | Phase one, before the reboot | Phase two, after it |
+|---|---|---|
+| Changes | IOMMU parameter, module load, blacklists, initramfs, rescue entry | bind list, live apply, verification, enable |
+| Binds a device | no | yes, with Ansible connected |
+| Unit state | installed, disabled | enabled last, after verification |
+| Worst case | a reboot that changes no device ownership | a failed task on a reachable host |
+
+Phase two applies the bindings with `systemctl start`, confirms every audited
+address reports `vfio-pci`, confirms the host's route device still holds the
+driver it held beforehand, and only then enables the unit. A boot never replays
+a list that has not been observed to work on that machine.
+
+The reboot also earns its place beyond the IOMMU parameter. An IOMMU disabled in
+firmware exposes no groups, so a pre-reboot audit reports "cannot assess" and
+there is nothing to classify; the groups exist only on the far side. Re-running
+the audit in phase two is what lets a first preparation converge in one pass
+rather than silently requiring the operator to notice and run the role again — a
+phase transition that was previously implicit and undocumented.
+
+Phase two also asserts, immediately before binding, that the bind list contains
+neither the route device nor the root device. The audit already refuses such a
+group; the assertion costs nothing and means a single classifier defect cannot
+strand a host, because both would have to fail the same way.
+
+An automatic post-boot watchdog that disabled the unit when the host could not
+reach the relay was considered and rejected. Its rollback target would be sound,
+unlike the reverted command line that stranded a previous host, but it
+reintroduces a self-modifying agent for a case the sequencing already covers: an
+unverified list is never persisted, so no boot needs rescuing from one.
+
+**The host GPU driver blacklist applies only when every GPU is bindable.**
+
+`modprobe` blacklists a module, not a device, so the blacklist cannot be scoped
+the way the binding is. On a host where the audit deliberately leaves one card
+on its own driver -- because its IOMMU group contains something the host needs --
+blanket-blacklisting the vendor's driver strands that card for the host as well.
+That is a much broader effect than the per-address decision the audit just made,
+and it contradicts it.
+
+So the blacklist is applied only when the audit is assessable and every detected
+GPU is bindable: when the host is genuinely dedicating its GPUs to guests. Its
+absence does not prevent binding, because `driver_override` plus an unbind
+succeeds whenever nothing holds the device open; the blacklist only removes the
+race with a driver that would otherwise claim the card at boot. Where it is not
+applied, a bind that fails because a driver still holds the card fails visibly
+rather than silently.
+
+The consequence either way is that `gpu-detection-service.yml`'s `nvidia-smi`
+MIG branch cannot run on a host whose GPUs are all bound, which is already true
+today and should be stated rather than left as a silent no-op.
 
 ## The rescue state
 

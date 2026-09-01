@@ -198,15 +198,64 @@ on which host — visibility and operator control that a shell loop reading a
 file on a host cannot offer, and which can be changed by deploying a service
 rather than by reaching every host in the fleet.
 
-The cost is accepted deliberately: the service now owns a resource it must
-reclaim, and a teardown path that does not run leaks a port. The window is 100
-ports wide, so a leak is a slow degradation rather than an outage, and the same
-API that reports holdings is where a reconciliation or manual release lands.
-
 Revisit if the playbook needs to run usefully with no provisioning service in
 the loop — a standalone seller path, or proving the host in isolation. Under
 that requirement the sub-window alternative returns, because it is the only one
 of the two that leaves the playbook self-sufficient.
+
+**A port lease is scoped to the relay, not to the host.**
+
+This corrects an error in the first version of this design, which made the lease
+unique on `(host, port)`. That is the wrong boundary. For a `tcp` proxy,
+`remotePort` binds a listening socket on `frps` itself, not on the node. Two
+nodes dialing one relay are not independent namespaces: if node A holds
+`R:6100`, node B cannot also hold it, and a `(host, port)` uniqueness constraint
+would happily issue it. The relay would refuse the second registration, and the
+refusal would surface asynchronously in a client log rather than as a failed
+allocation — the exact failure mode this change set out to remove by taking the
+dashboard out of the coordination path.
+
+The lease is therefore `UNIQUE(relay_id, remote_port)`, with the host recorded
+as an attribute rather than as part of the key. Uniqueness then matches the
+resource: one listening socket on one relay.
+
+`relay_id` is derived from the normalized `relay_addr:relay_port` the client
+dials, rather than configured separately. The lease has to describe the endpoint
+where the port is actually bound, and that endpoint is exactly what a client
+addresses. A separately configured identifier can disagree with reality in both
+directions: two deployments claiming one identifier while pointing at different
+relays would collide leases that do not conflict, and one relay under two
+identifiers would issue the same port twice. A derived identifier cannot lie
+about which endpoint a port was bound on.
+
+The cost is that moving a relay to a new address reads as a new endpoint while
+its existing proxies persist, so leases from the old address become stale and
+the new identity could reissue ports still bound. That is survivable — no DNS is
+involved and the addresses are reserved static ones, so it is a deliberate
+operator action rather than drift — and it is what reconciliation exists for.
+Revisit if relay addresses turn out to change in normal operation, in which case
+an explicit identifier with a documented migration becomes the better trade.
+
+**A lease is released on every terminal outcome, and reconciliation is the
+backstop.**
+
+Allocating before dispatch is deliberate: allocating afterwards means a crash
+between the two leaves a port bound on the relay that no record claims. But it
+also means the lease outlives any path that fails before teardown would ever
+run. A dispatch that never starts, a VM creation that fails permanently, a
+cancelled request, and an expired lease each end the VM's life without a
+teardown, and a release attached only to teardown leaks on all four.
+
+So release is attached to the lifecycle's terminal states rather than to one
+path through it. Even that is not sufficient on its own — a set of code paths
+is never provably exhaustive, and the one that is missed is the one nobody
+thought of. A periodic reconciliation releases leases whose owning job or
+fulfillment has been terminal beyond a grace period, which converts an
+unenumerated leak into a bounded one.
+
+The window is 100 ports wide, so an unreleased lease is a slow degradation
+rather than an outage, and the same API that reports holdings is where a manual
+release lands.
 
 **The host management client proxies `127.0.0.1:22` and nothing else.** The
 question was whether a second proxy should reach an `sshd`-independent recovery

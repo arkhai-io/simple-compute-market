@@ -95,8 +95,15 @@ operator step, called out in section 6.
 
 - [x] 5.1 Parser: `ansible_port` present yields the port; absent yields 22;
       non-integer skips the entry with a warning; `0` and `65536` skip.
-- [x] 5.2 API: create without `ssh_port` yields 22; create with one yields it;
-      update changes it; `HostResponse` carries it; out-of-range returns 400.
+- [x] 5.2 API, through the canonical typed client
+      (`tests/integration/test_hosts_api.py`): create without `ssh_port` yields
+      22; create with one yields it; update changes it and persists; update
+      without one leaves it; `HostListResponse` carries it; an imported
+      inventory's port reaches the registry. A malformed body is sent as raw
+      HTTP, because `HostCreate` validates the bound before a request exists —
+      and the API returns **422**, FastAPI's body-validation status. The
+      original claim of 400 was wrong: this repository uses 400 for domain
+      errors and 422 for body validation.
 - [x] 5.3 Renderers: a non-default port appears in both; the two renderers
       agree; a default port still renders explicitly.
 - [x] 5.4 Migration: applied against a database holding rows created before the
@@ -146,9 +153,9 @@ operator step, called out in section 6.
 
 | Accepted decision | Permanent location | State |
 |---|---|---|
-| The host registry is the authority for how the provisioner connects, including port, and every path derives its connection from a rendered inventory | `openspec/specs/physical-provisioning/spec.md` | At archival |
-| `ansible_port` renders for every host, so a rendered inventory says exactly what the registry holds | `openspec/specs/physical-provisioning/spec.md` | At archival |
-| A malformed port fails the entry rather than defaulting, because an unreachable host is not a degraded one | `openspec/specs/physical-provisioning/spec.md` | At archival |
+| The host registry is the authority for how the provisioner connects, including port, and every path derives its connection from a rendered inventory | `openspec/specs/physical-provisioning/spec.md` | Applied |
+| `ansible_port` renders for every host, so a rendered inventory says exactly what the registry holds | `openspec/specs/physical-provisioning/spec.md` | Applied |
+| A malformed port fails the entry rather than defaulting, because an unreachable host is not a degraded one | `openspec/specs/physical-provisioning/spec.md` | Applied |
 | Appending a migration makes `check_schema_version` require it before startup | `design.md` — deployment consequence, not a permanent contract | Recorded |
 | No roadmap edit; the campaign-level decision belongs to the change that alters what a deployment can do | `tasks.md` 7.5 | Recorded |
 
@@ -182,8 +189,8 @@ against the same baseline in the same environment.
 
 | Suite | Baseline | With this change |
 |---|---|---|
-| `pytest tests/unit` in `provisioning/compute/service` | 1 failed, 475 passed | 1 failed, **505 passed** |
-| `pytest tests/integration` in `provisioning/compute/service` | 185 passed | 185 passed |
+| `make test` unit, `provisioning/compute/service` | 475 passed | **506 passed** |
+| `make test` integration, `provisioning/compute/service` | 185 passed | **196 passed** — 11 added |
 | `make test` in `domains/vms/provisioning/iac` | 45 passed | 45 passed |
 | `make check-comment-hygiene` (repository root) | OK | OK |
 

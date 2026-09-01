@@ -56,11 +56,19 @@ evidence is supplied by the operator.
 The service allocates; the playbook applies what it is given. Recorded decision;
 see `design.md` for why, and for the revisit trigger.
 
-- [ ] 2.1 Add a `relay_port_allocations` table to
+- [ ] 2.1 Add a `relay_port_leases` table to
       `provisioning/compute/service/src/compute_provisioning_service/db/models.py`:
-      host, port, the fulfillment or job the port belongs to, and a timestamp.
-      Unique on (host, port) so a double-allocation fails in the database
-      rather than surfacing as a proxy the relay silently refuses.
+      `relay_id`, `remote_port`, the host, the fulfillment or job that holds it,
+      a state, and timestamps. **`UNIQUE(relay_id, remote_port)`** — not
+      `(host, port)`. `remotePort` binds a listening socket on the relay, so two
+      hosts on one relay share the port namespace; a host-scoped key would issue
+      a port already bound, and the refusal would appear asynchronously in a
+      client log rather than as a failed allocation.
+- [ ] 2.1a Derive `relay_id` from the normalized `relay_addr:relay_port` the
+      client dials rather than taking it as configuration. The lease must
+      describe the endpoint where the port is actually bound; see `design.md`
+      for why a separately configured identifier can disagree with reality in
+      both directions, and for the stale-lease consequence when a relay moves.
 - [ ] 2.2 Add the migration and register it in `MIGRATIONS` in
       `provisioning/compute/service/src/compute_provisioning_service/db/migrations.py`,
       dated after this change's sibling in `add-host-ssh-port` if that has
@@ -68,14 +76,22 @@ see `design.md` for why, and for the revisit trigger.
       migration before startup — a deployment consequence, recorded in
       section 9.
 - [ ] 2.3 Allocate on VM creation: first free port in the configured window for
-      that host, recorded before the job is dispatched. Allocating after
-      dispatch means a crash between the two leaves a port in use and unknown.
-- [ ] 2.4 Release on teardown. This is the obligation service-side allocation
-      accepts in exchange for having one authority; a teardown path that does
-      not release is the leak the decision named as its accepted cost.
-- [ ] 2.5 Fail the request when the window is exhausted, with a message naming
-      the host and the window. A relay refusing a proxy surfaces asynchronously
-      in a client log; an exhausted window must not reach that point.
+      that relay, recorded before the job is dispatched. Allocating after
+      dispatch means a crash between the two leaves a port bound on the relay
+      that no record claims.
+- [ ] 2.4 Release on **every terminal outcome**, not only teardown: a dispatch
+      that never starts, a permanently failed creation, a cancellation, and an
+      expiry each end a VM's life without a teardown running. A release attached
+      to teardown alone leaks on all four.
+- [ ] 2.4a Add reconciliation: a periodic sweep releasing leases whose owning
+      job or fulfillment has been terminal beyond a grace period. A set of code
+      paths is never provably exhaustive, and this bounds the leak from the one
+      that was missed. Follow the existing recovery-worker pattern rather than
+      inventing a second scheduling mechanism.
+- [ ] 2.5 Fail the request when the window is exhausted for that relay, with a
+      message naming the relay and the window. A relay refusing a proxy surfaces
+      asynchronously in a client log; an exhausted window must not reach that
+      point.
 - [ ] 2.6 Pass the allocated port to the job as an input, so `vm-create.yml`
       receives a port rather than deriving one.
 
@@ -173,15 +189,31 @@ structural checks in `tests/test_ansible_structure.py`, which cover task files
 
 ## 7. Tests
 
-- [ ] 7.1 The `connectivity` payload's new shape survives storefront → adapter
-      → extra-vars, and none of the three removed keys appears anywhere in the
-      chain.
+- [ ] 7.1 The `connectivity` payload's new shape survives storefront to adapter
+      to extra-vars, and none of the three removed keys appears anywhere in the
+      chain. Split by boundary rather than tested as one span: the client-to-API
+      contract belongs in the Level 2 suite through the canonical typed client,
+      and what the storefront passes to that client is a storefront unit test.
+      A hand-built request body standing in for the client proves nothing about
+      the contract it is imitating.
 - [ ] 7.2 Both storefront call sites build the identical payload.
 - [ ] 7.3 An undefined relay token fails rather than templating a default.
 - [ ] 7.4 A configuration selecting no access path is rejected before dispatch.
-- [ ] 7.5 Allocation: a port is recorded before dispatch; a second allocation
-      on the same host does not reuse it; teardown releases it; an exhausted
-      window fails with a message naming host and window.
+- [ ] 7.5 Allocation, as unit tests over the lease store: a port is recorded
+      before dispatch; a second allocation does not reuse a held port;
+      **two different hosts sharing one relay never receive the same port**;
+      the same port on two different relays is allowed; an exhausted window
+      fails with a message naming the relay and window.
+- [ ] 7.5a Lease lifecycle: each terminal outcome releases the lease — teardown,
+      a dispatch that never starts, a permanently failed creation, a
+      cancellation, an expiry. Assert per-path rather than through one
+      representative, since the point is that no path is missed.
+- [ ] 7.5b Reconciliation: a lease whose owner has been terminal beyond the
+      grace period is released; one whose owner is still live is not.
+- [ ] 7.5c Level 2, through the canonical typed client in
+      `provisioning/compute/service/tests/integration/`: the allocation and
+      release lifecycle wherever the API is part of the contract, following
+      `test_hosts_api.py`.
 - [ ] 7.6 Rendered client configuration contains no `subdomain` key and no
       dashboard address. Assert against non-comment lines, as
       `tests/test_passthrough_audit.py` does, so the check cannot be satisfied
@@ -262,6 +294,8 @@ Requires a rented, initialized host and the deployed relay.
 | Buyer VM access is port-based; vhost subdomain routing cannot serve SSH | `openspec/specs/physical-provisioning/architecture.md` |
 | The relay token never reaches a buyer-controlled machine, which is why the tunnel client runs on the host | `openspec/specs/physical-provisioning/architecture.md` |
 | The provisioning service allocates VM relay ports and owns their reclamation; the playbook applies what it is given | `openspec/specs/physical-provisioning/spec.md` |
+| A relay port lease is scoped to the relay, because `remotePort` binds a socket on the relay rather than on the host | `openspec/specs/physical-provisioning/spec.md` |
+| A lease is released on every terminal outcome, with reconciliation as the backstop | `openspec/specs/physical-provisioning/spec.md` |
 | The resolved `connectivity` field shape and its forwarding contract | `openspec/specs/physical-provisioning/spec.md` |
 | The storefront supplies relay location, never the relay credential | `openspec/specs/vm-storefront-fulfillment/spec.md` |
 

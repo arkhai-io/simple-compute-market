@@ -57,7 +57,7 @@ HOSTED_STRIPE_TEST_AUTHORITY_ENVIRONMENT ?=
 HOSTED_STRIPE_TEST_AUTHORITY_ENV_FILE ?=
 HOSTED_STRIPE_TEST_EVIDENCE ?= $(DIST_DIR)/hosted-stripe-test-evidence.json
 
-.PHONY: check-hosted-client-pin fix-hosted-client-pin review-wheelhouse review-wheelhouse-scope build build-dev build-seller build-apicredits-service build-apicredits-storefront build-apicredits-sample-app test test-core test-provisioning test-provisioning-iac test-registry test-storefront test-vms-buyer test-apicredits test-apicredits-middleware test-kits dist dist-storefront-client dist-policy dist-compute-provisioning dist-compute-provisioning-service dist-kits dist-hosted-client verify-hosted-release dist-registry-client dist-registry dist-identity dist-core dist-arkhai-core-buyer dist-arkhai-core-storefront dist-bare-metal-storefront dist-alkahest dist-config dist-clean init init-prerequisites init-submodules init-zero-tier init-buyer init-storefront init-arkhai-core-registry push-runtime-artifacts push-images push-dev-image
+.PHONY: check-hosted-client-pin fix-hosted-client-pin review-wheelhouse review-wheelhouse-scope build build-dev build-seller build-apicredits-service build-apicredits-storefront build-apicredits-sample-app test test-core test-provisioning test-provisioning-iac test-registry test-storefront test-vms-buyer test-apicredits test-apicredits-middleware test-kits dist dist-release dist-storefront-client dist-policy dist-compute-provisioning dist-compute-provisioning-service dist-kits dist-hosted-client verify-hosted-release dist-registry-client dist-registry dist-identity dist-core dist-arkhai-core-buyer dist-arkhai-core-storefront dist-bare-metal-storefront dist-alkahest dist-config dist-clean init init-prerequisites init-submodules init-zero-tier init-buyer init-storefront init-arkhai-core-registry push-runtime-artifacts push-images push-dev-image
 .PHONY: build-hosted-producer
 .PHONY: test-release-tooling test-deployment-packaging prepare-hosted-compose prepare-hosted-compose-local hosted-preflight hosted-preflight-local hosted-stripe-test-local hosted-compose-up hosted-compose-restart hosted-compose-clean hosted-stripe-test hosted-stripe-test-stop
 .PHONY: dist-arkhai-core-registry
@@ -77,6 +77,15 @@ HOSTED_STRIPE_TEST_EVIDENCE ?= $(DIST_DIR)/hosted-stripe-test-evidence.json
 # to uv sync.  Further upgrade: publish .dist/ contents to GCP Artifact
 # Registry and switch to --index https://...gar.../simple.
 # ---------------------------------------------------------------------------
+# Build the wheel set with the staged release verified first. Publishing paths
+# call this; `dist` alone builds without requiring a release to be reachable.
+# Written as two sub-invocations rather than two prerequisites because make
+# orders prerequisites only under -j1, and verification that can run after the
+# build it gates is not verification.
+dist-release: ## Verify the staged hosted release, then build the wheel set.
+	$(MAKE) verify-hosted-release
+	$(MAKE) dist
+
 dist: dist-storefront-client dist-identity dist-core dist-arkhai-core-buyer dist-arkhai-core-storefront dist-arkhai-core-registry dist-hosted-client dist-kits dist-alkahest dist-config dist-policy dist-compute-provisioning dist-domains dist-compute-provisioning-service dist-registry-client
 
 dist-domains: dist-kits dist-compute-provisioning ## Build every domains-scoped wheel through the domain aggregate
@@ -338,7 +347,15 @@ hosted-stripe-test: hosted-preflight ## Run one protected Stripe test-mode syste
 		$(if $(HOSTED_STRIPE_TEST_LIFECYCLE_TIMEOUT),--lifecycle-timeout "$(HOSTED_STRIPE_TEST_LIFECYCLE_TIMEOUT)",) \
 		--evidence "$(HOSTED_STRIPE_TEST_EVIDENCE)"
 
-dist-hosted-client: verify-hosted-release ## Copy only verified immutable release inputs into .dist.
+# Verification is not a prerequisite here. A staged release is required to
+# publish artifacts, not to build or test them, and most of this repository --
+# every package that does not depend on the hosted client -- can be built and
+# tested without one. Gating the wheelhouse on it made a private producer a
+# hard dependency of the whole build.
+#
+# `dist-release` is the verifying entry point, and is what a publishing path
+# calls. See docs/development/TESTING.md, "Raising the hosted contract".
+dist-hosted-client: ## Copy immutable release inputs into .dist when a release is staged.
 	@if [ "$(abspath $(HOSTED_RELEASE_DIR))" != "$(abspath $(DIST_DIR))" ]; then \
 		mkdir -p "$(DIST_DIR)"; \
 		for file in $(HOSTED_RELEASE_FILES); do \

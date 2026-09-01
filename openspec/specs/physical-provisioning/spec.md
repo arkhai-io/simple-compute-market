@@ -484,6 +484,61 @@ For a hosted bare-metal obligation, no Capacity Reservation commit, scheduling, 
 - **THEN** revocation, executor teardown, and capacity release converge under their physical operation identities
 - **AND** no financial reclaim is inferred from teardown
 
+### Requirement: Host registry records the connection port
+
+The host registry MUST record the SSH port the provisioner connects to for each host, defaulting to 22. The registry is the authority for how a host is reached — address, user, key material, and port — and every execution path MUST derive its connection from a rendered inventory rather than constructing one, so a host reached through a reverse tunnel, a NAT forward, or a bastion is reachable by every operation without any of them being changed individually.
+
+Rendered inventories MUST emit `ansible_port` for every host, including hosts on the default port, so a rendered inventory states what the registry holds rather than leaving the default implied by an absent line.
+
+An `ansible_port` supplied through the INI input format MUST be preserved rather than discarded. A value that is not a port number between 1 and 65535 MUST cause its entry to be rejected rather than replaced with a default, because a substituted port produces an unreachable host whose failure resembles a network fault rather than a bad inventory line.
+
+#### Scenario: A host is registered on a tunnel port
+
+- **WHEN** a host is registered with an SSH port other than 22
+- **THEN** the recorded port is returned by the host endpoints and appears as `ansible_port` in every rendered inventory for that host
+
+#### Scenario: An inventory file supplies a port
+
+- **WHEN** an INI inventory carrying `ansible_port` is imported
+- **THEN** the port is stored against the host and survives to the rendered inventory the provisioner connects with
+
+#### Scenario: An inventory file supplies a malformed port
+
+- **WHEN** an INI inventory entry carries an `ansible_port` that is not a port number between 1 and 65535
+- **THEN** that entry is rejected with a warning naming the host, other entries in the same file are still imported, and no host is registered with a substituted port
+
+### Requirement: Passthrough binding cannot strand a host
+
+Host preparation MUST NOT render a machine unreachable. A device is assigned to guests by binding a PCI address, never a vendor/device identifier: an identifier matches every device presenting it anywhere in the machine, including devices in IOMMU groups no decision considered.
+
+Passthrough viability MUST be audited before any binding is configured, and the audit MUST be read-only so it is safe to run against a machine nothing else has touched. A GPU whose IOMMU group contains a network controller, a storage controller, the device carrying the host's default route, or the device carrying its root filesystem MUST be reported unavailable rather than bound, because assigning it would require assigning that device with it.
+
+An absent or disabled IOMMU MUST fail closed. "No groups because the IOMMU is disabled" and "groups assessed, no conflicts found" MUST be distinguishable outcomes, and only the second may result in a device being bound.
+
+Bindings MUST be applied while an operator or automation holds a live connection to the host, and MUST NOT be persisted across reboots until they have been applied and verified on that machine. A reboot may enable the IOMMU, which claims no device; it MUST NOT carry a device binding that has not been verified.
+
+Declared GPU capacity MUST count devices that can be assigned to a guest, not devices present, so a host does not publish capacity no fulfillment can satisfy.
+
+#### Scenario: A GPU shares its group with a host-critical device
+
+- **WHEN** the audit finds a GPU whose IOMMU group contains the device carrying the host's default route
+- **THEN** that GPU is reported unavailable with the blocking device named, no binding is configured for it, and any GPU in a clean group on the same host is still bindable
+
+#### Scenario: The IOMMU is not enabled
+
+- **WHEN** the audit runs on a host exposing no IOMMU groups
+- **THEN** it reports that viability cannot be assessed, distinctly from reporting no conflicts, and no device is bound
+
+#### Scenario: A binding is applied
+
+- **WHEN** audited bindings are applied
+- **THEN** they are applied with a live connection to the host, every audited address is confirmed bound, the device carrying the default route is confirmed to hold the driver it held beforehand, and only then is the binding made to persist across reboots
+
+#### Scenario: A binding fails
+
+- **WHEN** applying a binding fails
+- **THEN** the failure is reported, the host remains running and reachable, virtualization remains available, and the affected device is not counted as capacity
+
 ## Evidence
 
 - VM and bare-metal allocation executor metadata: `provisioning/compute/service/tests/integration/test_leases_api.py` and `test_bare_metal_leases_api.py`.

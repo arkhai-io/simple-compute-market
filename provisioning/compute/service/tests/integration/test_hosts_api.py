@@ -243,3 +243,106 @@ class TestConnectivity:
         with pytest.raises(ProvisioningError) as exc_info:
             await client.check_connectivity("ghost")
         assert exc_info.value.status_code == 404
+
+
+class TestSshPort:
+    """The SSH port survives the real client, API, service, and database.
+
+    A host reached through a tunnel answers on a port rather than on 22 at
+    `kvm_host`. Unit tests cover each layer that has to carry the port; only
+    this level proves the canonical client and the server model agree about the
+    field, which is where a serialization mismatch would otherwise hide until a
+    real host failed to connect.
+    """
+
+    async def test_register_with_a_tunnel_port_round_trips(self, client_and_queue):
+        client, _ = client_and_queue
+        host = await client.register_host(HostCreate(
+            name="kvm1", kvm_host="10.0.0.1", ssh_user="ubuntu",
+            ssh_key_type="path", ssh_key_value="/home/appuser/.ssh/id_ed25519",
+            ssh_port=6000,
+        ))
+        assert host.ssh_port == 6000
+        assert (await client.get_host("kvm1")).ssh_port == 6000
+
+    async def test_register_without_a_port_defaults_to_22(self, client_and_queue):
+        client, _ = client_and_queue
+        host = await _register(client)  # _SAMPLE_HOST sets no ssh_port
+        assert host.ssh_port == 22
+
+    async def test_update_changes_the_port(self, client_and_queue):
+        client, _ = client_and_queue
+        await _register(client)
+        updated = await client.update_host("kvm1", HostUpdate(ssh_port=6005))
+        assert updated.ssh_port == 6005
+        assert (await client.get_host("kvm1")).ssh_port == 6005
+
+    async def test_update_without_a_port_leaves_it_alone(self, client_and_queue):
+        client, _ = client_and_queue
+        await client.register_host(HostCreate(
+            name="kvm1", kvm_host="10.0.0.1", ssh_user="ubuntu",
+            ssh_key_type="path", ssh_key_value="/home/appuser/.ssh/id_ed25519",
+            ssh_port=6000,
+        ))
+        updated = await client.update_host("kvm1", HostUpdate(ssh_user="ops"))
+        assert updated.ssh_port == 6000
+
+    async def test_the_port_appears_in_the_list_response(self, client_and_queue):
+        client, _ = client_and_queue
+        await client.register_host(HostCreate(
+            name="kvm1", kvm_host="10.0.0.1", ssh_user="ubuntu",
+            ssh_key_type="path", ssh_key_value="/home/appuser/.ssh/id_ed25519",
+            ssh_port=6001,
+        ))
+        listed = await client.list_hosts()
+        assert [h.ssh_port for h in listed.hosts if h.name == "kvm1"] == [6001]
+
+    async def test_an_imported_inventory_port_reaches_the_registry(
+        self, client_and_queue,
+    ):
+        client, _ = client_and_queue
+        result = await client.import_hosts_from_text(
+            "[kvm_hosts]\n"
+            "kvm1  ansible_host=10.0.0.1  ansible_user=ubuntu  ansible_port=6000  "
+            "ansible_ssh_private_key_file=/home/appuser/.ssh/id_ed25519\n",
+            ssh_key_type="path",
+        )
+        assert [h.ssh_port for h in result.hosts if h.name == "kvm1"] == [6000]
+        assert (await client.get_host("kvm1")).ssh_port == 6000
+
+    async def test_an_imported_inventory_without_a_port_defaults_to_22(
+        self, client_and_queue,
+    ):
+        client, _ = client_and_queue
+        await client.import_hosts_from_text(_SAMPLE_INI, ssh_key_type="path")
+        assert (await client.get_host("kvm1")).ssh_port == 22
+
+
+class TestSshPortRejection:
+    """Malformed bodies need raw HTTP: the typed client cannot construct one.
+
+    `HostCreate` validates the bound before a request exists, so the canonical
+    client can only send a valid port. Proving the server rejects an invalid one
+    is the narrow case where a raw request is the only way to reach the
+    behavior under test.
+    """
+
+    async def test_the_typed_client_rejects_an_out_of_range_port(self):
+        with pytest.raises(ValueError):
+            HostCreate(
+                name="kvm1", kvm_host="10.0.0.1", ssh_user="ubuntu",
+                ssh_key_type="path", ssh_key_value="/keys/id", ssh_port=70000,
+            )
+
+    @pytest.mark.parametrize("port", [0, 70000, "not-a-port"])
+    async def test_the_api_rejects_an_out_of_range_port(self, client_and_queue, port):
+        client, _ = client_and_queue
+        response = await client._client.post(  # noqa: SLF001 - malformed body by design
+            "/api/v1/hosts/",
+            json={
+                "name": "kvm1", "kvm_host": "10.0.0.1", "ssh_user": "ubuntu",
+                "ssh_key_type": "path", "ssh_key_value": "/keys/id",
+                "ssh_port": port,
+            },
+        )
+        assert response.status_code == 422

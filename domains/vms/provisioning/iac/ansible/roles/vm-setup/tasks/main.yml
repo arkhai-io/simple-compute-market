@@ -220,10 +220,10 @@
 # ============================================
 
 # This reboot exists for the IOMMU kernel parameter and the initramfs rebuild,
-# neither of which binds a device. It must never be made to carry a device
-# binding: a binding applied from the boot configuration can remove the host's
-# network path with no opportunity to observe or undo it, which is why
-# vfio-bind.service applies bindings after boot instead. See
+# neither of which binds a device, so it cannot remove the host's network path.
+# Device binding happens after it, in gpu-bind.yml, with this connection live.
+# vfio-bind.service is installed but disabled until a bind has been applied and
+# verified here, so no boot replays an unverified bind list. See
 # openspec/specs/physical-provisioning/architecture.md.
 - name: Reboot the system to apply all changes
   reboot:
@@ -236,3 +236,25 @@
   tags:
     - reboot
     - always
+
+# ============================================
+# GPU passthrough, phase two
+# ============================================
+
+# After the reboot, not before. The IOMMU only exists on this side of it, so a
+# first preparation can classify groups here that it could not classify
+# earlier; and binding is applied while this connection is live, so a wrong
+# bind list fails a task on a reachable host instead of taking the network away
+# during a boot nobody is watching.
+- name: Include GPU passthrough binding
+  include_tasks:
+    file: gpu-bind.yml
+    apply:
+      tags:
+        - gpu_bind
+        - gpu_passthrough
+        - host_setup
+  tags:
+    - gpu_bind
+    - gpu_passthrough
+    - host_setup

@@ -109,6 +109,7 @@ def test_bare_metal_view_uses_explicit_identities_and_same_generation_availabili
     view = result[0]["publication_views"]["bare_metal.v1"]
     assert view == {
         "physical_resource_id": "physical-resource-1",
+        "pool_id": "gpu-pool",
         "physical_host_id": "physical-host-1",
         "machine_id": "compute-kvm1-001",
         "available": True,

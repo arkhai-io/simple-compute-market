@@ -225,8 +225,8 @@ relay-vm-access-without-a-dashboard ──► add-buyer-vm-connectivity-terms
 
 | Change | Status | Acceptance boundary |
 |---|---|---|
-| [`never-strand-the-host-on-passthrough`](never-strand-the-host-on-passthrough/) | implemented; live verification outstanding | Host preparation cannot render a rented machine unreachable. Passthrough viability is audited read-only before anything is written, unsafe IOMMU groups are refused rather than bound, device binding is scoped to a PCI address and applied after boot, and the rollback target is a state that contends for no device |
-| [`add-host-ssh-port`](add-host-ssh-port/) | implemented | The host registry records the SSH port the provisioner connects on, `ansible_port` survives INI import instead of being silently discarded, and both inventory renderers emit it. Takes no position on where a port value comes from |
+| [`never-strand-the-host-on-passthrough`](never-strand-the-host-on-passthrough/) | implemented; promoted; live verification outstanding | Host preparation cannot render a rented machine unreachable. Passthrough viability is audited read-only before anything is written, unsafe IOMMU groups are refused rather than bound, device binding is scoped to a PCI address and applied after boot, and the rollback target is a state that contends for no device |
+| [`add-host-ssh-port`](add-host-ssh-port/) | implemented; promoted | The host registry records the SSH port the provisioner connects on, `ansible_port` survives INI import instead of being silently discarded, and both inventory renderers emit it. Takes no position on where a port value comes from |
 | [`relay-vm-access-without-a-dashboard`](relay-vm-access-without-a-dashboard/) | planned; carries a reload verification gate | VM tunnel allocation and verification stop depending on a relay dashboard, DNS name, certificate, and second credential. Splits the host's management and buyer tunnel clients, forwards the relay token as a secret, and stops restarting the tunnel client — and with it every buyer's live session — on each VM creation |
 
 `never-strand-the-host-on-passthrough` shares no code with the other two and

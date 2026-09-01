@@ -622,6 +622,22 @@ uv lock --find-links .dist
 rather than letting it surface later as a resolver error naming a version nobody
 wrote down.
 
+#### Building without the staged release
+
+The signed release lives in the producer's own repository, and reading it needs
+access to that repository. Building and testing this one does not: `make dist`
+builds every wheel without a staged release, and every package that does not
+depend on the hosted client can then be installed and tested normally. What is
+missing from `.dist` in that case is the client wheel itself, so the packages
+that do depend on it — the VM and bare-metal storefronts and buyers, and the API
+credits pair — cannot be installed until the wheel is obtained from the
+producer's release or its index.
+
+`make dist-release` is the verifying entry point. It verifies the staged
+release and then builds, and is what a publishing path calls. Verification
+belongs there rather than on `dist` because a staged release is required to
+publish artifacts, not to build or test them.
+
 The pinned version and the signed one are allowed to differ, and usually do
 while a capability is being built ahead of a publish. When the pin is unsigned
 the channel is `internal`: the wheel comes from the producer's index or a local

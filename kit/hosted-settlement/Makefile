@@ -9,7 +9,11 @@ include $(HOSTED_REPO_ROOT)/make/hosted-release.mk
 verify-hosted-release:
 	$(VERIFY_HOSTED_RELEASE)
 
-build: verify-hosted-release ## Build the wheel into the shared .dist/
+# Building this wheel resolves nothing and installs nothing, so it does not
+# need a staged release. `init` and `reinit` below do install the hosted client
+# and keep the gate: verification belongs where the client is installed, not
+# where a wheel is built.
+build: ## Build the wheel into the shared .dist/
 	uv build --wheel --out-dir $(DIST_DIR)
 
 init: verify-hosted-release ## Create or update the environment
