@@ -18,5 +18,5 @@
 - [x] 3.1 Promote the topology and rationale to the deployment-state spec and
       architecture.
 - [x] 3.2 Update permanent architecture and deployment/configuration guidance.
-- [ ] 3.3 Run targeted Helm checks, repository quality gates, strict OpenSpec
+- [x] 3.3 Run targeted Helm checks, repository quality gates, strict OpenSpec
       validation, and archive the completed change.

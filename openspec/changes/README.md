@@ -153,7 +153,6 @@ service-identity-signing ──► replace-polling-with-authenticated-push
 
 ```text
 add-database-migration-commands ──► separate-marketplace-registry ──► migrate-registry-to-postgres ──► index-registry-filters
-compose-schema-isolated-registries (independent)
 ```
 
 | Order | Change | Status | Acceptance boundary |
@@ -162,7 +161,6 @@ compose-schema-isolated-registries (independent)
 | 2 | [`separate-marketplace-registry`](separate-marketplace-registry/) | active | External-registry provider default, explicit embedded profiles, and one canonical full URL |
 | 3 | [`migrate-registry-to-postgres`](migrate-registry-to-postgres/) | blocked | Complete Alembic chain, preserved SQLite state, Secret-backed PostgreSQL rollout; waits for external infrastructure and step 2 |
 | 4 | [`index-registry-filters`](index-registry-filters/) | deferred | Activate only after PostgreSQL workload measurements exceed a named p95/SLO threshold |
-| — | [`compose-schema-isolated-registries`](compose-schema-isolated-registries/) | active | Optional second Helm registry with independent schema, identity, state, and coordinates; no deployment |
 
 ## Lesser goal — Package and release readiness
 
