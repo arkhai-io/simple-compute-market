@@ -13,13 +13,13 @@ evidence is supplied by the operator.
 
 ## 1. Relay configuration and the token
 
-- [ ] 1.1 Replace the `connectivity` payload built by
+- [ ] 1.1 Remove the relay keys from the `connectivity` payload built by
       `_connectivity_settings_from_storefront_config` in
-      `domains/vms/storefront/src/market_storefront/services/fulfillment_service.py`.
-      Out: `frp_server_addr`, `frp_domain`, `frp_dashboard_password`. In:
-      `relay_addr`, `relay_port`, `vm_port_range_start`, `vm_port_range_count`.
-      Relay-neutral names because the buyer receives a host and a port and has
-      no reason to learn which relay implementation produced them.
+      `domains/vms/storefront/src/market_storefront/services/fulfillment_service.py`:
+      `frp_server_addr`, `frp_domain`, `frp_dashboard_password` all go, and
+      nothing relay-related replaces them. Relay location is pool
+      configuration, so the storefront stops naming a relay per request; the
+      buyer-facing address is returned in the fulfillment result instead.
 - [ ] 1.2 The relay **token does not travel this way.** It is a credential and
       the storefront has no reason to hold one. Confirm the function returns
       the four fields above and nothing secret.
@@ -27,11 +27,29 @@ evidence is supplied by the operator.
       `domains/vms/storefront/src/market_storefront/services/vm_fulfillment_service.py`,
       which builds the same payload on the VM path. Two call sites, one shape;
       a test asserting they agree belongs in section 7.
-- [ ] 1.4 Update the storefront's `[provisioning]` keys and their comments in
+- [ ] 1.4 Remove the three `[provisioning]` relay keys and their comments from
       `domains/vms/storefront/src/market_storefront/settings.toml` and
       `domains/vms/storefront/src/market_storefront/groups/config.py`.
-- [ ] 1.5 The relay token reaches the service as a key in the existing
-      `provisioning-secrets` dynaconf profile. No new mount, no new Secret, no
+- [x] 1.4a Add `relay_addr`, `relay_port`, `vm_port_range_start`, and
+      `vm_port_range_count` to `AnsiblePoolConfig` in
+      `provisioning/compute/service/src/compute_provisioning_service/db/models.py`,
+      all nullable: a pool with no relay configured uses the direct-NAT path.
+      Add the migration and register it in `MIGRATIONS`.
+- [ ] 1.4b Extend the pool-configuration read/write path (`PoolConfigHandler`
+      and the pool API models) so an operator can set and read them, following
+      how `default_vm_ram` and its siblings are already carried. All four are
+      ordinary configuration and are returned by the pool endpoints; the
+      credential is not among them, so there is nothing secret in a pool row to
+      redact from a read response and no write path through which a token could
+      be set. See `design.md`'s open question on whether relay administration
+      eventually warrants its own resource.
+- [ ] 1.5 The relay token reaches the service as `relay_token` in the existing
+      `provisioning-secrets` dynaconf profile. The name matches what the
+      deployment renders and follows the flat snake_case convention of
+      `ssh_decryption_key` and `storefront_admin_key`; `_token` rather than
+      `_key` because it is a shared bearer token, not key material. Declare it
+      in `settings.toml` with an empty default alongside the FRP block it
+      replaces. No new mount, no new Secret, no
       chart change — the profile is already rendered into Secret Manager,
       already projected by ESO, and already mounted at
       `/app/config/config-provisioning-secrets.yml` in both the migrate init
@@ -39,6 +57,19 @@ evidence is supplied by the operator.
       `ssh_decryption_key` is read, via `getattr(self._settings, ...)` with a
       default, so an environment whose profile predates the key loads rather
       than crashing.
+- [ ] 1.5a Resolve the token **per relay** from `relay_tokens[relay_id]`, with
+      **no scalar fallback and no default**. Relays reached by different pools
+      are operated by different parties and admit on different tokens; a
+      fallback would either fail at admission with an error naming the relay's
+      rejection rather than the missing configuration, or — if two relays happen
+      to share a token — succeed and hide the misconfiguration until they do
+      not. Declare `relay_tokens` as an empty map in `settings.toml`.
+- [ ] 1.5b Key the map by the derived `relay_id`, not by a separate label, so
+      there is one fact and no second identifier to keep consistent with the
+      endpoint.
+- [ ] 1.5c Fail before dispatch when a pool has a relay configured and no
+      matching entry exists, alongside the other partial-configuration
+      rejections in section 3.
 - [ ] 1.6 Default it to empty rather than requiring it. A deployment with no
       relay configured is valid — it uses the direct-NAT path — so an absent
       token is a state, not an error. Section 3 is what makes a *partial*
@@ -56,7 +87,7 @@ evidence is supplied by the operator.
 The service allocates; the playbook applies what it is given. Recorded decision;
 see `design.md` for why, and for the revisit trigger.
 
-- [ ] 2.1 Add a `relay_port_leases` table to
+- [x] 2.1 Add a `relay_port_leases` table to
       `provisioning/compute/service/src/compute_provisioning_service/db/models.py`:
       `relay_id`, `remote_port`, the host, the fulfillment or job that holds it,
       a state, and timestamps. **`UNIQUE(relay_id, remote_port)`** — not
@@ -64,17 +95,17 @@ see `design.md` for why, and for the revisit trigger.
       hosts on one relay share the port namespace; a host-scoped key would issue
       a port already bound, and the refusal would appear asynchronously in a
       client log rather than as a failed allocation.
-- [ ] 2.1a Derive `relay_id` from the normalized `relay_addr:relay_port` the
-      client dials rather than taking it as configuration. The lease must
-      describe the endpoint where the port is actually bound; see `design.md`
-      for why a separately configured identifier can disagree with reality in
-      both directions, and for the stale-lease consequence when a relay moves.
-- [ ] 2.2 Add the migration and register it in `MIGRATIONS` in
-      `provisioning/compute/service/src/compute_provisioning_service/db/migrations.py`,
-      dated after this change's sibling in `add-host-ssh-port` if that has
-      landed. As there, appending makes `check_schema_version` require the
-      migration before startup — a deployment consequence, recorded in
-      section 9.
+- [x] 2.1a Derive `relay_id` from the normalized `relay_addr:relay_port` held in
+      the owning pool's configuration. Not a separately administered
+      identifier, and **not the pool id**: two pools may point at one relay, so
+      a pool-scoped key would issue a port another pool already holds. See
+      `design.md` for both, and for the `relays`-table revisit.
+- [x] 2.2 Schema ships as **one** migration, `20260901_001_relay_reachable_hosts`,
+      covering `hosts.ssh_port`, the pool relay columns, and the lease table.
+      A schema version costs an operator step whether or not it carries much,
+      and these deploy together, so they are one event rather than three.
+      Appending makes `check_schema_version` require it before startup — a
+      deployment consequence, recorded in section 9.
 - [ ] 2.3 Allocate on VM creation: first free port in the configured window for
       that relay, recorded before the job is dispatched. Allocating after
       dispatch means a crash between the two leaves a port bound on the relay
@@ -198,6 +229,12 @@ structural checks in `tests/test_ansible_structure.py`, which cover task files
       the contract it is imitating.
 - [ ] 7.2 Both storefront call sites build the identical payload.
 - [ ] 7.3 An undefined relay token fails rather than templating a default.
+- [ ] 7.3a Token resolution: two relays with different entries each get their
+      own; a relay with no entry fails before dispatch rather than borrowing
+      another's; a pool with no relay configured needs no entry.
+- [ ] 7.3b No pool read response carries a token, under any pool configuration.
+      Assert against the serialized response rather than the model, since that
+      is where a future field would leak.
 - [ ] 7.4 A configuration selecting no access path is rejected before dispatch.
 - [ ] 7.5 Allocation, as unit tests over the lease store: a port is recorded
       before dispatch; a second allocation does not reuse a held port;
@@ -294,6 +331,8 @@ Requires a rented, initialized host and the deployed relay.
 | Buyer VM access is port-based; vhost subdomain routing cannot serve SSH | `openspec/specs/physical-provisioning/architecture.md` |
 | The relay token never reaches a buyer-controlled machine, which is why the tunnel client runs on the host | `openspec/specs/physical-provisioning/architecture.md` |
 | The provisioning service allocates VM relay ports and owns their reclamation; the playbook applies what it is given | `openspec/specs/physical-provisioning/spec.md` |
+| Relay location and port window are pool configuration; the storefront names no relay | `openspec/specs/physical-provisioning/spec.md` |
+| The relay credential is resolved per relay, never shared across relays operated by different parties | `openspec/specs/physical-provisioning/spec.md` |
 | A relay port lease is scoped to the relay, because `remotePort` binds a socket on the relay rather than on the host | `openspec/specs/physical-provisioning/spec.md` |
 | A lease is released on every terminal outcome, with reconciliation as the backstop | `openspec/specs/physical-provisioning/spec.md` |
 | The resolved `connectivity` field shape and its forwarding contract | `openspec/specs/physical-provisioning/spec.md` |
@@ -307,3 +346,42 @@ rented host, and host preparation is the step that can lose one.
 `add-host-ssh-port` is independent code but a practical prerequisite for
 section 8, because a host reached through a management tunnel cannot be
 registered without it.
+
+## Implementation progress
+
+Started this session; the remainder is a clean handoff, not a partial state.
+
+**Done — schema foundation.** `AnsiblePoolConfig` gains `relay_addr`,
+`relay_port`, `vm_port_range_start`, `vm_port_range_count`, all nullable so a
+pool with no relay keeps serving VMs by direct NAT, plus a derived `relay_id`
+property. `RelayPortLease` is added with `UNIQUE(relay_id, remote_port)`. Schema ships as one
+migration, `20260901_001_relay_reachable_hosts`, folding in the `hosts.ssh_port`
+column that `add-host-ssh-port` previously carried separately.
+
+Covered by `tests/unit/services/test_relay_port_leases.py`, which pins the
+constraint at the database rather than in an allocator that could be rewritten
+around it: one relay cannot issue a port twice; two hosts on one relay cannot
+share a port; **two pools on one relay cannot share a port**; two relays may
+each issue the same port; identity is derived, normalized, shared by pools on
+one endpoint, and absent when no relay is configured; existing pool rows keep
+working.
+
+**Not started.** Sections 1 (connectivity reshape and token forwarding, except
+1.4a), 3, 4, 5, 6, 8, 9, 10, and the allocator itself (2.2–2.8). The Ansible
+work in 4 and 5 is the largest remaining piece and is independent of the
+service-side allocator.
+
+**Sequencing note for whoever continues.** Section 6's reload gate needs the
+node. Sections 1–5 are written against the assumption that `frpc reload`
+preserves established sessions; if the gate fails, the rework is confined to how
+the VM-facing client is configured — one process per VM instead of one per host
+— and does not reach the lease model or the connectivity shape.
+
+## Validation evidence
+
+| Suite | Baseline | With the work so far |
+|---|---|---|
+| `make test` unit, `provisioning/compute/service` | 475 passed | **522 passed** |
+| `make test` integration | 185 passed | **196 passed** |
+
+No failures. The schema work adds 16 unit tests.

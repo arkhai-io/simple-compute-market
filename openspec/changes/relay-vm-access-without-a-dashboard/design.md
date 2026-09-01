@@ -65,9 +65,11 @@ the only place their reservations survive. The local file is authoritative for
 one host's own proxies; the dashboard adds visibility of *other* hosts'
 proxies on the same relay.
 
-So the question the dashboard actually answers is narrow: how do two hosts
-sharing one relay avoid choosing the same port? That is the open question
-below, and it has answers that do not require a management surface.
+So the question the dashboard actually answers is narrow: how do two clients
+sharing one relay avoid choosing the same port? That is a coordination question
+about a relay-wide resource, and it is answered by a port lease held in the
+provisioning service — see the lease decision below — rather than by a
+management surface on the relay.
 
 Verification has a cleaner local answer still. `frpc`'s admin API, bound to
 `127.0.0.1`, reports proxy status for the client that owns the proxy — which is
@@ -124,8 +126,52 @@ why the field's keys are named `relay_*` rather than `frp_*`.
 ## Decisions
 
 **The relay token travels in the provisioning secrets profile, not storefront
-settings.** It is a credential; the storefront's role is to say which relay to
-use, not to hold the key to it.
+settings, and is resolved per relay.** It is a credential; the storefront's role
+is to say which relay to use, not to hold the key to it.
+
+A single service-wide token is the wrong shape for the same reason a
+service-wide relay address was. Once pools may point at different relays, those
+relays are operated by different parties and admit clients on different tokens;
+one shared value would mean a site's token admits clients to another site's
+rendezvous, which is precisely the trust boundary the per-site deployment shape
+exists to draw.
+
+So the profile carries a map keyed by the derived relay identity, and that is
+the only source:
+
+```yaml
+relay_tokens:
+  "10.0.0.9:7000": "…"
+  "10.0.0.10:7000": "…"
+```
+
+**There is no default and no scalar fallback.** A fallback is worse than a
+missing value here. If a relay's entry is absent and lookup falls back to some
+other relay's token, the request either fails at admission — with an error that
+names the relay's rejection rather than the missing configuration — or, if the
+two relays happen to share a token, succeeds and hides the misconfiguration
+until the day they do not. A per-relay entry that must exist turns both into one
+loud failure at the point the configuration is wrong.
+
+A pool with a relay configured and no matching entry therefore fails before
+dispatch, alongside the other partial-configuration rejections.
+
+Keying by the derived identity rather than by a separate label means there is
+still one fact — the endpoint — and no second identifier to keep consistent with
+it. The cost is that a relay moving address requires editing the pool and the
+map key together. Both describe the same move, so they fail together rather than
+diverging silently, and it is the same operator action that already invalidates
+leases. Under a `relays` table the token reference would move to the row and this
+map would go away, which is a further reason that table is the right destination
+once a second relay is real.
+
+**The token is not in the database, which is why pool CRUD stays simple.** Relay
+address, port, and window are ordinary pool configuration and are returned by
+the pool endpoints like any other field. The credential is not among them: it
+lives in the deployment's secrets profile, so there is nothing secret in the
+pool row to redact from a read response, and no write path through which a
+token could be set by an API caller. That is the reason to keep it there rather
+than beside the endpoint it belongs to.
 
 That profile is not a new mechanism to build. Secret material in this
 repository reaches a service as a rendered `config-<profile>.yml` file inside a
@@ -203,7 +249,29 @@ the loop — a standalone seller path, or proving the host in isolation. Under
 that requirement the sub-window alternative returns, because it is the only one
 of the two that leaves the playbook self-sufficient.
 
-**A port lease is scoped to the relay, not to the host.**
+**Relay location is pool configuration, not request configuration.**
+
+Which relay a host dials is a fact about where that host physically is, not
+about the request being served. Carrying it in the storefront's `connectivity`
+payload lets a storefront name a different relay per request for the same host,
+and makes a durable property of the fleet depend on a caller getting its
+configuration right.
+
+`AnsiblePoolConfig` already holds exactly this class of fact — `playbook_path`,
+`inventory_group`, `extra_vars`, the default VM shape — so the relay endpoint
+and its port window belong there: `relay_addr`, `relay_port`,
+`vm_port_range_start`, `vm_port_range_count`. `connectivity` then carries
+nothing relay-related at all, and the buyer-facing address is returned in the
+fulfillment result rather than supplied with the request.
+
+This also removes the weakest part of the previous shape. Deriving relay
+identity from a request payload meant a storefront misconfiguration could split
+one relay into two identities, or merge two into one. Derived from pool
+configuration, the identity is set once by an operator, cannot vary per request,
+and two pools naming the same endpoint derive the same identity — so a genuine
+collision is detected rather than missed.
+
+**A port lease is scoped to the relay, not to the host — and not to the pool.**
 
 This corrects an error in the first version of this design, which made the lease
 unique on `(host, port)`. That is the wrong boundary. For a `tcp` proxy,
@@ -219,22 +287,36 @@ The lease is therefore `UNIQUE(relay_id, remote_port)`, with the host recorded
 as an attribute rather than as part of the key. Uniqueness then matches the
 resource: one listening socket on one relay.
 
-`relay_id` is derived from the normalized `relay_addr:relay_port` the client
-dials, rather than configured separately. The lease has to describe the endpoint
-where the port is actually bound, and that endpoint is exactly what a client
-addresses. A separately configured identifier can disagree with reality in both
-directions: two deployments claiming one identifier while pointing at different
-relays would collide leases that do not conflict, and one relay under two
-identifiers would issue the same port twice. A derived identifier cannot lie
-about which endpoint a port was bound on.
+Keying on the pool instead is the obvious simplification, and it has the same
+defect one level up. Nothing stops two pools pointing at one relay — a site
+running a GPU pool and a bare-metal pool through one rendezvous is the ordinary
+case — and `UNIQUE(pool_id, remote_port)` would let both issue 6100. The relay
+would bind the first and refuse the second, asynchronously, in a client log.
+Uniqueness has to match the resource, and the resource is one listening socket
+on one relay.
+
+So the pool supplies the relay endpoint and the lease is keyed on that endpoint:
+`relay_id` is the normalized `relay_addr:relay_port` read from the pool's
+configuration. It is not a separately administered identifier. A separately
+configured one can disagree with reality in both directions — two pools claiming
+one identifier while pointing at different relays would collide leases that do
+not conflict, and one relay under two identifiers would issue the same port
+twice — whereas a value derived from the endpoint cannot lie about where a port
+was bound.
 
 The cost is that moving a relay to a new address reads as a new endpoint while
 its existing proxies persist, so leases from the old address become stale and
 the new identity could reissue ports still bound. That is survivable — no DNS is
 involved and the addresses are reserved static ones, so it is a deliberate
 operator action rather than drift — and it is what reconciliation exists for.
-Revisit if relay addresses turn out to change in normal operation, in which case
-an explicit identifier with a documented migration becomes the better trade.
+
+The full answer is a `relays` table that pools reference by foreign key, making
+identity a row rather than an address: moving a relay would then update one
+field and every lease would follow it. That is the right shape once there is
+more than one relay to administer. It is not built now because it costs a table,
+its CRUD, and an admin surface to solve a problem that arises only under a
+deliberate operator action, in a deployment with one relay. Revisit when a
+second relay is configured, or the first time a relay address changes.
 
 **A lease is released on every terminal outcome, and reconciliation is the
 backstop.**
@@ -338,5 +420,23 @@ Needs a live host, verified from supplied logs:
 - A buyer connection string produced by the relay path actually connects.
 ## Open questions
 
-None outstanding. Both questions this change opened have been resolved; their
-answers and revisit triggers are recorded under Decisions above.
+**Should relay administration have its own API surface?**
+
+Relay endpoint and window reach the service as pool configuration, so the
+existing pool CRUD carries them and no new controller is needed for that. The
+token deliberately does not: it is in the secrets profile, so a pool response
+has nothing to redact and a pool write has no way to set a credential.
+
+That holds only while token rotation is a deployment action — re-render the
+profile, restart or refresh. If rotation should instead be an API operation, the
+token has to become durable state, and then it does need somewhere to live that
+is not the pool row: a write-only field that never appears in a read response,
+or a separate relay resource with its own controller and its own authorization.
+Of those, the separate resource is the better shape, because a write-only field
+on an otherwise readable model is the kind of asymmetry that leaks the first
+time someone adds a debug serializer.
+
+Not decided here because nothing yet needs API-driven rotation, and the answer
+changes the schema rather than only the surface. Revisit when a second relay is
+configured — the same trigger as the `relays` table, which is not a coincidence:
+both are the same question about whether a relay is a first-class resource.

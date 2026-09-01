@@ -264,12 +264,18 @@ checked against it here.
       behaviour, material evidence, and unresolved work. Move alternatives and
       debugging narrative into `design.md` first — this step deletes
       duplication, not information.
-- [ ] 8.5 **Roadmap currency.** No roadmap goal in
-      `docs/development/ROADMAP.md` currently covers reaching or preparing
-      rented hosts. Decide explicitly whether one is warranted now that three
-      changes serve it, and record the disposition either way so an absent edit
-      is a deliberate finding.
-- [ ] 8.6 **Promotion.** Complete the design-promotion record:
+- [x] 8.5 **Roadmap currency.** No `docs/development/ROADMAP.md` edit, and the
+      campaign-level question is not this change's to answer. No roadmap goal
+      covers reaching or preparing rented hosts. Whether one is warranted
+      depends on what the campaign as a whole changes about the product, and
+      this change alters how a host is prepared rather than what a deployment
+      can do — the same disposition `add-host-ssh-port` recorded. The decision
+      is owned by `relay-vm-access-without-a-dashboard`, which is the change
+      that alters what a deployment can do, and is taken once at its closeout
+      rather than three times. Recorded so the absent edit is a deliberate
+      finding rather than an unanswered question.
+- [x] 8.6 **Promotion.** Design-promotion record complete; every normative row
+      is applied to its permanent destination:
 
 | Accepted decision | Permanent location | State |
 |---|---|---|

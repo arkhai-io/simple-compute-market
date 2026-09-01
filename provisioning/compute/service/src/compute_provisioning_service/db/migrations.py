@@ -352,16 +352,65 @@ def _migrate_hosts_public_host(engine: Engine) -> None:
     _add_column_if_missing(engine, "hosts", "public_host", "VARCHAR")
 
 
-def _migrate_hosts_ssh_port(engine: Engine) -> None:
-    """Add the port the provisioner connects to, defaulting to 22.
+def _migrate_relay_reachable_hosts(engine: Engine) -> None:
+    """Everything needed to reach a host, and a VM on it, without an inbound route.
 
-    NOT NULL with a default in the same statement, so pre-existing rows
-    backfill as part of the ALTER rather than through a second pass that a
-    partially-applied migration could skip.
+    One migration rather than three, because these ship as one deployment and a
+    schema version costs an operator step whether or not it carries much. The
+    three parts are independent of each other and are applied in one event:
+
+    ``hosts.ssh_port``
+        The port the provisioner connects to. NOT NULL with a default in the
+        same statement, so pre-existing rows backfill as part of the ALTER
+        rather than through a second pass a partial application could skip.
+
+    ``ansible_pool_configs`` relay columns
+        Where a pool's hosts dial for buyer VM tunnels, and the remote-port
+        window that relay accepts. All nullable: a pool with no relay serves
+        VMs by direct NAT, so existing rows keep today's behaviour.
+
+    ``relay_port_leases``
+        Unique on ``(relay_id, remote_port)`` rather than on the host or the
+        pool, because a remote port binds a listening socket on the relay:
+        hosts and pools sharing a relay share one port namespace.
     """
     _add_column_if_missing(
         engine, "hosts", "ssh_port", "INTEGER NOT NULL DEFAULT 22"
     )
+
+    for column, spec in (
+        ("relay_addr", "VARCHAR"),
+        ("relay_port", "INTEGER"),
+        ("vm_port_range_start", "INTEGER"),
+        ("vm_port_range_count", "INTEGER"),
+    ):
+        _add_column_if_missing(engine, "ansible_pool_configs", column, spec)
+
+    with engine.begin() as connection:
+        connection.execute(text(
+            """
+            CREATE TABLE IF NOT EXISTS relay_port_leases (
+                id VARCHAR PRIMARY KEY,
+                relay_id VARCHAR NOT NULL,
+                remote_port INTEGER NOT NULL,
+                host_name VARCHAR,
+                pool_id VARCHAR,
+                owner_kind VARCHAR NOT NULL,
+                owner_id VARCHAR NOT NULL,
+                created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                released_at TIMESTAMP,
+                CONSTRAINT uq_relay_port_leases_endpoint UNIQUE (relay_id, remote_port)
+            )
+            """
+        ))
+        connection.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_relay_port_leases_relay_id "
+            "ON relay_port_leases (relay_id)"
+        ))
+        connection.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_relay_port_leases_owner_id "
+            "ON relay_port_leases (owner_id)"
+        ))
 
 
 def _migrate_vm_leases_table(engine: Engine) -> None:
@@ -1669,7 +1718,7 @@ MIGRATIONS: tuple[Migration, ...] = (
         _migrate_executor_identities_and_pool_modes,
     ),
     Migration(
-        "20260901_001_hosts_ssh_port",
-        _migrate_hosts_ssh_port,
+        "20260901_001_relay_reachable_hosts",
+        _migrate_relay_reachable_hosts,
     ),
 )

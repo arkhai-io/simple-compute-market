@@ -203,6 +203,67 @@ class AnsiblePoolConfig(Base):
     default_vm_vcpus = Column(Integer, nullable=True)
     default_vm_disk_size = Column(String, nullable=True)
 
+    # Where this pool's hosts dial for buyer VM tunnels, and the remote-port
+    # window that relay accepts. Which relay a host reaches is a property of
+    # where that host is, not of the request being served, so it is configured
+    # once here rather than supplied per fulfillment.
+    #
+    # All nullable: a pool with no relay configured serves VMs by direct NAT.
+    relay_addr = Column(String, nullable=True)
+    relay_port = Column(Integer, nullable=True)
+    vm_port_range_start = Column(Integer, nullable=True)
+    vm_port_range_count = Column(Integer, nullable=True)
+
+    @property
+    def relay_id(self) -> str | None:
+        """Stable identity of the relay this pool's hosts dial.
+
+        A remote port binds a listening socket on the relay, so the port
+        namespace belongs to the relay rather than to a host or a pool. Two
+        pools configured against one endpoint must resolve to one identity, or
+        they would each issue ports the other already holds; deriving the
+        identity from the endpoint is what makes that true without an operator
+        having to keep a separate identifier consistent.
+        """
+        if not self.relay_addr or not self.relay_port:
+            return None
+        return f"{self.relay_addr.strip().lower()}:{int(self.relay_port)}"
+
+
+class RelayPortLease(Base):
+    """A remote port held on a relay for one VM.
+
+    Uniqueness is ``(relay_id, remote_port)`` because that is the resource: a
+    ``tcp`` proxy's remote port binds a listening socket on the relay itself.
+    Hosts sharing a relay share one port namespace, and so do pools; keying on
+    either would issue a port already bound, and the relay's refusal surfaces
+    asynchronously in a tunnel client's log rather than as a failed allocation.
+
+    A lease is recorded before the job that will use it is dispatched, so a
+    crash between the two cannot leave a port bound on the relay that no record
+    claims. It is released on every terminal outcome rather than on teardown
+    alone, because a dispatch that never starts, a permanently failed creation,
+    a cancellation, and an expiry all end a VM's life without a teardown
+    running. Reconciliation bounds whatever path is missed.
+    """
+
+    __tablename__ = "relay_port_leases"
+    __table_args__ = (
+        UniqueConstraint("relay_id", "remote_port", name="uq_relay_port_leases_endpoint"),
+    )
+
+    id = Column(String, primary_key=True)
+    relay_id = Column(String, nullable=False, index=True)
+    remote_port = Column(Integer, nullable=False)
+    # Recorded for operator visibility and reconciliation, not for uniqueness.
+    host_name = Column(String, nullable=True)
+    pool_id = Column(String, nullable=True)
+    # The job or fulfillment whose terminal state releases this lease.
+    owner_kind = Column(String, nullable=False)
+    owner_id = Column(String, nullable=False, index=True)
+    created_at = Column(DateTime, nullable=False, server_default=func.now())
+    released_at = Column(DateTime, nullable=True)
+
 
 class Host(Base):
     """Registered provisioning host.

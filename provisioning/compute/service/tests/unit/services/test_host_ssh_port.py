@@ -276,9 +276,11 @@ class TestMigration:
             default_inventory_group=_INVENTORY_GROUP,
         )
         with engine.begin() as connection:
+            # The migration is one event covering three independent parts;
+            # reverting the part under test is enough to re-apply it.
             connection.execute(text("ALTER TABLE hosts DROP COLUMN ssh_port"))
             connection.execute(text(
-                "DELETE FROM schema_migrations WHERE id = '20260901_001_hosts_ssh_port'"
+                "DELETE FROM schema_migrations WHERE id = '20260901_001_relay_reachable_hosts'"
             ))
         return engine
 

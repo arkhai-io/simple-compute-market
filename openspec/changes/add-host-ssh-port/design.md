@@ -113,9 +113,18 @@ a host existing.
 
 `check_schema_version` compares the database against `MIGRATIONS[-1]` and raises
 `SchemaDriftError` at startup when the last declared migration is not recorded.
-Appending `20260901_001_hosts_ssh_port` therefore means every deployed database
-must have migrations applied before an image carrying this code starts — through
-the Helm init container, `compute-provisioning-migrate`, or `make migrate`.
+Appending `20260901_001_relay_reachable_hosts` therefore means every deployed
+database must have migrations applied before an image carrying this code starts
+— through the Helm init container, `compute-provisioning-migrate`, or
+`make migrate`.
+
+That migration is shared. `hosts.ssh_port` ships in one event with the relay
+schema from `relay-vm-access-without-a-dashboard`, because a schema version
+costs an operator step whether or not it carries much and the campaign deploys
+together. The consequence to hold onto: this change is no longer independently
+deployable ahead of that one. If it needs to be, the migration splits back into
+two entries and the shared one is renamed — cheap while nothing has applied it,
+not cheap afterwards.
 
 This change does not run them. Applying a migration to a deployed database
 mutates persistent state and needs its own authorized packet.

@@ -445,7 +445,7 @@ def test_run_migrations_applies_versioned_migrations_to_old_sqlite_schema():
         "20260804_001_hosts_gpu_model",
         "20260811_001_provisioning_replay_reservations",
         "20260815_001_pool_declared_offering_modes",
-        "20260901_001_hosts_ssh_port",
+        "20260901_001_relay_reachable_hosts",
     }
 
 
