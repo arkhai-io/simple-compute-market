@@ -1,4 +1,4 @@
-.PHONY: test test-alkahest test-capacity-publication test-config test-contact-exchange test-delivery test-identity test-policy test-site test-site-client test-resource-pools test-fulfillment test-settlement-runtime test-negotiation-runtime test-hosted-settlement test-storefront dist dist-capacity-publication dist-contact-exchange dist-delivery dist-site dist-site-client dist-resource-pools dist-fulfillment dist-settlement-runtime dist-negotiation-runtime dist-hosted-settlement dist-storefront
+.PHONY: test test-alkahest test-capacity-publication test-config test-contact-exchange test-delivery test-identity test-policy test-site test-site-client test-resource-pools test-fulfillment test-settlement-runtime test-negotiation-runtime test-hosted-settlement test-storefront dist dist-ci dist-capacity-publication dist-contact-exchange dist-delivery dist-site dist-site-client dist-resource-pools dist-fulfillment dist-settlement-runtime dist-negotiation-runtime dist-hosted-settlement dist-storefront
 
 DIST_DIR ?= ../.dist
 
@@ -49,7 +49,9 @@ test-hosted-settlement:
 test-storefront:
 	cd storefront && $(MAKE) test
 
-dist: dist-capacity-publication dist-contact-exchange dist-delivery dist-site dist-site-client dist-resource-pools dist-fulfillment dist-settlement-runtime dist-negotiation-runtime dist-hosted-settlement dist-storefront
+dist: dist-ci dist-hosted-settlement
+
+dist-ci: dist-capacity-publication dist-contact-exchange dist-delivery dist-site dist-site-client dist-resource-pools dist-fulfillment dist-settlement-runtime dist-negotiation-runtime dist-storefront
 
 dist-contact-exchange: dist-settlement-runtime
 	-mkdir -p $(DIST_DIR)

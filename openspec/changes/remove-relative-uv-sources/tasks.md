@@ -36,3 +36,20 @@
 - [ ] 3.1 Correct `docs/development/RELEASING.md` and any conflicting local-development guidance.
 - [ ] 3.2 Run packaging checks, affected suites, full path-source scan, and strict OpenSpec validation.
 - [ ] 3.3 Promote the accepted rule to `openspec/specs/deployment-state/spec.md` and rationale to `architecture.md`, recording destinations in `design.md` before archive.
+
+## 4. CI wheelhouse repair
+
+- [x] 4.1 `make dist-ci` builds the complete repository-owned Python wheel
+      closure; hosted-client staging remains a separate release operation.
+- [x] 4.2 Python jobs always create `.dist`, predist jobs call `make dist-ci`,
+      and every transitive hosted-client consumer declares the prerequisite.
+- [x] 4.3 Corrected the two stale `arkhai-core` lock sources and reproduced all
+      15 formerly failing suites against a clean assembled wheelhouse.
+
+## 5. CI repair closeout
+
+- [x] 5.1 Closeout passed comment hygiene, touched-path tests, clean wheel
+      assembly, strict OpenSpec validation, and permanent cross-reference
+      checks. `docs/development/TESTING.md` owns the CI command; the design
+      promotion record identifies both permanent destinations and records no
+      roadmap impact.

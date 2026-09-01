@@ -466,6 +466,14 @@ relocated unit tests. Validate:
 - observable lifecycle events verified without arbitrary sleeps (see
   "Async test discipline" above).
 
+The Python CI matrix always creates `.dist`, including for projects with no
+internal dependencies. Jobs that consume repository-owned Python packages run
+`make dist-ci` so the Make dependency graph, rather than the workflow, owns the
+wheel inventory and build order. A job that consumes the separately released
+hosted-settlement client declares that prerequisite in its matrix entry, stages
+and verifies the signed client wheel, and then builds the repository-owned
+adapter against the assembled wheelhouse.
+
 ## Cross-Language Contract Conformance
 
 Where the same protocol has independent implementations in more than one
