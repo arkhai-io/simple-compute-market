@@ -112,7 +112,7 @@ dist-registry-client: ## Build arkhai-core-registry-client wheel into .dist/
 	@ls $(DIST_DIR)/arkhai_core_registry_client-*-none-any.whl > /dev/null 2>&1 || \
 		(echo "ERROR: arkhai-core-registry-client produced a platform-specific wheel — must build inside Docker" && exit 1)
 
-dist-arkhai-core-registry: dist-registry-client ## Build arkhai-core-registry wheel into .dist/
+dist-arkhai-core-registry: dist-core dist-registry-client ## Build arkhai-core-registry wheel into .dist/
 	-mkdir -p $(DIST_DIR)
 	cd core/registry && uv build --wheel --out-dir $(DIST_DIR)
 	@ls $(DIST_DIR)/arkhai_core_registry-*-none-any.whl > /dev/null 2>&1 || \

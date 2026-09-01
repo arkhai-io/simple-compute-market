@@ -46,6 +46,23 @@ This pushdown boundary is semantic, not a promise about physical execution. A de
 
 A registry may load another vocabulary on restart, but safe live rotation and coexistence of incompatible client generations are separate rollout concerns. The baseline does not treat a configured registry as a universal domain interpreter.
 
+## Self-description boundary
+
+The well-known registry descriptor assembles facts without creating a second
+authority for them. Its principal comes from the loaded response signer, its
+schema identity comes from the active filter specification, and its access
+posture comes from the read gate. Only the public base URL, display name,
+operator identity, and—when reads are gated—the acquisition pointer are
+operator-authored configuration. Contradictory or incomplete inputs stop
+startup.
+
+The descriptor is returned through the ordinary authenticated registry
+exchange. Its response proof shows that the named principal controls the
+active signing credential. That is proof of possession, not an endorsement of
+the claimed URL or operator. A directory may separately curate and sign the
+portable descriptor body; that offline assertion is a different trust layer
+from the registry's online response proof.
+
 ## Injected signer boundary
 
 The registry client depends on the scheme-neutral signer interface rather than a raw key or an address. The signer exposes only its canonical public principal and signing operation, so Ed25519 and EIP-191 follow the same client and server path and private material does not enter request models, listing payloads, logs, or registry persistence. The registry resolves the exact `{scheme, identifier}` to a stable publisher; it never infers ownership from identifier shape.

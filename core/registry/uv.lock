@@ -172,6 +172,7 @@ source = { editable = "." }
 dependencies = [
     { name = "aiohttp" },
     { name = "alembic" },
+    { name = "arkhai-core" },
     { name = "arkhai-kit-identity" },
     { name = "fastapi" },
     { name = "jsonpath-ng" },
@@ -199,6 +200,7 @@ dev = [
 requires-dist = [
     { name = "aiohttp", specifier = ">=3.9.0" },
     { name = "alembic", specifier = ">=1.12.0" },
+    { name = "arkhai-core", specifier = "==0.2.0" },
     { name = "arkhai-kit-identity", specifier = "==0.3.0" },
     { name = "fastapi", specifier = ">=0.104.0" },
     { name = "jsonpath-ng", specifier = ">=1.6" },

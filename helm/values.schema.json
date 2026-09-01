@@ -22,10 +22,11 @@
     },
     "registry": {
       "type": "object",
-      "required": ["identity"],
+      "required": ["identity", "descriptor"],
       "properties": {
         "image": {"$ref": "#/definitions/image"},
-        "identity": {"$ref": "#/definitions/identity"}
+        "identity": {"$ref": "#/definitions/identity"},
+        "descriptor": {"$ref": "#/definitions/registryDescriptor"}
       }
     },
     "storefront": {
@@ -175,6 +176,23 @@
       "properties": {
         "authority": {"type": "string", "minLength": 1},
         "principal": {"$ref": "#/definitions/publicIdentity"}
+      }
+    },
+    "registryDescriptor": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["baseUrl", "displayName", "operatorIdentity"],
+      "properties": {
+        "baseUrl": {"type": "string", "pattern": "^https?://\\S+$"},
+        "displayName": {"type": "string", "minLength": 1, "maxLength": 256},
+        "operatorIdentity": {"type": "string", "minLength": 1, "maxLength": 256},
+        "accessAcquisitionPointer": {
+          "type": "string",
+          "anyOf": [
+            {"const": ""},
+            {"pattern": "^https?://\\S+$"}
+          ]
+        }
       }
     },
     "registryAuthority": {

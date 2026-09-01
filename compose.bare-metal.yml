@@ -11,6 +11,9 @@ services:
       - REGISTRY_AUTHORITY_SCHEME=${BARE_METAL_REGISTRY_AUTHORITY_SCHEME:?set registry authority scheme}
       - REGISTRY_AUTHORITY_IDENTIFIER=${BARE_METAL_REGISTRY_AUTHORITY_IDENTIFIER:?set canonical registry principal}
       - REGISTRY_AUTHORITY_CREDENTIAL_FILE=/run/secrets/arkhai/registry-identity/credential
+      - REGISTRY_DESCRIPTOR_BASE_URL=${BARE_METAL_REGISTRY_PUBLIC_URL:?set externally reachable registry URL}
+      - REGISTRY_DESCRIPTOR_DISPLAY_NAME=${BARE_METAL_REGISTRY_DISPLAY_NAME:-Bare Metal Compute Registry}
+      - REGISTRY_DESCRIPTOR_OPERATOR_IDENTITY=${BARE_METAL_OPERATOR_IDENTITY:?set public operator identity}
     volumes:
       - ${BARE_METAL_REGISTRY_IDENTITY_CREDENTIAL_FILE:?set registry signer credential file}:/run/secrets/arkhai/registry-identity/credential:ro
 

@@ -18,6 +18,8 @@ Stable publisher rows and listings are owned through canonical
 - Optional API-key auth, gated independently for read and write
   (`REGISTRY_REQUIRE_READ_API_KEY`, `REGISTRY_REQUIRE_WRITE_API_KEY`);
   keys carry a read/write scope.
+- Authority-authenticated self-description at
+  `/.well-known/arkhai/registry-descriptor.json`.
 
 ## Quick start (local docker-compose)
 
@@ -52,6 +54,25 @@ routes require `Authorization: Bearer <key>` against an active row in
 `scope: read|write`; a single write-scoped bootstrap key can be seeded
 via `REGISTRY_BOOTSTRAP_API_KEY` on first start.
 
+## Registry descriptor
+
+Startup requires `REGISTRY_DESCRIPTOR_BASE_URL`,
+`REGISTRY_DESCRIPTOR_DISPLAY_NAME`, and
+`REGISTRY_DESCRIPTOR_OPERATOR_IDENTITY`. The service combines those public
+operator assertions with the active authority signer, filter-spec schema, and
+read gate. If reads require an API key,
+`REGISTRY_DESCRIPTOR_ACCESS_ACQUISITION_POINTER` is also required; public
+registries reject that setting.
+
+Authenticated buyers, sellers, and services can bootstrap from only a URL and
+their own signer with `RegistryClient.bootstrap_registry_descriptor()`. That
+method verifies the response against the principals carried in the descriptor
+before returning it. A normally constructed, externally pinned client uses
+`get_registry_descriptor()` instead. The endpoint does not require the registry
+read key, so a caller can discover the acquisition pointer first. Its signed
+response proves possession of the registry signing credential; it is not
+third-party endorsement of the operator or URL.
+
 ## Database
 
 - Dev: SQLite (`DATABASE_URL=sqlite:///./indexer.db`)
@@ -73,6 +94,7 @@ endpoints:
 - `POST /publishers/{publisher_id}/identity-rotations`
 - `POST /publishers/{publisher_id}/identity-rotations/{nonce}/retire`
 - `GET /filter-spec` (returns the active filter spec + ETag)
+- `GET /.well-known/arkhai/registry-descriptor.json` (signed self-description)
 - `POST /admin/api-keys` (admin)
 - `GET /api/v1/system/config`
 - `GET /api/v1/system/stats`

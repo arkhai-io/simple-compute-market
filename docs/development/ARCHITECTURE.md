@@ -163,6 +163,22 @@ accepted runs recover under immutable ownership.
 
 See the [marketplace identity contract](../../openspec/specs/marketplace-identity/spec.md) and its [architecture](../../openspec/specs/marketplace-identity/architecture.md).
 
+### Registry self-description
+
+Each registry publishes a strict portable descriptor at
+`/.well-known/arkhai/registry-descriptor.json`. The route uses the same
+scheme-neutral version 2 request authentication, durable replay, and signed
+response path as listing discovery. The descriptor's authority principal is
+the live response signer, its schema identity is the active filter
+specification, and its access posture is the live read gate. The registry
+process does not maintain duplicate configuration for those facts.
+
+The public URL, display name, operator identity, and any key-acquisition
+pointer remain operator-owned deployment configuration. A response proof
+establishes possession of the named credential, not third-party endorsement.
+Directory curation and offline operator signatures therefore remain outside
+the registry service boundary.
+
 ### Capacity publication and multi-domain storefront composition
 
 `arkhai-kit-capacity-publication` owns the storefront-side multi-site capacity
@@ -641,5 +657,4 @@ Alkahest remains an independent mechanism lane. API-credit and bare-metal hosted
 Bare metal composes the same provider-neutral hosted mechanism without importing VM packages or the released client directly. The installed buyer plugin uses the core `HostedSettlementTransport`; the seller binds bare-owned callbacks into the shared `HostedSettlementRouteService`. On first start, the seller rebuilds the accepted physical binding only from the durable negotiation thread, trusted listing, exact option, settlement plan, and canonical parties, then persists it under the obligation identity.
 
 Authoritative funding is the gate into the existing selected-site capacity and fulfillment clients. A deterministic fulfillment identity survives retries and restart. Access-ready state produces a credential-free public result and content-addressed lease-ready evidence; the resolver returns the canonical evidence with a marketplace-signer proof. Collection follows evidence. Reclaim is blocked after evidence, committed collection, or unknown physical authority. Financial return/loss recovery and post-collection lease teardown remain separate convergent lifecycles.
-
 
