@@ -253,6 +253,14 @@ The implemented change mapping is
 Remaining external operational evidence belongs to that change's unchecked
 verification tasks; it does not restore legacy identity precedence.
 
+## Registry discovery status
+
+Registry discovery is schema-driven and authority-authenticated, but a registry
+does not yet publish the complete operator-authored descriptor needed to import
+its public URL, authority trust pins, schema identity, and access posture as one
+unit. That gap is owned by
+[`add-registry-self-description`](../../openspec/changes/add-registry-self-description/).
+
 ---
 
 ## Hosted settlement release status

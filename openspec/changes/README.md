@@ -253,6 +253,7 @@ Changes with no campaign; each stands alone.
 | [`add-development-roadmap`](add-development-roadmap/) | implemented 2026-08-06; pending archive | Establishes `docs/development/ROADMAP.md`, the governance permitting it, and the closeout roadmap-currency step |
 | [`fix-golden-image-config`](fix-golden-image-config/) | active | Align generated and consumed keys and deliver secrets through the provisioning Secret profile |
 | [`deduplicate-dynaconf-bootstrap`](deduplicate-dynaconf-bootstrap/) | active | Parameterized kit/config construction with exact provisioning and e2e parity; storefront loader excluded. Useful precedent for the kit-composition extractions |
+| [`add-registry-self-description`](add-registry-self-description/) | active; no blocking dependency | Publishes one strict operator-authored registry descriptor through the existing signed registry exchange, with schema, access posture, and authority pins derived from their active sources |
 
 ## Archived and superseded
 
