@@ -249,7 +249,12 @@
       "type": "object",
       "additionalProperties": false,
       "properties": {
-        "address": {"type": "string", "pattern": "^0x[0-9A-Fa-f]{40}$"},
+        "address": {
+          "anyOf": [
+            {"const": ""},
+            {"type": "string", "pattern": "^0x[0-9A-Fa-f]{40}$"}
+          ]
+        },
         "ssh_public_key": {"type": "string", "minLength": 1}
       }
     },
@@ -279,9 +284,14 @@
       "additionalProperties": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["rpc_url", "chain_id"],
+        "required": ["chain_id"],
         "properties": {
-          "rpc_url": {"type": "string", "minLength": 1},
+          "rpc_url": {
+            "anyOf": [
+              {"const": ""},
+              {"type": "string", "minLength": 1}
+            ]
+          },
           "chain_id": {"type": "integer", "minimum": 1}
         }
       }

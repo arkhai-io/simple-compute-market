@@ -391,6 +391,24 @@ gemini_api_key = "secret-value"
     assert cfg.integrations.gemini_api_key == "secret-value"
 
 
+def test_secrets_overlay_completes_public_chain_configuration(tmp_path):
+    base = tmp_path / "storefront.toml"
+    base.write_text("""
+[Chains.base_sepolia]
+chain_id = 84532
+""")
+    secret = tmp_path / "storefront.secrets.toml"
+    secret.write_text("""
+[chains.base_sepolia]
+rpc_url = "https://rpc.example.invalid"
+""")
+
+    cfg = _build_isolated(tmp_path, [base, secret])
+
+    assert cfg.chains.base_sepolia.chain_id == 84532
+    assert cfg.chains.base_sepolia.rpc_url == "https://rpc.example.invalid"
+
+
 def test_env_var_wins_over_overlay_files(tmp_path, monkeypatch):
     overlay = tmp_path / "storefront.toml"
     overlay.write_text("port = 8001\n")
