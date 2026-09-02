@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+from datetime import timedelta
 import os
 
 from compute_provisioning.startup import (
@@ -13,7 +14,11 @@ from compute_provisioning_service import container as _container_module
 from compute_provisioning_service.config import settings
 from compute_provisioning_service.container import container
 from compute_provisioning_service.db.migrations import check_schema_version
+from market_fulfillment.db import SettlementRecord, SettlementRecordState
 from compute_provisioning_service.services.async_job_queue import AsyncJobQueue
+from compute_provisioning_service.services.definition_documents import (
+    DefinitionDocumentImporter,
+)
 from compute_provisioning_service.services.relay_service import RelayService
 
 logger = logging.getLogger(__name__)
@@ -73,6 +78,7 @@ def resolve_request_path_services() -> None:
     _container_module.resolved_executor_lease_service = container.executor_lease_service()
     _container_module.resolved_compute_contract_service = container.compute_contract_service()
     _container_module.resolved_resource_pool_service = container.resource_pool_service()
+    _container_module.resolved_relay_port_allocator = container.relay_port_allocator()
     _container_module.resolved_relay_service = RelayService(
         session_factory=_container_module.resolved_session_factory,
         settings=settings,
@@ -142,126 +148,20 @@ def seed_inventory_if_empty() -> None:
         )
 
 
-def _document_digest(text: str) -> str:
-    import hashlib
-
-    return hashlib.sha256(text.encode("utf-8")).hexdigest()
-
-
-def _recorded_digest(session_factory, kind: str) -> str | None:
-    from compute_provisioning_service.db.models import DefinitionDocumentImport
-
-    with session_factory() as db:
-        row = db.get(DefinitionDocumentImport, kind)
-        return None if row is None else row.digest
-
-
-def _record_digest(session_factory, kind: str, digest: str) -> None:
-    from compute_provisioning_service.db.models import DefinitionDocumentImport
-
-    with session_factory() as db, db.begin():
-        row = db.get(DefinitionDocumentImport, kind)
-        if row is None:
-            db.add(DefinitionDocumentImport(document_kind=kind, digest=digest))
-        else:
-            row.digest = digest
+def import_relay_definitions_if_configured() -> None:
+    _definition_importer().import_relay_definitions()
 
 
 def import_pool_definitions_if_configured() -> None:
-    """Reconcile the pool definition document when it has changed.
-
-    Import treats its document as authoritative: it overwrites pools that
-    differ and disables pools the document omits. That authority belongs to the
-    act of submitting a document. A process start is not a submission.
-
-    The distinction matters because import is idempotent with respect to the
-    *document*, not the *database*. Re-running it against state something else
-    changed reverts that change, because a diff against the document is exactly
-    what detects it. Applying it on every startup would therefore undo relay
-    and pool administration on eviction, drain, and crash recovery — silently,
-    with no failure and no log line an operator would think to check.
-
-    So the digest of the last reconciled document is recorded, and startup
-    reconciles only when the mounted document differs from it. An explicit
-    import request still reconciles unconditionally, because the operator asked.
-
-    The digest is recorded only after a successful apply, so a failed
-    reconciliation is retried on the next startup rather than being recorded as
-    done and skipped forever.
-    """
-    path = getattr(settings, "resolved_pool_definitions_path", None)
-    if path is None:
-        logger.info("Pool-definitions import: no pool_definitions_path configured — skipped")
-        return
-
-    if not path.exists():
-        raise FileNotFoundError(f"Configured pool-definitions file does not exist: {path}")
-
-    yaml_text = path.read_text(encoding="utf-8")
-    digest = _document_digest(yaml_text)
-    session_factory = _container_module.resolved_session_factory
-    if _recorded_digest(session_factory, "pools") == digest:
-        logger.info(
-            "Pool-definitions import from %s: unchanged since last reconciliation — "
-            "not reapplied, so administrative changes are preserved",
-            path,
-        )
-        return
-
-    pool_service = _container_module.resolved_resource_pool_service
-    diff = pool_service.import_pools(yaml_text, validate_only=False)
-    _record_digest(session_factory, "pools", digest)
-    logger.info(
-        "Pool-definitions import from %s: created=%d updated=%d disabled=%d unchanged=%d",
-        path,
-        len(diff.created), len(diff.updated), len(diff.disabled), len(diff.unchanged),
-    )
+    _definition_importer().import_pool_definitions()
 
 
-def import_relay_definitions_if_configured() -> None:
-    """Reconcile the relay definition document when it has changed.
-
-    Same gate as pools, and the same reason. Relays and pools use one rule so
-    that a reader who knows one does not guess wrong about the other.
-
-    A relay entry names which key of the secrets profile holds its admission
-    token. That key is read only when the relay is created and never re-read,
-    so a token rotated through the relay controller is not reverted by a
-    reconciliation of a document that still names the key holding the old one.
-    """
-    path = getattr(settings, "resolved_relay_definitions_path", None)
-    if path is None:
-        logger.info("Relay-definitions import: no relay_definitions_path configured — skipped")
-        return
-
-    if not path.exists():
-        raise FileNotFoundError(f"Configured relay-definitions file does not exist: {path}")
-
-    yaml_text = path.read_text(encoding="utf-8")
-    digest = _document_digest(yaml_text)
-    session_factory = _container_module.resolved_session_factory
-    if _recorded_digest(session_factory, "relays") == digest:
-        logger.info(
-            "Relay-definitions import from %s: unchanged since last reconciliation — "
-            "not reapplied, so administrative changes are preserved",
-            path,
-        )
-        return
-
-    from compute_provisioning_service.services.relay_definitions import (
-        import_relay_definitions,
-    )
-
-    diff = import_relay_definitions(
-        yaml_text,
-        relay_service=_container_module.resolved_relay_service,
+def _definition_importer() -> DefinitionDocumentImporter:
+    return DefinitionDocumentImporter(
+        session_factory=_container_module.resolved_session_factory,
         settings=settings,
-    )
-    _record_digest(session_factory, "relays", digest)
-    logger.info(
-        "Relay-definitions import from %s: created=%d updated=%d unchanged=%d",
-        path,
-        len(diff.created), len(diff.updated), len(diff.unchanged),
+        pool_service=_container_module.resolved_resource_pool_service,
+        relay_service=_container_module.resolved_relay_service,
     )
 
 
@@ -295,6 +195,27 @@ def startup_steps() -> tuple[ComputeProvisioningStartupStep, ...]:
         ComputeProvisioningStartupStep("seed-inventory", seed_inventory_if_empty),
         ComputeProvisioningStartupStep("create-job-queue", create_job_queue),
     )
+
+
+def _fulfillment_is_terminal(owner_kind: str, owner_id: str) -> bool:
+    """Whether a lease's owner has finished, for reconciliation to act on.
+
+    Supplied to the allocator rather than queried inside it: what makes a
+    fulfillment terminal belongs to fulfillment, not to port accounting, and
+    an allocator that knew would have to be changed whenever that did.
+    """
+    if owner_kind != "fulfillment":
+        return False
+    terminal = {
+        SettlementRecordState.failed.value,
+        SettlementRecordState.torn_down.value,
+        SettlementRecordState.abandoned.value,
+    }
+    session_factory = _container_module.resolved_session_factory
+    with session_factory() as db:
+        record = db.get(SettlementRecord, owner_id)
+        # A lease whose owner has vanished is orphaned by definition.
+        return record is None or record.state in terminal
 
 
 def background_tasks() -> tuple[ComputeProvisioningBackgroundTask, ...]:
@@ -370,6 +291,37 @@ def background_tasks() -> tuple[ComputeProvisioningBackgroundTask, ...]:
         logger.info(
             "Capacity reservation watchdog disabled "
             "(capacity_reservation_watchdog_enabled=false)"
+        )
+
+    # Relay port reconciliation — the backstop beneath release, which is
+    # attached to the settlement record's terminal transition. This recovers
+    # leases whose owner reached terminal by a path that bypassed it.
+    relay_reconcile_enabled = bool(
+        getattr(settings, "relay_port_reconciliation_enabled", True)
+    )
+    if relay_reconcile_enabled:
+        relay_poll = float(
+            getattr(settings, "relay_port_reconciliation_poll_interval_seconds", 300)
+        )
+        relay_grace = float(
+            getattr(settings, "relay_port_reconciliation_grace_seconds", 3600)
+        )
+        tasks.append(
+            ComputeProvisioningBackgroundTask(
+                "relay-port-reconciliation",
+                lambda: _container_module.resolved_relay_port_allocator.run_reconciliation(
+                    is_owner_terminal=_fulfillment_is_terminal,
+                    poll_interval_seconds=relay_poll,
+                    grace=timedelta(seconds=relay_grace),
+                ),
+                "Relay port reconciliation started (interval=%ds grace=%ds)",
+                (int(relay_poll), int(relay_grace)),
+            )
+        )
+    else:
+        logger.info(
+            "Relay port reconciliation disabled "
+            "(relay_port_reconciliation_enabled=false)"
         )
 
     # Fulfillment convergence watchdog retries durable dispatch work and

@@ -76,6 +76,15 @@ class _Deployment:
             resolved_pool_definitions_path=None,
         )
 
+    def recorded_digest(self, kind: str) -> str | None:
+        """What the service believes it last reconciled, read straight from the
+        row rather than through the importer that writes it."""
+        from compute_provisioning_service.db.models import DefinitionDocumentImport
+
+        with self.session_factory() as db:
+            row = db.get(DefinitionDocumentImport, kind)
+            return None if row is None else row.digest
+
     def write_document(self, text: str) -> None:
         self.document.write_text(text, encoding="utf-8")
 
@@ -223,7 +232,7 @@ class TestAFailedApplyIsRetried:
         with pytest.raises(Exception):
             deployment.restart(monkeypatch)
 
-        assert app_runtime._recorded_digest(deployment.session_factory, "relays") is None
+        assert deployment.recorded_digest("relays") is None
 
     def test_the_next_start_retries_after_the_document_is_fixed(
         self, deployment, monkeypatch

@@ -438,6 +438,17 @@ def _migrate_relay_reachable_hosts(engine: Engine) -> None:
             "CREATE INDEX IF NOT EXISTS ix_relay_port_leases_owner_id "
             "ON relay_port_leases (owner_id)"
         ))
+        # One active lease per owner, enforced rather than only queried, so a
+        # concurrent pair of retries for one fulfillment cannot both take a
+        # port. Partial rather than plain: release is soft, so a released lease
+        # keeps its row and an unconditional constraint would stop an owner
+        # ever holding a second lease across its whole history. Both SQLite
+        # (3.8+) and PostgreSQL support the partial form.
+        connection.execute(text(
+            "CREATE UNIQUE INDEX IF NOT EXISTS uq_relay_port_leases_active_owner "
+            "ON relay_port_leases (owner_kind, owner_id) "
+            "WHERE released_at IS NULL"
+        ))
         connection.execute(text(
             """
             CREATE TABLE IF NOT EXISTS definition_document_imports (

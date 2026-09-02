@@ -68,6 +68,25 @@ class RelayPortAllocator:
         which is correct without a lock held across the whole window scan.
         """
         with self._session_factory() as db:
+            # Idempotent for one owner. A crash between allocation and dispatch
+            # is retried, and without this the retry takes a second port and
+            # orphans the first — recovered only after reconciliation's grace
+            # period, during which the window is smaller than it looks.
+            existing = (
+                db.query(RelayPortLease)
+                .filter(
+                    RelayPortLease.owner_kind == owner_kind,
+                    RelayPortLease.owner_id == owner_id,
+                    RelayPortLease.released_at.is_(None),
+                )
+                .one_or_none()
+            )
+            if existing is not None:
+                return PortLease(
+                    id=existing.id,
+                    relay_id=existing.relay_id,
+                    remote_port=existing.remote_port,
+                )
             relay = db.get(Relay, relay_id)
             if relay is None:
                 raise RelayWindowExhaustedError(
@@ -151,6 +170,52 @@ class RelayPortAllocator:
         db.add(lease)
         return lease
 
+    @staticmethod
+    def release_in_session(db: Session, *, owner_kind: str, owner_id: str) -> int:
+        """Release inside the caller's transaction, without committing.
+
+        The terminal-state writer uses this so the release and the state that
+        makes it correct commit together. Releasing afterwards, in its own
+        transaction, reintroduces on every crash exactly the leak that
+        reconciliation exists to bound for paths nobody enumerated.
+        """
+        held = (
+            db.query(RelayPortLease)
+            .filter(
+                RelayPortLease.owner_kind == owner_kind,
+                RelayPortLease.owner_id == owner_id,
+                RelayPortLease.released_at.is_(None),
+            )
+            .all()
+        )
+        now = datetime.now(timezone.utc)
+        for lease in held:
+            lease.released_at = now
+        return len(held)
+
+    def find_active_lease(self, *, owner_kind: str, owner_id: str) -> PortLease | None:
+        """The lease an owner currently holds, or None.
+
+        Teardown reads this rather than pool configuration: the lease records
+        where the port was bound, and a pool rebound since creation no longer
+        describes it.
+        """
+        with self._session_factory() as db:
+            row = (
+                db.query(RelayPortLease)
+                .filter(
+                    RelayPortLease.owner_kind == owner_kind,
+                    RelayPortLease.owner_id == owner_id,
+                    RelayPortLease.released_at.is_(None),
+                )
+                .one_or_none()
+            )
+            if row is None:
+                return None
+            return PortLease(
+                id=row.id, relay_id=row.relay_id, remote_port=row.remote_port
+            )
+
     def release(self, *, owner_kind: str, owner_id: str) -> int:
         """Release every lease held by one owner. Returns how many were released.
 
@@ -160,19 +225,9 @@ class RelayPortAllocator:
         fail each other.
         """
         with self._session_factory() as db, db.begin():
-            held = (
-                db.query(RelayPortLease)
-                .filter(
-                    RelayPortLease.owner_kind == owner_kind,
-                    RelayPortLease.owner_id == owner_id,
-                    RelayPortLease.released_at.is_(None),
-                )
-                .all()
+            return self.release_in_session(
+                db, owner_kind=owner_kind, owner_id=owner_id
             )
-            now = datetime.now(timezone.utc)
-            for lease in held:
-                lease.released_at = now
-            return len(held)
 
     def reconcile(
         self,
@@ -181,6 +236,14 @@ class RelayPortAllocator:
         grace: timedelta = timedelta(hours=1),
     ) -> int:
         """Release leases whose owner has been terminal beyond a grace period.
+
+        One terminal state is reached only here rather than through the
+        settlement record's terminal transition. Capacity reclamation abandons
+        an aggregate that never dispatched, from a component that knows nothing
+        about ports — and allocation runs in its own transaction, so a lease
+        taken during an acceptance that then rolls back survives while the
+        record reverts to assigned and is later abandoned. That window is
+        narrow and real, and this is what closes it.
 
         Release is attached to every terminal outcome, and that is still not
         sufficient on its own: a set of code paths is never provably
@@ -218,6 +281,38 @@ class RelayPortAllocator:
                 )
         return released
 
+    async def run_reconciliation(
+        self,
+        *,
+        is_owner_terminal: Any,
+        poll_interval_seconds: float,
+        grace: timedelta,
+    ) -> None:
+        """Periodically release leases the terminal transition did not.
+
+        A backstop, not the mechanism: release is attached to the settlement
+        record's terminal transition, in that transition's own transaction.
+        What this recovers is a lease whose owner reached terminal by some path
+        that bypassed it — which is, by definition, a path nobody enumerated,
+        which is why this exists at all rather than being reasoned away.
+
+        Every release here is logged at warning level. A quiet sweep means the
+        enumerated path is working; a noisy one names a path that needs
+        finding.
+        """
+        import asyncio
+
+        while True:
+            try:
+                self.reconcile(is_owner_terminal=is_owner_terminal, grace=grace)
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                # A sweep failure must not end the loop: the next cycle is the
+                # recovery, and a dead backstop is worse than a noisy one.
+                logger.exception("Relay port reconciliation cycle failed")
+            await asyncio.sleep(poll_interval_seconds)
+
     def held_ports(self, relay_id: str) -> list[int]:
         with self._session_factory() as db:
             return sorted(
@@ -254,6 +349,44 @@ class RelayPortAllocator:
         return RelayWindowExhaustedError(
             f"relay '{relay.id}' ({relay.relay_addr}:{relay.relay_port}) has no free "
             f"port in its configured window {relay.vm_port_range_start}-{last}"
+        )
+
+    @staticmethod
+    def active_leases_for_relay(db: Session, relay_id: str) -> list[RelayPortLease]:
+        """Leases still bound on a relay, for the rebinding rules to consult.
+
+        A rebinding must be refused while any of these exist, because each one
+        corresponds to a connection string a buyer already holds.
+        """
+        return (
+            db.query(RelayPortLease)
+            .filter(
+                RelayPortLease.relay_id == relay_id,
+                RelayPortLease.released_at.is_(None),
+            )
+            .all()
+        )
+
+    @staticmethod
+    def active_leases_for_pool(db: Session, pool_id: str) -> list[RelayPortLease]:
+        return (
+            db.query(RelayPortLease)
+            .filter(
+                RelayPortLease.pool_id == pool_id,
+                RelayPortLease.released_at.is_(None),
+            )
+            .all()
+        )
+
+    @staticmethod
+    def active_leases_for_host(db: Session, host_name: str) -> list[RelayPortLease]:
+        return (
+            db.query(RelayPortLease)
+            .filter(
+                RelayPortLease.host_name == host_name,
+                RelayPortLease.released_at.is_(None),
+            )
+            .all()
         )
 
     @staticmethod

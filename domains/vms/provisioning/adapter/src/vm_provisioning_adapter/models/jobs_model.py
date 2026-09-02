@@ -61,10 +61,16 @@ class AnsibleJobParams:
     vm_gpu_partition_size: Optional[str] = None
 
     # FRP tunnelling (create only)
+    # relay_id and vm_remote_port are what an accepted operation persists.
+    # relay_addr/relay_port/relay_token are filled in at execution and are
+    # never written to the job's stored parameters — those are returned by the
+    # job endpoints, and a rotated token must reach a retry of a job accepted
+    # before the rotation. See services/relay_execution.py.
+    relay_id: Optional[str] = None
+    vm_remote_port: Optional[int] = None
     relay_addr: Optional[str] = None
     relay_port: Optional[int] = None
     relay_token: Optional[str] = None
-    vm_remote_port: Optional[int] = None
 
     # Golden image (create + golden mode)
     golden_image_name: Optional[str] = None

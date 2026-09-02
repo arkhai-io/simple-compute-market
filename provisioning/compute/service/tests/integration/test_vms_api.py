@@ -60,7 +60,7 @@ class TestHttpValidation:
         assert resp.status_code == 422
 
     async def test_create_vm_with_a_partial_relay_returns_422(self, client_and_queue):
-        """A relay address with nothing to go with it selects no access path.
+        """A relay reference with no leased port selects no access path.
 
         Accepted, it would create a VM with no external route and report
         success — the failure the relay work exists to remove.
@@ -72,7 +72,7 @@ class TestHttpValidation:
         ) as http:
             resp = await http.post(
                 f"/api/v1/hosts/{HOST}/vms/",
-                json={"vm_target": VM_NAME, "relay_addr": "203.0.113.4"},
+                json={"vm_target": VM_NAME, "relay_id": "site-a"},
             )
         assert resp.status_code == 422
 
@@ -132,13 +132,74 @@ class TestCreateVmViaClient:
         client, job_queue = client_and_queue
         dispatched = _make_event_seam(job_queue)
 
-        await client.create_vm(HOST, CreateVmRequest(vm_target=VM_NAME, vm_ram=4096, vm_vcpus=4))
+        submit = await client.create_vm(
+            HOST, CreateVmRequest(vm_target=VM_NAME, vm_ram=4096, vm_vcpus=4)
+        )
         await asyncio.wait_for(dispatched.wait(), timeout=5.0)
-        await asyncio.sleep(0.1)
+        # Wait on the job reaching a terminal state, not on the clock. The
+        # dispatch seam fires when the job *starts*; a sleep here was racing
+        # the playbook call it then asserts on, and `TESTING.md` prohibits
+        # sleeps as background synchronisation for exactly that reason.
+        await client.poll_until_complete(submit.job_id, timeout=5.0, poll_interval=0.05)
 
         fake_ansible.start_playbook.assert_called_once()
         call_kwargs = fake_ansible.start_playbook.call_args
         assert call_kwargs.kwargs.get("limit") == HOST or HOST in str(call_kwargs)
+
+    async def test_a_relay_bearing_request_reaches_the_service_intact(
+        self, client_and_queue, fake_ansible
+    ):
+        """What the client emits is what the service receives.
+
+        The only other relay request test is the deliberate raw-HTTP
+        malformed-body case, which proves rejection. This is the happy path:
+        the canonical client serializes the relay fields, and the extra-vars
+        the job is built from carry exactly them.
+        """
+        client, job_queue = client_and_queue
+        dispatched = _make_event_seam(job_queue)
+
+        submit = await client.create_vm(
+            HOST,
+            CreateVmRequest(
+                vm_target=VM_NAME,
+                relay_id="site-a",
+                vm_remote_port=6142,
+            ),
+        )
+        await asyncio.wait_for(dispatched.wait(), timeout=5.0)
+        final = await client.poll_until_complete(
+            submit.job_id, timeout=5.0, poll_interval=0.05
+        )
+
+        assert final.status == "succeeded"
+
+    async def test_a_relay_bearing_job_does_not_publish_its_token(
+        self, client_and_queue
+    ):
+        """The job endpoints are where the token used to be readable.
+
+        Asserted over the whole serialized status, not one field: the failure
+        was a credential surviving inside a parameters blob, which a field-by-
+        field check would have walked straight past.
+        """
+        client, job_queue = client_and_queue
+        dispatched = _make_event_seam(job_queue)
+
+        submit = await client.create_vm(
+            HOST,
+            CreateVmRequest(
+                vm_target=VM_NAME,
+                relay_id="site-a",
+                vm_remote_port=6142,
+            ),
+        )
+        await asyncio.wait_for(dispatched.wait(), timeout=5.0)
+        final = await client.poll_until_complete(
+            submit.job_id, timeout=5.0, poll_interval=0.05
+        )
+
+        assert "admission-token" not in final.model_dump_json()
 
     async def test_credentials_stored_and_returned_after_success(self, client_and_queue):
         """A successful create stores every role's credentials, retrievable by job_id.

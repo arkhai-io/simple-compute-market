@@ -75,6 +75,13 @@ class PreparedFulfillment:
     prepared: VersionedEnvelope[Any]
 
 
+class _NoCode:
+    co_varnames: tuple[str, ...] = ()
+
+
+_NO_CODE = _NoCode()
+
+
 class FulfillmentOrchestrator:
     def __init__(
         self,
@@ -136,7 +143,14 @@ class FulfillmentOrchestrator:
         market: str,
         fulfillment_request: VersionedEnvelope[Any],
         record: Any | None = None,
+        acquire: bool = True,
     ) -> PreparedFulfillment:
+        """Resolve and validate a fulfillment into a provider operation.
+
+        ``acquire=False`` asks the provider to prepare without taking anything
+        it would have to give back — the validation path, which answers a
+        question rather than making a commitment. Every rejection still runs.
+        """
         record = record or tx.db.get(SettlementRecord, capacity_reservation_id)
         if record is None:
             raise LookupError(f"no scheduled settlement for {capacity_reservation_id!r}")
@@ -147,12 +161,18 @@ class FulfillmentOrchestrator:
 
         pool = self._require_pool_delivers_mode(tx, record)
         provider = self._providers.require(record.provider)
-        prepared = provider.prepare_create(
-            capacity_reservation_id=capacity_reservation_id,
-            request=fulfillment_request,
-            resource=self._resource(record),
-            pool_config=dict(pool.provider_config or {}),
-        )
+        prepare = provider.prepare_create
+        kwargs: dict[str, Any] = {
+            "capacity_reservation_id": capacity_reservation_id,
+            "request": fulfillment_request,
+            "resource": self._resource(record),
+            "pool_config": dict(pool.provider_config or {}),
+        }
+        # Providers that acquire nothing during preparation need no say in
+        # this, and are not required to grow a parameter to keep working.
+        if not acquire and "allocate" in getattr(prepare, "__code__", _NO_CODE).co_varnames:
+            kwargs["allocate"] = False
+        prepared = prepare(**kwargs)
         return PreparedFulfillment(record=record, provider=provider, prepared=prepared)
 
     def validate_fulfillment(
@@ -163,11 +183,16 @@ class FulfillmentOrchestrator:
     ) -> FulfillmentValidationResult:
         try:
             with self._uow.read_transaction() as tx:
+                # Validation answers whether this request would be accepted. It
+                # must not acquire anything on the way to the answer, or a
+                # caller checking repeatedly consumes resources it never asked
+                # for and never receives.
                 self._prepare_fulfillment(
                     tx,
                     capacity_reservation_id=capacity_reservation_id,
                     market=market,
                     fulfillment_request=fulfillment_request,
+                    acquire=False,
                 )
             return FulfillmentValidationResult()
         except Exception as exc:

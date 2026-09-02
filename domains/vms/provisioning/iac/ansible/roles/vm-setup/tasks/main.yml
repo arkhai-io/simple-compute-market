@@ -112,13 +112,20 @@
     - security_hardening
     - host_setup
 
-- name: Include FRP client installation
+- name: Install the VM tunnel client when this host's pool uses a relay
+  # Conditional, not defaulted. A host with a public address and no relay
+  # serves VMs by direct NAT, which is a supported deployment — and the role
+  # now asserts an address and a token rather than falling back to a published
+  # literal, so including it unconditionally would fail initialization of every
+  # host that does not use a relay. The correct behaviour for an absent relay
+  # is that no VM tunnel client is installed at all.
   include_tasks:
     file: frp-client.yml
     apply:
       tags:
         - frp_client
         - host_setup
+  when: frp_server_addr is defined and frp_server_addr | length > 0
   tags:
     - frp_client
     - host_setup

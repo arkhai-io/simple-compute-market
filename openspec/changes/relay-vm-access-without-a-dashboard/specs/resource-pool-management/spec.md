@@ -57,7 +57,9 @@ Authority is what makes the document a declaration rather than a merge: an opera
 
 That authority is scoped to the act of submitting a document. A service MUST NOT re-apply a previously imported document merely because a process started. Import is idempotent with respect to the document, not with respect to the database: re-running it against state something else has changed reverts that change, because a diff against the document is what detects it. A process restart is not an operator declaring desired state, and treating it as one silently reverts administrative work on eviction, drain, and crash recovery.
 
-A service that imports a definition document at startup MUST therefore record a durable digest of the document it imported and reconcile only when the current document differs from the recorded one. An explicit import request MUST reconcile regardless of the digest, because the operator has asked. The recorded digest MUST be updated in the same transaction that applies the reconciliation, so a failed apply does not suppress the next attempt.
+A service that imports a definition document at startup MUST therefore record a durable digest of the document it imported and reconcile only when the current document differs from the recorded one. An explicit import request MUST reconcile regardless of the digest, because the operator has asked.
+
+The recorded digest MUST be written in the same transaction that applies the reconciliation. A digest recorded after a separate, already-committed apply is indistinguishable at the next startup from one recorded before a crash, so the two must commit or fail together. Satisfying this requires a session-scoped import operation: an import that opens and commits its own transaction cannot be composed with the digest write.
 
 #### Scenario: One imported entry is invalid
 
@@ -88,6 +90,11 @@ A service that imports a definition document at startup MUST therefore record a 
 
 - **WHEN** an operator submits a document identical to the one last imported
 - **THEN** reconciliation runs and the response reports the resulting diff
+
+#### Scenario: An import is composed with other work in one transaction
+
+- **WHEN** a caller applies a definition document and records its digest
+- **THEN** both are visible together or neither is, under any interruption
 
 #### Scenario: Reconciliation fails part way
 

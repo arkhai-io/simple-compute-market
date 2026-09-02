@@ -58,6 +58,10 @@ per-host key file for Ansible to use. Two defects stand in the way.
 - **Resolve the renderer's sentinel.** Either make the renderer produce an
   inventory that works for embedded hosts, or restrict it to what it can
   correctly express and say so. The sentinel does not survive in either case.
+- **Bring the Ansible extra-vars file under the same mechanism.** It is written
+  to the shared temporary directory with default permissions and now carries a
+  decrypted relay admission token. One kind of secret material on the execution
+  path should not have two arrangements for its lifetime.
 - **Correct the docstrings** that describe cleanup behaviour the code does not
   have.
 

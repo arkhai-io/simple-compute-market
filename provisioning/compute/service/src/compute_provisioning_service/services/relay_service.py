@@ -15,13 +15,17 @@ callers learn whether a token is configured, never what it is.
 from __future__ import annotations
 
 import uuid
+from contextlib import contextmanager
 from dataclasses import dataclass
 from typing import Any, Iterable, Optional
 
 from sqlalchemy.orm import Session
 
-from compute_provisioning_service.crypto import encrypt_key
+from market_config import encrypt_secret
 from compute_provisioning_service.db.models import Relay, RelayPortLease
+from compute_provisioning_service.services.relay_rebinding import (
+    check_relay_endpoint_change,
+)
 
 
 class _Unset:
@@ -95,19 +99,64 @@ class RelayService:
     def __init__(self, session_factory: Any, settings: Any | None = None) -> None:
         self._session_factory = session_factory
         self._settings = settings
+        # Set only on a view returned by ``joining``.
+        self._joined: Session | None = None
+
+    # ------------------------------------------------------------------
+    # Transaction handling
+    # ------------------------------------------------------------------
+    #
+    # Each operation below owns its transaction. A caller that needs several of
+    # them to land together — a document import applying many relays and
+    # recording which document it applied — asks for a view bound to its
+    # session:
+    #
+    #     joined = relay_service.joining(db)
+    #     joined.create_relay(...)
+    #     joined.update_relay(...)
+    #
+    # Bound explicitly rather than through an optional ``db=`` on every method.
+    # An optional parameter is silently omissible, and omitting it inside a
+    # caller's transaction opens a second one that commits independently —
+    # which is exactly the failure the composition exists to prevent, in a form
+    # that looks correct at the call site.
+
+    def joining(self, db: Session) -> "RelayService":
+        """A view whose operations run in *db* and do not commit."""
+        bound = RelayService(
+            session_factory=self._session_factory, settings=self._settings
+        )
+        bound._joined = db
+        return bound
+
+    @contextmanager
+    def _write(self):
+        if self._joined is not None:
+            yield self._joined
+            return
+        with self._session_factory() as owned, owned.begin():
+            yield owned
+
+    @contextmanager
+    def _read(self):
+        if self._joined is not None:
+            yield self._joined
+            return
+        with self._session_factory() as owned:
+            yield owned
 
     # ------------------------------------------------------------------
     # Reads
     # ------------------------------------------------------------------
 
     def list_relays(self) -> list[RelayView]:
-        with self._session_factory() as db:
-            rows = db.query(Relay).order_by(Relay.id).all()
+        with self._read() as session:
+            rows = session.query(Relay).order_by(Relay.id).all()
             return [RelayView.of(row) for row in rows]
 
     def get_relay(self, relay_id: str) -> RelayView:
-        with self._session_factory() as db:
-            return RelayView.of(self._require(db, relay_id))
+        with self._read() as session:
+            return RelayView.of(self._require(session, relay_id))
 
     # ------------------------------------------------------------------
     # Writes
@@ -125,7 +174,7 @@ class RelayService:
         token: str | None = None,
         enabled: bool = True,
     ) -> RelayView:
-        with self._session_factory() as db, db.begin():
+        with self._write() as db:
             addr = self._validated_addr(relay_addr)
             self._validate_window(vm_port_range_start, vm_port_range_count)
             self._reject_duplicate_endpoint(db, addr, relay_port, excluding=None)
@@ -162,12 +211,17 @@ class RelayService:
         is invisible in every subsequent read and should be requested rather
         than carried along by an edit to something else.
         """
-        with self._session_factory() as db, db.begin():
+        with self._write() as db:
             row = self._require(db, relay_id)
             addr = row.relay_addr if relay_addr is None else self._validated_addr(relay_addr)
             port = row.relay_port if relay_port is None else int(relay_port)
             if addr != row.relay_addr or port != row.relay_port:
                 self._reject_duplicate_endpoint(db, addr, port, excluding=row.id)
+                # A relay serves every pool referencing it, so moving one moves
+                # every buyer on it at once. Refused while it carries tunnels.
+                check_relay_endpoint_change(
+                    db, relay=row, new_addr=addr, new_port=port
+                )
             start = (
                 row.vm_port_range_start
                 if vm_port_range_start is None
@@ -200,7 +254,7 @@ class RelayService:
         """
         if not token or not token.strip():
             raise RelayValidationError("relay token must be a non-empty string")
-        with self._session_factory() as db, db.begin():
+        with self._write() as db:
             row = self._require(db, relay_id)
             row.relay_token_encrypted = self._encrypt(token)
             db.flush()
@@ -286,4 +340,4 @@ class RelayService:
 
     def _encrypt(self, token: str) -> str:
         secret = str(getattr(self._settings, "ssh_decryption_key", "") or "")
-        return encrypt_key(token, secret)
+        return encrypt_secret(token, secret)

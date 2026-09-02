@@ -1,5 +1,6 @@
 """Shared configuration helpers for market packages."""
 
+from .secret_at_rest import decrypt_secret, encrypt_secret
 from .resolution import (
     ConfigFieldSource,
     ConfigLayer,
@@ -27,6 +28,8 @@ from .settlement_migration import (
 )
 
 __all__ = [
+    "decrypt_secret",
+    "encrypt_secret",
     "BUYER_MIGRATION_COMMAND",
     "STOREFRONT_MIGRATION_COMMAND",
     "ConfigFieldSource",

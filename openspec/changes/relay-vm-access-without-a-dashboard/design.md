@@ -262,14 +262,23 @@ This is the same bookkeeping the schema migrations already use — a durable rec
 of what has been applied, consulted before applying it again — rather than a new
 mechanism.
 
-**Relays and pools use one mechanism, not two.** An earlier version of this
-design gave relays create-if-absent semantics precisely to escape the restart
-problem, leaving pools reconciled and relays not. That was solving the right
+**Relays and pools use one gate, and differ in one rule.** An earlier version of
+this design gave relays create-if-absent semantics precisely to escape the
+restart problem, leaving pools reconciled and relays not. That was solving the right
 problem in the wrong place. It bought restart-safety at the cost of making the
 document a bootstrap that could never be edited afterwards, and it put two
 contracts behind one idea, so a reader who knew the pool rule would guess wrong
-about relays. Fixing the invocation fixes both resources with one rule, and lets
-a relay's window be edited in the document and reconciled like anything else.
+about relays. Fixing the invocation fixes both resources with one gate, and lets a relay's
+window be edited in the document and reconciled like anything else.
+
+They differ in one rule, deliberately. A pool omitted from its document is
+disabled, because the document declares what the deployment offers and a pool it
+no longer names should not be scheduled. A relay omitted from its document is
+*retained*, because disabling one breaks every pool referencing it and every
+live tunnel on it — a far worse outcome than a stale row, and one an operator
+editing an unrelated entry would not expect. Retention is also what makes a
+relay established from a document and then administered through the API one
+relay rather than two.
 
 **Digest granularity is the whole document, and the token is why that is safe.**
 A per-entry digest would avoid reconciling entry A because entry B changed. It is
@@ -402,9 +411,16 @@ endpoint is unique, so one rendezvous cannot appear under two identities and
 issue the same port twice, and two rows cannot describe one rendezvous and
 collide leases that do not conflict.
 
-Moving a relay to a new address updates one field. Its leases reference the row
-and follow it, so the proxies that persist across the move stay accounted for
-rather than becoming stale records under an identity nothing points at any more.
+Moving a relay to a new address updates one field, and its leases reference the
+row and follow it — so the proxies that persist across the move stay accounted
+for rather than becoming records under an identity nothing points at any more.
+
+That is a claim about *accounting*, and an earlier version of this design let it
+stand as though it were a claim about safety. It is not. The buyer holds
+`ssh -p <port> <user>@<relay>`, and the relay half of that string is already
+delivered. A foreign key keeps the ledger honest across a move; it does nothing
+for the connection string a buyer is holding. See the rebinding decision below
+for what actually governs when a relay may move.
 
 **A lease is released on every terminal outcome, and reconciliation is the
 backstop.**
@@ -443,6 +459,102 @@ repository's playbooks.
 Revisit if a failure is observed in which the host retains its network path but
 `sshd` is unusable — that is the case a second proxy would genuinely address,
 and no evidence for it exists yet.
+
+**A relay is bound to a VM at creation, not to a host.**
+
+The lease records `relay_id`, and that record — not the pool's current
+configuration — is where a VM's relay lives for the whole of its life. A pool's
+relay reference determines which relay a *new* VM gets. Nothing moves an
+existing one.
+
+This is forced rather than chosen. The buyer was given a host and a port. Both
+halves are delivered artifacts of a paid rental, and the port is not portable
+between relays: 6142 on one rendezvous says nothing about 6142 on another, which
+may already be leased to a different host. Repointing a host's client at a new
+relay does not migrate its VMs; it strands every buyer on that host and asks the
+new relay for ports that may not be free.
+
+Two consequences follow, and both are corrections to how earlier drafts read.
+
+*Teardown reads the lease, not the pool.* Resolving the relay from pool
+configuration at teardown means that after any repoint, teardown reloads the
+wrong client and releases against the wrong relay. The lease is the authority
+because the lease is what recorded where the port was actually bound.
+
+*Relay uniformity on a host is an implementation limit, not a model limit.* One
+`frpc` process carries one `serverAddr` and one token, so a host can serve only
+VMs whose leases name the relay its client dials. The model already permits a
+per-VM relay; the current client topology is what does not. If the reload gate
+in section 6 fails, its recorded fallback — one client per VM — removes that
+limit for free and without a schema change, since the lease already carries the
+relay. Building per-VM clients *for* relay heterogeneity is not worth a unit, a
+control connection, and `poolCount` idle connections per VM to buy something
+nothing currently needs.
+
+**Rebinding requires draining, and draining already exists.**
+
+From the above, exactly one rule covers every way a relay binding can change:
+
+> A host's pool, a pool's relay reference, and a relay's address or port may
+> each change only while no affected host holds an active lease — unless the
+> relay on both sides of the change is the same, in which case nothing about
+> any delivered connection string moves and the change is free.
+
+No new primitive is needed. Disabling a pool is already specified as a draining
+operation: it excludes the pool from new scheduling without invalidating
+existing reservations or active workloads. So rebinding is disable, wait for
+leases to clear, rebind, re-enable.
+
+Rejecting the change while leases are held is preferred to accepting it and
+reissuing every buyer's connection string. A reissue is not something this
+system can deliver — the buyer already has the string, and nothing in the
+protocol pushes them a new one.
+
+**The relay token is resolved at execution, not carried in the accepted
+snapshot.**
+
+`physical-provisioning` requires that accepted operations snapshot the resolved
+playbook and provider variables with the submitted job, so that an operator
+editing pool configuration after dispatch cannot change what a running job does.
+The token is a deliberate exception, for two independent reasons.
+
+It must not be in the snapshot. The snapshot is persisted in a JSON column and
+returned by the job endpoints, so a token placed there is neither encrypted at
+rest nor withheld from a read — which is the whole of what this change claims
+about relay credentials.
+
+And it should not be in the snapshot. A token rotated through the relay
+controller has to take effect on the next execution, including a retry of a job
+accepted before the rotation. A snapshot pins the value that was correct at
+acceptance, which is exactly the value that no longer works.
+
+So the accepted operation carries `relay_id` and the leased `remote_port`, and
+the address and token are resolved immediately before the job's variables are
+written. A relay that has been disabled, deleted, or had its token cleared
+between acceptance and execution fails the job rather than retrying: the
+configuration is wrong, not the moment, and a retry against unchanged
+configuration would fail identically.
+
+The resolved variables file is secret material for the same reason a decrypted
+host key file is, and gets the same treatment — owner-only, in a directory the
+operation owns and removes. That work belongs with the host key material change
+rather than half here, because it is one mechanism serving both.
+
+**Lease release attaches to the settlement record's terminal transition.**
+
+`FulfillmentConvergenceWatchdog` is the single place a settlement record reaches
+succeeded or failed, for creates and teardowns alike. Release belongs there,
+inside the same transaction that records the terminal state.
+
+Not in the same transaction is the tempting simplification and it is wrong: a
+crash between the two leaves exactly the leak reconciliation exists to bound,
+recreated on a schedule rather than by an unforeseen path. Reconciliation should
+be cleaning up after paths nobody enumerated, not after the enumerated one.
+
+Attaching release to individual code paths — teardown, cancellation, expiry —
+was the earlier shape and is what produced an allocator whose comments claimed
+every terminal outcome released while nothing called it at all. One observer of
+terminal state is both correct and checkable.
 
 ## Alternatives considered
 

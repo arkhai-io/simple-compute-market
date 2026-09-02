@@ -27,13 +27,14 @@ mockMode: false
 # provisioning-secrets profile holds its admission token, never the token.
 # Leave a list empty to manage that resource entirely through the API.
 #
-# Setting `definitions.pools` makes pool inventory declarative for this
-# deployment: entries omitted from the document are disabled when the document
-# changes. That is a change to what a deployment means, not only to what it
-# contains.
+# Reconciled when the document's content changes, not on every start: import is
+# authoritative over the document it is given, so applying one nobody submitted
+# would revert relays administered through the API on any pod restart.
+#
+# A relay the document stops naming is retained, unlike a pool. Disabling one
+# would break every pool referencing it and every live tunnel on it.
 # ---------------------------------------------------------------------------
 definitions:
-  pools: {}
   relays: {}
 
 # ---------------------------------------------------------------------------
@@ -113,16 +114,14 @@ storefront:
 config:
   database_url: "sqlite:////app/data/provisioning.db"
 
-  # Definition document paths. Set only when the matching entry under
-  # `definitions` below supplies a document; the service skips an unset path
-  # and treats a set-but-absent one as a configuration error.
+  # relay_definitions_path is NOT set here. The chart derives it from
+  # `definitions.relays` below, so the mount and the path cannot disagree — a
+  # rendered-and-mounted document that the service skips because its path is
+  # unset is a silent no-op that looks like configuration.
   #
-  # Both documents are reconciled when their content changes, not on every
-  # start. Import is authoritative over the document it is given, so applying
-  # one that nobody submitted would revert pools and relays administered
-  # through the API on any pod restart.
-  pool_definitions_path: ""
-  relay_definitions_path: ""
+  # pool_definitions_path is likewise absent, deliberately: wiring it would
+  # newly subject every deployment's pools to declarative reconciliation, which
+  # is a change to what a deployment means rather than a bug fix.
 
   # Ansible paths — set to the IaC tree location inside the container.
   # Override here for environments that mount the IaC at a different path.
@@ -141,9 +140,12 @@ config:
   golden_gcs_bucket: ""
   golden_gcs_project: ""
 
-  # FRP tunneling
-  frp_server_addr: ""
-  frp_domain: ""
+  # relay_token is deliberately absent, and the values schema forbids setting
+  # it here. It is a credential: it reaches the service through the
+  # provisioning-secrets profile, and a value in plain chart values would be
+  # rendered into a ConfigMap. It seeds a relay established from
+  # `definitions.relays` and is read only when that relay is created — a token
+  # rotated through the relay API is authoritative from then on.
 
   # Lease watchdog
   lease_watchdog_enabled: true

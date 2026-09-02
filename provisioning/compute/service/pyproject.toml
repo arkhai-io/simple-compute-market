@@ -5,6 +5,7 @@ license = "MIT"
 description = "Deployable cross-domain compute provisioning service"
 requires-python = ">=3.12"
 dependencies = [
+    "arkhai-kit-config",
     "arkhai-kit-site>=0.3.0",
     "arkhai-kit-resource-pools>=0.2.0",
     "arkhai-kit-fulfillment>=0.2.0",

@@ -9,6 +9,12 @@ from typing import Any, Callable, Mapping
 from vm_provisioning_adapter.bundle import build_vm_adapter_bundle
 from vm_provisioning_adapter.compute_adapter import VmComputeAdapter
 from vm_provisioning_adapter.release import VmFulfillmentReleaseJobPort, VmReleaseExecutor
+from compute_provisioning_service.services.relay_port_allocator import (
+    RelayPortAllocator,
+)
+from compute_provisioning_service.services.relay_execution import (
+    RelayExecutionResolver,
+)
 from vm_provisioning_adapter.services.ansible_fulfillment_provider import (
     AnsibleFulfillmentProvider,
 )
@@ -39,10 +45,6 @@ class VmProvisioningRuntime:
     teardown_port: Any
 
     def fulfillment_provider(self):
-        from compute_provisioning_service.services.relay_port_allocator import (
-            RelayPortAllocator,
-        )
-
         return AnsibleFulfillmentProvider(
             job_service=self.job_service,
             job_queue_provider=self.job_queue_provider,
@@ -136,6 +138,9 @@ def build_vm_runtime(
         session_factory=session_factory,
         ansible_service=ansible_service,
         host_service=host_service,
+        relay_resolver=RelayExecutionResolver(
+            session_factory=session_factory, settings=config
+        ),
     )
     vm_operations_service = VmOperationsService(
         job_service=job_service,

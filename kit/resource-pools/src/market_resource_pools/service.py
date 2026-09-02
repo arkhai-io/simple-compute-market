@@ -619,9 +619,27 @@ class ResourcePoolService:
             assert response.diff is not None
             return response.diff
         with self._session_factory() as db, db.begin():
-            plan = self._calculate_reconciliation(db, validation.definitions)
-            diff = self._diff(plan)
-            self._apply_reconciliation(db, plan)
+            return self.import_pools_in_session(db, yaml_text)
+
+    def import_pools_in_session(self, db: Session, yaml_text: str) -> PoolImportDiff:
+        """Reconcile inside the caller's transaction, without committing.
+
+        Exists so an import can be composed with other writes that must land
+        with it or not at all — a startup importer recording which document it
+        applied, most immediately. A digest committed separately from the apply
+        it describes is indistinguishable, at the next startup, from one
+        recorded before a crash.
+
+        ``import_pools`` keeps its own transaction for the API path, which has
+        nothing to compose with.
+        """
+        validation = self._validate_document(yaml_text)
+        if not validation.valid:
+            message = "; ".join(problem.message for problem in validation.problems)
+            raise PoolValidationError(message)
+        plan = self._calculate_reconciliation(db, validation.definitions)
+        diff = self._diff(plan)
+        self._apply_reconciliation(db, plan)
         return diff
 
     def export_pools_yaml(self) -> str:

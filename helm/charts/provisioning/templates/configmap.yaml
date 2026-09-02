@@ -12,22 +12,21 @@ data:
   config-production.yml: |
     {{- $config := deepCopy .Values.config -}}
     {{- $_ := set $config "identity" (dict "principal" .Values.identity.principal) -}}
+    {{- /*
+      The path is derived from the document's presence, not configured beside
+      it. Two independent settings could disagree, and the failure when they do
+      is silent: the document renders, the volume mounts, and the service skips
+      an unset path while everything looks configured.
+    */}}
+    {{- if .Values.definitions.relays -}}
+      {{- $_ := set $config "relay_definitions_path" "/app/config/relay-definitions.yaml" -}}
+    {{- end -}}
     {{- $_ := set $config "storefront_identity" (dict "principals" .Values.storefrontIdentity.principals) -}}
     {{- $_ := set $config "admin_identity" (dict "principals" .Values.adminIdentity.principals) -}}
     {{- if not $config.storefront_url -}}
       {{- $_ := set $config "storefront_url" (default (printf "http://%s-storefront-%s:%d" .Release.Name .Values.storefront.agentName (int .Values.storefront.port)) .Values.storefront.url) -}}
     {{- end -}}
     {{- $config | toYaml | nindent 4 }}
-  {{- with .Values.definitions.pools }}
-  {{- /*
-    Declarative pool inventory. Reconciled authoritatively when it changes:
-    entries it omits are disabled. Carried in this ConfigMap rather than the
-    secrets Secret because it holds no credential, so editing a window is a
-    configuration change rather than a secret rotation.
-  */}}
-  pool-definitions.yaml: |
-    {{- toYaml . | nindent 4 }}
-  {{- end }}
   {{- with .Values.definitions.relays }}
   {{- /*
     Relay inventory. An entry may name which key of the provisioning-secrets

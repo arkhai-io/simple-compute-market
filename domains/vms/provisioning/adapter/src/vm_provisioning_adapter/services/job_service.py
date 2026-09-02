@@ -76,11 +76,16 @@ class AnsibleJobService:
         session_factory: sessionmaker[Session],
         ansible_service: AnsibleService,
         host_service=None,  # services.host_service.HostService | None
+        relay_resolver=None,  # services.relay_execution.RelayExecutionResolver | None
     ) -> None:
         self._settings = settings
         self._session_factory = session_factory
         self._ansible = ansible_service
         self._host_service = host_service
+        # Optional: a deployment with no relay uses the direct-NAT path and
+        # resolves nothing. A job that does reference a relay and finds no
+        # resolver fails at the relay rather than dispatching without a token.
+        self._relay_resolver = relay_resolver
 
     # ------------------------------------------------------------------
     # HTTP-layer operations
@@ -470,6 +475,12 @@ class AnsibleJobService:
 
             self._update_job(db, job, status=JobStatus.running.value)
             params = self._build_params(job.params)
+            # Last point before the token reaches a file. Resolved here rather
+            # than at acceptance so a rotation takes effect on a retry, and so
+            # the credential never enters job.params, which this service
+            # persists and returns.
+            if self._relay_resolver is not None:
+                params = self._relay_resolver.resolve_into(params)
             vars_path = self._ansible.build_vars_file(params)
 
             # Resolve inventory: prefer DB-backed rendering when HostService
@@ -720,9 +731,10 @@ class AnsibleJobService:
             # pool references, resolved at dispatch; a service-wide default
             # would let a job reach a relay its pool does not name, and would
             # silently substitute one relay's window for another's.
-            relay_addr=params.get("relay_addr"),
-            relay_port=params.get("relay_port"),
-            relay_token=params.get("relay_token"),
+            # Only the reference and the leased port come from stored params.
+            # The address and token are absent by construction and are filled
+            # in immediately before the vars file is written.
+            relay_id=params.get("relay_id"),
             vm_remote_port=params.get("vm_remote_port"),
             golden_image_name=params.get("golden_image_name"),
             gcs_bucket_url=params.get("gcs_bucket_url"),

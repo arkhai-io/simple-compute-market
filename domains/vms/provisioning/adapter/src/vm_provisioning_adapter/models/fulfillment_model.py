@@ -90,9 +90,11 @@ class AnsiblePreparedJobParameters(BaseModel):
     vm_gpu_device: str | None = None
     vm_gpu_devices: list[str] | None = None
     vm_gpu_partition_size: str | None = None
-    relay_addr: str | None = None
-    relay_port: int | None = None
-    relay_token: str | None = None
+    # The accepted snapshot carries the relay reference and the leased port.
+    # The address and token are resolved at execution: this envelope is
+    # persisted and read back, and a token in it would be neither encrypted at
+    # rest nor withheld from a job status response.
+    relay_id: str | None = None
     vm_remote_port: int | None = None
     golden_image_name: str | None = None
     gcs_bucket_url: str | None = None

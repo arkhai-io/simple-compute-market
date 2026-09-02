@@ -24,9 +24,13 @@ from __future__ import annotations
 import logging
 from typing import Optional
 
+from market_config import decrypt_secret, encrypt_secret
 from sqlalchemy.orm import Session, sessionmaker
 
 from compute_provisioning_service.db.models import DEFAULT_POOL_ID, Host, ResourcePool
+from compute_provisioning_service.services.relay_rebinding import (
+    check_host_pool_change,
+)
 from vm_provisioning_operator.models import HostCreate, HostUpdate
 
 logger = logging.getLogger(__name__)
@@ -102,7 +106,7 @@ class HostService:
         """Insert a new host row.
 
         If ``ssh_key_type`` is ``'embedded'``, the raw PEM in
-        ``ssh_key_value`` is encrypted via :func:`crypto.encrypt_key`
+        ``ssh_key_value`` is encrypted via ``market_config.encrypt_secret``
         before storage.
 
         Raises:
@@ -111,8 +115,7 @@ class HostService:
         """
         key_value = data.ssh_key_value
         if data.ssh_key_type == "embedded":
-            from vm_provisioning_adapter.crypto import encrypt_key
-            key_value = encrypt_key(key_value, self._settings.ssh_decryption_key)
+            key_value = encrypt_secret(key_value, self._settings.ssh_decryption_key)
 
         pool_id = data.pool_id or DEFAULT_POOL_ID
 
@@ -162,6 +165,17 @@ class HostService:
                 host.gpu_model = data.gpu_model
             if data.pool_id is not None:
                 self._require_pool_exists(db, data.pool_id)
+                # Moving a host between pools that dial one relay is free, and
+                # allowed while VMs run: the host keeps its rendezvous and its
+                # proxies keep their ports. Moving it to a pool on a different
+                # relay is refused while it holds leases, because the VMs
+                # cannot follow and their buyers hold the old address.
+                check_host_pool_change(
+                    db,
+                    host_name=host.name,
+                    current_pool_id=host.pool_id,
+                    new_pool_id=data.pool_id,
+                )
                 host.pool_id = data.pool_id
 
             # Resolve the effective key type after any update
@@ -171,8 +185,7 @@ class HostService:
             if data.ssh_key_value is not None:
                 key_value = data.ssh_key_value
                 if effective_type == "embedded":
-                    from vm_provisioning_adapter.crypto import encrypt_key
-                    key_value = encrypt_key(key_value, self._settings.ssh_decryption_key)
+                    key_value = encrypt_secret(key_value, self._settings.ssh_decryption_key)
                 host.ssh_key_value = key_value
 
             db.commit()
@@ -241,9 +254,8 @@ class HostService:
 
                 if ssh_key_type == "embedded":
                     from pathlib import Path
-                    from vm_provisioning_adapter.crypto import encrypt_key
                     raw = Path(key_value).read_text(encoding="utf-8")
-                    key_value = encrypt_key(raw, self._settings.ssh_decryption_key)
+                    key_value = encrypt_secret(raw, self._settings.ssh_decryption_key)
 
                 existing = db.query(Host).filter(Host.name == entry["name"]).one_or_none()
                 if existing is not None:
@@ -342,8 +354,7 @@ class HostService:
         """
         if host.ssh_key_type == "path":
             return host.ssh_key_value
-        from vm_provisioning_adapter.crypto import decrypt_key
-        return decrypt_key(host.ssh_key_value, self._settings.ssh_decryption_key)
+        return decrypt_secret(host.ssh_key_value, self._settings.ssh_decryption_key)
 
 
 # ---------------------------------------------------------------------------

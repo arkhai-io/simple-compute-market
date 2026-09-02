@@ -170,7 +170,16 @@ from market_resource_pools import DEFAULT_POOL_ID, ResourcePool  # noqa: F401
 
 
 class Relay(Base):
-    """A tunnel rendezvous that hosts dial, and the port window it accepts.
+    """A VM-facing tunnel rendezvous, and the remote-port window it accepts.
+
+    **This is not the host management tunnel.** A host holds two reverse
+    tunnels and they are easy to confuse, so: the management tunnel is the
+    operator's failsafe path to the host itself, static for a whole
+    provisioning service, established when the host is prepared outside this
+    repository, and absent from this table. What a row here describes is the
+    rendezvous a host's VM tunnel client dials on behalf of the VMs rented on
+    it. The two may be the same server; they are never the same concern, and
+    nothing in this service writes or restarts the management side.
 
     One row per rendezvous. ``UNIQUE(relay_addr, relay_port)`` is what makes
     identity trustworthy: a remote port binds a listening socket on the relay
@@ -270,6 +279,12 @@ class RelayPortLease(Base):
     Hosts sharing a relay share one port namespace, and so do pools; keying on
     either would issue a port already bound, and the relay's refusal surfaces
     asynchronously in a tunnel client's log rather than as a failed allocation.
+
+    The relay recorded here is the VM's relay for the whole of its life.
+    Teardown and reclamation read it rather than the pool's current
+    configuration, which may since have been rebound: the lease is what knows
+    where the port actually went, and releasing against anything else frees a
+    port that was never bound and leaves bound the one that was.
 
     A lease is recorded before the job that will use it is dispatched, so a
     crash between the two cannot leave a port bound on the relay that no record

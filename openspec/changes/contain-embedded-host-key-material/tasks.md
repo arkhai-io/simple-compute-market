@@ -43,6 +43,16 @@ path that already cleans up after itself.
       directory. That parent is the process-wide temporary directory, so a
       caller following the instruction would delete other tenants' files — the
       instruction is not merely unfollowed, it is unfollowable.
+- [ ] 1.5a **Cover the Ansible extra-vars file with the same mechanism.** It now
+      carries a decrypted relay admission token and is written with
+      `Path.write_text` under the shared temporary directory with default
+      permissions. It is secret material on the execution path by the same
+      argument as a decrypted key file, so it belongs in the same
+      operation-owned directory with the same lifetime and the same owner-only
+      mode — not a second, parallel arrangement.
+- [ ] 1.5b `relay-vm-access-without-a-dashboard` task 2A.7 defers this here
+      deliberately, so that one mechanism has one owner. Neither change is
+      complete without it; record the dependency in both.
 - [ ] 1.6 State the invariant in a comment where the material is written:
       decrypted key material exists only for the operation that needs it, and
       every path that writes it removes it including failing paths. The
@@ -132,8 +142,12 @@ path that already cleans up after itself.
 
 ## Sequencing against the sibling changes
 
-Independent of `relay-vm-access-without-a-dashboard`; either may land first.
-They touch one file in common, `ansible_service.py`, in different functions.
+Mostly independent of `relay-vm-access-without-a-dashboard`; either may land
+first. They touch one file in common, `ansible_service.py`, and now overlap in
+one place on purpose: task 1.5a here owns the temporary-file lifetime for the
+extra-vars file, which that change's token late-binding needs. If the two land
+separately, this one should land first or the token work carries a file it does
+not clean up.
 
 A practical prerequisite for that change's section 8 whenever the rented host's
 operator supplies its own SSH key rather than accepting the deployment's shared

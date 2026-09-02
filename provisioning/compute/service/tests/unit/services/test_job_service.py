@@ -109,9 +109,7 @@ class TestBuildParams:
             "vm_gpu_device": "0000:03:00.0",
             "vm_gpu_devices": ["0000:03:00.0", "0000:04:00.0"],
             "vm_gpu_partition_size": "1g.5gb",
-            "relay_addr": "203.0.113.4",
-            "relay_port": 7000,
-            "relay_token": "admission-token",
+            "relay_id": "site-a",
             "vm_remote_port": 6100,
             "golden_image_name": "base-v3",
             "gcs_bucket_url": "gs://bucket",
@@ -129,10 +127,11 @@ class TestBuildParams:
         assert params.vm_gpu_device == "0000:03:00.0"
         assert params.vm_gpu_devices == ["0000:03:00.0", "0000:04:00.0"]
         assert params.vm_gpu_partition_size == "1g.5gb"
-        assert params.relay_addr == "203.0.113.4"
-        assert params.relay_port == 7000
-        assert params.relay_token == "admission-token"
+        assert params.relay_id == "site-a"
         assert params.vm_remote_port == 6100
+        # Stored params never carry the endpoint or the token.
+        assert params.relay_addr is None
+        assert params.relay_token is None
         assert params.golden_image_name == "base-v3"
         assert params.gcs_bucket_url == "gs://bucket"
         assert params.gcs_image_path == "images/img.qcow2"
@@ -146,10 +145,10 @@ class TestBuildParams:
         params = svc._build_params(
             {"vm_host": "kvm1", "vm_action": "create", "executor_kind": "vm"}
         )
-        assert params.relay_addr is None
-        assert params.relay_port is None
-        assert params.relay_token is None
+        assert params.relay_id is None
         assert params.vm_remote_port is None
+        assert params.relay_addr is None
+        assert params.relay_token is None
 
     def test_returns_ansible_job_params_instance(self):
         svc = _make_service()

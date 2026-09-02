@@ -27,29 +27,27 @@ from vm_provisioning_adapter.models.vm_request_model import build_create_params,
 # CreateVmRequest — FRP cross-field validation
 # ---------------------------------------------------------------------------
 
-class TestCreateVmFrpValidation:
-    def test_relay_addr_without_its_companions_raises(self):
-        with pytest.raises(ValidationError, match="relay_token"):
+class TestCreateVmRelayValidation:
+    def test_relay_id_without_a_leased_port_raises(self):
+        with pytest.raises(ValidationError, match="vm_remote_port"):
             CreateVmRequest(
                 vm_target="test-vm",
-                relay_addr="203.0.113.4",
-                relay_token=None,
+                relay_id="site-a",
+                vm_remote_port=None,
             )
 
-    def test_relay_addr_with_its_companions_is_valid(self):
+    def test_relay_id_with_a_leased_port_is_valid(self):
         req = CreateVmRequest(
             vm_target="test-vm",
-            relay_addr="203.0.113.4",
-            relay_port=7000,
-            relay_token="admission-token",
+            relay_id="site-a",
             vm_remote_port=6100,
         )
-        assert req.relay_addr == "203.0.113.4"
+        assert req.relay_id == "site-a"
 
-    def test_no_relay_addr_needs_no_companions(self):
+    def test_no_relay_id_needs_no_port(self):
         req = CreateVmRequest(vm_target="test-vm")
-        assert req.relay_addr is None
-        assert req.relay_token is None
+        assert req.relay_id is None
+        assert req.vm_remote_port is None
 
 
 # ---------------------------------------------------------------------------
@@ -116,7 +114,7 @@ class TestCreateVmDefaults:
         assert req.vm_ram is None
         assert req.ssh_pubkey is None
         assert req.gpu_provisioned is None
-        assert req.relay_addr is None
+        assert req.relay_id is None
 
 
 # ---------------------------------------------------------------------------
@@ -148,16 +146,16 @@ class TestCreateVmToParams:
     def test_relay_fields_propagated(self):
         req = CreateVmRequest(
             vm_target="t",
-            relay_addr="203.0.113.4",
-            relay_port=7000,
-            relay_token="admission-token",
+            relay_id="site-a",
             vm_remote_port=6100,
         )
         p = build_create_params("kvm1", req)
-        assert p.relay_addr == "203.0.113.4"
-        assert p.relay_port == 7000
-        assert p.relay_token == "admission-token"
+        assert p.relay_id == "site-a"
         assert p.vm_remote_port == 6100
+        # The endpoint and token are absent by construction: this object is
+        # serialized into the job's persisted parameters.
+        assert p.relay_addr is None
+        assert p.relay_token is None
 
     def test_gpu_fields_propagated(self):
         req = CreateVmRequest(

@@ -192,3 +192,70 @@ Ansible run. Losing that correlation does not prove that creation failed or
 never occurred, so recovery MUST NOT compensate by launching another create
 playbook. The adapter remains the owner of provider metadata interpretation and
 teardown-envelope construction.
+
+## Buyer access to rented VMs
+
+A host participating in this system holds two reverse tunnels, and they are
+routinely confused. The **management tunnel** is the operator's path to the host
+itself: static for a whole provisioning service, established when the host is
+prepared outside this repository, and never written or restarted by a VM
+operation. The **VM tunnel** carries buyer access to rented VMs, with one proxy
+per VM added and removed continuously. They cannot share a process — a tunnel
+client carries exactly one rendezvous address and one admission token at the top
+level, and a proxy cannot override either — so two clients follow as a
+consequence rather than as a choice. Only the second is modelled here.
+
+### A relay's management surface is not a coordination interface
+
+Discovering a free port by querying the relay's dashboard makes a monitoring
+surface into a distributed lock, and requires every relay to run one, publish a
+DNS name for it, hold a certificate, and distribute a second credential. Port
+allocation belongs to an authority that can also reclaim what it issued, and
+proxy verification belongs to the client that registered the proxy: asking the
+relay whether our own registration succeeded is a round trip to a third party
+about our own state.
+
+### Buyer access is port-based
+
+A buyer receives a host and a port. Subdomain routing cannot serve SSH: FRP's
+`subdomain` option belongs to its `http` and `https` proxy types, which
+demultiplex on the `Host` header, while SSH sends no SNI and no `Host` header
+and exchanges version banners immediately on connect. A `tcp` proxy binds a
+distinct port whatever the key says, so the wildcard DNS record and certificate
+that subdomain routing implies serve nothing.
+
+### The relay token never reaches buyer-controlled hardware
+
+The tunnel client runs on the host rather than inside the VM. A buyer has root
+in their VM and would therefore hold the token, and a relay's `allowPorts` spans
+the management window as well as the VM window — so a buyer holding a token
+could bind a management port freed by a dropped tunnel and answer, as that host,
+the connections the provisioning service makes to administer it. Per-VM or
+per-host tokens do not address this: the relay still admits the holder to
+whatever `allowPorts` permits. The property worth holding is that the token
+never lands on buyer-controlled hardware at all.
+
+### A relay is a resource, not pool configuration
+
+A relay's address, allocation window, and admission token are shared by every
+pool that points at it. Held per pool they can diverge: two pools referencing
+one rendezvous would allocate from a single listening namespace under
+disagreeing bounds, and each would hold its own copy of one credential, making
+rotation one write per pool with a missed one failing asynchronously in a tunnel
+client's log.
+
+Relay uniformity across a host is a limit of running one VM tunnel client per
+host, not a limit of the model. A lease records its relay, so a per-VM relay is
+already representable; what forbids it is that one client dials one rendezvous.
+A topology of one client per VM would remove the limit without a schema change.
+
+### Rebinding requires draining
+
+A VM's relay is fixed for its life. The buyer holds an address and a port, both
+delivered, and a remote port is not portable between relays — a port number on
+one rendezvous says nothing about the same number on another, which may already
+be leased. Moving an existing VM would strand its buyer and request a port the
+new relay may not have free. So a relay binding changes only while no affected
+host holds a lease, and disabling a pool — already a draining operation that
+excludes new scheduling without disturbing running workloads — is how an
+operator reaches that state.

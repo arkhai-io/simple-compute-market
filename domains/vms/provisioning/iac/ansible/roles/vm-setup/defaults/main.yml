@@ -49,7 +49,7 @@ rescue_boot_entry_title: "Ubuntu (no vfio binding)"
 # because frps and frpc negotiate a protocol version: which client version a
 # host runs is a property of the relay the fleet talks to, so it must be
 # settable without editing a task.
-frp_version: "0.54.0"
+frp_version: "0.61.1"
 
 # Rendezvous port. The address and the admission token have no defaults and are
 # supplied per run — see the assertions in tasks/frp-client.yml for why a

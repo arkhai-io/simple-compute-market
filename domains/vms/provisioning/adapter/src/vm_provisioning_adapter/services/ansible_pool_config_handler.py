@@ -7,8 +7,11 @@ from typing import Any, Mapping
 from sqlalchemy.orm import Session
 
 from compute_provisioning import PoolConfigValidationProblem
-from compute_provisioning_service.crypto import decrypt_key
+from market_config import decrypt_secret
 from compute_provisioning_service.db.models import AnsiblePoolConfig, Relay
+from compute_provisioning_service.services.relay_rebinding import (
+    check_pool_relay_change,
+)
 from vm_provisioning_adapter.requirement_delegates import (
     DEFAULT_REQUIREMENT_DELEGATE,
     registered_requirement_delegate_names,
@@ -209,7 +212,7 @@ class AnsiblePoolConfigHandler:
     def _decrypt_token(self, relay: Relay) -> str | None:
         if not relay.relay_token_encrypted:
             return None
-        return decrypt_key(relay.relay_token_encrypted, self._encryption_key())
+        return decrypt_secret(relay.relay_token_encrypted, self._encryption_key())
 
     def _encryption_key(self) -> str:
         settings = self._settings
@@ -244,6 +247,16 @@ class AnsiblePoolConfigHandler:
         row.default_vm_ram = normalized["default_vm_ram"]
         row.default_vm_vcpus = normalized["default_vm_vcpus"]
         row.default_vm_disk_size = normalized["default_vm_disk_size"]
+        # A pool repoint changes which rendezvous its future VMs reach. Existing
+        # VMs keep the relay recorded on their leases, so the repoint is refused
+        # while any of them are still bound — see relay_rebinding for why a
+        # remote port cannot follow a VM to a different relay.
+        check_pool_relay_change(
+            db,
+            pool_id=pool_id,
+            current_relay_id=row.relay_id,
+            new_relay_id=normalized["relay_id"],
+        )
         row.relay_id = normalized["relay_id"]
 
     def delete_config(self, db: Session, pool_id: str) -> None:

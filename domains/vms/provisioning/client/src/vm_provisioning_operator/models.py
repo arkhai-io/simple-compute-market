@@ -265,9 +265,7 @@ class CreateVmRequest(BaseModel):
                     "vm_disk_size": "20G",
                     "ssh_pubkey": "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAI...",
                     "gpu_provisioned": True,
-                    "relay_addr": "203.0.113.9",
-                    "relay_port": 7000,
-                    "relay_token": "<relay admission token>",
+                    "relay_id": "site-a",
                     "vm_remote_port": 6100,
                 }
             ]
@@ -329,21 +327,16 @@ class CreateVmRequest(BaseModel):
 
     # Relay tunnelling. Relay-neutral names: the buyer receives a host and a
     # port and has no reason to learn which relay implementation produced them.
-    relay_addr: Optional[str] = Field(
+    relay_id: Optional[str] = Field(
         default=None,
         description=(
-            "Rendezvous address of the tunnel relay. When set, the VM's SSH "
-            "port is reached through the relay rather than by direct "
-            "port-forward. Requires relay_port, relay_token, and "
-            "vm_remote_port."
+            "Which registered relay this VM is reached through. A reference, "
+            "not an endpoint: the address and the admission token are resolved "
+            "from the relay at execution, so a token rotated after this request "
+            "was accepted still reaches the job, and no credential is written "
+            "into the job's persisted parameters — which the job endpoints "
+            "return. Requires vm_remote_port."
         ),
-    )
-    relay_port: Optional[int] = Field(
-        default=None, description="Rendezvous port the tunnel client dials"
-    )
-    relay_token: Optional[str] = Field(
-        default=None,
-        description="Relay admission token (required when relay_addr is set)",
     )
     vm_remote_port: Optional[int] = Field(
         default=None,
@@ -387,21 +380,10 @@ class CreateVmRequest(BaseModel):
         selects neither access path: the VM is created, no external route
         exists, and the job reports success.
         """
-        if not self.relay_addr:
+        if not self.relay_id:
             return self
-        missing = [
-            name
-            for name, value in (
-                ("relay_port", self.relay_port),
-                ("relay_token", self.relay_token),
-                ("vm_remote_port", self.vm_remote_port),
-            )
-            if not value
-        ]
-        if missing:
-            raise ValueError(
-                f"{', '.join(missing)} required when relay_addr is set"
-            )
+        if not self.vm_remote_port:
+            raise ValueError("vm_remote_port is required when relay_id is set")
         return self
 
 

@@ -56,13 +56,80 @@ A write that omits the token MUST preserve the stored value. Only an explicit to
 - **WHEN** a relay row is read from the database without the deployment's encryption key
 - **THEN** the recorded token is ciphertext and cannot be used to admit a client
 
+### Requirement: A relay binding is fixed for a VM's life
+
+A VM's relay MUST be recorded on its port lease at allocation, and that record — not the pool's current configuration — MUST be the authority for which relay that VM uses. Teardown and reclamation MUST read the lease. Resolving the relay from pool configuration at teardown would target the wrong relay after any rebinding, releasing a port that was never bound there and leaving bound the one that was.
+
+A pool's relay reference determines which relay a newly created VM receives. It MUST NOT change the relay of a VM that already exists.
+
+A host's pool assignment, a pool's relay reference, and a relay's address or port MUST NOT change while any affected host holds an active lease, unless the relay is the same on both sides of the change. The buyer holds a rendezvous address and a port; both are delivered, and a remote port is not portable between relays, so a rebinding that moved existing VMs would strand every buyer on the affected hosts and request ports the new relay may already have leased.
+
+Rebinding is therefore drain-then-change: disabling a pool already excludes it from new scheduling without invalidating active workloads, so an operator disables, waits for leases to clear, rebinds, and re-enables.
+
+#### Scenario: A pool's relay reference is changed while VMs are running
+
+- **WHEN** an operator changes a pool's relay reference and a host in that pool holds an active lease
+- **THEN** the change is rejected, naming the host and the lease it holds
+
+#### Scenario: A pool's relay reference is changed after draining
+
+- **WHEN** the same change is made once no host in the pool holds an active lease
+- **THEN** it is accepted, and subsequently created VMs are allocated on the new relay
+
+#### Scenario: A host moves between pools sharing one relay
+
+- **WHEN** a host is reassigned to a pool referencing the same relay as its current pool
+- **THEN** the move is accepted regardless of active leases, because no delivered connection string changes
+
+#### Scenario: A relay is repointed while it carries leases
+
+- **WHEN** a relay's address or port is updated and it holds an active lease
+- **THEN** the update is rejected
+
+#### Scenario: A VM is torn down after its pool was rebound
+
+- **WHEN** teardown runs for a VM whose pool now references a different relay
+- **THEN** the relay recorded on the VM's lease is used, and the port is released against it
+
+### Requirement: Relay admission tokens are resolved at execution
+
+A relay's admission token MUST NOT be written into an accepted operation's persisted parameter snapshot, and MUST NOT appear in any job status or job list response. Job parameters are persisted unencrypted and are returned by the job endpoints, so a token placed among them is neither protected at rest nor withheld from a read.
+
+An accepted operation MUST carry the relay reference and the leased remote port. The relay's address and admission token MUST be resolved immediately before the job's variables are written, so that a token rotated after acceptance takes effect on the next execution, including a retry of a job accepted before the rotation.
+
+A relay that is absent, disabled, or holds no token at execution MUST fail the job as a configuration error rather than a retryable one, because a retry against unchanged configuration fails identically.
+
+The rendered variables file holds the decrypted token and MUST have the same lifetime and access restrictions as other decrypted secret material on the execution path.
+
+#### Scenario: A job's status is retrieved
+
+- **WHEN** a job dispatched against a relay-backed pool is retrieved through the job endpoints
+- **THEN** no admission token appears in the returned parameters
+
+#### Scenario: Stored job parameters are inspected
+
+- **WHEN** the persisted parameters of an accepted operation are read directly from the database
+- **THEN** they carry the relay reference and remote port, and no token
+
+#### Scenario: A token is rotated between acceptance and execution
+
+- **WHEN** a relay's token is rotated after a job is accepted and before it executes
+- **THEN** the job executes with the rotated token
+
+#### Scenario: A relay becomes unusable between acceptance and execution
+
+- **WHEN** the referenced relay is disabled or its token cleared before the job executes
+- **THEN** the job fails as a configuration error and is not retried
+
 ### Requirement: Relay port leases are unique per relay
 
 The provisioning service MUST allocate a VM's relay port from the referenced relay's window before dispatch, record the allocation against that relay and the VM, and pass the port to the job as an input. The playbook MUST apply the port it is given and MUST NOT select one.
 
 A port lease MUST be unique on the relay and the remote port. The host is recorded as an attribute of the lease and MUST NOT form part of its uniqueness, because the listening socket is bound on the relay rather than on the host, and two hosts sharing a relay share one port namespace.
 
-A lease MUST be released on every terminal outcome of the VM's lifecycle, not only on teardown. A periodic reconciliation MUST release leases whose owning job or fulfillment has been terminal beyond a grace period.
+A lease MUST be released when the owning settlement record reaches a terminal state, in the same transaction that records that state. Attaching release to individual lifecycle paths instead leaves whichever path was not enumerated leaking silently; attaching it outside the terminal transaction reintroduces the same leak on any crash between the two. A periodic reconciliation MUST release leases whose owning job or fulfillment has been terminal beyond a grace period, as a backstop for paths that bypass the transition rather than as the primary mechanism.
+
+Allocation MUST be idempotent for one owner: allocating twice for the same fulfillment MUST return the lease already held rather than issuing a second port.
 
 A pool whose referenced relay has no usable allocation window MUST be rejected before dispatch rather than producing a VM with no external route.
 
@@ -80,6 +147,16 @@ A pool whose referenced relay has no usable allocation window MUST be rejected b
 
 - **WHEN** a lease's owning job has been terminal beyond the grace period and the lease is still held
 - **THEN** reconciliation releases it
+
+#### Scenario: An accepted fulfillment allocates twice
+
+- **WHEN** allocation runs a second time for a fulfillment that already holds an active lease
+- **THEN** the existing lease is returned and no second port is issued
+
+#### Scenario: Validation is requested
+
+- **WHEN** a fulfillment request is validated rather than accepted
+- **THEN** no port is leased and no durable state is written
 
 #### Scenario: A relay is configured with no usable window
 

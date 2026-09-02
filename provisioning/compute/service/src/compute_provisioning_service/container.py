@@ -29,6 +29,7 @@ from compute_provisioning_service.services.deal_event_sink import (
 )
 from compute_provisioning_service.services.capacity_reservation_watchdog import CapacityReservationWatchdog
 from compute_provisioning_service.services.fulfillment_convergence import FulfillmentConvergenceWatchdog
+from compute_provisioning_service.services.relay_port_allocator import RelayPortAllocator
 from compute_provisioning_service.services.lease_watchdog import LeaseWatchdog
 from compute_provisioning_service.services.principal_authority import (
     SqlAlchemyProvisioningPrincipalAuthority,
@@ -429,12 +430,18 @@ class Container(containers.DeclarativeContainer):
         settings=config,
     )
 
+    relay_port_allocator = providers.Singleton(
+        RelayPortAllocator,
+        session_factory,
+    )
+
     fulfillment_convergence_watchdog = providers.Singleton(
         FulfillmentConvergenceWatchdog,
         session_factory=session_factory,
         repository=settlement_repository,
         provider_registry=provider_registry,
         settings=config,
+        port_allocator=relay_port_allocator,
     )
 
     system_service = providers.Singleton(
@@ -474,6 +481,7 @@ resolved_executor_lease_service: "ExecutorLeaseService | None" = None
 resolved_compute_contract_service = None
 resolved_resource_pool_service: "ResourcePoolService | None" = None
 resolved_relay_service: Any | None = None
+resolved_relay_port_allocator: Any | None = None
 resolved_physical_settlement_scheduler: "PhysicalSettlementScheduler | None" = None
 resolved_fulfillment_service: "FulfillmentOrchestrator | None" = None
 resolved_capacity_reservation_watchdog: "CapacityReservationWatchdog | None" = None

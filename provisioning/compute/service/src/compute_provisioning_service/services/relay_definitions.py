@@ -129,6 +129,39 @@ def import_relay_definitions(
     relay_service: Any,
     settings: Any,
 ) -> RelayDefinitionDiff:
+    """Reconcile relays, each write in its own transaction.
+
+    Kept for callers with nothing to compose with. A startup importer, which
+    must land the digest with the apply, uses the session-scoped form below.
+    """
+    return _reconcile(yaml_text, relay_service=relay_service, settings=settings)
+
+
+def import_relay_definitions_in_session(
+    db: Any,
+    yaml_text: str,
+    *,
+    relay_service: Any,
+    settings: Any,
+) -> RelayDefinitionDiff:
+    """Reconcile relays inside the caller's transaction, without committing."""
+    return _reconcile(
+        yaml_text, relay_service=relay_service.joining(db), settings=settings
+    )
+
+
+def _reconcile(
+    yaml_text: str,
+    *,
+    relay_service: Any,
+    settings: Any,
+) -> RelayDefinitionDiff:
+    """Apply every entry through one relay service view.
+
+    The caller decides whether that view owns transactions or joins theirs; this
+    function does not branch on it, so there is one reconciliation and not two
+    that could drift.
+    """
     definitions = parse_relay_definitions(yaml_text)
     existing = {view.id: view for view in relay_service.list_relays()}
 

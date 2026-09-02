@@ -44,6 +44,7 @@ from vm_provisioning_adapter.models.ansible import (
     InventoryResponse,
 )
 from vm_provisioning_adapter.models.jobs_model import AnsibleJobParams, AnsibleRunResult
+from market_config import decrypt_secret
 
 logger = logging.getLogger(__name__)
 
@@ -357,9 +358,8 @@ class AnsibleService:
                 key_ref = host.ssh_key_value
             else:
                 # Decrypt and write a companion temp key file
-                from vm_provisioning_adapter.crypto import decrypt_key
                 secret = getattr(self._settings, "ssh_decryption_key", "")
-                plaintext = decrypt_key(host.ssh_key_value, secret)
+                plaintext = decrypt_secret(host.ssh_key_value, secret)
                 key_file = _Path(tempfile.gettempdir()) / f"{host.name}_key_{nonce}"
                 key_file.write_text(plaintext, encoding="utf-8")
                 key_file.chmod(0o400)

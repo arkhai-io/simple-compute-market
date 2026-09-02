@@ -90,12 +90,6 @@ spec:
               mountPath: /home/appuser/.ssh/id_ed25519
               subPath: id_ed25519
               readOnly: true
-            {{- if .Values.definitions.pools }}
-            - name: config
-              mountPath: /app/config/pool-definitions.yaml
-              subPath: pool-definitions.yaml
-              readOnly: true
-            {{- end }}
             {{- if .Values.definitions.relays }}
             - name: config
               mountPath: /app/config/relay-definitions.yaml

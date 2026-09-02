@@ -39,6 +39,9 @@ from compute_provisioning_service.services.relay_definitions import (
     import_relay_definitions,
     parse_relay_definitions,
 )
+from compute_provisioning_service.services.relay_rebinding import (
+    RelayRebindingRefused,
+)
 from compute_provisioning_service.services.relay_service import (
     RelayEndpointConflictError,
     RelayNotFoundError,
@@ -401,50 +404,271 @@ class TestTheDigestGate:
     silently, on eviction, drain, and crash recovery.
     """
 
-    def _digest_of(self, session_factory, kind):
-        with session_factory() as db:
-            row = db.get(DefinitionDocumentImport, kind)
-            return None if row is None else row.digest
+    def _importer(self, session_factory, settings):
+        from compute_provisioning_service.services.definition_documents import (
+            DefinitionDocumentImporter,
+        )
+
+        return DefinitionDocumentImporter(
+            session_factory=session_factory,
+            settings=settings,
+            pool_service=None,
+            relay_service=None,
+        )
 
     def test_nothing_is_recorded_before_a_first_import(self, session_factory):
-        assert self._digest_of(session_factory, "relays") is None
-
-    def test_a_recorded_digest_is_written_and_read_back(self, session_factory):
-        from compute_provisioning_service.app_runtime import (
-            _document_digest,
-            _record_digest,
-            _recorded_digest,
-        )
-
-        digest = _document_digest("relays: []\n")
-        _record_digest(session_factory, "relays", digest)
-        assert _recorded_digest(session_factory, "relays") == digest
-
-    def test_a_changed_document_produces_a_different_digest(self):
-        from compute_provisioning_service.app_runtime import _document_digest
-
-        assert _document_digest("relays: []\n") != _document_digest("relays: [1]\n")
-
-    def test_recording_twice_updates_rather_than_duplicating(self, session_factory):
-        from compute_provisioning_service.app_runtime import (
-            _document_digest,
-            _record_digest,
-            _recorded_digest,
-        )
-
-        _record_digest(session_factory, "pools", _document_digest("a"))
-        _record_digest(session_factory, "pools", _document_digest("b"))
-        assert _recorded_digest(session_factory, "pools") == _document_digest("b")
         with session_factory() as db:
+            assert db.get(DefinitionDocumentImport, "relays") is None
+
+    def test_a_changed_document_produces_a_different_digest(
+        self, session_factory, settings
+    ):
+        importer = self._importer(session_factory, settings)
+        assert importer.digest_of("relays: []\n") != importer.digest_of("relays: [1]\n")
+
+    def test_a_digest_is_written_and_read_back(self, session_factory, settings):
+        importer = self._importer(session_factory, settings)
+        digest = importer.digest_of("relays: []\n")
+        with session_factory() as db, db.begin():
+            importer._record_digest(db, "relays", digest)
+        with session_factory() as db:
+            assert importer._recorded_digest(db, "relays") == digest
+
+    def test_recording_twice_updates_rather_than_duplicating(
+        self, session_factory, settings
+    ):
+        importer = self._importer(session_factory, settings)
+        with session_factory() as db, db.begin():
+            importer._record_digest(db, "pools", importer.digest_of("a"))
+        with session_factory() as db, db.begin():
+            importer._record_digest(db, "pools", importer.digest_of("b"))
+        with session_factory() as db:
+            assert importer._recorded_digest(db, "pools") == importer.digest_of("b")
             assert db.query(DefinitionDocumentImport).count() == 1
 
-    def test_pools_and_relays_are_tracked_separately(self, session_factory):
-        from compute_provisioning_service.app_runtime import (
-            _document_digest,
-            _record_digest,
-            _recorded_digest,
+    def test_pools_and_relays_are_tracked_separately(self, session_factory, settings):
+        importer = self._importer(session_factory, settings)
+        with session_factory() as db, db.begin():
+            importer._record_digest(db, "pools", importer.digest_of("pool-doc"))
+        with session_factory() as db:
+            assert importer._recorded_digest(db, "relays") is None
+            assert importer._recorded_digest(db, "pools") is not None
+
+
+class TestRebinding:
+    """A relay binding is fixed for a VM's life.
+
+    The buyer holds a rendezvous address and a port. Both are delivered, and a
+    remote port is not portable between relays — 6142 on one says nothing about
+    6142 on another, which may already be leased. So a rebinding that moved
+    existing VMs would strand every buyer on the affected hosts, and these
+    rules refuse it rather than accept it and reissue connection strings the
+    system has no way to deliver.
+    """
+
+    def _make_lease(self, session_factory, *, relay_id="site-a",
+                    pool_id="gpu-pool", host="kvm1"):
+        from compute_provisioning_service.db.models import RelayPortLease
+
+        with session_factory() as db, db.begin():
+            db.add(
+                RelayPortLease(
+                    id=f"lease-{relay_id}",
+                    relay_id=relay_id,
+                    remote_port=6100,
+                    host_name=host,
+                    pool_id=pool_id,
+                    owner_kind="fulfillment",
+                    owner_id=f"cr-{relay_id}",
+                )
+            )
+
+    def _relay_with_lease(self, session_factory, relays, *, relay_id="site-a",
+                          addr="10.0.0.9", pool_id="gpu-pool", host="kvm1"):
+        _make_relay(relays, relay_id=relay_id, relay_addr=addr)
+        self._make_lease(
+            session_factory, relay_id=relay_id, pool_id=pool_id, host=host
         )
 
-        _record_digest(session_factory, "pools", _document_digest("pool-doc"))
-        assert _recorded_digest(session_factory, "relays") is None
-        assert _recorded_digest(session_factory, "pools") is not None
+    def _pool_on_relay(self, session_factory, handler, *, pool_id, relay_id):
+        """A pool already pointing at a relay. Written before any lease exists,
+        which is the real order: a lease is what a VM on that pool produced."""
+        with session_factory() as db, db.begin():
+            db.add(ResourcePool(id=pool_id, label=pool_id, provider="ansible", enabled=True))
+            handler.replace_config(
+                db, pool_id,
+                {"playbook_path": _PLAYBOOK_PATH, "relay_id": relay_id},
+            )
+
+    def test_a_relay_cannot_move_while_it_carries_tunnels(
+        self, session_factory, relays
+    ):
+        self._relay_with_lease(session_factory, relays)
+        with pytest.raises(RelayRebindingRefused) as excinfo:
+            relays.update_relay("site-a", relay_addr="10.0.0.20")
+        message = str(excinfo.value)
+        assert "kvm1:6100" in message
+        assert "Disable the pool" in message
+
+    def test_a_relay_can_move_once_drained(self, session_factory, relays):
+        from compute_provisioning_service.db.models import RelayPortLease
+        from datetime import datetime, timezone
+
+        self._relay_with_lease(session_factory, relays)
+        with session_factory() as db, db.begin():
+            db.query(RelayPortLease).one().released_at = datetime.now(timezone.utc)
+
+        assert relays.update_relay("site-a", relay_addr="10.0.0.20").relay_addr == "10.0.0.20"
+
+    def test_a_relay_edit_that_does_not_move_it_is_unaffected(
+        self, session_factory, relays
+    ):
+        """Only the endpoint is protected. A window or label change touches
+        nothing a buyer holds."""
+        self._relay_with_lease(session_factory, relays)
+        assert relays.update_relay("site-a", label="renamed").label == "renamed"
+        assert relays.update_relay("site-a", vm_port_range_count=50).vm_port_range_count == 50
+
+    def test_a_pool_cannot_be_repointed_while_its_hosts_hold_leases(
+        self, session_factory, relays, settings
+    ):
+        handler = AnsiblePoolConfigHandler(settings=settings)
+        _make_relay(relays, relay_id="site-a", relay_addr="10.0.0.9")
+        _make_relay(relays, relay_id="site-b", relay_addr="10.0.0.10")
+        self._pool_on_relay(session_factory, handler, pool_id="gpu-pool", relay_id="site-a")
+        self._make_lease(session_factory, relay_id="site-a", pool_id="gpu-pool")
+
+        with session_factory() as db, db.begin():
+            with pytest.raises(RelayRebindingRefused):
+                handler.replace_config(
+                    db, "gpu-pool",
+                    {"playbook_path": _PLAYBOOK_PATH, "relay_id": "site-b"},
+                )
+
+    def test_a_pool_write_that_keeps_its_relay_is_unaffected(
+        self, session_factory, relays, settings
+    ):
+        handler = AnsiblePoolConfigHandler(settings=settings)
+        _make_relay(relays, relay_id="site-a", relay_addr="10.0.0.9")
+        self._pool_on_relay(session_factory, handler, pool_id="gpu-pool", relay_id="site-a")
+        self._make_lease(session_factory, relay_id="site-a", pool_id="gpu-pool")
+        with session_factory() as db, db.begin():
+            handler.replace_config(
+                db, "gpu-pool",
+                {"playbook_path": "/other/playbook.yaml", "relay_id": "site-a"},
+            )
+        with session_factory() as db:
+            assert handler.read_config(db, "gpu-pool")["playbook_path"] == "/other/playbook.yaml"
+
+
+class TestExecutionTimeTokenResolution:
+    """The token is resolved here and nowhere earlier.
+
+    Earlier, it travelled in the accepted operation — which is persisted in a
+    JSON column and returned by the job endpoints, so the credential was
+    neither encrypted at rest nor withheld from a read. Resolving at execution
+    also means a rotation reaches a retry of a job accepted before it.
+    """
+
+    def _resolver(self, session_factory, settings):
+        from compute_provisioning_service.services.relay_execution import (
+            RelayExecutionResolver,
+        )
+
+        return RelayExecutionResolver(session_factory=session_factory, settings=settings)
+
+    def _params(self, **overrides):
+        from vm_provisioning_adapter.models.jobs_model import AnsibleJobParams
+
+        fields = {"vm_host": "kvm1", "vm_action": "create", "executor_kind": "vm"}
+        fields.update(overrides)
+        return AnsibleJobParams(**fields)
+
+    def test_a_job_with_no_relay_passes_through(self, session_factory, settings):
+        params = self._params()
+        assert self._resolver(session_factory, settings).resolve_into(params) is params
+
+    def test_the_address_and_token_are_filled_in(self, relays, session_factory, settings):
+        _make_relay(relays, token="admission-token")
+        resolved = self._resolver(session_factory, settings).resolve_into(
+            self._params(relay_id="site-a", vm_remote_port=6100)
+        )
+        assert resolved.relay_addr == "10.0.0.9"
+        assert resolved.relay_port == 7000
+        assert resolved.relay_token == "admission-token"
+
+    def test_a_rotation_reaches_the_next_dispatch_without_a_restart(
+        self, relays, session_factory, settings
+    ):
+        """The property the controller exists to provide.
+
+        Asserted through what a job actually runs with — the rendered extra-vars
+        — rather than through a successful write to the relay row. A rotation
+        that stores correctly and never reaches a playbook has changed nothing
+        an operator cares about.
+        """
+        from vm_provisioning_adapter.models.jobs_model import AnsibleJobParams
+        from vm_provisioning_adapter.services.ansible_service import AnsibleService
+
+        _make_relay(relays, token="original")
+        params = AnsibleJobParams(
+            vm_host="kvm1",
+            vm_action="create",
+            executor_kind="vm",
+            relay_id="site-a",
+            vm_remote_port=6100,
+        )
+        relays.rotate_token("site-a", "rotated")
+
+        resolved = self._resolver(session_factory, settings).resolve_into(params)
+        lines = AnsibleService(settings)._build_builtin_var_lines(resolved)
+
+        assert 'frp_auth_token: "rotated"' in lines
+        assert "original" not in "\n".join(lines)
+
+    def test_a_rotation_reaches_a_job_accepted_before_it(
+        self, relays, session_factory, settings
+    ):
+        """The second reason for late binding. A snapshot would pin the value
+        that was correct at acceptance, which after a rotation is exactly the
+        value that no longer works."""
+        _make_relay(relays, token="original")
+        params = self._params(relay_id="site-a", vm_remote_port=6100)
+        relays.rotate_token("site-a", "rotated")
+
+        resolved = self._resolver(session_factory, settings).resolve_into(params)
+
+        assert resolved.relay_token == "rotated"
+
+    @pytest.mark.parametrize(
+        "break_it, expected",
+        [
+            (lambda r: r.set_enabled("site-a", False), "disabled"),
+            (lambda r: None, "no admission token"),
+        ],
+    )
+    def test_an_unusable_relay_fails_the_job(
+        self, relays, session_factory, settings, break_it, expected
+    ):
+        from compute_provisioning_service.services.relay_execution import (
+            RelayUnusableAtExecutionError,
+        )
+
+        _make_relay(relays, token="admission-token" if expected == "disabled" else None)
+        break_it(relays)
+        with pytest.raises(RelayUnusableAtExecutionError) as excinfo:
+            self._resolver(session_factory, settings).resolve_into(
+                self._params(relay_id="site-a", vm_remote_port=6100)
+            )
+        assert expected in str(excinfo.value)
+
+    def test_a_vanished_relay_fails_the_job(self, session_factory, settings):
+        from compute_provisioning_service.services.relay_execution import (
+            RelayUnusableAtExecutionError,
+        )
+
+        with pytest.raises(RelayUnusableAtExecutionError):
+            self._resolver(session_factory, settings).resolve_into(
+                self._params(relay_id="never-created", vm_remote_port=6100)
+            )
+

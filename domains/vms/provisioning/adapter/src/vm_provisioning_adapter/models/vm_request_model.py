@@ -42,9 +42,10 @@ def build_create_params(host: str, body: CreateVmRequest) -> AnsibleJobParams:
         vm_gpu_device=body.vm_gpu_device,
         vm_gpu_devices=body.vm_gpu_devices,
         vm_gpu_partition_size=body.vm_gpu_partition_size,
-        relay_addr=body.relay_addr,
-        relay_port=body.relay_port,
-        relay_token=body.relay_token,
+        # The reference and the leased port only. The address and token are
+        # resolved at execution — this request becomes a persisted, readable
+        # job parameter blob, and the job endpoints return it verbatim.
+        relay_id=body.relay_id,
         vm_remote_port=body.vm_remote_port,
         golden_image_name=body.golden_image_name,
         gcs_bucket_url=body.gcs_bucket_url,

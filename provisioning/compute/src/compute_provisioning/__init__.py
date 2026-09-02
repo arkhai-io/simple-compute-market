@@ -57,6 +57,13 @@ from .app import (
     build_compute_provisioning_app,
 )
 from .lifecycle import cancel_background_tasks, create_background_task
+from compute_provisioning.relays import (
+    RelayCreate,
+    RelayListResponse,
+    RelayResponse,
+    RelayTokenRotate,
+    RelayUpdate,
+)
 from market_resource_pools import (
     PoolConfigHandler,
     PoolConfigValidationProblem,
@@ -132,6 +139,11 @@ __all__ = [
     "PoolImportRequest",
     "PoolImportResponse",
     "PoolListResponse",
+    "RelayCreate",
+    "RelayListResponse",
+    "RelayResponse",
+    "RelayTokenRotate",
+    "RelayUpdate",
     "PoolReplace",
     "PoolResponse",
     "PoolUpdate",

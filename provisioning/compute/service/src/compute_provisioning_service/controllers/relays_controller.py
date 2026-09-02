@@ -26,9 +26,18 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi_utils.cbv import cbv
-from pydantic import BaseModel, Field
 
+from compute_provisioning import (
+    RelayCreate,
+    RelayListResponse,
+    RelayResponse,
+    RelayTokenRotate,
+    RelayUpdate,
+)
 from compute_provisioning_service import container as _container_module
+from compute_provisioning_service.services.relay_rebinding import (
+    RelayRebindingRefused,
+)
 from compute_provisioning_service.services.relay_service import (
     UNSET,
     RelayEndpointConflictError,
@@ -41,61 +50,13 @@ from compute_provisioning_service.services.relay_service import (
 router = APIRouter(prefix="/relays", tags=["relays"])
 
 
-class RelayResponse(BaseModel):
-    """A relay as callers see it.
+def _response(view: RelayView) -> RelayResponse:
+    """Shared wire model built from the service view.
 
-    ``token_configured`` rather than the token. An operator needs to know
-    whether a relay is usable; nothing needs to read back a credential it
-    supplied, and a field that is never returned cannot leak through a
-    serializer someone adds later.
+    The view is the type that structurally cannot carry a token; this only
+    renames it for the wire.
     """
-
-    id: str
-    label: str | None = None
-    relay_addr: str
-    relay_port: int
-    vm_port_range_start: int
-    vm_port_range_count: int
-    enabled: bool
-    token_configured: bool
-
-    @classmethod
-    def of(cls, view: RelayView) -> "RelayResponse":
-        return cls(**view.__dict__)
-
-
-class RelayListResponse(BaseModel):
-    relays: list[RelayResponse]
-
-
-class RelayCreate(BaseModel):
-    relay_addr: str
-    relay_port: int
-    vm_port_range_start: int
-    vm_port_range_count: int
-    id: str | None = None
-    label: str | None = None
-    token: str | None = None
-    enabled: bool = True
-
-
-class RelayUpdate(BaseModel):
-    """Partial update. An omitted field is unchanged.
-
-    No token field: rotation is its own operation, so that changing a label
-    cannot carry a credential along with it and so that a rotation is
-    distinguishable in an audit trail from an ordinary edit.
-    """
-
-    label: str | None = None
-    relay_addr: str | None = None
-    relay_port: int | None = None
-    vm_port_range_start: int | None = None
-    vm_port_range_count: int | None = None
-
-
-class RelayTokenRotate(BaseModel):
-    token: str = Field(min_length=1)
+    return RelayResponse(**view.__dict__)
 
 
 @cbv(router)
@@ -111,7 +72,7 @@ class RelayController:
     @router.get("/", response_model=RelayListResponse)
     def list_relays(self) -> RelayListResponse:
         return RelayListResponse(
-            relays=[RelayResponse.of(v) for v in self._relays.list_relays()]
+            relays=[_response(v) for v in self._relays.list_relays()]
         )
 
     @router.post("/", response_model=RelayResponse, status_code=status.HTTP_201_CREATED)
@@ -133,11 +94,11 @@ class RelayController:
             raise HTTPException(
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)
             )
-        return RelayResponse.of(view)
+        return _response(view)
 
     @router.get("/{relay_id}", response_model=RelayResponse)
     def get_relay(self, relay_id: str) -> RelayResponse:
-        return RelayResponse.of(self._get(relay_id))
+        return _response(self._get(relay_id))
 
     @router.patch("/{relay_id}", response_model=RelayResponse)
     def update_relay(self, relay_id: str, body: RelayUpdate) -> RelayResponse:
@@ -155,11 +116,16 @@ class RelayController:
             raise self._not_found(relay_id)
         except RelayEndpointConflictError as exc:
             raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc))
+        except RelayRebindingRefused as exc:
+            # 409, not 422: the request is well-formed and would be valid once
+            # the relay is drained. The message carries the drain sequence, so
+            # it must reach the caller rather than becoming a 500.
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc))
         except RelayValidationError as exc:
             raise HTTPException(
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)
             )
-        return RelayResponse.of(view)
+        return _response(view)
 
     @router.post("/{relay_id}/token", response_model=RelayResponse)
     def rotate_token(self, relay_id: str, body: RelayTokenRotate) -> RelayResponse:
@@ -171,7 +137,7 @@ class RelayController:
             raise HTTPException(
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)
             )
-        return RelayResponse.of(view)
+        return _response(view)
 
     @router.post("/{relay_id}/enable", response_model=RelayResponse)
     def enable_relay(self, relay_id: str) -> RelayResponse:
@@ -183,7 +149,7 @@ class RelayController:
 
     def _set_enabled(self, relay_id: str, enabled: bool) -> RelayResponse:
         try:
-            return RelayResponse.of(self._relays.set_enabled(relay_id, enabled))
+            return _response(self._relays.set_enabled(relay_id, enabled))
         except RelayNotFoundError:
             raise self._not_found(relay_id)
 

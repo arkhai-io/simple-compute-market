@@ -17,7 +17,7 @@
       "type": "object",
       "properties": {
         "golden_root_ssh_password": false,
-        "frp_dashboard_password": false,
+        "relay_token": false,
         "ssh_decryption_key": false,
         "inventory_ini": false,
         "storefront_admin_key": false
