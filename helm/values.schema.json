@@ -33,6 +33,12 @@
         }
       }
     },
+    "bare-metal-storefront": {
+      "type": "object",
+      "properties": {
+        "enabled": {"type": "boolean"}
+      }
+    },
     "provisioning": {
       "type": "object",
       "required": ["identity", "storefrontIdentity", "adminIdentity"],

@@ -23,6 +23,10 @@ dependencies:
     version: "0.1.0"
     repository: "file://charts/storefront"
     condition: storefront.enabled
+  - name: bare-metal-storefront
+    version: "0.1.0"
+    repository: "file://charts/bare-metal-storefront"
+    condition: bare-metal-storefront.enabled
   - name: provisioning
     version: "0.1.0"
     repository: "file://charts/provisioning"

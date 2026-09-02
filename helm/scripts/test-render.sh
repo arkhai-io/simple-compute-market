@@ -14,7 +14,8 @@ EVM_RENDERED="$(mktemp)"
 DUAL_RENDERED="$(mktemp)"
 OVERLAP_RENDERED="$(mktemp)"
 TWO_REGISTRIES_RENDERED="$(mktemp)"
-trap 'rm -f "$DEFAULT_RENDERED" "$FIAT_RENDERED" "$EVM_RENDERED" "$DUAL_RENDERED" "$OVERLAP_RENDERED" "$TWO_REGISTRIES_RENDERED"' EXIT
+BARE_METAL_RENDERED="$(mktemp)"
+trap 'rm -f "$DEFAULT_RENDERED" "$FIAT_RENDERED" "$EVM_RENDERED" "$DUAL_RENDERED" "$OVERLAP_RENDERED" "$TWO_REGISTRIES_RENDERED" "$BARE_METAL_RENDERED"' EXIT
 
 helm template "$RELEASE" "$CHART_DIR" \
     --values "$CHART_DIR/values.yaml" >"$DEFAULT_RENDERED" 2>/dev/null
@@ -61,6 +62,9 @@ helm template "$RELEASE-overlap" "$CHART_DIR" \
 helm template "$RELEASE-registries" "$CHART_DIR" \
     --values "$CHART_DIR/values.yaml" \
     --values "$CHART_DIR/fixtures/two-registries-values.yaml" >"$TWO_REGISTRIES_RENDERED" 2>/dev/null
+helm template "$RELEASE-bare-metal" "$CHART_DIR" \
+    --values "$CHART_DIR/values.yaml" \
+    --set 'bare-metal-storefront.enabled=true' >"$BARE_METAL_RENDERED" 2>/dev/null
 
 errors=0
 fail() {
@@ -157,6 +161,8 @@ expect_present "$DEFAULT_CONFIGMAP" 'priority = \[\]' "new defaults have empty s
 expect_absent "$DEFAULT_CONFIGMAP" '\[Settlement\.(stripe|alkahest)\]' "new defaults install no mechanism subsection"
 expect_absent "$DEFAULT_RENDERED" 'private_key|privateKey|request_credential' "default manifests contain no signing key fields"
 expect_absent "$DEFAULT_RENDERED" 'admin_api_key|adminApiKey|X-Admin-Key' "default manifests contain no legacy administrator shared secret"
+expect_absent "$DEFAULT_RENDERED" 'charts/bare-metal-storefront/' "default render omits the dedicated bare-metal storefront"
+expect_present "$BARE_METAL_RENDERED" 'charts/bare-metal-storefront/templates/deployment\.yaml' "dedicated bare-metal storefront can be enabled explicitly"
 expect_present "$DEFAULT_REGISTRY" 'name: +REGISTRY_DESCRIPTOR_BASE_URL' "registry renders its public descriptor URL"
 expect_present "$DEFAULT_REGISTRY" 'value: +"?Local VM Compute Registry"?' "registry renders its descriptor display name"
 expect_present "$DEFAULT_REGISTRY" 'value: +"?Arkhai local development"?' "registry renders its operator identity"
