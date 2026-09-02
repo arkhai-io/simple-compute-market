@@ -75,13 +75,6 @@ class PreparedFulfillment:
     prepared: VersionedEnvelope[Any]
 
 
-class _NoCode:
-    co_varnames: tuple[str, ...] = ()
-
-
-_NO_CODE = _NoCode()
-
-
 class FulfillmentOrchestrator:
     def __init__(
         self,
@@ -161,18 +154,13 @@ class FulfillmentOrchestrator:
 
         pool = self._require_pool_delivers_mode(tx, record)
         provider = self._providers.require(record.provider)
-        prepare = provider.prepare_create
-        kwargs: dict[str, Any] = {
-            "capacity_reservation_id": capacity_reservation_id,
-            "request": fulfillment_request,
-            "resource": self._resource(record),
-            "pool_config": dict(pool.provider_config or {}),
-        }
-        # Providers that acquire nothing during preparation need no say in
-        # this, and are not required to grow a parameter to keep working.
-        if not acquire and "allocate" in getattr(prepare, "__code__", _NO_CODE).co_varnames:
-            kwargs["allocate"] = False
-        prepared = prepare(**kwargs)
+        prepared = provider.prepare_create(
+            capacity_reservation_id=capacity_reservation_id,
+            request=fulfillment_request,
+            resource=self._resource(record),
+            pool_config=dict(pool.provider_config or {}),
+            allocate=acquire,
+        )
         return PreparedFulfillment(record=record, provider=provider, prepared=prepared)
 
     def validate_fulfillment(

@@ -93,6 +93,28 @@ def check_relay_endpoint_change(
         )
 
 
+def check_relay_token_rotation(db: Session, *, relay: Relay) -> None:
+    """Refuse rotating the token of a relay that is still carrying tunnels.
+
+    Rotation does not change the address or port a buyer holds, so it does not
+    obviously belong to this rule — but it belongs for a different reason. A
+    host adopts a new token only by restarting its tunnel client, since `auth`
+    is not among the sections a reload applies, and that restart drops every
+    proxy the client registered. And `frps` admits on one token, so a rotation
+    invalidates every client still holding the old one at its next reconnect.
+    A shared bearer token cannot be rotated one host at a time.
+
+    Setting a token on a relay that has none, or rotating one before any host
+    dials it, is unaffected: neither has leases.
+    """
+    held = RelayPortAllocator.active_leases_for_relay(db, relay.id)
+    if held:
+        raise _refuse(
+            f"Relay '{relay.id}' cannot have its admission token rotated",
+            held,
+        )
+
+
 def check_pool_relay_change(
     db: Session,
     *,

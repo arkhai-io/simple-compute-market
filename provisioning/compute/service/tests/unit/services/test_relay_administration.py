@@ -545,6 +545,43 @@ class TestRebinding:
                     {"playbook_path": _PLAYBOOK_PATH, "relay_id": "site-b"},
                 )
 
+    def test_a_carrying_relay_cannot_have_its_token_rotated(
+        self, session_factory, relays
+    ):
+        """Rotation joins the drain rule, for a different reason than the
+        endpoint does.
+
+        It does not change the address or port a buyer holds — but a host
+        adopts a new token only by restarting its tunnel client, since `auth`
+        is not reloadable, and that restart drops every proxy the client
+        registered. `frps` also admits on one token, so a rotation invalidates
+        every client still holding the old one.
+        """
+        self._relay_with_lease(session_factory, relays)
+
+        with pytest.raises(RelayRebindingRefused) as excinfo:
+            relays.rotate_token("site-a", "rotated")
+
+        assert "kvm1:6100" in str(excinfo.value)
+
+    def test_a_token_can_be_set_before_any_host_dials(self, relays):
+        """The ordinary case is unaffected: a relay with no leases has nothing
+        to disturb."""
+        _make_relay(relays)
+
+        assert relays.rotate_token("site-a", "first-token").token_configured is True
+
+    def test_a_token_can_be_rotated_once_drained(self, session_factory, relays):
+        from datetime import datetime, timezone
+
+        from compute_provisioning_service.db.models import RelayPortLease
+
+        self._relay_with_lease(session_factory, relays)
+        with session_factory() as db, db.begin():
+            db.query(RelayPortLease).one().released_at = datetime.now(timezone.utc)
+
+        assert relays.rotate_token("site-a", "rotated").token_configured is True
+
     def test_a_pool_write_that_keeps_its_relay_is_unaffected(
         self, session_factory, relays, settings
     ):
@@ -597,15 +634,22 @@ class TestExecutionTimeTokenResolution:
         assert resolved.relay_port == 7000
         assert resolved.relay_token == "admission-token"
 
-    def test_a_rotation_reaches_the_next_dispatch_without_a_restart(
+    def test_a_rotated_token_reaches_the_rendered_job_variables(
         self, relays, session_factory, settings
     ):
-        """The property the controller exists to provide.
+        """How far the service-side path carries a rotation, and no further.
 
-        Asserted through what a job actually runs with — the rendered extra-vars
-        — rather than through a successful write to the relay row. A rotation
-        that stores correctly and never reaches a playbook has changed nothing
-        an operator cares about.
+        Asserted through what a job runs with rather than through a successful
+        write to the relay row: a rotation that stores correctly and never
+        reaches a playbook has changed nothing an operator cares about.
+
+        This does **not** show that the host's tunnel client adopts the token.
+        That needs the client's own configuration rewritten and the client
+        restarted, which `vm-create.yml` does and `test_vm_management_contracts`
+        pins; whether the restart behaves as intended against a real relay is
+        the live gate's business. An earlier name for this test claimed
+        rotation took effect "without a restart", which was true of the
+        variables and false of the host.
         """
         from vm_provisioning_adapter.models.jobs_model import AnsibleJobParams
         from vm_provisioning_adapter.services.ansible_service import AnsibleService
@@ -671,4 +715,3 @@ class TestExecutionTimeTokenResolution:
             self._resolver(session_factory, settings).resolve_into(
                 self._params(relay_id="never-created", vm_remote_port=6100)
             )
-

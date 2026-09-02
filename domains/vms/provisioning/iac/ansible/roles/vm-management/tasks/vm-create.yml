@@ -1767,6 +1767,56 @@
     vm_ip: "{{ vm_ready_result.stdout_lines[-1] }}"
   when: vm_action == "create" and vm_ready_result is defined and vm_ready_result.rc == 0
 
+- name: Reconcile the VM tunnel client's baseline against the resolved relay
+  # The client's top-level rendezvous and credential are templated once at host
+  # setup. The relay they name can change afterwards — its address under a
+  # drain, its token under a rotation — and neither reaches the host by itself,
+  # because a VM operation only appends proxy stanzas. Without this step a host
+  # keeps dialling a rendezvous or presenting a credential the relay no longer
+  # accepts, and the failure appears at the client's next reconnect rather than
+  # at the change.
+  #
+  # Only these three lines. Re-templating the file would erase the proxy blocks
+  # it also holds, which is the hazard the two-client split exists to prevent.
+  lineinfile:
+    path: /etc/frp/frpc-vms.toml
+    regexp: "{{ item.regexp }}"
+    line: "{{ item.line }}"
+    backrefs: no
+  loop:
+    - regexp: '^serverAddr\s*='
+      line: 'serverAddr = "{{ frp_server_addr }}"'
+    - regexp: '^serverPort\s*='
+      line: "serverPort = {{ frp_server_port | default(7000) }}"
+    - regexp: '^auth\.token\s*='
+      line: 'auth.token = "{{ frp_auth_token }}"'
+  register: frpc_vms_baseline
+  when:
+    - vm_action == "create"
+    - frp_server_addr is defined
+    - frp_auth_token is defined
+  delegate_to: "{{ target_host }}"
+
+- name: Restart the VM tunnel client when its baseline changed
+  # A restart, not a reload: `serverAddr`, `serverPort`, and `auth` are not
+  # among the sections a reload applies, so the client would keep using the old
+  # values until it restarted anyway.
+  #
+  # Safe here, and only here. A baseline can only have gone stale through a
+  # change the service refuses while the relay holds leases, so a host reaching
+  # this task with a changed baseline has no VM proxies of its own to lose. A
+  # restart at any other moment would end every buyer's session on this host.
+  systemd:
+    name: frpc-vms
+    state: restarted
+  when:
+    - vm_action == "create"
+    - frp_server_addr is defined
+    - frp_auth_token is defined
+    - frpc_vms_baseline is defined
+    - frpc_vms_baseline is changed
+  delegate_to: "{{ target_host }}"
+
 - name: Add this VM's proxy to the VM tunnel client configuration
   # The remote port is an input, leased by the provisioning service before this
   # job was dispatched. Nothing here chooses one: a remote port binds a

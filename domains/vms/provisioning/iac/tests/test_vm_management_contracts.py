@@ -102,15 +102,56 @@ class VmManagementContractTests(unittest.TestCase):
         self.assertIn("remotePort = {{ vm_remote_port }}", directives)
         self.assertNotIn("seq 7002 8000", directives)
 
-    def test_vm_create_reloads_rather_than_restarts_the_tunnel_client(self) -> None:
-        """A restart closes the control connection, so the relay tears down
-        every proxy this client registered — ending the established SSH session
-        of every buyer on the host, not just the VM being added."""
+    def test_vm_create_applies_a_proxy_by_reloading(self) -> None:
+        """Adding a proxy must never restart the client. A restart closes the
+        control connection, so the relay tears down every proxy this client
+        registered — ending the established SSH session of every buyer on the
+        host, not just the VM being added."""
+        text = _read(VM_CREATE)
+        start = text.index("- name: Apply the new proxy by reloading")
+        end = text.index("- name: Wait for this VM's proxy to come up")
+        block = _directives(text[start:end])
+
+        self.assertIn("/api/reload", block)
+        self.assertNotIn("state: restarted", block)
+
+    def test_vm_create_restarts_only_to_adopt_a_changed_baseline(self) -> None:
+        """The one restart that is correct, and the condition that makes it so.
+
+        A client's rendezvous and credential are not reloadable, so adopting a
+        changed one needs a restart. It is safe only because the service
+        refuses the changes that cause it while the relay holds leases, so a
+        host reaching this task has no proxies of its own to lose — which is
+        why the restart is guarded on the baseline having actually changed
+        rather than run unconditionally.
+        """
         directives = _directives(_read(VM_CREATE))
 
-        self.assertIn("/api/reload", directives)
-        self.assertNotIn("name: frpc", directives)
-        self.assertNotIn("state: restarted", directives)
+        self.assertIn("name: frpc-vms", directives)
+        self.assertIn("state: restarted", directives)
+        self.assertIn("frpc_vms_baseline is changed", directives)
+        # The old unit name would be the management tunnel's.
+        self.assertNotIn("name: frpc\n", directives)
+
+    def test_vm_create_reconciles_the_baseline_before_writing_a_proxy(self) -> None:
+        """Order matters: a proxy registered against a stale rendezvous or
+        credential is refused by the relay, and the refusal arrives in a client
+        log rather than as a failed task."""
+        text = _read(VM_CREATE)
+
+        self.assertLess(
+            text.index("- name: Reconcile the VM tunnel client's baseline"),
+            text.index("- name: Add this VM's proxy"),
+        )
+
+    def test_vm_create_carries_the_resolved_token_to_the_client(self) -> None:
+        """The token reaches the host's configuration, not only the job's
+        variables. Resolving it at execution and never writing it down leaves
+        the host presenting whatever credential it was built with."""
+        directives = _directives(_read(VM_CREATE))
+
+        self.assertIn("auth.token = ", directives)
+        self.assertIn("{{ frp_auth_token }}", directives)
 
     def test_vm_create_writes_only_the_vm_facing_client_configuration(self) -> None:
         """The host's own management tunnel is a separate file and unit,

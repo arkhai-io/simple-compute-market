@@ -197,7 +197,14 @@ class BareMetalFulfillmentProvider(FulfillmentProvider):
         request: VersionedEnvelope[Any],
         resource: SettlementResource,
         pool_config: dict[str, Any],
+        allocate: bool = True,
     ) -> VersionedEnvelope[Any]:
+        # Accepted and ignored: this provider acquires nothing while
+        # preparing, so validation and acceptance already do the same work.
+        # Declared rather than omitted so the contract is visible here, and
+        # so a future acquisition in this method meets a parameter that
+        # already says what to do about it.
+        del allocate
         self._validate_pool_config(pool_config)
         materialization = self._materialization(request)
         self._validate_resource_binding(

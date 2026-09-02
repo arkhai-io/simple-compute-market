@@ -642,9 +642,25 @@ structural checks in `tests/test_ansible_structure.py`, which cover task files
 - [x] 7.9 Controller behaviour, at Level 2 through the canonical typed client:
       create, list, detail, update, rotate, enable, disable. No response carries
       a token; every response carries whether one is configured.
-- [x] 7.9a A rotated token takes effect on the next dispatch without a restart.
-      This is the property the controller exists to provide, so it is asserted
-      end to end rather than inferred from a successful write.
+- [x] 7.9a A rotated token reaches the host, not only the job's variables.
+
+      The original wording — "takes effect on the next dispatch without a
+      restart" — was wrong in both halves, and the test written to it stopped
+      one boundary short of the claim. A host adopts a new token only by
+      restarting its tunnel client, because `auth` is not among the sections a
+      reload applies, and `frps` admits on one token, so a rotation invalidates
+      every client still holding the old one at its next reconnect. A shared
+      bearer token cannot be rotated one host at a time.
+
+      So rotation now joins the drain rule (1B), refused while the relay
+      carries tunnels; and `vm-create.yml` reconciles the client's rendezvous
+      and credential before writing a proxy, restarting only when they changed.
+      That restart is safe exactly there: a baseline can only have gone stale
+      through a change the service refuses while leases exist, so a host
+      reaching it has no proxies of its own to lose.
+
+      Whether the restarted client reconnects cleanly against a real relay is
+      section 6's business. Nothing below the live gate can show it.
 - [x] 7.9b An update duplicating another relay's rendezvous is rejected with
       both identifiers named, rather than surfacing as a constraint violation.
 - [x] 7.6 Rendered client configuration contains no `subdomain` key and no
@@ -1001,9 +1017,9 @@ documentation.
 - *Owned elsewhere:* 2A.7, the vars file's permissions and lifetime, which
   `contain-embedded-host-key-material` builds the mechanism for. Neither change
   is complete without it.
-- *Level 2 tests:* complete. The
-  behaviours they cover are asserted at the service level; what is missing is
-  the same assertions through the real application and the canonical client.
+- *Level 2 tests:* complete. The relay controller, the lease lifecycle, and
+  relay-bearing requests are all driven through the real application and the
+  canonical client.
 - *Deployment consequences and closeout:* 10.2–10.4 and all of section 11,
   including promotion.
 
@@ -1049,7 +1065,7 @@ applied.
 | `make test` integration, same | 196 | **215** |
 | `make test`, `kit/resource-pools` | 94 | 94 |
 | `make test`, `kit/fulfillment` | 152 | **154** |
-| `make test`, `domains/vms/provisioning/iac` | 52 | **62** |
+| `make test`, `domains/vms/provisioning/iac` | 52 | **65** |
 | `make check-comment-hygiene` | passes | passes |
 
 `test_test_controller.py` intermittently reports one failure across
@@ -1073,7 +1089,14 @@ the known flakes recorded in the campaign handoff.
 - Section 6's reload gate and section 8 — need the rented host and the deployed
   relay.
 
-**Owed, and not substitutable by anything above.** Task 7.7's shell harness for
-the reworked `vm-create.yml`. The IaC tests assert strings in YAML; they cannot
-show that a reload preserves a session or that a proxy comes up. Substring
-assertions over a playbook are not evidence about `frpc`.
+**Owed, and not substitutable by anything above.** The live FRP gate. No test
+here runs `frpc` or `frps`, so nothing above shows that a reload preserves an
+established session, that a proxy comes up, that the relay accepts a port inside
+its window and refuses one outside it, or that a client restarted to adopt a
+rotated token reconnects with it. Substring assertions over a playbook are not
+evidence about `frpc`, and neither is a harness that fakes it: the cleanup
+script's shell is executed for real, but with `curl` and `systemctl` stubbed,
+which proves which commands run and nothing about what they do.
+
+That gap is section 6 and section 8, and it is the reason those sections exist
+rather than an omission in the ones above them.

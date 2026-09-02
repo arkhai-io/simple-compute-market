@@ -319,8 +319,11 @@ class DefinitionDocumentImport(Base):
     """Digest of the definition document last reconciled, per document kind.
 
     Import treats a document as authoritative: it overwrites entries that
-    differ and disables entries the document omits. That authority belongs to
-    the act of submitting a document. A process start is not a submission, and
+    differ from it. What it does with an entry the document does not name
+    depends on the kind — a pool is disabled, because the document declares
+    what the deployment offers; a relay is retained, because disabling one
+    would break every pool referencing it and every live tunnel on it. That
+    authority, in either form, belongs to the act of submitting a document. A process start is not a submission, and
     re-applying a document nobody submitted reverts whatever else changed the
     database — silently, on eviction, drain, and crash recovery.
 
