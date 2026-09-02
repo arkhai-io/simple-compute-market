@@ -780,3 +780,6 @@ review-wheelhouse-scope: ## Print the review projects resolved from REVIEW_PROJE
 	if [ -n "$${REVIEW_PROJECTS:-}" ]; then args="$$args --projects $$REVIEW_PROJECTS"; \
 	elif [ -n "$${REVIEW_SCOPE_FILE:-}" ]; then args="$$args --scope-file $$REVIEW_SCOPE_FILE"; fi; \
 	$(CURDIR)/scripts/resolve-review-scope.py $$args
+
+prune-tombstones: ## Delete every file whose contents are a tombstone comment
+	@python3 scripts/prune_tombstones.py

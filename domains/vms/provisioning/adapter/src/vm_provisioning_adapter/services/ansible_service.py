@@ -76,12 +76,22 @@ def redact_ansible_output(text: str) -> str:
     if not text:
         return text
     redacted = re.sub(
-        r'(\\?"(?:password|ssh_key_path_host)\\?":\s*)\\?"[^"\\]*\\?"',
+        r'(\\?"(?:password|ssh_key_path_host|frp_auth_token)\\?":\s*)\\?"[^"\\]*\\?"',
         r'\1"[REDACTED]"',
         text,
     )
     redacted = re.sub(
         r"(password:\s*)(?!\[REDACTED\]).+",
+        r"\1[REDACTED]",
+        redacted,
+    )
+    # A relay's admission token is a credential of the same class as the two
+    # above. It reaches this function through the same route: the extra-vars
+    # file is rendered into a command line, and json-output.yml echoes facts by
+    # design. Matching the bare YAML form as well, since that is what a
+    # ``debug: var:`` task produces.
+    redacted = re.sub(
+        r"(frp_auth_token:\s*)(?!\[REDACTED\]).+",
         r"\1[REDACTED]",
         redacted,
     )
@@ -444,12 +454,19 @@ class AnsibleService:
             lines.append(f"vm_gpu_devices: {json.dumps(params.vm_gpu_devices)}")
         if params.vm_gpu_partition_size:
             lines.append(f'vm_gpu_partition_size: "{params.vm_gpu_partition_size}"')
-        if params.frp_server_addr:
-            lines.append(f'frp_server_addr: "{params.frp_server_addr}"')
-        if params.frp_domain:
-            lines.append(f'frp_domain: "{params.frp_domain}"')
-        if params.frp_dashboard_password:
-            lines.append(f'frp_dashboard_password: "{params.frp_dashboard_password}"')
+        # Relay inputs. The token is a credential and reaches the playbook the
+        # same way every other job variable does; the redaction pattern above
+        # is what keeps it out of logged command lines. The remote port is
+        # supplied, never chosen: allocation belongs to the service, which is
+        # also what can reclaim it when the VM's life ends by any path.
+        if params.relay_addr:
+            lines.append(f'frp_server_addr: "{params.relay_addr}"')
+        if params.relay_port:
+            lines.append(f"frp_server_port: {params.relay_port}")
+        if params.relay_token:
+            lines.append(f'frp_auth_token: "{params.relay_token}"')
+        if params.vm_remote_port:
+            lines.append(f"vm_remote_port: {params.vm_remote_port}")
         if params.golden_image_name:
             lines.append(f"golden_image_name: {params.golden_image_name}")
         if params.gcs_bucket_url:

@@ -33,7 +33,13 @@
   systemd:
     daemon_reload: yes
 
-- name: restart frpc
+- name: restart frpc-vms
+  # Only for a change to the client's own top-level configuration — serverAddr,
+  # token, transport — which is not hot-reloadable. Adding or removing a VM
+  # proxy must NOT come through here: a restart closes the control connection
+  # and the relay tears down every proxy this client registered, ending the
+  # established SSH session of every buyer on this host. VM operations reload
+  # through the loopback admin API instead.
   systemd:
-    name: frpc
+    name: frpc-vms
     state: restarted

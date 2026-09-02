@@ -1,8 +1,9 @@
 ---
 # Handlers for vm-management role
-
-- name: restart frpc
-  systemd:
-    name: frpc
-    state: restarted
-  ignore_errors: yes
+#
+# No tunnel-client handler. A VM operation must never restart a tunnel client:
+# a restart closes the control connection and the relay tears down every proxy
+# that client registered, ending the established SSH session of every buyer on
+# the host rather than only the VM being changed. VM operations apply their
+# proxy diff through the client's loopback admin API instead, which leaves
+# unchanged proxies alone.

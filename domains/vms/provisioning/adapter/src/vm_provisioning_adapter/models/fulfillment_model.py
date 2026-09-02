@@ -19,9 +19,14 @@ class VmConnectivitySettings(BaseModel):
     yet implemented.
     """
 
-    frp_server_addr: str | None = None
-    frp_domain: str | None = None
-    frp_dashboard_password: str | None = None
+    # Relay-neutral names: the buyer receives a host and a port and has no
+    # reason to learn which relay implementation produced them. The remote port
+    # is an input, leased by the service before dispatch; the playbook applies
+    # what it is given and chooses nothing.
+    relay_addr: str | None = None
+    relay_port: int | None = None
+    relay_token: str | None = None
+    vm_remote_port: int | None = None
 
 
 class VmFulfillmentRequirements(BaseModel):
@@ -41,7 +46,14 @@ class VmFulfillmentRequirements(BaseModel):
 
 
 class AnsiblePoolConfig(BaseModel):
-    """Validated, snapshotted Ansible provider configuration."""
+    """Validated, snapshotted Ansible provider configuration.
+
+    ``relay_id`` is the pool's own configuration. The four fields beneath it
+    are the referenced relay's, present only when this was built from an
+    execution read; a redacted read carries the reference alone. They are
+    accepted here rather than fetched so that what a job runs against is
+    snapshotted with it, as the playbook path and extra vars already are.
+    """
 
     playbook_path: str = Field(min_length=1)
     requirement_delegate: str = "vm_management_v1"
@@ -49,6 +61,12 @@ class AnsiblePoolConfig(BaseModel):
     default_vm_ram: int | None = Field(default=None, gt=0)
     default_vm_vcpus: int | None = Field(default=None, gt=0)
     default_vm_disk_size: str | None = Field(default=None, min_length=1)
+    relay_id: str | None = None
+    relay_addr: str | None = None
+    relay_port: int | None = None
+    vm_port_range_start: int | None = None
+    vm_port_range_count: int | None = None
+    relay_token: str | None = None
 
 
 class AnsiblePreparedJobParameters(BaseModel):
@@ -72,9 +90,10 @@ class AnsiblePreparedJobParameters(BaseModel):
     vm_gpu_device: str | None = None
     vm_gpu_devices: list[str] | None = None
     vm_gpu_partition_size: str | None = None
-    frp_server_addr: str | None = None
-    frp_domain: str | None = None
-    frp_dashboard_password: str | None = None
+    relay_addr: str | None = None
+    relay_port: int | None = None
+    relay_token: str | None = None
+    vm_remote_port: int | None = None
     golden_image_name: str | None = None
     gcs_bucket_url: str | None = None
     gcs_image_path: str | None = None

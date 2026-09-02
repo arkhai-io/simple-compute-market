@@ -20,6 +20,23 @@ global:
 mockMode: false
 
 # ---------------------------------------------------------------------------
+# Declarative pools and relays.
+#
+# Rendered into the ConfigMap and mounted into the application container. They
+# carry no credentials: a relay entry names *which key* of the
+# provisioning-secrets profile holds its admission token, never the token.
+# Leave a list empty to manage that resource entirely through the API.
+#
+# Setting `definitions.pools` makes pool inventory declarative for this
+# deployment: entries omitted from the document are disabled when the document
+# changes. That is a change to what a deployment means, not only to what it
+# contains.
+# ---------------------------------------------------------------------------
+definitions:
+  pools: {}
+  relays: {}
+
+# ---------------------------------------------------------------------------
 # Helm smoke-test configuration.
 # ---------------------------------------------------------------------------
 tests:
@@ -95,6 +112,17 @@ storefront:
 # ---------------------------------------------------------------------------
 config:
   database_url: "sqlite:////app/data/provisioning.db"
+
+  # Definition document paths. Set only when the matching entry under
+  # `definitions` below supplies a document; the service skips an unset path
+  # and treats a set-but-absent one as a configuration error.
+  #
+  # Both documents are reconciled when their content changes, not on every
+  # start. Import is authoritative over the document it is given, so applying
+  # one that nobody submitted would revert pools and relays administered
+  # through the API on any pod restart.
+  pool_definitions_path: ""
+  relay_definitions_path: ""
 
   # Ansible paths — set to the IaC tree location inside the container.
   # Override here for environments that mount the IaC at a different path.

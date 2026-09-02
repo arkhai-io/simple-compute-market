@@ -1,0 +1,25 @@
+[Unit]
+Description=VM tunnel client (buyer access to rented VMs)
+After=network.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+Restart=always
+RestartSec=5s
+ExecStart=/usr/local/bin/frpc -c /etc/frp/frpc-vms.toml
+# Reload rather than restart. A restart closes the control connection, and the
+# relay tears down every proxy this client registered — killing the established
+# SSH session of every buyer on this host, not just the VM being changed.
+ExecReload=/bin/kill -HUP $MAINPID
+LimitNOFILE=1048576
+
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/log/frp /etc/frp
+
+[Install]
+WantedBy=multi-user.target

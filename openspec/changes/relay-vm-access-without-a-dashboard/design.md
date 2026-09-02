@@ -125,85 +125,180 @@ why the field's keys are named `relay_*` rather than `frp_*`.
 
 ## Decisions
 
-**The relay token travels in the provisioning secrets profile, not storefront
-settings, and is resolved per relay.** It is a credential; the storefront's role
-is to say which relay to use, not to hold the key to it.
+**A relay is a first-class resource, and the token belongs on it.**
 
-A single service-wide token is the wrong shape for the same reason a
-service-wide relay address was. Once pools may point at different relays, those
-relays are operated by different parties and admit clients on different tokens;
-one shared value would mean a site's token admits clients to another site's
-rendezvous, which is precisely the trust boundary the per-site deployment shape
-exists to draw.
+An earlier version of this design put the relay endpoint and window on the pool
+and the token in the deployment's secrets profile, keyed by an identity derived
+from `relay_addr:relay_port`. Two facts moved it.
 
-So the profile carries a map keyed by the derived relay identity, and that is
-the only source:
+*The window can diverge.* Two pools may point at one relay — a site running a
+GPU pool and a bare-metal pool through one rendezvous is the ordinary case, and
+the lease decision below depends on it being ordinary. Deriving one identity
+from two pools unifies the *lease key* and nothing else. `vm_port_range_start`
+and `vm_port_range_count` stay per-pool, so two pools can allocate from one
+listening namespace under disagreeing bounds, and "the configured window for
+that relay" has no single answer.
 
-```yaml
-relay_tokens:
-  "10.0.0.9:7000": "…"
-  "10.0.0.10:7000": "…"
-```
+*The token would be duplicated state.* N pools sharing a relay would hold N
+encrypted copies of one credential. Rotation becomes N writes, and a missed one
+fails at admission — asynchronously, in a client log, which is the failure mode
+this change exists to remove.
 
-**There is no default and no scalar fallback.** A fallback is worse than a
-missing value here. If a relay's entry is absent and lookup falls back to some
-other relay's token, the request either fails at admission — with an error that
-names the relay's rejection rather than the missing configuration — or, if the
-two relays happen to share a token, succeeds and hides the misconfiguration
-until the day they do not. A per-relay entry that must exist turns both into one
-loud failure at the point the configuration is wrong.
+So a relay is a row: address, port, allocation window, and token, each stated
+once. Pools reference it. Divergence stops being discouraged and becomes
+unrepresentable, and a lease keys on a row rather than on a string assembled
+from an address.
 
-A pool with a relay configured and no matching entry therefore fails before
-dispatch, alongside the other partial-configuration rejections.
+This was previously deferred, on the grounds that a table, its CRUD, and an
+admin surface were too much to solve a problem arising only under deliberate
+operator action in a deployment with one relay. That reasoning held while the
+credential lived outside the pool, in the secrets profile. It does not survive
+the credential moving into the database: the pool then becomes the only place a
+relay fact can live, and the divergence above becomes reachable by ordinary
+configuration rather than by operator error.
 
-Keying by the derived identity rather than by a separate label means there is
-still one fact — the endpoint — and no second identifier to keep consistent with
-it. The cost is that a relay moving address requires editing the pool and the
-map key together. Both describe the same move, so they fail together rather than
-diverging silently, and it is the same operator action that already invalidates
-leases. Under a `relays` table the token reference would move to the row and this
-map would go away, which is a further reason that table is the right destination
-once a second relay is real.
+**Relay identity is a row, not a derived address.**
 
-**The token is not in the database, which is why pool CRUD stays simple.** Relay
-address, port, and window are ordinary pool configuration and are returned by
-the pool endpoints like any other field. The credential is not among them: it
-lives in the deployment's secrets profile, so there is nothing secret in the
-pool row to redact from a read response, and no write path through which a
-token could be set by an API caller. That is the reason to keep it there rather
-than beside the endpoint it belongs to.
+Deriving identity from the endpoint had one real virtue: a derived value cannot
+lie about where a port was bound, whereas a separately administered identifier
+can disagree with reality in both directions — two pools claiming one identifier
+while pointing at different relays would collide leases that do not conflict,
+and one relay under two identifiers would issue the same port twice.
 
-That profile is not a new mechanism to build. Secret material in this
-repository reaches a service as a rendered `config-<profile>.yml` file inside a
-Kubernetes Secret, mounted at `CONFIG_DIRECTORY` and named in `ACTIVE_PROFILES`
-alongside the non-secret profiles — Dynaconf sees no difference between a file
-projected from a Secret and one from a ConfigMap. The provisioning service
-already runs that way: `ACTIVE_PROFILES` is `production,provisioning-secrets`
-(plus `mock` when enabled), and `config-provisioning-secrets.yml` is mounted by
-`subPath` into both the migrate init container and the application container,
-carrying `ssh_decryption_key`, `storefront_admin_key`, and `inventory_ini`.
+A row keeps that virtue and drops the cost. The endpoint is unique on the
+relay table, so two rows cannot describe one rendezvous and one rendezvous
+cannot appear as two identities. Identity is then stable across an address
+change: moving a relay updates one field, and every lease referencing that row
+follows it, rather than the old address's leases becoming stale while the new
+identity reissues ports still bound.
 
-So the token is one more key in a file that already exists, on a path that
-already exists. There is no new Secret Manager shell, no new ExternalSecret, no
-new volume, no chart edit, and no values change in any environment. The whole
-delivery change is an added line where that profile is rendered.
+**The token is stored encrypted; the profile holds the root key, not the
+credential.**
 
-The alternative — projecting the existing rendezvous token shell as a second
-mounted file and reading it by path — was rejected on those grounds. It needs
-an ExternalSecret, a volume, a mount, and values edits per environment, to
-deliver a value the existing profile can carry for free, and it reads a raw
-credential from a path rather than through the configuration system every other
-setting uses.
+`ssh_decryption_key` in the provisioning secrets profile already encrypts host
+SSH key material at rest for `embedded` hosts. The relay token is the same class
+of material and takes the same treatment: Fernet-encrypted in the relay row,
+decrypted only on the execution path.
 
-The service reads it with a default rather than requiring it, so an environment
-whose profile predates the key loads normally. An absent token is a valid state:
-a deployment with no relay uses the direct-NAT path. What must fail is a
-*partial* relay configuration, which is a separate guard.
+The database therefore holds no usable credential. Recovering a token needs both
+the row and a key that never leaves the secrets profile. That is what makes
+storing it acceptable at all — *plaintext* in the database would be strictly
+worse than the mounted profile, since it adds the pool read surfaces, the export
+endpoint, and database backups while losing the profile's access control,
+versioning, and audit trail.
+
+The comparison worth stating is against what this repository already stores: an
+`embedded` host row carries an SSH private key granting root on that host. A
+relay token admits a client to a rendezvous within `allowPorts` and grants
+nothing on any machine. The lower-value credential is not getting weaker
+treatment than the higher-value one.
+
+**Two readers, and the redacted one has the unqualified name.**
+
+Provider configuration reaches five consumers through one reader today, and they
+do not share a trust level.
+
+| Consumer | Token |
+|---|---|
+| Fulfillment, via the pool loaded in the caller's transaction | required |
+| `PoolResponse` from pool list and get | must not appear |
+| The pool export document | must not appear |
+| Pool update's read-modify-write | must survive |
+| Reconciliation's configuration comparison | must not diverge on it |
+
+Stripping inside the single reader breaks fulfillment; not stripping leaks to
+two read surfaces and makes every reconciliation compare unequal forever. So
+there are two readers, and the one *without* secrets carries the unqualified
+name. A caller that forgets to ask for secrets loses the token loudly on the
+execution path rather than leaking it quietly on a read path — the failure
+direction is chosen, not incidental.
+
+A separate method is preferred to a boolean parameter because a name can be
+grepped for and cannot be supplied accidentally by a positional argument.
+
+**An absent token on a write preserves the stored one.** Pool update reads,
+merges, and writes back, and it reads through the redacted reader. Without an
+explicit preserve rule, a request changing only a label would round-trip a
+configuration containing no token and erase the credential — an unrelated edit
+destroying key material, which is a failure this system has already met once and
+should not rebuild one layer down. Absent means unchanged; only an explicit
+value replaces one. There is deliberately no way to express "clear the token"
+through a partial write, because clearing one disables every VM path on that
+relay and should be an explicit act.
+
+**A definition document is reconciled when it changes, not when a pod starts.**
+
+Deployment is Terraform applying a Helm chart. A relay must be establishable by
+applying the chart alone, with no operator API call and no credential passing
+through a workstation. The service already imports a pool definition document at
+startup, and that is the mechanism to reuse — but not as it currently behaves.
+
+`import_pool_definitions_if_configured` runs `import_pools` at every startup. The
+code justifies this on the grounds that import is idempotent and diff-based, so
+re-running it is harmless. That premise is wrong in a way worth stating
+precisely: **the import is idempotent with respect to the document, not with
+respect to the database.** Running it twice against an unchanged database is a
+no-op. Running it against a database that something else changed reverts that
+change, because a diff against the document is exactly what detects it.
+
+So every pod restart silently re-asserts a document nobody just submitted.
+Eviction, node drain, an OOM kill, and crashloop recovery all revert operator
+work with no failure and no log line anyone would think to check. That is the
+defect, and it belongs to the *invocation*, not to the import.
+
+The distinction matters because the import's authoritative behaviour is correct
+and specified. An operator submitting a document is declaring desired state, and
+disabling what the document omits is what makes it a declaration rather than a
+merge. Nothing should change there. What should change is that a pod starting up
+is not an operator submitting a document.
+
+So the service records a digest of each definition document it has imported and
+reconciles only when the digest differs from the one recorded. Editing the
+document and redeploying reconciles. Submitting a document through the import
+endpoint reconciles, because the operator asked. A pod restarting against an
+unchanged document does nothing at all.
+
+This is the same bookkeeping the schema migrations already use — a durable record
+of what has been applied, consulted before applying it again — rather than a new
+mechanism.
+
+**Relays and pools use one mechanism, not two.** An earlier version of this
+design gave relays create-if-absent semantics precisely to escape the restart
+problem, leaving pools reconciled and relays not. That was solving the right
+problem in the wrong place. It bought restart-safety at the cost of making the
+document a bootstrap that could never be edited afterwards, and it put two
+contracts behind one idea, so a reader who knew the pool rule would guess wrong
+about relays. Fixing the invocation fixes both resources with one rule, and lets
+a relay's window be edited in the document and reconciled like anything else.
+
+**Digest granularity is the whole document, and the token is why that is safe.**
+A per-entry digest would avoid reconciling entry A because entry B changed. It is
+not needed, because the field an operator is most likely to have changed through
+the API — the token — is structurally protected: the document never carries a
+token, reads never return one, and an absent token preserves the stored value. A
+reconciliation therefore cannot revert a rotation, whatever else it touches.
+
+What a reconciliation can revert is a window or an address changed through the
+API while the document still declares the old one. That is correct: those are
+fields the document declares, and an operator who has just edited the document
+is asserting them. It is also visible, in the reconciliation diff that import
+already returns.
+
+**The token is read once, at creation.** A relay entry names which profile key
+holds its token; the key is read when the relay is created and never re-read.
+Rotation is a controller operation. Treating the profile as continuing desired
+state would make it silently authoritative over a value the controller can also
+set, and the two would fight on a schedule nobody observes.
+
+**Nothing in the definition document is a credential.** It carries a rendezvous
+address, a port, a window, and the *name* of a profile key. It needs no Secret
+and can be an ordinary mounted configuration file. Only the profile holds the
+token, and it holds it as a bootstrap value rather than as the store.
 
 **The rendezvous token and the relay token are the same value in dev and are
 not the same setting.** The management tunnel's token is consumed by node
 initialization directly, and never by this service; the buyer-facing relay's
-token is what this profile carries. Today both address one relay and one shell
+token is what a relay row carries. Today both address one relay and one source
 supplies both. Keeping them distinct settings is what allows the buyer-facing
 relay to become a different server without re-plumbing anything.
 
@@ -249,7 +344,7 @@ the loop — a standalone seller path, or proving the host in isolation. Under
 that requirement the sub-window alternative returns, because it is the only one
 of the two that leaves the playbook self-sufficient.
 
-**Relay location is pool configuration, not request configuration.**
+**Relay location is deployment configuration, not request configuration.**
 
 Which relay a host dials is a fact about where that host physically is, not
 about the request being served. Carrying it in the storefront's `connectivity`
@@ -257,19 +352,24 @@ payload lets a storefront name a different relay per request for the same host,
 and makes a durable property of the fleet depend on a caller getting its
 configuration right.
 
-`AnsiblePoolConfig` already holds exactly this class of fact — `playbook_path`,
-`inventory_group`, `extra_vars`, the default VM shape — so the relay endpoint
-and its port window belong there: `relay_addr`, `relay_port`,
-`vm_port_range_start`, `vm_port_range_count`. `connectivity` then carries
-nothing relay-related at all, and the buyer-facing address is returned in the
-fulfillment result rather than supplied with the request.
+So `connectivity` carries nothing relay-related at all, and the buyer-facing
+address is returned in the fulfillment result rather than supplied with the
+request. The pool names which relay its hosts dial, and the relay row holds the
+endpoint and window.
 
-This also removes the weakest part of the previous shape. Deriving relay
+The pool is the right place for the *reference* for the same reason it holds
+`playbook_path`, `inventory_group`, `extra_vars`, and the default VM shape: it
+is where operator-set facts about how a set of hosts is driven already live. It
+is the wrong place for the endpoint and window themselves, because those are
+facts about the relay and are shared by every pool that points at it — see the
+first decision above.
+
+This also removes the weakest part of the original shape. Deriving relay
 identity from a request payload meant a storefront misconfiguration could split
-one relay into two identities, or merge two into one. Derived from pool
-configuration, the identity is set once by an operator, cannot vary per request,
-and two pools naming the same endpoint derive the same identity — so a genuine
-collision is detected rather than missed.
+one relay into two identities, or merge two into one. Under a referenced row the
+identity is set once by an operator, cannot vary per request, and two pools
+naming the same relay reference the same row — so a genuine collision is
+detected rather than missed.
 
 **A port lease is scoped to the relay, not to the host — and not to the pool.**
 
@@ -295,28 +395,16 @@ would bind the first and refuse the second, asynchronously, in a client log.
 Uniqueness has to match the resource, and the resource is one listening socket
 on one relay.
 
-So the pool supplies the relay endpoint and the lease is keyed on that endpoint:
-`relay_id` is the normalized `relay_addr:relay_port` read from the pool's
-configuration. It is not a separately administered identifier. A separately
-configured one can disagree with reality in both directions — two pools claiming
-one identifier while pointing at different relays would collide leases that do
-not conflict, and one relay under two identifiers would issue the same port
-twice — whereas a value derived from the endpoint cannot lie about where a port
-was bound.
+The lease therefore references the relay row, and `UNIQUE(relay_id, remote_port)`
+is uniqueness on the row rather than on a string assembled from an address. One
+relay is one row is one listening namespace, by construction: the relay table's
+endpoint is unique, so one rendezvous cannot appear under two identities and
+issue the same port twice, and two rows cannot describe one rendezvous and
+collide leases that do not conflict.
 
-The cost is that moving a relay to a new address reads as a new endpoint while
-its existing proxies persist, so leases from the old address become stale and
-the new identity could reissue ports still bound. That is survivable — no DNS is
-involved and the addresses are reserved static ones, so it is a deliberate
-operator action rather than drift — and it is what reconciliation exists for.
-
-The full answer is a `relays` table that pools reference by foreign key, making
-identity a row rather than an address: moving a relay would then update one
-field and every lease would follow it. That is the right shape once there is
-more than one relay to administer. It is not built now because it costs a table,
-its CRUD, and an admin surface to solve a problem that arises only under a
-deliberate operator action, in a deployment with one relay. Revisit when a
-second relay is configured, or the first time a relay address changes.
+Moving a relay to a new address updates one field. Its leases reference the row
+and follow it, so the proxies that persist across the move stay accounted for
+rather than becoming stale records under an identity nothing points at any more.
 
 **A lease is released on every terminal outcome, and reconciliation is the
 backstop.**
@@ -407,6 +495,15 @@ Verifiable from source and focused tests:
 - An undefined relay token fails rather than templating a default.
 - Rendered client configuration contains no `subdomain` key and no dashboard
   address.
+- A stored relay token is ciphertext at rest and is recoverable only with the
+  profile's encryption key.
+- The redacted configuration reader never yields a token, on the pool read
+  endpoints or in the export document, and the execution reader does.
+- A pool or relay update that omits the token leaves the stored one intact.
+- Reconciliation reports a seeded definition as unchanged on a second import
+  rather than diverging on a field one side cannot see.
+- A definition document naming a profile key seeds the token; one naming none
+  leaves an API-set token untouched across a restart.
 
 Needs a live host, verified from supplied logs:
 
@@ -418,25 +515,61 @@ Needs a live host, verified from supplied logs:
 - The management tunnel is unaffected by VM creation and destruction on the
   same host.
 - A buyer connection string produced by the relay path actually connects.
+
+## Recorded findings
+
+These are true of the current system, were found while designing this change,
+and are not fixed by it. They are recorded here so they are decisions rather
+than discoveries the next reader makes again.
+
+**One SSH key reaches every host in an environment.** The provisioning service
+is deployed with a single keypair, mounted at a fixed path, and host registration
+defaults to referencing that path rather than carrying key material. Every host
+in an environment is therefore reached with the same private key, across all
+pools. Per-host material is supported — an `embedded` host row carries its own
+encrypted key — but nothing populates it today.
+
+That support is the escape hatch, and it is sufficient: a host whose operator
+supplies its own key is registered as `embedded` and reached with that key,
+while hosts registered without one keep the shared fallback. What is missing is
+not a mechanism but a policy, and generating per-host keypairs and placing the
+public half in a node's `authorized_keys` is host preparation, outside this
+repository. Recorded rather than fixed because the exposure grows with the
+second independently operated host, not the first.
+
 ## Open questions
 
-**Should relay administration have its own API surface?**
+**Should relay administration have its own API surface?** *Resolved: yes.*
 
-Relay endpoint and window reach the service as pool configuration, so the
-existing pool CRUD carries them and no new controller is needed for that. The
-token deliberately does not: it is in the secrets profile, so a pool response
-has nothing to redact and a pool write has no way to set a credential.
+This was previously deferred alongside the `relays` table, on the reasoning that
+both were the same question about whether a relay is a first-class resource.
+That reasoning was correct, and the answer arrived when the token became durable
+state: a credential that can be rotated needs somewhere to live that is not a
+pool row, and a resource with its own controller is the better shape than a
+write-only field on an otherwise readable model.
 
-That holds only while token rotation is a deployment action — re-render the
-profile, restart or refresh. If rotation should instead be an API operation, the
-token has to become durable state, and then it does need somewhere to live that
-is not the pool row: a write-only field that never appears in a read response,
-or a separate relay resource with its own controller and its own authorization.
-Of those, the separate resource is the better shape, because a write-only field
-on an otherwise readable model is the kind of asymmetry that leaks the first
-time someone adds a debug serializer.
+So a relay is administered directly — created, listed, updated, and its token
+rotated — rather than through the pool that references it. The alternative that
+loses is not the write-only field, which is still needed for the token itself,
+but leaving relays seed-only: that would keep the deployment as the only way to
+add a relay, and cycling a deployment to point a new pool at a new rendezvous is
+the inflexibility that motivated moving the credential out of the profile in the
+first place.
 
-Not decided here because nothing yet needs API-driven rotation, and the answer
-changes the schema rather than only the surface. Revisit when a second relay is
-configured — the same trigger as the `relays` table, which is not a coincidence:
-both are the same question about whether a relay is a first-class resource.
+Authorization is the pool controller's, not a new boundary. A caller that can
+write a pool can already set `playbook_path`, which is arbitrary playbook
+execution on every host in that pool; setting a relay token is not a greater
+privilege than one already held.
+
+**What deletes a relay, and what happens to its leases?**
+
+Not decided. A relay with live leases cannot simply be removed — the proxies it
+carries outlive the row, and a deletion that orphans leases loses the record of
+which ports on that rendezvous are bound. The plausible answers are refusing
+deletion while any lease is held, disabling rather than deleting in the manner
+hosts already use, or cascading a release that does not correspond to anything
+actually torn down on the relay.
+
+Deferred because the first relay will not be deleted and the answer is a
+lifecycle decision that wants the reconciliation behaviour settled first. What
+this change owes is that the schema does not foreclose any of the three.

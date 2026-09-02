@@ -355,38 +355,65 @@ def _migrate_hosts_public_host(engine: Engine) -> None:
 def _migrate_relay_reachable_hosts(engine: Engine) -> None:
     """Everything needed to reach a host, and a VM on it, without an inbound route.
 
-    One migration rather than three, because these ship as one deployment and a
-    schema version costs an operator step whether or not it carries much. The
-    three parts are independent of each other and are applied in one event:
+    One migration rather than several, because these ship as one deployment and
+    a schema version costs an operator step whether or not it carries much.
 
     ``hosts.ssh_port``
         The port the provisioner connects to. NOT NULL with a default in the
         same statement, so pre-existing rows backfill as part of the ALTER
         rather than through a second pass a partial application could skip.
 
-    ``ansible_pool_configs`` relay columns
-        Where a pool's hosts dial for buyer VM tunnels, and the remote-port
-        window that relay accepts. All nullable: a pool with no relay serves
-        VMs by direct NAT, so existing rows keep today's behaviour.
+    ``relays``
+        One row per rendezvous, holding the address, port, allocation window,
+        and encrypted admission token. Unique on the endpoint: a rendezvous
+        recorded twice would issue one listening port to two callers.
+
+    ``ansible_pool_configs.relay_id``
+        A reference to that row. The window and token are shared by every pool
+        pointing at one relay, so holding them per pool would let two pools
+        allocate from one namespace under disagreeing bounds.
 
     ``relay_port_leases``
         Unique on ``(relay_id, remote_port)`` rather than on the host or the
         pool, because a remote port binds a listening socket on the relay:
         hosts and pools sharing a relay share one port namespace.
+
+    ``definition_document_imports``
+        The digest of each definition document last reconciled. Reconciliation
+        follows a change to a document; a process restart is not one, and
+        re-applying a document nobody submitted reverts whatever else changed
+        the database.
     """
     _add_column_if_missing(
         engine, "hosts", "ssh_port", "INTEGER NOT NULL DEFAULT 22"
     )
 
-    for column, spec in (
-        ("relay_addr", "VARCHAR"),
-        ("relay_port", "INTEGER"),
-        ("vm_port_range_start", "INTEGER"),
-        ("vm_port_range_count", "INTEGER"),
-    ):
-        _add_column_if_missing(engine, "ansible_pool_configs", column, spec)
+    with engine.begin() as connection:
+        connection.execute(text(
+            """
+            CREATE TABLE IF NOT EXISTS relays (
+                id VARCHAR PRIMARY KEY,
+                label VARCHAR,
+                relay_addr VARCHAR NOT NULL,
+                relay_port INTEGER NOT NULL,
+                vm_port_range_start INTEGER NOT NULL,
+                vm_port_range_count INTEGER NOT NULL,
+                relay_token_encrypted VARCHAR,
+                enabled BOOLEAN NOT NULL DEFAULT TRUE,
+                created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP,
+                CONSTRAINT uq_relays_endpoint UNIQUE (relay_addr, relay_port)
+            )
+            """
+        ))
+
+    _add_column_if_missing(engine, "ansible_pool_configs", "relay_id", "VARCHAR")
 
     with engine.begin() as connection:
+        connection.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_ansible_pool_configs_relay_id "
+            "ON ansible_pool_configs (relay_id)"
+        ))
         connection.execute(text(
             """
             CREATE TABLE IF NOT EXISTS relay_port_leases (
@@ -410,6 +437,15 @@ def _migrate_relay_reachable_hosts(engine: Engine) -> None:
         connection.execute(text(
             "CREATE INDEX IF NOT EXISTS ix_relay_port_leases_owner_id "
             "ON relay_port_leases (owner_id)"
+        ))
+        connection.execute(text(
+            """
+            CREATE TABLE IF NOT EXISTS definition_document_imports (
+                document_kind VARCHAR PRIMARY KEY,
+                digest VARCHAR NOT NULL,
+                imported_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+            )
+            """
         ))
 
 

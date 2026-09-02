@@ -177,10 +177,28 @@ class ResourcePoolService:
             return pool
 
     def get_pool_in_session(self, db: Session, pool_id: str) -> Optional[ResourcePool]:
-        """Load a pool and provider configuration in the caller's transaction."""
+        """Load a pool and its redacted provider configuration.
+
+        Redacted because most callers of a pool read serialize what they get.
+        Fulfillment wants the execution variant below.
+        """
         pool = db.query(ResourcePool).filter(ResourcePool.id == pool_id).one_or_none()
         if pool is not None:
             self._attach_provider_config(db, pool)
+        return pool
+
+    def get_pool_for_execution(self, db: Session, pool_id: str) -> Optional[ResourcePool]:
+        """Load a pool with secrets resolved, for preparing provider input.
+
+        The only caller is the dispatch path. The attached configuration may
+        contain decrypted credentials and must not be serialized into a
+        response, an export, or a persisted job snapshot.
+        """
+        pool = db.query(ResourcePool).filter(ResourcePool.id == pool_id).one_or_none()
+        if pool is not None:
+            pool.provider_config = self._handler(pool.provider).read_config_for_execution(
+                db, pool.id
+            )
         return pool
 
     def _require_pool(self, db: Session, pool_id: str) -> ResourcePool:

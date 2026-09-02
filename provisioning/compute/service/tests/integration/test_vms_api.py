@@ -59,7 +59,12 @@ class TestHttpValidation:
             )
         assert resp.status_code == 422
 
-    async def test_create_vm_frp_without_password_returns_422(self, client_and_queue):
+    async def test_create_vm_with_a_partial_relay_returns_422(self, client_and_queue):
+        """A relay address with nothing to go with it selects no access path.
+
+        Accepted, it would create a VM with no external route and report
+        success — the failure the relay work exists to remove.
+        """
         from httpx import ASGITransport, AsyncClient
         from compute_provisioning_service.main import app
         async with AsyncClient(
@@ -67,7 +72,7 @@ class TestHttpValidation:
         ) as http:
             resp = await http.post(
                 f"/api/v1/hosts/{HOST}/vms/",
-                json={"vm_target": VM_NAME, "frp_server_addr": "1.2.3.4"},
+                json={"vm_target": VM_NAME, "relay_addr": "203.0.113.4"},
             )
         assert resp.status_code == 422
 

@@ -230,24 +230,14 @@ async def _build_vm_fulfillment_context(
         settlement_mechanism=settlement_mechanism,
         chain_configs=chain_configs,
     )
-    connectivity = None
-    try:
-        from market_storefront.services.fulfillment_service import (
-            _connectivity_settings_from_storefront_config,
-        )
-
-        connectivity = _connectivity_settings_from_storefront_config()
-    except Exception:
-        logger.exception(
-            "[PROVISIONING] Failed to resolve connectivity context for escrow %s",
-            escrow_uid,
-        )
+    # No connectivity terms; see the sibling builder in fulfillment_service for
+    # why a storefront names no relay. The two payloads must stay identical:
+    # a VM reached differently depending on which path requested it is a defect
+    # visible on only one of them.
     request_payload: dict[str, Any] = {
         "vm_target": vm_target,
         "ssh_pubkey": ssh_public_key,
     }
-    if connectivity:
-        request_payload["connectivity"] = connectivity
     context = {
         "kind": "vm.storefront.fulfillment-context",
         "schema_version": 1,

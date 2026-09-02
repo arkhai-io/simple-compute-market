@@ -265,9 +265,10 @@ class CreateVmRequest(BaseModel):
                     "vm_disk_size": "20G",
                     "ssh_pubkey": "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAI...",
                     "gpu_provisioned": True,
-                    "frp_server_addr": "34.87.54.66",
-                    "frp_domain": "example.com",
-                    "frp_dashboard_password": "secret",
+                    "relay_addr": "203.0.113.9",
+                    "relay_port": 7000,
+                    "relay_token": "<relay admission token>",
+                    "vm_remote_port": 6100,
                 }
             ]
         }
@@ -326,22 +327,32 @@ class CreateVmRequest(BaseModel):
         default=None, description="MIG or SR-IOV partition size (e.g. '1g.5gb')"
     )
 
-    # FRP tunnelling
-    frp_server_addr: Optional[str] = Field(
+    # Relay tunnelling. Relay-neutral names: the buyer receives a host and a
+    # port and has no reason to learn which relay implementation produced them.
+    relay_addr: Optional[str] = Field(
         default=None,
         description=(
-            "IP address of the FRP server. When set, the VM's SSH port is "
-            "tunnelled through FRP rather than exposed via direct port-forward. "
-            "Requires frp_domain and frp_dashboard_password."
+            "Rendezvous address of the tunnel relay. When set, the VM's SSH "
+            "port is reached through the relay rather than by direct "
+            "port-forward. Requires relay_port, relay_token, and "
+            "vm_remote_port."
         ),
     )
-    frp_domain: Optional[str] = Field(
-        default=None,
-        description="Base domain of the FRP server (e.g. 'vm.example.com')",
+    relay_port: Optional[int] = Field(
+        default=None, description="Rendezvous port the tunnel client dials"
     )
-    frp_dashboard_password: Optional[str] = Field(
+    relay_token: Optional[str] = Field(
         default=None,
-        description="FRP dashboard password (required when frp_server_addr is set)",
+        description="Relay admission token (required when relay_addr is set)",
+    )
+    vm_remote_port: Optional[int] = Field(
+        default=None,
+        description=(
+            "Remote port to bind on the relay for this VM. Leased by the "
+            "provisioning service before dispatch; the playbook applies what "
+            "it is given and selects nothing, because a port binds a listening "
+            "socket on the relay and only one authority can avoid collisions."
+        ),
     )
 
     # Golden image overrides (create + golden mode only)
@@ -369,10 +380,27 @@ class CreateVmRequest(BaseModel):
     )
 
     @model_validator(mode="after")
-    def _validate_frp(self) -> "CreateVmRequest":
-        if self.frp_server_addr and not self.frp_dashboard_password:
+    def _validate_relay(self) -> "CreateVmRequest":
+        """A relay address with nothing to go with it produces an unreachable VM.
+
+        The failure being prevented is a partial relay configuration that
+        selects neither access path: the VM is created, no external route
+        exists, and the job reports success.
+        """
+        if not self.relay_addr:
+            return self
+        missing = [
+            name
+            for name, value in (
+                ("relay_port", self.relay_port),
+                ("relay_token", self.relay_token),
+                ("vm_remote_port", self.vm_remote_port),
+            )
+            if not value
+        ]
+        if missing:
             raise ValueError(
-                "frp_dashboard_password is required when frp_server_addr is set"
+                f"{', '.join(missing)} required when relay_addr is set"
             )
         return self
 

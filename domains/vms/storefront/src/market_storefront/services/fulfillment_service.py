@@ -129,13 +129,16 @@ async def _do_provision(
             settlement_resource_id=scheduled.settlement_resource_id,
         )
 
-    connectivity = _connectivity_settings_from_storefront_config()
+    # No connectivity terms. Which relay a host dials is a durable property of
+    # the deployment that owns the host, recorded on the relay its pool
+    # references. A storefront naming one per request would make a fleet-wide
+    # fact depend on a caller's configuration, and would let two requests
+    # against one host disagree about how that host is reached. The buyer's
+    # address and port come back in the fulfillment result instead.
     request_payload: dict[str, Any] = {
         "vm_target": vm_target,
         "ssh_pubkey": ssh_public_key,
     }
-    if connectivity:
-        request_payload["connectivity"] = connectivity
 
     accepted = await fulfillment_client.begin_fulfillment(
         FulfillmentRequestBody(
@@ -181,28 +184,6 @@ async def _do_provision(
         site_id=site_id,
     )
     return _fulfillment_result_to_legacy_shape(envelope)
-
-
-def _connectivity_settings_from_storefront_config() -> dict[str, Any] | None:
-    """Storefront-operator-configured FRP settings, or None if unset.
-
-    Currently the only source of connectivity terms; a buyer-specified,
-    negotiated source populating this same request field is a plausible
-    future addition, not yet implemented.
-    """
-    provisioning = settings.provisioning
-    frp_server_addr = getattr(provisioning, "frp_server_addr", None) or None
-    frp_domain = getattr(provisioning, "frp_domain", None) or None
-    frp_dashboard_password = (
-        getattr(provisioning, "frp_dashboard_password", None) or None
-    )
-    if not (frp_server_addr or frp_domain or frp_dashboard_password):
-        return None
-    return {
-        "frp_server_addr": frp_server_addr,
-        "frp_domain": frp_domain,
-        "frp_dashboard_password": frp_dashboard_password,
-    }
 
 
 async def _poll_fulfillment_until_terminal(

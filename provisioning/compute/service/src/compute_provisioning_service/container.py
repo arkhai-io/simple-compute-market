@@ -473,6 +473,7 @@ resolved_bare_metal_operations_service: Any | None = None
 resolved_executor_lease_service: "ExecutorLeaseService | None" = None
 resolved_compute_contract_service = None
 resolved_resource_pool_service: "ResourcePoolService | None" = None
+resolved_relay_service: Any | None = None
 resolved_physical_settlement_scheduler: "PhysicalSettlementScheduler | None" = None
 resolved_fulfillment_service: "FulfillmentOrchestrator | None" = None
 resolved_capacity_reservation_watchdog: "CapacityReservationWatchdog | None" = None

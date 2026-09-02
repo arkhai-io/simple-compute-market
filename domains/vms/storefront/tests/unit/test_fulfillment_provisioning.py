@@ -133,44 +133,36 @@ class TestFulfillmentResultToLegacyShape:
         assert "authentication" not in result
 
 
-class TestConnectivitySettingsFromStorefrontConfig:
-    def test_returns_none_when_nothing_configured(self, monkeypatch):
-        monkeypatch.setattr(
-            fs.settings, "provisioning",
-            SimpleNamespace(frp_server_addr="", frp_domain="", frp_dashboard_password=""),
-            raising=False,
-        )
-        assert fs._connectivity_settings_from_storefront_config() is None
+class TestTheStorefrontSelectsNoRelay:
+    """The storefront names no relay, on either request-building path.
 
-    def test_returns_configured_values(self, monkeypatch):
-        monkeypatch.setattr(
-            fs.settings, "provisioning",
-            SimpleNamespace(
-                frp_server_addr="relay.example.com:7000",
-                frp_domain="buyer-vm.example.com",
-                frp_dashboard_password="s3cr3t",
-            ),
-            raising=False,
-        )
-        result = fs._connectivity_settings_from_storefront_config()
-        assert result == {
-            "frp_server_addr": "relay.example.com:7000",
-            "frp_domain": "buyer-vm.example.com",
-            "frp_dashboard_password": "s3cr3t",
-        }
+    Which relay a host dials is recorded on the relay its pool references. A
+    storefront naming one per request would make a fleet-wide fact depend on a
+    caller's configuration, and would let two requests against one host
+    disagree about how that host is reached. The buyer's address and port come
+    back in the fulfillment result.
+    """
 
-    def test_partial_configuration_still_returns_a_dict(self, monkeypatch):
-        monkeypatch.setattr(
-            fs.settings, "provisioning",
-            SimpleNamespace(frp_server_addr="relay.example.com:7000", frp_domain="", frp_dashboard_password=""),
-            raising=False,
-        )
-        result = fs._connectivity_settings_from_storefront_config()
-        assert result == {
-            "frp_server_addr": "relay.example.com:7000",
-            "frp_domain": None,
-            "frp_dashboard_password": None,
-        }
+    def test_no_builder_remains_to_be_called(self):
+        assert not hasattr(fs, "_connectivity_settings_from_storefront_config")
+
+    def test_neither_request_builder_reads_relay_settings(self):
+        """Asserted against the source of both modules rather than by driving
+        them, because the point is that no code path exists to reach — a
+        behavioural test can only show that the paths exercised did not."""
+        import inspect
+
+        from market_storefront.services import vm_fulfillment_service as vfs
+
+        for module in (fs, vfs):
+            source = inspect.getsource(module)
+            directives = [
+                line for line in source.splitlines()
+                if not line.lstrip().startswith("#")
+            ]
+            body = "\n".join(directives)
+            for key in ("frp_server_addr", "frp_domain", "frp_dashboard_password"):
+                assert key not in body, f"{module.__name__} still reads {key}"
 
 
 class TestDoProvision:
@@ -207,7 +199,6 @@ class TestDoProvision:
             fs.settings, "provisioning",
             SimpleNamespace(
                 timeout=5.0, poll_interval=0.001,
-                frp_server_addr="", frp_domain="", frp_dashboard_password="",
             ),
             raising=False,
         )
@@ -276,9 +267,15 @@ class TestDoProvision:
         assert result["vm_name"] == "vm-1"
         assert result["provisioned_resource_ids"] == ["res-1"]
 
-    async def test_includes_connectivity_when_frp_configured(
+    async def test_no_connectivity_is_placed_in_the_request(
         self, monkeypatch, fulfillment_client, tmp_path,
     ):
+        """Even with relay-shaped storefront settings present.
+
+        A deployment carrying the removed keys must not quietly resume
+        supplying them: the storefront selects no relay, and a leftover setting
+        is inert rather than authoritative.
+        """
         monkeypatch.setattr(fs, "build_fulfillment_client", lambda *_: fulfillment_client)
         monkeypatch.setattr(fs, "build_capacity_client", lambda *_: SimpleNamespace())
         sqlite_client = (
@@ -288,7 +285,7 @@ class TestDoProvision:
             fs.settings, "provisioning",
             SimpleNamespace(
                 timeout=5.0, poll_interval=0.001,
-                frp_server_addr="relay.example.com:7000", frp_domain="", frp_dashboard_password="",
+                frp_server_addr="relay.example.com:7000",
             ),
             raising=False,
         )
@@ -300,11 +297,7 @@ class TestDoProvision:
         )
 
         begin_body = fulfillment_client.begin_fulfillment.await_args.args[0]
-        assert begin_body.fulfillment_request.payload["connectivity"] == {
-            "frp_server_addr": "relay.example.com:7000",
-            "frp_domain": None,
-            "frp_dashboard_password": None,
-        }
+        assert "connectivity" not in begin_body.fulfillment_request.payload
 
     async def test_failed_state_raises(
         self, monkeypatch, fulfillment_client, tmp_path,
@@ -321,7 +314,6 @@ class TestDoProvision:
             fs.settings, "provisioning",
             SimpleNamespace(
                 timeout=5.0, poll_interval=0.001,
-                frp_server_addr="", frp_domain="", frp_dashboard_password="",
             ),
             raising=False,
         )

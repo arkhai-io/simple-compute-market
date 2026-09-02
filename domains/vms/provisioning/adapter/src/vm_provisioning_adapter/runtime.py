@@ -39,9 +39,14 @@ class VmProvisioningRuntime:
     teardown_port: Any
 
     def fulfillment_provider(self):
+        from compute_provisioning_service.services.relay_port_allocator import (
+            RelayPortAllocator,
+        )
+
         return AnsibleFulfillmentProvider(
             job_service=self.job_service,
             job_queue_provider=self.job_queue_provider,
+            port_allocator=RelayPortAllocator(self.session_factory),
         )
 
     def readiness(self) -> dict[str, bool]:
@@ -142,7 +147,7 @@ def build_vm_runtime(
         job_queue_provider=job_queue_provider,
         ansible_service=ansible_service,
         host_service=host_service,
-        pool_config_handler=AnsiblePoolConfigHandler(),
+        pool_config_handler=AnsiblePoolConfigHandler(settings=config),
         job_service=job_service,
         vm_operations_service=vm_operations_service,
         host_operations_service=HostOperationsService(

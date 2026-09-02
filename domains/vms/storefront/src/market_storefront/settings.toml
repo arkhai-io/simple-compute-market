@@ -178,9 +178,6 @@ timeout                = 3600
 poll_interval          = 15
 preflight_timeout      = 30
 fail_on_unreachable    = true
-frp_server_addr        = ""
-frp_domain             = ""
-frp_dashboard_password = ""
 
 [provisioning.identity]
 # Ordered old/new public response trust pins for provisioning HTTP calls.

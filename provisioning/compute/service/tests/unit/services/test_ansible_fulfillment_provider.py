@@ -218,13 +218,122 @@ class TestSizingPrecedence:
         assert submitted_params.vm_gpu_count == 0
 
 
-class TestConnectivity:
-    """Connectivity (FRP) settings forward through the
-    fulfillment request to the Ansible job, separate from sizing
-    requirements. Storefront-configured for now; a negotiated source is a
-    plausible future addition, not yet implemented."""
+class TestRelayAccessPath:
+    """Exactly one access path is selected, and never zero.
 
-    async def test_connectivity_settings_forward_to_the_ansible_job(self, provider, job_service):
+    The failure this replaces: two paths guarded by different conditions, and a
+    configuration satisfying neither produced a VM with no external route and
+    reported success. Relay location now comes from the relay a pool
+    references, resolved by the execution read, and is not selectable per
+    request.
+    """
+
+    class _Allocator:
+        def __init__(self, port=6100):
+            self.port = port
+            self.calls = []
+
+        def allocate(self, **kwargs):
+            self.calls.append(kwargs)
+            return SimpleNamespace(
+                id="lease-1", relay_id=kwargs["relay_id"], remote_port=self.port
+            )
+
+    def _relay_pool_config(self, **overrides):
+        config = _pool_config()
+        config.update(
+            {
+                "relay_id": "site-a",
+                "relay_addr": "203.0.113.9",
+                "relay_port": 7000,
+                "vm_port_range_start": 6100,
+                "vm_port_range_count": 100,
+                "relay_token": "admission-token",
+            }
+        )
+        config.update(overrides)
+        return config
+
+    async def test_a_pool_with_no_relay_takes_the_direct_path(self, provider, job_service):
+        prepared = provider.prepare_create(
+            capacity_reservation_id="alloc-1", request=_request(),
+            resource=_resource(), pool_config=_pool_config(),
+        )
+        await provider.dispatch_create(prepared)
+
+        submitted: AnsibleJobParams = job_service.submit.await_args.args[0]
+        assert submitted.relay_addr is None
+        assert submitted.vm_remote_port is None
+
+    async def test_a_relay_backed_pool_forwards_the_relay_and_a_leased_port(
+        self, job_service
+    ):
+        allocator = self._Allocator(port=6142)
+        provider = AnsibleFulfillmentProvider(
+            job_service=job_service,
+            job_queue_provider=lambda: MagicMock(),
+            port_allocator=allocator,
+        )
+        prepared = provider.prepare_create(
+            capacity_reservation_id="alloc-1", request=_request(),
+            resource=_resource(), pool_config=self._relay_pool_config(),
+        )
+        await provider.dispatch_create(prepared)
+
+        submitted: AnsibleJobParams = job_service.submit.await_args.args[0]
+        assert submitted.relay_addr == "203.0.113.9"
+        assert submitted.relay_port == 7000
+        assert submitted.relay_token == "admission-token"
+        assert submitted.vm_remote_port == 6142
+
+    def test_the_port_is_leased_before_dispatch(self, job_service):
+        """Allocating after dispatch would let a crash between the two leave a
+        port bound on the relay that no record claims."""
+        allocator = self._Allocator()
+        provider = AnsibleFulfillmentProvider(
+            job_service=job_service,
+            job_queue_provider=lambda: MagicMock(),
+            port_allocator=allocator,
+        )
+        provider.prepare_create(
+            capacity_reservation_id="alloc-1", request=_request(),
+            resource=_resource(), pool_config=self._relay_pool_config(),
+        )
+
+        assert allocator.calls
+        assert allocator.calls[0]["relay_id"] == "site-a"
+        assert allocator.calls[0]["owner_id"] == "alloc-1"
+        job_service.submit.assert_not_awaited()
+
+    @pytest.mark.parametrize(
+        "missing, expected",
+        [
+            ({"relay_token": None}, "admission token"),
+            ({"relay_addr": None}, "relay address"),
+            ({"vm_port_range_start": None}, "port window start"),
+            ({"vm_port_range_count": None}, "port window size"),
+        ],
+    )
+    def test_a_partial_relay_configuration_is_rejected_before_dispatch(
+        self, job_service, missing, expected
+    ):
+        provider = AnsibleFulfillmentProvider(
+            job_service=job_service,
+            job_queue_provider=lambda: MagicMock(),
+            port_allocator=self._Allocator(),
+        )
+        with pytest.raises(ProviderConfigInvalidError) as excinfo:
+            provider.prepare_create(
+                capacity_reservation_id="alloc-1", request=_request(),
+                resource=_resource(),
+                pool_config=self._relay_pool_config(**missing),
+            )
+        assert expected in str(excinfo.value)
+        assert "site-a" in str(excinfo.value)
+
+    def test_a_request_cannot_select_a_relay(self, provider, job_service):
+        """Relay location is a durable property of the deployment. A request
+        carrying relay-shaped keys does not become a relay-backed VM."""
         request = _request()
         request.payload["connectivity"] = {
             "frp_server_addr": "relay.example.com:7000",
@@ -232,25 +341,12 @@ class TestConnectivity:
             "frp_dashboard_password": "s3cr3t",
         }
         prepared = provider.prepare_create(
-            capacity_reservation_id="alloc-1", request=request, resource=_resource(), pool_config=_pool_config(),
+            capacity_reservation_id="alloc-1", request=request,
+            resource=_resource(), pool_config=_pool_config(),
         )
-        await provider.dispatch_create(prepared)
-
-        submitted_params: AnsibleJobParams = job_service.submit.await_args.args[0]
-        assert submitted_params.frp_server_addr == "relay.example.com:7000"
-        assert submitted_params.frp_domain == "buyer-vm.example.com"
-        assert submitted_params.frp_dashboard_password == "s3cr3t"
-
-    async def test_no_connectivity_settings_means_no_frp_fields(self, provider, job_service):
-        prepared = provider.prepare_create(
-            capacity_reservation_id="alloc-1", request=_request(), resource=_resource(), pool_config=_pool_config(),
-        )
-        await provider.dispatch_create(prepared)
-
-        submitted_params: AnsibleJobParams = job_service.submit.await_args.args[0]
-        assert submitted_params.frp_server_addr is None
-        assert submitted_params.frp_domain is None
-        assert submitted_params.frp_dashboard_password is None
+        params = prepared.payload["parameters"]
+        assert params["relay_addr"] is None
+        assert params["vm_remote_port"] is None
 
 
 class TestTeardown:

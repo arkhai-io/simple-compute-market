@@ -89,6 +89,12 @@ class FakePoolConfigHandler:
     def read_config(self, unit_of_work, pool_id):
         return {}
 
+    def read_config_for_execution(self, db, pool_id):
+        # No secrets in this fake, so both reads agree. Implemented anyway: the
+        # split is part of the protocol, and a fake that provides only half of
+        # it would let a caller reach the wrong read without the suite noticing.
+        return self.read_config(db, pool_id)
+
     def replace_config(self, unit_of_work, pool_id, config):
         return None
 

@@ -28,26 +28,28 @@ from vm_provisioning_adapter.models.vm_request_model import build_create_params,
 # ---------------------------------------------------------------------------
 
 class TestCreateVmFrpValidation:
-    def test_frp_server_addr_without_password_raises(self):
-        with pytest.raises(ValidationError, match="frp_dashboard_password"):
+    def test_relay_addr_without_its_companions_raises(self):
+        with pytest.raises(ValidationError, match="relay_token"):
             CreateVmRequest(
                 vm_target="test-vm",
-                frp_server_addr="1.2.3.4",
-                frp_dashboard_password=None,
+                relay_addr="203.0.113.4",
+                relay_token=None,
             )
 
-    def test_frp_server_addr_with_password_valid(self):
+    def test_relay_addr_with_its_companions_is_valid(self):
         req = CreateVmRequest(
             vm_target="test-vm",
-            frp_server_addr="1.2.3.4",
-            frp_dashboard_password="secret",
+            relay_addr="203.0.113.4",
+            relay_port=7000,
+            relay_token="admission-token",
+            vm_remote_port=6100,
         )
-        assert req.frp_server_addr == "1.2.3.4"
+        assert req.relay_addr == "203.0.113.4"
 
-    def test_no_frp_server_addr_no_password_required(self):
+    def test_no_relay_addr_needs_no_companions(self):
         req = CreateVmRequest(vm_target="test-vm")
-        assert req.frp_server_addr is None
-        assert req.frp_dashboard_password is None
+        assert req.relay_addr is None
+        assert req.relay_token is None
 
 
 # ---------------------------------------------------------------------------
@@ -114,7 +116,7 @@ class TestCreateVmDefaults:
         assert req.vm_ram is None
         assert req.ssh_pubkey is None
         assert req.gpu_provisioned is None
-        assert req.frp_server_addr is None
+        assert req.relay_addr is None
 
 
 # ---------------------------------------------------------------------------
@@ -143,17 +145,19 @@ class TestCreateVmToParams:
         assert p.vm_disk_size == "40G"
         assert p.vm_os_variant == "ubuntu22.04"
 
-    def test_frp_fields_propagated(self):
+    def test_relay_fields_propagated(self):
         req = CreateVmRequest(
             vm_target="t",
-            frp_server_addr="1.2.3.4",
-            frp_domain="example.com",
-            frp_dashboard_password="secret",
+            relay_addr="203.0.113.4",
+            relay_port=7000,
+            relay_token="admission-token",
+            vm_remote_port=6100,
         )
         p = build_create_params("kvm1", req)
-        assert p.frp_server_addr == "1.2.3.4"
-        assert p.frp_domain == "example.com"
-        assert p.frp_dashboard_password == "secret"
+        assert p.relay_addr == "203.0.113.4"
+        assert p.relay_port == 7000
+        assert p.relay_token == "admission-token"
+        assert p.vm_remote_port == 6100
 
     def test_gpu_fields_propagated(self):
         req = CreateVmRequest(

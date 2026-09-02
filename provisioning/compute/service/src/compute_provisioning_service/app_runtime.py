@@ -14,6 +14,7 @@ from compute_provisioning_service.config import settings
 from compute_provisioning_service.container import container
 from compute_provisioning_service.db.migrations import check_schema_version
 from compute_provisioning_service.services.async_job_queue import AsyncJobQueue
+from compute_provisioning_service.services.relay_service import RelayService
 
 logger = logging.getLogger(__name__)
 
@@ -72,6 +73,10 @@ def resolve_request_path_services() -> None:
     _container_module.resolved_executor_lease_service = container.executor_lease_service()
     _container_module.resolved_compute_contract_service = container.compute_contract_service()
     _container_module.resolved_resource_pool_service = container.resource_pool_service()
+    _container_module.resolved_relay_service = RelayService(
+        session_factory=_container_module.resolved_session_factory,
+        settings=settings,
+    )
     _container_module.resolved_physical_settlement_scheduler = (
         container.physical_settlement_scheduler()
     )
@@ -137,20 +142,53 @@ def seed_inventory_if_empty() -> None:
         )
 
 
+def _document_digest(text: str) -> str:
+    import hashlib
+
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
+def _recorded_digest(session_factory, kind: str) -> str | None:
+    from compute_provisioning_service.db.models import DefinitionDocumentImport
+
+    with session_factory() as db:
+        row = db.get(DefinitionDocumentImport, kind)
+        return None if row is None else row.digest
+
+
+def _record_digest(session_factory, kind: str, digest: str) -> None:
+    from compute_provisioning_service.db.models import DefinitionDocumentImport
+
+    with session_factory() as db, db.begin():
+        row = db.get(DefinitionDocumentImport, kind)
+        if row is None:
+            db.add(DefinitionDocumentImport(document_kind=kind, digest=digest))
+        else:
+            row.digest = digest
+
+
 def import_pool_definitions_if_configured() -> None:
-    # ------------------------------------------------------------------
-    # Pool-definitions import — runs at every startup when configured.
-    #
-    # Unlike the old "empty table" seeding idea, this always imports when
-    # pool_definitions_path is set: import is idempotent/diff-based (see
-    # ResourcePoolService.import_pools), so re-running it on every restart
-    # is the correct behavior — the same idiom as the `inventory_ini`
-    # setting ("parsed and upserted... at every service startup").
-    #
-    # The system-created "default" pool always exists by this point (the
-    # resource_pools migration seeds it), so there is no "create default if
-    # empty" fallback here — that concern moved into the migration.
-    # ------------------------------------------------------------------
+    """Reconcile the pool definition document when it has changed.
+
+    Import treats its document as authoritative: it overwrites pools that
+    differ and disables pools the document omits. That authority belongs to the
+    act of submitting a document. A process start is not a submission.
+
+    The distinction matters because import is idempotent with respect to the
+    *document*, not the *database*. Re-running it against state something else
+    changed reverts that change, because a diff against the document is exactly
+    what detects it. Applying it on every startup would therefore undo relay
+    and pool administration on eviction, drain, and crash recovery — silently,
+    with no failure and no log line an operator would think to check.
+
+    So the digest of the last reconciled document is recorded, and startup
+    reconciles only when the mounted document differs from it. An explicit
+    import request still reconciles unconditionally, because the operator asked.
+
+    The digest is recorded only after a successful apply, so a failed
+    reconciliation is retried on the next startup rather than being recorded as
+    done and skipped forever.
+    """
     path = getattr(settings, "resolved_pool_definitions_path", None)
     if path is None:
         logger.info("Pool-definitions import: no pool_definitions_path configured — skipped")
@@ -159,13 +197,71 @@ def import_pool_definitions_if_configured() -> None:
     if not path.exists():
         raise FileNotFoundError(f"Configured pool-definitions file does not exist: {path}")
 
-    pool_service = _container_module.resolved_resource_pool_service
     yaml_text = path.read_text(encoding="utf-8")
+    digest = _document_digest(yaml_text)
+    session_factory = _container_module.resolved_session_factory
+    if _recorded_digest(session_factory, "pools") == digest:
+        logger.info(
+            "Pool-definitions import from %s: unchanged since last reconciliation — "
+            "not reapplied, so administrative changes are preserved",
+            path,
+        )
+        return
+
+    pool_service = _container_module.resolved_resource_pool_service
     diff = pool_service.import_pools(yaml_text, validate_only=False)
+    _record_digest(session_factory, "pools", digest)
     logger.info(
         "Pool-definitions import from %s: created=%d updated=%d disabled=%d unchanged=%d",
         path,
         len(diff.created), len(diff.updated), len(diff.disabled), len(diff.unchanged),
+    )
+
+
+def import_relay_definitions_if_configured() -> None:
+    """Reconcile the relay definition document when it has changed.
+
+    Same gate as pools, and the same reason. Relays and pools use one rule so
+    that a reader who knows one does not guess wrong about the other.
+
+    A relay entry names which key of the secrets profile holds its admission
+    token. That key is read only when the relay is created and never re-read,
+    so a token rotated through the relay controller is not reverted by a
+    reconciliation of a document that still names the key holding the old one.
+    """
+    path = getattr(settings, "resolved_relay_definitions_path", None)
+    if path is None:
+        logger.info("Relay-definitions import: no relay_definitions_path configured — skipped")
+        return
+
+    if not path.exists():
+        raise FileNotFoundError(f"Configured relay-definitions file does not exist: {path}")
+
+    yaml_text = path.read_text(encoding="utf-8")
+    digest = _document_digest(yaml_text)
+    session_factory = _container_module.resolved_session_factory
+    if _recorded_digest(session_factory, "relays") == digest:
+        logger.info(
+            "Relay-definitions import from %s: unchanged since last reconciliation — "
+            "not reapplied, so administrative changes are preserved",
+            path,
+        )
+        return
+
+    from compute_provisioning_service.services.relay_definitions import (
+        import_relay_definitions,
+    )
+
+    diff = import_relay_definitions(
+        yaml_text,
+        relay_service=_container_module.resolved_relay_service,
+        settings=settings,
+    )
+    _record_digest(session_factory, "relays", digest)
+    logger.info(
+        "Relay-definitions import from %s: created=%d updated=%d unchanged=%d",
+        path,
+        len(diff.created), len(diff.updated), len(diff.unchanged),
     )
 
 
@@ -186,6 +282,12 @@ def startup_steps() -> tuple[ComputeProvisioningStartupStep, ...]:
         ComputeProvisioningStartupStep(
             "resolve-request-path-services",
             resolve_request_path_services,
+        ),
+        # Relays before pools: a pool's provider configuration references a
+        # relay, so a first boot from definition documents needs the relay to
+        # exist before the pool that points at it.
+        ComputeProvisioningStartupStep(
+            "import-relay-definitions", import_relay_definitions_if_configured
         ),
         ComputeProvisioningStartupStep(
             "import-pool-definitions", import_pool_definitions_if_configured

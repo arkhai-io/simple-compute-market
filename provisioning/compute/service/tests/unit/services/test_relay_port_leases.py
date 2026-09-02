@@ -27,7 +27,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy.pool import StaticPool
 
 from compute_provisioning_service.db.database import run_migrations
-from compute_provisioning_service.db.models import AnsiblePoolConfig, RelayPortLease
+from compute_provisioning_service.db.models import AnsiblePoolConfig, Relay, RelayPortLease
 
 
 _PLAYBOOK_PATH = "/configured/playbook.yaml"
@@ -46,6 +46,29 @@ def _engine():
         default_inventory_group=_INVENTORY_GROUP,
     )
     return engine
+
+
+def _relay(relay_id: str, addr: str, port: int, **overrides) -> Relay:
+    fields = {
+        "id": relay_id,
+        "relay_addr": Relay.normalize_addr(addr),
+        "relay_port": port,
+        "vm_port_range_start": 6100,
+        "vm_port_range_count": 100,
+    }
+    fields.update(overrides)
+    return Relay(**fields)
+
+
+def _pool_config(pool_id: str, **overrides) -> AnsiblePoolConfig:
+    fields = {
+        "pool_id": pool_id,
+        "playbook_path": _PLAYBOOK_PATH,
+        "inventory_group": _INVENTORY_GROUP,
+        "extra_vars": {},
+    }
+    fields.update(overrides)
+    return AnsiblePoolConfig(**fields)
 
 
 def _lease(relay_id: str, port: int, **overrides) -> RelayPortLease:
@@ -120,41 +143,78 @@ class TestLeaseScoping:
 
 
 class TestRelayIdentity:
-    """Identity is derived from the endpoint, so it cannot disagree with it."""
+    """Identity is a row, so it survives the endpoint changing.
 
-    def _config(self, **overrides) -> AnsiblePoolConfig:
-        fields = {
-            "pool_id": "gpu-pool",
-            "playbook_path": _PLAYBOOK_PATH,
-            "inventory_group": _INVENTORY_GROUP,
-            "extra_vars": {},
-            "relay_addr": "10.0.0.9",
-            "relay_port": 7000,
-        }
-        fields.update(overrides)
-        return AnsiblePoolConfig(**fields)
+    An earlier shape derived identity from ``relay_addr:relay_port`` held on
+    the pool. The invariants below are the same ones that shape had to satisfy;
+    what changed is that they are now enforced by a unique constraint on the
+    relay table rather than by a normalizing property, and that identity no
+    longer moves when a relay does.
+    """
 
-    def test_identity_comes_from_the_configured_endpoint(self):
-        assert self._config().relay_id == "10.0.0.9:7000"
+    def test_one_rendezvous_cannot_be_recorded_twice(self):
+        """What stops one relay issuing a listening port to two callers."""
+        engine = _engine()
+        with Session(engine) as session:
+            session.add(_relay("a", "10.0.0.9", 7000))
+            session.commit()
+            session.add(_relay("b", "10.0.0.9", 7000))
+            with pytest.raises(IntegrityError):
+                session.commit()
 
-    def test_two_pools_on_one_endpoint_resolve_to_one_identity(self):
-        """Which is what makes a genuine collision detectable."""
-        first = self._config(pool_id="gpu-pool")
-        second = self._config(pool_id="bare-metal-pool")
-        assert first.relay_id == second.relay_id
+    def test_addresses_are_normalized_before_they_are_compared(self):
+        """Two spellings of one endpoint collide instead of creating two rows."""
+        assert Relay.normalize_addr("  Relay.Local  ") == "relay.local"
 
-    def test_two_pools_on_different_endpoints_do_not_collide(self):
-        assert self._config().relay_id != self._config(relay_addr="10.0.0.10").relay_id
+    def test_two_pools_may_reference_one_relay(self):
+        """The ordinary case: a GPU pool and a bare-metal pool, one rendezvous."""
+        engine = _engine()
+        with Session(engine) as session:
+            session.add(_relay("shared", "10.0.0.9", 7000))
+            session.add(_pool_config("gpu-pool", relay_id="shared"))
+            session.add(_pool_config("bare-metal-pool", relay_id="shared"))
+            session.commit()
+            configs = session.query(AnsiblePoolConfig).filter(
+                AnsiblePoolConfig.relay_id == "shared"
+            ).all()
+            assert {c.pool_id for c in configs} == {"gpu-pool", "bare-metal-pool"}
 
-    def test_identity_is_normalized(self):
-        assert self._config(relay_addr="  Relay.Local  ").relay_id == "relay.local:7000"
+    def test_two_relays_are_distinct_identities(self):
+        engine = _engine()
+        with Session(engine) as session:
+            session.add(_relay("a", "10.0.0.9", 7000))
+            session.add(_relay("b", "10.0.0.10", 7000))
+            session.commit()
+            assert session.query(Relay).count() == 2
 
-    @pytest.mark.parametrize(
-        "overrides", [{"relay_addr": None}, {"relay_port": None}, {"relay_addr": ""}]
-    )
-    def test_an_unconfigured_relay_has_no_identity(self, overrides):
+    def test_a_pool_with_no_relay_holds_no_identity(self):
         """A pool with no relay serves VMs by direct NAT; it holds no leases."""
-        assert self._config(**overrides).relay_id is None
+        engine = _engine()
+        with Session(engine) as session:
+            session.add(_pool_config("nat-pool"))
+            session.commit()
+            assert session.get(AnsiblePoolConfig, "nat-pool").relay_id is None
+
+    def test_a_relay_address_change_keeps_its_leases(self):
+        """The property a foreign key buys that a derived string could not.
+
+        Under a derived identity the old address's leases became records under
+        an identity nothing pointed at any more, while the new identity was
+        free to reissue ports still bound on the relay.
+        """
+        engine = _engine()
+        with Session(engine) as session:
+            session.add(_relay("moving", "10.0.0.9", 7000))
+            session.add(_lease("moving", 6100))
+            session.commit()
+
+            session.get(Relay, "moving").relay_addr = "10.0.0.20"
+            session.commit()
+
+            held = session.query(RelayPortLease).filter(
+                RelayPortLease.relay_id == "moving"
+            ).all()
+            assert [lease.remote_port for lease in held] == [6100]
 
 
 class TestMigrations:
@@ -164,15 +224,27 @@ class TestMigrations:
         columns = [sorted(c["column_names"]) for c in constraints]
         assert ["relay_id", "remote_port"] in columns
 
-    def test_pool_config_gains_the_relay_columns(self):
+    def test_the_relay_table_carries_the_endpoint_constraint(self):
+        engine = _engine()
+        constraints = inspect(engine).get_unique_constraints("relays")
+        columns = [sorted(c["column_names"]) for c in constraints]
+        assert ["relay_addr", "relay_port"] in columns
+
+    def test_pool_config_gains_the_relay_reference(self):
         engine = _engine()
         names = {c["name"] for c in inspect(engine).get_columns("ansible_pool_configs")}
-        assert {
-            "relay_addr", "relay_port", "vm_port_range_start", "vm_port_range_count",
-        } <= names
+        assert "relay_id" in names
+
+    def test_the_document_import_digest_table_exists(self):
+        engine = _engine()
+        names = {
+            c["name"]
+            for c in inspect(engine).get_columns("definition_document_imports")
+        }
+        assert {"document_kind", "digest", "imported_at"} <= names
 
     def test_existing_pool_rows_keep_working_without_a_relay(self):
-        """Nullable columns: a pool configured before this change is unchanged."""
+        """Nullable reference: a pool configured before this change is unchanged."""
         engine = _engine()
         with engine.begin() as connection:
             connection.execute(text(
@@ -181,9 +253,7 @@ class TestMigrations:
                 "VALUES ('legacy', :p, 'vm_management_v1', :g, '{}')"
             ), {"p": _PLAYBOOK_PATH, "g": _INVENTORY_GROUP})
         with Session(engine) as session:
-            config = session.get(AnsiblePoolConfig, "legacy")
-            assert config.relay_addr is None
-            assert config.relay_id is None
+            assert session.get(AnsiblePoolConfig, "legacy").relay_id is None
 
     def test_running_migrations_twice_is_idempotent(self):
         engine = _engine()

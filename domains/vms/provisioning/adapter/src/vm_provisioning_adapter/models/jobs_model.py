@@ -61,9 +61,10 @@ class AnsibleJobParams:
     vm_gpu_partition_size: Optional[str] = None
 
     # FRP tunnelling (create only)
-    frp_server_addr: Optional[str] = None
-    frp_domain: Optional[str] = None
-    frp_dashboard_password: Optional[str] = None
+    relay_addr: Optional[str] = None
+    relay_port: Optional[int] = None
+    relay_token: Optional[str] = None
+    vm_remote_port: Optional[int] = None
 
     # Golden image (create + golden mode)
     golden_image_name: Optional[str] = None

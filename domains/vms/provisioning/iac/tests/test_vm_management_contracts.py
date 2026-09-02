@@ -12,6 +12,18 @@ VM_UNDEFINE = TASKS / "vm-undefine.yml"
 JSON_OUTPUT = TASKS / "json-output.yml"
 
 
+def _directives(text: str) -> str:
+    """Non-comment lines only.
+
+    An assertion that scans a whole file can be satisfied by its own comments:
+    these tasks explain at length which mechanism they deliberately avoid, so a
+    check for the absence of that mechanism must not read the explanation.
+    """
+    return "\n".join(
+        line for line in text.splitlines() if not line.lstrip().startswith("#")
+    )
+
+
 def _read(path: Path) -> str:
     return path.read_text(encoding="utf-8")
 
@@ -48,21 +60,65 @@ class VmManagementContractTests(unittest.TestCase):
             text,
         )
 
-    def test_vm_create_reads_frp_dashboard_from_compressed_response_env(self) -> None:
+    def test_vm_create_verifies_the_proxy_through_the_local_admin_api(self) -> None:
+        """The client that registered the proxy is asked whether it worked.
+
+        Polling the relay's dashboard was a round trip to ask a third party
+        about our own state, and it required that every relay run a management
+        surface, publish a DNS name for it, hold a certificate, and distribute
+        a second credential.
+        """
         text = _read(VM_CREATE)
-        wait_idx = text.index("Wait for FRP proxy to appear online in dashboard")
-        display_idx = text.index("Display FRP proxy information")
+        wait_idx = text.index("Wait for this VM's proxy to come up")
+        display_idx = text.index("Report buyer access for this VM")
         wait_block = text[wait_idx:display_idx]
 
-        self.assertIn(
-            'curl --compressed -fsS -u "admin:{{ frp_dashboard_password }}"',
-            wait_block,
-        )
-        self.assertIn('export FRP_DASHBOARD_RESPONSE="$RESPONSE"', wait_block)
-        self.assertIn('json.loads(os.environ["FRP_DASHBOARD_RESPONSE"])', wait_block)
-        self.assertIn('proxy.get("status") == "online"', wait_block)
-        self.assertNotIn("json.load(sys.stdin)", wait_block)
-        self.assertNotIn("| python3 - <<'PY'", wait_block)
+        self.assertIn("http://127.0.0.1:{{ frp_admin_port", wait_block)
+        self.assertIn("/api/status", wait_block)
+        self.assertIn("'status', 'equalto', 'running'", wait_block)
+
+    def test_vm_create_contacts_no_relay_management_surface(self) -> None:
+        """Scanned over directives rather than the whole file: the comments
+        explain which mechanism the tasks deliberately avoid, and an assertion
+        matching its own explanation proves nothing."""
+        directives = _directives(_read(VM_CREATE))
+
+        for absent in (
+            "frp-admin",
+            "frp_dashboard_password",
+            "frp_domain",
+            "frp_subdomain",
+            "subdomain =",
+        ):
+            self.assertNotIn(absent, directives)
+
+    def test_vm_create_applies_a_supplied_port_and_selects_none(self) -> None:
+        """A remote port binds a listening socket on the relay, so every client
+        dialing it draws from one namespace. The playbook writes the stanza it
+        is given; the provisioning service is the single authority that can
+        avoid collisions and reclaim what it issued."""
+        directives = _directives(_read(VM_CREATE))
+
+        self.assertIn("remotePort = {{ vm_remote_port }}", directives)
+        self.assertNotIn("seq 7002 8000", directives)
+
+    def test_vm_create_reloads_rather_than_restarts_the_tunnel_client(self) -> None:
+        """A restart closes the control connection, so the relay tears down
+        every proxy this client registered — ending the established SSH session
+        of every buyer on the host, not just the VM being added."""
+        directives = _directives(_read(VM_CREATE))
+
+        self.assertIn("/api/reload", directives)
+        self.assertNotIn("name: frpc", directives)
+        self.assertNotIn("state: restarted", directives)
+
+    def test_vm_create_writes_only_the_vm_facing_client_configuration(self) -> None:
+        """The host's own management tunnel is a separate file and unit,
+        written when the host was prepared. No VM operation may touch it."""
+        directives = _directives(_read(VM_CREATE))
+
+        self.assertIn("/etc/frp/frpc-vms.toml", directives)
+        self.assertNotIn("/etc/frp/frpc.toml", directives)
 
     def test_vm_destroy_emits_force_destroy_json_contract(self) -> None:
         text = _read(VM_DESTROY)
@@ -85,8 +141,8 @@ class VmManagementContractTests(unittest.TestCase):
 
         for token in (
             "virsh domifaddr {{ vm_name }}",
-            "path: /etc/frp/frpc.toml",
-            "notify: restart frpc",
+            "path: /etc/frp/frpc-vms.toml",
+            "/api/reload",
             "Fail if VM is running",
             "Cannot undefine VM '{{ vm_name }}' - VM is currently running",
             "iptables -t nat -L PREROUTING -n --line-numbers",

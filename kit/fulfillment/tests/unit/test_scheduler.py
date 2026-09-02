@@ -42,6 +42,12 @@ class _Handler:
     def validate_config(self, config): return dict(config)
     def validate_config_problems(self, config): return dict(config), ()
     def read_config(self, db, pool_id): return {}
+
+    def read_config_for_execution(self, db, pool_id):
+        # No secrets in this fake, so both reads agree. Implemented anyway: the
+        # split is part of the protocol, and a fake that provides only half of
+        # it would let a caller reach the wrong read without the suite noticing.
+        return self.read_config(db, pool_id)
     def replace_config(self, db, pool_id, config): pass
     def delete_config(self, db, pool_id): pass
 

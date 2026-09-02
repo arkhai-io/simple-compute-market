@@ -4,6 +4,7 @@ import uuid
 from sqlalchemy import JSON, Boolean, Column, DateTime, ForeignKey, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import declarative_base, relationship
 from sqlalchemy.sql import func
+from sqlalchemy.sql.expression import true as sa_true
 
 
 Base = declarative_base()
@@ -168,6 +169,54 @@ class Credential(Base):
 from market_resource_pools import DEFAULT_POOL_ID, ResourcePool  # noqa: F401
 
 
+class Relay(Base):
+    """A tunnel rendezvous that hosts dial, and the port window it accepts.
+
+    One row per rendezvous. ``UNIQUE(relay_addr, relay_port)`` is what makes
+    identity trustworthy: a remote port binds a listening socket on the relay
+    itself, so one rendezvous recorded twice would issue the same port to two
+    callers and the refusal would surface asynchronously in a tunnel client's
+    log rather than as a failed allocation.
+
+    The admission token is stored encrypted under the deployment's
+    ``ssh_decryption_key``, the same key that protects embedded host key
+    material. The database therefore holds no usable credential: recovering a
+    token requires both this row and a key held outside the database. No read
+    path that serves an API response, an export, or a reconciliation
+    comparison may return it — see the pool configuration handlers, which
+    expose a redacted read under the unqualified name and secrets only through
+    an explicitly named execution read.
+    """
+
+    __tablename__ = "relays"
+    __table_args__ = (
+        UniqueConstraint("relay_addr", "relay_port", name="uq_relays_endpoint"),
+    )
+
+    id = Column(String, primary_key=True)
+    label = Column(String, nullable=True)
+    relay_addr = Column(String, nullable=False)
+    relay_port = Column(Integer, nullable=False)
+    vm_port_range_start = Column(Integer, nullable=False)
+    vm_port_range_count = Column(Integer, nullable=False)
+    # Ciphertext, or NULL when no token has been supplied yet. A relay with no
+    # token is rejected before dispatch rather than dialled and refused.
+    relay_token_encrypted = Column(String, nullable=True)
+    enabled = Column(Boolean, nullable=False, default=True, server_default=sa_true())
+    created_at = Column(DateTime, nullable=False, server_default=func.now())
+    updated_at = Column(DateTime, nullable=True, onupdate=func.now())
+
+    @staticmethod
+    def normalize_addr(addr: str) -> str:
+        """Canonical spelling of a rendezvous address.
+
+        Applied on write so two spellings of one endpoint collide on the
+        unique constraint instead of creating two rows that would each issue
+        ports the other already holds.
+        """
+        return addr.strip().lower()
+
+
 class AnsiblePoolConfig(Base):
     """Ansible-provider-specific config for a resource pool.
 
@@ -203,31 +252,14 @@ class AnsiblePoolConfig(Base):
     default_vm_vcpus = Column(Integer, nullable=True)
     default_vm_disk_size = Column(String, nullable=True)
 
-    # Where this pool's hosts dial for buyer VM tunnels, and the remote-port
-    # window that relay accepts. Which relay a host reaches is a property of
-    # where that host is, not of the request being served, so it is configured
-    # once here rather than supplied per fulfillment.
+    # Which relay this pool's hosts dial for buyer VM tunnels. A reference,
+    # not the endpoint itself: the rendezvous address, its port window, and
+    # its token are shared by every pool pointing at the same relay, so they
+    # belong to the relay row. Holding the window here would let two pools
+    # allocate from one listening namespace under disagreeing bounds.
     #
-    # All nullable: a pool with no relay configured serves VMs by direct NAT.
-    relay_addr = Column(String, nullable=True)
-    relay_port = Column(Integer, nullable=True)
-    vm_port_range_start = Column(Integer, nullable=True)
-    vm_port_range_count = Column(Integer, nullable=True)
-
-    @property
-    def relay_id(self) -> str | None:
-        """Stable identity of the relay this pool's hosts dial.
-
-        A remote port binds a listening socket on the relay, so the port
-        namespace belongs to the relay rather than to a host or a pool. Two
-        pools configured against one endpoint must resolve to one identity, or
-        they would each issue ports the other already holds; deriving the
-        identity from the endpoint is what makes that true without an operator
-        having to keep a separate identifier consistent.
-        """
-        if not self.relay_addr or not self.relay_port:
-            return None
-        return f"{self.relay_addr.strip().lower()}:{int(self.relay_port)}"
+    # Nullable: a pool with no relay configured serves VMs by direct NAT.
+    relay_id = Column(String, ForeignKey("relays.id"), nullable=True, index=True)
 
 
 class RelayPortLease(Base):
@@ -253,7 +285,10 @@ class RelayPortLease(Base):
     )
 
     id = Column(String, primary_key=True)
-    relay_id = Column(String, nullable=False, index=True)
+    # References the relay row rather than a string assembled from its address,
+    # so a relay moving to a new address updates one field and its leases
+    # follow it instead of becoming records under an identity nothing points at.
+    relay_id = Column(String, ForeignKey("relays.id"), nullable=False, index=True)
     remote_port = Column(Integer, nullable=False)
     # Recorded for operator visibility and reconciliation, not for uniqueness.
     host_name = Column(String, nullable=True)
@@ -263,6 +298,28 @@ class RelayPortLease(Base):
     owner_id = Column(String, nullable=False, index=True)
     created_at = Column(DateTime, nullable=False, server_default=func.now())
     released_at = Column(DateTime, nullable=True)
+
+
+class DefinitionDocumentImport(Base):
+    """Digest of the definition document last reconciled, per document kind.
+
+    Import treats a document as authoritative: it overwrites entries that
+    differ and disables entries the document omits. That authority belongs to
+    the act of submitting a document. A process start is not a submission, and
+    re-applying a document nobody submitted reverts whatever else changed the
+    database — silently, on eviction, drain, and crash recovery.
+
+    So a startup reconciles only when the mounted document differs from the
+    digest recorded here. The digest is written in the same transaction that
+    applies the reconciliation, so a failed apply does not record a document
+    that was never applied and suppress the next attempt.
+    """
+
+    __tablename__ = "definition_document_imports"
+
+    document_kind = Column(String, primary_key=True)
+    digest = Column(String, nullable=False)
+    imported_at = Column(DateTime, nullable=False, server_default=func.now())
 
 
 class Host(Base):

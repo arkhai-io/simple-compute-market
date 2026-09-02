@@ -218,8 +218,9 @@ product already sells VMs on hosts it reaches by tunnel; it simply cannot do so
 against a relay deployed without a management surface.
 
 ```text
-never-strand-the-host-on-passthrough ──► (prerequisite for exercising either below on real hardware)
+never-strand-the-host-on-passthrough ──► (prerequisite for exercising any below on real hardware)
 add-host-ssh-port (independent)
+contain-embedded-host-key-material (independent)
 relay-vm-access-without-a-dashboard ──► add-buyer-vm-connectivity-terms
 ```
 
@@ -227,12 +228,19 @@ relay-vm-access-without-a-dashboard ──► add-buyer-vm-connectivity-terms
 |---|---|---|
 | [`never-strand-the-host-on-passthrough`](never-strand-the-host-on-passthrough/) | implemented; promoted; live verification outstanding | Host preparation cannot render a rented machine unreachable. Passthrough viability is audited read-only before anything is written, unsafe IOMMU groups are refused rather than bound, device binding is scoped to a PCI address and applied after boot, and the rollback target is a state that contends for no device |
 | [`add-host-ssh-port`](add-host-ssh-port/) | implemented; promoted | The host registry records the SSH port the provisioner connects on, `ansible_port` survives INI import instead of being silently discarded, and both inventory renderers emit it. Takes no position on where a port value comes from |
-| [`relay-vm-access-without-a-dashboard`](relay-vm-access-without-a-dashboard/) | in progress; schema landed, allocator and Ansible outstanding; carries a reload verification gate | VM tunnel allocation and verification stop depending on a relay dashboard, DNS name, certificate, and second credential. Splits the host's management and buyer tunnel clients, forwards the relay token as a secret, and stops restarting the tunnel client — and with it every buyer's live session — on each VM creation |
+| [`contain-embedded-host-key-material`](contain-embedded-host-key-material/) | in design | A host may be reached with its own SSH key rather than the deployment's shared one. Decrypted key material exists only for the operation that needs it, on failing paths as well as succeeding ones. Takes no position on who generates a host's keypair |
+| [`relay-vm-access-without-a-dashboard`](relay-vm-access-without-a-dashboard/) | in design; schema landed but superseded, allocator and Ansible outstanding; carries a reload verification gate | VM tunnel allocation and verification stop depending on a relay dashboard, DNS name, certificate, and second credential. A relay becomes an administered resource with its own controller, holding its own window and encrypted token, changeable against a running service rather than by redeployment, and no longer reverted when a pod restarts against an unchanged definition document. The host's management and buyer tunnel clients are split, and adding a VM stops restarting the tunnel client — and with it every buyer's live session |
 
-`never-strand-the-host-on-passthrough` shares no code with the other two and
-blocks neither. It is sequenced first because both are verified by preparing
-and provisioning a real rented host, and host preparation is the step that can
-lose the machine.
+`never-strand-the-host-on-passthrough` shares no code with the others and
+blocks none of them. It is sequenced first because they are verified by
+preparing and provisioning a real rented host, and host preparation is the step
+that can lose the machine.
+
+`contain-embedded-host-key-material` is what allows a host prepared by someone
+else to be registered at all. Every host in an environment is currently reached
+with one key, which is workable while one party operates them all and is not
+workable for a rented machine whose operator supplies its own credential. It
+shares no code with the relay work and either may land first.
 
 `add-buyer-vm-connectivity-terms` is listed under Goal 2, where its negotiation
 impact places it. It populates the same `connectivity` field this campaign

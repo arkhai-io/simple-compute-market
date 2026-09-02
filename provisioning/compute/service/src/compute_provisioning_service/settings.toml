@@ -84,10 +84,16 @@ non_retryable_errors = [
     "Domain not found",
 ]
 
-# FRP tunneling defaults (per-request values take precedence)
-frp_server_addr = ""
-frp_domain = ""
-frp_dashboard_password = ""
+# Bootstrap admission token for a relay established from the relay definition
+# document. Read only when a relay is created, and never afterwards: a token
+# rotated through the relay controller is authoritative from that point, and
+# re-reading this value would let a redeployment silently revert a rotation.
+# Stored encrypted on the relay row under ssh_decryption_key; nothing reads
+# this setting at dispatch.
+#
+# Empty by default. A deployment with no relay serves VMs by direct NAT, so an
+# absent token is a valid state; what fails is a relay configured without one.
+relay_token = ""
 
 # Rate limiting
 enable_rate_limiting = false
@@ -111,6 +117,15 @@ inventory_ini = ""
 # default: the system-created "default" pool (seeded by the resource_pools
 # migration) is enough for a fresh checkout with no operator-supplied pools.
 pool_definitions_path = ""
+
+# Relay definitions
+# Path to a YAML file of relay definitions. Reconciled at startup only when the
+# document differs from the one last reconciled: import treats a document as
+# authoritative, and re-applying one nobody submitted would revert relays
+# administered through the API on any pod restart. Each entry may name which
+# key of the secrets profile holds its admission token; that key is read once,
+# when the relay is created.
+relay_definitions_path = ""
 
 # Legacy/default pool migration configuration. Existing hosts are backfilled
 # into this real Ansible pool. Override the inventory group where needed.

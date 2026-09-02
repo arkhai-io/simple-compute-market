@@ -18,3 +18,23 @@ data:
       {{- $_ := set $config "storefront_url" (default (printf "http://%s-storefront-%s:%d" .Release.Name .Values.storefront.agentName (int .Values.storefront.port)) .Values.storefront.url) -}}
     {{- end -}}
     {{- $config | toYaml | nindent 4 }}
+  {{- with .Values.definitions.pools }}
+  {{- /*
+    Declarative pool inventory. Reconciled authoritatively when it changes:
+    entries it omits are disabled. Carried in this ConfigMap rather than the
+    secrets Secret because it holds no credential, so editing a window is a
+    configuration change rather than a secret rotation.
+  */}}
+  pool-definitions.yaml: |
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  {{- with .Values.definitions.relays }}
+  {{- /*
+    Relay inventory. An entry may name which key of the provisioning-secrets
+    profile holds its admission token; the key is named here, the value never
+    is. That key is read once, when the relay is created — a token rotated
+    through the relay API is authoritative from then on.
+  */}}
+  relay-definitions.yaml: |
+    {{- toYaml . | nindent 4 }}
+  {{- end }}

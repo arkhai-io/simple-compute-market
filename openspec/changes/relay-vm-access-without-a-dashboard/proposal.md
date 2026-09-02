@@ -77,14 +77,45 @@ wildcard DNS record and certificate it implies are not needed.
   repository, and is never touched by a VM operation. Two
   files, two units, no shared write target — which also removes the hazard that
   re-running host setup re-templates one file and erases live VM proxies.
-- **Reshape the `connectivity` field** to `relay_addr`, `relay_port`,
-  `relay_token`, `vm_port_range_start`, and `vm_port_range_count`. Remove
-  `frp_domain` and `frp_dashboard_password`. Relay-neutral naming, because the
-  buyer receives a host and a port and has no reason to learn which relay
-  implementation produced them.
-- **Forward the relay token as a secret** through the provisioning secrets
-  profile, and remove the fallback literal from the template so a missing token
-  fails initialization instead of configuring a known one.
+- **Make a relay a first-class resource.** A relay row holds the rendezvous
+  address, port, allocation window, and token; pools reference it. Each fact is
+  stated once, so two pools sharing a relay cannot allocate from one listening
+  namespace under disagreeing windows, and rotating a token is one write rather
+  than one per pool.
+- **Remove relay configuration from the `connectivity` field entirely.** Remove
+  `frp_server_addr`, `frp_domain`, and `frp_dashboard_password` and add nothing
+  in their place. Which relay a host dials is a durable fact about the fleet,
+  not a property of the request being served, and the buyer-facing address is
+  returned in the fulfillment result rather than supplied with it.
+- **Store the relay token encrypted, rooted in the secrets profile.** The token
+  is Fernet-encrypted in the relay row using the same profile key that already
+  protects host SSH key material, so the database holds no usable credential.
+  Reads split in two: the reader without secrets carries the unqualified name
+  and serves the pool endpoints, the export document, and reconciliation, while
+  an explicit execution reader serves fulfillment. A write that omits the token
+  preserves the stored one.
+- **Give relays their own controller.** Create, list, detail, update, token
+  rotation, enable, and disable, against a running service. A relay is
+  infrastructure an operator repoints and rotates, so requiring a redeployment
+  for each change is the inflexibility that motivated moving the credential out
+  of the deployment's profile in the first place.
+- **Reconcile a definition document when it changes, not when a pod starts.**
+  The service currently re-applies its pool definition document at every
+  startup, on the stated grounds that import is idempotent. It is idempotent
+  with respect to the document, not the database, so re-running it reverts
+  whatever else changed the database — silently, on eviction, drain, and crash
+  recovery. The service now records a digest of each document it has imported
+  and reconciles only when the document differs. Authoritative import is
+  unchanged and remains what an explicit import request performs.
+- **Establish relays from a mounted definition document.** A deployment reaches
+  a working relay by applying the chart alone, with no operator API call and no
+  credential passing through a workstation. The document carries no credential;
+  an entry names which profile key holds its token, read once when the relay is
+  created and never re-read, so a rotation through the controller survives a
+  later reconciliation.
+- **Remove the fallback literal from the client template** so a missing token
+  fails initialization instead of configuring a value published in a tracked
+  file.
 - **Fail loudly on a partial relay configuration.** A relay address with no
   usable allocation window is a configuration error, rejected before dispatch,
   rather than a VM created with no route.
@@ -100,11 +131,15 @@ None.
 
 ### Modified Capabilities
 
-- `physical-provisioning`: the fulfillment request's `connectivity` field
-  changes shape, and the adapter forwards a relay token it did not previously
-  carry.
-- `vm-storefront-fulfillment`: the storefront's provisioning settings keys
-  change with the field.
+- `physical-provisioning`: relays become an administered resource with their own
+  endpoints; the fulfillment request's `connectivity` field sheds its relay keys;
+  the service allocates and reclaims VM relay ports; and provider configuration
+  gains a credential that read paths must not return.
+- `resource-pool-management`: provider configuration reads split into a
+  redacted default and a named execution read, and full replacement stops
+  applying to fields a read never returned.
+- `vm-storefront-fulfillment`: the storefront's provisioning settings keys are
+  removed with the field.
 
 ## Non-Goals
 
@@ -134,22 +169,38 @@ is the storefront that populates it and the playbook that consumes it, both in
 this repository.
 
 **Deployment.** Storefront `[provisioning]` keys `frp_server_addr`,
-`frp_domain`, and `frp_dashboard_password` are replaced. A deployment carrying
-the old keys must be reconfigured; the relay token moves into the provisioning
-secrets profile rather than storefront settings, because it is a credential and
-the storefront has no reason to hold it.
+`frp_domain`, and `frp_dashboard_password` are removed. A deployment carrying
+them must be reconfigured. Nothing replaces them in storefront settings: the
+relay endpoint becomes deployment configuration in the definition document, and
+the token becomes durable state in the database, because a credential has no
+business in a storefront's configuration.
 
 **Host state.** None to migrate. The dev cluster has never run a live-fire
 provisioning test and is deployed in mock mode, so no host has been initialized
 against the relay and none carries accumulated VM proxy stanzas in a single
 `/etc/frp/frpc.toml`.
 
-**Delivery.** The relay token is one more key in the `provisioning-secrets`
-dynaconf profile, which is already rendered, already projected by External
-Secrets, and already mounted into the provisioning service. No new Secret
-Manager shell, no new ExternalSecret, no new volume or mount, and no chart or
-values change in any environment. Delivering the key is a matter of rendering
-one more line into that profile, wherever it is rendered.
+**Schema.** One migration carries the relay table, the port lease table, and the
+host connection port. It has not been applied in any environment, so it is a
+single operator step against an unmigrated database rather than a sequence.
+
+**Delivery.** The token seed is one more key in the `provisioning-secrets`
+dynaconf profile — already rendered, already projected, already mounted — so it
+needs no new secret shell, no new volume, and no new mount. The relay definition
+document is an ordinary mounted configuration file carrying no credential, so it
+needs a ConfigMap and a mount but no Secret. That mount is the one delivery-side
+addition, and it is a values and template change rather than a new mechanism.
+
+`pool_definitions_path` is deliberately left unwired. It exists in the service
+and is connected to nothing, so no deployment reconciles pools today. The
+digest gate makes wiring it safe, but doing so would newly subject every
+deployment's pools to declarative reconciliation — a change to what a deployment
+means rather than a bug fix. Worth doing, deliberately, in its own change.
+
+**Bootstrap.** A deployment reaches a working relay-backed pool by applying the
+chart alone. No operator API call is required to establish the first relay, and
+no credential passes through an operator's workstation to get there. Adding a
+relay after deployment is an API operation and needs no redeploy.
 
 **Documentation.** `docs/seller-frp-setup.md` describes the dashboard, the
 wildcard record, and the three storefront keys, and instructs sellers to expect
@@ -177,15 +228,20 @@ is rewritten as part of this change rather than left to contradict the code.
   provisioned on the same host.
 - A host can reach a management relay and a buyer relay independently, so the
   two need not be the same server.
-- The relay token stops having a published default value.
+- A relay can be added, repointed, rotated, or disabled against a running
+  service, so neither adding a rendezvous nor changing one requires a
+  deployment, and neither is undone by a pod restart.
+- The relay token stops having a published default value, and stops being
+  recoverable from the database alone.
 - Two silent failure modes — a VM with no route reported as success, and a
   discarded relay token — become loud.
 
 ## Permanent documentation impact
 
-- [x] Existing subsystem specification: `openspec/specs/physical-provisioning/spec.md` — `connectivity` field shape, relay token handling, allocation ownership
-- [x] Existing subsystem specification: `openspec/specs/vm-storefront-fulfillment/spec.md` — storefront-configured connectivity source
-- [x] Existing capability architecture: `openspec/specs/physical-provisioning/architecture.md` — why relay coordination is host-local rather than relay-side
+- [x] Existing subsystem specification: `openspec/specs/physical-provisioning/spec.md` — relay resource and its lifecycle, token confidentiality on read paths, `connectivity` field shape, allocation ownership
+- [x] Existing subsystem specification: `openspec/specs/vm-storefront-fulfillment/spec.md` — removal of storefront-configured connectivity keys
+- [x] Existing capability architecture: `openspec/specs/physical-provisioning/architecture.md` — why relay coordination is host-local rather than relay-side, and why a relay is a resource rather than pool configuration
+- [x] `docs/development/DEPLOYMENT_AND_CONFIG.md` — the definition documents' paths and contents, and that reconciliation follows a change to a document rather than a restart
 - [ ] `docs/development/ARCHITECTURE.md` — no repository-wide shape change anticipated
 - [ ] `docs/development/ROADMAP.md` — no roadmap goal currently covers reaching hosts without an inbound route; whether one is warranted is a closeout decision, not an omission
 
@@ -198,8 +254,25 @@ is rewritten as part of this change rather than left to contradict the code.
 - The relay token is never held by a buyer-controlled machine, which is why the
   tunnel client runs on the host rather than in the VM →
   `openspec/specs/physical-provisioning/architecture.md`
+- A relay is a resource, not pool configuration, because its window and token
+  are shared by every pool that points at it →
+  `openspec/specs/physical-provisioning/architecture.md`
 - The `connectivity` field's resolved shape and its forwarding contract →
   `openspec/specs/physical-provisioning/spec.md`
 - The provisioning service allocates VM relay ports and owns their reclamation;
   the playbook applies what it is given →
+  `openspec/specs/physical-provisioning/spec.md`
+- Relay tokens are encrypted at rest under the profile key and are never
+  returned by a configuration read path →
+  `openspec/specs/physical-provisioning/spec.md`
+- Import authority is scoped to submitting a document; a process restart is not
+  a submission →
+  `openspec/specs/resource-pool-management/spec.md`
+- Why import authority exists at all, and why omitted entries are disabled
+  rather than erased →
+  `openspec/specs/resource-pool-management/spec.md`
+- Reconciliation follows a change to a document rather than a restart →
+  `docs/development/DEPLOYMENT_AND_CONFIG.md`
+- Relays are administered through their own controller, including rotation,
+  without redeployment →
   `openspec/specs/physical-provisioning/spec.md`

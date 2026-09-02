@@ -1,0 +1,39 @@
+# VM tunnel client — buyer access to rented VMs on this host.
+#
+# One proxy per VM is appended and removed by VM operations. This file is
+# templated once, at host setup; the proxies below it are managed in place so a
+# re-run of host setup cannot erase live buyer tunnels.
+#
+# The host's own management tunnel is a separate file and a separate unit. A
+# client carries exactly one serverAddr and one auth.token at the top level and
+# a proxy cannot override them, so the two layers cannot share a process once
+# they may address different relays.
+
+serverAddr = "{{ frp_server_addr }}"
+serverPort = {{ frp_server_port | default(7000) }}
+
+# No default. An undefined token fails the task that renders this file rather
+# than configuring a value published in a tracked template.
+auth.method = "token"
+auth.token = "{{ frp_auth_token }}"
+
+transport.tls.enable = true
+
+# Bound to loopback. It supplies both the reload that applies a proxy diff and
+# the status check that confirms a proxy came up — replacing two round trips to
+# a relay's management dashboard with questions asked of the local client about
+# its own state. Loopback because it is unauthenticated by default and needs no
+# reachability beyond the host.
+webServer.addr = "127.0.0.1"
+webServer.port = {{ frp_admin_port | default(7400) }}
+
+log.to = "/var/log/frp/frpc-vms.log"
+log.level = "info"
+log.maxDays = 30
+
+transport.heartbeatInterval = 30
+transport.heartbeatTimeout = 90
+
+# Idle connections held ready per client. Kept modest because a relay's
+# transport.maxPoolCount bounds what it will accept across all clients.
+transport.poolCount = 5

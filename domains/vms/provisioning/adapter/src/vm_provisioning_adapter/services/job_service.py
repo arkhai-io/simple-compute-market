@@ -716,9 +716,14 @@ class AnsibleJobService:
             vm_gpu_device=params.get("vm_gpu_device"),
             vm_gpu_devices=params.get("vm_gpu_devices"),
             vm_gpu_partition_size=params.get("vm_gpu_partition_size"),
-            frp_server_addr=params.get("frp_server_addr") or str(self._settings.frp_server_addr or ""),
-            frp_domain=params.get("frp_domain") or str(self._settings.frp_domain or ""),
-            frp_dashboard_password=params.get("frp_dashboard_password") or str(self._settings.frp_dashboard_password or ""),
+            # No settings fallback. Relay location is a property of the relay a
+            # pool references, resolved at dispatch; a service-wide default
+            # would let a job reach a relay its pool does not name, and would
+            # silently substitute one relay's window for another's.
+            relay_addr=params.get("relay_addr"),
+            relay_port=params.get("relay_port"),
+            relay_token=params.get("relay_token"),
+            vm_remote_port=params.get("vm_remote_port"),
             golden_image_name=params.get("golden_image_name"),
             gcs_bucket_url=params.get("gcs_bucket_url"),
             gcs_image_path=params.get("gcs_image_path"),

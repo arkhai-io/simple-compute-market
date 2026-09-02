@@ -134,6 +134,11 @@ class Settings:
         return Path(raw).resolve() if raw else None
 
     @property
+    def resolved_relay_definitions_path(self) -> Path | None:
+        raw = str(getattr(self._source, "relay_definitions_path", "") or "").strip()
+        return Path(raw).resolve() if raw else None
+
+    @property
     def management_vars_path(self) -> Path:
         return Path(str(self._source.management_vars_path)).resolve()
 
