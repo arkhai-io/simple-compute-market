@@ -11,6 +11,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
+import tomllib
 from dynaconf import Dynaconf
 from market_identity import TrustedIdentitySet, create_signer
 
@@ -43,6 +44,8 @@ def test_settings_toml_provides_baseline_defaults():
     ]
     assert s.pricing.publish_priceless is False
     assert list(s.pricing.settlements) == []
+    packaged = tomllib.loads(agent_config._DEFAULTS_FILE.read_text())
+    assert "storefront_domains" not in packaged
     # On by default -- the projection path has parity with the local-table
     # path it supersedes. A staged/canary rollout sets this false
     # explicitly rather than relying on a default that no longer matches.
@@ -341,6 +344,35 @@ rpc_url = "http://localhost:8545"
         "has_matching_inventory_guard",
         "escrow_shape_guard",
         "bisection",
+    ]
+
+
+def test_storefront_domain_overlay_is_the_complete_explicit_selection(
+    tmp_path, monkeypatch
+):
+    monkeypatch.delenv("STOREFRONT_STOREFRONT_DOMAINS")
+    overlay = tmp_path / "storefront.toml"
+    overlay.write_text(
+        """
+[[storefront_domains]]
+contribution = "vms"
+offering_mode = "vm"
+domain_identity = "compute.v1"
+contract_version = "1.0"
+
+[[storefront_domains]]
+contribution = "bare_metal"
+offering_mode = "bare_metal"
+domain_identity = "bare_metal.v1"
+contract_version = "1.0"
+"""
+    )
+
+    cfg = _build_isolated(tmp_path, [overlay])
+
+    assert [domain.contribution for domain in cfg.storefront_domains] == [
+        "vms",
+        "bare_metal",
     ]
 
 

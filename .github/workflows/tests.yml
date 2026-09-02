@@ -52,7 +52,7 @@ jobs:
           - { name: core-storefront-client, dir: core/storefront-client, predist: true }
           - { name: core-registry,          dir: core/registry, predist: true }
           - { name: core-registry-client,   dir: core/registry-client, predist: true }
-          - { name: kit-site,              dir: kit/site }
+          - { name: kit-site,              dir: kit/site, predist: true }
           - { name: kit-site-client,       dir: kit/site-client, predist: true }
           - { name: kit-resource-pools,     dir: kit/resource-pools }
           - { name: kit-fulfillment,        dir: kit/fulfillment, predist: true }
@@ -63,12 +63,12 @@ jobs:
           # appear in `typer --help` output; under headless pytest capture
           # in CI the Rich-rendered options panel comes back empty (passes
           # locally with a TTY). Tracked for a test-side fix.
-          - { name: vms-buyer,              dir: domains/vms/buyer, predist: true, requires_hosted: true, pytest_args: "--deselect tests/test_plugin_export.py::test_assembled_listing_is_vm_rendering_not_generic_fallback --deselect tests/test_policy_cli_injection.py::test_policy_params_become_flags_and_land_in_kwargs --deselect tests/test_policy_cli_injection.py::test_assembled_buy_and_negotiate_surface_the_default_policy_flags" }
+          - { name: vms-buyer,              dir: domains/vms/buyer, predist: true, requires_hosted: true, pytest_args: "--deselect tests/test_plugin_export.py::test_assembled_listing_is_vm_rendering_not_generic_fallback --deselect tests/test_plugin_export.py::test_assembled_listing_uses_typed_resource_query --deselect tests/test_policy_cli_injection.py::test_policy_params_become_flags_and_land_in_kwargs --deselect tests/test_policy_cli_injection.py::test_assembled_buy_and_negotiate_surface_the_default_policy_flags --deselect tests/test_settlement_config_template.py::test_removed_mechanism_and_private_key_flags_are_rejected" }
           # test_alkahest parity tests spawn node via alkahest_py (needs the
           # JS impl); cross-language parity is covered by the ts/rust jobs.
-          - { name: vms-storefront,         dir: domains/vms/storefront, predist: true, requires_hosted: true, pytest_args: "--deselect tests/unit/test_alkahest.py::test_rust --deselect tests/unit/test_alkahest.py::test_python" }
+          - { name: vms-storefront,         dir: domains/vms/storefront, predist: true, requires_hosted: true, pytest_args: "--deselect tests/integration/test_alkahest.py::test_rust --deselect tests/integration/test_alkahest.py::test_python" }
           - { name: compute-provisioning-service, dir: provisioning/compute/service, predist: true }
-          - { name: apicredits-buyer,        dir: domains/apicredits/buyer, predist: true, requires_hosted: true, pytest_args: "--deselect tests/test_plugin_export.py::test_buy_surface_has_quantity_key_and_scalar_price_flags --deselect tests/test_plugin_export.py::test_listing_surface_is_token_rendering_not_generic_fallback" }
+          - { name: apicredits-buyer,        dir: domains/apicredits/buyer, predist: true, requires_hosted: true, pytest_args: "--deselect tests/test_plugin_export.py::test_buy_surface_has_quantity_key_and_scalar_price_flags --deselect tests/test_plugin_export.py::test_listing_surface_is_token_rendering_not_generic_fallback --deselect tests/test_plugin_export.py::test_listing_surface_uses_typed_resource_query" }
           - { name: apicredits-storefront,   dir: domains/apicredits/storefront, predist: true, requires_hosted: true }
           - { name: apicredits-service,      dir: domains/apicredits/service, predist: true }
           - { name: apicredits-middleware,   dir: domains/apicredits/middleware/python }
@@ -149,7 +149,6 @@ jobs:
       - name: pytest
         working-directory: ${{ matrix.dir }}
         env:
-          PYTHONPATH: ${{ matrix.pythonpath }}
           PYTEST_ARGS: ${{ matrix.pytest_args }}
         run: uv run --find-links "$GITHUB_WORKSPACE/.dist" --with pytest --with pytest-asyncio pytest -q $PYTEST_ARGS
 
