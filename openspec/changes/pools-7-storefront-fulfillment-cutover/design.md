@@ -2313,6 +2313,16 @@ proving the tightened check — not just the original four-field comparison
 
 Validation evidence: `provisioning/compute/service/tests/unit/services/test_legacy_vm_fulfillment_backfill.py`, `provisioning/compute/service/tests/unit/test_legacy_vm_lease_migration.py`, and `provisioning/compute/service/tests/unit/services/test_fulfillment_convergence_after_legacy_backfill.py` were run directly against the assembled `kit/fulfillment`/`kit/site`/`kit/resource-pools`/`provisioning/compute/{,service}`/VM-adapter/VM-client/`arkhai_bare_metal` source tree, not evaluated by `py_compile` alone. The full reachable suite (`kit/fulfillment/tests` plus `provisioning/compute/service/tests`, unit and integration) passes: 598 tests, no regressions.
 
+### Post-deployment correction: optional teardown-job column
+
+The historical table-creation migration uses `CREATE TABLE IF NOT EXISTS`, so
+it cannot add fields to a lease table created by an older deployed service.
+Teardown-job tracking is optional input to the cutover: a missing column means
+the same thing as a NULL value, namely that no teardown provider operation is
+known. The cutover therefore adds that nullable column before enumeration. A
+full migration-replay fixture now starts from the older table shape, rather
+than exercising only the current historical schema declaration.
+
 ## Section 5 (fulfillment acceptance and provider preparation) — resolved design decisions (discuss phase, resolved 2026-07-23)
 
 Discuss phase for the new Section 5 ("Implement fulfillment acceptance and provider preparation," renumbered from 6 per the resequencing decision above) is complete. The decisions below are accepted and bind Section 5 planning.

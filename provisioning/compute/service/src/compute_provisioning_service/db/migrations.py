@@ -434,6 +434,10 @@ def _migrate_legacy_vm_leases_to_fulfillment(engine: Engine) -> None:
     if not _table_exists(engine, "vm_leases"):
         return
 
+    # Some deployed lease tables predate teardown-job tracking. Absence has
+    # the same meaning as NULL: no teardown provider operation is known.
+    _add_column_if_missing(engine, "vm_leases", "vm_remove_job_id", "VARCHAR")
+
     from market_fulfillment.db import Base as FulfillmentBase
 
     FulfillmentBase.metadata.create_all(engine)
