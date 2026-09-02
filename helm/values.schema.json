@@ -50,8 +50,8 @@
           }
         },
         "identity": {"$ref": "#/definitions/identity"},
-        "storefrontIdentity": {"$ref": "#/definitions/trustedIdentitySet"},
-        "adminIdentity": {"$ref": "#/definitions/trustedIdentitySet"},
+        "storefrontIdentity": {"$ref": "#/definitions/bootstrapIdentity"},
+        "adminIdentity": {"$ref": "#/definitions/bootstrapIdentity"},
         "sshKey": {"$ref": "#/definitions/externalSecretReference"},
         "sshDecryptionKey": {"$ref": "#/definitions/externalSecretReference"},
         "config": {
@@ -180,6 +180,20 @@
           "type": "array",
           "minItems": 1,
           "maxItems": 2,
+          "uniqueItems": true,
+          "items": {"$ref": "#/definitions/publicIdentity"}
+        }
+      }
+    },
+    "bootstrapIdentity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["principals"],
+      "properties": {
+        "principals": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 1,
           "uniqueItems": true,
           "items": {"$ref": "#/definitions/publicIdentity"}
         }
