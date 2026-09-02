@@ -20,15 +20,8 @@
         }
       }
     },
-    "registry": {
-      "type": "object",
-      "required": ["identity", "descriptor"],
-      "properties": {
-        "image": {"$ref": "#/definitions/image"},
-        "identity": {"$ref": "#/definitions/identity"},
-        "descriptor": {"$ref": "#/definitions/registryDescriptor"}
-      }
-    },
+    "registry": {"$ref": "#/definitions/registryInstance"},
+    "api-credits-registry": {"$ref": "#/definitions/registryInstance"},
     "storefront": {
       "type": "object",
       "properties": {
@@ -92,6 +85,23 @@
     }
   },
   "definitions": {
+    "registryInstance": {
+      "type": "object",
+      "required": ["identity", "descriptor"],
+      "properties": {
+        "enabled": {"type": "boolean"},
+        "image": {"$ref": "#/definitions/image"},
+        "identity": {"$ref": "#/definitions/identity"},
+        "descriptor": {"$ref": "#/definitions/registryDescriptor"},
+        "config": {
+          "type": "object",
+          "properties": {
+            "filterSpecPath": {"type": "string", "pattern": "^/\\S+\\.ya?ml$"},
+            "rootPath": {"type": "string"}
+          }
+        }
+      }
+    },
     "image": {
       "type": "object",
       "properties": {

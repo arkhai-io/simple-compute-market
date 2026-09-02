@@ -14,6 +14,11 @@ dependencies:
     version: "0.1.0"
     repository: "file://charts/registry"
     condition: registry.enabled
+  - name: registry
+    alias: api-credits-registry
+    version: "0.1.0"
+    repository: "file://charts/registry"
+    condition: api-credits-registry.enabled
   - name: storefront
     version: "0.1.0"
     repository: "file://charts/storefront"

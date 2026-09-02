@@ -13,7 +13,8 @@ FIAT_RENDERED="$(mktemp)"
 EVM_RENDERED="$(mktemp)"
 DUAL_RENDERED="$(mktemp)"
 OVERLAP_RENDERED="$(mktemp)"
-trap 'rm -f "$DEFAULT_RENDERED" "$FIAT_RENDERED" "$EVM_RENDERED" "$DUAL_RENDERED" "$OVERLAP_RENDERED"' EXIT
+TWO_REGISTRIES_RENDERED="$(mktemp)"
+trap 'rm -f "$DEFAULT_RENDERED" "$FIAT_RENDERED" "$EVM_RENDERED" "$DUAL_RENDERED" "$OVERLAP_RENDERED" "$TWO_REGISTRIES_RENDERED"' EXIT
 
 helm template "$RELEASE" "$CHART_DIR" \
     --values "$CHART_DIR/values.yaml" >"$DEFAULT_RENDERED" 2>/dev/null
@@ -57,6 +58,9 @@ helm template "$RELEASE-overlap" "$CHART_DIR" \
     --set-string 'storefront.agents[0].config.seller.provisioning.identity.principals[1].identifier=0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266' \
     --set-string 'storefront.agents[0].config.settlement.stripe.authority.principals[1].scheme=eip191' \
     --set-string 'storefront.agents[0].config.settlement.stripe.authority.principals[1].identifier=0x1c5a77d9fa7ef466951b2f01f724bca3a5820b63' >"$OVERLAP_RENDERED" 2>/dev/null
+helm template "$RELEASE-registries" "$CHART_DIR" \
+    --values "$CHART_DIR/values.yaml" \
+    --values "$CHART_DIR/fixtures/two-registries-values.yaml" >"$TWO_REGISTRIES_RENDERED" 2>/dev/null
 
 errors=0
 fail() {
@@ -132,6 +136,8 @@ expect_override_failure() {
 DEFAULT_CONFIGMAP="$(extract_section "$DEFAULT_RENDERED" 'storefront/templates/configmap\.yaml')"
 DEFAULT_DEPLOYMENT="$(extract_section "$DEFAULT_RENDERED" 'storefront/templates/deployment\.yaml')"
 DEFAULT_REGISTRY="$(extract_section "$DEFAULT_RENDERED" 'registry/templates/deployment\.yaml')"
+TWO_REGISTRIES_COMPUTE="$(extract_section "$TWO_REGISTRIES_RENDERED" 'charts/registry/templates/deployment\.yaml')"
+TWO_REGISTRIES_CREDITS="$(extract_section "$TWO_REGISTRIES_RENDERED" 'charts/api-credits-registry/templates/deployment\.yaml')"
 FIAT_CONFIGMAP="$(extract_section "$FIAT_RENDERED" 'storefront/templates/configmap\.yaml')"
 FIAT_DEPLOYMENT="$(extract_section "$FIAT_RENDERED" 'storefront/templates/deployment\.yaml')"
 FIAT_REGISTRY="$(extract_section "$FIAT_RENDERED" 'registry/templates/deployment\.yaml')"
@@ -155,6 +161,22 @@ expect_present "$DEFAULT_REGISTRY" 'name: +REGISTRY_DESCRIPTOR_BASE_URL' "regist
 expect_present "$DEFAULT_REGISTRY" 'value: +"?Local VM Compute Registry"?' "registry renders its descriptor display name"
 expect_present "$DEFAULT_REGISTRY" 'value: +"?Arkhai local development"?' "registry renders its operator identity"
 expect_absent "$DEFAULT_REGISTRY" 'REGISTRY_DESCRIPTOR_ACCESS_ACQUISITION_POINTER' "public registry omits an acquisition pointer"
+expect_present "$DEFAULT_REGISTRY" 'value: +"?/app/filter-spec\.yaml"?' "default registry selects the compute filter specification"
+expect_absent "$DEFAULT_RENDERED" 'api-credits-registry' "default render omits the API-credits registry"
+
+expect_present "$CHART_DIR/../core/registry/filter-spec.yaml" 'id: +vms\.compute' "compute filter specification declares vms.compute"
+expect_present "$CHART_DIR/../domains/apicredits/registry/filter-spec.yaml" 'id: +api_credits' "API-credits filter specification declares api_credits"
+expect_present "$TWO_REGISTRIES_COMPUTE" 'name: +'"$RELEASE"'-registries-registry' "dual render names the compute workload independently"
+expect_present "$TWO_REGISTRIES_COMPUTE" 'value: +"?/app/filter-spec\.yaml"?' "dual render selects the compute filter specification"
+expect_present "$TWO_REGISTRIES_COMPUTE" 'secretName: +"?arkhai-registry-identity"?' "dual render keeps the compute signer Secret"
+expect_present "$TWO_REGISTRIES_CREDITS" 'name: +'"$RELEASE"'-registries-api-credits-registry' "dual render names the API-credits workload independently"
+expect_present "$TWO_REGISTRIES_CREDITS" 'value: +"?/app/filter-spec-apicredits\.yaml"?' "dual render selects the API-credits filter specification"
+expect_present "$TWO_REGISTRIES_CREDITS" 'value: +"?https://credits\.example\.test"?' "dual render gives API credits its own descriptor URL"
+expect_present "$TWO_REGISTRIES_CREDITS" 'secretName: +"?credits-registry-identity"?' "dual render gives API credits its own signer Secret"
+expect_present "$TWO_REGISTRIES_RENDERED" 'name: +'"$RELEASE"'-registries-registry-data' "dual render keeps an independent compute PVC"
+expect_present "$TWO_REGISTRIES_RENDERED" 'name: +'"$RELEASE"'-registries-api-credits-registry-data' "dual render creates an independent API-credits PVC"
+expect_present "$TWO_REGISTRIES_RENDERED" 'name: +'"$RELEASE"'-registries-registry' "dual render keeps an independent compute Service"
+expect_present "$TWO_REGISTRIES_RENDERED" 'name: +'"$RELEASE"'-registries-api-credits-registry' "dual render creates an independent API-credits Service"
 
 expect_present "$FIAT_CONFIGMAP" 'scheme = \"ed25519\"' "fiat profile renders Ed25519 scheme"
 expect_present "$FIAT_CONFIGMAP" 'identifier = \"0EqyMnQrtKs6E2i9RhXk5tAiSrcaAWuvhSCjMsl3hzc\"' "fiat profile renders the configured public storefront principal"

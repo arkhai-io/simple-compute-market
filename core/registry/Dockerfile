@@ -25,6 +25,7 @@ COPY .dist/ /.dist/
 COPY core/registry/src ./src
 COPY core/registry/alembic ./alembic
 COPY core/registry/filter-spec.yaml ./
+COPY domains/apicredits/registry/filter-spec.yaml ./filter-spec-apicredits.yaml
 COPY core/registry/pyproject.toml core/registry/uv.lock ./
 # Normalize the lock's find-links registry path to the in-image wheel dir
 # (uv records it relative to the repo, which cannot normalize from /app).
@@ -47,6 +48,7 @@ COPY --from=builder --chown=appuser:appuser /app/.venv ./.venv
 COPY --from=builder --chown=appuser:appuser /app/src ./src
 COPY --from=builder --chown=appuser:appuser /app/alembic ./alembic
 COPY --from=builder --chown=appuser:appuser /app/filter-spec.yaml ./
+COPY --from=builder --chown=appuser:appuser /app/filter-spec-apicredits.yaml ./
 ENV PATH="/app/.venv/bin:$PATH"
 USER appuser
 
