@@ -66,10 +66,10 @@ spec:
         {{- if and ($alkahest.enabled | default false) (gt (len $chains) 0) }}
         {{- $chainName := first (keys $chains | sortAlpha) }}
         {{- $chain := index $chains $chainName }}
+        {{- if $chain.rpc_url }}
         - name: wait-for-rpc
           image: busybox:1.36
-          {{- /* Probe an injected chain only when Alkahest is enabled. */}}
-          {{- $rpcProbeUrl := default (include "rpc.url" $) $chain.rpc_url }}
+          {{- /* Probe only a public RPC URL rendered into the ConfigMap. */}}
           command:
             - sh
             - -c
@@ -77,10 +77,11 @@ spec:
               echo "Waiting for RPC..."
               until wget -qO- --post-data '{"jsonrpc":"2.0","method":"eth_blockNumber","params":[],"id":1}' \
                 --header 'Content-Type: application/json' \
-                {{ $rpcProbeUrl | quote }} > /dev/null 2>&1; do
+                {{ $chain.rpc_url | quote }} > /dev/null 2>&1; do
                 echo "RPC not ready, retrying in 5s..."; sleep 5
               done
               echo "RPC ready."
+        {{- end }}
         {{- end }}
         - name: wait-for-registry
           image: busybox:1.36

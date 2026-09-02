@@ -11,11 +11,12 @@ RELEASE="${RELEASE:-arkhai-test}"
 DEFAULT_RENDERED="$(mktemp)"
 FIAT_RENDERED="$(mktemp)"
 EVM_RENDERED="$(mktemp)"
+SECRET_RPC_RENDERED="$(mktemp)"
 DUAL_RENDERED="$(mktemp)"
 OVERLAP_RENDERED="$(mktemp)"
 TWO_REGISTRIES_RENDERED="$(mktemp)"
 BARE_METAL_RENDERED="$(mktemp)"
-trap 'rm -f "$DEFAULT_RENDERED" "$FIAT_RENDERED" "$EVM_RENDERED" "$DUAL_RENDERED" "$OVERLAP_RENDERED" "$TWO_REGISTRIES_RENDERED" "$BARE_METAL_RENDERED"' EXIT
+trap 'rm -f "$DEFAULT_RENDERED" "$FIAT_RENDERED" "$EVM_RENDERED" "$SECRET_RPC_RENDERED" "$DUAL_RENDERED" "$OVERLAP_RENDERED" "$TWO_REGISTRIES_RENDERED" "$BARE_METAL_RENDERED"' EXIT
 
 helm template "$RELEASE" "$CHART_DIR" \
     --values "$CHART_DIR/values.yaml" >"$DEFAULT_RENDERED" 2>/dev/null
@@ -25,6 +26,11 @@ helm template "$RELEASE-fiat" "$CHART_DIR" \
 helm template "$RELEASE-evm" "$CHART_DIR" \
     --values "$CHART_DIR/values.yaml" \
     --values "$CHART_DIR/fixtures/eip191-evm-values.yaml" >"$EVM_RENDERED" 2>/dev/null
+helm template "$RELEASE-secret-rpc" "$CHART_DIR" \
+    --values "$CHART_DIR/values.yaml" \
+    --values "$CHART_DIR/fixtures/eip191-evm-values.yaml" \
+    --set-string 'storefront.agents[0].config.wallet.address=' \
+    --set-string 'storefront.agents[0].config.chains.anvil.rpc_url=' >"$SECRET_RPC_RENDERED" 2>/dev/null
 helm template "$RELEASE-dual" "$CHART_DIR" \
     --values "$CHART_DIR/values.yaml" \
     --values "$CHART_DIR/fixtures/eip191-evm-values.yaml" \
@@ -147,6 +153,8 @@ FIAT_DEPLOYMENT="$(extract_section "$FIAT_RENDERED" 'storefront/templates/deploy
 FIAT_REGISTRY="$(extract_section "$FIAT_RENDERED" 'registry/templates/deployment\.yaml')"
 EVM_CONFIGMAP="$(extract_section "$EVM_RENDERED" 'storefront/templates/configmap\.yaml')"
 EVM_DEPLOYMENT="$(extract_section "$EVM_RENDERED" 'storefront/templates/deployment\.yaml')"
+SECRET_RPC_CONFIGMAP="$(extract_section "$SECRET_RPC_RENDERED" 'storefront/templates/configmap\.yaml')"
+SECRET_RPC_DEPLOYMENT="$(extract_section "$SECRET_RPC_RENDERED" 'storefront/templates/deployment\.yaml')"
 DUAL_CONFIGMAP="$(extract_section "$DUAL_RENDERED" 'storefront/templates/configmap\.yaml')"
 PROVISIONING_CONFIGMAP="$(extract_section "$FIAT_RENDERED" 'provisioning/templates/configmap\.yaml')"
 PROVISIONING_DEPLOYMENT="$(extract_section "$FIAT_RENDERED" 'provisioning/templates/deployment\.yaml')"
@@ -216,6 +224,7 @@ expect_absent "$FIAT_RENDERED" 'private_key|privateKey|request_credential|STRIPE
 expect_absent "$FIAT_RENDERED" 'checkout\.stripe\.com|client_secret|payer_profile_ref|instrument_ref|payment_method|mandate|bank_instructions' "fiat manifests contain no payer, instrument, action, or bank material"
 expect_present "$PROVISIONING_CONFIGMAP" 'scheme: +ed25519' "fiat provisioning renders Ed25519 public principals"
 expect_present "$PROVISIONING_CONFIGMAP" 'identifier: +xoImN8fTEOxXYnvgC6JZ0lN0n0qvZERwz_vlOjX3MkI' "fiat provisioning renders its public service identity"
+expect_absent "$PROVISIONING_CONFIGMAP" '^[[:space:]]+principal:' "provisioning renders the service identity at the runtime config path"
 expect_absent "$FIAT_RENDERED" 'admin_api_key|adminApiKey|X-Admin-Key' "fiat manifests contain no legacy administrator shared secret"
 expect_present "$PROVISIONING_CONFIGMAP" 'identifier: +0EqyMnQrtKs6E2i9RhXk5tAiSrcaAWuvhSCjMsl3hzc' "fiat provisioning pins the trusted storefront principal"
 expect_present "$PROVISIONING_CONFIGMAP" 'identifier: +5zTqbCtiV95yNV5HKqBaTEh-a0Y8Ap7TBt8vAbVja1g' "fiat provisioning pins a distinct administrator principal"
@@ -223,6 +232,8 @@ expect_present "$PROVISIONING_DEPLOYMENT" 'name: +ARKHAI_IDENTITY_CREDENTIAL' "f
 expect_present "$PROVISIONING_DEPLOYMENT" 'name: +\"?fiat-provisioning-identity\"?' "fiat provisioning signer is Secret-referenced"
 expect_present "$FIAT_CONFIGMAP" '\[Identity\.service_peers\.provisioning_default\]' "fiat storefront renders provisioning service-peer trust"
 expect_present "$FIAT_CONFIGMAP" 'site_id = \"default\"' "fiat storefront binds provisioning callbacks to the default site"
+expect_present "$FIAT_CONFIGMAP" '\[capacity\.sites\]' "fiat storefront renders the capacity site authority table"
+expect_present "$FIAT_CONFIGMAP" '\"default\" = \"http://arkhai-node-operator-provisioning:8081\"' "fiat storefront binds the default site to provisioning"
 expect_present "$FIAT_CONFIGMAP" '\[provisioning\.identity\]' "fiat storefront pins provisioning response authority"
 expect_present "$FIAT_CONFIGMAP" 'identifier = \"xoImN8fTEOxXYnvgC6JZ0lN0n0qvZERwz_vlOjX3MkI\"' "fiat storefront trusts the provisioning principal"
 expect_present "$FIAT_CONFIGMAP" '\[Identity\.administrators\.operator\]' "fiat storefront renders explicit administrator trust"
@@ -247,6 +258,10 @@ expect_present "$OVERLAP_CONFIGMAP" 'principals = \[\{ scheme = \"ed25519\"[^]]+
 expect_present "$OVERLAP_PROVISIONING_CONFIGMAP" 'identifier: +0x9965507d1a55bcc2695c58ba16fb37d819b0a4dc' "overlap profile renders second provisioning administrator principal"
 expect_present "$EVM_CONFIGMAP" 'chain_id = 31337' "EVM profile renders explicit chain ID"
 expect_present "$EVM_DEPLOYMENT" 'wait-for-rpc' "EVM profile retains chain readiness"
+expect_present "$SECRET_RPC_CONFIGMAP" '\[Chains\.anvil\]' "secret-RPC profile keeps public chain metadata"
+expect_present "$SECRET_RPC_CONFIGMAP" 'chain_id = 31337' "secret-RPC profile renders public chain ID"
+expect_absent "$SECRET_RPC_CONFIGMAP" 'rpc_url|address = ' "secret-RPC profile omits credential-backed values from the ConfigMap"
+expect_absent "$SECRET_RPC_DEPLOYMENT" 'wait-for-rpc|RPC_URL|rpc_url' "secret-RPC profile omits the credential from the pod specification"
 expect_present "$EVM_DEPLOYMENT" 'name: +\"?evm-bob-marketplace-identity\"?' "EVM marketplace signer is Secret-referenced"
 expect_present "$EVM_DEPLOYMENT" 'secretName: +\"?evm-bob-runtime\"?' "EVM wallet overlay is Secret-referenced"
 expect_absent "$EVM_RENDERED" 'private_key|privateKey|request_credential|sshPrivateKey|golden_root_ssh_password|frp_dashboard_password' "EVM manifests reference secrets without embedding keys"

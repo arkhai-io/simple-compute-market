@@ -200,6 +200,8 @@ principals = [{{ range $i, $principal := $principals }}{{ if $i }}, {{ end }}{ s
 {{- $alkahest := $settlement.alkahest | default dict -}}
 {{- $registryAuthority := $cfg.registryAuthority | default dict -}}
 {{- $domains := required "storefront config.storefrontDomains requires at least one explicit registration" $cfg.storefrontDomains -}}
+{{- $provisioningSiteID := $prov.siteId | default "default" -}}
+{{- $provisioningURL := default (include "provisioning.url" $root) $prov.serviceUrl -}}
 {{- if lt (len $domains) 1 -}}
   {{- fail "storefront config.storefrontDomains requires at least one explicit registration" -}}
 {{- end -}}
@@ -233,7 +235,6 @@ principals = [{{ range $i, $principal := $principals }}{{ if $i }}, {{ end }}{ s
   {{- if not $provisioningAuthorityTrusted -}}
     {{- fail "provisioning authority principals must include the active provisioning principal" -}}
   {{- end -}}
-  {{- $provisioningSiteID := $prov.siteId | default "default" -}}
   {{- $provisioningPeerTrusted := false -}}
   {{- range $peerID, $peer := ($identity.servicePeers | default dict) -}}
     {{- if and (eq ($peer.role | default "") "service") (eq ($peer.siteId | default "") $provisioningSiteID) -}}
@@ -313,7 +314,9 @@ ssh_public_key = {{ $wallet.ssh_public_key | quote }}
 {{- $chain := index $chains $chainName }}
 
 [Chains.{{ $chainName }}]
-rpc_url = {{ default (include "rpc.wsUrl" $root) $chain.rpc_url | quote }}
+{{- if $chain.rpc_url }}
+rpc_url = {{ $chain.rpc_url | quote }}
+{{- end }}
 chain_id = {{ required (printf "chains.%s.chain_id is required" $chainName) $chain.chain_id | int }}
 {{- end }}
 
@@ -333,7 +336,7 @@ root_path = {{ $agent.rootPath | quote }}
 {{- end }}
 
 [provisioning]
-service_url = {{ default (include "provisioning.url" $root) $prov.serviceUrl | quote }}
+service_url = {{ $provisioningURL | quote }}
 {{- if $prov.mode }}
 mode        = {{ $prov.mode | quote }}
 {{- end }}
@@ -343,6 +346,9 @@ poll_interval = {{ $prov.pollInterval | int }}
 
 [provisioning.identity]
 {{ include "storefront.principalsToml" (dict "label" "provisioning identity" "principals" $provIdentity.principals) }}
+
+[capacity.sites]
+{{ $provisioningSiteID | quote }} = {{ $provisioningURL | quote }}
 
 {{- if $pricing }}
 [pricing]
