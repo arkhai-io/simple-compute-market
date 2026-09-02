@@ -290,6 +290,10 @@ storefront:
         wallet: {}
         chains: {}
 
+# The dedicated bare-metal storefront is an optional role. The combined
+# compute storefront above already loads the bare-metal domain contribution.
+bare-metal-storefront:
+  enabled: false
 
 # ---------------------------------------------------------------------------
 # provisioning subchart
