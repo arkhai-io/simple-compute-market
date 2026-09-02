@@ -78,6 +78,7 @@
 - [x] 8.5 Updated shared and subchart Helm values/schemas/helpers/fixtures to render explicit public registrations while retaining one RWO/Recreate SQLite workload, trusted sites, and Secret-only credentials.
 - [x] 8.6 Added configuration/schema/render fixtures for one/two domains and fail-closed missing/duplicate/unsupported inputs; public config contains no signer, provider, SSH, or private-result value.
 - [x] 8.7 Implemented and permanently documented staged artifact, quiesce, explicit migration check/write/backup, frozen-binding readiness, single-process activation, and forward-recovery sequencing; no live database merge is supported.
+- [x] 8.8 Remove the packaged VM registration from `settings.toml` so Dynaconf list merging cannot append it to an operator's explicit one- or two-domain selection. Configuration loading now proves the effective list equals the complete overlay, and `deployment-state` permanently records the no-packaged-default rule.
 
 ## 9. Behavioral, integration, packaging, and strict validation
 
