@@ -11,6 +11,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
+import tomllib
 from dynaconf import Dynaconf
 from market_identity import TrustedIdentitySet, create_signer
 
@@ -43,7 +44,8 @@ def test_settings_toml_provides_baseline_defaults():
     ]
     assert s.pricing.publish_priceless is False
     assert list(s.pricing.settlements) == []
-    assert s.get("storefront_domains") is None
+    packaged = tomllib.loads(agent_config._DEFAULTS_FILE.read_text())
+    assert "storefront_domains" not in packaged
     # On by default -- the projection path has parity with the local-table
     # path it supersedes. A staged/canary rollout sets this false
     # explicitly rather than relying on a default that no longer matches.
@@ -345,7 +347,10 @@ rpc_url = "http://localhost:8545"
     ]
 
 
-def test_storefront_domain_overlay_is_the_complete_explicit_selection(tmp_path):
+def test_storefront_domain_overlay_is_the_complete_explicit_selection(
+    tmp_path, monkeypatch
+):
+    monkeypatch.delenv("STOREFRONT_STOREFRONT_DOMAINS")
     overlay = tmp_path / "storefront.toml"
     overlay.write_text(
         """
