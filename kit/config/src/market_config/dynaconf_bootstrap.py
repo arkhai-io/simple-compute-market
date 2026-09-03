@@ -24,7 +24,6 @@ class DynaconfBootstrapOptions:
     nested_separator: str = "__"
     load_dotenv: bool = True
     dotenv_path: Path | None = None
-    dotenv_files: tuple[str, ...] = ()
     filter_missing_includes: bool = False
     environments: bool = False
     merge_enabled: bool = True
@@ -93,8 +92,6 @@ def _dynaconf_kwargs(
     }
     if options.dotenv_path is not None:
         kwargs["dotenv_path"] = str(options.dotenv_path)
-    if options.dotenv_files:
-        kwargs["dotenv_files"] = list(options.dotenv_files)
     return kwargs
 
 

@@ -97,12 +97,12 @@ Compute provisioning and e2e MUST use the shared `arkhai-kit-config` bootstrap f
 #### Scenario: Compute provisioning loads optional profiles
 
 - **WHEN** compute provisioning supplies no `CONFIG_DIRECTORY` override and selects one or more `ACTIVE_PROFILES`
-- **THEN** the shared bootstrap resolves the service-local config directory, orders `config.yml` before selected profile files, filters missing include files, and constructs Dynaconf with the provisioning settings file, `PROVISIONING` environment prefix, current dotenv options, disabled Dynaconf environments, and merge enabled
+- **THEN** the shared bootstrap resolves the service-local config directory, orders `config.yml` before selected profile files, filters missing include files, and constructs Dynaconf with the provisioning settings file, `PROVISIONING` environment prefix, supported normal `.env` discovery, disabled Dynaconf environments, and merge enabled; it does not add `.env.local` loading
 
 #### Scenario: E2E loads profile and secret layers
 
 - **WHEN** e2e supplies a config-directory override and selects one or more active profiles
-- **THEN** the shared bootstrap orders `config.yml` before every requested profile path without filtering missing includes and constructs Dynaconf with project `settings.toml` followed by `.secrets.toml`, the project `.env` path, the `ARKHAI` environment prefix, disabled Dynaconf environments, and merge enabled
+- **THEN** the shared bootstrap orders `config.yml` before every requested profile path without filtering missing includes and constructs Dynaconf with project `settings.toml` followed by `.secrets.toml`, the project `.env` path, the `ARKHAI` environment prefix, disabled Dynaconf environments, and merge enabled; dotenv-sourced `ARKHAI_*` values participate at environment precedence without overwriting already-set process values
 
 ### Requirement: Installable package boundaries
 Published wheels MUST resolve internal runtime dependencies by distribution version or a supplied wheel directory and MUST NOT encode parent-directory monorepo paths in customer-facing lock metadata.

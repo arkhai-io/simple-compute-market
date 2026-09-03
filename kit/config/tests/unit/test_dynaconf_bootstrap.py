@@ -81,7 +81,6 @@ def test_dynaconf_kwargs_preserve_consumer_constructor_options(tmp_path: Path) -
         settings_files=(settings_file,),
         envvar_prefix="PROVISIONING",
         nested_separator_keyword="envvar_separator",
-        dotenv_files=(".env", ".env.local"),
         filter_missing_includes=True,
     )
 
@@ -103,7 +102,6 @@ def test_dynaconf_kwargs_preserve_consumer_constructor_options(tmp_path: Path) -
         "environments": False,
         "merge_enabled": True,
         "envvar_separator": "__",
-        "dotenv_files": [".env", ".env.local"],
     }
 
 

@@ -7,13 +7,10 @@ from types import SimpleNamespace
 
 import pytest
 from dynaconf import Dynaconf
-from market_config import load_dynaconf
 from market_identity import Ed25519Signer, Eip191Signer
 
-from compute_provisioning_service.config import (
-    Settings,
-    _BOOTSTRAP_OPTIONS,
-)
+from compute_provisioning_service import config as config_module
+from compute_provisioning_service.config import Settings
 from compute_provisioning_service.identity import (
     IDENTITY_CREDENTIAL_ENV,
     resolve_identity_context,
@@ -138,49 +135,111 @@ def test_missing_or_mismatched_identity_configuration_fails_startup(
         resolve_identity_context(settings, environ=environment)
 
 
-def test_provisioning_bootstrap_preserves_profile_and_constructor_policy(
+def test_provisioning_bootstrap_uses_resolver_environment_and_file_precedence(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    (tmp_path / "settings.toml").write_text(
-        '[bootstrap_characterization]\nlayer = "settings"\n'
+    settings_file = tmp_path / "settings.toml"
+    settings_file.write_text(
+        "[bootstrap_characterization]\n"
+        'settings_vs_base = "settings"\n'
+        'settings_only = "settings"\n'
     )
     (tmp_path / "config.yml").write_text(
-        "bootstrap_characterization:\n  layer: base\n  base_only: true\n"
+        "bootstrap_characterization:\n"
+        "  settings_vs_base: base\n"
+        "  base_vs_first: base\n"
+        "  base_only: base\n"
     )
     (tmp_path / "config-first.yml").write_text(
-        "bootstrap_characterization:\n  layer: first\n  first_only: true\n"
+        "bootstrap_characterization:\n"
+        "  base_vs_first: first\n"
+        "  first_vs_second: first\n"
+        "  first_only: first\n"
     )
-    monkeypatch.setenv(
-        "PROVISIONING_BOOTSTRAP_CHARACTERIZATION__LAYER",
-        "environment",
+    (tmp_path / "config-second.yml").write_text(
+        "bootstrap_characterization:\n"
+        "  first_vs_second: second\n"
+        "  second_only: second\n"
     )
 
     options = replace(
-        _BOOTSTRAP_OPTIONS,
-        default_config_directory=tmp_path,
-        settings_files=(tmp_path / "settings.toml",),
+        config_module._BOOTSTRAP_OPTIONS,
+        default_config_directory=tmp_path / "unused-default",
+        settings_files=(settings_file,),
         load_dotenv=False,
     )
-    result = load_dynaconf(
-        options,
-        config_directory=None,
-        active_profiles=" first, missing ",
+    monkeypatch.setattr(config_module, "_BOOTSTRAP_OPTIONS", options)
+
+    result = config_module._load_bootstrap(
+        {
+            "CONFIG_DIRECTORY": str(tmp_path),
+            "ACTIVE_PROFILES": " first, second, missing ",
+        }
     )
 
-    assert result.active_profiles == ("first", "missing")
+    assert result.config_directory == tmp_path
+    assert result.active_profiles == ("first", "second", "missing")
     assert result.includes == (
         tmp_path / "config.yml",
         tmp_path / "config-first.yml",
+        tmp_path / "config-second.yml",
     )
-    assert result.settings.BOOTSTRAP_CHARACTERIZATION.LAYER == "environment"
-    assert result.settings.BOOTSTRAP_CHARACTERIZATION.BASE_ONLY is True
-    assert result.settings.BOOTSTRAP_CHARACTERIZATION.FIRST_ONLY is True
+    values = result.settings.BOOTSTRAP_CHARACTERIZATION
+    assert values.SETTINGS_VS_BASE == "base"
+    assert values.BASE_VS_FIRST == "first"
+    assert values.FIRST_VS_SECOND == "second"
+    assert values.SETTINGS_ONLY == "settings"
+    assert values.BASE_ONLY == "base"
+    assert values.FIRST_ONLY == "first"
+    assert values.SECOND_ONLY == "second"
     assert options.envvar_prefix == "PROVISIONING"
     assert options.nested_separator_keyword == "envvar_separator"
-    assert _BOOTSTRAP_OPTIONS.load_dotenv is True
-    assert _BOOTSTRAP_OPTIONS.dotenv_files == (".env", ".env.local")
     assert options.filter_missing_includes is True
+
+
+def test_provisioning_bootstrap_dotenv_uses_environment_layer_without_dotenv_local(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    settings_file = tmp_path / "settings.toml"
+    settings_file.write_text(
+        "[bootstrap_characterization]\n"
+        'dotenv_vs_file = "settings"\n'
+        'environment_vs_dotenv = "settings"\n'
+        'local_only = "settings"\n'
+    )
+    dotenv_key = "PROVISIONING_BOOTSTRAP_CHARACTERIZATION__DOTENV_VS_FILE"
+    environment_key = (
+        "PROVISIONING_BOOTSTRAP_CHARACTERIZATION__ENVIRONMENT_VS_DOTENV"
+    )
+    local_key = "PROVISIONING_BOOTSTRAP_CHARACTERIZATION__LOCAL_ONLY"
+    (tmp_path / ".env").write_text(
+        f"{dotenv_key}=dotenv\n"
+        f"{environment_key}=dotenv\n"
+    )
+    (tmp_path / ".env.local").write_text(f"{local_key}=dotenv-local\n")
+    monkeypatch.delenv(dotenv_key, raising=False)
+    monkeypatch.delenv(local_key, raising=False)
+    monkeypatch.setenv(environment_key, "environment")
+    monkeypatch.chdir(tmp_path)
+
+    options = replace(
+        config_module._BOOTSTRAP_OPTIONS,
+        default_config_directory=tmp_path,
+        settings_files=(settings_file,),
+    )
+    monkeypatch.setattr(config_module, "_BOOTSTRAP_OPTIONS", options)
+
+    result = config_module._load_bootstrap(
+        {"CONFIG_DIRECTORY": str(tmp_path), "ACTIVE_PROFILES": ""}
+    )
+
+    values = result.settings.BOOTSTRAP_CHARACTERIZATION
+    assert values.DOTENV_VS_FILE == "dotenv"
+    assert values.ENVIRONMENT_VS_DOTENV == "environment"
+    assert values.LOCAL_ONLY == "settings"
+    assert options.load_dotenv is True
 
 
 class TestBareMetalReclaimPolicy:

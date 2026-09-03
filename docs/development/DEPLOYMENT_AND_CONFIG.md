@@ -29,14 +29,31 @@ override.
 2. `config-<profile>.yml` files, one per entry in `ACTIVE_PROFILES`,
    applied in order.
 3. `config.yml` files, default values.
-3. `settings.toml` — Empty variable names.
+4. `settings.toml` — committed defaults.
 
 Each service picks its own `envvar_prefix` (for example, the compute
 provisioning service uses `PROVISIONING`; the API-credits storefront
-uses `APICREDITS_STOREFRONT`) and constructs its `Dynaconf` instance
-with `environments=False` — this repository uses named profiles
-instead of Dynaconf's built-in environment concept, layered through
-`includes=[...]`, `merge_enabled=True`.
+uses `APICREDITS_STOREFRONT`) and uses `environments=False` — this
+repository uses named profiles instead of Dynaconf's built-in environment
+concept, layered through `includes=[...]`, `merge_enabled=True`.
+
+For compute provisioning and e2e, deterministic profile parsing, ordered
+base/profile include resolution, and Dynaconf construction live in
+`arkhai-kit-config`. Their composition roots still read `CONFIG_DIRECTORY`
+and `ACTIVE_PROFILES` from the process environment and pass those values
+explicitly to the shared loader. They also retain role-specific policy: settings
+and secret files, environment prefix, dotenv location/discovery, missing-include
+handling, wrappers, validators, and exported helpers. This boundary is scoped
+to those migrated consumers; other services may still have separate loaders
+until an explicit change migrates them.
+
+Dynaconf dotenv loading contributes prefixed variables to the environment
+layer rather than creating a file layer below profile includes. An already-set
+process variable wins over the same dotenv key; otherwise a dotenv-sourced
+prefixed variable overrides settings, secrets, base config, and profiles just
+like any other environment value. E2e points Dynaconf at its project `.env`.
+Compute provisioning uses Dynaconf's normal `.env` discovery and does not add
+`.env.local` loading.
 
 **Why environment variables are not used for application config, beyond
 the escape hatch:** environment variables are the highest-priority

@@ -2,7 +2,8 @@
 Centralised dynaconf configuration loader.
 
 Resolution order (highest priority wins):
-  1. PROVISIONING_* environment variables
+  1. PROVISIONING_* environment variables, including values loaded by Dynaconf
+     from its discovered .env file when the same process variable is not already set
   2. config-<profile>.yml files (in CONFIG_DIRECTORY, one per ACTIVE_PROFILES entry)
   3. config.yml  (in CONFIG_DIRECTORY)
   4. settings.toml  (committed defaults / schema documentation)
@@ -16,7 +17,8 @@ Profile selection:
   In Kubernetes the ConfigMap mounts config-production.yml into CONFIG_DIRECTORY
   and the Deployment sets ACTIVE_PROFILES=production.
   Locally, copy config/config-local.yml.example to config/config-local.yml
-  and set ACTIVE_PROFILES=local (or add it to .env).
+  and set ACTIVE_PROFILES=local (or add it to .env). Dynaconf uses its normal
+  .env discovery; this service does not add .env.local loading.
 
 All includes are optional — missing files are silently skipped.  This means
 a fresh checkout with no config-local.yml and no ACTIVE_PROFILES set will
@@ -30,10 +32,15 @@ loaded into Dynaconf.
 from __future__ import annotations
 
 import os
+from collections.abc import Mapping
 from pathlib import Path
 
 from dynaconf import Dynaconf
-from market_config import DynaconfBootstrapOptions, load_dynaconf
+from market_config import (
+    DynaconfBootstrapOptions,
+    DynaconfBootstrapResult,
+    load_dynaconf,
+)
 
 BARE_METAL_RECLAIM_POLICIES = frozenset({
     "remove_lease_key",
@@ -50,14 +57,21 @@ _BOOTSTRAP_OPTIONS = DynaconfBootstrapOptions(
     settings_files=(_SRC_DIR / "settings.toml",),
     envvar_prefix="PROVISIONING",
     nested_separator_keyword="envvar_separator",
-    dotenv_files=(".env", ".env.local"),
     filter_missing_includes=True,
 )
-_bootstrap = load_dynaconf(
-    _BOOTSTRAP_OPTIONS,
-    config_directory=os.environ.get("CONFIG_DIRECTORY"),
-    active_profiles=os.environ.get("ACTIVE_PROFILES", ""),
-)
+
+
+def _load_bootstrap(environ: Mapping[str, str]) -> DynaconfBootstrapResult:
+    """Build settings from resolver variables owned by this composition root."""
+
+    return load_dynaconf(
+        _BOOTSTRAP_OPTIONS,
+        config_directory=environ.get("CONFIG_DIRECTORY"),
+        active_profiles=environ.get("ACTIVE_PROFILES", ""),
+    )
+
+
+_bootstrap = _load_bootstrap(os.environ)
 _CONFIG_DIR = _bootstrap.config_directory
 _active_profiles = list(_bootstrap.active_profiles)
 _includes = [str(path) for path in _bootstrap.includes]
