@@ -56,15 +56,11 @@ claims_sweep_interval = 30
 # endpoint; gating collection on heartbeats is lifecycle policy (I.5).
 heartbeat_interval_seconds = 60
 default_vm_host               = "kvm1"
-# Installed storefront contributions are public, version-pinned assertions.
-# Deployment overlays may replace this array with VM + bare-metal or one exact
-# registration; private keys, provider settings, and authority credentials do
-# not belong here.
-[[storefront_domains]]
-contribution = "vms"
-offering_mode = "vm"
-domain_identity = "compute.v1"
-contract_version = "1.0"
+# Installed storefront contributions are public, version-pinned assertions
+# supplied by the operator. This list has no packaged default because Dynaconf
+# merges arrays across layers; a default would remain alongside the explicit
+# deployment selection. Private keys, provider settings, and authority
+# credentials do not belong here.
 # Marketplace identity (public). Signing material is supplied only through
 # the ARKHAI_IDENTITY_CREDENTIAL secret environment variable.
 [Identity.principal]

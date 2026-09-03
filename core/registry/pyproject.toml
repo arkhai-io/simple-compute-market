@@ -17,6 +17,7 @@ dependencies = [
     "pyyaml>=6.0",
     "jsonschema>=4.20",
     "jsonpath-ng>=1.6",
+    "arkhai-core==0.2.0",
     "arkhai-kit-identity==0.3.0",
 ]
 

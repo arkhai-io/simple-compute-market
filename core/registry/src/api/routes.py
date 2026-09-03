@@ -3,7 +3,7 @@
 from fastapi import APIRouter
 
 from src.api.admin_routes import router as admin_router
-from src.api.api_key_auth import require_read_access
+from src.api.descriptor_routes import router as descriptor_router
 from src.api.filter_spec import router as filter_spec_router
 from src.api.listing_routes import router as listing_router
 from src.api.publisher_routes import router as publisher_router
@@ -19,6 +19,7 @@ router = APIRouter()
 # attached at the admin router (a separate shared secret).
 router.include_router(make_health_router())
 router.include_router(admin_router)
+router.include_router(descriptor_router)
 
 router.include_router(make_system_router())
 router.include_router(filter_spec_router)

@@ -427,6 +427,12 @@ The cutover SHALL NOT submit a replacement create operation merely because an ex
 - **WHEN** the cutover enumerates a population of nonterminal legacy leases and one candidate fails validation
 - **THEN** no candidate's settlement or provisioned-resource rows are committed, and a rerun against the same unmodified population is idempotent
 
+#### Scenario: Legacy lease table predates teardown-job tracking
+
+- **GIVEN** a legacy lease table has no teardown-job column
+- **WHEN** the fulfillment cutover runs
+- **THEN** the missing optional field is normalized as no known teardown operation before candidate enumeration, and the cutover continues under the same state-mapping and validation rules
+
 ### Requirement: Fulfillment teardown is available through the provisioning client
 
 The compute provisioning client SHALL expose `begin_fulfillment_teardown(fulfillment_id)` over `POST /fulfillment/{fulfillment_id}/begin-teardown`. Repeated requests for an already-started or completed teardown SHALL return the durable aggregate acceptance without creating a second teardown operation. Unknown identifiers and conflicting aggregate states SHALL retain the endpoint's documented HTTP error classification.
@@ -458,5 +464,4 @@ The compute provisioning client SHALL expose `begin_fulfillment_teardown(fulfill
 - Legacy lease state derivation, provider-envelope preparation, and per-candidate validation: `provisioning/compute/service/tests/unit/services/test_legacy_vm_fulfillment_backfill.py`.
 - Cross-candidate enumeration, conflict rejection, idempotent rerun, and whole-migration atomicity: `provisioning/compute/service/tests/unit/test_legacy_vm_lease_migration.py`.
 - Convergence observing and progressing backfilled rows: `provisioning/compute/service/tests/unit/services/test_fulfillment_convergence_after_legacy_backfill.py`.
-
 

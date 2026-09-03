@@ -121,11 +121,18 @@ registry:
       name: arkhai-registry-identity
       key: credential
 
+  descriptor:
+    baseUrl: "http://localhost:8080"
+    displayName: "Local VM Compute Registry"
+    operatorIdentity: "Arkhai local development"
+    accessAcquisitionPointer: ""
+
   service:
     type: NodePort
     port: 8080
 
   config:
+    filterSpecPath: "/app/filter-spec.yaml"
     databaseUrl: "sqlite:///./indexer.db"
     host: "0.0.0.0"
     enableHealthChecks: true
@@ -133,6 +140,68 @@ registry:
     endpointCheckTimeout: 10
     heartbeatTtlSecs: 60
     logLevel: "info"
+
+# ---------------------------------------------------------------------------
+# Optional API-credits registry. This is a second instance of the same
+# schema-opaque registry chart, with independent identity, state, and public
+# descriptor coordinates. Keep disabled to preserve the compute-only topology.
+# ---------------------------------------------------------------------------
+api-credits-registry:
+  enabled: false
+
+  image:
+    repository: ""
+    name: arkhai
+    tag: registry
+    pullPolicy: IfNotPresent
+    digest: ""
+  identity:
+    authority: registry-api-credits
+    principal:
+      scheme: eip191
+      identifier: "0x15d34aaf54267db7d7c367839aaf71a00a2c6a65"
+    credentialSecret:
+      name: arkhai-api-credits-registry-identity
+      key: credential
+
+  descriptor:
+    baseUrl: "http://localhost:8082"
+    displayName: "Local API Credits Registry"
+    operatorIdentity: "Arkhai local development"
+    accessAcquisitionPointer: ""
+
+  service:
+    type: ClusterIP
+    port: 8080
+
+  config:
+    filterSpecPath: "/app/filter-spec-apicredits.yaml"
+    databaseUrl: "sqlite:////var/lib/arkhai-registry/indexer.db"
+    host: "0.0.0.0"
+    rootPath: ""
+    enableHealthChecks: true
+    healthCheckInterval: 60
+    endpointCheckTimeout: 10
+    heartbeatTtlSecs: 60
+    logLevel: "info"
+    requireReadApiKey: false
+    requireWriteApiKey: false
+
+  auth:
+    bootstrapKeySecret:
+      name: ""
+      key: ""
+    adminKeySecret:
+      name: ""
+      key: ""
+
+  persistence:
+    enabled: true
+    storageClass: ""
+    size: 2Gi
+    accessMode: ReadWriteOnce
+    mountPath: /var/lib/arkhai-registry
+    existingClaim: ""
 
 # ---------------------------------------------------------------------------
 # storefront subchart
@@ -221,6 +290,10 @@ storefront:
         wallet: {}
         chains: {}
 
+# The dedicated bare-metal storefront is an optional role. The combined
+# compute storefront above already loads the bare-metal domain contribution.
+bare-metal-storefront:
+  enabled: false
 
 # ---------------------------------------------------------------------------
 # provisioning subchart

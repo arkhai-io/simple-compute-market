@@ -259,8 +259,6 @@ The implemented change mapping is
 Remaining external operational evidence belongs to that change's unchecked
 verification tasks; it does not restore legacy identity precedence.
 
----
-
 ## Hosted settlement release status
 
 The common VM consumer supports exact hosted funding profiles `card.v1`,

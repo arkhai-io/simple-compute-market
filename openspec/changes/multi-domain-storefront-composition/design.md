@@ -232,6 +232,12 @@ contract_version = "1.0"
 
 Order is for deterministic status/publication iteration only, never fallback or precedence. Generated config and Helm schemas reject duplicates, unknown keys, empty registrations, and provider/secret fields. Trusted site URLs and public principals remain in their existing public connection configuration; signer credentials remain Secret-mounted.
 
+The packaged settings file contains no `storefront_domains` entry. Dynaconf
+merges arrays across the packaged and operator layers, so even a one-element
+packaged default would be appended to the explicit deployment list and make a
+valid multi-domain selection ambiguous. Helm, Compose, or another operator
+overlay supplies the complete non-empty list.
+
 The storefront wheel/image installs the shared role plus exact VM and bare-metal contribution wheels from `.dist`. The same command handles one or two registrations. Compose and Helm render one process, one SQLite volume, `Recreate`, one set of workers, and no waits for disabled contributions. Readiness reports registration and pool/site blockers without artifact payloads.
 
 ### 11. Divide proof by the lowest meaningful test level

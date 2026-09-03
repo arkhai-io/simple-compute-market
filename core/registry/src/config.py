@@ -1,5 +1,3 @@
-import os
-from typing import Literal
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -14,7 +12,7 @@ class Settings(BaseSettings):
         # shared-env/.env) so the registry boots cleanly.
         extra="ignore",
     )
-    
+
     database_url: str = "sqlite:///./indexer.db"
 
     # Server Configuration
@@ -27,16 +25,36 @@ class Settings(BaseSettings):
     root_path: str = ""
 
     registry_authority_id: str | None = Field(
-        default=None, validation_alias="REGISTRY_AUTHORITY_ID",
+        default=None,
+        validation_alias="REGISTRY_AUTHORITY_ID",
     )
     registry_authority_scheme: str | None = Field(
-        default=None, validation_alias="REGISTRY_AUTHORITY_SCHEME",
+        default=None,
+        validation_alias="REGISTRY_AUTHORITY_SCHEME",
     )
     registry_authority_identifier: str | None = Field(
-        default=None, validation_alias="REGISTRY_AUTHORITY_IDENTIFIER",
+        default=None,
+        validation_alias="REGISTRY_AUTHORITY_IDENTIFIER",
     )
     registry_authority_credential_file: str | None = Field(
-        default=None, validation_alias="REGISTRY_AUTHORITY_CREDENTIAL_FILE",
+        default=None,
+        validation_alias="REGISTRY_AUTHORITY_CREDENTIAL_FILE",
+    )
+    registry_descriptor_base_url: str | None = Field(
+        default=None,
+        validation_alias="REGISTRY_DESCRIPTOR_BASE_URL",
+    )
+    registry_descriptor_display_name: str | None = Field(
+        default=None,
+        validation_alias="REGISTRY_DESCRIPTOR_DISPLAY_NAME",
+    )
+    registry_descriptor_operator_identity: str | None = Field(
+        default=None,
+        validation_alias="REGISTRY_DESCRIPTOR_OPERATOR_IDENTITY",
+    )
+    registry_descriptor_access_acquisition_pointer: str | None = Field(
+        default=None,
+        validation_alias="REGISTRY_DESCRIPTOR_ACCESS_ACQUISITION_POINTER",
     )
 
     # Optional ZeroTier configuration (used by deployment/Makefile, not by app logic)
@@ -55,13 +73,16 @@ class Settings(BaseSettings):
     # revoke keys via ``POST /admin/api-keys`` etc., gated by the
     # ``admin_api_key`` env var (separate from the api_keys table).
     require_read_api_key: bool = Field(
-        default=False, validation_alias="REGISTRY_REQUIRE_READ_API_KEY",
+        default=False,
+        validation_alias="REGISTRY_REQUIRE_READ_API_KEY",
     )
     require_write_api_key: bool = Field(
-        default=False, validation_alias="REGISTRY_REQUIRE_WRITE_API_KEY",
+        default=False,
+        validation_alias="REGISTRY_REQUIRE_WRITE_API_KEY",
     )
     admin_api_key: str | None = Field(
-        default=None, validation_alias="REGISTRY_ADMIN_API_KEY",
+        default=None,
+        validation_alias="REGISTRY_ADMIN_API_KEY",
     )
     # Optional bootstrap secret. When set AND the api_keys table is
     # empty at startup, the registry seeds a single row with this raw
@@ -70,7 +91,8 @@ class Settings(BaseSettings):
     # the first run, the env var can stay set or be removed — the
     # row persists across restarts.
     bootstrap_api_key: str | None = Field(
-        default=None, validation_alias="REGISTRY_BOOTSTRAP_API_KEY",
+        default=None,
+        validation_alias="REGISTRY_BOOTSTRAP_API_KEY",
     )
 
     # Logging
@@ -79,11 +101,10 @@ class Settings(BaseSettings):
     @property
     def is_postgres(self) -> bool:
         return self.database_url.startswith("postgresql://")
-    
+
     @property
     def is_sqlite(self) -> bool:
         return self.database_url.startswith("sqlite://")
 
 
 settings = Settings()
-

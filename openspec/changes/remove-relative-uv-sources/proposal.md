@@ -33,6 +33,10 @@ Earlier buyer/registry/storefront projects now consume internal wheels correctly
 - Regenerate only affected locks against built wheels and preserve unrelated external index sources such as PyTorch CPU selection.
 - Add a repository check rejecting parent-directory internal `tool.uv.sources` entries in consumable projects.
 - Correct release documentation to match wheel-only internal dependency policy.
+- Repair bare-metal publication projection so the already-modeled `pool_id`
+  carries the host's authoritative pool binding. Clean-wheel CI exposed the
+  stale projection; this restores the existing physical-provisioning contract
+  rather than adding a new API field.
 - State: **Planned and first in the release-readiness campaign; scope reduced 2026-08-06 to one confirmed project plus one to re-identify.**
 
 ## Capabilities
@@ -44,11 +48,14 @@ None.
 ### Modified Capabilities
 
 - `deployment-state`: Consumable projects resolve internal dependencies from built distributions rather than editable parent paths.
+- `physical-provisioning`: A bare-metal publication view retains the inventory
+  host's exact provider-pool binding.
 
 ## Dependencies and Related Changes
 
 - Precedes `type-core-packages` packaging verification and `configure-pypi-trusted-publishing`.
-- Coordinates with newly extracted packages but does not change their runtime contracts.
+- Coordinates with newly extracted packages. The CI repair also restores one
+  existing physical-provisioning runtime contract exposed by clean-wheel testing.
 
 ## Non-Goals
 
@@ -58,4 +65,4 @@ None.
 
 ## Impact
 
-Touches the remaining project/lock pairs (see the re-inventory above — one confirmed, one to re-identify, not five), local Make/build orchestration, repository packaging checks, CI, and `docs/development/RELEASING.md`. Runtime APIs are unchanged. The repository check rejecting parent-directory internal sources remains full-scope and is what keeps the already-clean projects clean.
+Touches the remaining project/lock pairs (see the re-inventory above — one confirmed, one to re-identify, not five), local Make/build orchestration, repository packaging checks, CI, `docs/development/RELEASING.md`, and the compute service's bare-metal publication projection. No API field is added; the existing `pool_id` field now carries its authoritative value. The repository check rejecting parent-directory internal sources remains full-scope and is what keeps the already-clean projects clean.

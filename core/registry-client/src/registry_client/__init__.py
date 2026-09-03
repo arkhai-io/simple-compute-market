@@ -9,6 +9,7 @@ Both accept a ``transport=`` kwarg for in-process test injection.
 """
 
 from registry_client.client import RegistryClient, SyncRegistryClient
+from market_core import RegistryDescriptor
 from registry_client.auth import (
     RegistryClientError,
     authenticate_request,
@@ -40,6 +41,7 @@ __all__ = [
     "RegistryClient",
     "SyncRegistryClient",
     "RegistryClientError",
+    "RegistryDescriptor",
     "authenticate_request",
     "authentication_headers",
     "FilterSpecResponse",

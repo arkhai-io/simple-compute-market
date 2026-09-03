@@ -110,6 +110,33 @@ separate mechanism resources and never determine profile selection. ConfigMaps,
 arguments, image layers, run logs, evidence, output, and examples contain no
 resolved signing value.
 
+## Registry descriptor configuration
+
+The registry is a Pydantic-settings service rather than a Dynaconf role. Its
+Helm and Compose surfaces set the public descriptor fields through
+`REGISTRY_DESCRIPTOR_BASE_URL`, `REGISTRY_DESCRIPTOR_DISPLAY_NAME`, and
+`REGISTRY_DESCRIPTOR_OPERATOR_IDENTITY`. When
+`REGISTRY_REQUIRE_READ_API_KEY=true`, the deployment must also set
+`REGISTRY_DESCRIPTOR_ACCESS_ACQUISITION_POINTER`; a public registry must omit
+that pointer. Startup rejects missing fields and either posture mismatch.
+
+These values are public operator assertions. The service derives the
+descriptor's authority principal from the credential-backed active signer and
+derives its schema identity from the loaded filter specification. Helm keeps
+the descriptor values in ordinary values while mounting the signer credential
+from a Secret. Compose wrappers likewise carry public descriptor values beside
+public identity pins and keep signer credentials in role-owned file mounts.
+
+The umbrella chart enables the compute registry by default and keeps the
+`api-credits-registry` alias disabled. Enabling the alias instantiates the same
+schema-opaque registry chart a second time. The compute instance selects
+`/app/filter-spec.yaml` (`vms.compute`); the API-credits instance selects
+`/app/filter-spec-apicredits.yaml` (`api_credits`). Both specifications are
+packaged in the registry image, but each process loads exactly one. Identity,
+credential Secret, descriptor, API-key Secret references, Service, and PVC
+values are instance-local. `global.registryIdentity` continues to configure
+the compute storefront's trust pin and does not constrain the alias signer.
+
 ## Per-domain stack composition
 
 Each domain stack owns its public topology while consuming shared core/kit

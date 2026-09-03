@@ -181,3 +181,20 @@ content came from a plan epoch the author had no authority over. Path
 permissions cannot detect that. A cross-reference check can, in one pass — so
 run one before promoting documentation, and treat an unresolvable citation as a
 blocking defect rather than a stale link to fix later.
+
+## Agent skills
+
+### Issue tracker
+
+GitHub Issues handle intake and triage through the `gh` CLI. See `docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+Use the five default triage labels. See `docs/agents/triage-labels.md`.
+
+### Domain docs
+
+Multi-context: one platform context over `core/`, `kit/`, and `provisioning/`, plus a
+subcontext per market domain under `domains/`. ADRs are dated decision records and live in
+`docs/adr/`, separate from the current-state contracts in `openspec/specs/`. See
+`docs/agents/domain.md`.

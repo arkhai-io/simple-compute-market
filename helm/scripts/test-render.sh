@@ -11,9 +11,12 @@ RELEASE="${RELEASE:-arkhai-test}"
 DEFAULT_RENDERED="$(mktemp)"
 FIAT_RENDERED="$(mktemp)"
 EVM_RENDERED="$(mktemp)"
+SECRET_RPC_RENDERED="$(mktemp)"
 DUAL_RENDERED="$(mktemp)"
 OVERLAP_RENDERED="$(mktemp)"
-trap 'rm -f "$DEFAULT_RENDERED" "$FIAT_RENDERED" "$EVM_RENDERED" "$DUAL_RENDERED" "$OVERLAP_RENDERED"' EXIT
+TWO_REGISTRIES_RENDERED="$(mktemp)"
+BARE_METAL_RENDERED="$(mktemp)"
+trap 'rm -f "$DEFAULT_RENDERED" "$FIAT_RENDERED" "$EVM_RENDERED" "$SECRET_RPC_RENDERED" "$DUAL_RENDERED" "$OVERLAP_RENDERED" "$TWO_REGISTRIES_RENDERED" "$BARE_METAL_RENDERED"' EXIT
 
 helm template "$RELEASE" "$CHART_DIR" \
     --values "$CHART_DIR/values.yaml" >"$DEFAULT_RENDERED" 2>/dev/null
@@ -23,6 +26,11 @@ helm template "$RELEASE-fiat" "$CHART_DIR" \
 helm template "$RELEASE-evm" "$CHART_DIR" \
     --values "$CHART_DIR/values.yaml" \
     --values "$CHART_DIR/fixtures/eip191-evm-values.yaml" >"$EVM_RENDERED" 2>/dev/null
+helm template "$RELEASE-secret-rpc" "$CHART_DIR" \
+    --values "$CHART_DIR/values.yaml" \
+    --values "$CHART_DIR/fixtures/eip191-evm-values.yaml" \
+    --set-string 'storefront.agents[0].config.wallet.address=' \
+    --set-string 'storefront.agents[0].config.chains.anvil.rpc_url=' >"$SECRET_RPC_RENDERED" 2>/dev/null
 helm template "$RELEASE-dual" "$CHART_DIR" \
     --values "$CHART_DIR/values.yaml" \
     --values "$CHART_DIR/fixtures/eip191-evm-values.yaml" \
@@ -57,6 +65,12 @@ helm template "$RELEASE-overlap" "$CHART_DIR" \
     --set-string 'storefront.agents[0].config.seller.provisioning.identity.principals[1].identifier=0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266' \
     --set-string 'storefront.agents[0].config.settlement.stripe.authority.principals[1].scheme=eip191' \
     --set-string 'storefront.agents[0].config.settlement.stripe.authority.principals[1].identifier=0x1c5a77d9fa7ef466951b2f01f724bca3a5820b63' >"$OVERLAP_RENDERED" 2>/dev/null
+helm template "$RELEASE-registries" "$CHART_DIR" \
+    --values "$CHART_DIR/values.yaml" \
+    --values "$CHART_DIR/fixtures/two-registries-values.yaml" >"$TWO_REGISTRIES_RENDERED" 2>/dev/null
+helm template "$RELEASE-bare-metal" "$CHART_DIR" \
+    --values "$CHART_DIR/values.yaml" \
+    --set 'bare-metal-storefront.enabled=true' >"$BARE_METAL_RENDERED" 2>/dev/null
 
 errors=0
 fail() {
@@ -131,11 +145,16 @@ expect_override_failure() {
 
 DEFAULT_CONFIGMAP="$(extract_section "$DEFAULT_RENDERED" 'storefront/templates/configmap\.yaml')"
 DEFAULT_DEPLOYMENT="$(extract_section "$DEFAULT_RENDERED" 'storefront/templates/deployment\.yaml')"
+DEFAULT_REGISTRY="$(extract_section "$DEFAULT_RENDERED" 'registry/templates/deployment\.yaml')"
+TWO_REGISTRIES_COMPUTE="$(extract_section "$TWO_REGISTRIES_RENDERED" 'charts/registry/templates/deployment\.yaml')"
+TWO_REGISTRIES_CREDITS="$(extract_section "$TWO_REGISTRIES_RENDERED" 'charts/api-credits-registry/templates/deployment\.yaml')"
 FIAT_CONFIGMAP="$(extract_section "$FIAT_RENDERED" 'storefront/templates/configmap\.yaml')"
 FIAT_DEPLOYMENT="$(extract_section "$FIAT_RENDERED" 'storefront/templates/deployment\.yaml')"
 FIAT_REGISTRY="$(extract_section "$FIAT_RENDERED" 'registry/templates/deployment\.yaml')"
 EVM_CONFIGMAP="$(extract_section "$EVM_RENDERED" 'storefront/templates/configmap\.yaml')"
 EVM_DEPLOYMENT="$(extract_section "$EVM_RENDERED" 'storefront/templates/deployment\.yaml')"
+SECRET_RPC_CONFIGMAP="$(extract_section "$SECRET_RPC_RENDERED" 'storefront/templates/configmap\.yaml')"
+SECRET_RPC_DEPLOYMENT="$(extract_section "$SECRET_RPC_RENDERED" 'storefront/templates/deployment\.yaml')"
 DUAL_CONFIGMAP="$(extract_section "$DUAL_RENDERED" 'storefront/templates/configmap\.yaml')"
 PROVISIONING_CONFIGMAP="$(extract_section "$FIAT_RENDERED" 'provisioning/templates/configmap\.yaml')"
 PROVISIONING_DEPLOYMENT="$(extract_section "$FIAT_RENDERED" 'provisioning/templates/deployment\.yaml')"
@@ -150,6 +169,28 @@ expect_present "$DEFAULT_CONFIGMAP" 'priority = \[\]' "new defaults have empty s
 expect_absent "$DEFAULT_CONFIGMAP" '\[Settlement\.(stripe|alkahest)\]' "new defaults install no mechanism subsection"
 expect_absent "$DEFAULT_RENDERED" 'private_key|privateKey|request_credential' "default manifests contain no signing key fields"
 expect_absent "$DEFAULT_RENDERED" 'admin_api_key|adminApiKey|X-Admin-Key' "default manifests contain no legacy administrator shared secret"
+expect_absent "$DEFAULT_RENDERED" 'charts/bare-metal-storefront/' "default render omits the dedicated bare-metal storefront"
+expect_present "$BARE_METAL_RENDERED" 'charts/bare-metal-storefront/templates/deployment\.yaml' "dedicated bare-metal storefront can be enabled explicitly"
+expect_present "$DEFAULT_REGISTRY" 'name: +REGISTRY_DESCRIPTOR_BASE_URL' "registry renders its public descriptor URL"
+expect_present "$DEFAULT_REGISTRY" 'value: +"?Local VM Compute Registry"?' "registry renders its descriptor display name"
+expect_present "$DEFAULT_REGISTRY" 'value: +"?Arkhai local development"?' "registry renders its operator identity"
+expect_absent "$DEFAULT_REGISTRY" 'REGISTRY_DESCRIPTOR_ACCESS_ACQUISITION_POINTER' "public registry omits an acquisition pointer"
+expect_present "$DEFAULT_REGISTRY" 'value: +"?/app/filter-spec\.yaml"?' "default registry selects the compute filter specification"
+expect_absent "$DEFAULT_RENDERED" 'api-credits-registry' "default render omits the API-credits registry"
+
+expect_present "$CHART_DIR/../core/registry/filter-spec.yaml" 'id: +vms\.compute' "compute filter specification declares vms.compute"
+expect_present "$CHART_DIR/../domains/apicredits/registry/filter-spec.yaml" 'id: +api_credits' "API-credits filter specification declares api_credits"
+expect_present "$TWO_REGISTRIES_COMPUTE" 'name: +'"$RELEASE"'-registries-registry' "dual render names the compute workload independently"
+expect_present "$TWO_REGISTRIES_COMPUTE" 'value: +"?/app/filter-spec\.yaml"?' "dual render selects the compute filter specification"
+expect_present "$TWO_REGISTRIES_COMPUTE" 'secretName: +"?arkhai-registry-identity"?' "dual render keeps the compute signer Secret"
+expect_present "$TWO_REGISTRIES_CREDITS" 'name: +'"$RELEASE"'-registries-api-credits-registry' "dual render names the API-credits workload independently"
+expect_present "$TWO_REGISTRIES_CREDITS" 'value: +"?/app/filter-spec-apicredits\.yaml"?' "dual render selects the API-credits filter specification"
+expect_present "$TWO_REGISTRIES_CREDITS" 'value: +"?https://credits\.example\.test"?' "dual render gives API credits its own descriptor URL"
+expect_present "$TWO_REGISTRIES_CREDITS" 'secretName: +"?credits-registry-identity"?' "dual render gives API credits its own signer Secret"
+expect_present "$TWO_REGISTRIES_RENDERED" 'name: +'"$RELEASE"'-registries-registry-data' "dual render keeps an independent compute PVC"
+expect_present "$TWO_REGISTRIES_RENDERED" 'name: +'"$RELEASE"'-registries-api-credits-registry-data' "dual render creates an independent API-credits PVC"
+expect_present "$TWO_REGISTRIES_RENDERED" 'name: +'"$RELEASE"'-registries-registry' "dual render keeps an independent compute Service"
+expect_present "$TWO_REGISTRIES_RENDERED" 'name: +'"$RELEASE"'-registries-api-credits-registry' "dual render creates an independent API-credits Service"
 
 expect_present "$FIAT_CONFIGMAP" 'scheme = \"ed25519\"' "fiat profile renders Ed25519 scheme"
 expect_present "$FIAT_CONFIGMAP" 'identifier = \"0EqyMnQrtKs6E2i9RhXk5tAiSrcaAWuvhSCjMsl3hzc\"' "fiat profile renders the configured public storefront principal"
@@ -183,6 +224,8 @@ expect_absent "$FIAT_RENDERED" 'private_key|privateKey|request_credential|STRIPE
 expect_absent "$FIAT_RENDERED" 'checkout\.stripe\.com|client_secret|payer_profile_ref|instrument_ref|payment_method|mandate|bank_instructions' "fiat manifests contain no payer, instrument, action, or bank material"
 expect_present "$PROVISIONING_CONFIGMAP" 'scheme: +ed25519' "fiat provisioning renders Ed25519 public principals"
 expect_present "$PROVISIONING_CONFIGMAP" 'identifier: +xoImN8fTEOxXYnvgC6JZ0lN0n0qvZERwz_vlOjX3MkI' "fiat provisioning renders its public service identity"
+expect_absent "$PROVISIONING_CONFIGMAP" '^[[:space:]]+principal:' "provisioning renders the service identity at the runtime config path"
+expect_absent "$PROVISIONING_CONFIGMAP" '^[[:space:]]+principals:' "provisioning renders singular bootstrap trust identities at their runtime config paths"
 expect_absent "$FIAT_RENDERED" 'admin_api_key|adminApiKey|X-Admin-Key' "fiat manifests contain no legacy administrator shared secret"
 expect_present "$PROVISIONING_CONFIGMAP" 'identifier: +0EqyMnQrtKs6E2i9RhXk5tAiSrcaAWuvhSCjMsl3hzc' "fiat provisioning pins the trusted storefront principal"
 expect_present "$PROVISIONING_CONFIGMAP" 'identifier: +5zTqbCtiV95yNV5HKqBaTEh-a0Y8Ap7TBt8vAbVja1g' "fiat provisioning pins a distinct administrator principal"
@@ -190,6 +233,8 @@ expect_present "$PROVISIONING_DEPLOYMENT" 'name: +ARKHAI_IDENTITY_CREDENTIAL' "f
 expect_present "$PROVISIONING_DEPLOYMENT" 'name: +\"?fiat-provisioning-identity\"?' "fiat provisioning signer is Secret-referenced"
 expect_present "$FIAT_CONFIGMAP" '\[Identity\.service_peers\.provisioning_default\]' "fiat storefront renders provisioning service-peer trust"
 expect_present "$FIAT_CONFIGMAP" 'site_id = \"default\"' "fiat storefront binds provisioning callbacks to the default site"
+expect_present "$FIAT_CONFIGMAP" '\[capacity\.sites\]' "fiat storefront renders the capacity site authority table"
+expect_present "$FIAT_CONFIGMAP" '\"default\" = \"http://arkhai-node-operator-provisioning:8081\"' "fiat storefront binds the default site to provisioning"
 expect_present "$FIAT_CONFIGMAP" '\[provisioning\.identity\]' "fiat storefront pins provisioning response authority"
 expect_present "$FIAT_CONFIGMAP" 'identifier = \"xoImN8fTEOxXYnvgC6JZ0lN0n0qvZERwz_vlOjX3MkI\"' "fiat storefront trusts the provisioning principal"
 expect_present "$FIAT_CONFIGMAP" '\[Identity\.administrators\.operator\]' "fiat storefront renders explicit administrator trust"
@@ -211,9 +256,13 @@ expect_present "$DUAL_CONFIGMAP" 'priority = \["fiat\.stripe\.v1", "alkahest\.v1
 expect_present "$DUAL_CONFIGMAP" '\[Settlement\.stripe\]' "dual profile renders Stripe"
 expect_present "$DUAL_CONFIGMAP" '\[Settlement\.alkahest\]' "dual profile renders Alkahest"
 expect_present "$OVERLAP_CONFIGMAP" 'principals = \[\{ scheme = \"ed25519\"[^]]+\}, \{ scheme = \"eip191\"' "overlap profile renders ordered two-principal storefront trust"
-expect_present "$OVERLAP_PROVISIONING_CONFIGMAP" 'identifier: +0x9965507d1a55bcc2695c58ba16fb37d819b0a4dc' "overlap profile renders second provisioning administrator principal"
+expect_absent "$OVERLAP_PROVISIONING_CONFIGMAP" '^[[:space:]]+principals:' "overlap profile keeps provisioning bootstrap identities singular"
 expect_present "$EVM_CONFIGMAP" 'chain_id = 31337' "EVM profile renders explicit chain ID"
 expect_present "$EVM_DEPLOYMENT" 'wait-for-rpc' "EVM profile retains chain readiness"
+expect_present "$SECRET_RPC_CONFIGMAP" '\[Chains\.anvil\]' "secret-RPC profile keeps public chain metadata"
+expect_present "$SECRET_RPC_CONFIGMAP" 'chain_id = 31337' "secret-RPC profile renders public chain ID"
+expect_absent "$SECRET_RPC_CONFIGMAP" 'rpc_url|address = ' "secret-RPC profile omits credential-backed values from the ConfigMap"
+expect_absent "$SECRET_RPC_DEPLOYMENT" 'wait-for-rpc|RPC_URL|rpc_url' "secret-RPC profile omits the credential from the pod specification"
 expect_present "$EVM_DEPLOYMENT" 'name: +\"?evm-bob-marketplace-identity\"?' "EVM marketplace signer is Secret-referenced"
 expect_present "$EVM_DEPLOYMENT" 'secretName: +\"?evm-bob-runtime\"?' "EVM wallet overlay is Secret-referenced"
 expect_absent "$EVM_RENDERED" 'private_key|privateKey|request_credential|sshPrivateKey|golden_root_ssh_password|relay_token' "EVM manifests reference secrets without embedding keys"
@@ -253,6 +302,14 @@ expect_override_failure \
     "$CHART_DIR/fixtures/eip191-evm-values.yaml" \
     "Alkahest without wallet Secret fails schema/render" \
     --set-string 'storefront.agents[0].secret.secretName='
+expect_override_failure \
+    "$CHART_DIR/fixtures/fiat-ed25519-values.yaml" \
+    "key-gated registry without an acquisition pointer fails render" \
+    --set 'registry.config.requireReadApiKey=true'
+expect_override_failure \
+    "$CHART_DIR/fixtures/fiat-ed25519-values.yaml" \
+    "public registry with an acquisition pointer fails render" \
+    --set-string 'registry.descriptor.accessAcquisitionPointer=https://registry.example/access'
 
 expect_override_failure \
     "$CHART_DIR/fixtures/fiat-ed25519-values.yaml" \

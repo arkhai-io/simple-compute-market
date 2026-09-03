@@ -156,7 +156,6 @@ def _create_pre_migration_tables(engine):
                 lease_end_utc TIMESTAMP NOT NULL,
                 status VARCHAR NOT NULL DEFAULT 'pending',
                 create_job_id VARCHAR,
-                vm_remove_job_id VARCHAR,
                 allocation_id VARCHAR,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL,
                 updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL
@@ -197,6 +196,9 @@ def _create_pre_migration_tables(engine):
 def test_run_migrations_applies_versioned_migrations_to_old_sqlite_schema():
     engine = _sqlite_memory_engine()
     _create_pre_migration_tables(engine)
+    assert "vm_remove_job_id" not in {
+        column["name"] for column in inspect(engine).get_columns("vm_leases")
+    }
 
     run_migrations(
         engine,

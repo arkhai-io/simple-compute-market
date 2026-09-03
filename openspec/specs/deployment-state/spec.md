@@ -36,6 +36,34 @@ Production topology MUST support independently operated registries, seller store
 - **WHEN** a provider deploys its node
 - **THEN** it can point at an externally operated registry instead of requiring a private registry instance
 
+### Requirement: Schema-isolated registry composition
+
+One Helm release MAY compose multiple registry instances by aliasing the same
+registry role. Each enabled instance MUST select exactly one filter
+specification and MUST have independent authority identity, credential Secret,
+descriptor, authentication, Service, persistence, and workload coordinates.
+Disabling an optional instance MUST emit no resource for that instance and MUST
+preserve the existing compute-registry render.
+
+#### Scenario: Compute and API-credit registries are enabled
+
+- **WHEN** an operator enables compute and API-credit registry instances with
+  their respective filter specifications
+- **THEN** Helm renders two independently named registry workloads, Services,
+  PVCs, signer Secret references, descriptors, and schema paths
+
+#### Scenario: API-credit registry is disabled
+
+- **WHEN** an operator renders the default umbrella values
+- **THEN** only the existing compute registry resources are emitted and they
+  select the `vms.compute` filter specification
+
+#### Scenario: Registry identities differ
+
+- **WHEN** two registry aliases configure different authority principals
+- **THEN** each registry process uses its own identity and credential Secret
+  without requiring either to equal an umbrella-global identity
+
 ### Requirement: Explicit persistence ownership
 Each service MUST own its database and migration history; cross-service identifiers MUST cross APIs/events rather than relational foreign keys between service databases.
 
@@ -420,6 +448,10 @@ An operator MUST preview and explicitly import legacy buyer identity into one ex
 
 A compute-family storefront deployment MUST configure a non-empty public list of domain registrations, each naming one contribution, offering mode, exact domain identity, and supported contract version. The image MUST contain the shared shell and every enabled contribution as staged immutable wheels. Helm and Compose MUST run one process against one single-writer SQLite volume, render trusted sites independently, and keep signer credentials, provider settings, SSH material, and private results in Secret-only channels.
 
+Packaged storefront settings MUST NOT select a default registration. The
+operator-supplied list is the complete selection after configuration layering,
+not an extension of an image-owned domain choice.
+
 #### Scenario: Combined storefront is rendered
 
 - **WHEN** VM and bare-metal registrations are configured with complete trusted sites
@@ -429,6 +461,11 @@ A compute-family storefront deployment MUST configure a non-empty public list of
 
 - **WHEN** preflight cannot find a configured contribution or its complete exact contract
 - **THEN** activation remains quiesced and reports the missing contribution/mode/domain/version without serving new work
+
+#### Scenario: Operator config selects several domains
+
+- **WHEN** an operator overlay selects VM and bare-metal registrations
+- **THEN** the effective configuration contains exactly those two registrations, with no packaged registration appended by configuration merging
 
 ### Requirement: Legacy storefront domain migration is transactional
 

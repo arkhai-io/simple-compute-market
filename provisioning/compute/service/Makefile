@@ -60,6 +60,7 @@ clean: ## Remove generated files
 
 IMAGE_NAME ?= arkhai
 IMAGE_TAG ?= compute-provisioning
+GIT_SUFFIX := $(shell git rev-parse --short HEAD)
 APPUSER_UID ?= 1000
 APPUSER_GID ?= 1000
 
@@ -73,6 +74,7 @@ build-image: ## Build the wheel-only destination image
 		--build-arg DIST_FINGERPRINT=$(DIST_FINGERPRINT) \
 		-t $(IMAGE_NAME):$(IMAGE_TAG) \
 		-f Dockerfile ../../..
+	docker tag $(IMAGE_NAME):$(IMAGE_TAG) $(IMAGE_NAME):$(IMAGE_TAG)-$(GIT_SUFFIX)
 
 deploy: ## Run the destination image with mock provisioning
 	docker run -d --rm --name compute-provisioning \
