@@ -1,5 +1,13 @@
 """Shared configuration helpers for market packages."""
 
+from .dynaconf_bootstrap import (
+    DynaconfBootstrapOptions,
+    DynaconfBootstrapResult,
+    load_dynaconf,
+    parse_active_profiles,
+    resolve_config_directory,
+    resolve_include_paths,
+)
 from .secret_at_rest import decrypt_secret, encrypt_secret
 from .resolution import (
     ConfigFieldSource,
@@ -28,6 +36,12 @@ from .settlement_migration import (
 )
 
 __all__ = [
+    "DynaconfBootstrapOptions",
+    "DynaconfBootstrapResult",
+    "load_dynaconf",
+    "parse_active_profiles",
+    "resolve_config_directory",
+    "resolve_include_paths",
     "decrypt_secret",
     "encrypt_secret",
     "BUYER_MIGRATION_COMMAND",

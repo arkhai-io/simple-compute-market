@@ -285,6 +285,7 @@ dependencies = [
     { name = "arkhai-apicredits-buyer" },
     { name = "arkhai-core-registry-client" },
     { name = "arkhai-core-storefront-client" },
+    { name = "arkhai-kit-config" },
     { name = "arkhai-kit-alkahest" },
     { name = "arkhai-kit-policy" },
     { name = "arkhai-kit-site-client" },
@@ -323,6 +324,7 @@ requires-dist = [
     { name = "arkhai-apicredits-buyer", specifier = ">=0.2.0" },
     { name = "arkhai-core-registry-client", specifier = ">=0.11.0" },
     { name = "arkhai-core-storefront-client", specifier = ">=0.17.0" },
+    { name = "arkhai-kit-config" },
     { name = "arkhai-kit-alkahest", specifier = ">=0.1.0" },
     { name = "arkhai-kit-policy", specifier = ">=0.1.0" },
     { name = "arkhai-kit-site-client", specifier = ">=0.1.0" },
@@ -398,6 +400,8 @@ version = "0.1.2"
 source = { registry = "../.dist" }
 dependencies = [
     { name = "arkhai-kit-settlement-runtime" },
+    { name = "cryptography" },
+    { name = "dynaconf" },
     { name = "eth-account" },
     { name = "pydantic" },
     { name = "tomlkit" },

@@ -29,6 +29,12 @@ Internal Python boundaries are exercised as distributions. Prerequisite packages
 
 The architectural purpose is reproducibility: package metadata and wheel contents, not checkout-relative imports, determine what a consumer receives. Pure-Python wheel checks prevent a host-built native artifact from being mistaken for a target-platform image dependency.
 
+## Configuration bootstrap boundary
+
+For compute provisioning and e2e, profile-based Dynaconf construction is a foundation concern where the mechanics are deterministic: trimming the ordered active-profile selector, resolving the base file before profile files, optionally filtering absent include paths, and creating the settings object from explicit options. `arkhai-kit-config` owns those shared mechanics for these two consumers. It deliberately does not read `CONFIG_DIRECTORY` or `ACTIVE_PROFILES`; each composition root remains responsible for process-environment lookup and passes the resulting values into the foundation layer.
+
+Settings and secret files, dotenv behavior, environment prefixes, missing-file tolerance, typed wrappers, validators, and exported accessors remain consumer policy. Compute provisioning therefore filters absent YAML includes before construction, while e2e preserves every requested include path and adds its project `.secrets.toml`. Keeping those differences above the shared bootstrap prevents a code-deduplication change from becoming an implicit configuration migration. Compatibility-specific Dynaconf constructor options may be carried through explicitly until a separately specified cleanup can change them with characterization evidence.
+
 ## Bare-metal seller artifact
 
 The bare-metal storefront is a separately installable role distribution and dedicated image. The image installs only staged wheels, runs as an unprivileged user, persists seller state and reservation-to-site routing tables in one role-owned SQLite database, and invokes the `bare-metal-storefront` command. It includes the bare-metal domain and shared storefront, identity, policy, site-client, settlement-runtime, and compute-provisioning client boundaries; it does not include or import the VM storefront implementation.

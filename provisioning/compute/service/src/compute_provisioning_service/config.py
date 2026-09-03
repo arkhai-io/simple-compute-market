@@ -31,9 +31,9 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
-from typing import List
 
 from dynaconf import Dynaconf
+from market_config import DynaconfBootstrapOptions, load_dynaconf
 
 BARE_METAL_RECLAIM_POLICIES = frozenset({
     "remove_lease_key",
@@ -42,38 +42,26 @@ BARE_METAL_RECLAIM_POLICIES = frozenset({
 })
 DEFAULT_BARE_METAL_RECLAIM_POLICY = "remove_lease_key"
 
-# ---------------------------------------------------------------------------
-# Resolve config directory and active profiles
-# ---------------------------------------------------------------------------
+# The service owns environment lookup and optional-include policy; the shared kit
+# owns deterministic profile/include resolution and Dynaconf construction.
 _SRC_DIR = Path(__file__).parent
-_CONFIG_DIR = Path(os.environ.get("CONFIG_DIRECTORY", str(_SRC_DIR / "config")))
-
-_raw_profiles: str = os.environ.get("ACTIVE_PROFILES", "")
-_active_profiles: List[str] = [p.strip() for p in _raw_profiles.split(",") if p.strip()]
-
-# Only include files that exist on disk — missing files are silently skipped
-# rather than raising. This makes every include optional, so a fresh checkout
-# with no profile files works out of the box.
-_includes: List[str] = []
-for _candidate in [_CONFIG_DIR / "config.yml"] + [
-    _CONFIG_DIR / f"config-{p}.yml" for p in _active_profiles
-]:
-    if _candidate.exists():
-        _includes.append(str(_candidate))
-
-# ---------------------------------------------------------------------------
-# Dynaconf instance
-# ---------------------------------------------------------------------------
-_dynaconf = Dynaconf(
-    settings_file=[str(_SRC_DIR / "settings.toml")],
-    includes=_includes,
+_BOOTSTRAP_OPTIONS = DynaconfBootstrapOptions(
+    default_config_directory=_SRC_DIR / "config",
+    settings_files=(_SRC_DIR / "settings.toml",),
     envvar_prefix="PROVISIONING",
-    load_dotenv=True,
-    dotenv_files=[".env", ".env.local"],
-    envvar_separator="__",
-    environments=False,   # profiles are used instead of dynaconf environments
-    merge_enabled=True,
+    nested_separator_keyword="envvar_separator",
+    dotenv_files=(".env", ".env.local"),
+    filter_missing_includes=True,
 )
+_bootstrap = load_dynaconf(
+    _BOOTSTRAP_OPTIONS,
+    config_directory=os.environ.get("CONFIG_DIRECTORY"),
+    active_profiles=os.environ.get("ACTIVE_PROFILES", ""),
+)
+_CONFIG_DIR = _bootstrap.config_directory
+_active_profiles = list(_bootstrap.active_profiles)
+_includes = [str(path) for path in _bootstrap.includes]
+_dynaconf = _bootstrap.settings
 
 
 class Settings:

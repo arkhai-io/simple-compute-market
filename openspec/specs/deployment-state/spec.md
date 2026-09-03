@@ -62,6 +62,20 @@ Each stateful service MUST run and record its own ordered migration chain agains
 - **WHEN** a stateful service has no Kubernetes init container or standalone migration CLI to apply migrations ahead of the application process (for example, the API-credit service, which has no Helm chart)
 - **THEN** it MAY apply its own ordered migration chain in-process at application startup, before serving requests, rather than rejecting drift from its normal startup path — this is a valid instantiation of service-owned migration history for a service without the provisioning service's deployment topology, not an exception to it
 
+### Requirement: Shared Dynaconf bootstrap preserves consumer policy
+
+Compute provisioning and e2e MUST use the shared `arkhai-kit-config` bootstrap for profile parsing, base-then-profile include resolution, and Dynaconf construction. The shared bootstrap MUST receive configuration-directory and active-profile values explicitly from each composition root and MUST preserve consumer-owned settings-file, dotenv, secret-file, environment-prefix, nested-key, merge, and missing-include policy rather than imposing one common policy on those consumers.
+
+#### Scenario: Compute provisioning loads optional profiles
+
+- **WHEN** compute provisioning supplies no `CONFIG_DIRECTORY` override and selects one or more `ACTIVE_PROFILES`
+- **THEN** the shared bootstrap resolves the service-local config directory, orders `config.yml` before selected profile files, filters missing include files, and constructs Dynaconf with the provisioning settings file, `PROVISIONING` environment prefix, current dotenv options, disabled Dynaconf environments, and merge enabled
+
+#### Scenario: E2E loads profile and secret layers
+
+- **WHEN** e2e supplies a config-directory override and selects one or more active profiles
+- **THEN** the shared bootstrap orders `config.yml` before every requested profile path without filtering missing includes and constructs Dynaconf with project `settings.toml` followed by `.secrets.toml`, the project `.env` path, the `ARKHAI` environment prefix, disabled Dynaconf environments, and merge enabled
+
 ### Requirement: Installable package boundaries
 Published wheels MUST resolve internal runtime dependencies by distribution version or a supplied wheel directory and MUST NOT encode parent-directory monorepo paths in customer-facing lock metadata.
 
