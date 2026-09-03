@@ -48,7 +48,30 @@ class FulfillmentValidationResult:
 
 class FulfillmentProvider(ABC):
     @abstractmethod
-    def prepare_create(self, *, capacity_reservation_id:str, request: VersionedEnvelope[Any], resource:'SettlementResource', pool_config:dict[str,Any]) -> VersionedEnvelope[Any]: ...
+    def prepare_create(
+        self,
+        *,
+        capacity_reservation_id: str,
+        request: VersionedEnvelope[Any],
+        resource: "SettlementResource",
+        pool_config: dict[str, Any],
+        allocate: bool = True,
+    ) -> VersionedEnvelope[Any]:
+        """Resolve a request into a provider operation, rejecting what it must.
+
+        ``allocate=False`` asks for the same validation with nothing acquired.
+        Validation prepares in order to decide whether a request *would* be
+        accepted, so a provider that takes a durable or external resource here
+        lets a caller who only ever asks consume what it never receives — a
+        finite port window drained by repeated validation, for instance.
+
+        A provider that acquires nothing may ignore the flag. One that does
+        acquire MUST honour it, and MUST still perform every rejection it
+        performs when accepting: purity is about acquiring, not about
+        checking, and validation that skips a check stops answering the
+        question it exists for.
+        """
+        ...
     @abstractmethod
     async def dispatch_create(self, prepared:VersionedEnvelope[Any]) -> FulfillmentResult: ...
     @abstractmethod

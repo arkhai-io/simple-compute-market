@@ -104,7 +104,14 @@ class SqlAlchemyFulfillmentTransaction:
         )
 
     def get_pool(self, pool_id: str) -> Any | None:
-        return self._pool_service.get_pool_in_session(self.db, pool_id)
+        """Load the pool that will execute, with provider secrets resolved.
+
+        This is the dispatch path, so it takes the execution-scoped read: the
+        provider needs credentials the redacted read deliberately withholds.
+        What comes back must not be serialized into a response or a persisted
+        snapshot — see PoolConfigHandler for the two levels of disclosure.
+        """
+        return self._pool_service.get_pool_for_execution(self.db, pool_id)
 
     def persist_prepared_create(
         self,

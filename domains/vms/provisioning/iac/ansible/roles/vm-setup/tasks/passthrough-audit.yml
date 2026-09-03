@@ -1,0 +1,311 @@
+---
+# Passthrough viability audit.
+#
+# Read-only by construction: no copy, no lineinfile, no mutating command, no
+# handler notification. It is safe to run against a machine nothing else has
+# touched, which is the point — it is the first thing run against newly rented
+# hardware, before any decision is written anywhere.
+#
+# An IOMMU group is the hardware's unit of DMA isolation. The kernel assigns a
+# device to a guest only if every device in its group goes with it, so a GPU
+# grouped with a device the host needs cannot be passed through at all. That is
+# a property of the board's PCIe topology and no configuration changes it. The
+# audit's whole job is to establish, per GPU, whether that is the case.
+#
+# Classification reads sysfs rather than lspci output. sysfs exposes class,
+# vendor, device, and bound driver as discrete files, so there is no output
+# format to parse and no locale or version variation to absorb. lspci is used
+# only for a human-readable model name, and its absence degrades the report
+# rather than the verdict.
+
+- name: Audit GPU passthrough viability
+  become: yes
+  shell:
+    cmd: |
+      python3 - <<'PY'
+      import json
+      import os
+      import re
+      import subprocess
+
+      # Every sysfs read goes through this root so the classifier can be
+      # exercised against a fixture tree. Production always resolves /sys.
+      SYSFS = os.environ.get("SYSFS_ROOT", "/sys")
+
+      PCI_ADDR = re.compile(r"^[0-9a-fA-F]{4}:[0-9a-fA-F]{2}:[0-9a-fA-F]{2}\.[0-9a-fA-F]$")
+
+      # Class codes are the high 4 hex digits of the sysfs `class` attribute.
+      GPU_CLASSES = {"0300", "0302"}          # VGA controller, 3D controller
+      COMPANION_CLASSES = {"0403", "0c03", "0c80"}  # card audio, USB-C, UCSI
+      BRIDGE_CLASSES = {"0604", "0600", "0601"}
+
+      def read(path, default=None):
+          try:
+              with open(path, "r") as fh:
+                  return fh.read().strip()
+          except OSError:
+              return default
+
+      def device_path(addr):
+          return os.path.join(SYSFS, "bus/pci/devices", addr)
+
+      def device_class(addr):
+          raw = read(os.path.join(device_path(addr), "class"), "")
+          # 0x030000 -> 0300; a short or absent value classifies as unknown,
+          # which is a blocker, because failing closed is the safe direction.
+          digits = raw[2:] if raw.startswith("0x") else raw
+          return digits[:4].lower() if len(digits) >= 4 else ""
+
+      def device_ids(addr):
+          vendor = read(os.path.join(device_path(addr), "vendor"), "")
+          device = read(os.path.join(device_path(addr), "device"), "")
+          if not vendor or not device:
+              return ""
+          return "%s:%s" % (vendor.replace("0x", ""), device.replace("0x", ""))
+
+      def device_driver(addr):
+          link = os.path.join(device_path(addr), "driver")
+          if not os.path.islink(link):
+              return None
+          return os.path.basename(os.path.realpath(link))
+
+      def slot_of(addr):
+          # domain:bus:device without the function, so a card's audio and USB
+          # functions can be recognised as belonging to the same physical card.
+          return addr.rsplit(".", 1)[0]
+
+      def run(cmd):
+          try:
+              out = subprocess.run(
+                  cmd, capture_output=True, text=True, timeout=15, check=False
+              )
+              return out.stdout if out.returncode == 0 else ""
+          except (OSError, subprocess.SubprocessError):
+              return ""
+
+      def pci_parent(start):
+          # Walk up a resolved sysfs path and return the nearest PCI address.
+          path = start
+          while path and path != "/":
+              base = os.path.basename(path)
+              if PCI_ADDR.match(base):
+                  return base
+              path = os.path.dirname(path)
+          return None
+
+      def route_device():
+          out = run(["ip", "-o", "route", "get", "1.1.1.1"])
+          match = re.search(r"\bdev\s+(\S+)", out)
+          if not match:
+              return None
+          link = os.path.join(SYSFS, "class/net", match.group(1), "device")
+          if not os.path.exists(link):
+              return None
+          return pci_parent(os.path.realpath(link))
+
+      def root_device():
+          source = run(["findmnt", "-no", "SOURCE", "/"]).strip()
+          if not source:
+              return None
+          parent = run(["lsblk", "-no", "PKNAME", source]).strip().splitlines()
+          name = parent[0].strip() if parent else os.path.basename(source)
+          block = os.path.join(SYSFS, "block", name)
+          if not os.path.exists(block):
+              return None
+          return pci_parent(os.path.realpath(block))
+
+      def iommu_groups():
+          groups = {}
+          root = os.path.join(SYSFS, "kernel/iommu_groups")
+          if not os.path.isdir(root):
+              return groups
+          for group in sorted(os.listdir(root)):
+              devices = os.path.join(root, group, "devices")
+              if not os.path.isdir(devices):
+                  continue
+              groups[group] = sorted(os.listdir(devices))
+          return groups
+
+      def model_names():
+          names = {}
+          for line in run(["lspci", "-Dnn"]).splitlines():
+              parts = line.split(" ", 1)
+              if len(parts) == 2 and PCI_ADDR.match(parts[0]):
+                  names[parts[0]] = parts[1].strip()
+          return names
+
+      # --- IOMMU enablement -------------------------------------------------
+      # An empty group tree on a machine with the IOMMU disabled looks exactly
+      # like a machine with no conflicts. They mean opposite things, so the
+      # absence of groups is reported as "cannot assess" and never as a clean
+      # result that something downstream could act on.
+      iommu_dir = os.path.join(SYSFS, "class/iommu")
+      iommu_present = os.path.isdir(iommu_dir) and bool(os.listdir(iommu_dir))
+      groups = iommu_groups()
+      assessable = bool(iommu_present and groups)
+
+      report = {
+          "iommu_enabled": bool(iommu_present),
+          "assessable": assessable,
+          "route_device": None,
+          "root_device": None,
+          "gpus": [],
+          "bind_addresses": [],
+      }
+
+      if not assessable:
+          report["reason"] = (
+              "IOMMU is not enabled or exposes no groups; passthrough viability "
+              "cannot be assessed and no device will be bound"
+          )
+          print(json.dumps(report))
+          raise SystemExit(0)
+
+      critical = {}
+      route = route_device()
+      root = root_device()
+      report["route_device"] = route
+      report["root_device"] = root
+      if route:
+          critical[route] = "carries the host default route"
+      if root:
+          critical[root] = "carries the host root filesystem"
+
+      group_of = {}
+      for group, members in groups.items():
+          for addr in members:
+              group_of[addr] = group
+
+      names = model_names()
+      bind_addresses = []
+
+      for addr in sorted(group_of):
+          if device_class(addr) not in GPU_CLASSES:
+              continue
+
+          group = group_of[addr]
+          gpu_slot = slot_of(addr)
+          members = []
+          blockers = []
+          bindable_members = []
+
+          for member in groups[group]:
+              cls = device_class(member)
+              driver = device_driver(member)
+              entry = {
+                  "address": member,
+                  "ids": device_ids(member),
+                  "class": cls,
+                  "driver": driver,
+                  "model": names.get(member, ""),
+              }
+
+              if member in critical:
+                  entry["role"] = "blocker"
+                  entry["reason"] = critical[member]
+              elif cls in GPU_CLASSES and slot_of(member) == gpu_slot:
+                  entry["role"] = "gpu"
+                  bindable_members.append(member)
+              elif cls in COMPANION_CLASSES and slot_of(member) == gpu_slot:
+                  # Same physical card: audio, and on Turing and later the
+                  # USB-C controller and its UCSI companion.
+                  entry["role"] = "companion"
+                  bindable_members.append(member)
+              elif cls in BRIDGE_CLASSES:
+                  # A bridge appears in a group as its upstream port. Bridges
+                  # are not endpoints and are never assigned to a guest, so a
+                  # bridge is not a blocker and is not bound either.
+                  entry["role"] = "bridge"
+              else:
+                  entry["role"] = "blocker"
+                  entry["reason"] = "class %s is not part of this card" % (cls or "unknown")
+
+              if entry["role"] == "blocker":
+                  blockers.append(entry)
+              members.append(entry)
+
+          report["gpus"].append({
+              "address": addr,
+              "ids": device_ids(addr),
+              "model": names.get(addr, ""),
+              "group": group,
+              "members": members,
+              "bindable": not blockers,
+              "bind_addresses": bindable_members if not blockers else [],
+              "blockers": [
+                  "%s (%s) %s" % (b["address"], b["ids"] or "unknown", b.get("reason", ""))
+                  for b in blockers
+              ],
+          })
+
+          if not blockers:
+              bind_addresses.extend(bindable_members)
+
+      report["bind_addresses"] = sorted(set(bind_addresses))
+      print(json.dumps(report))
+      PY
+    executable: /bin/bash
+  register: passthrough_audit_raw
+  changed_when: false
+  tags:
+    - passthrough_audit
+    - gpu_passthrough
+    - host_setup
+
+- name: Record passthrough audit
+  set_fact:
+    passthrough_audit: "{{ passthrough_audit_raw.stdout | from_json }}"
+  tags:
+    - passthrough_audit
+    - gpu_passthrough
+    - host_setup
+
+- name: Report passthrough audit
+  debug:
+    msg: >-
+      {{
+        ['=== GPU passthrough audit ===',
+         'IOMMU enabled: ' ~ passthrough_audit.iommu_enabled,
+         'Assessable: ' ~ passthrough_audit.assessable,
+         'Default route device: ' ~ (passthrough_audit.route_device | default('unknown')),
+         'Root filesystem device: ' ~ (passthrough_audit.root_device | default('unknown')),
+         'GPUs found: ' ~ (passthrough_audit.gpus | length),
+         'Bindable GPUs: ' ~ (passthrough_audit.gpus | selectattr('bindable') | list | length)]
+        + (passthrough_audit.gpus | map('to_json') | list)
+        + ['Rescue boot entry: "' ~ rescue_boot_entry_title ~ '" — select it from the'
+           ~ ' console to boot with no device bound to vfio-pci.']
+      }}
+  tags:
+    - passthrough_audit
+    - gpu_passthrough
+    - host_setup
+
+- name: Warn when passthrough cannot be assessed
+  debug:
+    msg:
+      - "IOMMU is not enabled or exposes no groups."
+      - "{{ passthrough_audit.reason | default('') }}"
+      - "No device will be bound to vfio-pci. If this host is expected to"
+      - "provide GPU capacity, enable VT-d/AMD-Vi in firmware and re-run."
+  when: not passthrough_audit.assessable
+  tags:
+    - passthrough_audit
+    - gpu_passthrough
+    - host_setup
+
+- name: Warn about GPUs that cannot be bound
+  debug:
+    msg:
+      - "GPU {{ item.address }} ({{ item.ids }}) cannot be passed through."
+      - "It shares IOMMU group {{ item.group }} with a device this host needs:"
+      - "{{ item.blockers }}"
+      - "Passing the GPU would require passing those devices with it. The GPU"
+      - "is left on its normal driver and is not available as capacity."
+  loop: "{{ passthrough_audit.gpus | rejectattr('bindable') | list }}"
+  loop_control:
+    label: "{{ item.address }}"
+  when: passthrough_audit.assessable
+  tags:
+    - passthrough_audit
+    - gpu_passthrough
+    - host_setup

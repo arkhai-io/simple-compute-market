@@ -267,7 +267,7 @@ class TestSeedFromIni:
 class TestRegisterHostEmbeddedKey:
     def test_embedded_key_is_encrypted_in_db(self, svc, settings, tmp_path):
         from cryptography.fernet import Fernet
-        from vm_provisioning_adapter.crypto import decrypt_key
+        from market_config import decrypt_secret
 
         key = Fernet.generate_key().decode()
         settings.ssh_decryption_key = key
@@ -286,7 +286,7 @@ class TestRegisterHostEmbeddedKey:
         # The stored value must not be the plaintext
         assert host.ssh_key_value != raw_pem
         # But it must be decryptable back to the plaintext
-        assert decrypt_key(host.ssh_key_value, key) == raw_pem
+        assert decrypt_secret(host.ssh_key_value, key) == raw_pem
 
     def test_embedded_key_decryptable_via_get_decrypted_key_value(self, svc, settings):
         from cryptography.fernet import Fernet

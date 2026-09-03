@@ -29,6 +29,7 @@ from .contracts import (
     CredentialEnvelope,
     ExecutorActionEnvelope,
     FulfillmentAcceptanceResponse,
+    FulfillmentValidationResponse,
     FulfillmentRequestBody,
     FulfillmentScheduleRequest,
     FulfillmentScheduleResponse,
@@ -40,6 +41,13 @@ from .contracts import (
     LeaseTermination,
     LeaseView,
     ProvisioningJob,
+)
+from .relays import (
+    RelayCreate,
+    RelayListResponse,
+    RelayResponse,
+    RelayTokenRotate,
+    RelayUpdate,
 )
 from market_fulfillment import VersionedEnvelope
 
@@ -300,6 +308,16 @@ PROVISIONING_ROUTE_CONTRACTS = (
     ProvisioningRouteContract("DELETE", re.compile(r"/api/v1/pools/(?P<pool_id>[^/]+)"), "provisioning_pool_disable", path_resource="pool_id"),
     ProvisioningRouteContract("POST", re.compile(r"/api/v1/pools/import"), "provisioning_pools_import"),
     ProvisioningRouteContract("POST", re.compile(r"/api/v1/pools/validate"), "provisioning_pools_validate"),
+    # Relay administration. Ordered so the token, enable, and disable
+    # sub-resources match before the bare relay id pattern, which would
+    # otherwise swallow them and authenticate a rotation as an ordinary read.
+    ProvisioningRouteContract("GET", re.compile(r"/api/v1/relays/?$"), "provisioning_relays_list"),
+    ProvisioningRouteContract("POST", re.compile(r"/api/v1/relays/(?P<relay_id>[^/]+)/token"), "provisioning_relay_rotate_token", path_resource="relay_id"),
+    ProvisioningRouteContract("POST", re.compile(r"/api/v1/relays/(?P<relay_id>[^/]+)/enable"), "provisioning_relay_enable", path_resource="relay_id"),
+    ProvisioningRouteContract("POST", re.compile(r"/api/v1/relays/(?P<relay_id>[^/]+)/disable"), "provisioning_relay_disable", path_resource="relay_id"),
+    ProvisioningRouteContract("GET", re.compile(r"/api/v1/relays/(?P<relay_id>[^/]+)"), "provisioning_relay_get", path_resource="relay_id"),
+    ProvisioningRouteContract("POST", re.compile(r"/api/v1/relays/?$"), "provisioning_relay_create"),
+    ProvisioningRouteContract("PATCH", re.compile(r"/api/v1/relays/(?P<relay_id>[^/]+)"), "provisioning_relay_update", path_resource="relay_id"),
     ProvisioningRouteContract("POST", re.compile(r"/api/v1/fulfillment/validate"), "provisioning_fulfillment_validate", body_resource="capacity_reservation_id"),
     # Mock-profile control routes remain authenticated when mounted.
     ProvisioningRouteContract("POST", re.compile(r"/test/mock-rules"), "provisioning_test_rule_add"),
@@ -509,6 +527,12 @@ class ComputeProvisioningClientProtocol(Protocol):
         *,
         request_id: str | None = None,
     ) -> FulfillmentScheduleResponse: ...
+    async def validate_fulfillment(
+        self,
+        body: FulfillmentRequestBody,
+        *,
+        request_id: str | None = None,
+    ) -> FulfillmentValidationResponse: ...
     async def begin_fulfillment(
         self,
         body: FulfillmentRequestBody,
@@ -946,6 +970,27 @@ class ComputeProvisioningClient:
             )
         )
 
+    async def validate_fulfillment(
+        self,
+        body: FulfillmentRequestBody,
+        *,
+        request_id: str | None = None,
+    ) -> FulfillmentValidationResponse:
+        """Ask whether this request would be accepted, without accepting it.
+
+        Every rejection acceptance performs still runs; nothing durable is
+        written and nothing is acquired, so a caller who only ever asks cannot
+        consume resources it never receives.
+        """
+        return FulfillmentValidationResponse.model_validate(
+            await self._request(
+                "POST",
+                "/api/v1/fulfillment/validate",
+                body,
+                request_id=request_id,
+            )
+        )
+
     async def begin_fulfillment(
         self,
         body: FulfillmentRequestBody,
@@ -1000,6 +1045,80 @@ class ComputeProvisioningClient:
             await self._request(
                 "GET",
                 f"/api/v1/fulfillment/{fulfillment_id}/result",
+                request_id=request_id,
+            )
+        )
+
+    # ------------------------------------------------------------------
+    # Relay administration
+    # ------------------------------------------------------------------
+    #
+    # A relay is changed against a running service rather than by redeploying,
+    # so these are ordinary operations rather than a deployment concern. They
+    # exist on the canonical client because a test driving relays through a
+    # hand-built request body would prove only that the server accepts that
+    # body — the client and the test's private wrapper could then drift apart
+    # while the test stayed green.
+
+    async def list_relays(
+        self, *, request_id: str | None = None
+    ) -> RelayListResponse:
+        return RelayListResponse.model_validate(
+            await self._request("GET", "/api/v1/relays/", request_id=request_id)
+        )
+
+    async def create_relay(
+        self, body: RelayCreate, *, request_id: str | None = None
+    ) -> RelayResponse:
+        return RelayResponse.model_validate(
+            await self._request(
+                "POST", "/api/v1/relays/", body, request_id=request_id
+            )
+        )
+
+    async def get_relay(
+        self, relay_id: str, *, request_id: str | None = None
+    ) -> RelayResponse:
+        return RelayResponse.model_validate(
+            await self._request(
+                "GET", f"/api/v1/relays/{relay_id}", request_id=request_id
+            )
+        )
+
+    async def update_relay(
+        self, relay_id: str, body: RelayUpdate, *, request_id: str | None = None
+    ) -> RelayResponse:
+        return RelayResponse.model_validate(
+            await self._request(
+                "PATCH", f"/api/v1/relays/{relay_id}", body, request_id=request_id
+            )
+        )
+
+    async def rotate_relay_token(
+        self, relay_id: str, body: RelayTokenRotate, *, request_id: str | None = None
+    ) -> RelayResponse:
+        """Replace a relay's admission token.
+
+        Separate from ``update_relay`` deliberately — see ``RelayUpdate``.
+        """
+        return RelayResponse.model_validate(
+            await self._request(
+                "POST",
+                f"/api/v1/relays/{relay_id}/token",
+                body,
+                request_id=request_id,
+            )
+        )
+
+    async def set_relay_enabled(
+        self, relay_id: str, enabled: bool, *, request_id: str | None = None
+    ) -> RelayResponse:
+        action = "enable" if enabled else "disable"
+        return RelayResponse.model_validate(
+            await self._request(
+                "POST",
+                f"/api/v1/relays/{relay_id}/{action}",
+                {},
                 request_id=request_id,
             )
         )

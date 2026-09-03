@@ -44,12 +44,23 @@ gpu_provisioned: false      # true to attach a GPU (passthrough or partitioned)
 # Partitioned GPU (MIG or SR-IOV). Examples: "1g.5gb", "2g.10gb" (MIG), "vf0", "vf1" (SR-IOV).
 # vm_gpu_partition_size: "1g.5gb"
 
-# --- Optional: FRP (reverse proxy) ------------------------------------------
-# If set, VM gets a subdomain and port via FRP instead of direct port forwarding on the host.
-# frp_server_addr: "1.2.3.4"
-# frp_domain: "sub.example.com"
-# Required for FRP subdomain/port allocation (dashboard API). Prefer ansible-vault or -e "frp_dashboard_password=..."
-# frp_dashboard_password: "YOUR_FRP_DASHBOARD_PASSWORD"
+# --- Optional: relay tunnel --------------------------------------------------
+# If set, the VM is reached through a tunnel relay rather than by direct port
+# forwarding on the host. Buyers connect to a port on the relay:
+#   ssh -p <vm_remote_port> <user>@<frp_server_addr>
+#
+# There is no subdomain and no dashboard credential. A tcp proxy binds a
+# distinct port and SSH sends no Host header, so there is nothing for a relay
+# to route a name on.
+#
+# All four are supplied by the provisioning service, which owns the relay and
+# leases the remote port. Setting them by hand is for running the playbook
+# standalone against a relay you administer yourself; the port must be free on
+# that relay, since nothing here checks.
+# frp_server_addr: "203.0.113.9"
+# frp_server_port: 7000
+# frp_auth_token: "<relay admission token>"
+# vm_remote_port: 6142
 
 # --- Optional: lease end (vm_action: lease_end) ------------------------------
 # vm_lease_end: "2026-12-31 23:59"

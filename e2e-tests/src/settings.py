@@ -2,13 +2,13 @@
 Centralised dynaconf configuration loader.
 
 Resolution order (highest priority wins):
-  1. CLI args injected via conftest into env vars before this module loads
-  2. ARKHAI_* environment variables
+  1. CLI args injected via conftest into environment variables before this module loads
+  2. ARKHAI_* environment variables. Dynaconf loads missing values from the project
+     .env into this same environment layer; already-exported values are not overwritten
   3. config-<profile>.yml files (in CONFIG_DIRECTORY, one per ACTIVE_PROFILES entry)
   4. config.yml  (in CONFIG_DIRECTORY)
-  5. .env / .env.<ENV_FOR_DYNACONF> files
-  6. .secrets.toml
-  7. settings.toml  (project defaults / schema documentation)
+  5. .secrets.toml
+  6. settings.toml  (project defaults / schema documentation)
 
 Merge behaviour:
   Values are unioned using deep-merge behavior.
@@ -19,52 +19,47 @@ Merge behaviour:
 from __future__ import annotations
 
 import os
+from collections.abc import Mapping
 from pathlib import Path
 from typing import List
 
-from dynaconf import Dynaconf, Validator
-
-# ---------------------------------------------------------------------------
-# Resolve config directory and active profiles
-# ---------------------------------------------------------------------------
-_PROJECT_ROOT = Path(__file__).parent.parent
-_CONFIG_DIR = Path(os.environ.get("CONFIG_DIRECTORY", _PROJECT_ROOT / "config"))
-
-_raw_profiles: str = os.environ.get("ACTIVE_PROFILES", "")
-_active_profiles: List[str] = [p.strip() for p in _raw_profiles.split(",") if p.strip()]
-
-# Build the ordered list of YAML includes that dynaconf will merge in order.
-# config.yml is always loaded first; profile files layer on top.
-_includes: List[str] = [str(_CONFIG_DIR / "config.yml")]
-for _profile in _active_profiles:
-    _profile_path = _CONFIG_DIR / f"config-{_profile}.yml"
-    _includes.append(str(_profile_path))
-
-# ---------------------------------------------------------------------------
-# Dynaconf instance
-# ---------------------------------------------------------------------------
-settings = Dynaconf(
-    # Base TOML defaults live next to this file's package root
-    settings_file=[
-        str(_PROJECT_ROOT / "settings.toml"),
-        str(_PROJECT_ROOT / ".secrets.toml"),
-    ],
-    # Additional YAML layers (config dir + profiles)
-    includes=_includes,
-    # .env file support
-    load_dotenv=True,
-    dotenv_path=str(_PROJECT_ROOT / ".env"),
-    # All ARKHAI_* env vars override everything
-    envvar_prefix="ARKHAI",
-    environments=False,  # we use profiles, not dynaconf environments
-    # Allow nested keys via __ separator in env vars (ARKHAI_RPC__URL)
-    nested_sep="__",
-    # Deep-merge all loaded files by default. Without this, a profile file
-    # that defines `buyer:` replaces the entire buyer mapping from earlier
-    # files rather than updating only the keys it sets. Individual files can
-    # still opt out by setting `dynaconf_merge: false` at their top level.
-    merge_enabled=True,
+from dynaconf import Validator
+from market_config import (
+    DynaconfBootstrapOptions,
+    DynaconfBootstrapResult,
+    load_dynaconf,
 )
+
+# E2E owns environment lookup, secrets, and pass-through include policy; the
+# shared kit owns deterministic profile/include resolution and construction.
+_PROJECT_ROOT = Path(__file__).parent.parent
+_BOOTSTRAP_OPTIONS = DynaconfBootstrapOptions(
+    default_config_directory=_PROJECT_ROOT / "config",
+    settings_files=(
+        _PROJECT_ROOT / "settings.toml",
+        _PROJECT_ROOT / ".secrets.toml",
+    ),
+    envvar_prefix="ARKHAI",
+    nested_separator_keyword="nested_sep",
+    dotenv_path=_PROJECT_ROOT / ".env",
+)
+
+
+def _load_bootstrap(environ: Mapping[str, str]) -> DynaconfBootstrapResult:
+    """Build settings from resolver variables owned by this composition root."""
+
+    return load_dynaconf(
+        _BOOTSTRAP_OPTIONS,
+        config_directory=environ.get("CONFIG_DIRECTORY"),
+        active_profiles=environ.get("ACTIVE_PROFILES", ""),
+    )
+
+
+_bootstrap = _load_bootstrap(os.environ)
+_CONFIG_DIR = _bootstrap.config_directory
+_active_profiles: List[str] = list(_bootstrap.active_profiles)
+_includes: List[str] = [str(path) for path in _bootstrap.includes]
+settings = _bootstrap.settings
 
 
 def validate_all() -> None:

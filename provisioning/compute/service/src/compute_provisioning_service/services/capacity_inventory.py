@@ -92,6 +92,7 @@ def _project_host(
 
     publication_view = _bare_metal_publication_view(
         host=host,
+        pool_id=projected["pool_id"],
         resource=resource,
         capacity=capacity,
     )
@@ -105,6 +106,7 @@ def _project_host(
 def _bare_metal_publication_view(
     *,
     host: Any,
+    pool_id: str,
     resource: Mapping[str, Any],
     capacity: Mapping[str, Any],
 ) -> dict[str, Any] | None:
@@ -114,9 +116,13 @@ def _bare_metal_publication_view(
         return None
 
     available = dict(resource.get("available") or {})
+    # The view is a self-contained public projection, so it carries the pool it
+    # belongs to rather than leaving a consumer to recover it from the enclosing
+    # resource. Omitting it produced a view whose pool_id was null beside a
+    # sibling field naming the same pool.
     return project_bare_metal_resource({
         "physical_resource_id": str(resource.get("resource_id") or ""),
-        "pool_id": str(resource.get("pool_id") or host.pool_id),
+        "pool_id": pool_id,
         "physical_host_id": str(raw_config.get("physical_host_id") or ""),
         "machine_id": str(raw_config.get("machine_id") or ""),
         "available": (

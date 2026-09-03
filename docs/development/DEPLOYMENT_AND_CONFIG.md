@@ -29,14 +29,31 @@ override.
 2. `config-<profile>.yml` files, one per entry in `ACTIVE_PROFILES`,
    applied in order.
 3. `config.yml` files, default values.
-3. `settings.toml` — Empty variable names.
+4. `settings.toml` — committed defaults.
 
 Each service picks its own `envvar_prefix` (for example, the compute
 provisioning service uses `PROVISIONING`; the API-credits storefront
-uses `APICREDITS_STOREFRONT`) and constructs its `Dynaconf` instance
-with `environments=False` — this repository uses named profiles
-instead of Dynaconf's built-in environment concept, layered through
-`includes=[...]`, `merge_enabled=True`.
+uses `APICREDITS_STOREFRONT`) and uses `environments=False` — this
+repository uses named profiles instead of Dynaconf's built-in environment
+concept, layered through `includes=[...]`, `merge_enabled=True`.
+
+For compute provisioning and e2e, deterministic profile parsing, ordered
+base/profile include resolution, and Dynaconf construction live in
+`arkhai-kit-config`. Their composition roots still read `CONFIG_DIRECTORY`
+and `ACTIVE_PROFILES` from the process environment and pass those values
+explicitly to the shared loader. They also retain role-specific policy: settings
+and secret files, environment prefix, dotenv location/discovery, missing-include
+handling, wrappers, validators, and exported helpers. This boundary is scoped
+to those migrated consumers; other services may still have separate loaders
+until an explicit change migrates them.
+
+Dynaconf dotenv loading contributes prefixed variables to the environment
+layer rather than creating a file layer below profile includes. An already-set
+process variable wins over the same dotenv key; otherwise a dotenv-sourced
+prefixed variable overrides settings, secrets, base config, and profiles just
+like any other environment value. E2e points Dynaconf at its project `.env`.
+Compute provisioning uses Dynaconf's normal `.env` discovery and does not add
+`.env.local` loading.
 
 **Why environment variables are not used for application config, beyond
 the escape hatch:** environment variables are the highest-priority
@@ -203,6 +220,71 @@ Mixed/ambiguous rows, missing site or pool/resource provenance, public-mode
 conflicts, orphan relationships, and derivation collisions fail without
 mutating the source. Once accepted effects use common bindings, rollback is
 forward recovery under those bindings, not restoration of an unbound schema.
+
+## Definition documents
+
+A service may be given the path to a YAML document describing resources it
+should hold — pools, relays. The document is mounted like any other
+configuration file and is not a Secret: it carries endpoints, windows, and the
+*names* of profile keys, never a credential.
+
+Two settings name such a document. `pool_definitions_path` is read by the
+provisioning service; no chart supplies it, so declarative pools are opt-in for
+a deployment that sets it directly. `relay_definitions_path` is derived by the
+provisioning chart from the presence of `definitions.relays` rather than
+configured beside it, because two independent settings can disagree and the
+failure when they do is silent: the document renders, the volume mounts, and
+the service skips an unset path while everything looks configured.
+
+### Reconciliation follows the document, not the process
+
+Import treats its document as authoritative. It overwrites entries that differ
+from what is stored and, for pools, disables entries the document does not
+name. That authority belongs to an operator submitting a document.
+
+**A process start is not a submission.** Import is idempotent with respect to
+the document, not the database: re-running it against state something else
+changed reverts that change, because a diff against the document is exactly what
+detects it. Applied on every startup it would silently undo administrative work
+on eviction, drain, and crash recovery.
+
+So a service records the digest of the document it last reconciled and applies a
+document only when the current one differs. The digest is written in the same
+transaction as the apply — recorded separately, a digest that committed after an
+already-committed apply is indistinguishable at the next startup from one
+recorded before a crash. An explicit import request reconciles regardless of the
+digest, because the operator has asked.
+
+The practical consequences for a deployment:
+
+- Editing a mounted document and rolling the deployment applies the edit.
+- Restarting against an unchanged document changes nothing, so anything set
+  through the API survives.
+- A failed apply records no digest, so the next start retries it.
+
+### Relays and pools differ in one rule
+
+A pool absent from the document is **disabled**: the document declares what the
+deployment offers, and a pool it does not name should not be scheduled.
+
+A relay absent from the document is **retained**. Disabling one would break
+every pool referencing it and every live tunnel on it, which is a far worse
+outcome than a stale row and is not what an operator editing an unrelated entry
+is asking for. A relay established from a document and then administered through
+the API is one relay, not two.
+
+### Secrets are named, not carried
+
+A relay entry may name which key of the deployment's secrets profile holds its
+admission token. The service resolves that key **when the relay is created** and
+never re-reads it, so a token rotated through the API is not reverted by a later
+reconciliation of a document that still names the key holding the old value.
+
+An entry naming a key the profile does not carry fails the import, naming the
+key. Creating the resource with an empty credential instead would defer the
+failure to the point of use, where it appears as a remote service refusing a
+connection rather than as a configuration error where the configuration is
+wrong.
 
 ## Migrations at startup
 

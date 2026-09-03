@@ -35,6 +35,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 import pytest_asyncio
+from cryptography.fernet import Fernet
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, sessionmaker
@@ -49,6 +50,10 @@ from market_identity import (
 )
 
 from compute_provisioning_service import container as _container_module
+from compute_provisioning_service.services.relay_port_allocator import (
+    RelayPortAllocator,
+)
+from compute_provisioning_service.services.relay_service import RelayService
 from vm_provisioning_operator import ProvisioningClient
 from compute_provisioning_service.db.database import create_session_factory
 
@@ -317,13 +322,7 @@ ok: [kvm1] => {
 # ---------------------------------------------------------------------------
 
 
-@pytest.fixture
-def db_engine():
-    engine = create_engine(
-        "sqlite:///:memory:",
-        connect_args={"check_same_thread": False},
-        poolclass=StaticPool,
-    )
+def _initialize_test_database(engine):
     # resource_pools must exist before Base's ansible_pool_configs FK resolves.
     from market_resource_pools.db import Base as PoolsBase
     PoolsBase.metadata.create_all(bind=engine)
@@ -348,6 +347,16 @@ def db_engine():
             policy_tags={"deliverable_modes": ["bare_metal", "vm"]},
         ))
         session.commit()
+
+
+@pytest.fixture
+def db_engine():
+    engine = create_engine(
+        "sqlite:///:memory:",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    _initialize_test_database(engine)
     return engine
 
 
@@ -447,7 +456,11 @@ async def client_and_queue(
         frp_dashboard_password="",
         resolved_playbook_path=Path("/fake/playbook.yml"),
         resolved_inventory_path=Path("/fake/hosts"),
-        ssh_decryption_key="",
+        # A real Fernet key, not an empty string: the at-rest encryption used
+        # by embedded host keys and relay tokens fails closed without one, and
+        # a harness that supplies nothing can only exercise the unencrypted
+        # paths. Generated per run and never used on a network.
+        ssh_decryption_key=Fernet.generate_key().decode(),
         database_url="sqlite:///:memory:",
         lease_watchdog_grace_period_seconds=300,
         lease_watchdog_enabled=False,
@@ -479,7 +492,7 @@ async def client_and_queue(
     from vm_provisioning_adapter.services.ansible_pool_config_handler import AnsiblePoolConfigHandler
     resource_pool_service = ResourcePoolService(
         session_factory=session_factory,
-        handlers={"ansible": AnsiblePoolConfigHandler()},
+        handlers={"ansible": AnsiblePoolConfigHandler(settings=mock_settings)},
     )
 
     job_service = AnsibleJobService(
@@ -539,6 +552,11 @@ async def client_and_queue(
     ansible_fulfillment_provider = AnsibleFulfillmentProvider(
         job_service=job_service,
         job_queue_provider=lambda: job_queue,
+        # Without this a relay-backed pool cannot lease a port, so every
+        # relay-backed fulfillment is rejected as invalid provider
+        # configuration — which reads as a bad request rather than as a
+        # harness that cannot reach the path.
+        port_allocator=RelayPortAllocator(session_factory),
     )
     fulfillment_unit_of_work = SqlAlchemyFulfillmentUnitOfWork(
         session_factory=session_factory,
@@ -604,7 +622,7 @@ async def client_and_queue(
         job_queue_provider=lambda: job_queue,
         ansible_service=fake_ansible,
         host_service=host_service,
-        pool_config_handler=AnsiblePoolConfigHandler(),
+        pool_config_handler=AnsiblePoolConfigHandler(settings=mock_settings),
         job_service=job_service,
         vm_operations_service=VmOperationsService(
             job_service=job_service,
@@ -661,6 +679,15 @@ async def client_and_queue(
     _container_module.resolved_lease_lifecycle_service = lease_lifecycle_service
     _container_module.resolved_capacity_ledger_service = capacity_ledger_service
     _container_module.resolved_resource_pool_service = resource_pool_service
+    # Relay administration and port accounting. Real services over the test
+    # session factory: the relay table is the thing under test in the relay
+    # suite, and the allocator is what the convergence path releases through.
+    _container_module.resolved_relay_service = RelayService(
+        session_factory=session_factory, settings=mock_settings
+    )
+    _container_module.resolved_relay_port_allocator = RelayPortAllocator(
+        session_factory
+    )
     _container_module.resolved_physical_settlement_scheduler = (
         physical_settlement_scheduler
     )

@@ -32,6 +32,8 @@ The boundary this goal draws is between *physical* and *commercial* authority, n
 
 The VM storefront still holds physical state the projection has superseded. It retains `resources`, `hosts`, `compute_pool_members`, and `resource_transition_events`, a local-table listing-derivation path behind a configuration flag, and CSV import as the operator path for seeding inventory — including a startup seeding step and Helm and compose wiring, so retiring it is an operator-facing contract change rather than only a code deletion. It also retains surfaces whose callers are already gone: `compute_allocations`, an execution ledger that `kit/site`'s `CapacityReservation` supersedes and that no production code writes to; admin endpoints for reading and patching resource state whose documented caller no longer makes that call; and a physical-host identifier threaded across the storefront-to-provisioning boundary that the capacity boundary strips, so it is always absent.
 
+Buyer-access infrastructure is provisioning-owned. A tunnel relay is a resource in the provisioning service, referenced by the pools whose hosts dial it, holding its own rendezvous address, port window, and admission token. The VM storefront names no relay and holds no relay credential: which relay serves a host is a physical fact about where that host is, and a storefront selecting one per request would make a fleet-wide property depend on a commercial caller's configuration.
+
 Capacity declaration is the one place the provisioning service is not yet the fuller authority. Host inventory carries GPU count and model only, so the projection's host-derived fallback cannot express vCPU, RAM, or disk. The retiring storefront CSV has been the system's only operator-facing expression of multi-dimensional capacity — which is why capacity administration is a prerequisite of the retirement rather than a parallel improvement.
 
 | Open gap | Owned by |
@@ -39,8 +41,12 @@ Capacity declaration is the one place the provisioning service is not yet the fu
 | Sellable capacity has no authoritative multi-dimensional declaration or operator path in the provisioning service | [`capacity-resource-administration`](../../openspec/changes/capacity-resource-administration/) |
 | The VM storefront retains local physical tables, the local-table derivation path, CSV import and its deployment contract, the dead execution ledger, the orphaned physical admin surface, and dead physical-identity plumbing | [`pools-9-retire-local-physical-authority`](../../openspec/changes/pools-9-retire-local-physical-authority/) |
 | Stale physical-placement fields on the current fulfillment path, and VM shape not reaching the provisioning request | [`fix-vm-fulfillment-capacity-boundary`](../../openspec/changes/fix-vm-fulfillment-capacity-boundary/) |
+| Buyer VM tunnels coordinated through a relay's management dashboard, with relay location and credential held in storefront configuration | [`relay-vm-access-without-a-dashboard`](../../openspec/changes/relay-vm-access-without-a-dashboard/) |
+| One SSH key reaches every host in an environment, so a host prepared by another party cannot be registered with its own credential | [`contain-embedded-host-key-material`](../../openspec/changes/contain-embedded-host-key-material/) |
 
 A schema drop of the frozen columns is deliberately excluded from the retirement and belongs to a later follow-up, after a deployment cycle confirms the freeze never needed rolling back.
+
+Reaching hosts and VMs that have no inbound route is not a separate goal. The product already sells VMs on hosts it reaches by tunnel; what the relay and host-key work fixes is that the existing mechanism required a relay to expose a management surface and required the storefront to hold physical facts. Those are defects in how the mechanism was built, and they belong to this goal's consolidation rather than to a capability the product does not yet have.
 
 ---
 
@@ -264,6 +270,14 @@ materialization, status, fulfillment, collection, and reclaim remain
 storefront-mediated through the shared settlement runtime. Historical
 card-only accepted state is recovery-only, and Alkahest remains an independent
 mechanism lane.
+
+The provider-neutral client is resolved from the public package index like any
+other external dependency. Nothing stages it into the wheelhouse and no build
+or test target verifies a release to obtain it: a release describes a deployed
+authority, and verifying one is a publication-time activity. The wheel the
+index serves is byte-identical to the one the signed manifest binds, so a
+consumer that wants attestation can still have it — from the manifest, which is
+the only thing that carries it.
 
 The independently signed hosted `v0.2.1` producer release, manifest, client
 wheel, service image, API/schema/conformance artifacts, SBOM/provenance,

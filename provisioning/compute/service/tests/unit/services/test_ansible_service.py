@@ -165,24 +165,31 @@ class TestBuildVmVarsCreate:
         yaml = _build(svc, vm_gpu_devices=devices)
         assert f"vm_gpu_devices: {json.dumps(devices)}" in yaml
 
-    def test_frp_fields_present_when_set(self):
+    def test_relay_fields_present_when_set(self):
         svc = _make_service()
         yaml = _build(
             svc,
-            frp_server_addr="1.2.3.4",
-            frp_domain="example.com",
-            frp_dashboard_password="secret",
+            relay_addr="203.0.113.4",
+            relay_port=7000,
+            relay_token="admission-token",
+            vm_remote_port=6100,
         )
-        assert 'frp_server_addr: "1.2.3.4"' in yaml
-        assert 'frp_domain: "example.com"' in yaml
-        assert 'frp_dashboard_password: "secret"' in yaml
+        # The playbook's variable names are unchanged; what changed is where
+        # the values come from and that a dashboard credential is not among
+        # them. The remote port is supplied rather than chosen by the playbook.
+        assert 'frp_server_addr: "203.0.113.4"' in yaml
+        assert "frp_server_port: 7000" in yaml
+        assert 'frp_auth_token: "admission-token"' in yaml
+        assert "vm_remote_port: 6100" in yaml
+        assert "frp_domain" not in yaml
+        assert "frp_dashboard_password" not in yaml
 
-    def test_frp_fields_absent_when_none(self):
+    def test_relay_fields_absent_when_none(self):
         svc = _make_service()
         yaml = _build(svc)
         assert "frp_server_addr" not in yaml
-        assert "frp_domain" not in yaml
-        assert "frp_dashboard_password" not in yaml
+        assert "frp_auth_token" not in yaml
+        assert "vm_remote_port" not in yaml
 
     def test_bare_metal_fields_are_serialized_for_node_actions(self):
         svc = _make_service()
@@ -431,11 +438,14 @@ class TestExtractAnsibleJson:
 
 
 class _FakeHost:
-    def __init__(self, name, kvm_host, public_host=None):
+    """Stands in for a Host row; carries every attribute the renderer reads."""
+
+    def __init__(self, name, kvm_host, public_host=None, ssh_port=22):
         self.name = name
         self.kvm_host = kvm_host
         self.public_host = public_host
         self.ssh_user = "ubuntu"
+        self.ssh_port = ssh_port
         self.ssh_key_type = "path"
         self.ssh_key_value = "/home/appuser/.ssh/id_ed25519"
 

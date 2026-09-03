@@ -41,9 +41,10 @@ class ProvisioningParams:
     vm_gpu_device: Optional[str] = None
     vm_gpu_devices: Optional[list[str]] = field(default=None)
     vm_gpu_partition_size: Optional[str] = None
-    frp_server_addr: Optional[str] = None
-    frp_domain: Optional[str] = None
-    frp_dashboard_password: Optional[str] = None
+    relay_addr: Optional[str] = None
+    relay_port: Optional[int] = None
+    relay_token: Optional[str] = None
+    vm_remote_port: Optional[int] = None
     golden_image_name: Optional[str] = None
     gcs_bucket_url: Optional[str] = None
     gcs_image_path: Optional[str] = None
@@ -190,12 +191,14 @@ class ProvisioningService:
             lines.append(f"vm_gpu_devices: {json.dumps(params.vm_gpu_devices)}")
         if params.vm_gpu_partition_size:
             lines.append(f'vm_gpu_partition_size: "{params.vm_gpu_partition_size}"')
-        if params.frp_server_addr:
-            lines.append(f'frp_server_addr: "{params.frp_server_addr}"')
-        if params.frp_domain:
-            lines.append(f'frp_domain: "{params.frp_domain}"')
-        if params.frp_dashboard_password:
-            lines.append(f'frp_dashboard_password: "{params.frp_dashboard_password}"')
+        if params.relay_addr:
+            lines.append(f'frp_server_addr: "{params.relay_addr}"')
+        if params.relay_port:
+            lines.append(f"frp_server_port: {params.relay_port}")
+        if params.relay_token:
+            lines.append(f'frp_auth_token: "{params.relay_token}"')
+        if params.vm_remote_port:
+            lines.append(f"vm_remote_port: {params.vm_remote_port}")
         if params.golden_image_name:
             lines.append(f"golden_image_name: {params.golden_image_name}")
         if params.gcs_bucket_url:

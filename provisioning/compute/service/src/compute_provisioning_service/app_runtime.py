@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+from datetime import timedelta
 import os
 
 from compute_provisioning.startup import (
@@ -13,7 +14,12 @@ from compute_provisioning_service import container as _container_module
 from compute_provisioning_service.config import settings
 from compute_provisioning_service.container import container
 from compute_provisioning_service.db.migrations import check_schema_version
+from market_fulfillment.db import SettlementRecord, SettlementRecordState
 from compute_provisioning_service.services.async_job_queue import AsyncJobQueue
+from compute_provisioning_service.services.definition_documents import (
+    DefinitionDocumentImporter,
+)
+from compute_provisioning_service.services.relay_service import RelayService
 
 logger = logging.getLogger(__name__)
 
@@ -72,6 +78,11 @@ def resolve_request_path_services() -> None:
     _container_module.resolved_executor_lease_service = container.executor_lease_service()
     _container_module.resolved_compute_contract_service = container.compute_contract_service()
     _container_module.resolved_resource_pool_service = container.resource_pool_service()
+    _container_module.resolved_relay_port_allocator = container.relay_port_allocator()
+    _container_module.resolved_relay_service = RelayService(
+        session_factory=_container_module.resolved_session_factory,
+        settings=settings,
+    )
     _container_module.resolved_physical_settlement_scheduler = (
         container.physical_settlement_scheduler()
     )
@@ -137,35 +148,20 @@ def seed_inventory_if_empty() -> None:
         )
 
 
+def import_relay_definitions_if_configured() -> None:
+    _definition_importer().import_relay_definitions()
+
+
 def import_pool_definitions_if_configured() -> None:
-    # ------------------------------------------------------------------
-    # Pool-definitions import — runs at every startup when configured.
-    #
-    # Unlike the old "empty table" seeding idea, this always imports when
-    # pool_definitions_path is set: import is idempotent/diff-based (see
-    # ResourcePoolService.import_pools), so re-running it on every restart
-    # is the correct behavior — the same idiom as the `inventory_ini`
-    # setting ("parsed and upserted... at every service startup").
-    #
-    # The system-created "default" pool always exists by this point (the
-    # resource_pools migration seeds it), so there is no "create default if
-    # empty" fallback here — that concern moved into the migration.
-    # ------------------------------------------------------------------
-    path = getattr(settings, "resolved_pool_definitions_path", None)
-    if path is None:
-        logger.info("Pool-definitions import: no pool_definitions_path configured — skipped")
-        return
+    _definition_importer().import_pool_definitions()
 
-    if not path.exists():
-        raise FileNotFoundError(f"Configured pool-definitions file does not exist: {path}")
 
-    pool_service = _container_module.resolved_resource_pool_service
-    yaml_text = path.read_text(encoding="utf-8")
-    diff = pool_service.import_pools(yaml_text, validate_only=False)
-    logger.info(
-        "Pool-definitions import from %s: created=%d updated=%d disabled=%d unchanged=%d",
-        path,
-        len(diff.created), len(diff.updated), len(diff.disabled), len(diff.unchanged),
+def _definition_importer() -> DefinitionDocumentImporter:
+    return DefinitionDocumentImporter(
+        session_factory=_container_module.resolved_session_factory,
+        settings=settings,
+        pool_service=_container_module.resolved_resource_pool_service,
+        relay_service=_container_module.resolved_relay_service,
     )
 
 
@@ -187,12 +183,39 @@ def startup_steps() -> tuple[ComputeProvisioningStartupStep, ...]:
             "resolve-request-path-services",
             resolve_request_path_services,
         ),
+        # Relays before pools: a pool's provider configuration references a
+        # relay, so a first boot from definition documents needs the relay to
+        # exist before the pool that points at it.
+        ComputeProvisioningStartupStep(
+            "import-relay-definitions", import_relay_definitions_if_configured
+        ),
         ComputeProvisioningStartupStep(
             "import-pool-definitions", import_pool_definitions_if_configured
         ),
         ComputeProvisioningStartupStep("seed-inventory", seed_inventory_if_empty),
         ComputeProvisioningStartupStep("create-job-queue", create_job_queue),
     )
+
+
+def _fulfillment_is_terminal(owner_kind: str, owner_id: str) -> bool:
+    """Whether a lease's owner has finished, for reconciliation to act on.
+
+    Supplied to the allocator rather than queried inside it: what makes a
+    fulfillment terminal belongs to fulfillment, not to port accounting, and
+    an allocator that knew would have to be changed whenever that did.
+    """
+    if owner_kind != "fulfillment":
+        return False
+    terminal = {
+        SettlementRecordState.failed.value,
+        SettlementRecordState.torn_down.value,
+        SettlementRecordState.abandoned.value,
+    }
+    session_factory = _container_module.resolved_session_factory
+    with session_factory() as db:
+        record = db.get(SettlementRecord, owner_id)
+        # A lease whose owner has vanished is orphaned by definition.
+        return record is None or record.state in terminal
 
 
 def background_tasks() -> tuple[ComputeProvisioningBackgroundTask, ...]:
@@ -268,6 +291,37 @@ def background_tasks() -> tuple[ComputeProvisioningBackgroundTask, ...]:
         logger.info(
             "Capacity reservation watchdog disabled "
             "(capacity_reservation_watchdog_enabled=false)"
+        )
+
+    # Relay port reconciliation — the backstop beneath release, which is
+    # attached to the settlement record's terminal transition. This recovers
+    # leases whose owner reached terminal by a path that bypassed it.
+    relay_reconcile_enabled = bool(
+        getattr(settings, "relay_port_reconciliation_enabled", True)
+    )
+    if relay_reconcile_enabled:
+        relay_poll = float(
+            getattr(settings, "relay_port_reconciliation_poll_interval_seconds", 300)
+        )
+        relay_grace = float(
+            getattr(settings, "relay_port_reconciliation_grace_seconds", 3600)
+        )
+        tasks.append(
+            ComputeProvisioningBackgroundTask(
+                "relay-port-reconciliation",
+                lambda: _container_module.resolved_relay_port_allocator.run_reconciliation(
+                    is_owner_terminal=_fulfillment_is_terminal,
+                    poll_interval_seconds=relay_poll,
+                    grace=timedelta(seconds=relay_grace),
+                ),
+                "Relay port reconciliation started (interval=%ds grace=%ds)",
+                (int(relay_poll), int(relay_grace)),
+            )
+        )
+    else:
+        logger.info(
+            "Relay port reconciliation disabled "
+            "(relay_port_reconciliation_enabled=false)"
         )
 
     # Fulfillment convergence watchdog retries durable dispatch work and

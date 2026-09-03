@@ -782,6 +782,12 @@ def test_independent_sessions_serialize_fulfillment_acceptance_deterministically
         def read_config(self, db, pool_id):
             return {}
 
+        def read_config_for_execution(self, db, pool_id):
+            # Dispatch reads through this one; a handler that omits it fails
+            # loudly here rather than returning configuration with its secrets
+            # silently missing.
+            return self.read_config(db, pool_id)
+
         def replace_config(self, db, pool_id, config):
             pass
 

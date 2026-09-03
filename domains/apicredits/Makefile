@@ -1,10 +1,17 @@
 DIST_DIR ?= ../../.dist
 
-.PHONY: test test-domain test-service test-storefront test-buyer test-sample-app test-middleware check-middleware-toolchains
+.PHONY: reinit test test-domain test-service test-storefront test-buyer test-sample-app test-middleware check-middleware-toolchains
 
 test: test-domain test-service test-storefront test-buyer test-sample-app test-middleware
 
-test-domain: ## Domain-package-level tests (distribution/wheel-import + credits client contract)
+reinit: ## Force-reinstall internal wheels without bumping versions. Run make dist from the monorepo root first.
+	uv sync --dev --find-links $(DIST_DIR) \
+		--upgrade-package arkhai-core --reinstall-package arkhai-core \
+		--upgrade-package arkhai-kit-policy --reinstall-package arkhai-kit-policy \
+		--upgrade-package arkhai-kit-alkahest --reinstall-package arkhai-kit-alkahest \
+		--upgrade-package arkhai-kit-identity --reinstall-package arkhai-kit-identity
+
+test-domain: reinit ## Domain-package-level tests (distribution/wheel-import + credits client contract)
 	uv run --find-links $(DIST_DIR) pytest tests -q
 
 test-service:

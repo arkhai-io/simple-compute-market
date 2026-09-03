@@ -1,184 +1,192 @@
-# Seller FRP setup (optional)
+# Seller relay setup (optional)
 
-How to set up an FRP reverse-proxy server so buyer VMs are reachable via
-wildcard subdomains instead of random TCP ports on your KVM host.
+How to run a tunnel relay so buyer VMs are reachable when your KVM host has no
+inbound route of its own.
 
-The default seller flow ([`seller-quickstart.md`](./seller-quickstart.md))
-uses direct port-forward NAT: the KVM host's public IP exposes each VM
-on a random port (`ssh -p <port> tenant@<kvm-host-ip>`). FRP replaces
-that with a stable public host running `frps`, plus a `frpc` client on
-each VM that opens a tunnel back. Buyers then SSH to a per-VM subdomain
-(`ssh tenant@<vm>.vm.your-domain.com`).
+The default seller flow ([`seller-quickstart.md`](./seller-quickstart.md)) uses
+direct port-forward NAT: the KVM host's public IP exposes each VM on a port
+(`ssh -p <port> tenant@<kvm-host-ip>`). A relay replaces that with a
+publicly-reachable machine running `frps`, and a tunnel client on the KVM host
+that dials out to it. Buyers then reach a port on the relay instead of a port
+on your host.
 
-Use FRP if:
+Use a relay if your KVM host isn't directly reachable — NAT'd, behind a
+corporate firewall, on a VPN-only network — or if you run several hosts and
+want one ingress address.
 
-- The KVM host isn't directly reachable (NAT'd, behind a corporate
-  firewall, on a VPN-only network).
-- You want subdomain-style routing instead of port-numbered routing.
-- You're running multiple KVM hosts and want a single ingress address.
+Skip it if your host has a public IP and you don't mind port-numbered access.
+Direct NAT is simpler, has one fewer moving part, and remains fully supported.
 
-Skip FRP if your KVM host has a public IP and you don't mind random
-ports — direct NAT is simpler and has one fewer moving part.
+## What a buyer receives
+
+A host and a port:
+
+```console
+ssh -p 6142 tenant@relay.example.com
+```
+
+Buyer access is port-based. There are no per-VM subdomains, and a wildcard DNS
+record serves nothing here.
+
+The reason is a property of the protocol rather than a choice. FRP's `subdomain`
+option belongs to its `http` and `https` proxy types, which demultiplex on the
+`Host` header. SSH runs over a `tcp` proxy: it sends no SNI and no `Host`
+header, and client and server exchange version banners immediately on connect.
+A relay has nothing to route on, so a `tcp` proxy binds a distinct port whatever
+the `subdomain` key says.
+
+## What the relay does not need
+
+**No dashboard.** Nothing in the provisioning path reads one. Ports are
+allocated by the provisioning service, and proxy status is read from the tunnel
+client on your own host over loopback — the client that registered the proxy is
+the one that knows whether registration succeeded. `frps` serves its dashboard
+and admin API unauthenticated unless separately configured, so leaving them off
+is the defensible default.
+
+**No DNS name for an admin interface,** and no certificate for one.
+
+**No dashboard password.** The relay's admission token is the only credential.
 
 ## Prerequisites
 
-- A publicly-reachable VM with **at least 2 vCPU / 4 GB RAM** running
-  Ubuntu 22.04+ (any provider: Hetzner, AWS EC2, GCP Compute Engine,
-  DigitalOcean, Azure, Linode, bare metal). Around $5-10/mo is plenty.
-- SSH access to that VM as a user with passwordless `sudo`.
-- A domain you control DNS for. The wildcard record `*.vm.<your-domain>`
-  must point at the FRP server's IP.
+- A publicly-reachable machine, at least 2 vCPU / 4 GB RAM, Ubuntu 22.04+, any
+  provider. Around $5–10/mo is plenty.
+- SSH access to it as a user with passwordless `sudo`.
+- A DNS name or static IP for it. A plain `A` record is enough.
+- Inbound TCP open on the rendezvous port (7000 by default) and across the port
+  window you allocate for VMs.
 
-The FRP server VM doesn't need GPU/disk capacity — it only proxies TCP
-traffic. Network throughput is the bottleneck; pick a region close to
-your buyers.
+## Choosing a port window
 
-## 1. Stand up the FRP server VM
+The relay binds one listening socket per VM, inside a window you choose.
+6100–6199 is a reasonable default: 100 concurrent VMs across every host dialling
+this relay.
 
-Any provisioning path works — `terraform apply`, the cloud console, or
-`hcloud`/`aws`/`gcloud` CLI. The Ansible playbook only needs SSH access
-afterward.
+Two things to know:
 
-Minimum requirements on the VM:
+- **The window is shared by every host on the relay.** A remote port binds a
+  socket on the relay itself, not on your KVM host, so two hosts dialling one
+  relay draw from one pool. Size it for the whole fleet behind it.
+- **It must match what you register.** Bound it with `allowPorts` in
+  `frps.toml` and register the same window with the provisioning service. A
+  proxy outside the window is refused by the relay, and that refusal appears in
+  a tunnel client's log rather than as a failed provisioning request.
 
-- Ubuntu 22.04 LTS or newer
-- SSH port 22 open from your operator machine
-- Ports `7000`, `7002-8000`, `80`, `443` open from the public internet
-  (UFW rules are configured automatically by the playbook, but the
-  cloud-provider firewall needs them open too)
-
-## 2. Add the host to your Ansible inventory
-
-Edit `domains/vms/provisioning/iac/ansible/inventory/hosts` (copy from
-`hosts.example` if you haven't):
-
-```ini
-[frp_servers]
-proxy-prod ansible_host=<FRP_VM_PUBLIC_IP> ansible_user=ubuntu ansible_ssh_private_key_file=~/.ssh/id_ed25519
-```
-
-`proxy-prod` is just a friendly alias — use whatever you want, the
-playbook targets the group, not the name.
-
-## 3. Run the setup playbook
-
-From `domains/vms/provisioning/iac/`:
-
-```bash
-ansible-playbook -i ansible/inventory/hosts \
-  ansible/playbooks/frp/frp-server-setup.yaml \
-  -e "frp_domain=vm.your-domain.com" \
-  -e "certbot_email=admin@your-domain.com" \
-  --limit proxy-prod
-```
-
-The playbook installs `frps`, configures Nginx + Let's Encrypt for the
-dashboard, sets up UFW + fail2ban, and reboots the host. Run time:
-~5 minutes.
-
-When it finishes, **save the credentials file it writes locally** to
-`domains/vms/provisioning/iac/credentials/frp-server-credentials-<host>-<timestamp>.json`.
-It contains the `auth_token` and `dashboard_password` you'll need next.
-
-For full parameter details and re-run / SSL recovery flags, see
-[`domains/vms/provisioning/iac/README.md`](../domains/vms/provisioning/iac/README.md#1-setup-frp-server-optional-for-secure-remote-access-to-leased-vms).
-
-## 4. DNS records
-
-Add two records pointing at the FRP server's public IP:
-
-```
-A  *.vm.your-domain.com   <FRP_VM_PUBLIC_IP>
-A  frp-admin.vm.your-domain.com   <FRP_VM_PUBLIC_IP>
-```
-
-The wildcard is what lets each provisioned VM get its own subdomain.
-The `frp-admin` record is for the dashboard (HTTPS via the Let's Encrypt
-cert the playbook just provisioned).
-
-DNS propagation can take a few minutes. Verify:
-
-```bash
-dig +short frp-admin.vm.your-domain.com
-dig +short anything.vm.your-domain.com   # wildcard should answer the same IP
-```
-
-If `frp-admin` resolves but SSL hadn't yet been provisioned because DNS
-wasn't ready during step 3, re-run the playbook with `--tags frp_ssl`.
-
-## 5. Wire the seller config
-
-Add three keys to your `config.seller.toml` under `[provisioning]`:
+## Server configuration
 
 ```toml
-[provisioning]
-mode                   = "http"
-service_url            = "http://seller-provisioning:8081"
-frp_server_addr        = "<FRP_VM_PUBLIC_IP>"
-frp_domain             = "vm.your-domain.com"
-frp_dashboard_password = "<from credentials JSON>"
+# /etc/frp/frps.toml
+bindPort = 7000
+
+auth.method = "token"
+auth.token = "<a long random string>"
+
+# The window buyer VM tunnels may bind. Nothing outside it is admitted.
+allowPorts = [{ start = 6100, end = 6199 }]
+
+# No dashboard: nothing in the provisioning path reads one, and it is
+# unauthenticated unless separately configured.
+
+log.to = "/var/log/frp/frps.log"
+log.level = "info"
+log.maxDays = 30
 ```
 
-The storefront forwards these to the provisioning service on each
-`/vms` call. When all three are set, the provisioning playbook routes
-the new VM through FRP instead of opening a port on the KVM host.
+Generate the token with something like `openssl rand -base64 32`. It is the
+whole of the relay's admission control: anyone holding it can register a proxy
+within `allowPorts`.
 
-Bring the stack down and back up so the storefront re-reads the config:
+Run a `frps` version compatible with the tunnel client the fleet installs.
+`frps` and `frpc` negotiate a protocol version, so a large gap between them is a
+real mismatch rather than a cosmetic one.
 
-```bash
-docker compose -f compose/seller.yml -f compose/seller.live.yml \
-  down seller-storefront seller-provisioning
-docker compose -f compose/seller.yml -f compose/seller.live.yml \
-  up -d seller-storefront seller-provisioning
+## Registering the relay
+
+A relay is a resource in the provisioning service, not a setting on your
+storefront. Register it once:
+
+```console
+POST /api/v1/relays/
+{
+  "id": "site-a",
+  "relay_addr": "relay.example.com",
+  "relay_port": 7000,
+  "vm_port_range_start": 6100,
+  "vm_port_range_count": 100,
+  "token": "<the token from frps.toml>"
+}
 ```
 
-## 6. Verify
+Then point a resource pool at it; hosts in that pool dial that relay.
 
-Provision a test VM through the storefront admin API or buyer flow.
-The settle response's `connection.ssh_commands.external` should look
-like:
+The token is encrypted at rest and is never returned by any read. Relay and pool
+responses report *whether* a token is configured, not what it is.
 
-```
-ssh -i <key> tenantXXXXXXXX@<subdomain>.vm.your-domain.com
-```
+To change it, rotate on both sides: update `frps.toml` and restart `frps`, then
 
-not
-
-```
-ssh -i <key> -p <random_port> tenantXXXXXXXX@<kvm-host-ip>
+```console
+POST /api/v1/relays/site-a/token
 ```
 
-If you see the second form, FRP isn't picking up — check that all three
-`frp_*` config keys are non-empty and the provisioning service was
-restarted after the config change.
+The new value takes effect on the next VM created, including a retry of one
+accepted before the rotation. VMs already running keep their existing tunnels.
 
-The FRP dashboard at `https://frp-admin.vm.your-domain.com` (user
-`admin`, password from credentials JSON) lists active proxies and lets
-you confirm each VM has registered.
+## Storefront configuration
 
-## Troubleshooting
+None. A storefront names no relay, and any relay-shaped keys under
+`[provisioning]` in a storefront configuration are inert.
 
-**Playbook fails at `Obtain SSL certificate with Certbot`** — DNS isn't
-pointing at the FRP server yet, or hasn't propagated. The playbook
-continues without SSL; finish DNS, then re-run with `--tags frp_ssl`.
+Which relay a host dials is a property of where that host is, recorded against
+the relay its pool references. A storefront naming a relay per request would
+make a fleet-wide fact depend on one caller's configuration, and would let two
+requests for the same host disagree about how it is reached.
 
-**VM provisioning succeeds but `frpc` doesn't connect from the VM** —
-the FRP server's port `7000` isn't reachable from the KVM host. Check
-the cloud-provider firewall (UFW on the FRP server is already set by
-the playbook). `sudo ufw status verbose` on the FRP server should show
-`7000/tcp ALLOW`.
+## Changing a relay later
 
-**Wildcard subdomains 404** — Nginx on the FRP server only serves the
-`frp-admin` site directly; the wildcard subdomains are proxied at the
-TCP layer by `frps` itself. If `dig` resolves but connections fail,
-check `journalctl -u frps -f` on the FRP server while a VM provisions.
+A VM's relay is fixed for that VM's life. The buyer holds an address and a port,
+and a port on one relay means nothing on another, so an existing VM cannot be
+moved to a different rendezvous.
 
-**Dashboard password lost** — re-run the playbook; it generates a new
-random password and writes a fresh credentials JSON. Existing `frpc`
-clients use the auth token (separate), so they keep working as long as
-the token didn't change.
+Three changes are therefore refused while any affected host still runs a VM:
+repointing a relay's address or port, changing which relay a pool uses, and
+moving a host into a pool that dials a different relay. Each is allowed once the
+affected hosts hold no leases.
 
-**Want to switch back to direct port-forward** — set all three
-`frp_*` keys back to `""` in `config.seller.toml` and restart the
-stack. New VMs go back to direct NAT; existing leased VMs are
-unaffected until they expire.
+To make one:
+
+1. Disable the pool. New VMs stop being scheduled onto it; running VMs are
+   untouched.
+2. Wait for its VMs to be torn down or to expire.
+3. Make the change.
+4. Re-enable the pool.
+
+Moving a host between pools that dial the *same* relay needs none of this.
+Nothing a buyer holds changes.
+
+## Verifying
+
+On the KVM host, after a VM has been created:
+
+```console
+systemctl status frpc-vms
+curl -s http://127.0.0.1:7400/api/status | jq '.tcp[].name'
+tail -f /var/log/frp/frpc-vms.log
+```
+
+That loopback admin API is what the provisioning path itself reads to confirm a
+proxy came up.
+
+On the relay:
+
+```console
+journalctl -u frps -f
+```
+
+A proxy registering outside the window is refused here, naming the port. That is
+the log to check when a VM is created successfully but a buyer cannot reach it.
+
+Note the unit name: `frpc-vms`. If your host also runs a management tunnel that
+lets an operator reach the host itself, that is a separate unit and a separate
+configuration file, established when the host was prepared. No VM operation
+touches it, and it is not what this document describes.

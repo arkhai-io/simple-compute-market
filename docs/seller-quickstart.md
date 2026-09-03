@@ -6,7 +6,7 @@ canonical marketplace identity, and optionally provision real KVM VMs.
 For the buyer side see [`buyer-quickstart.md`](./buyer-quickstart.md).
 To run your own listing registry instead of pointing at an existing one,
 see [`indexer-quickstart.md`](./indexer-quickstart.md). To expose VMs
-via wildcard subdomains instead of direct port-forward NAT, see
+through a tunnel relay when your host has no inbound route, see
 [`seller-frp-setup.md`](./seller-frp-setup.md). To sell whole-machine
 SSH access instead of VM slices, see
 [`bare-metal-seller-quickstart.md`](./bare-metal-seller-quickstart.md).

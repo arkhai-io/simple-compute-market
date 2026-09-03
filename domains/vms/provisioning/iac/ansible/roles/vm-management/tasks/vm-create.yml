@@ -1767,240 +1767,147 @@
     vm_ip: "{{ vm_ready_result.stdout_lines[-1] }}"
   when: vm_action == "create" and vm_ready_result is defined and vm_ready_result.rc == 0
 
-- name: Generate unique VM subdomain by checking existing VM names via FRP API
-  shell: |
-    set -e
-    echo "Querying FRP dashboard API for existing VM names..."
-    
-    FRP_DOMAIN="{{ frp_domain }}"
-    FRP_PASSWORD="{{ frp_dashboard_password }}"
-    
-    # Query FRP API to get all TCP proxies
-    RESPONSE=$(curl --compressed -s -u "admin:${FRP_PASSWORD}" "https://frp-admin.${FRP_DOMAIN}/api/proxy/tcp" || echo '{"proxies":[]}')
-    
-    # Extract existing 6-char suffixes from proxy names matching pattern vm-XXXXXX
-    EXISTING_SUFFIXES=$(echo "$RESPONSE" | grep -oP '"name":\s*"vm-\K[a-z0-9]{6}' | sort -u || echo "")
-    
-    if [ -z "$EXISTING_SUFFIXES" ]; then
-      echo "No existing VM suffixes found"
-    else
-      echo "Existing VM suffixes:"
-      echo "$EXISTING_SUFFIXES" | tr '\n' ' '
-      echo ""
-      echo "Total count: $(echo "$EXISTING_SUFFIXES" | wc -w)"
-    fi
-    
-    # Generate a unique 6-character alphanumeric string
-    MAX_ATTEMPTS=100
-    ATTEMPT=0
-    UNIQUE_SUFFIX=""
-    
-    while [ $ATTEMPT -lt $MAX_ATTEMPTS ]; do
-      # Generate random 6-char string (lowercase letters and digits)
-      CANDIDATE=$(cat /dev/urandom | tr -dc 'a-z0-9' | fold -w 6 | head -n 1)
-      
-      # Check if this suffix is already used
-      if ! echo "$EXISTING_SUFFIXES" | grep -q "^${CANDIDATE}$"; then
-        UNIQUE_SUFFIX="$CANDIDATE"
-        echo "Generated unique suffix: $UNIQUE_SUFFIX"
-        break
-      fi
-      
-      ATTEMPT=$((ATTEMPT + 1))
-    done
-    
-    if [ -z "$UNIQUE_SUFFIX" ]; then
-      echo "Failed to generate unique suffix after $MAX_ATTEMPTS attempts"
-      exit 1
-    fi
-    
-    echo "$UNIQUE_SUFFIX"
-  register: frp_subdomain_result
+- name: Reconcile the VM tunnel client's baseline against the resolved relay
+  # The client's top-level rendezvous and credential are templated once at host
+  # setup. The relay they name can change afterwards — its address under a
+  # drain, its token under a rotation — and neither reaches the host by itself,
+  # because a VM operation only appends proxy stanzas. Without this step a host
+  # keeps dialling a rendezvous or presenting a credential the relay no longer
+  # accepts, and the failure appears at the client's next reconnect rather than
+  # at the change.
+  #
+  # Only these three lines. Re-templating the file would erase the proxy blocks
+  # it also holds, which is the hazard the two-client split exists to prevent.
+  lineinfile:
+    path: /etc/frp/frpc-vms.toml
+    regexp: "{{ item.regexp }}"
+    line: "{{ item.line }}"
+    backrefs: no
+  loop:
+    - regexp: '^serverAddr\s*='
+      line: 'serverAddr = "{{ frp_server_addr }}"'
+    - regexp: '^serverPort\s*='
+      line: "serverPort = {{ frp_server_port | default(7000) }}"
+    - regexp: '^auth\.token\s*='
+      line: 'auth.token = "{{ frp_auth_token }}"'
+  register: frpc_vms_baseline
   when:
     - vm_action == "create"
-    - vm_ip is defined
     - frp_server_addr is defined
-    - frp_dashboard_password is defined
+    - frp_auth_token is defined
   delegate_to: "{{ target_host }}"
 
-- name: Display VM name generation details
-  debug:
-    msg: "{{ frp_subdomain_result.stdout_lines }}"
+- name: Restart the VM tunnel client when its baseline changed
+  # A restart, not a reload: `serverAddr`, `serverPort`, and `auth` are not
+  # among the sections a reload applies, so the client would keep using the old
+  # values until it restarted anyway.
+  #
+  # Safe here, and only here. A baseline can only have gone stale through a
+  # change the service refuses while the relay holds leases, so a host reaching
+  # this task with a changed baseline has no VM proxies of its own to lose. A
+  # restart at any other moment would end every buyer's session on this host.
+  systemd:
+    name: frpc-vms
+    state: restarted
   when:
     - vm_action == "create"
-    - vm_ip is defined
     - frp_server_addr is defined
-    - frp_subdomain_result is defined
-    - frp_subdomain_result is not skipped
-
-- name: Set FRP subdomain fact from generated unique suffix
-  set_fact:
-    frp_subdomain: "{{ frp_subdomain_result.stdout_lines[-1] }}"
-  when:
-    - vm_action == "create"
-    - vm_ip is defined
-    - frp_server_addr is defined
-    - frp_subdomain_result is defined
-    - frp_subdomain_result is not skipped
-    - frp_subdomain_result.rc == 0
-
-- name: Find available FRP port via FRP API and host config
-  shell: |
-    set -e
-    echo "Querying FRP dashboard API for used ports..."
-    
-    FRP_DOMAIN="{{ frp_domain }}"
-    FRP_PASSWORD="{{ frp_dashboard_password }}"
-    
-    # Query FRP API to get all TCP proxies
-    RESPONSE=$(curl --compressed -s -u "admin:${FRP_PASSWORD}" "https://frp-admin.${FRP_DOMAIN}/api/proxy/tcp" || echo '{"proxies":[]}')
-    
-    # Extract active ports from JSON response (remotePort is only present for online proxies)
-    USED_PORTS_API=$(echo "$RESPONSE" | grep -oP '"remotePort":\s*\K[0-9]+' | sort -n || echo "")
-
-    # Also inspect the host FRP client config because offline proxies return conf:null in the
-    # dashboard response but still reserve their remotePort in /etc/frp/frpc.toml.
-    USED_PORTS_LOCAL=""
-    if [ -f /etc/frp/frpc.toml ]; then
-      USED_PORTS_LOCAL=$(grep -oP 'remotePort\s*=\s*\K[0-9]+' /etc/frp/frpc.toml | sort -n || echo "")
-    fi
-
-    USED_PORTS=$(printf "%s\n%s\n" "$USED_PORTS_API" "$USED_PORTS_LOCAL" | grep -E '^[0-9]+$' | sort -nu || echo "")
-
-    echo "Used ports from dashboard: $USED_PORTS_API"
-    echo "Used ports from local frpc.toml: $USED_PORTS_LOCAL"
-    echo "Combined used ports: $USED_PORTS"
-    
-    # Find first available port in range 7002-8000
-    REMOTE_PORT=""
-    for PORT in $(seq 7002 8000); do
-      if ! echo "$USED_PORTS" | grep -q "^${PORT}$"; then
-        echo "Port $PORT is available"
-        REMOTE_PORT=$PORT
-        break
-      fi
-    done
-    
-    if [ -z "$REMOTE_PORT" ]; then
-      echo "No available ports found in range 7002-8000"
-      echo "UNKNOWN"
-    else
-      echo "Found available port: $REMOTE_PORT"
-      echo "$REMOTE_PORT"
-    fi
-  register: frp_remote_port_result
-  when:
-    - vm_action == "create"
-    - vm_ip is defined
-    - frp_server_addr is defined
-    - frp_dashboard_password is defined
+    - frp_auth_token is defined
+    - frpc_vms_baseline is defined
+    - frpc_vms_baseline is changed
   delegate_to: "{{ target_host }}"
-  ignore_errors: yes
 
-- name: Set FRP remote port fact
-  set_fact:
-    frp_remote_port: "{{ frp_remote_port_result.stdout_lines[-1] | default('UNKNOWN') }}"
-  when:
-    - vm_action == "create"
-    - vm_ip is defined
-    - frp_server_addr is defined
-    - frp_remote_port_result is defined
-
-- name: Add FRP proxy configuration for VM
+- name: Add this VM's proxy to the VM tunnel client configuration
+  # The remote port is an input, leased by the provisioning service before this
+  # job was dispatched. Nothing here chooses one: a remote port binds a
+  # listening socket on the relay, so every client dialing that relay draws
+  # from one namespace and only a single authority can avoid collisions. The
+  # previous path asked the relay's dashboard and raced other hosts.
+  #
+  # No `subdomain` key. That is a vhost feature of frp's http/https proxy
+  # types; a tcp proxy binds a distinct port whatever the key says, and SSH
+  # sends no SNI and no Host header for a relay to demultiplex on. The wildcard
+  # DNS record and certificate it implied served nothing.
   blockinfile:
-    path: /etc/frp/frpc.toml
+    path: /etc/frp/frpc-vms.toml
     marker: "# {mark} ANSIBLE MANAGED BLOCK FOR VM {{ vm_name }}"
     block: |
-      
+
       [[proxies]]
-      name = "vm-{{ frp_subdomain }}"
+      name = "vm-{{ vm_name }}"
       type = "tcp"
       localIP = "{{ vm_ip }}"
       localPort = 22
-      remotePort = {{ frp_remote_port }}
-      subdomain = "{{ frp_subdomain }}"
+      remotePort = {{ vm_remote_port }}
       transport.useEncryption = true
     create: no
   when:
     - vm_action == "create"
     - vm_ip is defined
     - frp_server_addr is defined
-    - frp_remote_port is defined
-    - frp_remote_port != 'UNKNOWN'
+    - vm_remote_port is defined
   delegate_to: "{{ target_host }}"
-  notify: restart frpc
 
-- name: Restart FRP client to apply new proxy configuration
-  systemd:
-    name: frpc
-    state: restarted
-    daemon_reload: yes
+- name: Apply the new proxy by reloading the VM tunnel client
+  # Reload rather than restart. `systemctl restart` closes the control
+  # connection, and the relay treats that as the client going away and tears
+  # down every proxy it registered — so provisioning a fourth VM would drop the
+  # live SSH sessions of the buyers holding the first three. A reload applies a
+  # proxy diff and leaves unchanged proxies untouched.
+  uri:
+    url: "http://127.0.0.1:{{ frp_admin_port | default(7400) }}/api/reload"
+    method: GET
+    status_code: 200
   when:
     - vm_action == "create"
     - vm_ip is defined
     - frp_server_addr is defined
+    - vm_remote_port is defined
   delegate_to: "{{ target_host }}"
 
-- name: Wait for FRP proxy to appear online in dashboard
-  shell: |
-    set -e
-    RESPONSE=$(curl --compressed -fsS -u "admin:{{ frp_dashboard_password }}" "https://frp-admin.{{ frp_domain }}/api/proxy/tcp")
-    export FRP_DASHBOARD_RESPONSE="$RESPONSE"
-    python3 - <<'PY'
-    import json
-    import os
-    import sys
-
-    expected_name = "vm-{{ frp_subdomain }}"
-    expected_port = "{{ frp_remote_port }}"
-    data = json.loads(os.environ["FRP_DASHBOARD_RESPONSE"])
-
-    for proxy in data.get("proxies", []):
-        if proxy.get("name") != expected_name:
-            continue
-        if proxy.get("status") == "online":
-            conf = proxy.get("conf") or {}
-            remote_port = conf.get("remotePort")
-            if remote_port is None:
-                remote_port = proxy.get("remotePort")
-            if str(remote_port) == expected_port:
-                print("online")
-                raise SystemExit(0)
-
-    print(
-        f"Proxy {expected_name} is not online on remotePort {expected_port}",
-        file=sys.stderr,
-    )
-    raise SystemExit(1)
-    PY
-  register: frp_proxy_online_result
+- name: Wait for this VM's proxy to come up
+  # Asked of the local client through its loopback admin API, not of the relay.
+  # The client is the party that registered the proxy and the party that knows
+  # whether registration succeeded; polling the relay was a round trip to ask a
+  # third party about our own state, and it required a dashboard, a DNS name, a
+  # certificate, and a second credential to do it.
+  uri:
+    url: "http://127.0.0.1:{{ frp_admin_port | default(7400) }}/api/status"
+    method: GET
+    return_content: yes
+    status_code: 200
+  register: frp_client_status
   retries: 12
   delay: 5
-  until: frp_proxy_online_result.rc == 0
+  until: >-
+    frp_client_status.json is defined
+    and (
+      frp_client_status.json.tcp | default([])
+      | selectattr('name', 'equalto', 'vm-' ~ vm_name)
+      | selectattr('status', 'equalto', 'running')
+      | list | length
+    ) > 0
   when:
     - vm_action == "create"
     - vm_ip is defined
     - frp_server_addr is defined
-    - frp_dashboard_password is defined
-    - frp_remote_port is defined
-    - frp_remote_port != 'UNKNOWN'
-    - frp_subdomain is defined
+    - vm_remote_port is defined
   delegate_to: "{{ target_host }}"
 
-- name: Display FRP proxy information
+- name: Report buyer access for this VM
   debug:
     msg:
-      - "=== FRP Proxy Configuration ==="
-      - "VM Name: {{ vm_name }}"
-      - "VM IP: {{ vm_ip }}"
-      - "FRP Subdomain: {{ frp_subdomain }}"
-      - "FRP Domain: {{ frp_domain | default('vm.arkhai.io') }}"
-      - "FRP Remote Port: {{ frp_remote_port | default('Check logs: tail -f /var/log/frp/frpc.log') }}"
-      - "SSH Access: ssh -p {{ frp_remote_port }} {{ vm_name | regex_replace('[^a-zA-Z0-9]', '') | lower }}@{{ frp_subdomain }}.{{ frp_domain | default('vm.arkhai.io') }}"
+      - "=== Buyer access ==="
+      - "VM name: {{ vm_name }}"
+      - "VM address: {{ vm_ip }}"
+      - "Relay: {{ frp_server_addr }}"
+      - "Remote port: {{ vm_remote_port }}"
+      - "SSH: ssh -p {{ vm_remote_port }} {{ vm_name | regex_replace('[^a-zA-Z0-9]', '') | lower }}@{{ frp_server_addr }}"
   when:
     - vm_action == "create"
     - vm_ip is defined
     - frp_server_addr is defined
+    - vm_remote_port is defined
 
 - name: Install GPU drivers in golden VM with GPU passthrough
   shell: |
@@ -2544,7 +2451,7 @@
           ssh_key_path_host: "~/.ssh/{{ vm_root_ssh_filename }}"
           ssh_commands:
             internal: "ssh -i ~/.ssh/{{ vm_root_ssh_filename }} root@{{ vm_ip }}"
-            external: "{{ 'ssh -i ~/.ssh/' + vm_root_ssh_filename + ' -p ' + external_ssh_port + ' root@' + tenant_ssh_host if (external_ssh_port is defined) else 'ssh -i ~/.ssh/' + vm_root_ssh_filename + ' -p ' + frp_remote_port + ' root@' + frp_subdomain + '.' + (frp_domain | default('vm.arkhai.io')) }}"
+            external: "{{ 'ssh -i ~/.ssh/' + vm_root_ssh_filename + ' -p ' + external_ssh_port + ' root@' + tenant_ssh_host if (external_ssh_port is defined) else 'ssh -i ~/.ssh/' + vm_root_ssh_filename + ' -p ' + (vm_remote_port | string) + ' root@' + frp_server_addr }}"
         tenant:
           password: "{{ tenant_password }}"
           key_type: "generated"
@@ -2552,17 +2459,19 @@
           ssh_key_path_downloaded: "keys/{{ vm_name }}_tenant_private_key"
           ssh_commands:
             internal: "ssh -i keys/{{ vm_name }}_tenant_private_key {{ vm_name | regex_replace('[^a-zA-Z0-9]', '') | lower }}@{{ vm_ip }}"
-            external: "{{ 'ssh -i keys/' + vm_name + '_tenant_private_key -p ' + external_ssh_port + ' ' + (vm_name | regex_replace('[^a-zA-Z0-9]', '') | lower) + '@' + tenant_ssh_host if (external_ssh_port is defined) else 'ssh -i keys/' + vm_name + '_tenant_private_key -p ' + frp_remote_port + ' ' + (vm_name | regex_replace('[^a-zA-Z0-9]', '') | lower) + '@' + frp_subdomain + '.' + (frp_domain | default('vm.arkhai.io')) }}"
+            external: "{{ 'ssh -i keys/' + vm_name + '_tenant_private_key -p ' + external_ssh_port + ' ' + (vm_name | regex_replace('[^a-zA-Z0-9]', '') | lower) + '@' + tenant_ssh_host if (external_ssh_port is defined) else 'ssh -i keys/' + vm_name + '_tenant_private_key -p ' + (vm_remote_port | string) + ' ' + (vm_name | regex_replace('[^a-zA-Z0-9]', '') | lower) + '@' + frp_server_addr }}"
       network:
-        mode: "{{ 'direct_port_forwarding' if (external_ssh_port is defined) else 'frp_proxy' }}"
-        port_forwarding: "{{ tenant_ssh_host + ':' + external_ssh_port + ' -> ' + vm_ip + ':22' if (external_ssh_port is defined) else 'N/A - Using FRP' }}"
-      frp:
+        mode: "{{ 'direct_port_forwarding' if (external_ssh_port is defined) else 'relay_tunnel' }}"
+        port_forwarding: "{{ tenant_ssh_host + ':' + external_ssh_port + ' -> ' + vm_ip + ':22' if (external_ssh_port is defined) else 'N/A - reached through the relay' }}"
+      relay:
+        # Buyer access is a host and a port. There is no subdomain and no
+        # relay domain: frp's subdomain option is a vhost feature of its http
+        # and https proxy types, and SSH sends no SNI and no Host header for a
+        # tcp proxy's relay to demultiplex on.
         enabled: "{{ true if (frp_server_addr is defined) else false }}"
-        subdomain: "{{ frp_subdomain | default('N/A') }}"
-        domain: "{{ frp_domain | default('N/A') }}"
-        remote_port: "{{ frp_remote_port | default('N/A') }}"
-        ssh_access_subdomain: "{{ 'ssh ' + (vm_name | regex_replace('[^a-zA-Z0-9]', '') | lower) + '@' + frp_subdomain + '.' + (frp_domain | default('vm.arkhai.io')) if (frp_server_addr is defined) else 'N/A' }}"
-        ssh_access_port: "{{ 'ssh -p ' + frp_remote_port + ' ' + (vm_name | regex_replace('[^a-zA-Z0-9]', '') | lower) + '@' + (frp_domain | default('vm.arkhai.io')) if (frp_server_addr is defined and frp_remote_port is defined and frp_remote_port != 'UNKNOWN') else 'N/A' }}"
+        relay_addr: "{{ frp_server_addr | default('N/A') }}"
+        remote_port: "{{ vm_remote_port | default('N/A') }}"
+        ssh_access: "{{ 'ssh -p ' + (vm_remote_port | string) + ' ' + (vm_name | regex_replace('[^a-zA-Z0-9]', '') | lower) + '@' + frp_server_addr if (frp_server_addr is defined and vm_remote_port is defined) else 'N/A' }}"
       verification:
         tenant_ssh_status: "{{ tenant_ssh_verification.stdout | default('Not tested') }}"
       gpu:
@@ -2586,10 +2495,10 @@
   debug:
     msg: 
       - "VM {{ vm_name }} created successfully - IP: {{ vm_ip }}{% if external_ssh_port is defined %}:{{ external_ssh_port }}{% endif %}"
-      - "{% if frp_server_addr is defined %}FRP Mode: Subdomain {{ frp_subdomain }}.{{ frp_domain | default('vm.arkhai.io') }}, Remote Port {{ frp_remote_port }}{% else %}Direct Port Forwarding: {{ external_ssh_port }}{% endif %}"
+      - "{% if frp_server_addr is defined %}Relay tunnel: {{ frp_server_addr }} remote port {{ vm_remote_port }}{% else %}Direct Port Forwarding: {{ external_ssh_port }}{% endif %}"
       - "Root: ssh -i ~/.ssh/{{ vm_root_ssh_filename }} root@{{ vm_ip }} (password: retrieve via credentials API)"
       - "Tenant: ssh -i keys/{{ vm_name }}_tenant_private_key {{ vm_name | regex_replace('[^a-zA-Z0-9]', '') | lower }}@{{ vm_ip }} (password: retrieve via credentials API)"
-      - "{% if frp_server_addr is defined %}External SSH: ssh -i keys/{{ vm_name }}_tenant_private_key -p {{ frp_remote_port }} {{ vm_name | regex_replace('[^a-zA-Z0-9]', '') | lower }}@{{ frp_subdomain }}.{{ frp_domain | default('vm.arkhai.io') }}{% else %}External SSH: ssh -i keys/{{ vm_name }}_tenant_private_key -p {{ external_ssh_port }} {{ vm_name | regex_replace('[^a-zA-Z0-9]', '') | lower }}@{{ tenant_ssh_host }}{% endif %}"
+      - "{% if frp_server_addr is defined %}External SSH: ssh -i keys/{{ vm_name }}_tenant_private_key -p {{ vm_remote_port }} {{ vm_name | regex_replace('[^a-zA-Z0-9]', '') | lower }}@{{ frp_server_addr }}{% else %}External SSH: ssh -i keys/{{ vm_name }}_tenant_private_key -p {{ external_ssh_port }} {{ vm_name | regex_replace('[^a-zA-Z0-9]', '') | lower }}@{{ tenant_ssh_host }}{% endif %}"
   when: 
     - vm_action == "create" 
     - vm_create_result is defined 
@@ -2615,23 +2524,22 @@
           ssh_key_path_host: "~/.ssh/{{ vm_root_ssh_filename }}"
           ssh_commands:
             internal: "ssh -i ~/.ssh/{{ vm_root_ssh_filename }} root@{{ vm_ip }}"
-            external: "{{ 'ssh -i ~/.ssh/' + vm_root_ssh_filename + ' -p ' + external_ssh_port + ' root@' + tenant_ssh_host if (external_ssh_port is defined) else 'ssh -i ~/.ssh/' + vm_root_ssh_filename + ' -p ' + frp_remote_port + ' root@' + frp_subdomain + '.' + (frp_domain | default('vm.arkhai.io')) }}"
+            external: "{{ 'ssh -i ~/.ssh/' + vm_root_ssh_filename + ' -p ' + external_ssh_port + ' root@' + tenant_ssh_host if (external_ssh_port is defined) else 'ssh -i ~/.ssh/' + vm_root_ssh_filename + ' -p ' + (vm_remote_port | string) + ' root@' + frp_server_addr }}"
         tenant:
           password: "{{ tenant_password }}"
           key_type: "provided"
           public_key: "{{ vm_tenant_pubkey }}"
           ssh_commands:
             internal: "ssh -i <your_private_key> {{ vm_name | regex_replace('[^a-zA-Z0-9]', '') | lower }}@{{ vm_ip }}"
-            external: "{{ 'ssh -i <your_private_key> -p ' + external_ssh_port + ' ' + (vm_name | regex_replace('[^a-zA-Z0-9]', '') | lower) + '@' + tenant_ssh_host if (external_ssh_port is defined) else 'ssh -i <your_private_key> -p ' + frp_remote_port + ' ' + (vm_name | regex_replace('[^a-zA-Z0-9]', '') | lower) + '@' + frp_subdomain + '.' + (frp_domain | default('vm.arkhai.io')) }}"
+            external: "{{ 'ssh -i <your_private_key> -p ' + external_ssh_port + ' ' + (vm_name | regex_replace('[^a-zA-Z0-9]', '') | lower) + '@' + tenant_ssh_host if (external_ssh_port is defined) else 'ssh -i <your_private_key> -p ' + (vm_remote_port | string) + ' ' + (vm_name | regex_replace('[^a-zA-Z0-9]', '') | lower) + '@' + frp_server_addr }}"
       network:
-        mode: "{{ 'direct_port_forwarding' if (external_ssh_port is defined) else 'frp_proxy' }}"
-        port_forwarding: "{{ tenant_ssh_host + ':' + external_ssh_port + ' -> ' + vm_ip + ':22' if (external_ssh_port is defined) else 'N/A - Using FRP' }}"
+        mode: "{{ 'direct_port_forwarding' if (external_ssh_port is defined) else 'relay_tunnel' }}"
+        port_forwarding: "{{ tenant_ssh_host + ':' + external_ssh_port + ' -> ' + vm_ip + ':22' if (external_ssh_port is defined) else 'N/A - reached through the relay' }}"
       frp:
         enabled: "{{ true if (frp_server_addr is defined) else false }}"
-        subdomain: "{{ frp_subdomain | default('N/A') }}"
-        domain: "{{ frp_domain | default('N/A') }}"
-        remote_port: "{{ frp_remote_port | default('N/A') }}"
-        ssh_access: "{{ 'ssh -p ' + frp_remote_port + ' ' + (vm_name | regex_replace('[^a-zA-Z0-9]', '') | lower) + '@' + frp_subdomain + '.' + (frp_domain | default('vm.arkhai.io')) if (frp_server_addr is defined and frp_remote_port is defined and frp_remote_port != 'UNKNOWN') else 'N/A' }}"
+        relay_addr: "{{ frp_server_addr | default('N/A') }}"
+        remote_port: "{{ vm_remote_port | default('N/A') }}"
+        ssh_access: "{{ 'ssh -p ' + (vm_remote_port | string) + ' ' + (vm_name | regex_replace('[^a-zA-Z0-9]', '') | lower) + '@' + frp_server_addr if (frp_server_addr is defined and vm_remote_port is defined) else 'N/A' }}"
       gpu:
         provisioned: "{{ vm_gpu_provisioned | default(false) | bool }}"
         pci_address: "{{ gpu_pci_id | default('N/A') }}"
@@ -2657,10 +2565,10 @@
   debug:
     msg: 
       - "VM {{ vm_name }} created successfully - IP: {{ vm_ip }}{% if external_ssh_port is defined %}:{{ external_ssh_port }}{% endif %}"
-      - "{% if frp_server_addr is defined %}FRP Mode: Subdomain {{ frp_subdomain }}.{{ frp_domain | default('vm.arkhai.io') }}, Remote Port {{ frp_remote_port }}{% else %}Direct Port Forwarding: {{ external_ssh_port }}{% endif %}"
+      - "{% if frp_server_addr is defined %}Relay tunnel: {{ frp_server_addr }} remote port {{ vm_remote_port }}{% else %}Direct Port Forwarding: {{ external_ssh_port }}{% endif %}"
       - "Root access: ssh -i ~/.ssh/{{ vm_root_ssh_filename }} root@{{ vm_ip }} (password: retrieve via credentials API)"
       - "Tenant access: ssh -i <your_private_key> {{ vm_name | regex_replace('[^a-zA-Z0-9]', '') | lower }}@{{ vm_ip }} (password: retrieve via credentials API)"
-      - "{% if frp_server_addr is defined %}External SSH: ssh -i <your_private_key> -p {{ frp_remote_port }} {{ vm_name | regex_replace('[^a-zA-Z0-9]', '') | lower }}@{{ frp_subdomain }}.{{ frp_domain | default('vm.arkhai.io') }}{% else %}External SSH: ssh -i <your_private_key> -p {{ external_ssh_port }} {{ vm_name | regex_replace('[^a-zA-Z0-9]', '') | lower }}@{{ tenant_ssh_host }}{% endif %}"
+      - "{% if frp_server_addr is defined %}External SSH: ssh -i <your_private_key> -p {{ vm_remote_port }} {{ vm_name | regex_replace('[^a-zA-Z0-9]', '') | lower }}@{{ frp_server_addr }}{% else %}External SSH: ssh -i <your_private_key> -p {{ external_ssh_port }} {{ vm_name | regex_replace('[^a-zA-Z0-9]', '') | lower }}@{{ tenant_ssh_host }}{% endif %}"
   when: 
     - vm_action == "create" 
     - vm_create_result is defined 
@@ -2774,28 +2682,30 @@
       track_step "get_external_port" "success"
       
       # Remove FRP proxy configuration
-      log "=== Removing FRP proxy configuration ==="
-      if [ -f /etc/frp/frpc.toml ]; then
-        if sed -i "/# BEGIN ANSIBLE MANAGED BLOCK FOR VM $VM_NAME/,/# END ANSIBLE MANAGED BLOCK FOR VM $VM_NAME/d" /etc/frp/frpc.toml 2>/dev/null; then
-          log "FRP configuration block removed"
-          if systemctl is-active --quiet frpc; then
-            if systemctl restart frpc; then
-              log "FRP client restarted successfully"
-              track_step "remove_frp_config" "success"
-            else
-              log_error "Failed to restart frpc"
-              track_step "remove_frp_config" "partial"
-            fi
+      log "=== Removing this VM's tunnel proxy ==="
+      # Only the VM-facing client. The host's own management tunnel is a
+      # separate file and unit, and this script must never touch it: it is the
+      # path an operator uses to reach a host, and this script runs
+      # unattended on the host itself.
+      if [ -f /etc/frp/frpc-vms.toml ]; then
+        if sed -i "/# BEGIN ANSIBLE MANAGED BLOCK FOR VM $VM_NAME/,/# END ANSIBLE MANAGED BLOCK FOR VM $VM_NAME/d" /etc/frp/frpc-vms.toml 2>/dev/null; then
+          log "Proxy stanza removed"
+          # Reload, not restart. A restart would drop every other buyer's
+          # established session on this host.
+          if curl -fsS "http://127.0.0.1:{{ frp_admin_port | default(7400) }}/api/reload" >/dev/null 2>&1; then
+            log "VM tunnel client reloaded"
+            track_step "remove_relay_proxy" "success"
           else
-            track_step "remove_frp_config" "success"
+            log_error "Failed to reload the VM tunnel client"
+            track_step "remove_relay_proxy" "partial"
           fi
         else
-          log "No FRP configuration found for this VM"
-          track_step "remove_frp_config" "skipped"
+          log "No proxy stanza found for this VM"
+          track_step "remove_relay_proxy" "skipped"
         fi
       else
-        log "FRP configuration file not found"
-        track_step "remove_frp_config" "skipped"
+        log "VM tunnel client configuration not found"
+        track_step "remove_relay_proxy" "skipped"
       fi
       
       # Clean up iptables port forwarding rules
@@ -3040,7 +2950,7 @@
       lineinfile:
         path: "{{ playbook_dir }}/../../inventory/hosts"
         insertafter: "^\\[kvms\\]"
-        line: "{{ vm_name }} ansible_host={{ (frp_subdomain + '.' + frp_domain) if (frp_server_addr is defined) else target_host }} ansible_port={{ frp_remote_port if (frp_server_addr is defined) else external_ssh_port }} ansible_user=root ansible_ssh_private_key_file=~/.ssh/{{ vm_root_ssh_filename }}"
+        line: "{{ vm_name }} ansible_host={{ frp_server_addr if (frp_server_addr is defined) else target_host }} ansible_port={{ vm_remote_port if (frp_server_addr is defined) else external_ssh_port }} ansible_user=root ansible_ssh_private_key_file=~/.ssh/{{ vm_root_ssh_filename }}"
         backup: yes
         create: yes
       delegate_to: localhost

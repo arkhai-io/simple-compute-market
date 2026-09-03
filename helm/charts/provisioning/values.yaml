@@ -20,6 +20,24 @@ global:
 mockMode: false
 
 # ---------------------------------------------------------------------------
+# Declarative pools and relays.
+#
+# Rendered into the ConfigMap and mounted into the application container. They
+# carry no credentials: a relay entry names *which key* of the
+# provisioning-secrets profile holds its admission token, never the token.
+# Leave a list empty to manage that resource entirely through the API.
+#
+# Reconciled when the document's content changes, not on every start: import is
+# authoritative over the document it is given, so applying one nobody submitted
+# would revert relays administered through the API on any pod restart.
+#
+# A relay the document stops naming is retained, unlike a pool. Disabling one
+# would break every pool referencing it and every live tunnel on it.
+# ---------------------------------------------------------------------------
+definitions:
+  relays: {}
+
+# ---------------------------------------------------------------------------
 # Helm smoke-test configuration.
 # ---------------------------------------------------------------------------
 tests:
@@ -96,6 +114,15 @@ storefront:
 config:
   database_url: "sqlite:////app/data/provisioning.db"
 
+  # relay_definitions_path is NOT set here. The chart derives it from
+  # `definitions.relays` below, so the mount and the path cannot disagree — a
+  # rendered-and-mounted document that the service skips because its path is
+  # unset is a silent no-op that looks like configuration.
+  #
+  # pool_definitions_path is likewise absent, deliberately: wiring it would
+  # newly subject every deployment's pools to declarative reconciliation, which
+  # is a change to what a deployment means rather than a bug fix.
+
   # Ansible paths — set to the IaC tree location inside the container.
   # Override here for environments that mount the IaC at a different path.
   playbook_path: "/opt/domains/vms/provisioning/iac/ansible/playbooks/single-tenant/vm-operations.yaml"
@@ -113,9 +140,12 @@ config:
   golden_gcs_bucket: ""
   golden_gcs_project: ""
 
-  # FRP tunneling
-  frp_server_addr: ""
-  frp_domain: ""
+  # relay_token is deliberately absent, and the values schema forbids setting
+  # it here. It is a credential: it reaches the service through the
+  # provisioning-secrets profile, and a value in plain chart values would be
+  # rendered into a ConfigMap. It seeds a relay established from
+  # `definitions.relays` and is read only when that relay is created — a token
+  # rotated through the relay API is authoritative from then on.
 
   # Lease watchdog
   lease_watchdog_enabled: true

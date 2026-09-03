@@ -10,16 +10,19 @@ from pathlib import Path
 import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
+MANIFEST = REPO_ROOT / "manifests" / "published-distributions.json"
 WORKFLOW = REPO_ROOT / ".github" / "workflows" / "publish-pypi.yml"
 
 
 def _packages() -> list[dict[str, object]]:
-    """The PACKAGES table the workflow heredocs into `packages.json`."""
+    """Every distribution this repository publishes.
 
-    text = WORKFLOW.read_text(encoding="utf-8")
-    body = re.search(r"cat > packages\.json <<'JSON'\n(.*?)\n\s*JSON\n", text, re.S)
-    assert body, "publish-pypi.yml no longer states its package table as a heredoc"
-    return json.loads(re.sub(r"^ {10}", "", body.group(1), flags=re.M))
+    Read from the manifest rather than from a workflow heredoc. The workflow
+    stated its own table and the Makefile stated another; the two disagreed in
+    both directions, which is what one declaration prevents.
+    """
+
+    return json.loads(MANIFEST.read_text(encoding="utf-8"))["distributions"]
 
 
 def _escaping_force_includes(package: Path) -> list[str]:
@@ -102,16 +105,22 @@ def test_a_published_package_looks_for_local_wheels_only_in_dist(
         )
 
 
-def test_the_publish_job_creates_the_directory_those_packages_look_in() -> None:
+def test_the_workflow_builds_the_directory_those_packages_look_in() -> None:
     """The other half of the pair above, which is otherwise only true by luck.
 
-    Requiring every `find-links` to point at `.dist` means nothing unless the
-    workflow actually makes `.dist`. It did not, which is the whole bug: the
-    hosted client job created it as a side effect of staging release assets,
-    so that one package built and the four that merely declared it did not.
+    Requiring every `find-links` to point at `.dist` means nothing unless
+    something actually makes `.dist`. It did not, which was the whole bug: one
+    job created it as a side effect of staging release assets, so that package
+    built and the four that merely declared it did not.
+
+    The workflow no longer publishes, and builds the whole wheelhouse with
+    `make dist` rather than one package at a time -- so the guarantee now comes
+    from the build target rather than from step ordering, and this asserts the
+    workflow still reaches it.
     """
 
     text = WORKFLOW.read_text(encoding="utf-8")
-    creates = text.index("mkdir -p .dist\n      - name: Build distribution")
-
-    assert creates < text.index("run: |\n          if [ \"${{ matrix.wheel_only }}\" = \"true\" ]")
+    assert "run: make dist" in text, (
+        "the distribution workflow no longer builds the wheelhouse, so the "
+        "find-links directory every package declares may not exist"
+    )

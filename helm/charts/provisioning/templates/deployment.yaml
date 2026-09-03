@@ -90,6 +90,12 @@ spec:
               mountPath: /home/appuser/.ssh/id_ed25519
               subPath: id_ed25519
               readOnly: true
+            {{- if .Values.definitions.relays }}
+            - name: config
+              mountPath: /app/config/relay-definitions.yaml
+              subPath: relay-definitions.yaml
+              readOnly: true
+            {{- end }}
           livenessProbe:
             httpGet:
               path: /health

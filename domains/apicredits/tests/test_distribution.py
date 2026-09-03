@@ -1,17 +1,28 @@
+"""Structural assertions about the built wheels.
+
+These read the wheel archives directly: what modules each one carries, what its
+metadata requires, what it exports. No environment is created and nothing is
+installed, so they run in about a second and need no interpreter beyond this
+one, no network, and no build toolchain.
+
+The installation behaviour these wheels must also satisfy is asserted in
+test_distribution_install.py, which is slower and needs more of the machine.
+The two were one file, and every failure it produced for a year was the
+install half breaking for reasons unrelated to the structural half -- which
+then did not run at all, because a collection error takes the file with it.
+"""
+
 from __future__ import annotations
 
 import re
-import shutil
-import subprocess
-import sys
 import zipfile
 from pathlib import Path
 
 import pytest
 
+from conftest_wheels import APICREDITS, REPO, _members, _metadata, wheels
 
-REPO = Path(__file__).resolve().parents[3]
-APICREDITS = REPO / "domains" / "apicredits"
+__all__ = ["wheels"]
 
 
 def test_no_apicredits_project_declares_an_internal_editable_source() -> None:
@@ -33,118 +44,6 @@ def test_no_apicredits_project_declares_an_internal_editable_source() -> None:
     assert violations == [], (
         f"internal editable [tool.uv.sources] override(s) found: {violations}"
     )
-
-
-@pytest.fixture(scope="module")
-def wheels(tmp_path_factory: pytest.TempPathFactory) -> dict[str, Path]:
-    output = tmp_path_factory.mktemp("apicredits-wheels")
-    projects = {
-        "domain": (
-            APICREDITS,
-            "arkhai_apicredits_domain-*.whl",
-        ),
-        "buyer": (
-            APICREDITS / "buyer",
-            "arkhai_apicredits_buyer-*.whl",
-        ),
-        "storefront": (
-            APICREDITS / "storefront",
-            "arkhai_apicredits_storefront-*.whl",
-        ),
-        "vms_storefront": (
-            REPO / "domains" / "vms" / "storefront",
-            "arkhai_vms_storefront-*.whl",
-        ),
-        "bare_metal_storefront": (
-            REPO / "domains" / "bare_metal" / "storefront",
-            "arkhai_bare_metal_storefront-*.whl",
-        ),
-        "service": (
-            APICREDITS / "service",
-            "arkhai_apicredits_service-*.whl",
-        ),
-        "core": (REPO / "core", "arkhai_core-*.whl"),
-        "core_storefront": (
-            REPO / "core" / "storefront",
-            "arkhai_core_storefront-*.whl",
-        ),
-        "core_registry_client": (
-            REPO / "core" / "registry-client",
-            "arkhai_core_registry_client-*.whl",
-        ),
-        "policy": (REPO / "kit" / "policy", "arkhai_kit_policy-*.whl"),
-        "alkahest": (REPO / "kit" / "alkahest", "arkhai_kit_alkahest-*.whl"),
-        "identity": (REPO / "kit" / "identity", "arkhai_kit_identity-*.whl"),
-        "capacity_publication": (
-            REPO / "kit" / "capacity-publication",
-            "arkhai_kit_capacity_publication-*.whl",
-        ),
-        "storefront_kit": (
-            REPO / "kit" / "storefront",
-            "arkhai_kit_storefront-*.whl",
-        ),
-        "config": (REPO / "kit" / "config", "arkhai_kit_config-*.whl"),
-        "site": (REPO / "kit" / "site", "arkhai_kit_site-*.whl"),
-        "site_client": (REPO / "kit" / "site-client", "arkhai_kit_site_client-*.whl"),
-        "settlement_runtime": (
-            REPO / "kit" / "settlement-runtime",
-            "arkhai_kit_settlement_runtime-*.whl",
-        ),
-        "hosted_settlement": (
-            REPO / "kit" / "hosted-settlement",
-            "arkhai_kit_hosted_settlement-*.whl",
-        ),
-        "resource_pools": (
-            REPO / "kit" / "resource-pools",
-            "arkhai_kit_resource_pools-*.whl",
-        ),
-        "negotiation_runtime": (
-            REPO / "kit" / "negotiation-runtime",
-            "arkhai_kit_negotiation_runtime-*.whl",
-        ),
-    }
-    built: dict[str, Path] = {}
-    for name, (project, pattern) in projects.items():
-        subprocess.run(
-            ["uv", "build", "--wheel", "--out-dir", str(output)],
-            cwd=project,
-            check=True,
-            capture_output=True,
-            text=True,
-        )
-        matches = sorted(output.glob(pattern))
-        assert len(matches) == 1
-        built[name] = matches[0]
-    # The version follows the pin rather than being spelled again here, where
-    # nothing would keep it in step with the package that actually declares it.
-    pinned = re.search(
-        r'arkhai-hosted-settlement-client==([0-9]+\.[0-9]+\.[0-9]+)',
-        (REPO / "kit" / "hosted-settlement" / "pyproject.toml").read_text(
-            encoding="utf-8"
-        ),
-    )
-    assert pinned is not None
-    hosted_clients = sorted(
-        (REPO / ".dist").glob(
-            f"arkhai_hosted_settlement_client-{pinned.group(1)}-py3-none-any.whl"
-        )
-    )
-    assert len(hosted_clients) == 1
-    shutil.copy2(hosted_clients[0], output / hosted_clients[0].name)
-    return built
-
-
-def _members(wheel: Path) -> set[str]:
-    with zipfile.ZipFile(wheel) as archive:
-        return set(archive.namelist())
-
-
-def _metadata(wheel: Path) -> str:
-    with zipfile.ZipFile(wheel) as archive:
-        metadata_name = next(
-            name for name in archive.namelist() if name.endswith(".dist-info/METADATA")
-        )
-        return archive.read(metadata_name).decode()
 
 
 def test_domain_wheel_owns_shared_concepts(wheels: dict[str, Path]) -> None:
@@ -225,163 +124,3 @@ def test_storefront_wheel_exports_contract_constant(
     ) in entry_points
 
 
-def test_domain_contract_imports_from_built_wheel(
-    wheels: dict[str, Path],
-) -> None:
-    venv = wheels["domain"].parent / "venv"
-    subprocess.run(
-        ["uv", "venv", str(venv)],
-        check=True,
-        capture_output=True,
-        text=True,
-    )
-    python = venv / ("Scripts/python.exe" if sys.platform == "win32" else "bin/python")
-    subprocess.run(
-        [
-            "uv",
-            "pip",
-            "install",
-            "--python",
-            str(python),
-            "--find-links",
-            str(wheels["domain"].parent),
-            str(wheels["domain"]),
-        ],
-        check=True,
-        capture_output=True,
-        text=True,
-    )
-    code = """
-from pathlib import Path
-from domains.apicredits import domain_runtime
-contract = domain_runtime.market_domain()
-module_path = Path(domain_runtime.__file__).resolve()
-assert contract.identity == "api_credits.v1"
-assert "site-packages" in module_path.parts
-"""
-    subprocess.run(
-        [str(python), "-I", "-c", code],
-        cwd=wheels["domain"].parent,
-        check=True,
-        capture_output=True,
-        text=True,
-    )
-
-
-def test_service_schema_module_imports_from_built_wheel(
-    wheels: dict[str, Path],
-) -> None:
-    """The service wheel installs controllers/db/middleware/models/services
-    as flat top-level packages (no wrapping arkhai_apicredits_service
-    package name, confirmed by inspecting the built wheel's own file
-    list) -- this is the one package in this file that previously had no
-    real-install-and-import coverage at all, unlike domain's existing
-    test above.
-    """
-    venv = wheels["service"].parent / "venv-service"
-    subprocess.run(
-        ["uv", "venv", str(venv)],
-        check=True,
-        capture_output=True,
-        text=True,
-    )
-    python = venv / ("Scripts/python.exe" if sys.platform == "win32" else "bin/python")
-    subprocess.run(
-        [
-            "uv",
-            "pip",
-            "install",
-            "--python",
-            str(python),
-            "--find-links",
-            str(wheels["service"].parent),
-            str(wheels["service"]),
-        ],
-        check=True,
-        capture_output=True,
-        text=True,
-    )
-    code = """
-from pathlib import Path
-from db import models
-module_path = Path(models.__file__).resolve()
-assert hasattr(models, "ApiKey")
-assert hasattr(models, "CreditGrant")
-assert hasattr(models, "ConsumptionEvent")
-assert "site-packages" in module_path.parts
-"""
-    subprocess.run(
-        [str(python), "-I", "-c", code],
-        cwd=wheels["service"].parent,
-        check=True,
-        capture_output=True,
-        text=True,
-    )
-
-
-def test_storefront_domain_imports_resolve_without_a_raw_source_copy(
-    wheels: dict[str, Path],
-) -> None:
-    """Simulates the storefront Docker runtime stage's actual condition:
-    only the storefront's own src/ tree present (as ``COPY .../src ./src``
-    puts there) plus the installed wheels -- deliberately no raw
-    ``domains/`` source copy, unlike the Dockerfile's previous
-    (now-removed) ``COPY domains/ ./domains/`` step. Every
-    ``domains.apicredits.*`` module the storefront package's own code
-    actually imports must resolve from the installed
-    ``arkhai-apicredits-domain`` wheel with nothing else on the path to
-    fall back to.
-    """
-    venv = wheels["storefront"].parent / "venv-storefront-runtime"
-    subprocess.run(
-        ["uv", "venv", str(venv)], check=True, capture_output=True, text=True
-    )
-    python = venv / ("Scripts/python.exe" if sys.platform == "win32" else "bin/python")
-    subprocess.run(
-        [
-            "uv",
-            "pip",
-            "install",
-            "--python",
-            str(python),
-            "--find-links",
-            str(wheels["storefront"].parent),
-            str(wheels["domain"]),
-            str(wheels["storefront"]),
-        ],
-        check=True,
-        capture_output=True,
-        text=True,
-    )
-
-    runtime_root = wheels["storefront"].parent / "simulated-runtime"
-    (runtime_root / "src").mkdir(parents=True)
-    for item in (APICREDITS / "storefront" / "src").iterdir():
-        dest = runtime_root / "src" / item.name
-        if item.is_dir():
-            shutil.copytree(item, dest)
-        else:
-            shutil.copy2(item, dest)
-
-    code = """
-import importlib
-for name in (
-    "domains.apicredits.domain_runtime",
-    "domains.apicredits.negotiation.storefront_round",
-    "domains.apicredits.listings.models",
-    "domains.apicredits.listings.pricing",
-    "domains.apicredits.listings.reconciler",
-    "domains.apicredits.negotiation.terms",
-    "domains.apicredits.settlement",
-):
-    mod = importlib.import_module(name)
-    assert "site-packages" in mod.__file__, (name, mod.__file__)
-"""
-    subprocess.run(
-        [str(python), "-I", "-c", code],
-        cwd=runtime_root,
-        env={"PYTHONPATH": str(runtime_root / "src")},
-        check=True,
-        capture_output=True,
-        text=True,
-    )

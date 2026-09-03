@@ -33,6 +33,7 @@ calls into.
 
 from __future__ import annotations
 
+import uuid
 from typing import Any
 
 import httpx
@@ -41,7 +42,13 @@ from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
 
 from compute_provisioning_service import container as _container_module
+from compute_provisioning import (
+    ComputeProvisioningClient,
+    ComputeProvisioningError,
+    FulfillmentRequestBody,
+)
 from compute_provisioning_service.main import app
+from .conftest import SERVICE_AUTHORITIES, STOREFRONT_SIGNER
 from market_fulfillment import (
     PhysicalSettlementRequest,
     SettlementRepository,
@@ -62,36 +69,56 @@ app.include_router(
 
 
 class FulfillmentApi:
-    """Typed helper over the fulfillment endpoints (no raw HTTP in tests)."""
+    """Call-shape adapter over the canonical `ComputeProvisioningClient`.
 
-    def __init__(self, client: AsyncClient) -> None:
+    Every request below goes through the client production code uses. That is
+    the point: a helper that built its own request bodies would prove the
+    server accepts *those* bodies, and could then drift from the shipped client
+    indefinitely while staying green — the failure `TESTING.md` names.
+
+    What remains here is argument shape and unwrapping, so the 26 call sites in
+    this file read as they did. Two methods still take the raw transport, and
+    say why at their definitions.
+    """
+
+    def __init__(self, client: ComputeProvisioningClient, http: AsyncClient) -> None:
         self._client = client
+        self._http = http
+
+    @staticmethod
+    def _body(capacity_reservation_id: str, market: str, fulfillment_request: dict):
+        return FulfillmentRequestBody(
+            capacity_reservation_id=capacity_reservation_id,
+            market=market,
+            fulfillment_request=fulfillment_request,
+        )
 
     async def validate(
         self, capacity_reservation_id: str, market: str, fulfillment_request: dict
     ) -> dict:
-        resp = await self._client.post(
-            "/api/v1/fulfillment/validate",
-            json={
-                "capacity_reservation_id": capacity_reservation_id,
-                "market": market,
-                "fulfillment_request": fulfillment_request,
-            },
+        response = await self._client.validate_fulfillment(
+            self._body(capacity_reservation_id, market, fulfillment_request)
         )
-        assert resp.status_code == 200, resp.text
-        return resp.json()
+        return response.model_dump(mode="json")
 
     async def begin(
         self, capacity_reservation_id: str, market: str, fulfillment_request: dict
     ) -> dict:
-        resp = await self.begin_raw(capacity_reservation_id, market, fulfillment_request)
-        assert resp.status_code == 200, resp.text
-        return resp.json()
+        response = await self._client.begin_fulfillment(
+            self._body(capacity_reservation_id, market, fulfillment_request)
+        )
+        return response.model_dump(mode="json")
 
     async def begin_raw(
         self, capacity_reservation_id: str, market: str, fulfillment_request: dict
     ) -> httpx.Response:
-        return await self._client.post(
+        """Raw, because the caller asserts on a rejection status code.
+
+        A typed client raises on those rather than returning them, so the
+        status code itself is unobservable through it. This is the
+        error-path exception `TESTING.md` allows, not a convenience.
+        """
+        return await self._http.post(
             "/api/v1/fulfillment/begin",
             json={
                 "capacity_reservation_id": capacity_reservation_id,
@@ -101,15 +128,17 @@ class FulfillmentApi:
         )
 
     async def get_job(self, job_id: str) -> dict:
-        resp = await self._client.get(f"/api/v1/jobs/{job_id}/contract")
+        resp = await self._http.get(f"/api/v1/jobs/{job_id}/contract")
         assert resp.status_code == 200, resp.text
         return resp.json()
 
     async def status(self, fulfillment_id: str) -> httpx.Response:
-        return await self._client.get(f"/api/v1/fulfillment/{fulfillment_id}/status")
+        """Raw for the same reason as `begin_raw`: callers assert 404."""
+        return await self._http.get(f"/api/v1/fulfillment/{fulfillment_id}/status")
 
     async def result(self, fulfillment_id: str) -> httpx.Response:
-        return await self._client.get(f"/api/v1/fulfillment/{fulfillment_id}/result")
+        """Raw for the same reason as `begin_raw`."""
+        return await self._http.get(f"/api/v1/fulfillment/{fulfillment_id}/result")
 
     async def schedule(
         self,
@@ -119,7 +148,8 @@ class FulfillmentApi:
         requirements: dict[str, Any] | None = None,
         resource_id: str | None = None,
     ) -> httpx.Response:
-        return await self._client.post(
+        """Raw: callers assert both success and rejection status codes."""
+        return await self._http.post(
             "/api/v1/fulfillment/schedule",
             json={
                 "capacity_reservation_id": capacity_reservation_id,
@@ -134,7 +164,14 @@ class FulfillmentApi:
 async def fulfillment(client_and_queue) -> FulfillmentApi:
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as http:
-        yield FulfillmentApi(http)
+        async with ComputeProvisioningClient(
+            "http://test",
+            signer=STOREFRONT_SIGNER,
+            caller_role="seller",
+            expected_authorities=SERVICE_AUTHORITIES,
+            transport=transport,
+        ) as client:
+            yield FulfillmentApi(client, http)
 
 
 def _fulfillment_request(**overrides: Any) -> dict:
@@ -303,10 +340,17 @@ class TestBeginPersistsPreparedCreateInput:
 
         # A conflicting retry (different requirements) is rejected rather
         # than silently redispatched or overwriting the accepted request.
-        with pytest.raises(AssertionError):
+        #
+        # Named as the service's own rejection. This previously expected an
+        # AssertionError — which came from the test helper's internal status
+        # check, not from the service, and would equally have been raised by
+        # any other non-200. Going through the canonical client means the
+        # rejection itself is what is asserted.
+        with pytest.raises(ComputeProvisioningError) as excinfo:
             await fulfillment.begin(
                 capacity_reservation_id, "vms", _fulfillment_request(vm_ram=16384)
             )
+        assert "fulfillment_conflict" in str(excinfo.value)
 
         with session_factory() as db:
             record = SettlementRepository().get(db, capacity_reservation_id)
@@ -737,3 +781,121 @@ class TestScheduleEndpoint:
         )
         assert resp.status_code == 404
         assert resp.json()["detail"]["code"] == "fulfillment_not_found"
+
+
+class TestRelayPortLifecycleOverTheApi:
+    """Allocation and release across the real fulfillment API.
+
+    The allocator's primitives and the convergence wiring are covered at the
+    service level. What this adds is the whole path in one place: a relay
+    registered through its controller, a pool pointing at it, a fulfillment
+    accepted over HTTP, and a lease that exists afterwards and not before.
+
+    A lease is a durable claim on a finite window, so the two properties worth
+    driving end to end are that asking a question does not take one and that
+    accepting twice does not take two.
+    """
+
+    async def _relay_backed_reservation(self, pool_id: str) -> str:
+        """A registered relay, a pool pointing at it, and a scheduled
+        reservation on that pool.
+
+        The pool is created by `_scheduled_reservation`, so this points it at
+        the relay afterwards rather than creating it first — two creations of
+        one pool is a conflict, not a race.
+        """
+        from compute_provisioning_service import container as _container_module
+        from compute_provisioning_service.services.relay_service import RelayService
+
+        relays: RelayService = _container_module.resolved_relay_service
+        # The container outlives a single test in this module, and relays live
+        # in a table the pool fixture does not reset.
+        if not any(r.id == "site-a" for r in relays.list_relays()):
+            relays.create_relay(
+                relay_id="site-a",
+                relay_addr="203.0.113.9",
+                relay_port=7000,
+                vm_port_range_start=6100,
+                vm_port_range_count=100,
+                token="admission-token",
+            )
+
+        capacity_reservation_id = await _scheduled_reservation(pool_id=pool_id)
+
+        pools = _container_module.resolved_resource_pool_service
+        pools.update_pool(
+            pool_id,
+            PoolUpdate(
+                provider_config={**_PROVIDER_CONFIG, "relay_id": "site-a"}
+            ),
+        )
+        return capacity_reservation_id
+
+    @staticmethod
+    def _held_ports() -> list[int]:
+        from compute_provisioning_service import container as _container_module
+
+        allocator = _container_module.resolved_relay_port_allocator
+        return allocator.held_ports("site-a")
+
+    async def test_validation_takes_no_port(self, fulfillment: FulfillmentApi):
+        """Repeated, because the failure mode is cumulative: a caller that only
+        ever asks would otherwise drain a finite window without ever receiving
+        a VM."""
+        capacity_reservation_id = await self._relay_backed_reservation(
+            f"relay-pool-{uuid.uuid4().hex[:8]}"
+        )
+
+        for _ in range(3):
+            result = await fulfillment.validate(
+                capacity_reservation_id, "vms", _fulfillment_request()
+            )
+            assert result["valid"] is True, result
+
+        assert self._held_ports() == []
+
+    async def test_acceptance_takes_exactly_one_port(
+        self, fulfillment: FulfillmentApi
+    ):
+        capacity_reservation_id = await self._relay_backed_reservation(
+            f"relay-pool-{uuid.uuid4().hex[:8]}"
+        )
+
+        await fulfillment.begin(capacity_reservation_id, "vms", _fulfillment_request())
+
+        held = self._held_ports()
+        assert len(held) == 1
+        assert 6100 <= held[0] <= 6199
+
+    async def test_an_equivalent_retry_takes_no_second_port(
+        self, fulfillment: FulfillmentApi
+    ):
+        """An accepted fulfillment retried is the same fulfillment. Two ports
+        for one VM would leave the first orphaned until reconciliation."""
+        capacity_reservation_id = await self._relay_backed_reservation(
+            f"relay-pool-{uuid.uuid4().hex[:8]}"
+        )
+
+        first = await fulfillment.begin(
+            capacity_reservation_id, "vms", _fulfillment_request()
+        )
+        second = await fulfillment.begin(
+            capacity_reservation_id, "vms", _fulfillment_request()
+        )
+
+        assert first["fulfillment_id"] == second["fulfillment_id"]
+        assert len(self._held_ports()) == 1
+
+    async def test_a_direct_nat_pool_takes_no_port(self, fulfillment: FulfillmentApi):
+        """A deployment with no relay is a supported state, not a degraded one."""
+        capacity_reservation_id = await _scheduled_reservation()
+
+        await fulfillment.begin(capacity_reservation_id, "vms", _fulfillment_request())
+
+        from compute_provisioning_service import container as _container_module
+        from compute_provisioning_service.db.models import RelayPortLease
+
+        session_factory = _container_module.resolved_session_factory
+        with session_factory() as db:
+            assert db.query(RelayPortLease).count() == 0
+

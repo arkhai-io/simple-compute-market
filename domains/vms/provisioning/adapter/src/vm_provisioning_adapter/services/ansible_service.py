@@ -44,6 +44,7 @@ from vm_provisioning_adapter.models.ansible import (
     InventoryResponse,
 )
 from vm_provisioning_adapter.models.jobs_model import AnsibleJobParams, AnsibleRunResult
+from market_config import decrypt_secret
 
 logger = logging.getLogger(__name__)
 
@@ -76,12 +77,22 @@ def redact_ansible_output(text: str) -> str:
     if not text:
         return text
     redacted = re.sub(
-        r'(\\?"(?:password|ssh_key_path_host)\\?":\s*)\\?"[^"\\]*\\?"',
+        r'(\\?"(?:password|ssh_key_path_host|frp_auth_token)\\?":\s*)\\?"[^"\\]*\\?"',
         r'\1"[REDACTED]"',
         text,
     )
     redacted = re.sub(
         r"(password:\s*)(?!\[REDACTED\]).+",
+        r"\1[REDACTED]",
+        redacted,
+    )
+    # A relay's admission token is a credential of the same class as the two
+    # above. It reaches this function through the same route: the extra-vars
+    # file is rendered into a command line, and json-output.yml echoes facts by
+    # design. Matching the bare YAML form as well, since that is what a
+    # ``debug: var:`` task produces.
+    redacted = re.sub(
+        r"(frp_auth_token:\s*)(?!\[REDACTED\]).+",
         r"\1[REDACTED]",
         redacted,
     )
@@ -347,9 +358,8 @@ class AnsibleService:
                 key_ref = host.ssh_key_value
             else:
                 # Decrypt and write a companion temp key file
-                from vm_provisioning_adapter.crypto import decrypt_key
                 secret = getattr(self._settings, "ssh_decryption_key", "")
-                plaintext = decrypt_key(host.ssh_key_value, secret)
+                plaintext = decrypt_secret(host.ssh_key_value, secret)
                 key_file = _Path(tempfile.gettempdir()) / f"{host.name}_key_{nonce}"
                 key_file.write_text(plaintext, encoding="utf-8")
                 key_file.chmod(0o400)
@@ -363,10 +373,16 @@ class AnsibleService:
                 if getattr(host, "public_host", None)
                 else ""
             )
+            # ansible_port is emitted for every host, matching
+            # HostService.render_inventory_ini. These are two renderings of
+            # the same registry row and must not drift: a host that connects
+            # differently depending on which path built its inventory is a
+            # defect that only appears on one code path.
             lines.append(
                 f"{host.name}"
                 f"  ansible_host={host.kvm_host}"
                 f"{public_seg}"
+                f"  ansible_port={host.ssh_port}"
                 f"  ansible_user={host.ssh_user}"
                 f"  ansible_ssh_private_key_file={key_ref}"
             )
@@ -438,12 +454,19 @@ class AnsibleService:
             lines.append(f"vm_gpu_devices: {json.dumps(params.vm_gpu_devices)}")
         if params.vm_gpu_partition_size:
             lines.append(f'vm_gpu_partition_size: "{params.vm_gpu_partition_size}"')
-        if params.frp_server_addr:
-            lines.append(f'frp_server_addr: "{params.frp_server_addr}"')
-        if params.frp_domain:
-            lines.append(f'frp_domain: "{params.frp_domain}"')
-        if params.frp_dashboard_password:
-            lines.append(f'frp_dashboard_password: "{params.frp_dashboard_password}"')
+        # Relay inputs. The token is a credential and reaches the playbook the
+        # same way every other job variable does; the redaction pattern above
+        # is what keeps it out of logged command lines. The remote port is
+        # supplied, never chosen: allocation belongs to the service, which is
+        # also what can reclaim it when the VM's life ends by any path.
+        if params.relay_addr:
+            lines.append(f'frp_server_addr: "{params.relay_addr}"')
+        if params.relay_port:
+            lines.append(f"frp_server_port: {params.relay_port}")
+        if params.relay_token:
+            lines.append(f'frp_auth_token: "{params.relay_token}"')
+        if params.vm_remote_port:
+            lines.append(f"vm_remote_port: {params.vm_remote_port}")
         if params.golden_image_name:
             lines.append(f"golden_image_name: {params.golden_image_name}")
         if params.gcs_bucket_url:

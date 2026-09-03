@@ -447,6 +447,7 @@ def test_run_migrations_applies_versioned_migrations_to_old_sqlite_schema():
         "20260804_001_hosts_gpu_model",
         "20260811_001_provisioning_replay_reservations",
         "20260815_001_pool_declared_offering_modes",
+        "20260901_001_relay_reachable_hosts",
     }
 
 
@@ -506,7 +507,7 @@ def test_run_migrations_is_idempotent():
         migration_count = connection.execute(
             text("SELECT COUNT(*) FROM schema_migrations")
         ).scalar_one()
-    assert migration_count == 15
+    assert migration_count == 16
 
 
 # ---------------------------------------------------------------------------

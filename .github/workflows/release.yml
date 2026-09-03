@@ -65,7 +65,7 @@ jobs:
         run: |
           set -euo pipefail
           make dist-clean
-          make dist HOSTED_RELEASE_DIR="$GITHUB_WORKSPACE/.hosted-release"
+          make dist-release HOSTED_RELEASE_DIR="$GITHUB_WORKSPACE/.hosted-release"
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3

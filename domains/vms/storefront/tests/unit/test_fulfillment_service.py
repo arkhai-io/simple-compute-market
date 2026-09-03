@@ -491,8 +491,6 @@ async def test_do_provision_end_to_end_delivers_credentials_for_storage(
             poll_interval=0.001,
             service_url="http://provisioning",
             frp_server_addr="",
-            frp_domain="",
-            frp_dashboard_password="",
         ),
         raising=False,
     )
@@ -621,7 +619,6 @@ async def test_do_provision_result_fetch_is_safe_to_repeat(client, monkeypatch):
         "provisioning",
         SimpleNamespace(
             timeout=5.0, poll_interval=0.001, service_url="http://provisioning",
-            frp_server_addr="", frp_domain="", frp_dashboard_password="",
         ),
         raising=False,
     )

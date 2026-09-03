@@ -9,6 +9,7 @@ validate-playbooks:
 	ANSIBLE_CONFIG=ansible/ansible.cfg ansible-playbook -i ansible/inventory/hosts ansible/playbooks/frp/frp-server-setup.yaml --syntax-check
 	ANSIBLE_CONFIG=ansible/ansible.cfg ansible-playbook -i ansible/inventory/hosts ansible/playbooks/frp/docker-app-setup.yaml --syntax-check
 	ANSIBLE_CONFIG=ansible/ansible.cfg ansible-playbook -i ansible/inventory/hosts ansible/playbooks/host-kit/vm-setup.yaml --syntax-check
+	ANSIBLE_CONFIG=ansible/ansible.cfg ansible-playbook -i ansible/inventory/hosts ansible/playbooks/host-kit/passthrough-audit.yaml --syntax-check
 	ANSIBLE_CONFIG=ansible/ansible.cfg ansible-playbook -i ansible/inventory/hosts ansible/playbooks/single-tenant/vm-operations.yaml --syntax-check
 
 # uv-managed venv + pytest, consistent with every other package's test

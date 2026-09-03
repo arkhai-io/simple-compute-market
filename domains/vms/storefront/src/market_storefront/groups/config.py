@@ -448,9 +448,6 @@ _INIT_USER_TEMPLATE = """\
 # poll_interval = 15
 # preflight_timeout = 30                        # how long startup waits for /health to come up
 # fail_on_unreachable = true                    # set false in dev when service comes up later
-# frp_server_addr = ""
-# frp_domain = ""
-# frp_dashboard_password = ""
 # Public response authority overlap for the provisioning service:
 # [provisioning.identity]
 # principals = [

@@ -1,0 +1,198 @@
+{
+  "_comment": "Every distribution this repository publishes, in dependency order. One declaration read by every publication path: the registry push and the public index workflow both derive their set from here, because two lists kept in agreement by hand diverge silently and the copy that diverges is discovered by consumers. Order matters -- a distribution must appear after everything it depends on.",
+  "distributions": [
+    {
+      "key": "kit-alkahest",
+      "path": "kit/alkahest",
+      "dist": "arkhai-kit-alkahest"
+    },
+    {
+      "key": "kit-config",
+      "path": "kit/config",
+      "dist": "arkhai-kit-config"
+    },
+    {
+      "key": "kit-identity",
+      "path": "kit/identity",
+      "dist": "arkhai-kit-identity"
+    },
+    {
+      "key": "kit-policy",
+      "path": "kit/policy",
+      "dist": "arkhai-kit-policy"
+    },
+    {
+      "key": "kit-settlement-runtime",
+      "path": "kit/settlement-runtime",
+      "dist": "arkhai-kit-settlement-runtime"
+    },
+    {
+      "key": "kit-negotiation-runtime",
+      "path": "kit/negotiation-runtime",
+      "dist": "arkhai-kit-negotiation-runtime"
+    },
+    {
+      "key": "kit-hosted-settlement",
+      "path": "kit/hosted-settlement",
+      "dist": "arkhai-kit-hosted-settlement"
+    },
+    {
+      "key": "core",
+      "path": "core",
+      "dist": "arkhai-core"
+    },
+    {
+      "key": "core-buyer",
+      "path": "core/buyer",
+      "dist": "arkhai-core-buyer"
+    },
+    {
+      "key": "core-storefront",
+      "path": "core/storefront",
+      "dist": "arkhai-core-storefront"
+    },
+    {
+      "key": "core-storefront-client",
+      "path": "core/storefront-client",
+      "dist": "arkhai-core-storefront-client"
+    },
+    {
+      "key": "core-registry-client",
+      "path": "core/registry-client",
+      "dist": "arkhai-core-registry-client"
+    },
+    {
+      "key": "core-registry",
+      "path": "core/registry",
+      "dist": "arkhai-core-registry"
+    },
+    {
+      "key": "kit-site",
+      "path": "kit/site",
+      "dist": "arkhai-kit-site"
+    },
+    {
+      "key": "kit-site-client",
+      "path": "kit/site-client",
+      "dist": "arkhai-kit-site-client"
+    },
+    {
+      "key": "kit-capacity-publication",
+      "path": "kit/capacity-publication",
+      "dist": "arkhai-kit-capacity-publication"
+    },
+    {
+      "key": "kit-contact-exchange",
+      "path": "kit/contact-exchange",
+      "dist": "arkhai-kit-contact-exchange"
+    },
+    {
+      "key": "kit-delivery",
+      "path": "kit/delivery",
+      "dist": "arkhai-kit-delivery"
+    },
+    {
+      "key": "kit-fulfillment",
+      "path": "kit/fulfillment",
+      "dist": "arkhai-kit-fulfillment"
+    },
+    {
+      "key": "kit-resource-pools",
+      "path": "kit/resource-pools",
+      "dist": "arkhai-kit-resource-pools"
+    },
+    {
+      "key": "kit-storefront",
+      "path": "kit/storefront",
+      "dist": "arkhai-kit-storefront"
+    },
+    {
+      "key": "bare-metal",
+      "path": "domains/bare_metal",
+      "dist": "arkhai-bare-metal"
+    },
+    {
+      "key": "bare-metal-storefront",
+      "path": "domains/bare_metal/storefront",
+      "dist": "arkhai-bare-metal-storefront"
+    },
+    {
+      "key": "bare-metal-provisioning-adapter",
+      "path": "domains/bare_metal/provisioning/adapter",
+      "dist": "arkhai-bare-metal-provisioning-adapter"
+    },
+    {
+      "key": "vms",
+      "path": "domains/vms/domain",
+      "dist": "arkhai-vms"
+    },
+    {
+      "key": "vms-buyer",
+      "path": "domains/vms/buyer",
+      "dist": "arkhai-vms-buyer",
+      "wheel_only": true
+    },
+    {
+      "key": "vms-provisioning-adapter",
+      "path": "domains/vms/provisioning/adapter",
+      "dist": "arkhai-vms-provisioning-adapter"
+    },
+    {
+      "key": "compute-provisioning-service",
+      "path": "provisioning/compute/service",
+      "dist": "arkhai-compute-provisioning-service"
+    },
+    {
+      "key": "vms-storefront",
+      "path": "domains/vms/storefront",
+      "dist": "arkhai-vms-storefront",
+      "wheel_only": true
+    },
+    {
+      "key": "apicredits-domain",
+      "path": "domains/apicredits",
+      "dist": "arkhai-apicredits-domain"
+    },
+    {
+      "key": "apicredits-buyer",
+      "path": "domains/apicredits/buyer",
+      "dist": "arkhai-apicredits-buyer",
+      "wheel_only": true
+    },
+    {
+      "key": "apicredits-middleware",
+      "path": "domains/apicredits/middleware/python",
+      "dist": "arkhai-apicredits-middleware"
+    },
+    {
+      "key": "apicredits-storefront",
+      "path": "domains/apicredits/storefront",
+      "dist": "arkhai-apicredits-storefront"
+    },
+    {
+      "key": "apicredits-service",
+      "path": "domains/apicredits/service",
+      "dist": "arkhai-apicredits-service"
+    },
+    {
+      "key": "vms-provisioning-operator-client",
+      "path": "domains/vms/provisioning/client",
+      "dist": "arkhai-vms-provisioning-operator-client"
+    },
+    {
+      "key": "compute-provisioning",
+      "path": "provisioning/compute",
+      "dist": "arkhai-compute-provisioning"
+    },
+    {
+      "key": "bare-metal-buyer",
+      "path": "domains/bare_metal/buyer",
+      "dist": "arkhai-bare-metal-buyer"
+    },
+    {
+      "key": "apicredits-sample-app",
+      "path": "domains/apicredits/sample-app",
+      "dist": "arkhai-apicredits-sample-app"
+    }
+  ]
+}

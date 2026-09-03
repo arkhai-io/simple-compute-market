@@ -59,9 +59,96 @@ class AnsibleFulfillmentProvider(FulfillmentProvider):
         *,
         job_service: "AnsibleJobService",
         job_queue_provider: Callable[[], "AsyncJobQueue"],
+        port_allocator: Any | None = None,
     ) -> None:
         self._job_service = job_service
         self._job_queue_provider = job_queue_provider
+        # Optional so a pool with no relay — the direct-NAT path — needs no
+        # allocator at all. A pool that does reference a relay and finds no
+        # allocator is rejected rather than dispatched without a port.
+        self._port_allocator = port_allocator
+
+    @staticmethod
+    def _validate_access_path(config: AnsiblePoolConfig) -> bool:
+        """Decide which access path this pool selects, refusing to select none.
+
+        Exactly one of two paths must apply: direct NAT for a pool with no
+        relay, or a relay tunnel for a pool with one. The failure this replaces
+        was a configuration satisfying neither, which produced a VM with no
+        external route and reported success.
+
+        Every check here is answerable from configuration before any host is
+        touched, and each names what is missing. A rejection reading only
+        "misconfigured" would reproduce the diagnostic problem this change
+        exists to remove — a relay refusing a proxy asynchronously in a log.
+        """
+        if not config.relay_id:
+            return False
+
+        missing = [
+            name
+            for name, value in (
+                ("relay address", config.relay_addr),
+                ("port window start", config.vm_port_range_start),
+                ("port window size", config.vm_port_range_count),
+                ("admission token", config.relay_token),
+            )
+            if not value
+        ]
+        if missing:
+            raise ProviderConfigInvalidError(
+                f"pool references relay {config.relay_id!r}, but the relay is "
+                f"unusable: no {', no '.join(missing)}. A relay that is disabled, "
+                "has no allocation window, or has no token configured cannot "
+                "carry a VM tunnel, and a VM created against it would have no "
+                "external route."
+            )
+        return True
+
+    def _leased_relay_id(self, capacity_reservation_id: str) -> str | None:
+        """The relay this fulfillment's port was leased on, if any.
+
+        Returns None for a direct-NAT VM and for a lease already released, both
+        of which mean there is no relay work left to do at teardown.
+        """
+        if self._port_allocator is None:
+            return None
+        lease = self._port_allocator.find_active_lease(
+            owner_kind="fulfillment", owner_id=capacity_reservation_id
+        )
+        return None if lease is None else lease.relay_id
+
+    def _lease_remote_port(
+        self,
+        *,
+        config: AnsiblePoolConfig,
+        capacity_reservation_id: str,
+        vm_host: str,
+        pool_id: str | None,
+    ) -> int:
+        """Lease a remote port on the relay this pool references.
+
+        ``pool_id`` is recorded on the lease and is not decoration: the rule
+        refusing a pool repoint while its hosts hold tunnels finds those
+        tunnels by pool, so a lease without one leaves that rule unable to see
+        anything and silently permissive.
+        """
+        if self._port_allocator is None:
+            raise ProviderConfigInvalidError(
+                f"pool references relay {config.relay_id!r} but this provider was "
+                "built without a port allocator, so no remote port can be leased"
+            )
+        try:
+            lease = self._port_allocator.allocate(
+                relay_id=config.relay_id,
+                owner_kind="fulfillment",
+                owner_id=capacity_reservation_id,
+                host_name=vm_host,
+                pool_id=pool_id,
+            )
+        except Exception as exc:
+            raise ProviderConfigInvalidError(str(exc)) from exc
+        return lease.remote_port
 
     @staticmethod
     def _pool_config(pool_config: dict[str, Any]) -> AnsiblePoolConfig:
@@ -110,7 +197,14 @@ class AnsibleFulfillmentProvider(FulfillmentProvider):
         request: VersionedEnvelope[Any],
         resource: SettlementResource,
         pool_config: dict[str, Any],
+        allocate: bool = True,
     ) -> VersionedEnvelope[Any]:
+        """Build the accepted operation for a VM creation.
+
+        ``allocate=False`` makes preparation a pure function of its inputs, for
+        the validation path: every rejection still happens, and no durable
+        state is written.
+        """
         try:
             requirements = VmFulfillmentRequirements.model_validate(request.payload)
         except Exception as exc:
@@ -127,9 +221,31 @@ class AnsibleFulfillmentProvider(FulfillmentProvider):
         derived = resolve_requirement_delegate(
             config.requirement_delegate
         ).translate(resource.dimensions)
-        connectivity = requirements.connectivity
+        vm_host = self._vm_host(resource)
+        # Checking which access path a pool selects is a pure read and belongs
+        # in preparation, where a misconfiguration is rejected before anything
+        # is written.
+        uses_relay = self._validate_access_path(config)
+        # Leasing is not. `validate_fulfillment` prepares in order to decide
+        # whether a request *would* be accepted, so allocating here would let a
+        # validation-only call consume a durable port — and repeated validation
+        # exhaust a finite window without a single accepted fulfillment.
+        #
+        # Still allocated before dispatch, just after acceptance rather than
+        # before it: a crash between allocation and dispatch must not leave a
+        # port bound on the relay that no record claims.
+        remote_port = (
+            self._lease_remote_port(
+                config=config,
+                capacity_reservation_id=capacity_reservation_id,
+                vm_host=vm_host,
+                pool_id=resource.pool_id,
+            )
+            if uses_relay and allocate
+            else None
+        )
         params = AnsibleJobParams(
-            vm_host=self._vm_host(resource),
+            vm_host=vm_host,
             vm_action="create",
             executor_kind=resource.executor_kind,
             vm_target=requirements.vm_target,
@@ -144,9 +260,11 @@ class AnsibleFulfillmentProvider(FulfillmentProvider):
             vm_gpu_device=requirements.vm_gpu_device,
             vm_gpu_devices=requirements.vm_gpu_devices,
             vm_gpu_partition_size=requirements.vm_gpu_partition_size,
-            frp_server_addr=connectivity.frp_server_addr if connectivity else None,
-            frp_domain=connectivity.frp_domain if connectivity else None,
-            frp_dashboard_password=connectivity.frp_dashboard_password if connectivity else None,
+            # The reference and the leased port, never the endpoint or the
+            # token: this becomes a persisted, readable snapshot. Resolution
+            # happens at execution — see services/relay_execution.py.
+            relay_id=config.relay_id if uses_relay else None,
+            vm_remote_port=remote_port,
             escrow_uid=capacity_reservation_id,
             playbook_path=config.playbook_path,
         )
@@ -220,6 +338,12 @@ class AnsibleFulfillmentProvider(FulfillmentProvider):
             ) from exc
 
         config = self._pool_config(pool_config)
+        # The relay comes from the lease, not from the pool. The pool may have
+        # been rebound since this VM was created, and the lease is the only
+        # record of where its port was actually bound — resolving from pool
+        # configuration would reload the wrong host client and release a port
+        # against a relay it never occupied.
+        relay_id = self._leased_relay_id(settlement_result.capacity_reservation_id)
         params = AnsibleJobParams(
             vm_host=metadata.vm_host,
             vm_action="vm_remove",
@@ -227,6 +351,7 @@ class AnsibleFulfillmentProvider(FulfillmentProvider):
             vm_target=metadata.vm_target,
             escrow_uid=settlement_result.capacity_reservation_id,
             playbook_path=config.playbook_path,
+            relay_id=relay_id,
         )
         self._validate_extra_vars(params, config.extra_vars)
         params = dataclasses.replace(params, provider_extra_vars=config.extra_vars)

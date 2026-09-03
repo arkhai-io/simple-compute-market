@@ -9,6 +9,12 @@ from typing import Any, Callable, Mapping
 from vm_provisioning_adapter.bundle import build_vm_adapter_bundle
 from vm_provisioning_adapter.compute_adapter import VmComputeAdapter
 from vm_provisioning_adapter.release import VmFulfillmentReleaseJobPort, VmReleaseExecutor
+from compute_provisioning_service.services.relay_port_allocator import (
+    RelayPortAllocator,
+)
+from compute_provisioning_service.services.relay_execution import (
+    RelayExecutionResolver,
+)
 from vm_provisioning_adapter.services.ansible_fulfillment_provider import (
     AnsibleFulfillmentProvider,
 )
@@ -42,6 +48,7 @@ class VmProvisioningRuntime:
         return AnsibleFulfillmentProvider(
             job_service=self.job_service,
             job_queue_provider=self.job_queue_provider,
+            port_allocator=RelayPortAllocator(self.session_factory),
         )
 
     def readiness(self) -> dict[str, bool]:
@@ -131,6 +138,9 @@ def build_vm_runtime(
         session_factory=session_factory,
         ansible_service=ansible_service,
         host_service=host_service,
+        relay_resolver=RelayExecutionResolver(
+            session_factory=session_factory, settings=config
+        ),
     )
     vm_operations_service = VmOperationsService(
         job_service=job_service,
@@ -142,7 +152,7 @@ def build_vm_runtime(
         job_queue_provider=job_queue_provider,
         ansible_service=ansible_service,
         host_service=host_service,
-        pool_config_handler=AnsiblePoolConfigHandler(),
+        pool_config_handler=AnsiblePoolConfigHandler(settings=config),
         job_service=job_service,
         vm_operations_service=vm_operations_service,
         host_operations_service=HostOperationsService(

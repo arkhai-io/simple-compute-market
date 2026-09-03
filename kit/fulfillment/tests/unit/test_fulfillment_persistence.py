@@ -26,16 +26,24 @@ def _record(**overrides):
     return SimpleNamespace(**values)
 
 
-def test_get_pool_uses_callers_session():
+def test_get_pool_uses_callers_session_and_the_execution_read():
+    """Dispatch needs provider secrets the redacted read withholds.
+
+    Asserting which read is used, not merely that a pool comes back: the two
+    differ only in whether credentials are present, so a call to the redacted
+    one would fail later, at the point a tunnel client is configured without a
+    token, rather than here.
+    """
     db = MagicMock()
     pool_service = MagicMock()
-    pool_service.get_pool_in_session.return_value = object()
+    pool_service.get_pool_for_execution.return_value = object()
     tx = SqlAlchemyFulfillmentTransaction(db, pool_service, MagicMock())
 
     result = tx.get_pool("pool-1")
 
-    pool_service.get_pool_in_session.assert_called_once_with(db, "pool-1")
-    assert result is pool_service.get_pool_in_session.return_value
+    pool_service.get_pool_for_execution.assert_called_once_with(db, "pool-1")
+    pool_service.get_pool_in_session.assert_not_called()
+    assert result is pool_service.get_pool_for_execution.return_value
 
 
 def test_identical_prepared_operation_is_idempotent():

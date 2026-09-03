@@ -1106,3 +1106,258 @@ async def test_run_cycle_emits_one_zero_value_diagnostics_event_when_empty(
         state["oldest_row_age_seconds"] is None
         for state in payload["per_state"].values()
     )
+
+
+# ---------------------------------------------------------------------------
+# Relay port leases and the terminal transition
+#
+# The allocator's release primitive is covered in test_relay_port_allocator.
+# What is asserted here is the thing that was missing when the primitive
+# existed and nothing called it: that reaching a terminal state is what
+# releases, through the convergence path rather than through a direct call.
+# ---------------------------------------------------------------------------
+
+
+def _relay_and_lease(session_factory, *, owner_id="cr-1", port=6100):
+    from compute_provisioning_service.db.models import Relay, RelayPortLease
+    from compute_provisioning_service.db.models import Base as ServiceBase
+
+    ServiceBase.metadata.create_all(session_factory.kw["bind"])
+    with session_factory() as db:
+        db.add(
+            Relay(
+                id="site-a",
+                relay_addr="10.0.0.9",
+                relay_port=7000,
+                vm_port_range_start=6100,
+                vm_port_range_count=100,
+            )
+        )
+        db.add(
+            RelayPortLease(
+                id=f"lease-{owner_id}",
+                relay_id="site-a",
+                remote_port=port,
+                host_name="kvm1",
+                owner_kind="fulfillment",
+                owner_id=owner_id,
+            )
+        )
+        db.commit()
+
+
+def _held(session_factory) -> list[int]:
+    from compute_provisioning_service.db.models import RelayPortLease
+
+    with session_factory() as db:
+        return sorted(
+            row.remote_port
+            for row in db.query(RelayPortLease)
+            .filter(RelayPortLease.released_at.is_(None))
+            .all()
+        )
+
+
+def _allocator(session_factory):
+    from compute_provisioning_service.services.relay_port_allocator import (
+        RelayPortAllocator,
+    )
+
+    return RelayPortAllocator(session_factory)
+
+
+async def test_a_failed_create_releases_the_relay_port(session_factory, repo):
+    """The path that had no caller. Driven through convergence, not by calling
+    release, because the wiring is what is under test."""
+    _accepted_row(repo, session_factory)
+    _relay_and_lease(session_factory)
+    with session_factory() as db:
+        repo.transition(db, "cr-1", SettlementRecordState.dispatching.value)
+        db.commit()
+
+    provider = _StubProvider(status=ProviderStatus(state=ProviderOperationState.failed, detail="provider said no"))
+    watchdog = FulfillmentConvergenceWatchdog(
+        session_factory=session_factory,
+        repository=repo,
+        provider_registry=ProviderRegistry({"ansible": provider}),
+        settings=_settings(),
+        port_allocator=_allocator(session_factory),
+    )
+
+    await watchdog.converge_creates()
+
+    with session_factory() as db:
+        assert repo.get(db, "cr-1").state == SettlementRecordState.failed.value
+    assert _held(session_factory) == []
+
+
+async def test_a_successful_create_keeps_the_relay_port(session_factory, repo):
+    """A created VM is live and its buyer is using that port. Releasing here
+    would hand a bound port to the next allocation."""
+    _accepted_row(repo, session_factory)
+    _relay_and_lease(session_factory)
+    with session_factory() as db:
+        repo.transition(db, "cr-1", SettlementRecordState.dispatching.value)
+        db.commit()
+
+    provider = _StubProvider(status=ProviderStatus(state=ProviderOperationState.succeeded))
+    watchdog = FulfillmentConvergenceWatchdog(
+        session_factory=session_factory,
+        repository=repo,
+        provider_registry=ProviderRegistry({"ansible": provider}),
+        settings=_settings(),
+        port_allocator=_allocator(session_factory),
+    )
+
+    await watchdog.converge_creates()
+
+    assert _held(session_factory) == [6100]
+
+
+async def test_a_deployment_with_no_allocator_converges_normally(
+    session_factory, repo
+):
+    """A deployment with no relay leases nothing, so the watchdog must not
+    require an allocator to reach a terminal state."""
+    _accepted_row(repo, session_factory)
+    with session_factory() as db:
+        repo.transition(db, "cr-1", SettlementRecordState.dispatching.value)
+        db.commit()
+
+    provider = _StubProvider(status=ProviderStatus(state=ProviderOperationState.failed, detail="no relay here"))
+    watchdog = FulfillmentConvergenceWatchdog(
+        session_factory=session_factory,
+        repository=repo,
+        provider_registry=ProviderRegistry({"ansible": provider}),
+        settings=_settings(),
+    )
+
+    await watchdog.converge_creates()
+
+    with session_factory() as db:
+        assert repo.get(db, "cr-1").state == SettlementRecordState.failed.value
+
+
+async def test_a_completed_teardown_releases_the_relay_port(session_factory, repo):
+    """The other terminal direction, and the one an operator expects to free a
+    port. Driven through convergence: what is under test is that reaching
+    `torn_down` releases, not that `release` works when called."""
+    _active_row_ready_for_teardown(repo, session_factory)
+    _relay_and_lease(session_factory)
+    with session_factory() as db:
+        repo.add_provisioned_resource(
+            db, capacity_reservation_id="cr-1", provisioned_resource_id="provisioned-vm-42"
+        )
+        repo.transition(
+            db,
+            "cr-1",
+            SettlementRecordState.tearing_down.value,
+            teardown_provider_metadata={"teardown_job": "1"},
+        )
+        db.commit()
+
+    provider = _StubProvider(status=ProviderStatus(state=ProviderOperationState.succeeded))
+    watchdog = FulfillmentConvergenceWatchdog(
+        session_factory=session_factory,
+        repository=repo,
+        provider_registry=ProviderRegistry({"ansible": provider}),
+        settings=_settings(),
+        port_allocator=_allocator(session_factory),
+    )
+
+    await watchdog.converge_teardowns()
+
+    with session_factory() as db:
+        assert repo.get(db, "cr-1").state == SettlementRecordState.torn_down.value
+    assert _held(session_factory) == []
+
+
+async def test_a_failed_teardown_keeps_the_relay_port(session_factory, repo):
+    """`teardown_failed` is not terminal — recovery may retry, and the proxy
+    may still be registered on the relay. Releasing here would hand a bound
+    port to the next allocation."""
+    _active_row_ready_for_teardown(repo, session_factory)
+    _relay_and_lease(session_factory)
+    with session_factory() as db:
+        repo.transition(
+            db,
+            "cr-1",
+            SettlementRecordState.tearing_down.value,
+            teardown_provider_metadata={"teardown_job": "1"},
+        )
+        db.commit()
+
+    provider = _StubProvider(status=ProviderStatus(
+        state=ProviderOperationState.failed, detail="teardown did not complete"
+    ))
+    watchdog = FulfillmentConvergenceWatchdog(
+        session_factory=session_factory,
+        repository=repo,
+        provider_registry=ProviderRegistry({"ansible": provider}),
+        settings=_settings(),
+        port_allocator=_allocator(session_factory),
+    )
+
+    await watchdog.converge_teardowns()
+
+    assert _held(session_factory) == [6100]
+
+
+# ---------------------------------------------------------------------------
+# What reconciliation is allowed to reclaim
+#
+# The allocator does not decide this: what makes a fulfillment terminal belongs
+# to fulfillment. The predicate below is what the deployed worker supplies, and
+# it is the whole of what stands between an orphaned lease and a permanently
+# smaller window, so its answers are asserted rather than assumed.
+# ---------------------------------------------------------------------------
+
+
+def _terminality(session_factory, repo, monkeypatch):
+    from compute_provisioning_service import app_runtime
+    from compute_provisioning_service import container as _container_module
+
+    monkeypatch.setattr(
+        _container_module, "resolved_session_factory", session_factory, raising=False
+    )
+    return app_runtime._fulfillment_is_terminal
+
+
+@pytest.mark.parametrize(
+    "state, terminal",
+    [
+        (SettlementRecordState.assigned.value, False),
+        (SettlementRecordState.dispatch_pending.value, False),
+        (SettlementRecordState.dispatching.value, False),
+        (SettlementRecordState.active.value, False),
+        (SettlementRecordState.tearing_down.value, False),
+        # Not terminal: recovery may retry, and the proxy may still be bound.
+        (SettlementRecordState.teardown_failed.value, False),
+        (SettlementRecordState.failed.value, True),
+        (SettlementRecordState.torn_down.value, True),
+        (SettlementRecordState.abandoned.value, True),
+    ],
+)
+def test_terminality_matches_the_lifecycle(
+    session_factory, repo, monkeypatch, state, terminal
+):
+    _accepted_row(repo, session_factory)
+    with session_factory() as db:
+        record = repo.get(db, "cr-1")
+        record.state = state
+        db.commit()
+
+    assert _terminality(session_factory, repo, monkeypatch)("fulfillment", "cr-1") is terminal
+
+
+def test_a_vanished_owner_counts_as_terminal(session_factory, repo, monkeypatch):
+    """A lease whose record is gone is orphaned by definition, and nothing
+    else will ever release it."""
+    assert _terminality(session_factory, repo, monkeypatch)("fulfillment", "never") is True
+
+
+def test_a_lease_of_another_kind_is_left_alone(session_factory, repo, monkeypatch):
+    """This predicate only speaks for fulfillments. Reporting terminal for an
+    owner kind it cannot inspect would release live tunnels."""
+    assert _terminality(session_factory, repo, monkeypatch)("something-else", "x") is False
+

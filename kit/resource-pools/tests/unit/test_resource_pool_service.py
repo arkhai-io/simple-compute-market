@@ -127,6 +127,12 @@ class _AnsibleLikePoolConfigHandler:
         row = self._configs.get(pool_id) if hasattr(self, "_configs") else None
         return dict(row) if row else {}
 
+    def read_config_for_execution(self, db, pool_id: str) -> dict[str, Any]:
+        # No secrets in this fake, so both reads agree. Implemented anyway: the
+        # split is part of the protocol, and a fake providing only half of it
+        # would let a caller reach the wrong read without the suite noticing.
+        return self.read_config(db, pool_id)
+
     def replace_config(self, db, pool_id: str, config) -> None:
         if not hasattr(self, "_configs"):
             self._configs: dict[str, dict] = {}
@@ -900,6 +906,12 @@ class _StubPoolConfigHandler:
 
     def read_config(self, db, pool_id: str):
         return dict(self.configs.get(pool_id, {}))
+
+    def read_config_for_execution(self, db, pool_id):
+        # No secrets in this fake, so both reads agree. Implemented anyway: the
+        # split is part of the protocol, and a fake that provides only half of
+        # it would let a caller reach the wrong read without the suite noticing.
+        return self.read_config(db, pool_id)
 
     def replace_config(self, db, pool_id: str, config):
         self.replaced.append(pool_id)

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import dataclasses
+import json
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
@@ -218,13 +219,199 @@ class TestSizingPrecedence:
         assert submitted_params.vm_gpu_count == 0
 
 
-class TestConnectivity:
-    """Connectivity (FRP) settings forward through the
-    fulfillment request to the Ansible job, separate from sizing
-    requirements. Storefront-configured for now; a negotiated source is a
-    plausible future addition, not yet implemented."""
+class TestRelayAccessPath:
+    """Exactly one access path is selected, and never zero.
 
-    async def test_connectivity_settings_forward_to_the_ansible_job(self, provider, job_service):
+    The failure this replaces: two paths guarded by different conditions, and a
+    configuration satisfying neither produced a VM with no external route and
+    reported success. Relay location now comes from the relay a pool
+    references, resolved by the execution read, and is not selectable per
+    request.
+    """
+
+    class _Allocator:
+        def __init__(self, port=6100):
+            self.port = port
+            self.calls = []
+
+        def allocate(self, **kwargs):
+            self.calls.append(kwargs)
+            return SimpleNamespace(
+                id="lease-1", relay_id=kwargs["relay_id"], remote_port=self.port
+            )
+
+    def _relay_pool_config(self, **overrides):
+        config = _pool_config()
+        config.update(
+            {
+                "relay_id": "site-a",
+                "relay_addr": "203.0.113.9",
+                "relay_port": 7000,
+                "vm_port_range_start": 6100,
+                "vm_port_range_count": 100,
+                "relay_token": "admission-token",
+            }
+        )
+        config.update(overrides)
+        return config
+
+    async def test_no_accepted_operation_carries_a_token(self, job_service):
+        """The credential must not reach the persisted, readable snapshot.
+
+        Asserted over the serialized envelope rather than the dataclass,
+        because that is what is written to the job's params column and handed
+        back by the job endpoints.
+        """
+        provider = AnsibleFulfillmentProvider(
+            job_service=job_service,
+            job_queue_provider=lambda: MagicMock(),
+            port_allocator=self._Allocator(),
+        )
+        prepared = provider.prepare_create(
+            capacity_reservation_id="alloc-1", request=_request(),
+            resource=_resource(), pool_config=self._relay_pool_config(),
+        )
+        assert "admission-token" not in json.dumps(prepared.payload)
+
+    async def test_a_pool_with_no_relay_takes_the_direct_path(self, provider, job_service):
+        prepared = provider.prepare_create(
+            capacity_reservation_id="alloc-1", request=_request(),
+            resource=_resource(), pool_config=_pool_config(),
+        )
+        await provider.dispatch_create(prepared)
+
+        submitted: AnsibleJobParams = job_service.submit.await_args.args[0]
+        assert submitted.relay_addr is None
+        assert submitted.vm_remote_port is None
+
+    async def test_a_relay_backed_pool_forwards_the_relay_and_a_leased_port(
+        self, job_service
+    ):
+        allocator = self._Allocator(port=6142)
+        provider = AnsibleFulfillmentProvider(
+            job_service=job_service,
+            job_queue_provider=lambda: MagicMock(),
+            port_allocator=allocator,
+        )
+        prepared = provider.prepare_create(
+            capacity_reservation_id="alloc-1", request=_request(),
+            resource=_resource(), pool_config=self._relay_pool_config(),
+        )
+        await provider.dispatch_create(prepared)
+
+        submitted: AnsibleJobParams = job_service.submit.await_args.args[0]
+        assert submitted.relay_id == "site-a"
+        assert submitted.vm_remote_port == 6142
+        # The endpoint and the token are deliberately absent. What is submitted
+        # is persisted and returned by the job endpoints, so a token here would
+        # be published; it is resolved at execution instead.
+        assert submitted.relay_addr is None
+        assert submitted.relay_token is None
+
+    def test_validation_leases_nothing(self, job_service):
+        """Validation answers whether a request would be accepted. Acquiring on
+        the way to the answer lets a caller who only ever asks exhaust a finite
+        window without a single accepted fulfillment."""
+        allocator = self._Allocator()
+        provider = AnsibleFulfillmentProvider(
+            job_service=job_service,
+            job_queue_provider=lambda: MagicMock(),
+            port_allocator=allocator,
+        )
+        provider.prepare_create(
+            capacity_reservation_id="alloc-1", request=_request(),
+            resource=_resource(), pool_config=self._relay_pool_config(),
+            allocate=False,
+        )
+        assert allocator.calls == []
+
+    def test_validation_still_rejects_a_partial_relay(self, job_service):
+        """Purity is about acquiring, not about checking. Every rejection that
+        acceptance performs must still run, or validation stops answering the
+        question it exists for."""
+        provider = AnsibleFulfillmentProvider(
+            job_service=job_service,
+            job_queue_provider=lambda: MagicMock(),
+            port_allocator=self._Allocator(),
+        )
+        with pytest.raises(ProviderConfigInvalidError):
+            provider.prepare_create(
+                capacity_reservation_id="alloc-1", request=_request(),
+                resource=_resource(),
+                pool_config=self._relay_pool_config(relay_token=None),
+                allocate=False,
+            )
+
+    def test_the_lease_records_the_pool_and_host(self, job_service):
+        """Both are what the rebinding rules look leases up by.
+
+        A lease without a pool leaves the rule refusing a pool repoint unable
+        to find anything — permissive, silently, and only observable by
+        repointing a pool that is carrying tunnels and watching it succeed.
+        """
+        allocator = self._Allocator()
+        provider = AnsibleFulfillmentProvider(
+            job_service=job_service,
+            job_queue_provider=lambda: MagicMock(),
+            port_allocator=allocator,
+        )
+        provider.prepare_create(
+            capacity_reservation_id="alloc-1", request=_request(),
+            resource=_resource(), pool_config=self._relay_pool_config(),
+        )
+
+        call = allocator.calls[0]
+        assert call["pool_id"] == _resource().pool_id
+        assert call["host_name"] == "kvm1"
+
+    def test_the_port_is_leased_before_dispatch(self, job_service):
+        """Allocating after dispatch would let a crash between the two leave a
+        port bound on the relay that no record claims."""
+        allocator = self._Allocator()
+        provider = AnsibleFulfillmentProvider(
+            job_service=job_service,
+            job_queue_provider=lambda: MagicMock(),
+            port_allocator=allocator,
+        )
+        provider.prepare_create(
+            capacity_reservation_id="alloc-1", request=_request(),
+            resource=_resource(), pool_config=self._relay_pool_config(),
+        )
+
+        assert allocator.calls
+        assert allocator.calls[0]["relay_id"] == "site-a"
+        assert allocator.calls[0]["owner_id"] == "alloc-1"
+        job_service.submit.assert_not_awaited()
+
+    @pytest.mark.parametrize(
+        "missing, expected",
+        [
+            ({"relay_token": None}, "admission token"),
+            ({"relay_addr": None}, "relay address"),
+            ({"vm_port_range_start": None}, "port window start"),
+            ({"vm_port_range_count": None}, "port window size"),
+        ],
+    )
+    def test_a_partial_relay_configuration_is_rejected_before_dispatch(
+        self, job_service, missing, expected
+    ):
+        provider = AnsibleFulfillmentProvider(
+            job_service=job_service,
+            job_queue_provider=lambda: MagicMock(),
+            port_allocator=self._Allocator(),
+        )
+        with pytest.raises(ProviderConfigInvalidError) as excinfo:
+            provider.prepare_create(
+                capacity_reservation_id="alloc-1", request=_request(),
+                resource=_resource(),
+                pool_config=self._relay_pool_config(**missing),
+            )
+        assert expected in str(excinfo.value)
+        assert "site-a" in str(excinfo.value)
+
+    def test_a_request_cannot_select_a_relay(self, provider, job_service):
+        """Relay location is a durable property of the deployment. A request
+        carrying relay-shaped keys does not become a relay-backed VM."""
         request = _request()
         request.payload["connectivity"] = {
             "frp_server_addr": "relay.example.com:7000",
@@ -232,25 +419,12 @@ class TestConnectivity:
             "frp_dashboard_password": "s3cr3t",
         }
         prepared = provider.prepare_create(
-            capacity_reservation_id="alloc-1", request=request, resource=_resource(), pool_config=_pool_config(),
+            capacity_reservation_id="alloc-1", request=request,
+            resource=_resource(), pool_config=_pool_config(),
         )
-        await provider.dispatch_create(prepared)
-
-        submitted_params: AnsibleJobParams = job_service.submit.await_args.args[0]
-        assert submitted_params.frp_server_addr == "relay.example.com:7000"
-        assert submitted_params.frp_domain == "buyer-vm.example.com"
-        assert submitted_params.frp_dashboard_password == "s3cr3t"
-
-    async def test_no_connectivity_settings_means_no_frp_fields(self, provider, job_service):
-        prepared = provider.prepare_create(
-            capacity_reservation_id="alloc-1", request=_request(), resource=_resource(), pool_config=_pool_config(),
-        )
-        await provider.dispatch_create(prepared)
-
-        submitted_params: AnsibleJobParams = job_service.submit.await_args.args[0]
-        assert submitted_params.frp_server_addr is None
-        assert submitted_params.frp_domain is None
-        assert submitted_params.frp_dashboard_password is None
+        params = prepared.payload["parameters"]
+        assert params["relay_id"] is None
+        assert params["vm_remote_port"] is None
 
 
 class TestTeardown:
@@ -402,3 +576,81 @@ class TestRequirementDelegateRegistry:
                 resource=_resource(dimensions={"ram_gb": "4.5"}),
                 pool_config=_pool_config(),
             )
+
+
+class TestTeardownReadsTheLease:
+    """Teardown targets where the port actually went.
+
+    The rebinding rules make disagreement between a lease and its pool hard to
+    reach through the API, which is the point of them — but "hard to reach"
+    is not "impossible", and a lease is the only record of where a port was
+    bound. Resolving the relay from pool configuration at teardown would
+    release against a relay the port never occupied and leave bound the one it
+    did, on a path that runs after the VM is already gone.
+    """
+
+    class _Allocator:
+        def __init__(self, relay_id="site-a", port=6100):
+            self._lease = SimpleNamespace(
+                id="lease-1", relay_id=relay_id, remote_port=port
+            )
+            self.lookups = []
+
+        def find_active_lease(self, *, owner_kind, owner_id):
+            self.lookups.append((owner_kind, owner_id))
+            return self._lease
+
+        def allocate(self, **kwargs):
+            return self._lease
+
+    class _NoLeaseAllocator:
+        def find_active_lease(self, *, owner_kind, owner_id):
+            return None
+
+    def _pool_on(self, relay_id):
+        config = _pool_config()
+        config["relay_id"] = relay_id
+        return config
+
+    def test_teardown_uses_the_leased_relay_not_the_pools(self, job_service):
+        """The pool now points at site-b; the VM's port is bound on site-a."""
+        allocator = self._Allocator(relay_id="site-a")
+        provider = AnsibleFulfillmentProvider(
+            job_service=job_service,
+            job_queue_provider=lambda: MagicMock(),
+            port_allocator=allocator,
+        )
+
+        prepared = provider.prepare_teardown(
+            _settlement_result(), self._pool_on("site-b")
+        )
+
+        assert prepared.payload["parameters"]["relay_id"] == "site-a"
+        assert allocator.lookups == [("fulfillment", "alloc-1")]
+
+    def test_teardown_of_a_direct_nat_vm_names_no_relay(self, job_service):
+        provider = AnsibleFulfillmentProvider(
+            job_service=job_service,
+            job_queue_provider=lambda: MagicMock(),
+            port_allocator=self._NoLeaseAllocator(),
+        )
+
+        prepared = provider.prepare_teardown(_settlement_result(), _pool_config())
+
+        assert prepared.payload["parameters"]["relay_id"] is None
+
+    def test_teardown_after_the_lease_is_released_names_no_relay(self, job_service):
+        """A released lease means the relay work is already done; teardown has
+        nothing further to reload."""
+        provider = AnsibleFulfillmentProvider(
+            job_service=job_service,
+            job_queue_provider=lambda: MagicMock(),
+            port_allocator=self._NoLeaseAllocator(),
+        )
+
+        prepared = provider.prepare_teardown(
+            _settlement_result(), self._pool_on("site-b")
+        )
+
+        assert prepared.payload["parameters"]["relay_id"] is None
+

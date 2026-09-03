@@ -74,7 +74,7 @@ entry points agree.
 
 **Encode the port in `kvm_host` as `host:port`.** Requires no schema change and
 is how a human would write it. Ansible does not parse it — `ansible_host` is a
-hostname, and `1.2.3.4:6000` is treated as a literal name that fails to
+hostname, and `203.0.113.5:6000` is treated as a literal name that fails to
 resolve. Every consumer of `kvm_host` would need to learn to split it, and
 `public_host` would face the same question with a different answer.
 
@@ -105,9 +105,29 @@ this change is exercisable without cloud state.
 - Migration: applied against a database holding rows created before the column,
   every row reads 22.
 
-Live evidence that a connection actually reaches a tunnel port belongs to the
-infrastructure repository's node-initialization work, not here — this change
-can be fully verified without a host existing.
+Live evidence that a connection actually reaches a tunnel port belongs to
+whoever prepares the host, not here — this change can be fully verified without
+a host existing.
+
+## Deployment consequence
+
+`check_schema_version` compares the database against `MIGRATIONS[-1]` and raises
+`SchemaDriftError` at startup when the last declared migration is not recorded.
+Appending `20260901_001_relay_reachable_hosts` therefore means every deployed
+database must have migrations applied before an image carrying this code starts
+— through the Helm init container, `compute-provisioning-migrate`, or
+`make migrate`.
+
+That migration is shared. `hosts.ssh_port` ships in one event with the relay
+schema from `relay-vm-access-without-a-dashboard`, because a schema version
+costs an operator step whether or not it carries much and the campaign deploys
+together. The consequence to hold onto: this change is no longer independently
+deployable ahead of that one. If it needs to be, the migration splits back into
+two entries and the shared one is renamed — cheap while nothing has applied it,
+not cheap afterwards.
+
+This change does not run them. Applying a migration to a deployed database
+mutates persistent state and needs its own authorized packet.
 
 ## Open questions
 

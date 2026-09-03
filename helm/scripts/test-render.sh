@@ -246,7 +246,7 @@ expect_present "$FIAT_RENDERED" 'image: +[^[:space:]]+@sha256:111111111111111111
 expect_present "$FIAT_RENDERED" 'image: +[^[:space:]]+@sha256:2222222222222222222222222222222222222222222222222222222222222222' "fiat provisioning image is digest-pinned"
 expect_present "$FIAT_RENDERED" 'image: +[^[:space:]]+@sha256:3333333333333333333333333333333333333333333333333333333333333333' "fiat storefront image is digest-pinned"
 expect_present "$FIAT_RENDERED" 'image: +[^[:space:]]+@sha256:4444444444444444444444444444444444444444444444444444444444444444' "fiat smoke images are digest-pinned"
-expect_absent "$FIAT_RENDERED" 'kind: +Secret|sshPrivateKey|golden_root_ssh_password|frp_dashboard_password' "fiat chart renders only pre-existing Secret references"
+expect_absent "$FIAT_RENDERED" 'kind: +Secret|sshPrivateKey|golden_root_ssh_password|relay_token' "fiat chart renders only pre-existing Secret references"
 
 expect_present "$EVM_CONFIGMAP" 'scheme = \"eip191\"' "EVM profile renders explicit EIP-191 scheme"
 expect_present "$EVM_CONFIGMAP" '\[Settlement\.alkahest\]' "EVM profile renders canonical Alkahest mechanism"
@@ -265,7 +265,7 @@ expect_absent "$SECRET_RPC_CONFIGMAP" 'rpc_url|address = ' "secret-RPC profile o
 expect_absent "$SECRET_RPC_DEPLOYMENT" 'wait-for-rpc|RPC_URL|rpc_url' "secret-RPC profile omits the credential from the pod specification"
 expect_present "$EVM_DEPLOYMENT" 'name: +\"?evm-bob-marketplace-identity\"?' "EVM marketplace signer is Secret-referenced"
 expect_present "$EVM_DEPLOYMENT" 'secretName: +\"?evm-bob-runtime\"?' "EVM wallet overlay is Secret-referenced"
-expect_absent "$EVM_RENDERED" 'private_key|privateKey|request_credential|sshPrivateKey|golden_root_ssh_password|frp_dashboard_password' "EVM manifests reference secrets without embedding keys"
+expect_absent "$EVM_RENDERED" 'private_key|privateKey|request_credential|sshPrivateKey|golden_root_ssh_password|relay_token' "EVM manifests reference secrets without embedding keys"
 
 expect_render_failure \
     "$CHART_DIR/fixtures/invalid-missing-identity-secret-values.yaml" \

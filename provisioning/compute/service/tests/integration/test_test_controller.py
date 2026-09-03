@@ -21,14 +21,12 @@ from typing import AsyncIterator
 import pytest
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
-from sqlalchemy.pool import StaticPool
 from .conftest import (
     ADMIN_SIGNER,
     SERVICE_AUTHORITIES,
     SERVICE_SIGNER,
     STOREFRONT_SIGNER,
+    _initialize_test_database,
     _install_signed_asgi_transport,
 )
 from compute_provisioning_service.identity import ProvisioningIdentityContext
@@ -41,8 +39,7 @@ from compute_provisioning_service.services.principal_authority import (
 
 from compute_provisioning_service import container as _container_module
 from vm_provisioning_operator import ProvisioningClient, ProvisioningError
-from compute_provisioning_service.db.database import create_session_factory
-from compute_provisioning_service.db.models import Base
+from compute_provisioning_service.db.database import create_db_engine
 from compute_provisioning_service.main import app
 from vm_provisioning_operator.models import CreateVmRequest
 from vm_provisioning_adapter.services.ansible_service import AnsibleService
@@ -53,6 +50,19 @@ from vm_provisioning_adapter.services.mock_ansible_service import MockRule, Prog
 from vm_provisioning_adapter.services.system_service import SystemService
 
 HOST = "kvm1"
+
+
+@pytest.fixture
+def db_engine(tmp_path):
+    """Use file-backed SQLite because this module runs DB sessions concurrently."""
+
+    engine = create_db_engine(
+        f"sqlite:///{tmp_path / 'test-controller.db'}",
+        is_sqlite=True,
+    )
+    _initialize_test_database(engine)
+    yield engine
+    engine.dispose()
 
 
 # ---------------------------------------------------------------------------

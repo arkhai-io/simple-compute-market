@@ -42,9 +42,6 @@ def _make_service(**settings_overrides) -> AnsibleJobService:
         "UNREACHABLE",
         "Domain not found",
     ]
-    settings.frp_server_addr = ""
-    settings.frp_domain = ""
-    settings.frp_dashboard_password = ""
     settings.resolved_playbook_path = Path("/playbooks/vm-operations.yaml")
     settings.resolved_bare_metal_playbook_path = Path("/playbooks/node-access.yaml")
     for k, v in settings_overrides.items():
@@ -112,9 +109,8 @@ class TestBuildParams:
             "vm_gpu_device": "0000:03:00.0",
             "vm_gpu_devices": ["0000:03:00.0", "0000:04:00.0"],
             "vm_gpu_partition_size": "1g.5gb",
-            "frp_server_addr": "1.2.3.4",
-            "frp_domain": "example.com",
-            "frp_dashboard_password": "secret",
+            "relay_id": "site-a",
+            "vm_remote_port": 6100,
             "golden_image_name": "base-v3",
             "gcs_bucket_url": "gs://bucket",
             "gcs_image_path": "images/img.qcow2",
@@ -131,32 +127,28 @@ class TestBuildParams:
         assert params.vm_gpu_device == "0000:03:00.0"
         assert params.vm_gpu_devices == ["0000:03:00.0", "0000:04:00.0"]
         assert params.vm_gpu_partition_size == "1g.5gb"
-        assert params.frp_server_addr == "1.2.3.4"
-        assert params.frp_domain == "example.com"
-        assert params.frp_dashboard_password == "secret"
+        assert params.relay_id == "site-a"
+        assert params.vm_remote_port == 6100
+        # Stored params never carry the endpoint or the token.
+        assert params.relay_addr is None
+        assert params.relay_token is None
         assert params.golden_image_name == "base-v3"
         assert params.gcs_bucket_url == "gs://bucket"
         assert params.gcs_image_path == "images/img.qcow2"
 
-    def test_frp_falls_back_to_settings_when_not_in_params(self):
-        svc = _make_service(frp_server_addr="9.9.9.9", frp_domain="fallback.com")
-        params = svc._build_params({
-            "executor_kind": "vm",
-            "vm_host": "kvm1",
-            "vm_action": "create",
-        })
-        assert params.frp_server_addr == "9.9.9.9"
-        assert params.frp_domain == "fallback.com"
-
-    def test_frp_param_overrides_settings(self):
-        svc = _make_service(frp_server_addr="9.9.9.9")
-        params = svc._build_params({
-            "vm_host": "kvm1",
-            "executor_kind": "vm",
-            "vm_action": "create",
-            "frp_server_addr": "1.1.1.1",
-        })
-        assert params.frp_server_addr == "1.1.1.1"
+    def test_relay_fields_have_no_settings_fallback(self):
+        """A service-wide relay default would let a job reach a relay its pool
+        does not name, and would substitute one relay's window for another's.
+        Relay location is resolved from the pool's referenced relay at dispatch
+        or it is absent."""
+        svc = _make_service()
+        params = svc._build_params(
+            {"vm_host": "kvm1", "vm_action": "create", "executor_kind": "vm"}
+        )
+        assert params.relay_id is None
+        assert params.vm_remote_port is None
+        assert params.relay_addr is None
+        assert params.relay_token is None
 
     def test_returns_ansible_job_params_instance(self):
         svc = _make_service()

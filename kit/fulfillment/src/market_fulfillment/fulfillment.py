@@ -136,7 +136,14 @@ class FulfillmentOrchestrator:
         market: str,
         fulfillment_request: VersionedEnvelope[Any],
         record: Any | None = None,
+        acquire: bool = True,
     ) -> PreparedFulfillment:
+        """Resolve and validate a fulfillment into a provider operation.
+
+        ``acquire=False`` asks the provider to prepare without taking anything
+        it would have to give back — the validation path, which answers a
+        question rather than making a commitment. Every rejection still runs.
+        """
         record = record or tx.db.get(SettlementRecord, capacity_reservation_id)
         if record is None:
             raise LookupError(f"no scheduled settlement for {capacity_reservation_id!r}")
@@ -152,6 +159,7 @@ class FulfillmentOrchestrator:
             request=fulfillment_request,
             resource=self._resource(record),
             pool_config=dict(pool.provider_config or {}),
+            allocate=acquire,
         )
         return PreparedFulfillment(record=record, provider=provider, prepared=prepared)
 
@@ -163,11 +171,16 @@ class FulfillmentOrchestrator:
     ) -> FulfillmentValidationResult:
         try:
             with self._uow.read_transaction() as tx:
+                # Validation answers whether this request would be accepted. It
+                # must not acquire anything on the way to the answer, or a
+                # caller checking repeatedly consumes resources it never asked
+                # for and never receives.
                 self._prepare_fulfillment(
                     tx,
                     capacity_reservation_id=capacity_reservation_id,
                     market=market,
                     fulfillment_request=fulfillment_request,
+                    acquire=False,
                 )
             return FulfillmentValidationResult()
         except Exception as exc:

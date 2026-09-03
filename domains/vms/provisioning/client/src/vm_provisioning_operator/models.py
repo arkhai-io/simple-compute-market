@@ -36,6 +36,16 @@ class HostCreate(BaseModel):
         ),
     )
     ssh_user: str = Field(default="root", description="SSH user on the KVM host.")
+    ssh_port: int = Field(
+        default=22,
+        ge=1,
+        le=65535,
+        description=(
+            "Port the provisioner connects to. Set it when the host answers "
+            "SSH somewhere other than port 22 at kvm_host — through a reverse "
+            "tunnel, a NAT forward, or a bastion."
+        ),
+    )
     ssh_key_type: Literal["path", "embedded"] = Field(
         default="path",
         description=(
@@ -66,6 +76,9 @@ class HostUpdate(BaseModel):
     kvm_host: Optional[str] = Field(default=None, description="Updated IP/hostname.")
     public_host: Optional[str] = Field(default=None, description="Updated public address.")
     ssh_user: Optional[str] = Field(default=None, description="Updated SSH user.")
+    ssh_port: Optional[int] = Field(
+        default=None, ge=1, le=65535, description="Updated SSH port.",
+    )
     ssh_key_type: Optional[Literal["path", "embedded"]] = Field(default=None)
     ssh_key_value: Optional[str] = Field(default=None, description="Updated key path or material.")
     gpu_count: Optional[int] = Field(default=None, ge=0)
@@ -85,6 +98,7 @@ class HostResponse(BaseModel):
     kvm_host: str
     public_host: Optional[str] = None
     ssh_user: str
+    ssh_port: int
     ssh_key_type: str
     gpu_count: int
     gpu_model: Optional[str] = None
@@ -251,9 +265,8 @@ class CreateVmRequest(BaseModel):
                     "vm_disk_size": "20G",
                     "ssh_pubkey": "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAI...",
                     "gpu_provisioned": True,
-                    "frp_server_addr": "34.87.54.66",
-                    "frp_domain": "example.com",
-                    "frp_dashboard_password": "secret",
+                    "relay_id": "site-a",
+                    "vm_remote_port": 6100,
                 }
             ]
         }
@@ -312,22 +325,27 @@ class CreateVmRequest(BaseModel):
         default=None, description="MIG or SR-IOV partition size (e.g. '1g.5gb')"
     )
 
-    # FRP tunnelling
-    frp_server_addr: Optional[str] = Field(
+    # Relay tunnelling. Relay-neutral names: the buyer receives a host and a
+    # port and has no reason to learn which relay implementation produced them.
+    relay_id: Optional[str] = Field(
         default=None,
         description=(
-            "IP address of the FRP server. When set, the VM's SSH port is "
-            "tunnelled through FRP rather than exposed via direct port-forward. "
-            "Requires frp_domain and frp_dashboard_password."
+            "Which registered relay this VM is reached through. A reference, "
+            "not an endpoint: the address and the admission token are resolved "
+            "from the relay at execution, so a token rotated after this request "
+            "was accepted still reaches the job, and no credential is written "
+            "into the job's persisted parameters — which the job endpoints "
+            "return. Requires vm_remote_port."
         ),
     )
-    frp_domain: Optional[str] = Field(
+    vm_remote_port: Optional[int] = Field(
         default=None,
-        description="Base domain of the FRP server (e.g. 'vm.example.com')",
-    )
-    frp_dashboard_password: Optional[str] = Field(
-        default=None,
-        description="FRP dashboard password (required when frp_server_addr is set)",
+        description=(
+            "Remote port to bind on the relay for this VM. Leased by the "
+            "provisioning service before dispatch; the playbook applies what "
+            "it is given and selects nothing, because a port binds a listening "
+            "socket on the relay and only one authority can avoid collisions."
+        ),
     )
 
     # Golden image overrides (create + golden mode only)
@@ -355,11 +373,17 @@ class CreateVmRequest(BaseModel):
     )
 
     @model_validator(mode="after")
-    def _validate_frp(self) -> "CreateVmRequest":
-        if self.frp_server_addr and not self.frp_dashboard_password:
-            raise ValueError(
-                "frp_dashboard_password is required when frp_server_addr is set"
-            )
+    def _validate_relay(self) -> "CreateVmRequest":
+        """A relay address with nothing to go with it produces an unreachable VM.
+
+        The failure being prevented is a partial relay configuration that
+        selects neither access path: the VM is created, no external route
+        exists, and the job reports success.
+        """
+        if not self.relay_id:
+            return self
+        if not self.vm_remote_port:
+            raise ValueError("vm_remote_port is required when relay_id is set")
         return self
 
 

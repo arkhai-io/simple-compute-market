@@ -352,6 +352,114 @@ def _migrate_hosts_public_host(engine: Engine) -> None:
     _add_column_if_missing(engine, "hosts", "public_host", "VARCHAR")
 
 
+def _migrate_relay_reachable_hosts(engine: Engine) -> None:
+    """Everything needed to reach a host, and a VM on it, without an inbound route.
+
+    One migration rather than several, because these ship as one deployment and
+    a schema version costs an operator step whether or not it carries much.
+
+    ``hosts.ssh_port``
+        The port the provisioner connects to. NOT NULL with a default in the
+        same statement, so pre-existing rows backfill as part of the ALTER
+        rather than through a second pass a partial application could skip.
+
+    ``relays``
+        One row per rendezvous, holding the address, port, allocation window,
+        and encrypted admission token. Unique on the endpoint: a rendezvous
+        recorded twice would issue one listening port to two callers.
+
+    ``ansible_pool_configs.relay_id``
+        A reference to that row. The window and token are shared by every pool
+        pointing at one relay, so holding them per pool would let two pools
+        allocate from one namespace under disagreeing bounds.
+
+    ``relay_port_leases``
+        Unique on ``(relay_id, remote_port)`` rather than on the host or the
+        pool, because a remote port binds a listening socket on the relay:
+        hosts and pools sharing a relay share one port namespace.
+
+    ``definition_document_imports``
+        The digest of each definition document last reconciled. Reconciliation
+        follows a change to a document; a process restart is not one, and
+        re-applying a document nobody submitted reverts whatever else changed
+        the database.
+    """
+    _add_column_if_missing(
+        engine, "hosts", "ssh_port", "INTEGER NOT NULL DEFAULT 22"
+    )
+
+    with engine.begin() as connection:
+        connection.execute(text(
+            """
+            CREATE TABLE IF NOT EXISTS relays (
+                id VARCHAR PRIMARY KEY,
+                label VARCHAR,
+                relay_addr VARCHAR NOT NULL,
+                relay_port INTEGER NOT NULL,
+                vm_port_range_start INTEGER NOT NULL,
+                vm_port_range_count INTEGER NOT NULL,
+                relay_token_encrypted VARCHAR,
+                enabled BOOLEAN NOT NULL DEFAULT TRUE,
+                created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP,
+                CONSTRAINT uq_relays_endpoint UNIQUE (relay_addr, relay_port)
+            )
+            """
+        ))
+
+    _add_column_if_missing(engine, "ansible_pool_configs", "relay_id", "VARCHAR")
+
+    with engine.begin() as connection:
+        connection.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_ansible_pool_configs_relay_id "
+            "ON ansible_pool_configs (relay_id)"
+        ))
+        connection.execute(text(
+            """
+            CREATE TABLE IF NOT EXISTS relay_port_leases (
+                id VARCHAR PRIMARY KEY,
+                relay_id VARCHAR NOT NULL,
+                remote_port INTEGER NOT NULL,
+                host_name VARCHAR,
+                pool_id VARCHAR,
+                owner_kind VARCHAR NOT NULL,
+                owner_id VARCHAR NOT NULL,
+                created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                released_at TIMESTAMP,
+                CONSTRAINT uq_relay_port_leases_endpoint UNIQUE (relay_id, remote_port)
+            )
+            """
+        ))
+        connection.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_relay_port_leases_relay_id "
+            "ON relay_port_leases (relay_id)"
+        ))
+        connection.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_relay_port_leases_owner_id "
+            "ON relay_port_leases (owner_id)"
+        ))
+        # One active lease per owner, enforced rather than only queried, so a
+        # concurrent pair of retries for one fulfillment cannot both take a
+        # port. Partial rather than plain: release is soft, so a released lease
+        # keeps its row and an unconditional constraint would stop an owner
+        # ever holding a second lease across its whole history. Both SQLite
+        # (3.8+) and PostgreSQL support the partial form.
+        connection.execute(text(
+            "CREATE UNIQUE INDEX IF NOT EXISTS uq_relay_port_leases_active_owner "
+            "ON relay_port_leases (owner_kind, owner_id) "
+            "WHERE released_at IS NULL"
+        ))
+        connection.execute(text(
+            """
+            CREATE TABLE IF NOT EXISTS definition_document_imports (
+                document_kind VARCHAR PRIMARY KEY,
+                digest VARCHAR NOT NULL,
+                imported_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+            )
+            """
+        ))
+
+
 def _migrate_vm_leases_table(engine: Engine) -> None:
     """Historical step, kept for correct replay against any DB still
     catching up from scratch. vm_leases was dropped for good by
@@ -1659,5 +1767,9 @@ MIGRATIONS: tuple[Migration, ...] = (
     Migration(
         "20260815_001_pool_declared_offering_modes",
         _migrate_executor_identities_and_pool_modes,
+    ),
+    Migration(
+        "20260901_001_relay_reachable_hosts",
+        _migrate_relay_reachable_hosts,
     ),
 )

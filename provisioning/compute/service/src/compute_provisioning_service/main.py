@@ -42,6 +42,7 @@ from vm_provisioning_adapter.routers import vm_mock_router, vm_router_mounts  # 
 from bare_metal_provisioning_adapter.routers import bare_metal_router_mounts  # noqa: E402
 from compute_provisioning_service.controllers.compute_contract_controller import ComputeContractController  # noqa: E402
 from compute_provisioning_service.controllers.pools_controller import PoolController  # noqa: E402
+from compute_provisioning_service.controllers.relays_controller import RelayController  # noqa: E402
 from compute_provisioning_service.controllers.fulfillment_controller import FulfillmentController  # noqa: E402
 from market_site.router import make_capacity_router  # noqa: E402
 
@@ -215,6 +216,7 @@ app = build_compute_provisioning_app(
         *bare_metal_router_mounts(),
         ComputeProvisioningRouterMount(ComputeContractController.make_router(), "/api/v1"),
         ComputeProvisioningRouterMount(PoolController.make_router(), "/api/v1"),
+        ComputeProvisioningRouterMount(RelayController.make_router(), "/api/v1"),
         ComputeProvisioningRouterMount(FulfillmentController.make_router(), "/api/v1"),
         ComputeProvisioningRouterMount(
             make_capacity_router(
