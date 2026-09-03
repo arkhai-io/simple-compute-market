@@ -74,8 +74,11 @@ That establishes the packaging change and not the publication.
 
 ## 4. Publication — owned elsewhere
 
-- [ ] 4.1 The producer publishes the released client to the public index. Every
+- [x] 4.1 The producer publishes the released client to the public index. Every
   code change here is complete without it; the suites resolve once it lands.
+  Published. The wheel on the index hashes to `5764d9e5…7ea7f35`, the digest
+  the trust configuration pins, so what the index serves is what the manifest
+  binds.
 - [x] 4.3 First real failure behind the gate, and it is not a code defect.
   `domains/apicredits` `test-domain` failed collecting
   `test_hosted_settlement_contract.py`: `SettlementOption` missing from the
@@ -148,10 +151,20 @@ That establishes the packaging change and not the publication.
   nothing in it yet. Verified that the suite passes with the client present:
   **39 passed**.
 
-- [ ] 4.2 Re-run the six consuming suites against the real index rather than
-  the wheelhouse. Expect real failures behind them in projects whose tests have
-  not run in some time; record those separately rather than folding them into
-  packaging.
+- [x] 4.2 Re-ran the consuming suites against the index, with the client absent
+  from the wheelhouse entirely. Five pass: `kit/hosted-settlement` 187,
+  `domains/bare_metal/storefront` 124, `domains/apicredits/storefront` 77,
+  `domains/apicredits/buyer` 17, and `domains/apicredits` 39. Their locks now
+  record `https://pypi.org/simple` and a `files.pythonhosted.org` URL rather
+  than a path into `.dist`.
+
+  `domains/vms/buyer` and `domains/vms/storefront` fail resolving
+  `torch>=2.7.0` for a platform absent from their environment matrix. Not
+  hosted-settlement's and not this change's: the same failure appears with the
+  client present. Recorded as a finding against those projects.
+
+  `domains/bare_metal/buyer` has no Makefile at all, so there is nothing to
+  run — the finding the original handoff recorded, confirmed.
 
 - [x] 4.6 `tests/test_distribution.py` split. Structural assertions — what each
   wheel carries, requires, and exports — read the archives directly and need no
@@ -177,10 +190,10 @@ That establishes the packaging change and not the publication.
 
 ## 5. Closeout
 
-- [ ] 5.1 **Comment hygiene.** `make check-comment-hygiene`. Then read the
+- [x] 5.1 **Comment hygiene.** `make check-comment-hygiene` passes. Read the
   three Makefiles: the removed gate must leave no comment explaining a
   prerequisite that is gone.
-- [ ] 5.2 **Import placement.** No Python imports added; the three script edits
+- [x] 5.2 **Import placement.** No Python imports added; the three script edits
   are call-site changes. Recorded as not applicable.
 - [ ] 5.3 **Documentation compliance.** `docs/development/DEPLOYMENT_AND_CONFIG.md`
   gains how the client is obtained; `docs/development/RELEASING.md` gains what
@@ -190,9 +203,10 @@ That establishes the packaging change and not the publication.
 - [ ] 5.4 **Narrative compression.** Reduce task notes to final behaviour and
   evidence. The rejected alternatives — vendoring the contract source, an
   offline digest gate on `init` — stay in `design.md`.
-- [ ] 5.5 **Roadmap currency.** `docs/development/ROADMAP.md`'s hosted
-  settlement section records that the client cannot currently be obtained.
-  Update it when publication lands, not before.
+- [x] 5.5 **Roadmap currency.** `docs/development/ROADMAP.md` recorded that the
+  client could not be obtained. It can; the paragraph now describes how it is
+  obtained and what the index does and does not attest, which is durable rather
+  than a note about a gap that closed.
 - [ ] 5.6 **Promotion.** Complete the design-promotion record below.
 
 ## Design promotion record

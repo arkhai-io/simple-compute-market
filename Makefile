@@ -653,10 +653,9 @@ push-charts: _require-ar-project dist-helm
 	helm push $(DIST_DIR)/arkhai-node-operator-*.tgz $(HELM_REGISTRY)
 	rm $(DIST_DIR)/arkhai-node-operator-*.tgz
 
-push-wheels: _require-ar-project
-	$(call publish_python_wheel,arkhai-core-storefront-client,$(STOREFRONT_CLIENT_VERSION),$(DIST_DIR)/arkhai_core_storefront_client-$(STOREFRONT_CLIENT_VERSION)-py3-none-any.whl)
-	$(call publish_python_wheel,arkhai-core-registry-client,$(REGISTRY_CLIENT_VERSION),$(DIST_DIR)/arkhai_core_registry_client-$(REGISTRY_CLIENT_VERSION)-py3-none-any.whl)
-	$(call publish_python_wheel,arkhai-vms-provisioning-operator-client,$(PROVISIONING_OPERATOR_CLIENT_VERSION),$(DIST_DIR)/arkhai_vms_provisioning_operator_client-$(PROVISIONING_OPERATOR_CLIENT_VERSION)-py3-none-any.whl)
+push-wheels: _require-ar-project ## Publish every manifest distribution to the registry.
+	uv run --no-project python scripts/push-distributions.py \
+	  --dist-dir $(DIST_DIR) --registry $(PYTHON_REGISTRY)
 
 push-cli: _require-ar-project
 	gcloud artifacts generic upload \

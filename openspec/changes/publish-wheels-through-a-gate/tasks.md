@@ -21,56 +21,128 @@ publication running for longer than necessary.
 
 ## 1. One enumeration
 
-- [ ] 1.1 Add a package manifest declaring every distribution this repository
+- [x] 1.1 Add a package manifest declaring every distribution this repository
   publishes, with each entry's source path, distribution name, and dependency
   order. Derive its initial contents from the `packages.json` heredoc in
   `.github/workflows/publish-pypi.yml` and reconcile against the three wheels
   `push-wheels` names in the root `Makefile`. The two disagree today; record
   which is correct per distribution rather than assuming the longer list is.
-- [ ] 1.2 Make `push-wheels` read the manifest instead of naming three wheels
+- [x] 1.2 Make `push-wheels` read the manifest instead of naming three wheels
   literally, and publish every entry rather than three.
-- [ ] 1.3 Make `publish-pypi.yml` read the manifest instead of heredocing its
+- [x] 1.3 Make `publish-pypi.yml` read the manifest instead of heredocing its
   own table.
-- [ ] 1.4 Update `scripts/tests/test_publish_matrix.py`. It currently parses the
+- [x] 1.4 Update `scripts/tests/test_publish_matrix.py`. It currently parses the
   heredoc by regex and asserts the workflow states its table that way; that
   assertion is about to be false. Keep what it actually protects — that a
   distribution with a `force-include` escaping its own directory cannot be built
   as an sdist — and point it at the manifest.
+- [x] 1.1b The two lists disagreed **in both directions**, which the plan did
+  not anticipate. The workflow published twenty-six distributions the registry
+  never received, and the registry received one -- 
+  `arkhai-vms-provisioning-operator-client` -- the workflow never published.
+  The manifest is the union: **29 distributions**. Whether that operator client
+  should now also reach the public index is a consequence worth confirming
+  rather than assuming; it follows from publishing everything, and nothing in
+  the code decides it.
+- [x] 1.1d The manifest was incomplete, which "one enumeration" does not
+  survive. Comparing it against every buildable distribution in the tree found
+  **ten** that neither publication path carried, six of them `kit/` packages —
+  capacity-publication, contact-exchange, delivery, fulfillment,
+  resource-pools, storefront. Those are precisely the composable functionality
+  other teams are meant to build marketplaces from, and none of them was
+  reachable from any index.
+
+  Nine are built by `make dist` and are added, ordered so a kit precedes what
+  consumes it: the manifest holds **38**. None needed `wheel_only`; the suite
+  grew from 188 to 206 as the new entries picked up the existing
+  per-distribution assertions, and all pass.
+
+- [ ] 1.1e `arkhai-vms-provisioning-iac` is the tenth and is **not** built by
+  `make dist`, so it cannot be published and is not in the manifest. Whether
+  that is deliberate — an Ansible-role package that nobody installs from an
+  index — or an omission in the dist graph is a question for whoever owns it.
+  Recorded rather than answered: adding it to the build is a separate decision
+  from enumerating what the build already produces.
+
+- [x] 1.1c `packages.json` carried a `wheel_only` flag on three distributions
+  whose wheels force-include files from outside their own directory, which an
+  sdist cannot carry. The first manifest dropped it and two tests caught the
+  regression. Every field of the original table is preserved.
 - [x] 1.1a The two lists disagreed and the longer one is right: all twenty-eight
   distributions are published. The three the registry path names are the
   clients other services consume, and the rest are kit packages other teams are
   meant to compose marketplaces from — which requires importing them
   individually. Reconciliation is therefore an extension of the registry path,
   not a reduction of the PyPI one.
-- [ ] 1.5 Add a check that the manifest is the only enumeration: no distribution
+- [x] 1.5 Add a check that the manifest is the only enumeration: no distribution
   list in a workflow, and no literal wheel name in a publish target. Two lists
   kept in agreement by hand is the failure this section exists to remove, and
   nothing stops it recurring without a check.
 
 ## 2. Stop automated public publication
 
-- [ ] 2.1 Remove the publishing job from `.github/workflows/publish-pypi.yml`.
+- [x] 2.1 Remove the publishing job from `.github/workflows/publish-pypi.yml`.
   Keep `detect-changes` if a later section needs it; delete it if not, rather
   than leaving a job whose only consumer is gone.
-- [ ] 2.2 Rename the workflow file if it no longer publishes to PyPI. A file
+- [x] 2.2 Rename the workflow if it no longer publishes to PyPI. A file
   named for what it used to do is the same defect as a stale comment.
 - [ ] 2.3 Record in `docs/development/RELEASING.md` that merging no longer
   publishes, and what to do instead. This is a contributor-workflow break and
   the first person it surprises should find the answer where they look.
-- [ ] 2.4 Verify: `make test-release-tooling` passes, and no workflow path
+- [x] 2.4 Verified: `make test-release-tooling` passes, and no workflow path
   reaches a PyPI upload.
+
+- [x] 2.5 `detect-changes` deleted with the job that consumed it, rather than
+  left computing outputs nobody reads. The workflow now builds the wheelhouse
+  and resolves every manifest entry against it, so the set is known good before
+  anyone promotes it — which is the check the file's new name claims.
+- [x] 2.6 `test_the_publish_job_creates_the_directory_those_packages_look_in`
+  asserted step ordering inside the deleted job. The guarantee it protected —
+  that something creates the `.dist` every package's `find-links` points at —
+  now comes from `make dist` rather than from ordering, and the test asserts
+  the workflow still reaches it.
 
 ## 3. Publish to the development registry on merge
 
 **Blocked on a writer identity for the development registry.**
 
-- [ ] 3.1 Add a merge-to-`main` workflow invoking `push-runtime-artifacts`,
-  authenticating by workload identity federation. Do not add a long-lived
-  credential.
-- [ ] 3.2 Confirm `push-wheels` publishes every manifest entry and that
-  `_require-ar-project` still gates the target as it does for a human caller.
-- [ ] 3.3 Verify by inspecting the registry after one merge: every manifest
-  entry present at the version its `pyproject.toml` declares.
+- [ ] 3.1 Add a workflow invoking `push-runtime-artifacts`, authenticating by
+  workload identity federation. Do not add a long-lived credential.
+
+  **Not on merge to the default branch.** The registry push is to be triggered
+  deliberately — `workflow_dispatch`, or a push filter on a nominated branch —
+  rather than by merging. That keeps the property section 2 established: no
+  merge publishes anything anywhere, and the difference between the registry
+  and the public index becomes which gate a human passes rather than which
+  branch they landed on.
+- [x] 3.2 `push-wheels` resolves and attempts every manifest entry. Two defects
+  found by running it, both mine:
+
+  Credentials were passed as `--username`/`--password` arguments. The publisher
+  refuses those alongside `UV_PUBLISH_TOKEN`, which is exported in any shell
+  that has published to the public index — so the target failed on the first
+  distribution with an error about argument conflicts rather than anything to
+  do with publishing. Worse, an argument is on the command line: the token
+  appeared in the `CalledProcessError` traceback, and would appear in any
+  captured build log. Credentials now reach the publisher through the
+  environment only, `UV_PUBLISH_TOKEN` is cleared for the subprocess, and a
+  failing publish is reported rather than raised so the arguments are never
+  printed.
+
+  Verified against a stubbed publisher with `UV_PUBLISH_TOKEN` deliberately
+  exported: the conflict is gone and no credential appears in the output.
+
+  Then run for real: **38 distributions published** to the development
+  registry, in manifest order, no failures. That is the target proven end to
+  end — resolution, credential handling, and upload.
+
+  What it does not prove is the identity. The push authenticated as a person
+  with `gcloud` credentials, which is what task 3.1 exists to replace: the
+  registry now holds a complete build, and nothing yet lets CI put one there.
+- [ ] 3.3 Verify by inspecting the registry after one *workflow* run: every
+  manifest entry present at the version its `pyproject.toml` declares. A
+  by-hand push has established the set is complete and uploadable; what remains
+  unverified is that the workflow's own identity can do it.
 
 ## 4. Promotion
 
