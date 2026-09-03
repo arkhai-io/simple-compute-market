@@ -100,7 +100,7 @@ def test_identity_change_expands_to_every_runtime_and_deployment_consumer() -> N
         "e2e-tests",
     }
     assert "dist-identity" in payload["dist_targets"]
-    assert "dist-hosted-client" in payload["dist_targets"]
+    assert "dist-kits" in payload["dist_targets"]
     assert "dist-storefront-client" in payload["dist_targets"]
     assert "dist-arkhai-core-registry" in payload["dist_targets"]
 

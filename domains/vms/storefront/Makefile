@@ -21,10 +21,10 @@ include $(HOSTED_REPO_ROOT)/make/hosted-release.mk
 verify-hosted-release:
 	$(VERIFY_HOSTED_RELEASE)
 
-init: verify-hosted-release ## Resolve deps from verified wheels and create .venv.
+init: ## Resolve deps from verified wheels and create .venv.
 	uv sync --find-links $(DIST_DIR)
 
-reinit: verify-hosted-release ## Force-reinstall verified internal wheels.
+reinit: ## Force-reinstall verified internal wheels.
 	uv sync --find-links $(DIST_DIR) \
 	--upgrade-package arkhai-core                    --reinstall-package arkhai-core \
 	--upgrade-package arkhai-core-storefront         --reinstall-package arkhai-core-storefront \

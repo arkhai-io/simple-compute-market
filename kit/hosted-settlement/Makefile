@@ -9,18 +9,18 @@ include $(HOSTED_REPO_ROOT)/make/hosted-release.mk
 verify-hosted-release:
 	$(VERIFY_HOSTED_RELEASE)
 
-# Building this wheel resolves nothing and installs nothing, so it does not
-# need a staged release. `init` and `reinit` below do install the hosted client
-# and keep the gate: verification belongs where the client is installed, not
-# where a wheel is built.
+# The hosted client is an ordinary external dependency, resolved from an index
+# like any other. Verification of the producer's signed release is a
+# publication-time concern and gates nothing here: a signed release describes a
+# deployed authority, and nothing below deploys one.
 build: ## Build the wheel into the shared .dist/
 	uv build --wheel --out-dir $(DIST_DIR)
 
-init: verify-hosted-release ## Create or update the environment
+init: ## Create or update the environment
 	uv venv --allow-existing --python $(PYTHON_VERSION)
 	uv sync --dev --python $(PYTHON_VERSION) --find-links $(DIST_DIR)
 
-reinit: verify-hosted-release ## Reinstall the local package environment
+reinit: ## Reinstall the local package environment
 	uv sync --dev --python $(PYTHON_VERSION) --find-links $(DIST_DIR) \
 		--upgrade-package arkhai-hosted-settlement-client \
 		--reinstall-package arkhai-hosted-settlement-client \

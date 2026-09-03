@@ -57,7 +57,7 @@ HOSTED_STRIPE_TEST_AUTHORITY_ENVIRONMENT ?=
 HOSTED_STRIPE_TEST_AUTHORITY_ENV_FILE ?=
 HOSTED_STRIPE_TEST_EVIDENCE ?= $(DIST_DIR)/hosted-stripe-test-evidence.json
 
-.PHONY: check-hosted-client-pin fix-hosted-client-pin review-wheelhouse review-wheelhouse-scope build build-dev build-seller build-apicredits-service build-apicredits-storefront build-apicredits-sample-app test test-core test-provisioning test-provisioning-iac test-registry test-storefront test-vms-buyer test-apicredits test-apicredits-middleware test-kits dist dist-release dist-storefront-client dist-policy dist-compute-provisioning dist-compute-provisioning-service dist-kits dist-hosted-client verify-hosted-release dist-registry-client dist-registry dist-identity dist-core dist-arkhai-core-buyer dist-arkhai-core-storefront dist-bare-metal-storefront dist-alkahest dist-config dist-clean init init-prerequisites init-submodules init-zero-tier init-buyer init-storefront init-arkhai-core-registry push-runtime-artifacts push-images push-dev-image
+.PHONY: check-hosted-client-pin fix-hosted-client-pin review-wheelhouse review-wheelhouse-scope build build-dev build-seller build-apicredits-service build-apicredits-storefront build-apicredits-sample-app test test-core test-provisioning test-provisioning-iac test-registry test-storefront test-vms-buyer test-apicredits test-apicredits-middleware test-kits dist dist-release dist-storefront-client dist-policy dist-compute-provisioning dist-compute-provisioning-service dist-kits verify-hosted-release dist-registry-client dist-registry dist-identity dist-core dist-arkhai-core-buyer dist-arkhai-core-storefront dist-bare-metal-storefront dist-alkahest dist-config dist-clean init init-prerequisites init-submodules init-zero-tier init-buyer init-storefront init-arkhai-core-registry push-runtime-artifacts push-images push-dev-image
 .PHONY: build-hosted-producer
 .PHONY: test-release-tooling test-deployment-packaging prepare-hosted-compose prepare-hosted-compose-local hosted-preflight hosted-preflight-local hosted-stripe-test-local hosted-compose-up hosted-compose-restart hosted-compose-clean hosted-stripe-test hosted-stripe-test-stop
 .PHONY: dist-arkhai-core-registry
@@ -82,11 +82,10 @@ HOSTED_STRIPE_TEST_EVIDENCE ?= $(DIST_DIR)/hosted-stripe-test-evidence.json
 # Written as two sub-invocations rather than two prerequisites because make
 # orders prerequisites only under -j1, and verification that can run after the
 # build it gates is not verification.
-dist-release: ## Verify the staged hosted release, then build the wheel set.
-	$(MAKE) verify-hosted-release
+dist-release: ## Build the wheel set for a publishing path.
 	$(MAKE) dist
 
-dist: dist-storefront-client dist-identity dist-core dist-arkhai-core-buyer dist-arkhai-core-storefront dist-arkhai-core-registry dist-hosted-client dist-kits dist-alkahest dist-config dist-policy dist-compute-provisioning dist-domains dist-compute-provisioning-service dist-registry-client
+dist: dist-storefront-client dist-identity dist-core dist-arkhai-core-buyer dist-arkhai-core-storefront dist-arkhai-core-registry dist-kits dist-alkahest dist-config dist-policy dist-compute-provisioning dist-domains dist-compute-provisioning-service dist-registry-client
 
 dist-domains: dist-kits dist-compute-provisioning ## Build every domains-scoped wheel through the domain aggregate
 	cd domains && $(MAKE) dist DIST_DIR=$(DIST_DIR)
@@ -153,7 +152,7 @@ dist-arkhai-core-storefront: ## Build arkhai-core-storefront wheel into .dist/
 	@ls $(DIST_DIR)/arkhai_core_storefront-*-none-any.whl > /dev/null 2>&1 || \
 		(echo "ERROR: arkhai-core-storefront produced a platform-specific wheel — must build inside Docker" && exit 1)
 
-dist-bare-metal-buyer: dist-core dist-arkhai-core-buyer dist-registry-client dist-kits dist-hosted-client ## Build the bare-metal buyer contribution wheel.
+dist-bare-metal-buyer: dist-core dist-arkhai-core-buyer dist-registry-client dist-kits ## Build the bare-metal buyer contribution wheel.
 	cd domains && $(MAKE) dist-bare-metal-buyer DIST_DIR=$(DIST_DIR)
 
 dist-bare-metal-storefront: dist-core dist-arkhai-core-storefront dist-kits ## Build the bare-metal storefront contribution wheel.
@@ -347,22 +346,12 @@ hosted-stripe-test: hosted-preflight ## Run one protected Stripe test-mode syste
 		$(if $(HOSTED_STRIPE_TEST_LIFECYCLE_TIMEOUT),--lifecycle-timeout "$(HOSTED_STRIPE_TEST_LIFECYCLE_TIMEOUT)",) \
 		--evidence "$(HOSTED_STRIPE_TEST_EVIDENCE)"
 
-# Verification is not a prerequisite here. A staged release is required to
-# publish artifacts, not to build or test them, and most of this repository --
-# every package that does not depend on the hosted client -- can be built and
-# tested without one. Gating the wheelhouse on it made a private producer a
-# hard dependency of the whole build.
-#
-# `dist-release` is the verifying entry point, and is what a publishing path
-# calls. See docs/development/TESTING.md, "Raising the hosted contract".
-dist-hosted-client: ## Copy immutable release inputs into .dist when a release is staged.
-	@if [ "$(abspath $(HOSTED_RELEASE_DIR))" != "$(abspath $(DIST_DIR))" ]; then \
-		mkdir -p "$(DIST_DIR)"; \
-		for file in $(HOSTED_RELEASE_FILES); do \
-			cp "$(HOSTED_RELEASE_DIR)/$$file" "$(DIST_DIR)/$$file"; \
-		done; \
-	fi
-dist-kits: dist-hosted-client ## Build kit-owned wheels into .dist/
+# The hosted settlement client is not staged into the wheelhouse. It is an
+# external dependency resolved from a package index, so nothing here copies it
+# and `.dist` holds only what this repository builds. Release verification
+# remains available as `verify-hosted-release` for a path that consumes a
+# staged release; no build or test target invokes it.
+dist-kits: ## Build kit-owned wheels into .dist/
 	$(MAKE) -C kit dist DIST_DIR=$(DIST_DIR)
 
 dist-alkahest: ## Build arkhai-kit-alkahest wheel into .dist/
@@ -747,14 +736,14 @@ last-diff: ## Write a binary-safe diff for the most recent commit.
 	git diff --binary HEAD^ HEAD > "$$OUTFILE"; \
 	echo "Done: $$OUTFILE"
 
-review-wheelhouse-prepare: ## Preserve verified release inputs across the disposable wheel rebuild.
-	@release_dir="$$(mktemp -d)"; \
-	trap 'rm -rf "$$release_dir"' EXIT; \
-	for file in $(HOSTED_RELEASE_FILES); do \
-		cp "$(HOSTED_RELEASE_DIR)/$$file" "$$release_dir/$$file"; \
-	done; \
-	$(MAKE) dist-clean; \
-	$(MAKE) dist HOSTED_RELEASE_DIR="$$release_dir"
+review-wheelhouse-prepare: ## Rebuild the wheelhouse from scratch, then refresh review locks.
+	@# Nothing needs preserving across the rebuild any more. This copied the
+	@# staged release inputs to a temporary directory and handed them back to
+	@# `dist`, because `dist-clean` would otherwise delete artifacts that were
+	@# received rather than built. `dist` builds every wheel it produces, so a
+	@# clean rebuild loses nothing.
+	$(MAKE) dist-clean
+	$(MAKE) dist
 	@$(MAKE) review-locks
 
 review-locks: ## Refresh selected project lockfiles against current repository wheels.

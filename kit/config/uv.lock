@@ -28,6 +28,7 @@ version = "0.1.2"
 source = { editable = "." }
 dependencies = [
     { name = "arkhai-kit-settlement-runtime" },
+    { name = "cryptography" },
     { name = "eth-account" },
     { name = "pydantic" },
     { name = "tomlkit" },
@@ -41,6 +42,7 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "arkhai-kit-settlement-runtime", specifier = "==0.1.2" },
+    { name = "cryptography", specifier = ">=42.0" },
     { name = "eth-account", specifier = ">=0.13.0" },
     { name = "pydantic", specifier = ">=2.7" },
     { name = "tomlkit", specifier = ">=0.13,<1" },

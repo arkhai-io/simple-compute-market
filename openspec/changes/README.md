@@ -166,16 +166,27 @@ add-database-migration-commands ──► separate-marketplace-registry ──�
 
 **What it adds up to.** The repository cannot publish a coherent set of installable distributions: internal dependencies resolve through relative paths, type checking is advertised but not enforced, and the publisher inventory does not match the packages that exist. This sequence makes every internal dependency wheel-resolvable, restores the checks, and reconciles the distribution graph. Not a roadmap goal — no behavior changes — but nothing outside this repository can consume the packages until it is done.
 
+Two changes joined this campaign on 2026-09-02, and they are the reason it is now blocking rather than merely unfinished. A dependency produced outside this repository resolves from nowhere, so six suites cannot run and `make dist` produces a wheelhouse missing the one artifact it was supposed to stage. Separately, twenty-eight distributions reach public PyPI on every merge to `main` with no gate — which is how `arkhai-kit-hosted-settlement` 0.1.4 came to be published declaring a dependency PyPI does not carry, uninstallable for everyone outside this repository and, because PyPI is write-once, not correctable in place.
+
 ```text
+resolve-hosted-client-from-an-index ──► publish-wheels-through-a-gate
 remove-relative-uv-sources ──► finish-buyer-cli-residue ──► type-core-packages ──► configure-pypi-trusted-publishing
 ```
 
 | Order | Change | Status | Acceptance boundary |
 |---|---|---|---|
+| 1 | [`resolve-hosted-client-from-an-index`](resolve-hosted-client-from-an-index/) | blocked on infrastructure and producer changes named below | The externally produced settlement client resolves from a declared index like any other dependency; release verification leaves `init`, `reinit`, and `dist-release`; the staged-release path leaves the `dist` graph and `.dist` holds only what this repository builds. `make dist` and `make test` succeed from a clean checkout, on a fork, with no producer access |
+| 2 | [`publish-wheels-through-a-gate`](publish-wheels-through-a-gate/) | active; the interim half needs no prerequisite | Automated publication to PyPI stops; merge to `main` publishes all twenty-eight distributions to the development registry; one inventory-derived list replaces the two enumerations; a human-invoked promotion copies bytes to PyPI and fails the whole set if any version there holds different content |
 | 1 | [`remove-relative-uv-sources`](remove-relative-uv-sources/) | active | Remove remaining internal parent-path sources and enforce wheel-only resolution. Re-inventoried 2026-08-06: one confirmed project remains and one named target no longer exists at its recorded path |
 | 2 | [`finish-buyer-cli-residue`](finish-buyer-cli-residue/) | active | Add only the remaining constrained settlement-preference hook; listing rendering and run-log compatibility are baseline |
 | 3 | [`type-core-packages`](type-core-packages/) | active after affected public surfaces stabilize | Restore advertised checks, ratchet package by package, verify `py.typed` in installed wheels. Its deferred `kit/site` question should wait for the kit-composition goal's extraction scope |
 | 4 | [`configure-pypi-trusted-publishing`](configure-pypi-trusted-publishing/) | externally blocked | Reconcile the consumable distribution graph and verify trusted publishers plus PyPI-only downstream installation. Should follow the kit extraction, which changes wheel contents |
+
+The two sequences are independent of each other and share this campaign because they share its completion test: nothing outside this repository can install what it publishes.
+
+`resolve-hosted-client-from-an-index` is blocked on work in repositories this one does not control and nothing here can unblock it: a publicly readable index must carry the settlement client, and the client's producer must publish to it. `publish-wheels-through-a-gate` reads its package list from the cross-repository release inventory format, which is defined outside this repository, and uses a plain manifest until that lands.
+
+`configure-pypi-trusted-publishing` overlaps `publish-wheels-through-a-gate` on the distribution inventory and on proving PyPI-only installation. Reconcile the two before either is archived rather than letting both claim the same acceptance.
 
 ## Lesser goal — End-to-end harness determinism
 

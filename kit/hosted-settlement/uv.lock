@@ -46,7 +46,7 @@ wheels = [
 
 [[package]]
 name = "arkhai-hosted-settlement-client"
-version = "0.4.0"
+version = "0.4.2"
 source = { registry = "../../.dist" }
 dependencies = [
     { name = "cryptography" },
@@ -56,7 +56,7 @@ dependencies = [
     { name = "rfc8785" },
 ]
 wheels = [
-    { path = "arkhai_hosted_settlement_client-0.4.0-py3-none-any.whl" },
+    { path = "arkhai_hosted_settlement_client-0.4.2-py3-none-any.whl" },
 ]
 
 [[package]]
@@ -81,7 +81,7 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "arkhai-core", specifier = "==0.2.0" },
-    { name = "arkhai-hosted-settlement-client", specifier = "==0.4.0" },
+    { name = "arkhai-hosted-settlement-client", specifier = "==0.4.2" },
     { name = "arkhai-kit-identity", specifier = "==0.3.0" },
     { name = "arkhai-kit-settlement-runtime", specifier = "==0.1.2" },
     { name = "pydantic", specifier = ">=2.7" },

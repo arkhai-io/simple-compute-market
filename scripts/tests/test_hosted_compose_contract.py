@@ -338,7 +338,7 @@ def test_a_development_run_can_bind_a_producer_built_here() -> None:
     local = ROOT_MAKE.split("hosted-stripe-test-local:", 1)[1].split("\nhosted-compose-up:", 1)[0]
     assert "$(HOSTED_PRODUCER_PINS)" in local
     # The protected target keeps every pin it has, spelled out.
-    protected = ROOT_MAKE.split("\nhosted-stripe-test:", 1)[1].split("\ndist-hosted-client:", 1)[0]
+    protected = ROOT_MAKE.split("\nhosted-stripe-test:", 1)[1].split("\nhosted-compose-up:", 1)[0]
     for pin in (
         "--hosted-manifest-sha256",
         "--hosted-client-wheel-sha256",
@@ -393,10 +393,13 @@ def test_the_released_producer_identities_come_from_the_trust_config() -> None:
 def test_the_build_names_the_artifacts_of_the_release_it_binds(tmp_path: Path) -> None:
     """A later release needs a trust config, not an edit to three Makefiles.
 
-    The client wheel, OpenAPI, conformance, and migration filenames were spelled
-    out beside the trust config they had to agree with. Nothing kept them in
-    step, so the first thing a version bump broke was a copy that silently named
-    the previous release.
+    The client wheel filename was spelled out beside the trust config it had to
+    agree with. Nothing kept the two in step, so the first thing a version bump
+    broke was a path that silently named the previous release.
+
+    The generated contract documents were checked here too, while the build
+    staged them. It no longer does, so what remains is the wheel the verifier
+    reads.
     """
 
     trust = tmp_path / "trust.json"
@@ -409,7 +412,7 @@ def test_the_build_names_the_artifacts_of_the_release_it_binds(tmp_path: Path) -
         [
             "make",
             "-n",
-            "dist-hosted-client",
+            "verify-hosted-release",
             f"HOSTED_RELEASE_TRUST={trust}",
             f"HOSTED_RELEASE_DIR={tmp_path / 'release'}",
         ],
@@ -419,15 +422,8 @@ def test_the_build_names_the_artifacts_of_the_release_it_binds(tmp_path: Path) -
         check=True,
     ).stdout
 
-    for expected in (
-        "arkhai_hosted_settlement_client-0.3.0-py3-none-any.whl",
-        "openapi-v0.3.0.json",
-        "conformance-v0.3.0.json",
-        "migrations-v6.json",
-    ):
-        assert expected in recipe
+    assert "arkhai_hosted_settlement_client-0.3.0-py3-none-any.whl" in recipe
     assert "0.2.1" not in recipe
-    assert "migrations-v5.json" not in recipe
 
 
 @pytest.mark.parametrize(

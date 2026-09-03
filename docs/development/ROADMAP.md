@@ -273,6 +273,18 @@ storefront-mediated through the shared settlement runtime. Historical
 card-only accepted state is recovery-only, and Alkahest remains an independent
 mechanism lane.
 
+**The client cannot currently be obtained.** The consumer pins `0.4.2`, and no
+index carries it: it exists on assets attached to a release in the producer's
+own repository and in an authenticated private index, neither reachable from a
+clean checkout and neither reachable at all from a forked pull request. Six
+suites cannot run as a result, including `domains/vms/storefront`'s, and
+`make dist` completes while producing a wheelhouse that does not contain it.
+Owned by [`resolve-hosted-client-from-an-index`](../../openspec/changes/resolve-hosted-client-from-an-index/),
+whose code changes are complete and whose remaining step is publication of the
+released client to a public index — not in this repository's gift. The
+verification below is unaffected: it describes a release, and a release is not
+how a build should obtain a dependency.
+
 The independently signed hosted `v0.2.1` producer release, manifest, client
 wheel, service image, API/schema/conformance artifacts, SBOM/provenance,
 repository/workflow identity, and source commit have been verified. Production
