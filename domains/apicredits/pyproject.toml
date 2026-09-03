@@ -3,7 +3,7 @@ name = "arkhai-apicredits-domain"
 version = "0.2.0"
 license = "MIT"
 description = "Shared API-credit domain models, policies, and market-domain contract."
-requires-python = ">=3.12"
+requires-python = ">=3.12,<3.14"
 dependencies = [
     "arkhai-core>=0.2.0",
     "arkhai-kit-policy",
@@ -45,6 +45,18 @@ only-include = ["__init__.py"]
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
 testpaths = ["tests"]
+filterwarnings = [
+    # Three contract models carry a field named `schema`, which shadows
+    # Pydantic's deprecated `BaseModel.schema()`. The name is the wire key: it
+    # is serialized into HTTP request bodies and into the canonical JSON that
+    # issuance evidence is digested and signed over, so renaming it is a
+    # contract change rather than a rename, and every `model_dump` call would
+    # have to start passing `by_alias=True` in step or the emitted key changes
+    # silently. Scoped to these two modules so the same shadow appearing
+    # anywhere else still surfaces.
+    "ignore:Field name \"schema\".*shadows an attribute:UserWarning:domains.apicredits.settlement.credits_client",
+    "ignore:Field name \"schema\".*shadows an attribute:UserWarning:domains.apicredits.settlement.issuance_evidence",
+]
 
 [dependency-groups]
 dev = [

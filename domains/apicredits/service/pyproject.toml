@@ -7,7 +7,7 @@ name = "arkhai-apicredits-service"
 version = "0.2.0"
 license = "MIT"
 description = "API-credits service: keys, credit grants, consumption, and the site quota ledger"
-requires-python = ">=3.12"
+requires-python = ">=3.12,<3.14"
 dependencies = [
     "arkhai-kit-site>=0.3.0",
     "arkhai-kit-resource-pools>=0.2.0",

@@ -3,7 +3,7 @@ name = "arkhai-apicredits-buyer"
 version = "0.3.1"
 license = "MIT"
 description = "API-credits buyer schema plugin for the core `market` CLI: discover credit listings, negotiate quantity x rate, settle into issued keys."
-requires-python = ">=3.12"
+requires-python = ">=3.12,<3.14"
 dependencies = [
   "typer>=0.12.0",
   "rich>=13.7.0",

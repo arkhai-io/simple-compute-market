@@ -76,10 +76,104 @@ That establishes the packaging change and not the publication.
 
 - [ ] 4.1 The producer publishes the released client to the public index. Every
   code change here is complete without it; the suites resolve once it lands.
+- [x] 4.3 First real failure behind the gate, and it is not a code defect.
+  `domains/apicredits` `test-domain` failed collecting
+  `test_hosted_settlement_contract.py`: `SettlementOption` missing from the
+  installed `market_core.schemas`. The symbol is present in `core/` source and
+  in the `arkhai_core-0.2.0` wheel in `.dist`. The installed copy was an older
+  build of the same version number, so `uv` saw 0.2.0 already satisfied and did
+  not replace it. A fresh environment passes: **39 passed**.
+
+  The cause is structural rather than incidental. `test-domain` runs
+  `uv run --find-links $(DIST_DIR) pytest tests -q` with no `init` and no
+  `reinit`, and the domain root Makefile has no force-reinstall target at all —
+  its own `service/` sibling has one, and every other project in the repository
+  does. Internal wheels change contents without changing version, which is what
+  `reinit` and its `--reinstall-package` flags exist for, so a project that
+  reaches its tests without passing through one tests whatever it installed
+  first.
+
+  This is the same shape as `domains/bare_metal/buyer` having no `test` target:
+  a project that does not run the way the repository runs things, and is
+  therefore silently testing something other than the current tree.
+
+  Fixed: a `reinit` following the repository's established pattern, reinstalling
+  the four internal wheels the domain declares, with `test-domain` depending on
+  it as every sibling's `test` does.
+
+  A caution learned while verifying it. `uv` hardlinks installed files from its
+  cache, so editing a file inside `.venv` edits the cached wheel too. An attempt
+  to simulate a stale install that way corrupted the cache, and `reinit`
+  faithfully restored the corruption — which looked like the fix not working.
+  It was the test that was wrong. Where a cache entry is genuinely stale for a
+  version whose contents changed, `--reinstall-package` reinstalls from that
+  cache and `uv cache clean <package>` is what clears it.
+
+- [x] 4.4 A second, unrelated failure in the same suite:
+  `test_storefront_domain_imports_resolve_without_a_raw_source_copy` created
+  three throwaway environments with `uv venv` and no interpreter pinned, so each
+  took `uv`'s default. Where that default is newer than the available wheels —
+  3.14 on the reporting machine — the install fell back to building
+  `pydantic-core` from source and failed for a reason unrelated to the wheel
+  resolution being tested. It passed here only because this machine's default
+  was older.
+
+  Pinning the throwaway venvs to the suite's own interpreter was necessary and
+  not sufficient: the project venv was itself 3.14, so the pin faithfully
+  reproduced the problem. The cause is that the whole `domains/apicredits`
+  family declared `requires-python = ">=3.12"` with no upper bound, and its
+  dependency set has no wheels for 3.14.
+
+  Sixteen projects in this repository already carry `<3.14` for exactly this
+  reason; the six in this family were missed. Bounded to match, after which
+  `uv` selects 3.13 and the suite passes. Both parts are kept — the bound stops
+  an unsupported interpreter being selected, and the pin stops the throwaway
+  environments diverging from the one under test.
+
+- [x] 4.5 A coupling this change created, found the same way.
+  `tests/test_distribution.py` requires
+  `arkhai_hosted_settlement_client-<pinned>-py3-none-any.whl` to be present in
+  `.dist`, and asserts on its absence. `make dist` no longer puts it there, so
+  the fixture fails for eight of the file's tests.
+
+  It never arrived from `make dist` before either — `dist-hosted-client`
+  no-opped whenever the staged directory and `.dist` were the same path — so
+  this test has always depended on someone having staged a release by hand. It
+  is the same latent breakage as the six suites, in a place that reads as a
+  packaging test rather than a hosted-settlement one.
+
+  Not fixed here, because the fix depends on the destination. Once the client
+  resolves from an index the fixture should stop copying it out of `.dist` and
+  let resolution supply it, which cannot be written against an index that has
+  nothing in it yet. Verified that the suite passes with the client present:
+  **39 passed**.
+
 - [ ] 4.2 Re-run the six consuming suites against the real index rather than
   the wheelhouse. Expect real failures behind them in projects whose tests have
   not run in some time; record those separately rather than folding them into
   packaging.
+
+- [x] 4.6 `tests/test_distribution.py` split. Structural assertions — what each
+  wheel carries, requires, and exports — read the archives directly and need no
+  environment: 7 tests, ~8s. Installation behaviour, which creates throwaway
+  environments to assert what resolves with only wheels present, is now
+  `test_distribution_install.py`: 3 tests, ~13s. The shared wheel-building
+  fixture and its helpers moved to `tests/conftest_wheels.py`.
+
+  The split is worth it because a collection error takes a whole file with it.
+  Every failure this file produced during this session was the install half
+  breaking on interpreter selection or a missing artifact, and the structural
+  half — which would have passed — did not run at all.
+
+- [x] 4.7 Three Pydantic shadow warnings filtered rather than fixed, scoped to
+  the two modules that raise them. The field is named `schema` because that is
+  the wire key: it is serialized into HTTP request bodies and into the
+  canonical JSON that issuance evidence is digested and signed over. Renaming
+  it with an alias would require every `model_dump` call to pass `by_alias=True`
+  in the same commit — four call sites, two of them feeding signed digests —
+  and a missed one changes an emitted key silently. That is a contract change
+  with signature consequences, not a cleanup, and it wants its own change and
+  its own verification.
 
 ## 5. Closeout
 
