@@ -264,7 +264,7 @@ wheels = [
 [[package]]
 name = "arkhai-hosted-settlement-client"
 version = "0.4.2"
-source = { registry = "../../../.dist" }
+source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "cryptography" },
     { name = "eth-account" },
@@ -273,7 +273,7 @@ dependencies = [
     { name = "rfc8785" },
 ]
 wheels = [
-    { path = "arkhai_hosted_settlement_client-0.4.2-py3-none-any.whl" },
+    { url = "https://files.pythonhosted.org/packages/13/df/03829e0deb06dd24a0eef182dbd7d7b602f188cbaeabef42a9b7a61d6c48/arkhai_hosted_settlement_client-0.4.2-py3-none-any.whl", hash = "sha256:5764d9e569f79ee0194bf7e9b902c67f65669faae68217aa402b009fa7ea7f35", size = 19126, upload-time = "2026-09-03T10:35:00.891Z" },
 ]
 
 [[package]]
@@ -310,6 +310,7 @@ source = { registry = "../../../.dist" }
 dependencies = [
     { name = "arkhai-kit-settlement-runtime" },
     { name = "cryptography" },
+    { name = "dynaconf" },
     { name = "eth-account" },
     { name = "pydantic" },
     { name = "tomlkit" },

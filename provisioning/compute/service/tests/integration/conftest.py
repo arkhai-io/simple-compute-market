@@ -322,13 +322,7 @@ ok: [kvm1] => {
 # ---------------------------------------------------------------------------
 
 
-@pytest.fixture
-def db_engine():
-    engine = create_engine(
-        "sqlite:///:memory:",
-        connect_args={"check_same_thread": False},
-        poolclass=StaticPool,
-    )
+def _initialize_test_database(engine):
     # resource_pools must exist before Base's ansible_pool_configs FK resolves.
     from market_resource_pools.db import Base as PoolsBase
     PoolsBase.metadata.create_all(bind=engine)
@@ -353,6 +347,16 @@ def db_engine():
             policy_tags={"deliverable_modes": ["bare_metal", "vm"]},
         ))
         session.commit()
+
+
+@pytest.fixture
+def db_engine():
+    engine = create_engine(
+        "sqlite:///:memory:",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    _initialize_test_database(engine)
     return engine
 
 
