@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import re
-import shutil
 import subprocess
 import sys
 import zipfile
@@ -94,22 +92,8 @@ def wheels(tmp_path_factory: pytest.TempPathFactory) -> dict[str, Path]:
         matches = sorted(output.glob(pattern))
         assert len(matches) == 1
         built[name] = matches[0]
-    # The version follows the pin rather than being spelled again here, where
-    # nothing would keep it in step with the package that actually declares it.
-    pinned = re.search(
-        r'arkhai-hosted-settlement-client==([0-9]+\.[0-9]+\.[0-9]+)',
-        (REPO / "kit" / "hosted-settlement" / "pyproject.toml").read_text(
-            encoding="utf-8"
-        ),
-    )
-    assert pinned is not None
-    hosted_clients = sorted(
-        (REPO / ".dist").glob(
-            f"arkhai_hosted_settlement_client-{pinned.group(1)}-py3-none-any.whl"
-        )
-    )
-    assert len(hosted_clients) == 1
-    shutil.copy2(hosted_clients[0], output / hosted_clients[0].name)
+    # Separately released dependencies stay out of this repository-owned wheel set.
+    # Installation tests resolve them from the package index, like runtime installs do.
     return built
 
 
