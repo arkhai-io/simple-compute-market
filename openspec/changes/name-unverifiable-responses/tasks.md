@@ -100,6 +100,12 @@
       currently reach it. Suites: core buyer 115, storefront client 30, core
       storefront 148, e2e unit 97, VM buyer 196, VM storefront 941, bare-metal
       buyer 11, bare-metal storefront 122.
+- [ ] 4.2 **Campaign index currency** (part seven, added when
+      `openspec/README.md#plan-closeout-requirements` was extended from six parts to seven).
+      Appended rather than folded into an existing task, per `AGENTS.md`'s rule to amend
+      rather than replace implementation history. This change has no row in
+      `openspec/changes/README.md`; add one under the campaign that owns it with its status
+      and acceptance boundary, or record here why it stands outside every campaign.
 
 ## Design promotion record
 

@@ -53,6 +53,18 @@ never silently broken so much as never actually executed at all.
 - [x] 4.1 Read `test_multi_registry.py` fully; no fulfillment-lifecycle vocabulary (legacy or current) anywhere in the file, and it doesn't import `DealState` -- confirmed independent of everything Sections 1-3 touched. No changes needed.
 - [x] 4.2 Read `test_buy_oneshot_buyer_cli.py` fully; no legacy vocabulary. It does import `DealState` and assigns `deal_state.reserved_resource_id` directly (`= BUY_RESOURCE_ID`), which remains a valid field after Sections 1-3's changes -- direct assignment, not dependent on how the *other* scenario files populate it. No changes needed.
 
+## 5. Closeout
+
+Per `openspec/README.md#plan-closeout-requirements`.
+
+- [ ] 5.1 **Comment hygiene.** Run `make check-comment-hygiene`, then direct-read the comments and docstrings this change touches for the fuzzier provenance-narration rule the target cannot catch mechanically.
+- [ ] 5.2 **Import placement.** Review every import this change adds or touches and move it to module level where safe; retain a local import only against an observed circular import or a documented lazy-load reason, verified against the real suite.
+- [ ] 5.3 **Documentation compliance.** Re-check this change's accepted decisions against `openspec/README.md`'s placement rules. It carries no delta specs, so confirm every material decision has a permanent destination or an explicit temporary, superseded, or rejected classification.
+- [ ] 5.4 **Narrative compression.** Compress completed-task notes to final behavior, material validation evidence, unresolved or deferred work, and permanent-documentation destinations, moving durable rationale into `design.md` first.
+- [ ] 5.5 **Roadmap currency.** This change sits under the lesser goal “End-to-end harness determinism”, which has no roadmap goal behind it, so it most likely owes `docs/development/ROADMAP.md` nothing. Confirm that and record the no-impact disposition explicitly rather than omitting the step.
+- [ ] 5.6 **Campaign index currency.** Update this change's row, and its campaign's dependency graph, in `openspec/changes/README.md` to match its state at completion, or record the disposition here if its status and campaign placement are both unchanged.
+- [ ] 5.7 **Promotion.** Complete the design-promotion record, mapping every accepted decision to its exact permanent heading, and verify no production source references `openspec/changes/refactor-e2e-fulfillment-lifecycle`.
+
 ## Design-promotion record
 
 See `design.md`'s "Section 1 ... Design promotion record" table. Sections 2-4

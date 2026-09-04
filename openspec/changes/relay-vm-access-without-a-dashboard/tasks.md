@@ -971,6 +971,13 @@ values to confirm the mount renders and the document is not placed in a Secret.
 | Relay uniformity per host is a limit of one client per host, not of the model | `openspec/specs/physical-provisioning/architecture.md` |
 | Encrypting a configured secret at rest is part of the configuration pattern | `kit/config` module docstring |
 | One SSH key currently reaches every host in an environment; per-host material is supported and unused | recorded in this change's `design.md`; the fix is owned by `contain-embedded-host-key-material` |
+- [ ] 11.7 **Campaign index currency** (part seven, added when
+      `openspec/README.md#plan-closeout-requirements` was extended from six parts to seven).
+      Appended rather than folded into an existing task, per `AGENTS.md`'s rule to amend
+      rather than replace implementation history. Update this change's row, and its
+      campaign's dependency graph, in `openspec/changes/README.md` to match its state at
+      completion, or record the disposition here if its status and campaign placement are
+      both unchanged.
 
 ## Sequencing against the sibling changes
 

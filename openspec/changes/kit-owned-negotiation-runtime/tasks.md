@@ -50,6 +50,13 @@ Per `openspec/README.md#plan-closeout-requirements`.
       disposition, package surfaces, and parent-owned validation.
 - [x] 6.5 Updated Goal 4's current state and removed the completed negotiation-copy gap.
 - [x] 6.6 Completed the design-promotion record and permanent architecture/testing docs.
+- [ ] 6.7 **Campaign index currency** (part seven, added when
+      `openspec/README.md#plan-closeout-requirements` was extended from six parts to seven).
+      Appended rather than folded into an existing task, per `AGENTS.md`'s rule to amend
+      rather than replace implementation history. Update this change's row, and its
+      campaign's dependency graph, in `openspec/changes/README.md` to match its state at
+      completion, or record the disposition here if its status and campaign placement are
+      both unchanged.
 
 ## Design promotion record
 

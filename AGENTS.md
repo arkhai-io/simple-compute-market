@@ -19,7 +19,7 @@ Use a discuss → plan → implement workflow for non-trivial changes.
 - Name the files to touch and why.
 - Identify the permanent documentation destination for every accepted material design decision.
 - Include focused validation and relevant integration suites.
-- End the plan with the closeout task defined in `openspec/README.md#plan-closeout-requirements` — comment hygiene, documentation compliance, and tasks compression. Do not defer this to a later review round. Promotion happens post code-review to reduce file churn.
+- End the plan with the closeout task defined in `openspec/README.md#plan-closeout-requirements` — comment hygiene, import placement, documentation compliance, narrative compression, roadmap currency, campaign index currency, and promotion. Do not defer this to a later review round. Promotion happens post code-review to reduce file churn.
 
 ### Implement
 

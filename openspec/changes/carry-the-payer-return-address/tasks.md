@@ -126,3 +126,31 @@
       is no such table in the repository -- it was a matrix from an earlier
       working session, not a committed artifact -- so both this task and the
       note now name the lane itself.
+
+## 6. Closeout
+
+Per `openspec/README.md#plan-closeout-requirements`. This change's implementation predates the closeout task becoming a planning requirement. The parts are recorded here so each carries an explicit disposition rather than an assumed one; confirm and tick each rather than treating the change as closed.
+
+- [ ] 6.1 **Comment hygiene.** Run `make check-comment-hygiene`, then direct-read the
+      comments and docstrings this change touches for the fuzzier provenance-narration rule
+      the target cannot catch mechanically.
+- [ ] 6.2 **Import placement.** Review every import this change adds or touches and move it
+      to module level where safe; retain a local import only against an observed circular
+      import or a documented lazy-load reason, verified against the real suite.
+- [ ] 6.3 **Documentation compliance.** Re-check this change's accepted decisions against
+      `openspec/README.md`'s placement rules. It carries delta specs for
+      `settlement-servicing`, `test-compatibility`; confirm each landed in the owning
+      `openspec/specs/<capability>/spec.md`, and that durable conceptual rationale sits in
+      the companion `architecture.md` rather than only in `design.md`.
+- [ ] 6.4 **Narrative compression.** Compress completed-task notes to final behavior,
+      material validation evidence, unresolved or deferred work, and permanent-documentation
+      destinations, moving durable rationale into `design.md` first.
+- [ ] 6.5 **Roadmap currency.** This change belongs to no campaign, so it most likely owes
+      `docs/development/ROADMAP.md` nothing. Confirm that and record the disposition
+      explicitly rather than omitting the step.
+- [ ] 6.6 **Campaign index currency.** This change has no row in
+      `openspec/changes/README.md`; add one under the campaign that owns it with its status
+      and acceptance boundary, or record here why it stands outside every campaign.
+- [ ] 6.7 **Promotion.** Add a design-promotion record, mapping every accepted decision to
+      its exact permanent heading, and verify no production source references
+      `openspec/changes/carry-the-payer-return-address`.

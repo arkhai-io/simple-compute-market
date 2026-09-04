@@ -33,3 +33,15 @@
 
 - [ ] 6.1 Update the `add-bare-metal-hosted-settlement` matrix note to record the two lanes as qualified with the protected run's evidence path, workflow run, and bound release, matching how the interactive `card.v1` lanes were recorded.
 - [ ] 6.2 Sync the two modified requirements into `openspec/specs/settlement-servicing/spec.md` and verify `openspec validate --changes project-an-authoritative-funding-loss --strict` passes before archiving.
+
+## 7. Closeout
+
+Per `openspec/README.md#plan-closeout-requirements`.
+
+- [ ] 7.1 **Comment hygiene.** Run `make check-comment-hygiene`, then direct-read the comments and docstrings this change touches for the fuzzier provenance-narration rule the target cannot catch mechanically.
+- [ ] 7.2 **Import placement.** Review every import this change adds or touches and move it to module level where safe; retain a local import only against an observed circular import or a documented lazy-load reason, verified against the real suite.
+- [ ] 7.3 **Documentation compliance.** Re-check this change's accepted decisions against `openspec/README.md`'s placement rules. It carries delta specs for `settlement-servicing`; confirm each landed in the owning `openspec/specs/<capability>/spec.md`, and that durable conceptual rationale sits in the companion `architecture.md` rather than only in `design.md`.
+- [ ] 7.4 **Narrative compression.** Compress completed-task notes to final behavior, material validation evidence, unresolved or deferred work, and permanent-documentation destinations, moving durable rationale into `design.md` first.
+- [ ] 7.5 **Roadmap currency.** This change belongs to no campaign, so it most likely owes `docs/development/ROADMAP.md` nothing. Confirm that and record the disposition explicitly rather than omitting the step.
+- [ ] 7.6 **Campaign index currency.** This change has no row in `openspec/changes/README.md`; add one under the campaign that owns it with its status and acceptance boundary, or record here why it stands outside every campaign.
+- [ ] 7.7 **Promotion.** Add a design-promotion record, mapping every accepted decision to its exact permanent heading, and verify no production source references `openspec/changes/project-an-authoritative-funding-loss`.

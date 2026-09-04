@@ -58,3 +58,15 @@
 - [x] 7.3 Promote package/deployment topology to `openspec/specs/deployment-state/spec.md`, `openspec/specs/deployment-state/architecture.md`, and the role map in `docs/development/ARCHITECTURE.md`.
 - [x] 7.4 Update `openspec/specs/physical-provisioning/architecture.md` and `openspec/specs/fulfillment/architecture.md` with the accepted pull-based composition boundary and any remaining result-delivery limitation.
 - [ ] 7.5 Record every promoted decision in `design.md`, run strict validation for the change and affected permanent specs, and archive only after current-state documentation matches verified behavior.
+
+## 8. Closeout
+
+Per `openspec/README.md#plan-closeout-requirements`.
+
+- [ ] 8.1 **Comment hygiene.** Run `make check-comment-hygiene`, then direct-read the comments and docstrings this change touches for the fuzzier provenance-narration rule the target cannot catch mechanically.
+- [ ] 8.2 **Import placement.** Review every import this change adds or touches and move it to module level where safe; retain a local import only against an observed circular import or a documented lazy-load reason, verified against the real suite.
+- [ ] 8.3 **Documentation compliance.** Re-check this change's accepted decisions against `openspec/README.md`'s placement rules. It carries delta specs for `deployment-state`, `market-composition`, `storefront-publication`; confirm each landed in the owning `openspec/specs/<capability>/spec.md`, and that durable conceptual rationale sits in the companion `architecture.md` rather than only in `design.md`.
+- [ ] 8.4 **Narrative compression.** Compress completed-task notes to final behavior, material validation evidence, unresolved or deferred work, and permanent-documentation destinations, moving durable rationale into `design.md` first.
+- [ ] 8.5 **Roadmap currency.** Update the “One storefront serving several compute-family domains” goal's current-state description and gap-to-change mapping in `docs/development/ROADMAP.md`, and name that update in the design-promotion record.
+- [ ] 8.6 **Campaign index currency.** Update this change's row, and its campaign's dependency graph, in `openspec/changes/README.md` to match its state at completion, or record the disposition here if its status and campaign placement are both unchanged.
+- [ ] 8.7 **Promotion.** Add a design-promotion record, mapping every accepted decision to its exact permanent heading, and verify no production source references `openspec/changes/market-platform-bare-metal-10-storefront-composition`.

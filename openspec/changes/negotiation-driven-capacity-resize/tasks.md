@@ -68,3 +68,15 @@ cover at minimum:
 - Settlement and fulfillment reading the negotiated shape rather than the listing's
   `offer_resource` -- `_resolve_compute_resource` and `vm_fulfillment_planner` both
   read the listing today.
+
+## 3. Closeout
+
+Per `openspec/README.md#plan-closeout-requirements`. This change's implementation predates the closeout task becoming a planning requirement. The parts are recorded here so each carries an explicit disposition rather than an assumed one; confirm and tick each rather than treating the change as closed.
+
+- [ ] 3.1 **Comment hygiene.** Run `make check-comment-hygiene`, then direct-read the comments and docstrings this change touches for the fuzzier provenance-narration rule the target cannot catch mechanically.
+- [ ] 3.2 **Import placement.** Review every import this change adds or touches and move it to module level where safe; retain a local import only against an observed circular import or a documented lazy-load reason, verified against the real suite.
+- [ ] 3.3 **Documentation compliance.** Re-check this change's accepted decisions against `openspec/README.md`'s placement rules. It carries no delta specs, so confirm every material decision has a permanent destination or an explicit temporary, superseded, or rejected classification.
+- [ ] 3.4 **Narrative compression.** Compress completed-task notes to final behavior, material validation evidence, unresolved or deferred work, and permanent-documentation destinations, moving durable rationale into `design.md` first.
+- [ ] 3.5 **Roadmap currency.** Update the “Negotiate full compute capability, not GPU count alone” goal's current-state description and gap-to-change mapping in `docs/development/ROADMAP.md`, and name that update in the design-promotion record.
+- [ ] 3.6 **Campaign index currency.** Update this change's row, and its campaign's dependency graph, in `openspec/changes/README.md` to match its state at completion, or record the disposition here if its status and campaign placement are both unchanged.
+- [ ] 3.7 **Promotion.** Complete the design-promotion record, mapping every accepted decision to its exact permanent heading, and verify no production source references `openspec/changes/negotiation-driven-capacity-resize`.

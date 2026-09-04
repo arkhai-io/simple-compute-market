@@ -158,6 +158,13 @@ operator step, called out in section 6.
 | A malformed port fails the entry rather than defaulting, because an unreachable host is not a degraded one | `openspec/specs/physical-provisioning/spec.md` | Applied |
 | Appending a migration makes `check_schema_version` require it before startup | `design.md` — deployment consequence, not a permanent contract | Recorded |
 | No roadmap edit; the campaign-level decision belongs to the change that alters what a deployment can do | `tasks.md` 7.5 | Recorded |
+- [ ] 7.7 **Campaign index currency** (part seven, added when
+      `openspec/README.md#plan-closeout-requirements` was extended from six parts to seven).
+      Appended rather than folded into an existing task, per `AGENTS.md`'s rule to amend
+      rather than replace implementation history. Update this change's row, and its
+      campaign's dependency graph, in `openspec/changes/README.md` to match its state at
+      completion, or record the disposition here if its status and campaign placement are
+      both unchanged.
 
 ## Implementation notes
 

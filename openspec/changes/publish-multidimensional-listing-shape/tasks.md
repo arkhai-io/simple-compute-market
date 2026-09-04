@@ -51,6 +51,13 @@ Per `openspec/README.md#plan-closeout-requirements`.
       mapping in `docs/development/ROADMAP.md` — specifically the statement that
       listings advertise a GPU-only shape and that dimension filters match nothing.
 - [ ] 4.6 **Promotion.** Complete the design-promotion record below.
+- [ ] 4.7 **Campaign index currency** (part seven, added when
+      `openspec/README.md#plan-closeout-requirements` was extended from six parts to seven).
+      Appended rather than folded into an existing task, per `AGENTS.md`'s rule to amend
+      rather than replace implementation history. Update this change's row, and its
+      campaign's dependency graph, in `openspec/changes/README.md` to match its state at
+      completion, or record the disposition here if its status and campaign placement are
+      both unchanged.
 
 ## Design promotion record
 

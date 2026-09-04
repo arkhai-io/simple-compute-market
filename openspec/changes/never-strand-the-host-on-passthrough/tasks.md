@@ -288,6 +288,13 @@ checked against it here.
 | Declared GPU capacity counts assignable devices, not present ones | `openspec/specs/physical-provisioning/spec.md` | Applied |
 | ACS override is rejected, and why | `openspec/specs/physical-provisioning/architecture.md` | Applied |
 | The blacklist is all-or-nothing, so it applies only when every GPU is bindable | `design.md` — implementation rationale, not a permanent contract | Recorded |
+- [ ] 8.7 **Campaign index currency** (part seven, added when
+      `openspec/README.md#plan-closeout-requirements` was extended from six parts to seven).
+      Appended rather than folded into an existing task, per `AGENTS.md`'s rule to amend
+      rather than replace implementation history. Update this change's row, and its
+      campaign's dependency graph, in `openspec/changes/README.md` to match its state at
+      completion, or record the disposition here if its status and campaign placement are
+      both unchanged.
 
 ## Out of scope, observed
 

@@ -25,3 +25,8 @@ the domain-layer `requirements` parser (VM first), the shared
 matching-contract confirmation (should not need to change), the
 `offering_type` field (if accepted), and the staged wire-key
 compatibility migration (if accepted).
+
+That plan must end with the seven-part closeout task defined in
+`openspec/README.md#plan-closeout-requirements`. No closeout section appears here
+because that requirement attaches when implementation is planned, and this change
+has no implementation plan yet.

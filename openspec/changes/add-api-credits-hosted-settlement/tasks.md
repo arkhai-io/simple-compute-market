@@ -26,3 +26,15 @@ Consolidated validation passed for the shared buyer/storefront/runtime suites, a
 
 - [ ] Verify and record the exact independently signed `expand-stripe-payer-funding` producer manifest/client/image/provenance and its protected acceptance run. **Blocked:** this checkout contains the consumer pins and local deterministic contract only; no independently verifiable signed producer acceptance record is available here.
 - [ ] Run the wallet-free API-credit hosted protected scenario for available card, US bank transfer, ACH, off-session action, new-key use to HTTP 402, same-owner top-up, other-owner rejection, restart, evidence, collection/reclaim, and sign the sanitized report. **Blocked:** requires the exact accepted producer artifacts, protected Stripe account capabilities/credentials and browser inputs, plus a deployed authenticated portable evidence resolver; deterministic local ports are not substitutes.
+
+## Closeout
+
+Per `openspec/README.md#plan-closeout-requirements`.
+
+- [ ] **Comment hygiene.** Run `make check-comment-hygiene`, then direct-read the comments and docstrings this change touches for the fuzzier provenance-narration rule the target cannot catch mechanically.
+- [ ] **Import placement.** Review every import this change adds or touches and move it to module level where safe; retain a local import only against an observed circular import or a documented lazy-load reason, verified against the real suite.
+- [ ] **Documentation compliance.** Re-check this change's accepted decisions against `openspec/README.md`'s placement rules. It carries delta specs for `api-credits`, `buyer-orchestration`, `deployment-state`, `market-composition`, `settlement-servicing`, `storefront-publication`, `test-compatibility`; confirm each landed in the owning `openspec/specs/<capability>/spec.md`, and that durable conceptual rationale sits in the companion `architecture.md` rather than only in `design.md`.
+- [ ] **Narrative compression.** Compress completed-task notes to final behavior, material validation evidence, unresolved or deferred work, and permanent-documentation destinations, moving durable rationale into `design.md` first.
+- [ ] **Roadmap currency.** This change belongs to no campaign, so it most likely owes `docs/development/ROADMAP.md` nothing. Confirm that and record the disposition explicitly rather than omitting the step.
+- [ ] **Campaign index currency.** This change has no row in `openspec/changes/README.md`; add one under the campaign that owns it with its status and acceptance boundary, or record here why it stands outside every campaign.
+- [ ] **Promotion.** Complete the design-promotion record, mapping every accepted decision to its exact permanent heading, and verify no production source references `openspec/changes/add-api-credits-hosted-settlement`.

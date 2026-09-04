@@ -101,5 +101,6 @@ A capability MAY maintain `architecture.md` beside its normative `spec.md` for d
 - Repository-wide architecture, operational, and directional separation: `docs/development/ARCHITECTURE.md`, `docs/development/ROADMAP.md`, and `openspec/changes/README.md` — the current system, the goals being pursued, and delivery readiness respectively, each naming the other two's jurisdiction.
 - The single permitted directional roadmap and its no-tasks/no-acceptance-criteria/no-status constraints: `docs/development/ROADMAP.md`.
 - Roadmap currency owed at change completion: `openspec/README.md#plan-closeout-requirements`, part 5.
+- Campaign index currency owed at change completion: `openspec/README.md#plan-closeout-requirements`, part 6.
 
 Strict OpenSpec validation checks artifact structure. Evidence strength, current-versus-proposed classification, coherent change boundaries, and stale inline-note disposition still require code-aware review.
