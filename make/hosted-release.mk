@@ -32,10 +32,9 @@ HOSTED_RELEASE_MANIFEST ?= $(HOSTED_RELEASE_DIR)/release-manifest.json
 
 ifeq ($(HOSTED_RELEASE_TRUST),)
 
-# The pinned version is not signed. There is no release to verify, no signed
-# artifact names to list, and no schema to assert -- which is not the same as
-# verifying the last signed release, a different release than the one this
-# source consumes. That is what a hardcoded trust filename did.
+# The pinned version is not signed. There is no release to verify -- which is
+# not the same as verifying the last signed release, a different release than
+# the one this source consumes. That is what a hardcoded trust filename did.
 #
 # This states the situation and succeeds, because an unsigned pin is a state
 # the design supports: the wheel comes from the producer's access-controlled
@@ -43,8 +42,6 @@ ifeq ($(HOSTED_RELEASE_TRUST),)
 # protected run binds a signed release by construction and so never lands here;
 # if it did it would carry an empty `--trust` and fail closed in the verifier.
 HOSTED_RELEASE_VERSION ?= $(call _hosted_field,version)
-HOSTED_RELEASE_SCHEMA ?=
-HOSTED_RELEASE_FILES =
 HOSTED_CLIENT_WHEEL ?= $(HOSTED_RELEASE_DIR)/$(call _hosted_field,wheel)
 VERIFY_HOSTED_RELEASE = printf '%s\n' \
 	'hosted client $(HOSTED_RELEASE_VERSION) is pinned and unsigned: no trust' \
@@ -54,21 +51,14 @@ VERIFY_HOSTED_RELEASE = printf '%s\n' \
 else
 
 # Which release is bound is a choice, made once. What that release contains is
-# not a choice -- it follows -- so the artifact names are read from the trust
-# config rather than spelled out beside it, where they would have to be edited
-# in step with it and would name the previous release when they were not. The
-# verifier derives the same names from the same two values.
+# not a choice -- it follows -- so the wheel name is derived from the version
+# the trust config states rather than spelled out beside it, where it would have
+# to be edited in step with it and would name the previous release when it was
+# not. The verifier derives every artifact name from that same config.
 HOSTED_RELEASE_CONTRACT := $(shell uv run --no-project python -c \
 	"import json;d=json.load(open('$(HOSTED_RELEASE_TRUST)'));print(d['release_version'],d['schema_version'])" 2>/dev/null)
 HOSTED_RELEASE_VERSION ?= $(word 1,$(HOSTED_RELEASE_CONTRACT))
-HOSTED_RELEASE_SCHEMA ?= $(word 2,$(HOSTED_RELEASE_CONTRACT))
 HOSTED_CLIENT_WHEEL ?= $(HOSTED_RELEASE_DIR)/arkhai_hosted_settlement_client-$(HOSTED_RELEASE_VERSION)-py3-none-any.whl
-HOSTED_RELEASE_FILES = release-manifest.json \
-	arkhai_hosted_settlement_client-$(HOSTED_RELEASE_VERSION)-py3-none-any.whl \
-	openapi-v$(HOSTED_RELEASE_VERSION).json \
-	conformance-v$(HOSTED_RELEASE_VERSION).json \
-	migrations-v$(HOSTED_RELEASE_SCHEMA).json \
-	sbom.spdx.json provenance.intoto.json
 VERIFY_HOSTED_RELEASE = uv run --no-project --with 'eth-account>=0.13,<0.14' \
 	python $(call _hosted_path,scripts/verify-hosted-release.py) \
 	--trust $(HOSTED_RELEASE_TRUST) \

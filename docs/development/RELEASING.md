@@ -141,6 +141,14 @@ and required capabilities; a matching major version or floating image tag is
 not a substitute. The hosted repository publishes those artifacts. This
 repository publishes only the thin adapter and marketplace consumers.
 
+A staged release is therefore no longer how the client is obtained; that is the
+index's job. What staging is still for is the rest of the manifest — the service
+image digest, OpenAPI and conformance hashes, migration schema version, SBOM,
+provenance, and signer identity — which a deployment verifies before activating a
+workload and which no package index carries. Verifying a release describes a
+deployed authority, so it is a publication-time and deployment-time activity and
+gates no build or test.
+
 Hosted financial system E2E consumes that same ordinary production release; it
 does not acquire a second test distribution or alternate service image. The
 verified release identity records its repository, workflow reference, and

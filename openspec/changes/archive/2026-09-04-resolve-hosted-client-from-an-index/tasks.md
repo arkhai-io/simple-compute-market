@@ -47,11 +47,21 @@ That establishes the packaging change and not the publication.
   `dist-clean` would otherwise delete artifacts that were received rather than
   built. `dist` builds everything it produces, so a clean rebuild loses
   nothing.
-- [ ] 2.7 `HOSTED_RELEASE_FILES` in `make/hosted-release.mk` now has no
-  consumer — `review-wheelhouse-prepare` was the last. Left in place rather
-  than removed in the same pass, because it has two branches in that file and
-  removing it is a separate small edit worth its own review. It is dead as it
-  stands and should not survive closeout.
+- [x] 2.7 `HOSTED_RELEASE_FILES` removed from both branches of
+  `make/hosted-release.mk`. `HOSTED_RELEASE_SCHEMA` went with it: the file list was
+  its only consumer, so removing one orphaned the other. Both comments that described
+  the artifact list were corrected rather than left describing a variable that no
+  longer exists — the unsigned branch no longer claims there are "no signed artifact
+  names to list", and the signed branch now explains that the wheel name is derived
+  from the version the trust config states. `HOSTED_CLIENT_WHEEL` and
+  `HOSTED_RELEASE_VERSION` stay; both have live consumers.
+
+  Verified: `make -n verify-hosted-release` still expands to the full verifier
+  invocation with trust, manifest, and wheel paths resolved; hosted release-tooling
+  tests **26 passed**; `make test-release-tooling` **205 passed, 2 failed**. Both
+  failures are pre-existing — they reproduce with this edit reverted — and concern the
+  publish workflow (`test_publish_matrix.py`, `test_image_publication_contract.py`),
+  which `publish-wheels-through-a-gate` task 1.4 owns.
 
 ## 3. Verification
 
@@ -223,15 +233,39 @@ That establishes the packaging change and not the publication.
   dependency; they belong to an internal wheel whose locked metadata predated a rebuild
   at the same version — the hazard task 4.3 describes, surfaced here as a side effect.
 
-- [ ] 4.9 **Interpreter selection blocks these suites by default.** Every suite above
-  needed `UV_PYTHON=3.13`. `requires-python = ">=3.12"` lets uv select 3.14.6, for which
-  `pydantic-core` 2.33.2 publishes no wheel, so resolution falls back to a `maturin`
-  source build and fails before any test runs. Pre-existing and unrelated to the client:
-  the same class of environment finding as the `torch>=2.7.0` platform constraint already
-  recorded in 3.5 and 4.2. A clean checkout on a default interpreter therefore still does
-  not satisfy this change's acceptance, for a reason that has nothing to do with the
-  hosted client. Decide whether this change owns pinning the interpreter or whether it is
-  a separate finding against those projects.
+- [x] 4.9 **Interpreter selection, resolved for this change's path.** Verified cause:
+  `uv` selects the newest interpreter a project admits. `pydantic-core` 2.33.2 publishes
+  no wheel for 3.14, so resolution falls back to a `maturin` source build and fails before
+  any test runs. Proven both ways against fresh environments —
+  `domains/bare_metal/storefront` uncapped selects 3.14 and dies in the Rust build;
+  `domains/apicredits/storefront`, capped, selects CPython 3.13.14 and installs 97
+  packages.
+
+  This is not a new policy question. The repository already caps: twenty-two projects
+  declare `<3.14`, and both CI workflows pin 3.13.7. The projects that failed are the ones
+  missing the cap, so the fix is to apply the existing convention rather than to choose one.
+
+  **Decision: this change owns the two projects in its own path** — the hosted-client
+  consumers whose suites it must re-run — and no more. `domains/bare_metal/storefront` and
+  `domains/bare_metal/buyer` now declare `>=3.12,<3.14`, matching the fifteen projects that
+  already use exactly that; both re-locked, both wheels rebuilt so their published metadata
+  carries the cap. Verified with no `UV_PYTHON` set and no pre-existing environment:
+  storefront **124 passed**, buyer **11 passed**. Downstream consumers unaffected:
+  `e2e-tests` unit **237 passed**, `domains/apicredits/storefront` **77 passed**.
+
+  Correction to this task as first written: it claimed every suite re-run under 4.8 needed
+  `UV_PYTHON=3.13`. That was assumed from one observed failure, not tested. The API-credit
+  projects were already capped and never needed it; the pin was redundant there.
+
+  **Residual, deliberately not taken here.** Twelve further projects declare an uncapped
+  `>=3.12` and pull `pydantic` or `fastapi` directly, so each hits the same wall on a
+  default interpreter: `core/registry`, `core/storefront`, `domains/bare_metal` (domain
+  root), `domains/bare_metal/provisioning/adapter`, `domains/vms/provisioning/adapter`,
+  `domains/vms/provisioning/client`, `kit/fulfillment`, `kit/resource-pools`,
+  `kit/site-client`, `kit/site`, `provisioning/compute`, and
+  `provisioning/compute/service`. None sits in this change's acceptance path. Capping them
+  edits packaging metadata across the tree and wants its own re-lock, wheel rebuild, and
+  review, so it belongs in its own change rather than being absorbed here.
 
 ## 5. Closeout
 
@@ -240,26 +274,55 @@ That establishes the packaging change and not the publication.
   prerequisite that is gone.
 - [x] 5.2 **Import placement.** No Python imports added; the three script edits
   are call-site changes. Recorded as not applicable.
-- [ ] 5.3 **Documentation compliance.** `docs/development/DEPLOYMENT_AND_CONFIG.md`
-  gains how the client is obtained; `docs/development/RELEASING.md` gains what
-  a staged release is still for. `docs/development/TESTING.md` has a "Raising
-  the hosted contract" section the removed comment cited — check it still
-  describes a flow that exists.
-- [ ] 5.4 **Narrative compression.** Reduce task notes to final behaviour and
-  evidence. The rejected alternatives — vendoring the contract source, an
-  offline digest gate on `init` — stay in `design.md`.
+- [x] 5.3 **Documentation compliance.** All three done, and the TESTING.md check found
+  a real defect. `docs/development/DEPLOYMENT_AND_CONFIG.md` said the API-credit
+  distribution installs the hosted client "from the staged wheelhouse", which stopped
+  being true; it now names the index and gains a paragraph stating how an externally
+  produced dependency is obtained, what `.dist` holds, and where attestation still comes
+  from. `docs/development/RELEASING.md` gains what a staged release is still for — the
+  manifest coordinates no package index carries — and that verifying one gates no build
+  or test. `docs/development/TESTING.md`'s "Raising the hosted contract" still told a
+  reader to relock because "these projects declare no index, so the wheels must be
+  findable"; the client resolves from the public index now, and `--find-links` is for this
+  repository's own wheels. Corrected in place.
+
+  The delta spec also mislabelled an operation: "Deployment documentation states how a
+  dependency is obtained" was under `## MODIFIED Requirements` while no such requirement
+  exists in `openspec/specs/deployment-state/spec.md`. It is new, so it is ADDED;
+  archival would have failed on it. `openspec validate --strict` now reports the change
+  valid.
+- [x] 5.4 **Narrative compression.** Re-read at closeout. Both rejected alternatives —
+  vendoring the contract source, and an offline digest gate on `init` — are already held
+  in `design.md` and are not restated in any task note, so there is no duplication to
+  delete. The long notes that remain (4.3's stale-installed-wheel diagnosis, 4.8's
+  lockfile correction, 4.9's interpreter finding) are each a durable finding with its
+  evidence rather than debugging narrative; this step deletes duplication, not
+  information, so they stay.
 - [x] 5.5 **Roadmap currency.** `docs/development/ROADMAP.md` recorded that the
   client could not be obtained. It can; the paragraph now describes how it is
   obtained and what the index does and does not attest, which is durable rather
   than a note about a gap that closed.
-- [ ] 5.6 **Promotion.** Complete the design-promotion record below.
-- [ ] 5.7 **Campaign index currency** (part seven, added when `openspec/README.md#plan-closeout-requirements` was extended from six parts to seven). Appended rather than folded into an existing task, per `AGENTS.md`'s rule to amend rather than replace implementation history. Update this change's row, and its campaign's dependency graph, in `openspec/changes/README.md` to match its state at completion, or record the disposition here if its status and campaign placement are both unchanged.
+- [x] 5.6 **Promotion.** Design-promotion record below completed with exact
+  destinations. No production source references
+  `openspec/changes/resolve-hosted-client-from-an-index`.
+- [x] 5.7 **Campaign index currency** (part seven, added when
+  `openspec/README.md#plan-closeout-requirements` was extended from six parts to seven).
+  Appended rather than folded into an existing task, per `AGENTS.md`'s rule to amend
+  rather than replace implementation history. The row and its campaign narrative were
+  corrected on 2026-09-04: they described this change as blocked on infrastructure and
+  producer changes, and its campaign preamble claimed the dependency "resolves from
+  nowhere", both of which had stopped being true. On archival the row is removed, which
+  is the disposition a completed change owes the index. The campaign's own summary keeps
+  the residual this change did not take — twelve projects still declaring an uncapped
+  `requires-python` — so it does not leave with the index.
 
 ## Design promotion record
 
 | Accepted decision | Permanent location | State |
 |---|---|---|
-| An externally produced dependency resolves from a package index; nothing stages it into the wheelhouse | `openspec/specs/deployment-state/spec.md` | Pending |
-| `.dist` holds only what this repository builds | `openspec/specs/deployment-state/spec.md` | Pending |
-| Verification of a producer's signed release is a publication-time activity that gates no build or test | `openspec/specs/deployment-state/spec.md` | Pending |
-| How an externally produced dependency is obtained | `docs/development/DEPLOYMENT_AND_CONFIG.md` | Pending |
+| An externally produced dependency resolves from a package index; nothing stages it into the wheelhouse | `openspec/specs/deployment-state/spec.md` — "Externally produced dependencies resolve from a declared index" | Synchronized at archival |
+| `.dist` holds only what this repository builds | `openspec/specs/deployment-state/spec.md` — "Externally produced dependencies resolve from a declared index" | Synchronized at archival |
+| Verification of a producer's signed release is a publication-time activity that gates no build or test | `openspec/specs/deployment-state/spec.md` — "Release verification is a publication-time activity", with the operator-facing statement in `docs/development/RELEASING.md` — "Hosted settlement release pin" | Synchronized at archival |
+| How an externally produced dependency is obtained | `openspec/specs/deployment-state/spec.md` — "Deployment documentation states how a dependency is obtained", satisfied by `docs/development/DEPLOYMENT_AND_CONFIG.md` | Promoted 2026-09-04 |
+| The interpreter cap that lets these suites resolve, applied to this change's own path only | `domains/bare_metal/{storefront,buyer}/pyproject.toml`, matching the convention twenty-two projects already declare | Applied 2026-09-04 |
+| Why vendoring the contract source and an offline digest gate on `init` were rejected | This change's `design.md` | Retained as change history |

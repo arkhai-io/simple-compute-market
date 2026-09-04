@@ -57,8 +57,6 @@ invoke it.
 - **THEN** the build and the suite proceed, and no published artifact results
   from them
 
-## MODIFIED Requirements
-
 ### Requirement: Deployment documentation states how a dependency is obtained
 
 Deployment and release documentation MUST state, for every distribution this

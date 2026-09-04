@@ -622,7 +622,8 @@ So raising the contract is:
 $EDITOR kit/hosted-settlement/pyproject.toml
 # 2. bring the other two distributions with it
 make fix-hosted-client-pin
-# 3. relock; these projects declare no index, so the wheels must be findable
+# 3. relock. The hosted client resolves from the public package index like any
+#    other third-party dependency; --find-links is for this repository's own wheels.
 uv lock --find-links .dist
 ```
 

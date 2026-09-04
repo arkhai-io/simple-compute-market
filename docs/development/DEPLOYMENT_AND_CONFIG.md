@@ -357,8 +357,18 @@ authenticated buyer result route; they do not belong in TOML, environment
 variables, listings, settlement evidence, logs, images, or ConfigMaps.
 
 The API-credit storefront distribution and image install
-`arkhai-kit-hosted-settlement` and the released hosted client from the staged
-wheelhouse. The storefront owns the settlement operation journal, private
+`arkhai-kit-hosted-settlement` from the staged wheelhouse and the released hosted
+client from the public package index.
+
+The hosted settlement client is produced outside this repository and is obtained
+the way any other third-party dependency is: each consuming project pins an exact
+version and resolves it from the public package index, recording the wheel URL and
+hash in its lockfile. Nothing stages it into `.dist`, which holds only what this
+repository builds, and no build or test target verifies a signed release in order
+to obtain it. Attestation remains available and remains separate: the wheel the
+index serves is byte-identical to the one the signed manifest binds, so a consumer
+that wants provenance takes it from the manifest, which is the only artifact that
+carries it. The storefront owns the settlement operation journal, private
 buyer-result table, and signed issuance-evidence table; the credits service
 independently owns keys, request-digested grants, balances, quota, credentials,
 and its migration history. Restart either authority against its own volume.
