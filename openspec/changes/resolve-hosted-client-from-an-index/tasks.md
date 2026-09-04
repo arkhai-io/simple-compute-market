@@ -188,6 +188,51 @@ That establishes the packaging change and not the publication.
   with signature consequences, not a cleanup, and it wants its own change and
   its own verification.
 
+- [x] 4.8 **Correction to 4.2, found and resolved 2026-09-04.** 4.2 recorded that the
+  consuming projects' locks "now record `https://pypi.org/simple` ... rather than a path
+  into `.dist`". That had not landed on this branch: four locks still recorded `.dist`
+  and had done so in every commit since the entry first appeared —
+  `domains/bare_metal/storefront`, `domains/bare_metal/buyer`,
+  `domains/apicredits/storefront`, and `domains/apicredits/buyer`. `.dist` carries no
+  client wheel, so `uv sync --frozen` failed on the missing artifact. A fifth,
+  `e2e-tests`, still carried a stale `0.4.0` `.dist` entry naming a wheel that no longer
+  exists at any version. 4.2 is left as written, per `AGENTS.md`'s rule to amend rather
+  than replace implementation history.
+
+  All five re-locked with `--upgrade-package arkhai-hosted-settlement-client`. Every
+  lockfile in the repository that carries the client — seven — now records
+  `0.4.2` from `https://pypi.org/simple`. The recorded wheel hash is
+  `sha256:5764d9e5...7ea7f35`, the digest the trust configuration pins, so what the index
+  serves is what the manifest binds.
+
+  Suites re-run against the index with the client absent from the wheelhouse:
+  `domains/bare_metal/storefront` **124 passed**, `domains/apicredits/storefront`
+  **77 passed**, `domains/apicredits/buyer` **17 passed**, `domains/apicredits`
+  **39 passed** (its full target green end to end: 174 Python tests across six suites
+  plus six Rust parity tests, exit 0), and `e2e-tests` unit **237 passed**.
+
+  `domains/bare_metal/buyer` **11 passed**. 4.2 recorded it as having "no Makefile at
+  all, so there is nothing to run". The first half is still true and the second is not:
+  the project has `tests/test_buyer_composition.py` and runs under
+  `uv run --project domains/bare_metal/buyer --find-links .dist pytest`. Its missing
+  Makefile remains a real gap — every sibling has one — but it is a packaging gap, not
+  an absence of tests.
+
+  The re-lock also refreshed stale internal metadata: `arkhai-kit-hosted-settlement`
+  0.1.2 gained `cryptography` and `dynaconf` in these locks. Neither is a client
+  dependency; they belong to an internal wheel whose locked metadata predated a rebuild
+  at the same version — the hazard task 4.3 describes, surfaced here as a side effect.
+
+- [ ] 4.9 **Interpreter selection blocks these suites by default.** Every suite above
+  needed `UV_PYTHON=3.13`. `requires-python = ">=3.12"` lets uv select 3.14.6, for which
+  `pydantic-core` 2.33.2 publishes no wheel, so resolution falls back to a `maturin`
+  source build and fails before any test runs. Pre-existing and unrelated to the client:
+  the same class of environment finding as the `torch>=2.7.0` platform constraint already
+  recorded in 3.5 and 4.2. A clean checkout on a default interpreter therefore still does
+  not satisfy this change's acceptance, for a reason that has nothing to do with the
+  hosted client. Decide whether this change owns pinning the interpreter or whether it is
+  a separate finding against those projects.
+
 ## 5. Closeout
 
 - [x] 5.1 **Comment hygiene.** `make check-comment-hygiene` passes. Read the

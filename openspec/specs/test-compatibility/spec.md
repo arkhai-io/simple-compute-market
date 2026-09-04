@@ -70,6 +70,21 @@ The marketplace-owner wallet-free VM lifecycle against Stripe test mode MUST ver
 
 How a saved instrument becomes ready MUST follow the bound release rather than the harness. Where the bound release declares direct payer instrument setup, a bank-funded saved-instrument lane MUST complete its setup by submitting the payer's own verification evidence and MUST NOT require a browser. Where it does not, the existing interactive setup path MUST stand unchanged. A profile for which the bound release offers no saved-instrument path at all MUST be reported as an unavailable prerequisite, not as a failure of the lane.
 
+A refusal the authority states it will not reconsider MUST end a lane's wait at
+once and MUST be reported as that refusal. A lane MAY retry only a refusal whose
+condition can still change, such as losing a compare-and-set reservation. A
+refusal that can never succeed MUST NOT be retried until a deadline and MUST NOT
+be reported as a convergence timeout in a later stage, because that names a
+stage instead of a cause and discards what the authority said. A wait that does
+exhaust MUST record the last refusal it received, so an exhausted retry is
+distinguishable from an answer that never arrived.
+
+An obligation the runtime parks for operator evidence MUST also end a lane's
+wait at once. A parked obligation is waiting for a person rather than for time,
+and its projection already carries the mechanism's own name for what it could
+not get past, so a wait that outlasts it replaces a stated cause with an expired
+bound.
+
 #### Scenario: Successful `card.v1` purchase
 
 - **WHEN** Chromium completes required card interaction and hosted retrieval proves accepted funding and transfer outcomes
@@ -114,6 +129,31 @@ How a saved instrument becomes ready MUST follow the bound release rather than t
 
 - **WHEN** real profile funding completes while webhook forwarding or the reconciliation worker is stopped and ordinary processes later restart against preserved authority state
 - **THEN** authoritative Stripe retrieval converges the accepted obligation without recreating funding and any transfer or reversal uses the original operation identity exactly once
+
+#### Scenario: A bank-transfer reclaim supplies a payer return address
+
+- **WHEN** a `us_bank_transfer.v1` obligation funded in test mode reaches eligible pre-transfer reclaim and the bound release declares payer return instructions
+- **THEN** the buyer's reclaim supplies a return address the run is entitled to use, the authority accepts the return as in flight, and the report records the reclaim boundary without the address or any provider identifier
+
+#### Scenario: A bank-transfer reclaim without an address is reported as refused
+
+- **WHEN** a `us_bank_transfer.v1` reclaim lane supplies no return address
+- **THEN** the run reports the authority's own refusal naming the missing input, and does not consume a retry deadline or report a convergence timeout
+
+#### Scenario: The authority refuses a reversal the profile forbids
+
+- **WHEN** an eligible-reclaim wait receives a refusal naming the accepted profile's reversal policy as the reason
+- **THEN** the wait ends immediately, the run reports that refusal and its code, and no retry deadline is consumed
+
+#### Scenario: A reclaim wait exhausts its deadline
+
+- **WHEN** an eligible-reclaim wait retries a refusal whose condition may still change and reaches its deadline
+- **THEN** the run reports a timeout that also names the last refusal received, rather than a bare statement that a stage did not converge
+
+#### Scenario: A parked obligation ends the wait
+
+- **WHEN** a lane observes the obligation projected as requiring operator evidence
+- **THEN** the wait ends at once and the run reports the mechanism's own reason for parking it, or names it as parked when the projection carries no reason
 
 ### Requirement: Deterministic hosted recovery is tested at the provider port
 Deterministic tests for timeout placement, unknown acknowledgement, delayed authoritative visibility, provider unavailability, exact-attempt failures, and duplicate or out-of-order normalized events MUST inject declared outcomes at the hosted service's internal financial-provider or webhook-inbox boundary. They MUST exercise the production operation journal, immutable request fingerprints, leases, retry policy, idempotency, reconciliation, webhook inbox, and lifecycle logic without exposing a provider-compatible API, reproducing Stripe objects, requiring provider credentials, or packaging the collaborator with production artifacts. Assertions MUST describe Arkhai state, calls, and effects under a scripted provider outcome; every assertion presented as Stripe behavior MUST be covered separately by Stripe test-mode evidence.

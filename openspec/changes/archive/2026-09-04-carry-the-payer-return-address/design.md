@@ -119,3 +119,15 @@ constraint: build the 0.4.0 wheel from the producer's `.dist`, move the pin, run
 ## Open Questions
 
 None.
+
+## Design promotion record
+
+| Accepted decision | Permanent location |
+|---|---|
+| The return address is carried as per-operation options relayed by neutral layers that do not read them | `openspec/specs/settlement-servicing/spec.md` — "Provider-neutral conditional escrow client" |
+| Only the hosted adapter names the address; mechanism vocabulary stays inside the mechanism client | `openspec/specs/settlement-servicing/spec.md` — "Mechanism clients own mechanism vocabulary" |
+| The options are bound into the reservation hash, so a relayed option cannot be altered without invalidating the reservation | `openspec/specs/settlement-servicing/spec.md` — "Provider-neutral conditional escrow client" |
+| The bank-transfer return lane's evidence shape and its protected-run constraints | `openspec/specs/test-compatibility/spec.md` — "Stripe-backed hosted settlement system evidence", with the run procedure in `docs/development/TESTING.md` |
+| The harness uses the account's own registered address rather than a fixture address | `openspec/specs/test-compatibility/spec.md` — "Stripe-backed hosted settlement system evidence" |
+| Why per-operation options rather than bound mechanism params, and why binding 0.4.0 is a sequencing statement rather than a capability claim | This change's `design.md` |
+

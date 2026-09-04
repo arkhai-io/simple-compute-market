@@ -261,7 +261,7 @@ wheels = [
 [[package]]
 name = "arkhai-hosted-settlement-client"
 version = "0.4.2"
-source = { registry = "../../../.dist" }
+source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "cryptography" },
     { name = "eth-account" },
@@ -270,7 +270,7 @@ dependencies = [
     { name = "rfc8785" },
 ]
 wheels = [
-    { path = "arkhai_hosted_settlement_client-0.4.2-py3-none-any.whl" },
+    { url = "https://files.pythonhosted.org/packages/13/df/03829e0deb06dd24a0eef182dbd7d7b602f188cbaeabef42a9b7a61d6c48/arkhai_hosted_settlement_client-0.4.2-py3-none-any.whl", hash = "sha256:5764d9e569f79ee0194bf7e9b902c67f65669faae68217aa402b009fa7ea7f35", size = 19126, upload-time = "2026-09-03T10:35:00.891Z" },
 ]
 
 [[package]]
@@ -293,6 +293,8 @@ version = "0.1.2"
 source = { registry = "../../../.dist" }
 dependencies = [
     { name = "arkhai-kit-settlement-runtime" },
+    { name = "cryptography" },
+    { name = "dynaconf" },
     { name = "eth-account" },
     { name = "pydantic" },
     { name = "tomlkit" },
@@ -706,6 +708,15 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/e6/8c/6691d986b728e77b5d2872743ebcd962d37a2d0f7e9ad95a81b284fbf905/cytoolz-1.1.0-cp314-cp314t-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:36c8ede93525cf11e2cc787b7156e5cecd7340193ef800b816a16f1404a8dc6d", size = 3001173, upload-time = "2025-10-19T00:43:42.923Z" },
     { url = "https://files.pythonhosted.org/packages/b7/f0/1ae6d28df503b0bdae094879da2072b8ba13db5919cd3798918761578411/cytoolz-1.1.0-cp314-cp314t-musllinux_1_2_aarch64.whl", hash = "sha256:e1b6d37545816905a76d9ed59fa4e332f929e879f062a39ea0f6f620405cdc27", size = 2953081, upload-time = "2025-10-19T00:43:47.103Z" },
     { url = "https://files.pythonhosted.org/packages/e7/9f/490c81bffb3428ab1fa114051fbb5ba18aaa2e2fe4da5bf4170ca524e6b3/cytoolz-1.1.0-cp314-cp314t-musllinux_1_2_x86_64.whl", hash = "sha256:be8e298d88f88bd172b59912240558be3b7a04959375646e7fd4996401452941", size = 2917612, upload-time = "2025-10-19T00:43:59.423Z" },
+]
+
+[[package]]
+name = "dynaconf"
+version = "3.3.5"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/71/e4/723ba469856bb493c948985e5bd562c8a65f2b93e70c896e9764ab76de00/dynaconf-3.3.5.tar.gz", hash = "sha256:a08f6ab44025034ef3c9f86b32548ab01efd4039094a74bd9f028a43c63d016f", size = 333426, upload-time = "2026-08-05T19:50:25.16Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/95/41/b38501c34c40c3261868a2af8ed5fffe3e6d889c680638708de27eb57788/dynaconf-3.3.5-py3-none-any.whl", hash = "sha256:b3b4a753d5c866fc85466b65fc58d4954f6ed7dc8aa67f2b15bcbfd85d184687", size = 271426, upload-time = "2026-08-05T19:50:23.802Z" },
 ]
 
 [[package]]

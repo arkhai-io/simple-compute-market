@@ -498,9 +498,9 @@ For a hosted bare-metal obligation, no Capacity Reservation commit, scheduling, 
 
 ### Requirement: Host registry records the connection port
 
-The host registry MUST record the SSH port the provisioner connects to for each host, defaulting to 22. The registry is the authority for how a host is reached — address, user, key material, and port — and every execution path MUST derive its connection from a rendered inventory rather than constructing one, so a host reached through a reverse tunnel, a NAT forward, or a bastion is reachable by every operation without any of them being changed individually.
+The host registry MUST record the SSH port the provisioner connects to for each host, defaulting to 22. The registry is the authority for how a host is reached — address, user, key material, and port — and every execution path MUST derive its connection from a rendered inventory rather than constructing one, so that a host reached through a reverse tunnel, a NAT forward, or a bastion is reachable by every operation without any of them being changed individually.
 
-Rendered inventories MUST emit `ansible_port` for every host, including hosts on the default port, so a rendered inventory states what the registry holds rather than leaving the default implied by an absent line.
+Rendered inventories MUST emit `ansible_port` for every host, including hosts on the default port, so that a rendered inventory states what the registry holds rather than leaving the default implied by an absent line.
 
 An `ansible_port` supplied through the INI input format MUST be preserved rather than discarded. A value that is not a port number between 1 and 65535 MUST cause its entry to be rejected rather than replaced with a default, because a substituted port produces an unreachable host whose failure resembles a network fault rather than a bad inventory line.
 
@@ -508,6 +508,11 @@ An `ansible_port` supplied through the INI input format MUST be preserved rather
 
 - **WHEN** a host is registered with an SSH port other than 22
 - **THEN** the recorded port is returned by the host endpoints and appears as `ansible_port` in every rendered inventory for that host
+
+#### Scenario: A host is registered without a port
+
+- **WHEN** a host is registered with no SSH port supplied
+- **THEN** the registry records port 22 and rendered inventories state it explicitly
 
 #### Scenario: An inventory file supplies a port
 

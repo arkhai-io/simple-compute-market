@@ -75,3 +75,14 @@ one field and removes that ambiguity.
 None. The change is confined to the harness's wait and diagnostic construction;
 no persisted state, wire contract, or deployment input is affected. Reverting is
 a code revert.
+
+## Design promotion record
+
+| Accepted decision | Permanent location |
+|---|---|
+| Retry eligibility is decided by the authority's own refusal code, not by HTTP status | `openspec/specs/test-compatibility/spec.md` — "Stripe-backed hosted settlement system evidence" |
+| A refusal that can never succeed ends the wait at once and is reported as that refusal, replacing the stage diagnostic rather than being reported as a convergence timeout | `openspec/specs/test-compatibility/spec.md` — "Stripe-backed hosted settlement system evidence" |
+| An exhausted wait records the last refusal it received, so an exhausted retry is distinguishable from an answer that never arrived | `openspec/specs/test-compatibility/spec.md` — "Stripe-backed hosted settlement system evidence" |
+| An obligation parked for operator evidence ends the wait at once, reporting the mechanism's own reason for parking it | `openspec/specs/test-compatibility/spec.md` — "Stripe-backed hosted settlement system evidence" |
+| Which authority codes the bank-transfer reclaim lane actually returns, and why the marketplace refusal type is resolved dynamically rather than imported | This change's `design.md`, with the resolution rationale local to `lifecycle_bridge._refusal_class` |
+

@@ -7,6 +7,9 @@ from types import SimpleNamespace
 
 import pytest
 
+from hosted_settlement_client import FundingProfile
+
+from tests.e2e.roles.scenarios.vms.hosted import network
 from tests.e2e.roles.scenarios.vms.hosted.network import (
     HostedAuthorityRefusal,
     _authority_refusal,
@@ -78,7 +81,6 @@ class _Reclaimer:
 
 
 def _wait(reclaimer: _Reclaimer, monkeypatch: pytest.MonkeyPatch, timeout: str = "180"):
-    from tests.e2e.roles.scenarios.vms.hosted import network
 
     monkeypatch.setenv("HOSTED_SETTLEMENT_E2E_LIFECYCLE_TIMEOUT", timeout)
     monkeypatch.setattr(network.time, "sleep", lambda _seconds: None)
@@ -141,7 +143,6 @@ def _public_wait(
     terminal: set[str],
     timeout: str = "180",
 ):
-    from tests.e2e.roles.scenarios.vms.hosted import network
 
     monkeypatch.setenv("HOSTED_SETTLEMENT_E2E_LIFECYCLE_TIMEOUT", timeout)
     monkeypatch.setattr(network.time, "sleep", lambda _seconds: None)
@@ -213,7 +214,6 @@ def test_materialize_bound_must_sit_below_the_lifecycle_bound(
     stage that never got to answer, so the setting is worse than absent.
     """
 
-    from tests.e2e.roles.scenarios.vms.hosted import network
 
     monkeypatch.setenv("HOSTED_SETTLEMENT_E2E_MATERIALIZE_TIMEOUT", "180")
     monkeypatch.setenv("HOSTED_SETTLEMENT_E2E_LIFECYCLE_TIMEOUT", "180")
@@ -225,7 +225,6 @@ def test_materialize_bound_must_sit_below_the_lifecycle_bound(
 def test_materialize_bound_below_the_lifecycle_bound_is_used(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from tests.e2e.roles.scenarios.vms.hosted import network
 
     monkeypatch.setenv("HOSTED_SETTLEMENT_E2E_MATERIALIZE_TIMEOUT", "300")
     monkeypatch.setenv("HOSTED_SETTLEMENT_E2E_LIFECYCLE_TIMEOUT", "600")
@@ -236,7 +235,6 @@ def test_materialize_bound_below_the_lifecycle_bound_is_used(
 def test_no_materialize_override_leaves_the_transport_default(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from tests.e2e.roles.scenarios.vms.hosted import network
 
     monkeypatch.delenv("HOSTED_SETTLEMENT_E2E_MATERIALIZE_TIMEOUT", raising=False)
 
@@ -290,7 +288,6 @@ class _Transport:
 
 
 def _port(monkeypatch: pytest.MonkeyPatch, profile: object) -> object:
-    from tests.e2e.roles.scenarios.vms.hosted import network
 
     transport = _Transport()
     monkeypatch.setattr(network, "HostedSettlementTransport", lambda **_kw: transport)
@@ -308,8 +305,6 @@ def test_a_bank_transfer_reclaim_supplies_the_return_address(
     """The authority refuses a push-funded return with nowhere to address it,
     so the lane that reclaims one supplies the address it may use."""
 
-    from hosted_settlement_client import FundingProfile
-    from tests.e2e.roles.scenarios.vms.hosted import network
 
     monkeypatch.setenv(
         "HOSTED_SETTLEMENT_E2E_RETURN_ADDRESS", "account@example.test"
@@ -330,8 +325,6 @@ def test_a_bank_transfer_reclaim_without_an_address_names_the_prerequisite(
     """Naming the missing input beats issuing a request the run could not
     have completed, and beats reporting the authority's refusal as a surprise."""
 
-    from hosted_settlement_client import FundingProfile
-    from tests.e2e.roles.scenarios.vms.hosted import network
 
     monkeypatch.delenv("HOSTED_SETTLEMENT_E2E_RETURN_ADDRESS", raising=False)
     port, transport = _port(monkeypatch, FundingProfile.US_BANK_TRANSFER)
@@ -346,8 +339,6 @@ def test_a_card_reclaim_carries_no_address(monkeypatch: pytest.MonkeyPatch) -> N
     """A pull-funded profile is credited back to the instrument that funded
     it, so carrying an address there would carry one for nothing."""
 
-    from hosted_settlement_client import FundingProfile
-    from tests.e2e.roles.scenarios.vms.hosted import network
 
     monkeypatch.setenv(
         "HOSTED_SETTLEMENT_E2E_RETURN_ADDRESS", "account@example.test"

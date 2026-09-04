@@ -200,46 +200,34 @@ Resource Pool policy metadata MUST support stable domain-neutral keys for `listi
 
 ### Requirement: Pool-declared offering modes
 
-Each Resource Pool MUST declare the set of offering modes its configured
-provider can deliver under the domain-neutral `deliverable_modes` policy tag.
-The shared resource-pool package MUST validate this declaration as a
-JSON-compatible set of unique, non-empty strings and expose a typed reader and
-membership predicate without defining which names are meaningful to a domain.
-An absent or empty declaration authorizes no mode; readers and admission paths
-MUST NOT widen it with a default.
+Each Resource Pool MUST declare the set of offering modes its configured provider can deliver under the domain-neutral `deliverable_modes` policy tag. The shared resource-pool capability MUST validate this declaration as a JSON-compatible set of unique, non-empty strings and expose typed resolution and membership behavior without defining which names are meaningful to a domain. An absent or empty declaration authorizes no mode and MUST NOT be widened by a default.
 
-Create, replace, patch, bulk import, projection, and canonical export MUST use
-the existing policy-tag channel and precedence. An existing pool's initial set
-MUST be derived only from durable provider, playbook, and registered
-requirement-delegate configuration that proves the pool can deliver that mode.
-The derivation MUST include the system-owned `default` pool, MUST NOT use
-reservation history as capability evidence, MUST replace an unproved legacy
-declaration with the exact proved set, and MUST report each derived set at INFO.
+Create, replace, patch, bulk import, projection, and canonical export MUST use the existing policy-tag channel and precedence. An existing pool's initial set MUST be derived only from durable provider, playbook, and registered requirement-delegate configuration that proves the pool can deliver that mode. Derivation MUST include the system-owned `default` pool, MUST NOT use reservation history as capability evidence, MUST replace an unproved legacy declaration with the exact proved set, and MUST report each derived set at INFO.
 
 #### Scenario: Pool declares two modes
 
 - **WHEN** an operator stores `deliverable_modes: [bare_metal, vm]`
-- **THEN** the typed reader resolves exactly those two opaque mode names through the ordinary pool projection and administration paths
+- **THEN** typed resolution returns exactly those two opaque mode names through ordinary projection and administration paths
 
 #### Scenario: Declaration is absent
 
-- **WHEN** a pool has no `deliverable_modes` tag
-- **THEN** the typed reader resolves an empty set and the pool delivers no offering mode
+- **WHEN** a Resource Pool has no `deliverable_modes` tag
+- **THEN** typed resolution returns an empty set and the pool delivers no offering mode
 
 #### Scenario: Existing default pool is migrated
 
 - **WHEN** the default pool has an Ansible playbook and the registered VM requirement delegate
-- **THEN** migration declares exactly `vm`, reports that conclusion, and does not infer any additional mode from historical reservations
+- **THEN** migration declares exactly `vm`, reports that conclusion, and does not infer another mode from historical reservations
 
-#### Scenario: Legacy declaration is wider than its configuration
+#### Scenario: Legacy declaration is wider than configuration
 
-- **WHEN** a pool's provider configuration proves no deliverable mode but its legacy policy metadata names one or more modes
+- **WHEN** a pool's durable provider configuration proves no deliverable mode but its legacy policy metadata names one or more modes
 - **THEN** migration narrows the declaration to empty rather than retaining an unproved capability
 
 #### Scenario: Declaration is malformed
 
-- **WHEN** any pool write supplies a non-list, duplicate, empty, or non-string deliverable mode
-- **THEN** shared policy validation rejects the write without changing the pool
+- **WHEN** any Resource Pool write supplies a non-list, duplicate, empty, or non-string deliverable mode
+- **THEN** validation rejects the write without changing the pool
 
 ### Requirement: Reservation hold and SLA preference validation
 

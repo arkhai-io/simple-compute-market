@@ -110,28 +110,40 @@
 
 ## 5. Closeout
 
-Per `openspec/README.md#plan-closeout-requirements`. This change's implementation predates the closeout task becoming a planning requirement. The parts are recorded here so each carries an explicit disposition rather than an assumed one; confirm and tick each rather than treating the change as closed.
+Per `openspec/README.md#plan-closeout-requirements`. This change's implementation predates the closeout task becoming a planning requirement, so each part is recorded with the evidence that discharges it rather than assumed.
 
-- [ ] 5.1 **Comment hygiene.** Run `make check-comment-hygiene`, then direct-read the
-      comments and docstrings this change touches for the fuzzier provenance-narration rule
-      the target cannot catch mechanically.
-- [ ] 5.2 **Import placement.** Review every import this change adds or touches and move it
-      to module level where safe; retain a local import only against an observed circular
-      import or a documented lazy-load reason, verified against the real suite.
-- [ ] 5.3 **Documentation compliance.** Re-check this change's accepted decisions against
-      `openspec/README.md`'s placement rules. It carries delta specs for
-      `test-compatibility`; confirm each landed in the owning
-      `openspec/specs/<capability>/spec.md`, and that durable conceptual rationale sits in
-      the companion `architecture.md` rather than only in `design.md`.
-- [ ] 5.4 **Narrative compression.** Compress completed-task notes to final behavior,
-      material validation evidence, unresolved or deferred work, and permanent-documentation
-      destinations, moving durable rationale into `design.md` first.
-- [ ] 5.5 **Roadmap currency.** This change belongs to no campaign, so it most likely owes
-      `docs/development/ROADMAP.md` nothing. Confirm that and record the disposition
-      explicitly rather than omitting the step.
-- [ ] 5.6 **Campaign index currency.** This change has no row in
-      `openspec/changes/README.md`; add one under the campaign that owns it with its status
-      and acceptance boundary, or record here why it stands outside every campaign.
-- [ ] 5.7 **Promotion.** Add a design-promotion record, mapping every accepted decision to
-      its exact permanent heading, and verify no production source references
-      `openspec/changes/name-a-refusal-that-will-not-converge`.
+- [x] 5.1 **Comment hygiene.** `make check-comment-hygiene` passes. Direct-read the six
+      files this change touches outside `openspec/` — the four `hosted_real_stripe` modules,
+      the VM hosted `network.py` scenario, and `test_reclaim_refusal.py` — for provenance
+      narration: none present. `lifecycle_bridge._refusal_class`'s docstring explains why
+      the refusal type is resolved dynamically rather than imported, which is a current
+      invariant and the kind of local rationale comments are for.
+- [x] 5.2 **Import placement.** This change added one function-local import,
+      `from tests.e2e.roles.scenarios.vms.hosted import network` in
+      `test_reclaim_refusal.py`, a file it shares with `carry-the-payer-return-address`.
+      That module is already imported at the file's module scope, so the local import
+      deferred nothing; it was moved to module level in the same closeout pass that handled
+      the sibling change's copies. Every other import this change added is module level.
+      **Verified against the real suite:** 237 unit tests pass under `uv run --frozen
+      --project e2e-tests --find-links .dist python -m pytest e2e-tests/tests/unit`.
+- [x] 5.3 **Documentation compliance.** The delta is one MODIFIED requirement,
+      `test-compatibility`'s "Stripe-backed hosted settlement system evidence" — the same
+      requirement `carry-the-payer-return-address` modifies. The two deltas diverged rather
+      than nesting: each keeps the nine shared scenarios and adds its own, and applying them
+      in sequence would have dropped whichever landed first. The permanent spec therefore
+      carries the union — the nine shared scenarios plus that change's two payer-return
+      scenarios plus this change's three refusal and parking scenarios, with this change's
+      retry-and-parking prose. Decisions rejected here stay in `design.md`.
+- [x] 5.4 **Narrative compression.** Completed-task notes carry final behavior, the observed
+      authority codes, and permanent destinations, with rationale held in `design.md`'s three
+      decisions. Re-read at closeout; nothing to move or delete.
+- [x] 5.5 **Roadmap currency.** No goal current-state change owed. Naming the cause of a
+      refusal changes what a lane reports, not which mechanisms compose or what the market
+      can sell, so Goal 6's current state is unaffected and no gap row names this work.
+      Disposition recorded rather than the step skipped.
+- [x] 5.6 **Campaign index currency.** The index gained a row for this change on 2026-09-04
+      under the "Hosted fiat settlement" campaign, which had been absent from it entirely.
+      On archival that row is removed, which is the disposition a completed change owes the
+      index.
+- [x] 5.7 **Promotion.** Design-promotion record added to `design.md`. No production source
+      references `openspec/changes/name-a-refusal-that-will-not-converge`.

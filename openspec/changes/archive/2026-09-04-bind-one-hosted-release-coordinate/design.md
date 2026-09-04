@@ -72,3 +72,17 @@ development lane, CI, and the release-tooling tests already override these.
 reached a trust config only because the pinned version happened to be signed. It
 now names the config it reads, like its sibling does, so it asserts that the
 identities are derived rather than that a particular version is current.
+
+## Design promotion record
+
+| Accepted decision | Permanent location |
+|---|---|
+| One pin states the hosted contract and the whole binding derives from it; raising the contract is one edit and one command | `docs/development/TESTING.md` — "Raising the hosted contract" |
+| Every Makefile reads the binding from `make/hosted-release.mk` rather than naming a release itself; each sets only `HOSTED_REPO_ROOT` | `docs/development/TESTING.md` — "Raising the hosted contract" |
+| A caller may still name a trust configuration directly, and version, schema, wheel, and file list then follow from that file | `make/hosted-release.mk`, whose `?=` defaults are the contract; procedure documented in `docs/development/TESTING.md` |
+| Follower distributions must agree with `kit/hosted-settlement/pyproject.toml`, and disagreement is named with the file rather than surfacing later as a resolver error | `scripts/check-hosted-client-pin.py`, run as an ordinary test under `scripts/tests` |
+| `verify-hosted-release` no longer passes when the pin is ahead of the last signature — it names the disagreement instead | `docs/development/TESTING.md` — "Raising the hosted contract" |
+| Why the fragment calls the selector rather than introducing its own variable, why an exported variable fails across `cd`-invoked sub-Makefiles, and why the check runs as a test rather than beside the release targets | This change's `design.md` |
+
+This change carries no delta specs: it changes how the repository binds an external release, not observable market behavior, so no subsystem contract owns it.
+

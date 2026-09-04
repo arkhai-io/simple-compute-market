@@ -106,13 +106,13 @@ Per `openspec/README.md#plan-closeout-requirements`.
 - [x] 6.5 **Roadmap currency.** Update Goal 3's current-state description and gap
       mapping in `docs/development/ROADMAP.md`.
 - [x] 6.6 **Promotion.** Complete the design-promotion record below.
-- [ ] 6.7 **Campaign index currency** (part seven, added when
+- [x] 6.7 **Campaign index currency** (part seven, added when
       `openspec/README.md#plan-closeout-requirements` was extended from six parts to seven).
       Appended rather than folded into an existing task, per `AGENTS.md`'s rule to amend
-      rather than replace implementation history. Update this change's row, and its
-      campaign's dependency graph, in `openspec/changes/README.md` to match its state at
-      completion, or record the disposition here if its status and campaign placement are
-      both unchanged.
+      rather than replace implementation history. **Done:** the campaign index was reconciled
+      on 2026-09-04 and this change's row removed from it on archival. That removal is the
+      disposition a completed change owes the index — an archived change leaves the
+      active-change index rather than holding a status inside it.
 
 ## Design promotion record
 

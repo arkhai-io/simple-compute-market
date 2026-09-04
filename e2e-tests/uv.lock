@@ -285,8 +285,8 @@ dependencies = [
     { name = "arkhai-apicredits-buyer" },
     { name = "arkhai-core-registry-client" },
     { name = "arkhai-core-storefront-client" },
-    { name = "arkhai-kit-config" },
     { name = "arkhai-kit-alkahest" },
+    { name = "arkhai-kit-config" },
     { name = "arkhai-kit-policy" },
     { name = "arkhai-kit-site-client" },
     { name = "arkhai-vms-buyer" },
@@ -324,8 +324,8 @@ requires-dist = [
     { name = "arkhai-apicredits-buyer", specifier = ">=0.2.0" },
     { name = "arkhai-core-registry-client", specifier = ">=0.11.0" },
     { name = "arkhai-core-storefront-client", specifier = ">=0.17.0" },
-    { name = "arkhai-kit-config" },
     { name = "arkhai-kit-alkahest", specifier = ">=0.1.0" },
+    { name = "arkhai-kit-config" },
     { name = "arkhai-kit-policy", specifier = ">=0.1.0" },
     { name = "arkhai-kit-site-client", specifier = ">=0.1.0" },
     { name = "arkhai-vms-buyer", specifier = ">=0.3.0" },
@@ -354,8 +354,8 @@ provides-extras = ["dev", "stripe-test"]
 
 [[package]]
 name = "arkhai-hosted-settlement-client"
-version = "0.4.0"
-source = { registry = "../.dist" }
+version = "0.4.2"
+source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "cryptography" },
     { name = "eth-account" },
@@ -364,7 +364,7 @@ dependencies = [
     { name = "rfc8785" },
 ]
 wheels = [
-    { path = "arkhai_hosted_settlement_client-0.4.0-py3-none-any.whl" },
+    { url = "https://files.pythonhosted.org/packages/13/df/03829e0deb06dd24a0eef182dbd7d7b602f188cbaeabef42a9b7a61d6c48/arkhai_hosted_settlement_client-0.4.2-py3-none-any.whl", hash = "sha256:5764d9e569f79ee0194bf7e9b902c67f65669faae68217aa402b009fa7ea7f35", size = 19126, upload-time = "2026-09-03T10:35:00.891Z" },
 ]
 
 [[package]]

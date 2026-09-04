@@ -143,13 +143,13 @@ parts — this change is the first to run its own new sixth part.
       Record that disposition explicitly. Confirm the document as published satisfies
       its own new requirement (2.5's self-check re-run after any late edits).
 - [x] 7.6 **Promotion.** Complete the design-promotion record below.
-- [ ] 7.7 **Campaign index currency** (part seven, added when
+- [x] 7.7 **Campaign index currency** (part seven, added when
       `openspec/README.md#plan-closeout-requirements` was extended from six parts to seven).
       Appended rather than folded into an existing task, per `AGENTS.md`'s rule to amend
-      rather than replace implementation history. Update this change's row, and its
-      campaign's dependency graph, in `openspec/changes/README.md` to match its state at
-      completion, or record the disposition here if its status and campaign placement are
-      both unchanged.
+      rather than replace implementation history. **Done:** the campaign index was reconciled
+      on 2026-09-04 and this change's row removed from it on archival. That removal is the
+      disposition a completed change owes the index — an archived change leaves the
+      active-change index rather than holding a status inside it.
 
 ## Design promotion record
 
