@@ -41,6 +41,17 @@ spec:
             {{- if .Values.alkahestEnabled }}
             - name: BARE_METAL_STOREFRONT_EVM_ADDRESS
               value: {{ required "sellerEvmAddress is required when Alkahest is enabled" .Values.sellerEvmAddress | quote }}
+            # Chain routing and the signing key are rendered together: the
+            # runtime treats a configured chain without a key as a missing
+            # wallet and refuses to build the settlement client, so a partial
+            # render produces a role that starts and cannot settle.
+            - name: BARE_METAL_STOREFRONT_CHAINS
+              value: {{ required "chainsJson is required when Alkahest is enabled" .Values.chainsJson | quote }}
+            - name: BARE_METAL_STOREFRONT_EVM_PRIVATE_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ required "walletSecret.name is required when Alkahest is enabled" .Values.walletSecret.name | quote }}
+                  key: {{ required "walletSecret.key is required when Alkahest is enabled" .Values.walletSecret.key | quote }}
             {{- end }}
             - name: BARE_METAL_STOREFRONT_SETTLEMENT
               valueFrom:
@@ -68,6 +79,11 @@ spec:
           volumeMounts:
             - name: data
               mountPath: {{ .Values.persistence.mountPath | quote }}
+            {{- if .Values.chainAddressConfig.enabled }}
+            - name: chain-address-config
+              mountPath: {{ .Values.chainAddressConfig.mountPath | quote }}
+              readOnly: true
+            {{- end }}
           startupProbe:
             httpGet:
               path: /health
@@ -89,6 +105,14 @@ spec:
           resources:
             {{- toYaml .Values.resources | nindent 12 }}
       volumes:
+        {{- if .Values.chainAddressConfig.enabled }}
+        - name: chain-address-config
+          secret:
+            secretName: {{ required "chainAddressConfig.secretName is required when enabled" .Values.chainAddressConfig.secretName | quote }}
+            items:
+              - key: {{ required "chainAddressConfig.key is required when enabled" .Values.chainAddressConfig.key | quote }}
+                path: {{ .Values.chainAddressConfig.key | quote }}
+        {{- end }}
         - name: data
           {{- if or .Values.persistence.enabled .Values.persistence.existingClaim }}
           persistentVolumeClaim:

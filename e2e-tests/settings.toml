@@ -85,3 +85,32 @@ deal_timeout_seconds = 900
 teardown_timeout_seconds = 300
 poll_interval_seconds = 2
 terminal_teardown_status = "released"
+
+# Absent inputs skip by default so an ordinary suite run may exclude this
+# scenario. Set true for a deliberately selected acceptance run: every missing
+# input then fails instead, so the lane cannot report success having exercised
+# nothing.
+require_acceptance_lane = false
+
+# Operator-managed known_hosts for the leased host. When empty the run pins the
+# key on first contact and records that the identity was not independently
+# verified; set require_verified_host_key to refuse that weaker mode.
+known_hosts_file = ""
+require_verified_host_key = false
+
+# Operator-owned command proving host management access survived teardown. Runs
+# outside the buyer session and may not reference the buyer's credentials.
+management_probe_command = ""
+management_probe_timeout_seconds = 60
+
+# The seller's own publication round. Republication is an operator action, not
+# something the marketplace performs on its own, so relisting is evidenced by
+# invoking this and then observing public discovery.
+publish_command = ""
+publish_timeout_seconds = 300
+relist_timeout_seconds = 180
+
+# Bounded page for the public listing read. The buyer CLI caps this at 200; a
+# reported total larger than what was read fails rather than judging
+# availability from a partial page.
+list_page_limit = 200

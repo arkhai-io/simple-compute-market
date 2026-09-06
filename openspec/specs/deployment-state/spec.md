@@ -759,6 +759,31 @@ owner came to be a prerequisite of running unit tests.
 - **THEN** deployment documentation names the index and the resolution path
   without requiring them to read the build system to infer it
 
+### Requirement: Whole-host storefront chain configuration is rendered or absent
+
+Deployment of the whole-host storefront MUST render chain endpoint
+configuration and a signing-key reference when Alkahest settlement is enabled,
+and MUST render neither, nor a seller address, when it is disabled. The signing
+key MUST arrive by Secret reference and MUST NOT be rendered as a literal value.
+A chain whose deployed contract addresses are not published MUST be able to
+reference a mounted address configuration file, and the mounted location and the
+configured path MUST agree.
+
+Enabling settlement without chain configuration, without a signing-key Secret
+reference, or with an address mount whose Secret is unnamed MUST fail the render
+rather than produce a role that starts and cannot settle.
+
+#### Scenario: Hosted-only role is rendered
+
+- **WHEN** Alkahest is disabled
+- **THEN** no chain, wallet or seller-address configuration is present
+
+#### Scenario: Alkahest is enabled without chain configuration
+
+- **WHEN** settlement is enabled but no chain endpoint is configured
+- **THEN** the render fails
+
+
 ## Evidence
 
 - Configurable registry endpoints and independently composed role stacks: core buyer registry configuration plus domain Compose and Helm manifests.

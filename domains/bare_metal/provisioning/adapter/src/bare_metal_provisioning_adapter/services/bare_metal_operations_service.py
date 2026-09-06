@@ -17,6 +17,7 @@ from arkhai_bare_metal import (
     BareMetalLeaseCreate,
     NODE_GRANT_ACCESS_ACTION,
     NODE_RECLAIM_ACCESS_ACTION,
+    admissible_lease_account,
     bare_metal_executor_ref,
 )
 from compute_provisioning.contracts import ExecutorActionEnvelope
@@ -72,6 +73,13 @@ class BareMetalOperationsService:
     ) -> JobSubmitResponse:
         self._validate_machine(body.machine_id)
         access_ref = dict(body.access_ref or {})
+        # Admission before dispatch: once the name is a play variable it is
+        # already an argument to a `become: yes` task that creates the account
+        # and writes its authorized_keys.
+        ssh_user = admissible_lease_account(
+            _access_value(access_ref, "ssh_user", "user"),
+            settlement_identity=body.settlement_identity,
+        )
         resolved_operation_id = operation_id
         if resolved_operation_id is None and contract is not None:
             resolved_operation_id = _stable_operation_id(
@@ -100,7 +108,7 @@ class BareMetalOperationsService:
                 ),
                 escrow_uid=body.escrow_uid,
                 physical_host_id=body.physical_host_id,
-                ssh_user=_access_value(access_ref, "ssh_user", "user"),
+                ssh_user=ssh_user,
                 ssh_public_key=_access_value(
                     access_ref, "ssh_public_key", "ssh_pubkey", "public_key",
                 ),
@@ -132,6 +140,16 @@ class BareMetalOperationsService:
         machine_id = str(reservation.get("executor_target") or "")
         self._validate_machine(machine_id)
         access_ref = bare_metal_access_ref(reservation)
+        # Reclaim needs the same admission as grant: its policies act on an
+        # account that already exists.
+        ssh_user = admissible_lease_account(
+            _access_value(access_ref, "ssh_user", "user"),
+            settlement_identity=(
+                reservation.get("settlement_obligation_ref")
+                or reservation.get("escrow_uid")
+                or None
+            ),
+        )
         resolved_operation_id = operation_id
         if resolved_operation_id is None and contract is not None:
             resolved_operation_id = _stable_operation_id(
@@ -157,7 +175,7 @@ class BareMetalOperationsService:
                 executor_ref=reservation.get("executor_ref"),
                 escrow_uid=reservation.get("escrow_uid"),
                 physical_host_id=get_physical_host_id(reservation),
-                ssh_user=_access_value(access_ref, "ssh_user", "user"),
+                ssh_user=ssh_user,
                 ssh_public_key=_access_value(
                     access_ref, "ssh_public_key", "ssh_pubkey", "public_key",
                 ),

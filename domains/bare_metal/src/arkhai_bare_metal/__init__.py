@@ -25,6 +25,14 @@ from .hosted_contract import (
     validate_buyer_selection,
     validate_accepted_hosted_plan,
 )
+from .lease_accounts import (
+    LEASE_ACCOUNT_DIGEST_LENGTH,
+    LEASE_ACCOUNT_PATTERN,
+    LEASE_ACCOUNT_PREFIX,
+    BareMetalLeaseAccountError,
+    admissible_lease_account,
+    canonical_lease_account,
+)
 from .hosted_publication import (
     BareMetalHostedPublicationPolicy,
     BareMetalHostedPublicationResult,
@@ -136,6 +144,12 @@ __all__ = [
     "validate_accepted_hosted_plan",
     "derive_bare_metal_fulfillment_identity",
     "make_bare_metal_provision_terms",
+    "LEASE_ACCOUNT_DIGEST_LENGTH",
+    "LEASE_ACCOUNT_PATTERN",
+    "LEASE_ACCOUNT_PREFIX",
+    "BareMetalLeaseAccountError",
+    "admissible_lease_account",
+    "canonical_lease_account",
     "materialization_to_lease_create",
     "open_bare_metal_listing_keys",
     "record_derived_bare_metal_listing",

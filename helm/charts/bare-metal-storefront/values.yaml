@@ -39,6 +39,30 @@ publicUrl: http://bare-metal-storefront:8000
 sellerEvmAddress: ""
 alkahestEnabled: false
 
+# Chain endpoints for Alkahest, as the JSON object the runtime reads: a map of
+# chain name to `rpc_url` plus an optional `alkahest_address_config_path`.
+# Public routing only. Required when alkahestEnabled; ignored otherwise, so a
+# hosted-only role constructs no wallet, RPC, or chain client.
+chainsJson: ""
+
+# Deployed contract addresses for a chain that has no published address set,
+# such as a local or custom deployment. Mounted read-only; point the matching
+# chain's `alkahest_address_config_path` in chainsJson at
+# `<mountPath>/<key>`. Without this the runtime resolves no address
+# configuration for such a chain and builds no settlement client, so rendering
+# chainsJson alone does not make the role able to settle.
+chainAddressConfig:
+  enabled: false
+  secretName: ""
+  key: alkahest-addresses.json
+  mountPath: /etc/arkhai/chain
+
+# Existing Secret holding the seller's settlement signing key. Never a literal:
+# a key placed in chart values is rendered into an object that is not a Secret.
+walletSecret:
+  name: bare-metal-storefront-wallet
+  key: private-key
+
 # Strict shared Settlement configuration JSON. Hosted credentials remain in the
 # independently deployed hosted authority; this Secret contains only public
 # authority/trust/account references and release pins.

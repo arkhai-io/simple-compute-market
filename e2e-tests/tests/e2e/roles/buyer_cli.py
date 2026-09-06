@@ -234,6 +234,7 @@ class BuyerCli:
         data_dir: Path,
         home_dir: Path,
         credential_env: dict[str, str],
+        base_env: dict[str, str] | None = None,
     ):
         self.binary = binary
         self.config_path = config_path
@@ -241,6 +242,13 @@ class BuyerCli:
         self.data_dir = data_dir
         self.home_dir = home_dir
         self.credential_env = credential_env
+        # The environment the buyer process starts from. ``None`` keeps the
+        # inherited copy every existing scenario relies on. A scenario that
+        # also runs operator commands passes an explicit allowlist here, so an
+        # operator credential exported into the test process cannot answer a
+        # challenge on the buyer's behalf. A separate HOME is not enough for
+        # that: agent sockets and credential paths travel in the environment.
+        self.base_env = base_env
 
     @property
     def run_dir(self) -> Path:
@@ -278,7 +286,7 @@ class BuyerCli:
             p.stem for p in self.run_dir.glob("*.jsonl")
         ) if self.run_dir.exists() else frozenset()
 
-        env = dict(os.environ)
+        env = dict(os.environ if self.base_env is None else self.base_env)
         env["XDG_STATE_HOME"] = str(self.state_dir)
         env["XDG_CONFIG_HOME"] = str(self.config_path.parent.parent)
         env["XDG_DATA_HOME"] = str(self.data_dir)
@@ -332,6 +340,7 @@ def create_profiled_buyer_cli(
     registries: Iterable[str],
     toml_sections: Iterable[str] = (),
     credential_variable: str | None = None,
+    base_env: dict[str, str] | None = None,
 ) -> BuyerCli:
     """Create one hermetic buyer over the shared profile/config boundary.
 
@@ -411,6 +420,7 @@ def create_profiled_buyer_cli(
         data_dir=data_dir,
         home_dir=home_dir,
         credential_env={variable: marketplace_credential},
+        base_env=base_env,
     )
 
 
