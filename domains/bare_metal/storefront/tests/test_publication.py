@@ -9,7 +9,8 @@ from arkhai_bare_metal import (
     TrustedBareMetalProjection,
 )
 from market_identity import Ed25519Signer
-from registry_client import ListingRequest
+from pydantic_core import to_jsonable_python
+from registry_client import ListingRequest, RegistryClientError
 from registry_client.client import SyncRegistryClient
 from core_storefront.publication_command import (
     StorefrontPublicationCommandCallbacks,
@@ -125,8 +126,8 @@ class _CapturedRequest(Exception):
         self.request = request
 
 
-def _publish_through_real_client(monkeypatch) -> httpx.Request:
-    """Run one publish through the client ``_registry`` actually builds.
+def _bind_registry_environment(monkeypatch, handler) -> Ed25519Signer:
+    """Point ``_registry`` at a stub transport and the publication environment.
 
     Only the transport is substituted, so the bearer credential, the signature
     headers, and the request body are the ones production would send.
@@ -135,11 +136,6 @@ def _publish_through_real_client(monkeypatch) -> httpx.Request:
     # Deterministic development-only signing key. It is a fixture value and
     # must never be used on a public network.
     signer = Ed25519Signer(bytes.fromhex("22" * 32))
-    captured: list[httpx.Request] = []
-
-    def handler(request: httpx.Request) -> httpx.Response:
-        captured.append(request)
-        raise _CapturedRequest(request)
 
     class _SeamBoundClient(SyncRegistryClient):
         def __init__(self, base_url, **kwargs):
@@ -163,6 +159,19 @@ def _publish_through_real_client(monkeypatch) -> httpx.Request:
         "BARE_METAL_STOREFRONT_REGISTRY_URL", "https://registry.example"
     )
     monkeypatch.setenv("BARE_METAL_STOREFRONT_REGISTRY_AUTHORITY", "registry-dev")
+    return signer
+
+
+def _publish_through_real_client(monkeypatch) -> httpx.Request:
+    """Run one publish through the client ``_registry`` actually builds."""
+
+    captured: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured.append(request)
+        raise _CapturedRequest(request)
+
+    signer = _bind_registry_environment(monkeypatch, handler)
 
     client = publication_cli._registry(SimpleNamespace(marketplace_signer=signer))
     with pytest.raises(_CapturedRequest):
@@ -211,6 +220,129 @@ def test_empty_registry_credential_is_not_sent_as_an_empty_bearer(monkeypatch):
     request = _publish_through_real_client(monkeypatch)
 
     assert "authorization" not in request.headers
+
+
+# Obviously synthetic development-only credential. It is a fixture value and
+# must never be used on a public network.
+_DEV_WRITE_KEY = "synthetic-dev-write-key"
+
+
+def test_a_line_broken_credential_is_refused_without_echoing_it(monkeypatch):
+    # A key file written with a trailing newline is the realistic source of
+    # this: the value reaches the client verbatim, and the transport's own
+    # rejection quotes the whole header, credential included.
+    monkeypatch.setenv(
+        "BARE_METAL_STOREFRONT_REGISTRY_API_KEY", f"{_DEV_WRITE_KEY}\n"
+    )
+    signer = _bind_registry_environment(
+        monkeypatch, lambda request: httpx.Response(200, json={})
+    )
+
+    with pytest.raises(ValueError) as raised:
+        publication_cli._registry(SimpleNamespace(marketplace_signer=signer))
+
+    assert _DEV_WRITE_KEY not in str(raised.value)
+
+
+def test_a_registry_failure_quoting_the_bearer_is_reported_without_it(
+    monkeypatch, tmp_path, caplog,
+):
+    """A failed candidate carries a diagnosis, never request material.
+
+    The round records ``str(exception)`` for each failed candidate and an
+    operator reads that record, so an exception whose own message quotes the
+    Authorization header would publish the credential into the run log.
+    """
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        # The shape h11 raises for an unsendable header value, reproduced here
+        # rather than depending on the transport's exact wording.
+        raise httpx.LocalProtocolError(
+            f"Illegal header value b'Bearer {_DEV_WRITE_KEY}'"
+        )
+
+    monkeypatch.setenv("BARE_METAL_STOREFRONT_REGISTRY_API_KEY", _DEV_WRITE_KEY)
+    signer = _bind_registry_environment(monkeypatch, handler)
+    client = publication_cli._registry(SimpleNamespace(marketplace_signer=signer))
+    path = str(tmp_path / "storefront.db")
+    SQLiteClient(path)
+
+    with caplog.at_level("DEBUG"):
+        result = run_bare_metal_publication(
+            _selection(),
+            config=StorefrontPublicationCommandConfig(
+                db_path=path,
+                base_url="https://seller.example",
+                close_stale=False,
+            ),
+            callbacks=StorefrontPublicationCommandCallbacks(
+                build_payload=lambda _source, _candidate, _offer: (
+                    [{"chain_name": "base"}],
+                    [],
+                    7200,
+                ),
+                publish_offer=lambda offer, accepted, demands, maximum: (
+                    publication_cli._publish_registry_listing(
+                        client,
+                        listing_id="listing-1",
+                        offer=offer,
+                        accepted_escrows=accepted,
+                        settlement_options=[],
+                        demands=demands,
+                        max_duration_seconds=maximum,
+                        storefront_url="https://seller.example",
+                    )
+                ),
+            ),
+        )
+    client.close()
+
+    assert result.published == []
+    assert result.failed_count == 1
+    (_candidate, reason) = result.failed[0]
+    # The failure is still diagnosable: the transport's exception type names
+    # what went wrong without repeating what was sent.
+    assert "LocalProtocolError" in reason
+    assert _DEV_WRITE_KEY not in reason
+    assert _DEV_WRITE_KEY not in json.dumps(to_jsonable_python(result.failed))
+    assert _DEV_WRITE_KEY not in caplog.text
+
+
+def test_a_rejected_publish_reports_status_without_the_response_material():
+    """A registry rejection is reported by type and status only.
+
+    ``RegistryClientError`` carries the request URL and the response body, and
+    a registry that rejects a credential may quote what it was sent. Neither is
+    part of the report; the status is what an operator acts on.
+    """
+
+    class Client:
+        def publish_listing(self, request):
+            raise RegistryClientError(
+                "POST",
+                f"https://registry.example/listings?key={_DEV_WRITE_KEY}",
+                401,
+                json.dumps({"detail": f"api key {_DEV_WRITE_KEY} is not valid"}),
+            )
+
+    with pytest.raises(Exception) as raised:
+        publication_cli._publish_registry_listing(
+            Client(),
+            listing_id="listing-1",
+            offer={"kind": "bare_metal.v1"},
+            accepted_escrows=[],
+            settlement_options=[],
+            demands=[],
+            max_duration_seconds=3600,
+            storefront_url="https://storefront.example",
+        )
+
+    reason = str(raised.value)
+    assert "RegistryClientError" in reason
+    assert "401" in reason
+    assert _DEV_WRITE_KEY not in reason
+    assert "is not valid" not in reason
+    assert "registry.example" not in reason
 
 
 def _selection():

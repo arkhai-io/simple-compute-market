@@ -129,6 +129,7 @@ buyer's; the scenario evidences only what the granted session reports.
 | Whole-host access returns the tenant-facing endpoint | `openspec/specs/physical-provisioning/spec.md` |
 | Whole-host storefront chain configuration is rendered or absent | `openspec/specs/deployment-state/spec.md` |
 | Whole-host publication optionally supplies a write-scoped registry credential and reports candidate failure through its exit status | `openspec/specs/deployment-state/spec.md`; `docs/development/DEPLOYMENT_AND_CONFIG.md` |
+| A registry credential that cannot be sent as a header is refused before any request, and a candidate failure caused by a registry call is reported by type and, where available, HTTP status only | `openspec/specs/deployment-state/spec.md`; `docs/development/DEPLOYMENT_AND_CONFIG.md` |
 | Provisioning host trust is pinned by deployment, not by image configuration | `openspec/specs/deployment-state/spec.md` |
 | A domain buyer drives every rail its seller publishes | `openspec/specs/settlement-configuration/spec.md` |
 | Negotiation is not purchase | `openspec/specs/settlement-configuration/spec.md` |

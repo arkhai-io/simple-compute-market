@@ -796,9 +796,17 @@ the signature the registry verifies on top of it. A registry's administrative
 credential is a separate secret for that registry's own administrative routes
 and is not this value.
 
+The credential is sent verbatim as an HTTP bearer value, so it MUST be one line
+of printable US-ASCII. A configured credential that is not MUST be refused
+before any request is attempted, with a diagnostic that names the constraint and
+never the value.
+
 The publication command MUST report the round and MUST exit non-zero when the
 round contains a failed candidate, so an operator step that checks only the exit
-status cannot record a round that published nothing as a success.
+status cannot record a round that published nothing as a success. A candidate failure caused by a registry call MUST be reported only by
+exception type and, where available, HTTP status: the request
+URL, the request headers and the response body are request material and MUST NOT
+appear in the round the operator records.
 
 #### Scenario: The registry gates writes
 
@@ -811,6 +819,20 @@ status cannot record a round that published nothing as a success.
 - **WHEN** no registry API-key Secret is named
 - **THEN** no credential environment is rendered and publication carries its
   request signatures only
+
+#### Scenario: The configured credential cannot be sent as a header
+
+- **WHEN** the configured credential carries a line break or other character an
+  HTTP header value may not hold
+- **THEN** the client refuses it before any request, and the refusal does not
+  repeat the value
+
+#### Scenario: A registry call fails against a configured credential
+
+- **WHEN** a publication call fails, whether the transport rejects the request
+  or the registry rejects the credential
+- **THEN** the failed candidate records the exception type and, where there is
+  one, the HTTP status, and records no header, URL or response body
 
 #### Scenario: A candidate fails to publish
 
