@@ -52,6 +52,70 @@
       isolation, destructive reclaim policies, and any claim that the
       end-to-end demonstration has run.
 
+## 4. Buyer crypto rail
+
+- [x] 4.1 Buyer resolves the rail from the selected option; hosted path
+      unchanged. `domains/bare_metal/buyer/src/arkhai_bare_metal_buyer/
+      settlement_composition.py`, `cli.py`.
+- [x] 4.2 Escrow expiry is buyer-chosen (`--escrow-expiration-seconds`); the
+      advertised `AcceptedEscrow` carries none.
+- [x] 4.3 Acceptance callback verifies the escrow target, chain, funded token
+      and collection conditions it displaces in `core_buyer`, and does not
+      restate the shared principal/amount/expiry/asset checks.
+- [x] 4.4 Buyer transport gains the two wire paths the server already served
+      and nothing called: `POST /api/v1/settle/{escrow_uid}` and
+      `POST /api/v1/fulfillments/begin`.
+- [x] 4.5 `bare-metal fund` creates the accepted escrow through shared
+      `market_alkahest` codecs, has it verified, and begins fulfillment;
+      records the escrow before verification and adopts an existing one.
+- [x] 4.6 Acceptance scenario runs the rail's settlement command between
+      negotiation and the delivery view; `BARE_METAL.SETTLE_COMMAND`.
+- [x] 4.7 Promotion: buyer rail dispatch, displaced-check ownership, and
+      negotiation-is-not-purchase in
+      `openspec/specs/settlement-configuration/spec.md`.
+
+- [x] 4.8 Scenario argv corrected to the real parser (`--run-id`, no `--json`,
+      `teardown`/`status` as separate commands) and tested through the real
+      Typer app; `status` no longer requires a hosted settlement reference.
+- [x] 4.9 Chain address configuration read from the field the SDK defines, and
+      `fund_accepted_obligation` exercised with only the chain call controlled.
+- [x] 4.10 Acceptance re-derives the whole obligation with the shared
+      materialization instead of comparing an enumerated field list; nested
+      amount/arbiter/demand substitutions are refused. Physical terms are left
+      to the shared client, which already validates them.
+- [x] 4.11 Rerun adopts the escrow recorded in the run log and refuses a payer
+      address the funding key does not control.
+
+- [x] 4.12 Acceptance re-derives from the accepted obligation's negotiated
+      absolute total rather than the advertised hourly rate, so a rental
+      shorter than one rate unit is no longer refused before funding. No
+      scaling or rounding was added to the buyer.
+- [x] 4.13 Scenario asserts the run-log events this buyer emits
+      (`run_started`, `agreement_accepted`, `run_ended`) and proves discovery
+      through the opening record's registry, authority, listing, storefront and
+      publisher principals. Offline coverage produces those events with the
+      real `RunLog` instead of naming them by hand.
+- [x] 4.14 Scenario reads the runtime's real projections: the `result` receipt
+      envelope, `fulfillment.state` from `status`, a bounded wait to the active
+      state before delivery and access are read, and the same wait for the
+      teardown terminal state.
+- [x] 4.15 The lease session's own privilege level is captured over the granted
+      SSH session and judged before teardown is requested: non-zero uid, no
+      privileged supplementary group, no sudo grant. An incomplete answer
+      fails rather than defaulting to unprivileged.
+- [x] 4.16 The buyer process receives the domain configuration path and, on the
+      crypto rail only, one named funding key; the operator's environment is
+      not inherited and no secret is passed in argv. The generated profile
+      carries the selected chain for the shared loader.
+- [x] 4.17 Promotion: negotiated total, run-log/discovery binding and
+      begin-is-not-delivery in
+      `openspec/specs/settlement-configuration/spec.md`.
+
+Not implemented, and not claimed: any live crypto run, buyer reclaim of an
+expired escrow, and hosted-lane live qualification. Host-side proof that the
+lease account was created unprivileged is the executing authority's, not this
+buyer's; the scenario evidences only what the granted session reports.
+
 ## Design promotion record
 
 | Accepted decision | Permanent location |
@@ -59,6 +123,10 @@
 | Whole-host access acts on a derived lease account | `openspec/specs/physical-provisioning/spec.md` |
 | Whole-host access returns the tenant-facing endpoint | `openspec/specs/physical-provisioning/spec.md` |
 | Whole-host storefront chain configuration is rendered or absent | `openspec/specs/deployment-state/spec.md` |
+| A domain buyer drives every rail its seller publishes | `openspec/specs/settlement-configuration/spec.md` |
+| Negotiation is not purchase | `openspec/specs/settlement-configuration/spec.md` |
+| Acceptance validates the negotiated total, not the advertised rate | `openspec/specs/settlement-configuration/spec.md` |
+| A run is bound to its authenticated discovery, and beginning is not delivery | `openspec/specs/settlement-configuration/spec.md` |
 
 Not promoted, and not implemented: host-side ownership records, tenant path
 isolation, destructive reclaim policies, and end-to-end demonstration evidence.

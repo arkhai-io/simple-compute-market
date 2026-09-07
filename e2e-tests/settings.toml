@@ -81,10 +81,36 @@ buyer_credential_environment = "ARKHAI_E2E_BARE_METAL_MARKETPLACE_CREDENTIAL"
 # public key, settlement selection, and JSON/non-interactive flags. Seller-owned
 # site/resource/executor/provider fields and secret/private-key flags are rejected.
 buy_args = ""
+# The settlement command for the selected rail, run after `buy` negotiates.
+# Crypto: "bare-metal fund --buyer-evm-address 0x...". Hosted:
+# "bare-metal complete". A negotiated agreement is not a purchase, so this is
+# required rather than inferred.
+settle_command = ""
+
+# The chain the crypto rail proposes and funds on. These public values become
+# the one [chains.<name>] table in the generated buyer config; the name must be
+# the one the seller advertises in its accepted escrow. The funding key is never
+# configured here: it is read from ARKHAI_E2E_BARE_METAL_EVM_PRIVATE_KEY and
+# passed to the buyer process alone. Ignored by the hosted rail.
+buyer_chain_name = ""
+buyer_chain_rpc_url = ""
+# Optional; resolved from the chain name when zero.
+buyer_chain_id = 0
+# Deployed Alkahest addresses for a development chain. Leave empty only when the
+# chain's addresses ship with the kit.
+buyer_alkahest_address_config_path = ""
+
 deal_timeout_seconds = 900
+settle_timeout_seconds = 900
 teardown_timeout_seconds = 300
 poll_interval_seconds = 2
-terminal_teardown_status = "released"
+
+# Physical fulfillment states, as `market bare-metal status` reports them under
+# `fulfillment.state`. The settlement command returns once fulfillment has begun,
+# so the lease is waited to `active_fulfillment_state` before delivery is read.
+active_fulfillment_state = "active"
+provisioning_timeout_seconds = 900
+terminal_teardown_state = "released"
 
 # Absent inputs skip by default so an ordinary suite run may exclude this
 # scenario. Set true for a deliberately selected acceptance run: every missing

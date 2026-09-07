@@ -40,8 +40,42 @@ from tests.e2e.roles.helpers.domain_deal import (
 
 pytestmark = pytest.mark.e2e_bare_metal_deal
 
-_ACCESS_PROOF_COMMAND = "printf arkhai-bare-metal-access-ok"
-_ACCESS_PROOF_OUTPUT = "arkhai-bare-metal-access-ok"
+# One remote command, reporting what the buyer's own session is. A marker the
+# command prints back only proves SSH succeeded; the lease is also required to
+# be an ordinary account, so the identity and the sudo answer are read in the
+# same session rather than inferred from how the account was created.
+_ACCESS_PROOF_COMMAND = (
+    "printf 'arkhai-uid=%s\\n' \"$(id -u)\"; "
+    "printf 'arkhai-groups=%s\\n' \"$(id -Gn)\"; "
+    "if sudo -n true >/dev/null 2>&1; "
+    "then printf 'arkhai-sudo=granted\\n'; "
+    "else printf 'arkhai-sudo=refused\\n'; fi"
+)
+
+# Membership of any of these is a privilege grant on a Debian-family host:
+# `docker` and `lxd` are root-equivalent because their sockets can start a
+# container that mounts the host filesystem.
+_PRIVILEGED_GROUPS = frozenset(
+    {"root", "sudo", "wheel", "admin", "adm", "docker", "lxd"}
+)
+
+# The bare-metal plugin reads its own configuration file by environment
+# variable; the shared `--config` flag only reaches the core loader.
+_BUYER_CONFIG_VARIABLE = "BARE_METAL_BUYER_CONFIG"
+
+# Where this scenario reads the buyer's escrow funding key from, and the
+# default name `bare-metal fund` reads it under. Exactly one secret is copied
+# between them: the buyer process never inherits the operator's environment,
+# and a key passed in argv would be visible to every account on this machine.
+_FUNDING_KEY_SOURCE_VARIABLE = "ARKHAI_E2E_BARE_METAL_EVM_PRIVATE_KEY"
+_DEFAULT_FUNDING_KEY_VARIABLE = "BARE_METAL_BUYER_EVM_PRIVATE_KEY"
+
+# States from which a lease will not become active. The buyer CLI's own hosted
+# wait ends on this set, and a poll that treated them as "not yet" would report
+# a reported failure as a timeout.
+_TERMINAL_FAILURE_STATES = frozenset(
+    {"failed", "teardown_failed", "torn_down", "released"}
+)
 
 _FORBIDDEN_BUY_FLAGS = (
     "--access-ref",
@@ -124,8 +158,66 @@ def _buyer_ssh(
     )
 
 
+@dataclass(frozen=True)
+class AccessProof:
+    """What the buyer's own SSH session reported about itself."""
+
+    uid: int
+    groups: tuple[str, ...]
+    sudo_granted: bool
+
+
+def _parse_access_proof(stdout: str) -> AccessProof:
+    """Read the proof lines, refusing anything incomplete.
+
+    A partial answer fails rather than defaulting: a session that printed only
+    some of these lines has not shown it is unprivileged, and treating a missing
+    `arkhai-sudo` line as "no sudo" would turn a broken probe into a pass.
+    """
+    fields: dict[str, str] = {}
+    for line in stdout.splitlines():
+        key, separator, value = line.strip().partition("=")
+        if separator and key.startswith("arkhai-"):
+            fields[key] = value
+    missing = sorted(
+        {"arkhai-uid", "arkhai-groups", "arkhai-sudo"} - set(fields)
+    )
+    if missing:
+        raise AssertionError(
+            f"buyer session did not report {', '.join(missing)}; its privilege "
+            "level is unknown, which is not the same as unprivileged"
+        )
+    try:
+        uid = int(fields["arkhai-uid"])
+    except ValueError as exc:
+        raise AssertionError("buyer session reported a non-numeric uid") from exc
+    sudo = fields["arkhai-sudo"]
+    if sudo not in {"granted", "refused"}:
+        raise AssertionError(f"buyer session reported an unknown sudo answer {sudo!r}")
+    return AccessProof(
+        uid=uid,
+        groups=tuple(fields["arkhai-groups"].split()),
+        sudo_granted=sudo == "granted",
+    )
+
+
+def _assert_unprivileged_buyer_session(proof: AccessProof) -> None:
+    """The lease must be an ordinary account, not an administrator."""
+    if proof.uid == 0:
+        raise AssertionError("the buyer's lease session is root")
+    privileged = sorted(_PRIVILEGED_GROUPS.intersection(proof.groups))
+    if privileged:
+        raise AssertionError(
+            f"the buyer's lease account holds privileged groups: {privileged}"
+        )
+    if proof.sudo_granted:
+        raise AssertionError("the buyer's lease account was granted sudo")
+
+
 @pytest.fixture(scope="module")
-def bare_metal_buyer_cli(buyer_cli_binary, tmp_path_factory) -> BuyerCli:
+def bare_metal_buyer_cli(
+    buyer_cli_binary, tmp_path_factory, settle_command: list[str]
+) -> BuyerCli:
     _require_bare_metal_plugin()
     registry_url = str(_setting("REGISTRY_URL") or "")
     if not registry_url:
@@ -151,7 +243,8 @@ def bare_metal_buyer_cli(buyer_cli_binary, tmp_path_factory) -> BuyerCli:
         _require_input(f"{credential_variable} is not injected")
 
     yield create_profiled_buyer_cli(
-        base_env=_buyer_environment(),
+        base_env=_buyer_environment(settle_command),
+        config_path_variables=(_BUYER_CONFIG_VARIABLE,),
         binary=buyer_cli_binary,
         base=tmp_path_factory.mktemp("bare_metal_buyer_cli"),
         domain_identity="bare_metal.v1",
@@ -173,6 +266,7 @@ def bare_metal_buyer_cli(buyer_cli_binary, tmp_path_factory) -> BuyerCli:
                 for principal in registry_principals
             )
             + "]",
+            *_buyer_chain_sections(settle_command),
         ),
     )
 
@@ -236,6 +330,24 @@ def bare_metal_publication_command() -> list[str]:
 
 
 @pytest.fixture(scope="module")
+def settle_command() -> list[str]:
+    """The rail's own settlement command, run after `buy` negotiates.
+
+    Named rather than inferred: the crypto lane funds an escrow on chain
+    (`bare-metal fund`) and the hosted lane authorizes an instrument
+    (`bare-metal complete`). Choosing one silently would let a lane that was
+    configured for the other report a purchase it never made.
+    """
+    raw = str(_setting("SETTLE_COMMAND") or "")
+    if not raw:
+        _require_input(
+            "BARE_METAL.SETTLE_COMMAND must name the settlement command for the "
+            "selected rail; a negotiated agreement is not a purchase"
+        )
+    return shlex.split(raw)
+
+
+@pytest.fixture(scope="module")
 def bare_metal_ssh_private_key() -> Path:
     """Preflight the role-scoped access credential before any market effect."""
     file_name = os.environ.get(
@@ -251,17 +363,96 @@ def bare_metal_ssh_private_key() -> Path:
     return path
 
 
-def _buyer_environment() -> dict[str, str]:
+def _is_crypto_settlement(settle_command: list[str]) -> bool:
+    """Whether the selected rail funds an escrow on chain."""
+    return settle_command[:2] == ["bare-metal", "fund"]
+
+
+def _funding_key_variable(settle_command: list[str]) -> str:
+    """The variable `bare-metal fund` will read its funding key from.
+
+    Taken from the command's own `--private-key-env` when it names one, so a
+    lane that renames the variable still receives the key.
+    """
+    for index, argument in enumerate(settle_command):
+        if argument == "--private-key-env" and index + 1 < len(settle_command):
+            return settle_command[index + 1]
+        if argument.startswith("--private-key-env="):
+            return argument.split("=", 1)[1]
+    return _DEFAULT_FUNDING_KEY_VARIABLE
+
+
+def _buyer_environment(settle_command: list[str]) -> dict[str, str]:
     """The environment the buyer process starts from.
 
     An allowlist rather than a filtered copy of the operator's environment: a
-    filter has to predict every name worth removing. The buyer's own credential
-    is added separately by `BuyerCli`.
+    filter has to predict every name worth removing. The buyer's own marketplace
+    credential is added separately by `BuyerCli`, and the funding key is added
+    here only for the rail that spends it, so a hosted lane is never required to
+    hold an EVM secret.
     """
-    return {
+    environment = {
         "PATH": os.environ.get("PATH", "/usr/bin:/bin"),
         "LANG": os.environ.get("LANG", "C"),
     }
+    if _is_crypto_settlement(settle_command):
+        funding_key = os.environ.get(_FUNDING_KEY_SOURCE_VARIABLE, "").strip()
+        if not funding_key:
+            _require_input(
+                f"{_FUNDING_KEY_SOURCE_VARIABLE} must hold the buyer's escrow "
+                "funding key for the crypto settlement rail"
+            )
+        environment[_funding_key_variable(settle_command)] = funding_key
+    return environment
+
+
+def _buyer_chain_sections(settle_command: list[str]) -> tuple[str, ...]:
+    """The one `[chains.<name>]` table the crypto rail reads.
+
+    `buy` resolves the address set for the chain it is about to propose on, and
+    `fund` resolves the RPC to create the escrow. Both read the same shared
+    loader, so the chain has to be in the file this scenario generates rather
+    than in whatever config the operator happens to have.
+    """
+    if not _is_crypto_settlement(settle_command):
+        return ()
+    name = str(_setting("BUYER_CHAIN_NAME") or "").strip()
+    rpc_url = str(_setting("BUYER_CHAIN_RPC_URL") or "").strip()
+    if not name or not rpc_url:
+        _require_input(
+            "BARE_METAL.BUYER_CHAIN_NAME and BARE_METAL.BUYER_CHAIN_RPC_URL "
+            "must name the chain the seller advertises; the crypto rail cannot "
+            "propose or fund an escrow without them"
+        )
+    if not all(character.isalnum() or character in "_-" for character in name):
+        raise AssertionError(
+            f"BARE_METAL.BUYER_CHAIN_NAME {name!r} is not a bare TOML key, so it "
+            "would not be read back as the chain the listing names"
+        )
+    lines = [
+        "",
+        f"[chains.{name}]",
+        f"rpc_url = {json.dumps(rpc_url)}",
+    ]
+    chain_id = int(_setting("BUYER_CHAIN_ID", 0) or 0)
+    if chain_id:
+        lines.append(f"chain_id = {chain_id}")
+    address_config_path = str(
+        _setting("BUYER_ALKAHEST_ADDRESS_CONFIG_PATH") or ""
+    ).strip()
+    if address_config_path:
+        # Deployed addresses for a development chain are not bundled, and an
+        # unreadable file would silently fall back to the bundled set — a
+        # different set of contracts than the operator deployed.
+        if not Path(address_config_path).is_file():
+            _require_input(
+                "BARE_METAL.BUYER_ALKAHEST_ADDRESS_CONFIG_PATH is not a readable "
+                f"file: {address_config_path}"
+            )
+        lines.append(
+            "alkahest_address_config_path = " + json.dumps(address_config_path)
+        )
+    return tuple(lines)
 
 
 def _run_publication(publication_command: list[str]) -> None:
@@ -301,6 +492,89 @@ def _requested_public_key(buy_args: list[str]) -> str | None:
     return None
 
 
+def _assert_discovered_from_the_trusted_registry(started: dict[str, Any]) -> None:
+    """The purchased listing came from the configured authenticated registry.
+
+    `buy` records the registry it read, the listing it read, and the publisher
+    principals that listing was signed under, all from the authenticated
+    response. Checking those is what makes this a discovery assertion rather
+    than an assertion that some command ran.
+    """
+    registry_url = str(_setting("REGISTRY_URL") or "").rstrip("/")
+    registry_authority = str(_setting("REGISTRY_AUTHORITY") or "")
+    if str(started.get("source_registry_url") or "").rstrip("/") != registry_url:
+        raise AssertionError(
+            "the purchased listing did not come from the configured registry"
+        )
+    if str(started.get("source_registry_authority") or "") != registry_authority:
+        raise AssertionError(
+            "the purchased listing was not read under the configured registry "
+            "authority"
+        )
+    for field in ("listing_id", "storefront_url", "publisher_id"):
+        if not started.get(field):
+            raise AssertionError(f"discovery recorded no {field}")
+    principals = (started.get("publisher_principals") or {}).get("identities")
+    if not principals:
+        raise AssertionError(
+            "the listing carried no publisher principals, so nothing binds the "
+            "seller that was negotiated with to the listing that was discovered"
+        )
+
+
+def _fulfillment_state(view: dict[str, Any]) -> str:
+    """The physical state out of `market bare-metal status`'s envelope.
+
+    That command emits `{"fulfillment": <projection>}`, with a `settlement` key
+    beside it on the hosted rail. A missing key is an error rather than an empty
+    string: reading an unreadable projection as "not yet" turns a converged
+    lease into a timeout.
+    """
+    fulfillment = view.get("fulfillment")
+    if not isinstance(fulfillment, dict) or "state" not in fulfillment:
+        raise AssertionError(
+            "bare-metal status did not return its declared fulfillment projection"
+        )
+    return str(fulfillment.get("state") or "")
+
+
+def _await_fulfillment_state(
+    cli: BuyerCli,
+    run_id: str,
+    *,
+    target: str,
+    failure_states: frozenset[str],
+    timeout_seconds: float,
+) -> dict[str, Any]:
+    """Poll the physical projection until it reaches *target*.
+
+    The settlement command returns once fulfillment has begun, not once the host
+    is provisioned. A terminal failure ends the wait immediately: polling on
+    would report it as a timeout instead.
+    """
+    deadline = time.monotonic() + timeout_seconds
+    observed = ""
+    while True:
+        view = _json_result(
+            cli.run(["bare-metal", "status", "--run-id", run_id]),
+            command="market bare-metal status",
+        )
+        observed = _fulfillment_state(view)
+        if observed == target:
+            return view
+        if observed in failure_states:
+            raise AssertionError(
+                f"bare-metal fulfillment ended in state {observed!r} while "
+                f"waiting for {target!r}"
+            )
+        if time.monotonic() >= deadline:
+            raise AssertionError(
+                f"bare-metal fulfillment did not reach {target!r} before timeout "
+                f"(last state {observed!r})"
+            )
+        time.sleep(float(_setting("POLL_INTERVAL_SECONDS", 2)))
+
+
 def _request_teardown(cli: BuyerCli, run_id: str) -> dict[str, Any] | None:
     """Best-effort teardown used when the scenario is failing.
 
@@ -309,7 +583,7 @@ def _request_teardown(cli: BuyerCli, run_id: str) -> dict[str, Any] | None:
     """
     try:
         return _json_result(
-            cli.run(["bare-metal", "teardown", "request", "--from", run_id, "--json"]),
+            cli.run(["bare-metal", "teardown", "--run-id", run_id]),
             command="market bare-metal teardown request",
         )
     except Exception:
@@ -317,6 +591,7 @@ def _request_teardown(cli: BuyerCli, run_id: str) -> dict[str, Any] | None:
 
 
 def test_bare_metal_complete_deal(
+    settle_command: list[str],
     bare_metal_buyer_cli: BuyerCli,
     bare_metal_ssh_private_key: Path,
     management_reachability_probe: list[str],
@@ -370,22 +645,56 @@ def test_bare_metal_complete_deal(
     teardown_needed = True
     try:
         assert_market_run_succeeded(buy, command="market bare-metal buy")
-        ordered_event_groups(
+        started, _accepted, _ended = ordered_event_groups(
             buy.read_events(),
-            ("discover",),
-            ("negotiation_completed",),
-            ("settlement_submitted", "settlement_started"),
+            ("run_started",),
+            ("agreement_accepted",),
             ("run_ended",),
         )
+        _assert_discovered_from_the_trusted_registry(started)
 
         state = DomainDealState(domain_identity="bare_metal.v1")
         state.complete(DealStage.DISCOVERY)
         state.complete(DealStage.NEGOTIATION)
+
+        # `buy` negotiates and stops. Nothing is funded, verified or reserved
+        # until the rail's own settlement command runs, so a lane that went
+        # straight to `result` here would be asserting delivery of a lease
+        # nobody paid for.
+        _json_result(
+            bare_metal_buyer_cli.run(
+                [*settle_command, "--run-id", buy.run_id],
+                timeout=float(_setting("SETTLE_TIMEOUT_SECONDS", 900)),
+            ),
+            command="market " + " ".join(settle_command),
+        )
+        ordered_event_groups(
+            buy.read_events(),
+            ("agreement_accepted",),
+            (
+                "escrow_created",
+                "settlement_submitted",
+                "settlement_started",
+            ),
+            ("settlement_verified", "settlement_completed"),
+        )
         state.complete(DealStage.SETTLEMENT)
+
+        # The settlement command returns once fulfillment has begun, which is
+        # earlier than the host being usable. Reading the result or the access
+        # coordinates before the lease is active would report provisioning
+        # state as delivery.
+        _await_fulfillment_state(
+            bare_metal_buyer_cli,
+            buy.run_id,
+            target=str(_setting("ACTIVE_FULFILLMENT_STATE", "active")),
+            failure_states=_TERMINAL_FAILURE_STATES,
+            timeout_seconds=float(_setting("PROVISIONING_TIMEOUT_SECONDS", 900)),
+        )
 
         result = _json_result(
             bare_metal_buyer_cli.run(
-                ["bare-metal", "result", "--from", buy.run_id, "--json"]
+                ["bare-metal", "result", "--run-id", buy.run_id]
             ),
             command="market bare-metal result",
         )
@@ -403,7 +712,7 @@ def test_bare_metal_complete_deal(
 
         access = _json_result(
             bare_metal_buyer_cli.run(
-                ["bare-metal", "access", "--from", buy.run_id, "--json"]
+                ["bare-metal", "access", "--run-id", buy.run_id]
             ),
             command="market bare-metal access",
         )
@@ -418,42 +727,31 @@ def test_bare_metal_complete_deal(
         assert classify_ssh_probe(
             first_access, offered_fingerprint=lease_key.fingerprint
         ) is AccessVerdict.GRANTED, "granted lease did not admit the buyer key"
-        assert first_access.stdout == _ACCESS_PROOF_OUTPUT
+        # Judged before teardown: afterwards the lease key is refused, so this
+        # session cannot be re-entered to establish what it was allowed to do.
+        _assert_unprivileged_buyer_session(_parse_access_proof(first_access.stdout))
         assert known_hosts_file.is_file() and known_hosts_file.read_text().strip(), (
             "no host key is pinned, so later probes cannot verify the same host"
         )
 
         _json_result(
             bare_metal_buyer_cli.run(
-                ["bare-metal", "teardown", "request", "--from", buy.run_id, "--json"]
+                ["bare-metal", "teardown", "--run-id", buy.run_id]
             ),
             command="market bare-metal teardown request",
         )
         teardown_needed = False
-        terminal_status = str(_setting("TERMINAL_TEARDOWN_STATUS", "released"))
-        deadline = time.monotonic() + float(_setting("TEARDOWN_TIMEOUT_SECONDS", 300))
-        teardown: dict[str, Any] | None = None
-        while time.monotonic() < deadline:
-            teardown = _json_result(
-                bare_metal_buyer_cli.run(
-                    [
-                        "bare-metal",
-                        "teardown",
-                        "status",
-                        "--from",
-                        buy.run_id,
-                        "--json",
-                    ]
-                ),
-                command="market bare-metal teardown status",
-            )
-            if teardown.get("status") == terminal_status:
-                break
-            time.sleep(float(_setting("POLL_INTERVAL_SECONDS", 2)))
-        else:
-            raise AssertionError(
-                f"bare-metal teardown did not reach {terminal_status!r} before timeout"
-            )
+        terminal_state = str(_setting("TERMINAL_TEARDOWN_STATE", "released"))
+        teardown = _await_fulfillment_state(
+            bare_metal_buyer_cli,
+            buy.run_id,
+            target=terminal_state,
+            # `teardown_failed` is terminal here rather than a failure to wait
+            # through: the release did not happen and polling on would only
+            # report it as a timeout.
+            failure_states=frozenset({"failed", "teardown_failed"}),
+            timeout_seconds=float(_setting("TEARDOWN_TIMEOUT_SECONDS", 300)),
+        )
 
         # The same key must still be readable, or a denial below could mean the
         # credential vanished rather than that the authority withdrew it.
@@ -522,13 +820,38 @@ class LeasedHost:
 
 
 def _leased_host(view: dict[str, Any]) -> LeasedHost:
-    machine_id = str(view.get("machine_id") or "")
-    physical_host_id = str(view.get("physical_host_id") or "")
+    """The host identity out of `market bare-metal result`'s real envelope.
+
+    That command returns the storefront's own result response — a negotiation
+    id, the durable `receipt`, and the executor's `result` — so the identity
+    fields live under `receipt`. The executor's view is required to name the
+    same host: they are produced by different authorities, and a disagreement
+    means the relisting check below would be correlating against the wrong one.
+    """
+    receipt = view.get("receipt")
+    if not isinstance(receipt, dict):
+        raise AssertionError(
+            "fulfillment result carried no receipt, so the leased host is unknown"
+        )
+    machine_id = str(receipt.get("machine_id") or "")
+    physical_host_id = str(receipt.get("physical_host_id") or "")
     if not machine_id or not physical_host_id:
         raise AssertionError(
-            "fulfillment result did not expose both host identity fields, so a "
+            "fulfillment receipt did not expose both host identity fields, so a "
             "relisted offer cannot be correlated to the host that was leased"
         )
+    executor = view.get("result")
+    if isinstance(executor, dict):
+        executor_machine = str(executor.get("machine_id") or "")
+        executor_host = str(executor.get("physical_host_id") or "")
+        if executor_machine and executor_machine != machine_id:
+            raise AssertionError(
+                "the receipt and the executor result name different machines"
+            )
+        if executor_host and executor_host != physical_host_id:
+            raise AssertionError(
+                "the receipt and the executor result name different physical hosts"
+            )
     return LeasedHost(machine_id=machine_id, physical_host_id=physical_host_id)
 
 

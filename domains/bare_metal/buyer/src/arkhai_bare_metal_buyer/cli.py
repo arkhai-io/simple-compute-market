@@ -50,6 +50,7 @@ from core_buyer.run_log import RunLog
 from market_core.schemas import SettlementOption, SettlementPlan, SettlementSelection
 from market_identity import TrustedIdentitySet
 from pydantic_core import to_jsonable_python
+from market_alkahest.schemas import accepted_recipient_address
 from market_settlement_runtime import derive_obligation_ref
 
 from .config import (
@@ -60,6 +61,19 @@ from .config import (
 )
 from .fulfillment import BareMetalFulfillmentTransport
 from .funding import prepare_funding_authorization, stripe_config_from_user_config
+from .escrow import (
+    BareMetalEscrowError,
+    fund_accepted_obligation,
+    funding_address,
+    resolve_buyer_chain,
+)
+from .settlement_composition import (
+    ALKAHEST_MECHANISM,
+    HOSTED_MECHANISM,
+    BareMetalBuyerMechanismError,
+    bare_metal_escrow_proposal,
+    validate_accepted_alkahest_plan,
+)
 
 bare_metal_app = typer.Typer(
     no_args_is_help=True, help="Discover and settle trusted bare-metal listings."
@@ -209,6 +223,14 @@ def buy_bare_metal(
     option_id: str = typer.Option(...),
     ssh_public_key_file: str = typer.Option(...),
     duration_seconds: int = typer.Option(..., min=1),
+    escrow_expiration_seconds: int = typer.Option(
+        3600,
+        min=1,
+        help=(
+            "Alkahest only: seconds from now until the buyer's escrow may be "
+            "reclaimed. An advertised escrow entry carries no expiry."
+        ),
+    ),
     config: str | None = typer.Option(None, "--config"),
 ) -> None:
     """Negotiate one exact authenticated listing and persist recovery identity."""
@@ -228,11 +250,52 @@ def buy_bare_metal(
     selected = matches[0]
     if not selected.rates or selected.rates[0].per != "hour":
         raise typer.BadParameter("bare-metal listing must advertise an hourly rate")
-    facts = decode_bare_metal_hosted_option_facts(selected.params.get("bare_metal"))
+    # The rail is decided by the option the buyer selected, not by the domain.
+    mechanism = selected.mechanism
+    if mechanism not in (ALKAHEST_MECHANISM, HOSTED_MECHANISM):
+        raise typer.BadParameter(
+            f"settlement mechanism {mechanism!r} is not supported by this buyer"
+        )
+
+    trusted_listing = BareMetalListing.model_validate(listing.offer)
+    escrow_proposal = None
+    if mechanism == ALKAHEST_MECHANISM:
+        # An advertised escrow entry carries no expiry, so the buyer sets the
+        # instant its own funds become reclaimable.
+        expiration_unix = int(time.time()) + escrow_expiration_seconds
+        try:
+            escrow_proposal = bare_metal_escrow_proposal(
+                listing=listing.offer,
+                option=selected,
+                expiration_unix=expiration_unix,
+            )
+        except BareMetalBuyerMechanismError as exc:
+            raise typer.BadParameter(str(exc)) from exc
+        # When the seller advertises the address it will be paid at, the buyer
+        # pins it. Without one the payee is the seller's own choice at
+        # acceptance time and cannot be checked against anything the listing
+        # said; the rest of the obligation is still re-derived from it.
+        advertised_payout = accepted_recipient_address(escrow_proposal)
+        # The same address set the funding call will use, so the re-derived
+        # obligation is compared against the contracts actually deployed here.
+        try:
+            escrow_address_config_path = resolve_buyer_chain(
+                escrow_proposal.chain_name
+            ).alkahest_address_config_path
+        except BareMetalEscrowError as exc:
+            raise typer.BadParameter(str(exc)) from exc
+        # On-chain funding is an act the buyer performs; there is no saved
+        # instrument to authorize off-session.
+        allow_off_session = False
+    else:
+        facts = decode_bare_metal_hosted_option_facts(selected.params.get("bare_metal"))
+        expiration_unix = int(facts.funding_deadline.timestamp())
+        allow_off_session = selected.params.get("interaction") == "saved_instrument"
+
     selection = SettlementSelection(
         mechanism=selected.mechanism,
         option_id=selected.option_id,
-        expiration_unix=int(facts.funding_deadline.timestamp()),
+        expiration_unix=expiration_unix,
     )
     try:
         ssh_public_key = Path(ssh_public_key_file).read_text(encoding="utf-8").strip()
@@ -242,14 +305,18 @@ def buy_bare_metal(
         duration_seconds=duration_seconds,
         ssh_public_key=ssh_public_key,
         settlement=selection,
-        allow_off_session=selected.params.get("interaction") == "saved_instrument",
+        allow_off_session=allow_off_session,
     )
-    hosted_option = validate_buyer_selection(demand=demand, advertised_options=options)
-    trusted_listing = BareMetalListing.model_validate(listing.offer)
-    _validate_hosted_option_binding(
-        trusted_listing,
-        physical_host_id=facts.physical_host_id,
-    )
+    if mechanism == ALKAHEST_MECHANISM:
+        hosted_option = None
+    else:
+        hosted_option = validate_buyer_selection(
+            demand=demand, advertised_options=options
+        )
+        _validate_hosted_option_binding(
+            trusted_listing,
+            physical_host_id=facts.physical_host_id,
+        )
     accepted_terms = BareMetalTerms(
         machine_id=trusted_listing.machine_id,
         physical_host_id=trusted_listing.physical_host_id,
@@ -288,16 +355,32 @@ def buy_bare_metal(
         ),
         settlement_selection=selection,
         policy_params={"_selected_settlement_option": selected.model_dump(mode="json")},
-        validate_advertised_plan=lambda plan: validate_accepted_hosted_plan(
-            plan=plan,
-            listing_id=listing_id,
-            option=hosted_option,
-            demand=demand,
-            buyer_principal=CanonicalPrincipal.model_validate(
-                identity.principal.model_dump(mode="json")
-            ),
-            seller_principal=CanonicalPrincipal.model_validate(plan.seller_principal),
-            seller_terms=accepted_terms,
+        validate_advertised_plan=(
+            (
+                lambda plan: validate_accepted_alkahest_plan(
+                    plan=plan,
+                    proposal=escrow_proposal,
+                    duration_seconds=duration_seconds,
+                    address_config_path=escrow_address_config_path,
+                    seller_payout_address=advertised_payout,
+                )
+            )
+            if mechanism == ALKAHEST_MECHANISM
+            else (
+                lambda plan: validate_accepted_hosted_plan(
+                    plan=plan,
+                    listing_id=listing_id,
+                    option=hosted_option,
+                    demand=demand,
+                    buyer_principal=CanonicalPrincipal.model_validate(
+                        identity.principal.model_dump(mode="json")
+                    ),
+                    seller_principal=CanonicalPrincipal.model_validate(
+                        plan.seller_principal
+                    ),
+                    seller_terms=accepted_terms,
+                )
+            )
         ),
         max_rounds=buyer_config.default_max_rounds,
     )
@@ -452,6 +535,104 @@ def _start_or_resume(
     return deal, identity, hosted, fulfillment, settlement_ref
 
 
+def _accepted_alkahest_obligation(deal: Any) -> tuple[dict[str, Any], str]:
+    """The one accepted Alkahest obligation and its reference."""
+    if deal.settlement_plan is None:
+        raise typer.BadParameter("accepted run has no settlement plan")
+    plan = SettlementPlan.model_validate(deal.settlement_plan)
+    if len(plan.obligations) != 1 or plan.obligations[0].mechanism != ALKAHEST_MECHANISM:
+        raise typer.BadParameter("accepted run has no exact Alkahest obligation")
+    obligation = plan.obligations[0].model_dump(mode="json")
+    return obligation, derive_obligation_ref(deal.negotiation_id, 0, obligation)
+
+
+@bare_metal_app.command("fund")
+def fund_alkahest(
+    run_id: str = typer.Option(...),
+    buyer_evm_address: str = typer.Option(
+        ...,
+        help="The address funding the escrow; the seller records it as the payer.",
+    ),
+    private_key_env: str = typer.Option(
+        "BARE_METAL_BUYER_EVM_PRIVATE_KEY",
+        help="Environment variable holding the funding key. Never passed as an argument.",
+    ),
+    escrow_uid: str | None = typer.Option(
+        None,
+        help="Adopt an escrow already funded for this run instead of creating one.",
+    ),
+    config: str | None = typer.Option(None, "--config"),
+) -> None:
+    """Fund the accepted Alkahest obligation, have it verified, and begin.
+
+    One command because the three steps are not independently useful: a funded
+    escrow the seller has not verified reserves nothing, and a verified
+    settlement that never begins leaves paid-for capacity unclaimed. Re-running
+    with `--escrow-uid` resumes after a partial run rather than funding twice.
+    """
+    deal, identity, _, fulfillment = _recovered_transports(run_id, config)
+    obligation, obligation_ref = _accepted_alkahest_obligation(deal)
+    log = open_run_log(run_id, signer=identity.signer, profile_id=identity.profile_id)
+
+    # The run log is the record of what this run already spent. Reading it
+    # before funding is what stops a rerun after a crash from creating a second
+    # escrow and paying twice for one agreement.
+    if escrow_uid is None:
+        escrow_uid = getattr(deal, "escrow_uid", None)
+        if escrow_uid:
+            typer.echo(
+                f"adopting the escrow this run already created: {escrow_uid}",
+                err=True,
+            )
+
+    if escrow_uid is None:
+        private_key = os.environ.get(private_key_env, "").strip()
+        if not private_key:
+            raise typer.BadParameter(
+                f"{private_key_env} must hold the buyer's funding key"
+            )
+        try:
+            derived = funding_address(private_key)
+        except BareMetalEscrowError as exc:
+            raise typer.BadParameter(str(exc)) from exc
+        if derived.lower() != buyer_evm_address.strip().lower():
+            raise typer.BadParameter(
+                "--buyer-evm-address is not the address the funding key controls; "
+                "the seller would record a payer that did not fund the escrow"
+            )
+        try:
+            escrow_uid = fund_accepted_obligation(obligation, private_key=private_key)
+        except BareMetalEscrowError as exc:
+            raise typer.BadParameter(str(exc)) from exc
+        # Recorded before verification: an escrow that exists on chain but was
+        # never verified must still be recoverable, or the buyer's funds are
+        # stranded with no reference to reclaim them by.
+        log.event(
+            "escrow_created",
+            escrow_uid=escrow_uid,
+            obligation_ref=obligation_ref,
+            chain_name=(obligation.get("params") or {}).get("chain_name"),
+        )
+
+    verified = fulfillment.settle(
+        escrow_uid=escrow_uid,
+        negotiation_id=deal.negotiation_id,
+        buyer_evm_address=buyer_evm_address,
+    )
+    log.event(
+        "settlement_verified",
+        escrow_uid=escrow_uid,
+        obligation_ref=verified.get("obligation_ref") or obligation_ref,
+    )
+
+    begun = fulfillment.begin(
+        negotiation_id=deal.negotiation_id,
+        escrow_uid=escrow_uid,
+    )
+    log.event("fulfillment_begun", escrow_uid=escrow_uid)
+    _json({"escrow_uid": escrow_uid, "settlement": verified, "fulfillment": begun})
+
+
 @bare_metal_app.command("start")
 def start_hosted(
     run_id: str = typer.Option(...),
@@ -536,16 +717,17 @@ def hosted_status(
     """Retrieve current provider-neutral settlement and physical projection."""
 
     deal, _, hosted, fulfillment = _recovered_transports(run_id, config)
-    if deal.settlement_ref is None:
-        raise typer.BadParameter("run has no started hosted settlement")
-    _json(
-        {
-            "settlement": _safe_projection(
-                hosted.status(settlement_ref=deal.settlement_ref)
-            ),
-            "fulfillment": fulfillment.status(deal.negotiation_id),
-        }
-    )
+    projection: dict[str, Any] = {
+        "fulfillment": fulfillment.status(deal.negotiation_id)
+    }
+    # A settlement reference exists only on the hosted rail; an Alkahest run
+    # settles on chain and has none. Refusing here would leave a crypto lease
+    # with no way to observe its own physical convergence.
+    if deal.settlement_ref is not None:
+        projection["settlement"] = _safe_projection(
+            hosted.status(settlement_ref=deal.settlement_ref)
+        )
+    _json(projection)
 
 
 @bare_metal_app.command("result")

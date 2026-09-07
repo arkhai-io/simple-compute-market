@@ -138,10 +138,19 @@ def test_pagination_limit_is_requested_explicitly() -> None:
 
 
 def test_leased_host_requires_both_identity_fields() -> None:
+    """Read out of the `result` envelope's receipt, which is where they live."""
     assert _leased_host(
-        {"machine_id": "node-a", "physical_host_id": "host-a"}
+        {"receipt": {"machine_id": "node-a", "physical_host_id": "host-a"}}
     ) == LEASED
 
-    for partial in ({"machine_id": "node-a"}, {"physical_host_id": "host-a"}, {}):
+    partials = (
+        {"receipt": {"machine_id": "node-a"}},
+        {"receipt": {"physical_host_id": "host-a"}},
+        {"receipt": {}},
+        {},
+        # The flattened view an earlier caller assumed the command returned.
+        {"machine_id": "node-a", "physical_host_id": "host-a"},
+    )
+    for partial in partials:
         with pytest.raises(AssertionError):
             _leased_host(partial)

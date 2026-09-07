@@ -267,3 +267,87 @@ Where the bound release does not declare the capability, the operation MUST be r
 
 - **WHEN** a submission has been made and its result recorded
 - **THEN** marketplace persistence and any report contain the opaque setup reference and public readiness only, and contain no amounts, descriptor code, or provider payload
+
+### Requirement: A domain buyer drives every rail its seller publishes
+
+A seller composition that installs several mechanism registrations publishes an
+option per ready mechanism from one publication round. The buyer for that domain
+SHALL resolve the rail from the option the buyer selected, and SHALL NOT assume
+one mechanism's option shape when reading another's.
+
+Mechanism-specific acceptance validation remains mechanism-specific. A buyer that
+supplies `validate_advertised_plan` to the shared negotiation client replaces the
+shared `params`/`conditions` equality check for that agreement, so the callback
+SHALL verify the financial and collection semantics it displaced — at minimum the
+escrow target, chain, funded asset, and collection conditions — against the
+buyer's own proposal. It SHALL NOT restate the principal, amount, expiry, asset
+or mechanism checks the shared client already performs.
+
+#### Scenario: A published option is selectable on either rail
+- **WHEN** one publication advertises both an on-chain and a hosted option
+- **THEN** the selected `option_id` decides which rail the buyer drives
+- **AND** an option naming a mechanism the buyer cannot drive is refused by name
+
+#### Scenario: An advertised escrow entry carries no expiry
+- **WHEN** a buyer selects an on-chain option
+- **THEN** the escrow expiry is the buyer's own chosen instant
+- **AND** it is not read from the advertised entry, which does not carry one
+
+#### Scenario: A substituted plan is refused before funding
+- **WHEN** an accepted plan differs in any part of its funded obligation from
+  the one the buyer's proposal derives
+- **THEN** acceptance fails and no escrow is created
+
+The comparison SHALL be against the mechanism's own canonical materialization of
+the buyer's proposal, not an enumerated list of fields. A mechanism that encodes
+terms inside a funded payload — an arbiter or payee within the obligation data —
+would otherwise pass a top-level check while funding different terms.
+
+Where the buyer cannot derive a value from its own proposal, such as the address
+the seller will be paid at when the listing advertises none, the specification
+SHALL record that as an unpinned input rather than implying it is verified.
+
+The value re-derived from SHALL be the accepted obligation's negotiated absolute
+total, which the shared client has already required to equal the negotiated
+amount before delegating. An advertised rate is per unit and is not that total
+for any rental of a different length; a mechanism callback SHALL NOT validate
+against the advertised rate, and SHALL NOT introduce its own scaling or rounding
+of it.
+
+#### Scenario: A rental shorter than one rate unit
+- **WHEN** an hourly option is accepted for a fraction of an hour
+- **THEN** the accepted plan settles at the scaled negotiated total
+- **AND** an accepted plan carrying the unscaled hourly rate is refused
+
+### Requirement: Negotiation is not purchase
+
+An accepted agreement SHALL NOT be treated as a completed purchase. For an
+on-chain rail the buyer SHALL create the accepted obligation's escrow, obtain the
+seller's authoritative verification of it, and begin fulfillment, before any
+capacity is reserved or any delivery view is read.
+
+The escrow's identity SHALL be recorded before verification is requested, so that
+an escrow which exists on chain but was never verified remains reclaimable.
+
+#### Scenario: A resumed run adopts its escrow
+- **WHEN** a settlement run is repeated with an already-funded escrow reference
+- **THEN** that escrow is verified and begun
+- **AND** no second escrow is created
+
+A domain buy command records its run in the shared run log: the run's opening
+inputs, the accepted agreement, and the run's end. The opening record carries the
+registry the listing was read from, that registry's authority, the listing, its
+storefront, and the publisher principals the listing was signed under, so the
+purchased agreement is bound to an authenticated discovery. A consumer of that
+log SHALL assert the events the command emits; it SHALL NOT depend on names no
+producer writes.
+
+Beginning fulfillment is not delivery. The buyer-visible physical projection
+reports its own state, and the delivery and access views are meaningful only once
+that state is active, so a consumer SHALL wait on the projection rather than read
+those views when the settlement command returns.
+
+#### Scenario: The purchased listing came from the configured registry
+- **WHEN** a run's opening record names another registry, another authority, or
+  carries no publisher principals
+- **THEN** the run is not accepted as evidence of authenticated discovery
