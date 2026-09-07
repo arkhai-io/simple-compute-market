@@ -72,6 +72,16 @@ spec:
                 secretKeyRef:
                   name: {{ required "bare-metal storefront site bindings Secret name is required" .Values.siteBindingsSecret.name | quote }}
                   key: {{ required "bare-metal storefront site bindings Secret key is required" .Values.siteBindingsSecret.key | quote }}
+            {{- if .Values.registryApiKeySecret.name }}
+            # Publication runs in this container, so the write credential is
+            # part of the container environment rather than a command argument
+            # that would appear in process listings and shell history.
+            - name: BARE_METAL_STOREFRONT_REGISTRY_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.registryApiKeySecret.name | quote }}
+                  key: {{ required "registryApiKeySecret.key is required when registryApiKeySecret.name is set" .Values.registryApiKeySecret.key | quote }}
+            {{- end }}
           ports:
             - name: http
               containerPort: {{ .Values.service.port }}

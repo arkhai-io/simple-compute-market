@@ -58,12 +58,19 @@ def _registry(runtime: BareMetalStorefrontRuntime) -> SyncRegistryClient:
     trust = TrustedIdentitySet(
         identities=tuple(Identity.model_validate(item) for item in raw_principals)
     )
+    # A registry that gates writes rejects the seller's per-request signature
+    # alone: publication additionally needs a write-scoped registry API key,
+    # carried as the client's bearer credential. Registries with open
+    # publishing supply no key, and the header is then absent rather than
+    # empty, so this stays optional in both directions.
+    api_key = os.environ.get("BARE_METAL_STOREFRONT_REGISTRY_API_KEY") or None
     return SyncRegistryClient(
         os.environ["BARE_METAL_STOREFRONT_REGISTRY_URL"],
         signer=runtime.marketplace_signer,
         caller_role="seller",
         expected_registries=trust,
         registry_authority=os.environ["BARE_METAL_STOREFRONT_REGISTRY_AUTHORITY"],
+        api_key=api_key,
     )
 
 

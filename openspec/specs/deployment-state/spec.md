@@ -783,6 +783,40 @@ rather than produce a role that starts and cannot settle.
 - **WHEN** settlement is enabled but no chain endpoint is configured
 - **THEN** the render fails
 
+### Requirement: Whole-host publication carries a registry write credential when one is configured
+
+A registry that gates writes resolves a bearer credential in addition to the
+per-request seller signature. Deployment of the whole-host storefront MUST
+therefore be able to supply a write-scoped registry API key to publication, and
+MUST supply it by Secret reference, never as a literal value. The credential is
+optional: where none is configured the deployment MUST render no credential
+environment. The publication client treats an unset or empty credential as
+absent and sends no bearer header. The credential MUST NOT replace or relax
+the signature the registry verifies on top of it. A registry's administrative
+credential is a separate secret for that registry's own administrative routes
+and is not this value.
+
+The publication command MUST report the round and MUST exit non-zero when the
+round contains a failed candidate, so an operator step that checks only the exit
+status cannot record a round that published nothing as a success.
+
+#### Scenario: The registry gates writes
+
+- **WHEN** the storefront is rendered with a registry API-key Secret named
+- **THEN** publication's credential environment is bound to exactly that Secret
+  reference and no key material is rendered
+
+#### Scenario: The registry publishes openly
+
+- **WHEN** no registry API-key Secret is named
+- **THEN** no credential environment is rendered and publication carries its
+  request signatures only
+
+#### Scenario: A candidate fails to publish
+
+- **WHEN** a publication round returns a failed candidate
+- **THEN** the command prints the round and exits non-zero
+
 ### Requirement: Provisioning host trust is pinned by deployment, not by image configuration
 
 The provisioning deployment MAY pin the SSH host keys its playbooks accept.

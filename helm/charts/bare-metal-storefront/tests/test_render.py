@@ -68,6 +68,46 @@ def test_missing_site_secret_fails_closed() -> None:
     assert rendered.returncode != 0
 
 
+def test_registry_without_write_gating_renders_no_publication_credential() -> None:
+    """Publication against an open registry carries signatures only.
+
+    Rendering an empty environment entry would hand the client a malformed
+    bearer credential instead of none.
+    """
+    rendered = _render()
+    assert rendered.returncode == 0, rendered.stderr
+
+    assert "BARE_METAL_STOREFRONT_REGISTRY_API_KEY" not in rendered.stdout
+
+
+def test_write_gated_registry_binds_the_publication_credential_by_reference() -> None:
+    rendered = _render(
+        "--set-string",
+        "registryApiKeySecret.name=bare-metal-storefront-registry-key",
+        "--set-string",
+        "registryApiKeySecret.key=api-key",
+    )
+    assert rendered.returncode == 0, rendered.stderr
+    manifest = rendered.stdout
+
+    assert "name: BARE_METAL_STOREFRONT_REGISTRY_API_KEY" in manifest
+    assert 'name: "bare-metal-storefront-registry-key"' in manifest
+    # The key is a credential: it may only arrive by Secret reference.
+    assert (
+        "BARE_METAL_STOREFRONT_REGISTRY_API_KEY\n              value:" not in manifest
+    )
+
+
+def test_publication_credential_without_a_secret_key_fails_closed() -> None:
+    rendered = _render(
+        "--set-string",
+        "registryApiKeySecret.name=bare-metal-storefront-registry-key",
+        "--set-string",
+        "registryApiKeySecret.key=",
+    )
+    assert rendered.returncode != 0
+
+
 def test_hosted_only_role_mounts_no_chain_configuration() -> None:
     """A role with no Alkahest must construct no wallet, RPC, or chain client."""
     rendered = _render()

@@ -35,6 +35,15 @@ siteBindingsSecret:
   key: sites.json
 sitePlacement: fill_first
 
+# Existing Secret holding the write-scoped registry API key this seller
+# publishes with. Leave `name` empty for a registry with open publishing: no
+# environment entry is then rendered and publication carries request
+# signatures only. Never a literal key — a value placed here is rendered into
+# an object that is not a Secret.
+registryApiKeySecret:
+  name: ""
+  key: api-key
+
 publicUrl: http://bare-metal-storefront:8000
 sellerEvmAddress: ""
 alkahestEnabled: false

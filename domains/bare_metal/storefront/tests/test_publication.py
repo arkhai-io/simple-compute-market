@@ -2,10 +2,15 @@ from __future__ import annotations
 from types import SimpleNamespace
 import json
 
+import httpx
+import pytest
 from arkhai_bare_metal import (
     BareMetalResourceProjection,
     TrustedBareMetalProjection,
 )
+from market_identity import Ed25519Signer
+from registry_client import ListingRequest
+from registry_client.client import SyncRegistryClient
 from core_storefront.publication_command import (
     StorefrontPublicationCommandCallbacks,
     StorefrontPublicationCommandConfig,
@@ -105,6 +110,107 @@ def test_registry_republication_replaces_the_complete_listing_payload():
 
     assert result == {"status": "published", "listing_id": "listing-1"}
     assert published[0].settlement_options == [{"option_id": "hosted-1"}]
+
+
+class _CapturedRequest(Exception):
+    """Stops the exchange once the outgoing request has been observed.
+
+    The registry client verifies the signed response before returning, which a
+    transport stub cannot produce; raising here keeps the assertion on the real
+    request the client put on the wire.
+    """
+
+    def __init__(self, request: httpx.Request) -> None:
+        super().__init__("captured")
+        self.request = request
+
+
+def _publish_through_real_client(monkeypatch) -> httpx.Request:
+    """Run one publish through the client ``_registry`` actually builds.
+
+    Only the transport is substituted, so the bearer credential, the signature
+    headers, and the request body are the ones production would send.
+    """
+
+    # Deterministic development-only signing key. It is a fixture value and
+    # must never be used on a public network.
+    signer = Ed25519Signer(bytes.fromhex("22" * 32))
+    captured: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured.append(request)
+        raise _CapturedRequest(request)
+
+    class _SeamBoundClient(SyncRegistryClient):
+        def __init__(self, base_url, **kwargs):
+            super().__init__(
+                base_url, transport=httpx.MockTransport(handler), **kwargs
+            )
+
+    monkeypatch.setattr(publication_cli, "SyncRegistryClient", _SeamBoundClient)
+    monkeypatch.setenv(
+        "BARE_METAL_STOREFRONT_REGISTRY_PRINCIPALS",
+        json.dumps(
+            [
+                {
+                    "scheme": signer.identity.scheme.value,
+                    "identifier": signer.identity.identifier,
+                }
+            ]
+        ),
+    )
+    monkeypatch.setenv(
+        "BARE_METAL_STOREFRONT_REGISTRY_URL", "https://registry.example"
+    )
+    monkeypatch.setenv("BARE_METAL_STOREFRONT_REGISTRY_AUTHORITY", "registry-dev")
+
+    client = publication_cli._registry(SimpleNamespace(marketplace_signer=signer))
+    with pytest.raises(_CapturedRequest):
+        client.publish_listing(
+            ListingRequest(
+                listing_id="listing-1",
+                offer={"kind": "bare_metal.v1"},
+                accepted_escrows=[],
+                settlement_options=[],
+                demands=[],
+                max_duration_seconds=3600,
+                storefront_url="https://storefront.example",
+            )
+        )
+    client.close()
+    return captured[0]
+
+
+def test_publication_sends_the_configured_registry_write_credential(monkeypatch):
+    monkeypatch.setenv(
+        "BARE_METAL_STOREFRONT_REGISTRY_API_KEY", "write-scoped-dev-key"
+    )
+
+    request = _publish_through_real_client(monkeypatch)
+
+    assert request.headers["Authorization"] == "Bearer write-scoped-dev-key"
+    # The credential authenticates the caller; it never replaces the per-request
+    # seller signature the registry verifies on top of it.
+    assert request.headers["X-Market-Identity-Scheme"] == "ed25519"
+
+
+def test_publication_without_a_configured_credential_sends_no_bearer(monkeypatch):
+    monkeypatch.delenv("BARE_METAL_STOREFRONT_REGISTRY_API_KEY", raising=False)
+
+    request = _publish_through_real_client(monkeypatch)
+
+    assert "authorization" not in request.headers
+
+
+def test_empty_registry_credential_is_not_sent_as_an_empty_bearer(monkeypatch):
+    # An unset Secret key renders as an empty string. Sending `Bearer ` would
+    # reach the registry as a malformed credential rather than as the absent
+    # one an open-publishing registry expects.
+    monkeypatch.setenv("BARE_METAL_STOREFRONT_REGISTRY_API_KEY", "")
+
+    request = _publish_through_real_client(monkeypatch)
+
+    assert "authorization" not in request.headers
 
 
 def _selection():

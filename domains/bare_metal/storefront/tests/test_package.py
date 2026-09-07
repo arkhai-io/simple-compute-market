@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from importlib import metadata
 from importlib.metadata import entry_points
 
@@ -43,6 +44,44 @@ def test_version_command_uses_distribution_metadata() -> None:
 
     assert result.exit_code == 0
     assert result.stdout == f"bare-metal-storefront version {installed}\n"
+
+
+def test_publish_command_reports_a_failed_candidate_as_failure(monkeypatch) -> None:
+    round_result = {
+        "closed": [],
+        "published": [],
+        "failed": [[{"machine_id": "machine-1"}, "registry rejected the listing"]],
+        "skipped": [],
+    }
+    monkeypatch.setattr(
+        "arkhai_bare_metal_storefront.publication_cli.run_publication_once",
+        lambda: round_result,
+    )
+
+    result = CliRunner().invoke(app, ["publish"])
+
+    assert result.exit_code == 1
+    # The round stays readable on the failing path; an operator needs the
+    # per-candidate reason, not only the status.
+    assert json.loads(result.stdout) == round_result
+
+
+def test_publish_command_succeeds_when_no_candidate_failed(monkeypatch) -> None:
+    round_result = {
+        "closed": [],
+        "published": [{"listing_id": "listing-1"}],
+        "failed": [],
+        "skipped": [],
+    }
+    monkeypatch.setattr(
+        "arkhai_bare_metal_storefront.publication_cli.run_publication_once",
+        lambda: round_result,
+    )
+
+    result = CliRunner().invoke(app, ["publish"])
+
+    assert result.exit_code == 0
+    assert json.loads(result.stdout) == round_result
 
 
 def test_serve_command_delegates_process_options(monkeypatch) -> None:
