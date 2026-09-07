@@ -783,6 +783,42 @@ rather than produce a role that starts and cannot settle.
 - **WHEN** settlement is enabled but no chain endpoint is configured
 - **THEN** the render fails
 
+### Requirement: Provisioning host trust is pinned by deployment, not by image configuration
+
+The provisioning deployment MAY pin the SSH host keys its playbooks accept.
+Where pinning is enabled, the render MUST mount an operator-managed
+`known_hosts` Secret read-only into the serving container and MUST set the
+executing environment so that strict host-key checking and that mounted file
+take effect together: neither checking without the file, nor the file without
+checking. The environment is the authority because a configuration file shipped
+in the image is outranked by it, so the deployment MUST NOT depend on the
+image's own Ansible configuration for this decision. The Secret MUST be
+referenced, never rendered as literal key material, and its contents remain
+operator-owned; the chart does not generate, rotate, or validate pins.
+
+Enabling pinning without a Secret reference MUST fail the render rather than
+produce a role that starts and refuses every host. Where pinning is disabled,
+the render MUST carry no host-trust environment and no pin mount, leaving the
+image's existing defaults in force.
+
+#### Scenario: Pinning is enabled
+
+- **WHEN** the provisioning chart is rendered with host-key pinning enabled and
+  an existing `known_hosts` Secret named
+- **THEN** the serving container mounts that Secret read-only at the configured
+  file location and its environment enables strict checking against exactly that
+  file
+
+#### Scenario: Pinning is enabled without a Secret reference
+
+- **WHEN** host-key pinning is enabled but no Secret is named
+- **THEN** the render fails
+
+#### Scenario: Pinning is left disabled
+
+- **WHEN** the provisioning chart is rendered with default values
+- **THEN** no host-trust environment and no pin volume are present
+
 
 ## Evidence
 
@@ -792,6 +828,7 @@ rather than produce a role that starts and cannot settle.
 - Extracted compute API/worker packaging and image lifecycle: `provisioning/compute/service/pyproject.toml`, `provisioning/compute/service/Dockerfile`, and its composition, worker, and image smoke tests.
 - Explicit contribution configuration and secret-free render surfaces: `domains/vms/storefront/tests/unit/test_config_loader.py`, `test_cli.py`, `helm/charts/storefront/templates/tests/storefront-environment-test.yaml`, and Helm schema fixtures.
 - Transactional legacy storefront migration, byte-stable refusal, restrictive backup, atomic replacement, and idempotency: `domains/vms/storefront/tests/unit/test_domain_migration.py`.
+- Optional provisioning host-key pinning, its render refusal, and its disabled default: `helm/charts/provisioning/tests/test_host_key_pins_render.py`.
 - Bare-metal staged-wheel/image boundary and installed contribution: `domains/bare_metal/storefront/pyproject.toml`, `domains/bare_metal/storefront/Dockerfile`, `domains/bare_metal/storefront/tests/test_package.py`, `test_import_boundaries.py`, and `test_app_composition.py`.
 
 Repository-wide migration entrypoints and compatibility-preserving non-additive registry rollout remain proposed in `add-database-migration-commands` and `migrate-registry-to-postgres`.

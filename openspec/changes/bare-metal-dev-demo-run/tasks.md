@@ -13,6 +13,11 @@
 - [x] 1.7 Chart renders chain and signing-key configuration under Alkahest,
       and nothing when it is disabled.
 - [x] 1.8 Bare-metal provisioning adapter test target and lock repair.
+- [x] 1.9 Optional provisioning host-key pinning: an operator-managed
+      `known_hosts` Secret mounted read-only together with the strict Ansible
+      environment, a render refusal when the Secret is unnamed, and image
+      defaults untouched when it is disabled. Chart render test included.
+      Promoted to `openspec/specs/deployment-state/spec.md`.
 
 ## 2. Not done, deliberately
 
@@ -123,6 +128,7 @@ buyer's; the scenario evidences only what the granted session reports.
 | Whole-host access acts on a derived lease account | `openspec/specs/physical-provisioning/spec.md` |
 | Whole-host access returns the tenant-facing endpoint | `openspec/specs/physical-provisioning/spec.md` |
 | Whole-host storefront chain configuration is rendered or absent | `openspec/specs/deployment-state/spec.md` |
+| Provisioning host trust is pinned by deployment, not by image configuration | `openspec/specs/deployment-state/spec.md` |
 | A domain buyer drives every rail its seller publishes | `openspec/specs/settlement-configuration/spec.md` |
 | Negotiation is not purchase | `openspec/specs/settlement-configuration/spec.md` |
 | Acceptance validates the negotiated total, not the advertised rate | `openspec/specs/settlement-configuration/spec.md` |

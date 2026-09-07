@@ -49,7 +49,7 @@ rather than being repaired or defended against.
 
 ### Knowledge to promote
 
-Three changes here are durable production behaviour, not demonstration
+Four changes here are durable production behaviour, not demonstration
 scaffolding, and are owed a permanent home once reviewed:
 
 1. **Account admission.** Grant and reclaim admit the account against the
@@ -62,6 +62,11 @@ scaffolding, and are owed a permanent home once reviewed:
 3. **Whole-host storefront chain configuration.** The chart renders chain and
    signing-key configuration under Alkahest and nothing when it is disabled.
    Destination: `openspec/specs/deployment-state/spec.md`.
+4. **Optional provisioning host-key pinning.** Pinning is off by default; where
+   enabled, the deployment mounts an operator-managed `known_hosts` Secret and
+   sets the strict Ansible environment together, and refuses to render without
+   the Secret reference. Destination:
+   `openspec/specs/deployment-state/spec.md`.
 
 Deliberately **not** promoted: anything about hostile-tenant isolation,
 destructive reclaim policies, or a demonstrated live run. An earlier revision
