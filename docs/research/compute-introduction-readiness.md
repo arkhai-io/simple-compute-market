@@ -20,6 +20,25 @@ to bare metal or to unify the current VM and bare-metal implementations.
 API-credit introductions, hosted paid settlement, and off-platform completion
 attestations are separate work. They do not gate this outcome by default.
 
+### Agreed prospective-supply requirement
+
+The first increment must support listing machines the seller does not yet have.
+Restricting it to existing inventory would miss a central purpose of contact
+settlement. The site authority owns the prospective supply declaration; extend
+that authority where necessary rather than bypassing it. The storefront continues
+to own commercial terms and contact settlement.
+
+Prospective supply is not reservable capacity. A declaration must not require a
+fabricated existing-machine binding, add allocatable capacity, or imply that the
+machines exist. Completing an introduction neither changes those facts nor
+attests later procurement or delivery. Existing capacity-admission guarantees
+remain intact.
+
+This is an agreed requirement and ownership direction for #219, not an implemented
+capability. Its representation, lifecycle, and publication contract still need
+OpenSpec design. It replaces the earlier choice between existing inventory and
+seller declarations outside the site authority.
+
 ## Result
 
 The contact mechanism, signed reveal endpoints, and durable completed-introduction
@@ -27,15 +46,16 @@ reads are reusable. The complete installed-buyer and production-publication path
 is **not ready**. The material gaps are:
 
 1. Rateless acceptance is not wired correctly through the installed buyer.
-2. Production compute publication/startup still assumes site-backed inventory.
+2. Production compute publication/startup still assumes existing physical inventory;
+   prospective supply has no explicit supported representation.
 3. Lost acknowledgements, interrupted completion, and concurrent retries lack a
    complete demonstrated recovery path.
 4. Deletion is unexposed, and deleting the introduction row alone leaves contact
    copies in authenticated-response replay storage.
 
 A new webhook service and the full hosted-payment redesign are not demonstrated
-prerequisites. Choosing authenticated pull and choosing an inventory model still
-require explicit decisions; neither is silently selected by this report.
+prerequisites. Authenticated pull remains a delivery choice. Site-owned prospective
+supply is now required; its representation remains a design question.
 
 ## Evidence and limits
 
@@ -88,11 +108,24 @@ VM does not inherit contact support merely by finding a contact option:
 - `domains/vms/storefront/src/market_storefront/settlement_composition.py:264-270`
 - `domains/vms/buyer/settlement_composition.py:121-134`
 
-**Decision needed:** begin with honestly site-backed compute inventory, or support
-seller-declared compute offers without a site/provisioning authority? The latter
-requires an explicit publication and provenance model, not dummy host/site
-identifiers or bypassing existing capacity-backed binding checks. Neither answer
-implies domain unification (#196).
+**Follow-up finding:** the site authority has operator-entered resource records,
+but these are capacity buckets, not explicitly prospective supply. Registering a
+resource writes a bucket with a backing-resource identity; its snapshot includes
+enabled resources. The per-resource projection requires physical-resource identity,
+and the grouped projection describes current capacity. The production inventory
+adapter projects configured hosts. None of these inspected paths establishes a
+prospective-supply contract.
+
+- `kit/site/src/market_site/ledger.py:579-692`
+- `kit/site/src/market_site/projections.py:88-195`
+- `provisioning/compute/service/src/compute_provisioning_service/services/capacity_inventory.py:26-61`
+- `openspec/specs/site-capacity/architecture.md#projection-boundaries`
+
+The agreed direction is to extend site-owned declaration/publication for
+prospective supply, keeping it distinct from admission of real capacity. An
+arbitrary attribute or disabled bucket is not evidence of the required public
+semantics. Exact representation and VM/bare-metal reach remain open; this does
+not select domain unification (#196).
 
 An adjacent defect is visible at publication: the mutation handler does not apply
 the filter-schema validator used by the dry-run route
@@ -255,17 +288,16 @@ Before writing implementation tasks:
 
 | Gate | Choice to record | Existing decision owner |
 |---|---|---|
-| Offer provenance | Site-backed inventory first, or seller-declared compute offers without an inventory authority; exact VM/bare-metal reach | #191, with #196 only if an actual dependency is established |
+| Prospective supply | Required and site-owned; design its representation, lifecycle and publication without creating reservable capacity; exact VM/bare-metal reach remains open | #219 and #191, with #196 only if an actual dependency is established |
 | Review and disclosure | Authoritative reviewed context, drift handling, seller contact authorization, and when each party authorizes disclosure | #191 |
 | Consumer delivery | Signed pull as the initial integration, or additional delivery requirements | #191 |
 | Retention and deletion | Trigger/window, caller authority, post-delete history/retries, storage-copy boundaries | #197; implementation defect #203 |
 | Shared lifecycle | Smallest coherent rateless acceptance/completion/recovery boundary consistent with the intended composition model | #211 |
 
-A site-backed first increment may need less publication work, but leaves site
-configuration as an operator prerequisite. A seller-declared first increment
-serves a different operating model and needs truthful provenance without fake
-capacity. Cost and user value cannot be resolved merely by counting registration
-lines. No implementation readiness or new dependency edge follows from this table.
+An existing-inventory-only increment does not satisfy the selected requirement.
+The site authority remains the owner even when supply is prospective; deployment
+requirements for that mode still need design. No implementation readiness or new
+dependency edge follows from this table.
 
 ## Validation needed for a usable increment
 
@@ -275,9 +307,11 @@ acceptance, signature verification, state transitions, privacy, and deterministi
 interruption/retry/delete races belong at application integration level.
 
 A final installed-wheel, cross-service scenario must publish a real eligible
-compute offer, discover it through the registry, negotiate through the installed
-buyer, reveal and re-read under the intended principals, and exercise the accepted
-end-of-retention behavior. Assert the absence of payment/provisioning effects;
+compute offer for machines the seller does not yet have, discover it through the
+registry, negotiate through the installed buyer, reveal and re-read under the
+intended principals, and exercise the accepted end-of-retention behavior. Prove
+that neither declaration nor introduction creates reservable capacity or a false
+physical-machine binding. Assert the absence of payment/provisioning effects;
 do not substitute injected listing rows for publication evidence. Detailed race
 permutations stay in integration tests rather than multiplying system lanes.
 
@@ -292,8 +326,11 @@ The owning permanent homes are already
 `openspec/specs/introduction-delivery/spec.md`,
 `openspec/specs/buyer-orchestration/spec.md`,
 `openspec/specs/settlement-configuration/spec.md`, and
-`openspec/specs/marketplace-identity/spec.md`, with repository-wide composition
-rationale in `docs/development/ARCHITECTURE.md`. Future accepted changes must name
-any additional publication/domain owners, exact companion-architecture promotion,
+`openspec/specs/marketplace-identity/spec.md`. Prospective-supply design must also
+name promotion into `openspec/specs/site-capacity/spec.md`, its companion
+`openspec/specs/site-capacity/architecture.md`, and
+`openspec/specs/storefront-publication/spec.md`, with repository-wide composition
+rationale in `docs/development/ARCHITECTURE.md` as applicable. Future accepted
+changes must name any additional domain owners, exact companion-architecture promotion,
 roadmap/campaign impact, and the closeout required by `openspec/README.md`.
 This snapshot does not promote unimplemented behavior into those documents.
