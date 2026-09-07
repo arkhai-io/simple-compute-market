@@ -121,6 +121,54 @@ expired escrow, and hosted-lane live qualification. Host-side proof that the
 lease account was created unprivileged is the executing authority's, not this
 buyer's; the scenario evidences only what the granted session reports.
 
+## 5. Seller crypto acceptance
+
+- [x] 5.1 Alkahest owns its accepted obligation: `create_alkahest_registration`
+      supplies an `accepted_obligation_builder` that materializes through the
+      shared proposal → plan seams the buyer re-derives from, so the funded
+      `obligation_data` is one derivation, not two.
+      `kit/alkahest/src/market_alkahest/settlement_config.py`.
+- [x] 5.2 The seller's injected settlement resources travel with the acceptance
+      context, so a chain-materializing mechanism accepts against the same
+      address book and payout wallet it published from.
+      `domains/bare_metal/storefront/src/arkhai_bare_metal_storefront/
+      settlement_composition.py`.
+- [x] 5.3 An option that advertises no physical facts composes its physical
+      terms from the seller's own trusted listing and binding; the hosted
+      envelope stays byte-identical to the one `validate_accepted_hosted_plan`
+      reconstructs. A selection whose expiry nothing else pins is refused once
+      it has passed. `negotiation_service.py`.
+- [x] 5.4 Regression at the seller and mechanism seams: real publication builder
+      → buyer proposal helper and mechanism validator → composed acceptance,
+      whole-obligation comparison, whole physical envelope compared to an
+      independently written expectation, and no-write negatives. This covers the
+      mechanism validator and the seller's composition; it does not by itself
+      exercise the buyer client's own serializer or its outer acceptance checks.
+      `domains/bare_metal/storefront/tests/test_alkahest_exact_selection.py`,
+      `e2e-tests/tests/unit/test_bare_metal_alkahest_selection_contract.py`,
+      `domains/bare_metal/storefront/tests/test_http_negotiation.py`.
+- [x] 5.5 Round trip through the production buyer client: its request signing and
+      serialization, the composed storefront app, its signed reply, the client's
+      reply parser and acceptance validation, and the domain's accepted-plan
+      callback. Only the socket is substituted. Refusals cover expiry, listing
+      bounds, unadvertised access, another listing's option, buyer-supplied
+      physical identities and an untrusted seller principal.
+      `e2e-tests/tests/unit/test_bare_metal_alkahest_client_roundtrip.py`.
+- [x] 5.6 Promotion: mechanism-owned accepted obligation and acceptance context in
+      `openspec/specs/settlement-configuration/spec.md`; trusted physical
+      composition, selection expiry and the whole-envelope comparison in
+      `openspec/specs/negotiation-protocol/spec.md`.
+- [x] 5.7 Closeout: comment hygiene and import placement checked; sqlite3 is
+      module-level in the round-trip test. The accepted-obligation builder keeps
+      proposal/plan/schema imports lazy so registration does not eagerly load
+      acceptance-only materialization; clause publication retains its documented
+      lazy chain/token imports. Every repository path cited by the two edited
+      permanent specifications resolves on this branch, and
+      the campaign index row from 3.6 still describes this change. Disposition on
+      the roadmap: **no edit owed** — this completes an advertised rail's
+      acceptance inside existing capabilities and moves no goal. Typing: no mypy
+      or ruff target is configured for these packages, so none was run.
+
 ## Design promotion record
 
 | Accepted decision | Permanent location |
@@ -135,6 +183,8 @@ buyer's; the scenario evidences only what the granted session reports.
 | Negotiation is not purchase | `openspec/specs/settlement-configuration/spec.md` |
 | Acceptance validates the negotiated total, not the advertised rate | `openspec/specs/settlement-configuration/spec.md` |
 | A run is bound to its authenticated discovery, and beginning is not delivery | `openspec/specs/settlement-configuration/spec.md` |
+| A mechanism builds its own accepted obligation through the same materialization the counterparty re-derives from, and receives the seller's settlement resources to do it | `openspec/specs/settlement-configuration/spec.md` |
+| Physical terms for an option that advertises no physical facts come from the seller's trusted listing and binding, and the hosted physical envelope is compared whole | `openspec/specs/negotiation-protocol/spec.md` |
 
 Not promoted, and not implemented: host-side ownership records, tenant path
 isolation, destructive reclaim policies, and end-to-end demonstration evidence.

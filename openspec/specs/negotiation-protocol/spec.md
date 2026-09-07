@@ -193,13 +193,51 @@ listings as priceless.
   amount
 - **THEN** the proposal is rejected exactly as today
 
+### Requirement: Physical terms of an exact selection come from the seller's own trusted state
+
+When an exactly selected option provisions a physical resource, the domain MUST
+derive every physical term — machine, host, site, pool, resource and access
+method — from the seller's trusted listing and its listing binding, and MUST NOT
+accept one from the request. An option that advertises the physical facts inline
+MUST additionally be held to them and to the binding they were published from. An
+option that advertises none MUST still be composed against that trusted state
+rather than accepted as a non-provisioning agreement.
+
+Where nothing in the option pins the obligation's expiry, the selection's expiry
+MUST be refused once it has passed.
+
+An accepted plan's physical service terms are compared whole by the counterparty
+that reconstructs them, so the envelope a domain emits for an option carrying
+advertised physical facts MUST remain exactly the envelope that reconstruction
+builds.
+
+#### Scenario: A selection carries no advertised physical facts
+
+- **WHEN** a buyer exactly selects an option whose parameters describe only its
+  settlement terms on a listing that leases a machine
+- **THEN** the accepted terms and the physical service terms are composed from the
+  trusted listing and binding, and the deal provisions that machine
+
+#### Scenario: A request names a physical identity
+
+- **WHEN** a negotiation request's provision payload carries a machine, host, site,
+  pool or resource identity
+- **THEN** the request is rejected and no negotiation, obligation or capacity
+  record is written
+
 ## Evidence
 
+- Advertised-option acceptance, whole physical envelope, and refusal without
+  writes: `domains/bare_metal/storefront/tests/test_alkahest_exact_selection.py`.
+- Production buyer client round trip over the composed seller app, and the hosted
+  physical envelope key set:
+  `e2e-tests/tests/unit/test_bare_metal_alkahest_client_roundtrip.py` and
+  `domains/bare_metal/storefront/tests/test_http_negotiation.py`.
 - Synchronous new/continue HTTP behavior and lossless uint256-domain persistence: `domains/vms/storefront/tests/integration/test_negotiate_controller.py`.
 - Thread message ordering, terminal detection, exact message authorship, and uint256-domain storage: `domains/vms/storefront/tests/unit/test_negotiation_thread.py`.
-- History reconstruction and policy-chain primitives: `core/storefront/tests/unit/test_negotiation_sync.py`.
-- Agreed-term commit and authenticated administrator authorship: `domains/vms/storefront/tests/services/test_negotiation_service.py` and `domains/vms/storefront/tests/integration/test_negotiations_api.py`.
+- Recorded-term continuation and binding-mismatch rejection before acceptance effects: `kit/negotiation-runtime/tests/unit/test_runtime.py`.
+- Agreed-term commit and authenticated administrator authorship: `domains/vms/storefront/tests/unit/services/test_negotiation_service.py` and `domains/vms/storefront/tests/integration/test_negotiations_api.py`.
 - Transactional principal migration and fail-closed recovery ownership: `core/storefront/tests/unit/test_identity_migrations.py` and `core/buyer/tests/unit/test_identity_recovery.py`.
-- Immutable listing-to-thread inheritance, cross-domain rejection, exact contract resolution, and restart binding: `domains/vms/storefront/tests/unit/test_domain_thread_bindings.py`, `test_sync_negotiation_domain.py`, and `core/storefront/tests/unit/test_domain_registry.py`.
+- Immutable listing-to-thread inheritance and cross-domain rejection: `core/storefront/tests/unit/test_domain_binding_migrations.py`. Exact contract resolution: `core/storefront/tests/unit/test_domain_registry.py`.
 
 The complete live VM/bare-metal restart proof is owned by the multi-domain system lane and remains gated on the production bare-metal contribution.

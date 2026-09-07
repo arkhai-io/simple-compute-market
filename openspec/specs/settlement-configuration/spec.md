@@ -268,6 +268,39 @@ Where the bound release does not declare the capability, the operation MUST be r
 - **WHEN** a submission has been made and its result recorded
 - **THEN** marketplace persistence and any report contain the opaque setup reference and public readiness only, and contain no amounts, descriptor code, or provider payload
 
+### Requirement: A mechanism builds the accepted obligation it advertised
+
+A mechanism whose options can be exactly selected MUST supply the accepted
+obligation builder for its own registration; a domain MUST NOT construct an
+obligation for a mechanism it composed, and a selection naming a mechanism with
+no builder MUST be refused before any negotiation, obligation or capacity record
+is written.
+
+The builder MUST derive the obligation through the same materialization the
+counterparty re-derives it from, so the funded payload is one derivation rather
+than two implementations that can drift. Acceptance inputs the option cannot
+carry — the counterparty-chosen expiry, the negotiated duration, the domain's own
+option parameters and the seller's published demands — are supplied by the domain
+as acceptance context, and the seller's injected settlement resources travel with
+it so a mechanism that materializes against a chain accepts using the same
+address book and payout wallet it published from. The domain MUST NOT read the
+resulting mechanism parameters.
+
+#### Scenario: An advertised on-chain option is exactly selected
+
+- **WHEN** a buyer selects an option advertising an accepted escrow and no expiry,
+  supplying its own expiry and the lease duration
+- **THEN** the mechanism scales the advertised rate by that duration and returns one
+  obligation whose nested materialized payload equals what the buyer re-derives
+  from the same advertised entry
+
+#### Scenario: A selected mechanism builds no accepted obligation
+
+- **WHEN** a selection names a composed mechanism that supplies no accepted
+  obligation builder
+- **THEN** the request is refused and no negotiation, obligation or capacity record
+  is written
+
 ### Requirement: A domain buyer drives every rail its seller publishes
 
 A seller composition that installs several mechanism registrations publishes an

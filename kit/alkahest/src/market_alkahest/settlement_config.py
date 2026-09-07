@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Any
 
 from market_settlement_runtime import (
+    AcceptedObligationArtifacts,
     ComparisonOperator,
     FieldDescriptor,
     MechanismReadiness,
@@ -551,6 +552,138 @@ def alkahest_escrow_kind_projection(option: Any) -> str | None:
     return value if isinstance(value, str) and value else None
 
 
+def _principal_json(value: Any) -> dict[str, str]:
+    payload = value.model_dump(mode="json") if hasattr(value, "model_dump") else value
+    if not isinstance(payload, Mapping):
+        raise ValueError("Alkahest acceptance requires canonical principals")
+    scheme = payload.get("scheme")
+    identifier = payload.get("identifier")
+    if not isinstance(scheme, str) or not isinstance(identifier, str):
+        raise ValueError("Alkahest acceptance requires canonical principals")
+    return {"scheme": scheme, "identifier": identifier}
+
+
+def _wallet_address(wallet: Any) -> str | None:
+    address = _resource_value(wallet, "address") if wallet is not None else None
+    if address is None and isinstance(wallet, str):
+        address = wallet
+    return address.strip() or None if isinstance(address, str) else None
+
+
+def alkahest_accepted_obligation_builder(
+    section: BaseModel,
+    option: Any,
+    context: Mapping[str, Any],
+) -> AcceptedObligationArtifacts:
+    """Rebuild the one canonical Alkahest obligation from a selected option.
+
+    An advertised Alkahest option carries the accepted escrow entry and no
+    expiry — an ``AcceptedEscrow`` is chain, escrow address, literal fields
+    and rates only — so the instant the payer's funds become reclaimable is
+    an acceptance input the buyer chose, supplied here as
+    ``expiration_unix``. ``duration_seconds`` scales the advertised rate.
+
+    Materialization runs through the same proposal and plan seams the buyer
+    re-derives the obligation with, so the accepted ``obligation_data`` the
+    buyer funds is identical to the one it validates; a handwritten
+    conversion here would be a second implementation of the funded bytes.
+    ``settlement_resources`` are the seller's injected settlement resources
+    — the chain address book that published the escrow address and the
+    wallet the payout resolves to when the listing advertises no demand.
+    """
+
+    config = AlkahestSettlementConfig.model_validate(section)
+    if not config.enabled:
+        raise ValueError("Alkahest settlement is not enabled")
+    if _value(option, "mechanism") != ALKAHEST_MECHANISM_ID:
+        raise ValueError("selected option does not name Alkahest")
+    raw_params = _value(option, "params", {})
+    params = dict(raw_params) if isinstance(raw_params, Mapping) else {}
+    for key in context.get("domain_param_keys", ()):
+        params.pop(key, None)
+    escrow = params.pop("accepted_escrow", None)
+    if params:
+        raise ValueError(
+            "Alkahest option carries parameters this mechanism does not own"
+        )
+    if not isinstance(escrow, Mapping) or not escrow:
+        raise ValueError("Alkahest option advertises no accepted escrow")
+    expiration_unix = int(context.get("expiration_unix") or 0)
+    if expiration_unix <= 0:
+        raise ValueError("Alkahest acceptance requires a buyer-selected expiration")
+    duration_seconds = int(context.get("duration_seconds") or 0)
+    if duration_seconds <= 0:
+        raise ValueError("Alkahest acceptance requires a positive duration")
+
+    from .proposals import escrow_proposal_from_accepted_entry
+    from .plans import materialize_settlement_plan_from_proposal
+    from .schemas import RateValue, compute_rate_total
+
+    option_rates = [
+        RateValue.model_validate(rate) for rate in (_value(option, "rates") or ())
+    ]
+    escrow_rates = [
+        RateValue.model_validate(rate) for rate in (escrow.get("rates") or ())
+    ]
+    # The option identity is derived from the escrow entry, so the two rate
+    # views must agree; a divergence means the advertised price is not the
+    # price the escrow would settle at.
+    if [rate.model_dump(mode="json") for rate in option_rates] != [
+        rate.model_dump(mode="json") for rate in escrow_rates
+    ]:
+        raise ValueError("advertised option rates differ from the accepted escrow")
+    amount_rates = [rate for rate in option_rates if rate.field == "amount"]
+    if len(amount_rates) != 1:
+        raise ValueError("Alkahest option must advertise exactly one amount rate")
+    amount = compute_rate_total(amount_rates[0], duration_seconds)
+    if amount <= 0:
+        raise ValueError("trusted scaled Alkahest amount must be positive")
+
+    buyer = _principal_json(context.get("buyer_principal"))
+    seller = _principal_json(context.get("seller_principal"))
+    proposal = escrow_proposal_from_accepted_entry(
+        listing={"demands": list(context.get("listing_demands") or ())},
+        entry=dict(escrow),
+        expiration_unix=expiration_unix,
+    )
+    resources = context.get("settlement_resources")
+    resources = resources if isinstance(resources, Mapping) else {}
+    chains = resources.get("chains")
+    chain = chains.get(proposal.chain_name) if isinstance(chains, Mapping) else None
+    address_config_path = (
+        _resource_value(chain, "alkahest_address_config_path")
+        or config.address_config_path
+    )
+    plan = materialize_settlement_plan_from_proposal(
+        proposal=proposal,
+        seller_wallet_address=_wallet_address(resources.get("wallet")),
+        agreed_amount=amount,
+        duration_seconds=duration_seconds,
+        addr_config_path=address_config_path,
+    )
+    obligation = plan.obligations[0].model_dump(mode="json")
+    # The funded bytes are nested in ``params.obligation_data``; the scalar
+    # view above it is only a display of the same total.
+    funded_amount = (obligation.get("params") or {}).get("obligation_data", {})
+    if int(funded_amount.get("amount") or 0) != amount:
+        raise ValueError("materialized Alkahest escrow funds a different amount")
+    obligation["payer_principal"] = buyer
+    obligation["claimant_principal"] = seller
+    return AcceptedObligationArtifacts(
+        obligation=obligation,
+        amount=amount,
+        service_terms={
+            ALKAHEST_MECHANISM_ID: {
+                "option_id": _value(option, "option_id"),
+                "listing_id": context.get("listing_id"),
+                "chain_name": proposal.chain_name,
+                "escrow_contract": proposal.escrow_address,
+                "expiration_unix": expiration_unix,
+            }
+        },
+    )
+
+
 def validate_alkahest_publication_input(
     section: BaseModel,
     value: BaseModel,
@@ -578,6 +711,7 @@ def create_alkahest_registration(
         preflight=alkahest_preflight,
         client_factory=alkahest_client_factory,
         option_builder=alkahest_option_builder,
+        accepted_obligation_builder=alkahest_accepted_obligation_builder,
         settlement_verifier=verify_escrow_for_settlement,
         command_group=command_group,
         clause_fields=(
@@ -619,6 +753,7 @@ __all__ = [
     "validate_alkahest_publication_input",
     "ALKAHEST_MECHANISM_ID",
     "AlkahestSettlementConfig",
+    "alkahest_accepted_obligation_builder",
     "alkahest_buyer_compatibility",
     "alkahest_client_factory",
     "alkahest_option_builder",
