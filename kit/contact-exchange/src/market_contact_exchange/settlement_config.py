@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 import re
 from collections.abc import Mapping
 from typing import Any
@@ -63,6 +62,21 @@ def validate_contact_payload(value: Mapping[str, str]) -> dict[str, str]:
         ):
             raise ValueError("contact payload values must be non-blank and bounded")
     return payload
+
+
+def contains_contact_value(public: Any, contact: str) -> bool:
+    """Check a nonempty literal contact against decoded public string keys/values."""
+    # JSON escaping changes representation, not whether a public field leaks.
+    if isinstance(public, str):
+        return bool(contact) and contact in public
+    if isinstance(public, Mapping):
+        return any(
+            contains_contact_value(key, contact) or contains_contact_value(value, contact)
+            for key, value in public.items()
+        )
+    if isinstance(public, (list, tuple)):
+        return any(contains_contact_value(value, contact) for value in public)
+    return False
 
 
 class ContactProfile(BaseModel):
@@ -133,15 +147,13 @@ class ContactSettlementConfig(BaseModel):
 
     @model_validator(mode="after")
     def payload_stays_out_of_profiles(self) -> ContactSettlementConfig:
-        published = json.dumps(
-            {key: item.model_dump(mode="json") for key, item in self.profiles.items()},
-            ensure_ascii=False,
-            sort_keys=True,
-        )
+        published = {
+            key: item.model_dump(mode="json") for key, item in self.profiles.items()
+        }
         leaked = sorted(
             key
             for key, item in self.contact_payload.items()
-            if item and item in published
+            if contains_contact_value(published, item)
         )
         if leaked:
             raise ValueError(
@@ -239,9 +251,8 @@ def contact_option_builder(
         "terms": profile.terms,
         "claimant_principal": _principal_json(resources.get("claimant_principal")),
     }
-    public_payload = json.dumps(params, ensure_ascii=False, sort_keys=True)
     if any(
-        value and value in public_payload
+        contains_contact_value(params, value)
         for value in config.contact_payload.values()
     ):
         raise ValueError("contact payload must not reach a published option")
@@ -328,13 +339,9 @@ def contact_accepted_obligation_builder(
     negotiated_context = context.get("negotiated_context")
     if isinstance(negotiated_context, Mapping) and negotiated_context:
         introduction_package["negotiated_context"] = dict(negotiated_context)
-    public_payload = json.dumps(
-        {"params": params, "introduction": introduction_package},
-        ensure_ascii=False,
-        sort_keys=True,
-    )
+    public_payload = {"params": params, "introduction": introduction_package}
     if any(
-        value and value in public_payload
+        contains_contact_value(public_payload, value)
         for value in config.contact_payload.values()
     ):
         raise ValueError("contact payload must not reach an accepted obligation")

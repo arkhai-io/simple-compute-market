@@ -1531,7 +1531,9 @@ def _migrate_marketplace_principals(
                 f"{table_name}.{old_column} could not be removed during identity cutover"
             )
 
-def migrate_storefront_domain_bindings_schema(conn: sqlite3.Connection) -> None:
+def migrate_storefront_domain_bindings_schema(
+    conn: sqlite3.Connection, *, allow_unbacked: bool = False
+) -> None:
     """Create immutable listing, negotiation, and domain-artifact bindings."""
 
     conn.execute(
@@ -1644,12 +1646,12 @@ def migrate_storefront_domain_bindings_schema(conn: sqlite3.Connection) -> None:
         """
     )
     conn.execute(
-        """
+        f"""
         CREATE TRIGGER IF NOT EXISTS negotiation_domain_binding_complete_insert
         BEFORE INSERT ON negotiation_threads
         WHEN (
           NEW.domain_listing_id IS NULL
-          OR NEW.site_id IS NULL
+          {"" if allow_unbacked else "OR NEW.site_id IS NULL"}
           OR NEW.offering_mode IS NULL
           OR NEW.domain_identity IS NULL
           OR NEW.contract_major IS NULL
@@ -1668,7 +1670,7 @@ def migrate_storefront_domain_bindings_schema(conn: sqlite3.Connection) -> None:
         """
     )
     conn.execute(
-        """
+        f"""
         CREATE TRIGGER IF NOT EXISTS negotiation_domain_binding_owner_insert
         BEFORE INSERT ON negotiation_threads
         WHEN NEW.domain_identity IS NOT NULL
@@ -1676,7 +1678,7 @@ def migrate_storefront_domain_bindings_schema(conn: sqlite3.Connection) -> None:
             SELECT 1
             FROM storefront_listing_bindings binding
             WHERE binding.listing_id = NEW.domain_listing_id
-              AND binding.site_id = NEW.site_id
+              AND binding.site_id {"IS" if allow_unbacked else "="} NEW.site_id
               AND binding.offering_mode = NEW.offering_mode
               AND binding.domain_identity = NEW.domain_identity
               AND binding.contract_major = NEW.contract_major
@@ -1709,7 +1711,7 @@ def migrate_storefront_domain_bindings_schema(conn: sqlite3.Connection) -> None:
         """
     )
     conn.execute(
-        """
+        f"""
         CREATE TRIGGER IF NOT EXISTS negotiation_domain_binding_owner_update
         BEFORE UPDATE OF
           domain_listing_id, site_id, offering_mode, domain_identity,
@@ -1720,7 +1722,7 @@ def migrate_storefront_domain_bindings_schema(conn: sqlite3.Connection) -> None:
             SELECT 1
             FROM storefront_listing_bindings binding
             WHERE binding.listing_id = NEW.domain_listing_id
-              AND binding.site_id = NEW.site_id
+              AND binding.site_id {"IS" if allow_unbacked else "="} NEW.site_id
               AND binding.offering_mode = NEW.offering_mode
               AND binding.domain_identity = NEW.domain_identity
               AND binding.contract_major = NEW.contract_major
@@ -1794,6 +1796,47 @@ def _migrate_replay_attempt_leases(conn: sqlite3.Connection) -> None:
     )
 
 
+def _migrate_unbacked_listing_bindings(conn: sqlite3.Connection) -> None:
+    """Permit absent physical provenance while preserving immutable ownership."""
+
+    conn.execute(
+        """
+        CREATE TABLE storefront_listing_bindings_unbacked (
+          listing_id TEXT PRIMARY KEY,
+          site_id TEXT,
+          pool_id TEXT,
+          physical_resource_id TEXT,
+          offering_mode TEXT NOT NULL,
+          domain_identity TEXT NOT NULL,
+          contract_major INTEGER NOT NULL CHECK (contract_major >= 1),
+          contract_minor INTEGER NOT NULL CHECK (contract_minor >= 0),
+          derivation_key TEXT NOT NULL UNIQUE,
+          source_envelope_json TEXT NOT NULL,
+          last_reconciled_at TEXT NOT NULL,
+          CHECK (site_id IS NOT NULL OR
+                 (pool_id IS NULL AND physical_resource_id IS NULL)),
+          FOREIGN KEY (listing_id) REFERENCES listings(listing_id)
+        )
+        """
+    )
+    conn.execute(
+        "INSERT INTO storefront_listing_bindings_unbacked "
+        "SELECT * FROM storefront_listing_bindings"
+    )
+    for trigger in (
+        "negotiation_domain_binding_complete_insert",
+        "negotiation_domain_binding_owner_insert",
+        "negotiation_domain_binding_owner_update",
+    ):
+        conn.execute(f"DROP TRIGGER {trigger}")
+    conn.execute("DROP TABLE storefront_listing_bindings")
+    conn.execute(
+        "ALTER TABLE storefront_listing_bindings_unbacked "
+        "RENAME TO storefront_listing_bindings"
+    )
+    migrate_storefront_domain_bindings_schema(conn, allow_unbacked=True)
+
+
 _MIGRATIONS: tuple[Migration, ...] = (
     Migration(
         "20260604_000_listing_resource_timestamps",
@@ -1829,5 +1872,10 @@ _MIGRATIONS: tuple[Migration, ...] = (
         "20260815_001_storefront_domain_bindings",
         migrate_storefront_domain_bindings_schema,
         required_tables=("listings", "negotiation_threads"),
+    ),
+    Migration(
+        "20260907_001_unbacked_listing_bindings",
+        _migrate_unbacked_listing_bindings,
+        required_tables=("storefront_listing_bindings", "negotiation_threads"),
     ),
 )

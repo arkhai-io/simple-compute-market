@@ -169,14 +169,15 @@ def canonical_source_envelope(value: Mapping[str, object]) -> str:
 
 def build_storefront_derivation_key(
     *,
-    site_id: str,
+    site_id: str | None,
     offering_mode: str,
     binding: StorefrontDomainBinding,
     source_identity: object,
 ) -> str:
     """Build an unambiguous fixed-size identity for a domain publication source."""
 
-    _nonempty(site_id, field="site_id")
+    if site_id is not None:
+        _nonempty(site_id, field="site_id")
     if offering_mode != binding.offering_mode:
         raise StorefrontDomainRegistryError(
             "derivation offering_mode must equal the durable domain binding"
@@ -202,10 +203,14 @@ def build_storefront_derivation_key(
 
 @dataclass(frozen=True)
 class StorefrontListingBinding:
-    """Trusted common publication mapping for one durable listing."""
+    """Immutable provenance: site-backed, or unbacked with no pool/resource.
+
+    A null site discriminates the unbacked alternative; it cannot carry any
+    physical authority. Domain admission determines which offers may use it.
+    """
 
     listing_id: str
-    site_id: str
+    site_id: str | None
     binding: StorefrontDomainBinding
     derivation_key: str
     source_envelope_json: str
@@ -215,9 +220,16 @@ class StorefrontListingBinding:
 
     def __post_init__(self) -> None:
         _nonempty(self.listing_id, field="listing_id")
-        _nonempty(self.site_id, field="site_id")
+        if self.site_id is not None:
+            _nonempty(self.site_id, field="site_id")
         _nonempty(self.derivation_key, field="derivation_key")
         _nonempty(self.last_reconciled_at, field="last_reconciled_at")
+        if self.site_id is None and (
+            self.pool_id is not None or self.physical_resource_id is not None
+        ):
+            raise StorefrontDomainRegistryError(
+                "unbacked listing cannot carry a pool or physical resource"
+            )
         if self.pool_id is not None:
             _nonempty(self.pool_id, field="pool_id")
         if self.physical_resource_id is not None:
@@ -239,7 +251,7 @@ class StorefrontListingBinding:
         cls,
         *,
         listing_id: str,
-        site_id: str,
+        site_id: str | None,
         binding: StorefrontDomainBinding,
         derivation_key: str,
         source_envelope: Mapping[str, object],
@@ -279,13 +291,14 @@ class StorefrontThreadBinding:
 
     negotiation_id: str
     listing_id: str
-    site_id: str
+    site_id: str | None
     binding: StorefrontDomainBinding
 
     def __post_init__(self) -> None:
         _nonempty(self.negotiation_id, field="negotiation_id")
         _nonempty(self.listing_id, field="listing_id")
-        _nonempty(self.site_id, field="site_id")
+        if self.site_id is not None:
+            _nonempty(self.site_id, field="site_id")
 
 
 def bind_fulfillment_context(

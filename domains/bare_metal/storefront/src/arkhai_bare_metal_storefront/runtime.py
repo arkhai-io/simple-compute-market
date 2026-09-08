@@ -144,6 +144,13 @@ class BareMetalStorefrontRuntime:
             SettlementRuntime(repository, clients),
         )
 
+    @property
+    def introduction_only(self) -> bool:
+        return bool(
+            self.settlement_composition is not None
+            and self.settlement_composition.introduction_only
+        )
+
     def negotiation_service(self) -> BareMetalNegotiationService:
         """Build the request-scoped bare-metal negotiation orchestrator."""
         return BareMetalNegotiationService(
@@ -151,6 +158,7 @@ class BareMetalStorefrontRuntime:
             domain=self.domain,
             seller_principal=self.seller_principal,
             round_hook=default_seller_round_hook(),
+            introduction_only=self.introduction_only,
             build_plan=self.plan_builder,
             accepted_obligation_dispatch=(
                 self.settlement_composition.accepted_obligation_dispatch()
@@ -161,7 +169,7 @@ class BareMetalStorefrontRuntime:
 
     def settlement_service(self) -> BareMetalSettlementService:
         """Build commercial verification from explicitly configured chains."""
-        if not self.seller_evm_address:
+        if self.introduction_only or not self.seller_evm_address:
             raise RuntimeError("Alkahest settlement is not configured")
         return BareMetalSettlementService(
             db=self.db,
@@ -175,7 +183,11 @@ class BareMetalStorefrontRuntime:
 
     def fulfillment_service(self) -> BareMetalFulfillmentService:
         """Build durable fulfillment over exact selected-site clients."""
-        if self.capacity_client is None or self.fulfillment_client is None:
+        if (
+            self.introduction_only
+            or self.capacity_client is None
+            or self.fulfillment_client is None
+        ):
             raise RuntimeError("bare-metal fulfillment authorities are unavailable")
         return BareMetalFulfillmentService(
             db=self.db,
@@ -201,8 +213,8 @@ class BareMetalStorefrontRuntime:
                 if self.settlement_composition is not None or self.chain_clients
                 else "unavailable"
             ),
-            "site_projection": "unavailable",
-            "fulfillment": "unavailable",
+            "site_projection": "not_applicable" if self.introduction_only else "unavailable",
+            "fulfillment": "not_applicable" if self.introduction_only else "unavailable",
         }
         try:
             await asyncio.to_thread(_check_database)
@@ -212,7 +224,13 @@ class BareMetalStorefrontRuntime:
             checks["database"] = "error"
             paused = None
             resource_count = None
-        if self.capacity_client is not None:
+        if self.introduction_only:
+            assert self.settlement_composition is not None
+            readiness = await self.settlement_composition.readiness(clauses=())
+            checks["commercial_settlement"] = (
+                "ok" if readiness and all(item.ready for item in readiness if item.enabled) else "unavailable"
+            )
+        if not self.introduction_only and self.capacity_client is not None:
             try:
                 await self.capacity_client.snapshot()
             except Exception:
@@ -225,7 +243,7 @@ class BareMetalStorefrontRuntime:
                 )
         return {
             "status": (
-                "ok" if all(value == "ok" for value in checks.values()) else "degraded"
+                "ok" if all(value in {"ok", "not_applicable"} for value in checks.values()) else "degraded"
             ),
             "checks": checks,
             "paused": paused,
@@ -281,7 +299,7 @@ def build_runtime_from_environment(
     *,
     domain: MarketDomainContract | None = None,
 ) -> BareMetalStorefrontRuntime:
-    """Build the minimal runtime; trusted site bindings are composed later."""
+    """Compose only the authorities required by enabled settlement mechanisms."""
     selected_domain = validate_domain_contract(
         domain or get_market_domain_contract(),
     )
@@ -361,7 +379,10 @@ def build_runtime_from_environment(
     else:
         chain_clients, chain_config_paths = {}, {}
     if settlement_config is not None:
-        raw_chains = json.loads(os.environ.get("BARE_METAL_STOREFRONT_CHAINS", "{}"))
+        raw_chains = (
+            json.loads(os.environ.get("BARE_METAL_STOREFRONT_CHAINS", "{}"))
+            if alkahest_enabled else {}
+        )
         settlement_composition = (
             BareMetalStorefrontSettlementComposition.from_raw_config(
                 settlement_config,
@@ -375,18 +396,19 @@ def build_runtime_from_environment(
                 },
             )
         )
-    try:
-        site_bindings = parse_site_bindings(
-            os.environ["BARE_METAL_STOREFRONT_SITES"],
-        )
-        site_placement = os.environ.get(
-            "BARE_METAL_STOREFRONT_SITE_PLACEMENT",
-            "fill_first",
-        ).strip()
-    except (KeyError, TypeError, ValueError) as exc:
-        raise RuntimeError(
-            "bare-metal storefront requires valid trusted site bindings",
-        ) from exc
+    introduction_only = bool(
+        settlement_composition is not None and settlement_composition.introduction_only
+    )
+    site_bindings: tuple[BareMetalSiteBinding, ...] = ()
+    if not introduction_only:
+        try:
+            site_bindings = parse_site_bindings(
+                os.environ["BARE_METAL_STOREFRONT_SITES"],
+            )
+        except (KeyError, TypeError, ValueError) as exc:
+            raise RuntimeError(
+                "bare-metal storefront requires valid trusted site bindings",
+            ) from exc
     db = SQLiteClient(
         os.environ.get(
             "BARE_METAL_STOREFRONT_DB_PATH",
@@ -396,17 +418,21 @@ def build_runtime_from_environment(
         local_listing_principal=identity_config.principal,
         expected_legacy_sellers=(storefront_url,),
     )
-    try:
-        capacity_client, fulfillment_client = build_trusted_site_clients(
-            bindings=site_bindings,
-            signer=signer,
-            db_path=db.db_path,
-            placement=site_placement,
-        )
-    except (RuntimeError, TypeError, ValueError) as exc:
-        raise RuntimeError(
-            "bare-metal storefront trusted site composition is invalid",
-        ) from exc
+    capacity_client = fulfillment_client = None
+    if not introduction_only:
+        try:
+            capacity_client, fulfillment_client = build_trusted_site_clients(
+                bindings=site_bindings,
+                signer=signer,
+                db_path=db.db_path,
+                placement=os.environ.get(
+                    "BARE_METAL_STOREFRONT_SITE_PLACEMENT", "fill_first"
+                ).strip(),
+            )
+        except (RuntimeError, TypeError, ValueError) as exc:
+            raise RuntimeError(
+                "bare-metal storefront trusted site composition is invalid",
+            ) from exc
     try:
         delivery_sinks = load_storefront_delivery_sinks(storefront_delivery_section())
     except (TypeError, ValueError, json.JSONDecodeError) as exc:
@@ -421,7 +447,7 @@ def build_runtime_from_environment(
         storefront_url=storefront_url,
         admin_principals=admin_principals,
         marketplace_signer=signer,
-        seller_evm_address=seller_evm_address,
+        seller_evm_address=seller_evm_address if alkahest_enabled else None,
         settlement_composition=settlement_composition,
         chain_clients=chain_clients,
         chain_config_paths=chain_config_paths,

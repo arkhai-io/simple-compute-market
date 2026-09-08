@@ -146,11 +146,20 @@ jobs:
       - name: Build hosted adapter from verified client contract
         if: matrix.requires_hosted
         run: uv build --no-sources --out-dir .dist kit/hosted-settlement
+      - name: Initialize independent registry environment for contact publication tests
+        if: matrix.name == 'bare-metal-storefront'
+        run: uv sync --project core/registry --frozen --dev --find-links "$GITHUB_WORKSPACE/.dist"
       - name: pytest
         working-directory: ${{ matrix.dir }}
         env:
           PYTEST_ARGS: ${{ matrix.pytest_args }}
         run: uv run --find-links "$GITHUB_WORKSPACE/.dist" --with pytest --with pytest-asyncio pytest -q $PYTEST_ARGS
+      - name: Build bare-metal storefront image from checked-out wheels
+        if: matrix.name == 'bare-metal-storefront'
+        run: |
+          docker build -f domains/bare_metal/storefront/Dockerfile -t bare-metal-check:${{ github.sha }} .
+          docker run --rm --network none bare-metal-check:${{ github.sha }} publish-contacts --help
+
 
   release-deployment:
     name: release · deployment contracts

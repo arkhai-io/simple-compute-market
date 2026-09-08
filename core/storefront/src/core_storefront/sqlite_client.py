@@ -24,7 +24,7 @@ import os
 import sqlite3
 import time
 import uuid
-from collections.abc import Collection, Mapping, Sequence
+from collections.abc import Callable, Collection, Mapping, Sequence
 from datetime import datetime
 from decimal import Decimal, InvalidOperation
 from typing import Any
@@ -1572,7 +1572,7 @@ class SQLiteClient:
     def _listing_binding_from_row(row: tuple[Any, ...]) -> StorefrontListingBinding:
         return StorefrontListingBinding(
             listing_id=str(row[0]),
-            site_id=str(row[1]),
+            site_id=str(row[1]) if row[1] is not None else None,
             pool_id=str(row[2]) if row[2] is not None else None,
             physical_resource_id=str(row[3]) if row[3] is not None else None,
             binding=StorefrontDomainBinding(
@@ -1588,14 +1588,14 @@ class SQLiteClient:
 
     @staticmethod
     def _thread_binding_from_row(row: tuple[Any, ...]) -> StorefrontThreadBinding:
-        if any(value is None for value in row[1:]):
+        if any(row[index] is None for index in (1, 3, 4, 5, 6)):
             raise StorefrontDomainBindingError(
                 f"negotiation {row[0]!r} has no complete domain binding"
             )
         return StorefrontThreadBinding(
             negotiation_id=str(row[0]),
             listing_id=str(row[1]),
-            site_id=str(row[2]),
+            site_id=str(row[2]) if row[2] is not None else None,
             binding=StorefrontDomainBinding(
                 offering_mode=str(row[3]),
                 domain_identity=DomainIdentity(str(row[4])),
@@ -1757,7 +1757,7 @@ class SQLiteClient:
                 expected = StorefrontThreadBinding(
                     negotiation_id=negotiation_id,
                     listing_id=str(listing_row[0]),
-                    site_id=str(listing_row[1]),
+                    site_id=str(listing_row[1]) if listing_row[1] is not None else None,
                     binding=StorefrontDomainBinding(
                         offering_mode=str(listing_row[2]),
                         domain_identity=DomainIdentity(str(listing_row[3])),
@@ -2252,8 +2252,13 @@ class SQLiteClient:
         settlement_plan: dict[str, Any],
         buyer_principal: Identity,
         seller_principal: Identity,
+        register_bookkeeping: Callable[[sqlite3.Connection], None] | None = None,
     ) -> None:
-        """Persist an immutable accepted plan bound to the exact negotiation parties."""
+        """Persist an immutable accepted plan bound to the exact negotiation parties.
+
+        Optional bookkeeping runs in the same transaction. It must perform only
+        local persistence, never contact capture, lifecycle actions or network I/O.
+        """
         buyer_value = buyer_principal.model_dump(mode="json")
         seller_value = seller_principal.model_dump(mode="json")
         if settlement_plan.get("buyer_principal") != buyer_value:
@@ -2305,6 +2310,8 @@ class SQLiteClient:
                     "WHERE negotiation_id = ?",
                     (encoded, datetime.now().isoformat(), negotiation_id),
                 )
+                if register_bookkeeping is not None:
+                    register_bookkeeping(conn)
                 conn.commit()
             except Exception:
                 conn.rollback()

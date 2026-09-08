@@ -1,0 +1,12 @@
+# Synthetic public render fixture only. Never deploy its placeholder principals.
+bare-metal-storefront:
+  enabled: true
+  siteBindingsSecret: null
+  contactOffers:
+    configMap: {name: synthetic-contact-offers, key: offers.json}
+    registry:
+      url: https://registry.example.invalid
+      authority: synthetic-registry
+      principals:
+        - {scheme: ed25519, identifier: AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA}
+      apiKeySecret: {name: synthetic-registry-write, key: api-key}

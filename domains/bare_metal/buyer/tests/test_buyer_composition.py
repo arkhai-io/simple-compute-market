@@ -1,11 +1,15 @@
 from __future__ import annotations
 
 from pathlib import Path
+from types import SimpleNamespace
+from contextlib import nullcontext
+from unittest.mock import Mock
 import json
 
 import pytest
 import typer
 from typer.testing import CliRunner
+from arkhai_bare_metal_buyer import cli
 from arkhai_bare_metal_buyer.cli import (
     _json,
     _safe_projection,
@@ -15,6 +19,8 @@ from arkhai_bare_metal_buyer.cli import (
 from arkhai_bare_metal_buyer.config import load_bare_metal_buyer_config
 from arkhai_bare_metal_buyer.plugin import domain
 from market_core import DomainCapability
+from market_core.schemas import derive_settlement_option_id
+from core_buyer.negotiation_client import NegotiationOutcome
 from arkhai_bare_metal import BareMetalListing
 
 from arkhai_bare_metal_buyer.fulfillment import BareMetalFulfillmentTransport
@@ -242,3 +248,49 @@ def test_the_read_command_can_redeliver() -> None:
         if item.name == "introduction"
     )
     assert "deliver" in command.callback.__code__.co_varnames
+
+
+def test_request_introduction_forwards_amountless_advertised_option(tmp_path, monkeypatch):
+    # Deterministic synthetic test-only signer. NEVER deploy this key live.
+    signer = create_signer(IdentityScheme.ED25519, bytes([17]) * 32)
+    option = {
+        "mechanism": "contact-exchange.v1", "asset": "introduction",
+        "rates": [], "params": {
+            "profile": "default", "channel": "email", "terms": "SYNTHETIC introduction only",
+            "claimant_principal": signer.identity.model_dump(mode="json"),
+        },
+    }
+    option["option_id"] = derive_settlement_option_id(**option)
+    config = tmp_path / "buyer.toml"
+    config.write_text(
+        '[bare_metal]\nregistry_url="https://registry.example.invalid"\n'
+        'registry_authority="synthetic-registry"\n'
+        f'registry_principals=[{{scheme="ed25519", identifier="{signer.identity.identifier}"}}]\n'
+    )
+    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
+    monkeypatch.setattr(cli, "fresh_identity", lambda: SimpleNamespace(
+        profile_id="11111111-1111-4111-8111-111111111111",
+        principal=signer.identity, signer=signer,
+    ))
+    listing = SimpleNamespace(
+        storefront_url="https://seller.example.invalid", publisher_id="synthetic-publisher",
+        publisher_principals=TrustedIdentitySet(identities=(signer.identity,)),
+        settlement_options=[option],
+    )
+    # The external registry and negotiation calls are the command's I/O boundary.
+    monkeypatch.setattr(cli, "registry_client", lambda *args: nullcontext(
+        SimpleNamespace(get_listing=lambda listing_id: listing)
+    ))
+    negotiate = Mock(return_value=NegotiationOutcome(status="exited", negotiation_id=None))
+    monkeypatch.setattr(cli, "negotiate_with_seller", negotiate)
+    cli.request_introduction(
+        "synthetic-listing", option_id=option["option_id"], duration_seconds=3600,
+        expiration_seconds=3600, config=str(config),
+    )
+    arguments = negotiate.call_args.kwargs
+    assert arguments["initial_price"] is arguments["max_price"] is None
+    assert arguments["policy_params"]["_selected_settlement_option"] == option
+    assert arguments["settlement_selection"].option_id == option["option_id"]
+    assert arguments["provision_terms"].payload == {
+        "duration_seconds": 3600, "access_method": "none",
+    }

@@ -99,6 +99,16 @@ async def authenticate_response(request: Request, call_next):
             status_code=503,
         )
 
+    authenticated = context.authenticated
+    request_id = (
+        authenticated.request_id if authenticated is not None
+        else request.headers.get("X-Market-Request-ID") or None
+    )
+    # An unbound refusal stays unsigned. Return before consuming the response
+    # stream so callers without a request identity still receive its body.
+    if request_id is None:
+        return response
+
     raw_body = (
         b"".join([chunk async for chunk in response.body_iterator])
         if hasattr(response, "body_iterator")
@@ -110,24 +120,13 @@ async def authenticate_response(request: Request, call_next):
             body = json.loads(raw_body)
         except (TypeError, ValueError):
             body = raw_body.decode("utf-8")
-    authenticated = context.authenticated
-    if authenticated is None:
-        # Refused while authenticating: nothing was reserved and nothing was
-        # dispatched, so there is no outcome to record. The caller's own
-        # request identity is still bindable, and a caller that sent none has
-        # nothing to compare a signature against.
-        request_id = request.headers.get("X-Market-Request-ID") or None
-        if request_id is None:
-            return response
-    else:
-        request_id = authenticated.request_id
-        if authenticated.dispatch_allowed:
-            await runtime.db.record_replay_outcome(
-                authenticated.reservation,
-                attempt_token=authenticated.attempt_token,
-                status=response.status_code,
-                body=body,
-            )
+    if authenticated is not None and authenticated.dispatch_allowed:
+        await runtime.db.record_replay_outcome(
+            authenticated.reservation,
+            attempt_token=authenticated.attempt_token,
+            status=response.status_code,
+            body=body,
+        )
     headers = dict(response.headers)
     headers.update(
         signed_response_headers(

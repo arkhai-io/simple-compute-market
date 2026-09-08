@@ -56,11 +56,25 @@ spec:
                 secretKeyRef:
                   name: {{ required "bare-metal storefront identity credential Secret name is required" .Values.identity.credentialSecret.name | quote }}
                   key: {{ required "bare-metal storefront identity credential Secret key is required" .Values.identity.credentialSecret.key | quote }}
+            {{- if and .Values.siteBindingsSecret (not .Values.contactOffers) }}
             - name: BARE_METAL_STOREFRONT_SITES
               valueFrom:
                 secretKeyRef:
                   name: {{ required "bare-metal storefront site bindings Secret name is required" .Values.siteBindingsSecret.name | quote }}
                   key: {{ required "bare-metal storefront site bindings Secret key is required" .Values.siteBindingsSecret.key | quote }}
+            {{- end }}
+            {{- with .Values.contactOffers }}
+            - name: BARE_METAL_STOREFRONT_CONTACT_OFFERS_PATH
+              value: /etc/arkhai/contact-offers/offers.json
+            - name: BARE_METAL_STOREFRONT_REGISTRY_URL
+              value: {{ .registry.url | quote }}
+            - name: BARE_METAL_STOREFRONT_REGISTRY_AUTHORITY
+              value: {{ .registry.authority | quote }}
+            - name: BARE_METAL_STOREFRONT_REGISTRY_PRINCIPALS
+              value: {{ .registry.principals | toJson | quote }}
+            - name: BARE_METAL_STOREFRONT_REGISTRY_API_KEY_FILE
+              value: /etc/arkhai/contact-registry/api-key
+            {{- end }}
           ports:
             - name: http
               containerPort: {{ .Values.service.port }}
@@ -68,11 +82,19 @@ spec:
           volumeMounts:
             - name: data
               mountPath: {{ .Values.persistence.mountPath | quote }}
+            {{- if .Values.contactOffers }}
+            - name: contact-offers
+              mountPath: /etc/arkhai/contact-offers
+              readOnly: true
+            - name: contact-registry-key
+              mountPath: /etc/arkhai/contact-registry
+              readOnly: true
+            {{- end }}
           startupProbe:
             httpGet:
               path: /health
               port: http
-            failureThreshold: 30
+            failureThreshold: {{ if .Values.contactOffers }}100{{ else }}30{{ end }}
             periodSeconds: 2
           livenessProbe:
             httpGet:
@@ -96,6 +118,21 @@ spec:
           {{- else }}
           emptyDir: {}
           {{- end }}
+        {{- with .Values.contactOffers }}
+        - name: contact-offers
+          configMap:
+            name: {{ .configMap.name | quote }}
+            items:
+              - key: {{ .configMap.key | quote }}
+                path: offers.json
+        - name: contact-registry-key
+          secret:
+            secretName: {{ .registry.apiKeySecret.name | quote }}
+            defaultMode: 0440
+            items:
+              - key: {{ .registry.apiKeySecret.key | quote }}
+                path: api-key
+        {{- end }}
       {{- with .Values.nodeSelector }}
       nodeSelector:
         {{- toYaml . | nindent 8 }}

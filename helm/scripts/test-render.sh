@@ -16,7 +16,8 @@ DUAL_RENDERED="$(mktemp)"
 OVERLAP_RENDERED="$(mktemp)"
 TWO_REGISTRIES_RENDERED="$(mktemp)"
 BARE_METAL_RENDERED="$(mktemp)"
-trap 'rm -f "$DEFAULT_RENDERED" "$FIAT_RENDERED" "$EVM_RENDERED" "$SECRET_RPC_RENDERED" "$DUAL_RENDERED" "$OVERLAP_RENDERED" "$TWO_REGISTRIES_RENDERED" "$BARE_METAL_RENDERED"' EXIT
+CONTACT_RENDERED="$(mktemp)"
+trap 'rm -f "$DEFAULT_RENDERED" "$FIAT_RENDERED" "$EVM_RENDERED" "$SECRET_RPC_RENDERED" "$DUAL_RENDERED" "$OVERLAP_RENDERED" "$TWO_REGISTRIES_RENDERED" "$BARE_METAL_RENDERED" "$CONTACT_RENDERED"' EXIT
 
 helm template "$RELEASE" "$CHART_DIR" \
     --values "$CHART_DIR/values.yaml" >"$DEFAULT_RENDERED" 2>/dev/null
@@ -71,6 +72,10 @@ helm template "$RELEASE-registries" "$CHART_DIR" \
 helm template "$RELEASE-bare-metal" "$CHART_DIR" \
     --values "$CHART_DIR/values.yaml" \
     --set 'bare-metal-storefront.enabled=true' >"$BARE_METAL_RENDERED" 2>/dev/null
+
+helm template "$RELEASE-contact" "$CHART_DIR" \
+    --values "$CHART_DIR/values.yaml" \
+    --values "$CHART_DIR/fixtures/bare-metal-contact-values.yaml" >"$CONTACT_RENDERED"
 
 errors=0
 fail() {
@@ -331,6 +336,21 @@ expect_override_failure \
     "$CHART_DIR/fixtures/fiat-ed25519-values.yaml" \
     "enabled Stripe without publication pricing fails schema/render" \
     --set-json 'storefront.agents[0].config.pricing=null'
+expect_present "$CONTACT_RENDERED" 'BARE_METAL_STOREFRONT_CONTACT_OFFERS_PATH' "contact publication is explicitly enabled"
+expect_present "$CONTACT_RENDERED" 'BARE_METAL_STOREFRONT_REGISTRY_PRINCIPALS' "registry response trust is independent"
+expect_present "$CONTACT_RENDERED" 'BARE_METAL_STOREFRONT_REGISTRY_API_KEY_FILE' "registry bearer uses a file reference"
+expect_present "$CONTACT_RENDERED" 'name: "synthetic-contact-offers"' "offers use an existing ConfigMap"
+expect_present "$CONTACT_RENDERED" 'secretName: "synthetic-registry-write"' "registry write key stays in a Secret"
+expect_absent "$CONTACT_RENDERED" 'BARE_METAL_STOREFRONT_SITES' "contact mode carries no invented site authority"
+expect_absent "$BARE_METAL_RENDERED" 'BARE_METAL_STOREFRONT_CONTACT_OFFERS_PATH' "physical defaults do not publish contact offers"
+expect_override_failure \
+    "$CHART_DIR/fixtures/bare-metal-contact-values.yaml" \
+    "contact publication requires durable intent storage" \
+    --set 'bare-metal-storefront.persistence.enabled=false'
+expect_override_failure \
+    "$CHART_DIR/fixtures/bare-metal-contact-values.yaml" \
+    "contact publication refuses Alkahest image configuration" \
+    --set 'bare-metal-storefront.alkahestEnabled=true'
 if [[ $errors -gt 0 ]]; then
     echo "$errors assertion(s) failed" >&2
     exit 1

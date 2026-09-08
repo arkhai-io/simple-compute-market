@@ -686,8 +686,8 @@ def request_introduction(
         signer=identity.signer,
         listing_id=listing_id,
         resolve_seller_principals=lambda: listing.publisher_principals,
-        initial_price=0.0,
-        max_price=0.0,
+        initial_price=None,
+        max_price=None,
         unit_count=duration_seconds / 3600,
         provision_terms=BareMetalProvisionTerms(
             payload={
@@ -696,6 +696,7 @@ def request_introduction(
             },
         ),
         settlement_selection=selection,
+        policy_params={"_selected_settlement_option": selected.model_dump(mode="json")},
         max_rounds=buyer_config.default_max_rounds,
     )
     if outcome.status != "agreed" or outcome.negotiation_id is None:

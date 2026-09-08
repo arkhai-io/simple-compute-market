@@ -16,9 +16,12 @@ from market_core.schemas import (
     SettlementSelection,
     derive_settlement_option_id,
 )
-from market_identity import Identity, TrustedIdentitySet
+from market_identity import Ed25519Signer, Identity, TrustedIdentitySet
 
-from core_buyer.negotiation_client import _validate_settlement_acceptance
+from core_buyer.negotiation_client import (
+    _validate_settlement_acceptance,
+    negotiate_with_seller,
+)
 
 _BUYER = Identity(scheme="eip191", identifier="0x" + "11" * 20)
 _SELLER = Identity(scheme="eip191", identifier="0x" + "22" * 20)
@@ -127,7 +130,8 @@ _CONTACT_OPTION_ID = derive_settlement_option_id(
 )
 
 
-def test_accepts_amountless_introduction_plan() -> None:
+@pytest.mark.parametrize("amount", [None, 0, 42])
+def test_amountless_introduction_requires_absent_amount(amount) -> None:
     """An introduction accept mirrors the contact-exchange seller shape:
     amountless obligation, nominal asset, mechanism-namespaced package."""
 
@@ -158,7 +162,7 @@ def test_accepts_amountless_introduction_plan() -> None:
                 claimant="seller",
                 payer_principal=_BUYER.model_dump(mode="json"),
                 claimant_principal=_SELLER.model_dump(mode="json"),
-                amount=None,
+                amount=amount,
                 asset="introduction",
                 expiration_unix=_EXPIRATION,
                 conditions=[],
@@ -172,6 +176,14 @@ def test_accepts_amountless_introduction_plan() -> None:
         option_id=_CONTACT_OPTION_ID,
         expiration_unix=_EXPIRATION,
     )
+    if amount is not None:
+        with pytest.raises(RuntimeError, match="amount differs"):
+            _validate_contact(plan, selection, option)
+    else:
+        _validate_contact(plan, selection, option)
+
+
+def _validate_contact(plan, selection, option):
     _validate_settlement_acceptance(
         reply={
             "buyer_principal": _BUYER.model_dump(mode="json"),
@@ -205,3 +217,32 @@ def test_rejects_tampered_params() -> None:
     tampered = plan.obligations[0].model_copy(update={"params": params})
     with pytest.raises(RuntimeError, match="params differ"):
         _validate(plan.model_copy(update={"obligations": [tampered]}))
+
+
+@pytest.mark.parametrize("amount", [None, 0, _AMOUNT + 1])
+def test_priced_acceptance_rejects_missing_or_mismatched_amount(amount):
+    plan = _seller_plan(service_terms={})
+    obligation = plan.obligations[0].model_copy(update={"amount": amount})
+    with pytest.raises(RuntimeError, match="amount differs"):
+        _validate(plan.model_copy(update={"obligations": [obligation]}))
+
+
+@pytest.mark.parametrize("initial_price,max_price,option,selection", [
+    (None, 0, _advertised_option(), True),
+    (None, None, None, True),
+    (None, None, _advertised_option(), False),
+])
+def test_amountless_invocation_requires_complete_explicit_inputs(initial_price, max_price, option, selection):
+    # Deterministic synthetic test-only signer. NEVER deploy this key live.
+    signer = Ed25519Signer(bytes([17]) * 32)
+    with pytest.raises(ValueError, match="both|advertised rateless"):
+        negotiate_with_seller(
+            seller_url="http://127.0.0.1:1", principal=signer.identity, signer=signer,
+            listing_id="synthetic-listing", resolve_seller_principals=lambda: TrustedIdentitySet(identities=(_SELLER,)),
+            initial_price=initial_price, max_price=max_price, unit_count=1,
+            policy_params={"_selected_settlement_option": option},
+            settlement_selection=SettlementSelection(
+                mechanism="fiat.stripe.v1", option_id=_OPTION_ID,
+                expiration_unix=_EXPIRATION,
+            ) if selection else None,
+        )

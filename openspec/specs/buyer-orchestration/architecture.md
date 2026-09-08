@@ -25,6 +25,20 @@ Buyer behavior has three owners:
 
 The split prevents generic orchestration from acquiring pricing semantics and prevents policy middleware from constructing malformed domain messages.
 
+## Absent monetary inputs
+
+`negotiate_with_seller` treats two absent price inputs as an explicit amountless
+invocation, not a free priced offer. It requires the complete advertised rateless
+option and preserves `None` through policy context and accepted-obligation
+validation. A one-sided absence or monetary reply fails; the priced path still
+compares amounts. Mechanism eligibility belongs to the domain command, so the
+bare-metal introduction command checks contact exchange while core remains opaque.
+
+Acceptance returns durable agreement references without sharing a contact.
+The separate introduction start and read commands use the recorded identity and
+storefront trust; [contact exchange](../contact-exchange-settlement/spec.md) owns
+capture and party-read semantics.
+
 ## Settlement preference
 
 Settlement compatibility remains an authoritative orchestration constraint, while preference is buyer-local policy. Resource filtering completes first. The buyer then removes options whose registrations are absent, disabled, or incompatible. Repeatable explicit settlement clauses are ordered alternatives across listings: all comparisons inside one clause must match the same advertised option, and the first clause with survivors wins before configured mechanism priority.

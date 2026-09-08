@@ -68,7 +68,8 @@ class NegotiationContext:
     """
 
     direction: Literal["minimize", "maximize"]
-    our_reference_amount: float
+    # No monetary bound exists for explicitly amountless negotiation.
+    our_reference_amount: float | None
     # Round-0 opening when it differs from the bound (a haggler opens low
     # and concedes toward the bound). None means "open at the bound" —
     # the listed_price default, where the two coincide.

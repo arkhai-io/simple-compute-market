@@ -26,6 +26,7 @@ adminPrincipals:
   - scheme: eip191
     identifier: "0x0000000000000000000000000000000000000000"
 
+# Null omits site authority for contact-only settlement composition.
 # Existing Secret containing one JSON array under `key`. Each entry is exactly:
 # {"site_id":"...","authority_url":"https://...","authority_principal":
 #  {"scheme":"eip191|ed25519","identifier":"..."}}.
@@ -40,8 +41,8 @@ sellerEvmAddress: ""
 alkahestEnabled: false
 
 # Strict shared Settlement configuration JSON. Hosted credentials remain in the
-# independently deployed hosted authority; this Secret contains only public
-# authority/trust/account references and release pins.
+# independently deployed hosted authority. Contact configuration includes private
+# seller contact payloads and must remain in this existing Secret.
 settlementConfigSecret:
   name: bare-metal-storefront-settlement
   key: settlement.json
@@ -59,3 +60,14 @@ resources: {}
 nodeSelector: {}
 tolerations: []
 affinity: {}
+
+# Opt-in synthetic introduction publication. Supply an existing ConfigMap file
+# and independent registry trust/API-key Secret references; null performs no I/O.
+# contactOffers:
+#   configMap: {name: synthetic-contact-offers, key: offers.json}
+#   registry:
+#     url: https://registry.example.invalid
+#     authority: synthetic-registry
+#     principals: [{scheme: ed25519, identifier: "<canonical public principal>"}]
+#     apiKeySecret: {name: contact-registry-write, key: api-key}
+contactOffers: null

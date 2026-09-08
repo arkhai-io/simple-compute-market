@@ -26,6 +26,7 @@ from market_storefront_kit import (
 )
 
 from .api import router as http_router
+from .contact_offers import OFFERS_PATH_ENV, publish_contact_offers
 from .domain_runtime import get_market_domain_contract
 from .runtime import BareMetalStorefrontRuntime, build_runtime_from_environment
 from .response_auth import authenticate_response
@@ -50,6 +51,8 @@ def _negotiation_watchdog_policy() -> NegotiationWatchdogPolicy:
 
 
 async def _start_runtime(runtime: BareMetalStorefrontRuntime) -> None:
+    if path := os.environ.get(OFFERS_PATH_ENV):
+        await publish_contact_offers(runtime, path)
     set_stage_event_db_path(runtime.db.db_path)
     policy = _negotiation_watchdog_policy()
     asyncio.create_task(

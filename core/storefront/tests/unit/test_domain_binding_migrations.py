@@ -2,6 +2,7 @@ import base64
 import json
 import sqlite3
 from datetime import UTC, datetime
+from dataclasses import replace
 from types import SimpleNamespace
 
 import pytest
@@ -12,14 +13,17 @@ from core_storefront.domain_registry import (
     StorefrontDomainBinding,
     StorefrontDomainBindingError,
     StorefrontDomainRegistry,
+    StorefrontDomainRegistryError,
     StorefrontListingBinding,
     StorefrontThreadBinding,
     build_storefront_derivation_key,
 )
+from core_storefront import sqlite_migrations
 from core_storefront.sqlite_client import SQLiteClient
 from core_storefront.sqlite_migrations import (
     LegacyMigrationInputs,
     _backfill_accepted_escrows,
+    apply_schema_migrations,
 )
 
 from test_domain_registry import _registration
@@ -40,7 +44,7 @@ def _listing_binding(listing_id="listing-a", mode="vm", site="site-a"):
     return StorefrontListingBinding.from_source_envelope(
         listing_id=listing_id,
         site_id=site,
-        pool_id="pool-a",
+        pool_id="pool-a" if site is not None else None,
         binding=domain,
         derivation_key=build_storefront_derivation_key(
             site_id=site,
@@ -126,9 +130,10 @@ async def test_public_mode_disagreement_fails_before_listing_or_binding_write(tm
 
 
 @pytest.mark.asyncio
-async def test_opening_copies_binding_message_and_artifact_in_one_transaction(tmp_path):
+@pytest.mark.parametrize("site", ["site-a", None])
+async def test_opening_copies_binding_message_and_artifact_in_one_transaction(tmp_path, site):
     client = SQLiteClient(str(tmp_path / "storefront.db"))
-    listing_binding = _listing_binding()
+    listing_binding = _listing_binding(site=site)
     await _persist_listing(client, listing_binding)
     thread_binding = StorefrontThreadBinding(
         negotiation_id="negotiation-a",
@@ -276,3 +281,95 @@ def test_legacy_synthesizers_are_explicit_per_database():
     assert json.loads(second.execute(
         "SELECT accepted_escrows FROM listings"
     ).fetchone()[0]) == [{"rail": "second"}]
+
+
+@pytest.mark.asyncio
+async def test_unbacked_binding_migration_preserves_rows_and_rolls_back(tmp_path, monkeypatch):
+    path = str(tmp_path / "migration.db")
+    migration_id = "20260907_001_unbacked_listing_bindings"
+    with monkeypatch.context() as before_upgrade:
+        before_upgrade.setattr(sqlite_migrations, "_MIGRATIONS", tuple(
+            migration for migration in sqlite_migrations._MIGRATIONS
+            if migration.id != migration_id
+        ))
+        original = SQLiteClient(path)
+        binding = _listing_binding()
+        await _persist_listing(original, binding)
+        thread = StorefrontThreadBinding(
+            negotiation_id="preserved-thread", listing_id=binding.listing_id,
+            site_id=binding.site_id, binding=binding.binding,
+        )
+        await original.create_negotiation_thread(
+            negotiation_id=thread.negotiation_id, our_listing_id=thread.listing_id,
+            their_listing_id="buyer-listing", our_agent_id="https://seller.example.invalid",
+            their_agent_id="https://buyer.example.invalid", buyer_principal=_principal(0x33),
+            seller_principal=_principal(0x11), owner_id="seller", binding=thread,
+        )
+    with sqlite3.connect(path) as conn:
+        rows = conn.execute("SELECT * FROM storefront_listing_bindings").fetchall()
+        threads = conn.execute("SELECT * FROM negotiation_threads").fetchall()
+        schema = conn.execute(
+            "SELECT name, sql FROM sqlite_master WHERE type IN ('table', 'trigger', 'index') ORDER BY name"
+        ).fetchall()
+        conn.execute(f"""
+            CREATE TRIGGER reject_migration_record BEFORE INSERT ON schema_migrations
+            WHEN NEW.id = '{migration_id}'
+            BEGIN SELECT RAISE(ABORT, 'test commit refusal'); END
+        """)
+        with pytest.raises(sqlite3.IntegrityError, match="test commit refusal"):
+            apply_schema_migrations(conn)
+        conn.execute("DROP TRIGGER reject_migration_record")
+        assert conn.execute(
+            "SELECT name, sql FROM sqlite_master WHERE type IN ('table', 'trigger', 'index') ORDER BY name"
+        ).fetchall() == schema
+        assert conn.execute("SELECT * FROM storefront_listing_bindings").fetchall() == rows
+        assert conn.execute("SELECT * FROM negotiation_threads").fetchall() == threads
+        apply_schema_migrations(conn)
+        apply_schema_migrations(conn)
+        assert conn.execute("SELECT COUNT(*) FROM schema_migrations WHERE id=?", (migration_id,)).fetchone() == (1,)
+        assert conn.execute("SELECT * FROM storefront_listing_bindings").fetchall() == rows
+        assert conn.execute("SELECT * FROM negotiation_threads").fetchall() == threads
+        assert conn.execute("PRAGMA foreign_key_check").fetchall() == []
+    restarted = SQLiteClient(path)
+    assert await restarted.load_listing_binding(listing_id=binding.listing_id) == binding
+    assert await restarted.load_thread_binding(negotiation_id=thread.negotiation_id) == thread
+
+
+@pytest.mark.asyncio
+async def test_unbacked_sql_constraints_and_immutable_thread_parity(tmp_path):
+    client = SQLiteClient(str(tmp_path / "unbacked.db"))
+    binding = _listing_binding(site=None)
+    await _persist_listing(client, binding)
+    await client.create_negotiation_thread(
+        negotiation_id="unbacked-thread", our_listing_id=binding.listing_id,
+        their_listing_id="buyer-listing", our_agent_id="https://seller.example.invalid",
+        their_agent_id="https://buyer.example.invalid", buyer_principal=_principal(0x33),
+        seller_principal=_principal(0x11), owner_id="seller",
+        binding=StorefrontThreadBinding(
+            negotiation_id="unbacked-thread", listing_id=binding.listing_id,
+            site_id=None, binding=binding.binding,
+        ),
+    )
+    with sqlite3.connect(client.db_path) as conn:
+        for sql in (
+            "UPDATE storefront_listing_bindings SET site_id='invented-site'",
+            "UPDATE negotiation_threads SET site_id='invented-site' WHERE negotiation_id='unbacked-thread'",
+        ):
+            with pytest.raises(sqlite3.IntegrityError, match="immutable|disagrees"):
+                conn.execute(sql)
+        # The physical-provenance constraint applies to SQL inserts as well as models.
+        with pytest.raises(sqlite3.IntegrityError, match="CHECK constraint"):
+            conn.execute("""
+                INSERT INTO storefront_listing_bindings
+                SELECT listing_id, NULL, 'orphan-pool', NULL, offering_mode,
+                       domain_identity, contract_major, contract_minor,
+                       'different-key', source_envelope_json, last_reconciled_at
+                FROM storefront_listing_bindings
+            """)
+    assert (await client.load_thread_binding(negotiation_id="unbacked-thread")).site_id is None
+
+
+@pytest.mark.parametrize("physical", [{"pool_id": "pool-a"}, {"physical_resource_id": "resource-a"}])
+def test_unbacked_model_cannot_carry_physical_authority(physical):
+    with pytest.raises(StorefrontDomainRegistryError, match="unbacked listing"):
+        replace(_listing_binding(site=None), **physical)

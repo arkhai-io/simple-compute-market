@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import sqlite3
 import uuid
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
@@ -17,6 +18,7 @@ from core_storefront.models.negotiation_models import (
     NegotiateNewRequest,
     NegotiateNewResponse,
 )
+from market_contact_exchange import MECHANISM as CONTACT_MECHANISM
 from market_core import MarketDomainContract
 from market_core.schemas import (
     AcceptedEscrow,
@@ -29,7 +31,8 @@ from market_core.schemas import (
 )
 from market_policy.negotiation_middleware import NegotiationRound
 from market_identity import Identity
-from market_settlement_runtime import AcceptedObligationArtifacts
+from market_settlement_runtime import AcceptedObligationArtifacts, SettlementObligationRecord
+from market_settlement_runtime.sqlite_repository import SettlementSQLiteRepository
 
 from .negotiation import BareMetalSellerRoundHook
 from .sqlite_client import SQLiteClient
@@ -179,6 +182,7 @@ class BareMetalNegotiationService:
     seller_principal: Identity
     round_hook: BareMetalSellerRoundHook
     build_plan: PlanBuilder
+    introduction_only: bool = False
     accepted_obligation_dispatch: AcceptedObligationDispatch = field(
         default_factory=dict
     )
@@ -216,6 +220,11 @@ class BareMetalNegotiationService:
                 message=message,
                 selection=selection,
             )
+        listing_binding = await self.db.load_listing_binding(listing_id=request.listing_id)
+        if self.introduction_only or (
+            listing_binding is not None and listing_binding.site_id is None
+        ):
+            raise NegotiationRequestError("financial settlement is unavailable")
         proposal = EscrowProposal.model_validate(request.proposal)
         buyer_amount = _proposal_amount(proposal)
         accepted = _matching_acceptance(listing, proposal)
@@ -371,6 +380,19 @@ class BareMetalNegotiationService:
                 "selection does not exact-match one trusted listing option",
                 status_code=400,
             )
+        listing_binding = await self.db.load_listing_binding(listing_id=request.listing_id)
+        unbacked = listing_binding is not None and listing_binding.site_id is None
+        if self.introduction_only or unbacked:
+            if (
+                selected_option.mechanism != CONTACT_MECHANISM
+                or "bare_metal" in selected_option.params
+                or message.access_method != "none"
+                or message.ssh_public_key is not None
+                or message.access_ref is not None
+            ):
+                raise NegotiationRequestError(
+                    "introduction-only negotiation cannot promise physical or financial settlement"
+                )
         provisions_machine = "bare_metal" in selected_option.params
         terms: BareMetalTerms | None = None
         service_terms: dict[str, Any] = {}
@@ -437,11 +459,24 @@ class BareMetalNegotiationService:
             terms=terms,
             agreed_amount=agreed_amount,
         )
+        register_bookkeeping: Callable[[sqlite3.Connection], None] | None = None
+        if selection.mechanism == CONTACT_MECHANISM:
+            def register_bookkeeping(conn: sqlite3.Connection) -> None:
+                record = SettlementObligationRecord.from_obligation(
+                    agreement_ref=negotiation_id,
+                    obligation_index=0,
+                    obligation=plan.obligations[0].model_dump(mode="json"),
+                )
+                SettlementSQLiteRepository.upsert_settlement_obligation_in_transaction(
+                    conn, record.model_dump(),
+                )
+
         await self.db.commit_settlement_plan(
             negotiation_id=negotiation_id,
             settlement_plan=plan.model_dump(mode="json"),
             buyer_principal=buyer_principal,
             seller_principal=self.seller_principal,
+            register_bookkeeping=register_bookkeeping,
         )
         return NegotiateNewResponse(
             negotiation_id=negotiation_id,

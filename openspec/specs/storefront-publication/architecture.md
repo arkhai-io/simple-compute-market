@@ -18,7 +18,7 @@ policy and provisioning adapters. A shared shell can therefore select it
 without importing VM services or replacing domain-owned codecs and lifecycle
 semantics.
 
-Every derived listing persists one common binding containing trusted site,
+Every capacity-derived listing persists one common binding containing trusted site,
 offering mode, exact domain identity/version, public source envelope, and
 collision-safe pool or Physical Resource provenance. Public
 `virtualization_type` is projected from this binding, not guessed from a
@@ -37,7 +37,7 @@ authority on refusal or outage.
 
 ## Advisory publication, authoritative admission
 
-A listing is an offer based on the seller's latest complete capacity view. It is not a physical reservation.
+A capacity-backed listing is an offer based on the seller's latest complete capacity view. It is not a physical reservation. Unbacked contact offers instead describe an introduction and make no capacity claim.
 
 ```text
 site projections → storefront cache → listing reconciliation → registry
@@ -130,6 +130,34 @@ legacy `accepted_escrows`. The listing schema and registry projections allow an
 empty escrow list, so a hosted-only listing does not manufacture a chain
 carrier. Accepted negotiation persists the exact selected option and a
 quantity-scaled integer amount for later server-authoritative preparation.
+
+## Synthetic contact file publication
+
+`contact_offers.py` owns a bounded opt-in publication path independent of site
+projection reconciliation. The strict file describes synthetic offers, not
+inventory: typed bare-metal local artifacts have no access or authority binding,
+while the registry request includes the flat fields that `vms.compute/1` filters
+consume. Public profile terms and offers disclaim supply, payment, and provisioning.
+
+Validation covers the whole file before any listing intent or registry mutation:
+local public-content/privacy checks, signed schema retrieval and validation, then
+existing-ID conflicts. Each new listing and its immutable public offer/option
+snapshot commits in one transaction, and all intended listings are durable before
+the first remote upsert. Local transactions are per listing. A database failure
+can leave earlier intent; there is no atomic transaction across a file and registry.
+
+Every invocation upserts every intended ID. Stable explicit listing IDs and
+content-derived options let bounded retry or restart converge after lost
+acknowledgements. Confirmed count is not a count of all possible remote effects.
+Startup failure prevents serving but does not undo earlier upserts. There is no
+periodic refresh or background publisher, and omission is not withdrawal.
+
+An immutable ID rejects changes to public offer/option content or local ownership;
+closed or paused offers cannot be reopened by reconciliation. Timestamps and
+private contacts are not public intent. Accepted plans and revealed contacts live
+in their own immutable records, so republishing cannot rewrite them. See
+[contact capture](../contact-exchange-settlement/architecture.md#acceptance-and-capture)
+and [deployment inputs](../../../docs/development/DEPLOYMENT_AND_CONFIG.md#bare-metal-introduction-only-configuration).
 
 ## Related contracts
 

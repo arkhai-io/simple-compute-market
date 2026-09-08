@@ -588,9 +588,10 @@ class SettlementSQLiteRepository:
     def _now() -> str:
         return datetime.now(timezone.utc).isoformat()
 
-    def _obligation(self, row: tuple[Any, ...]) -> dict[str, Any]:
-        value = dict(zip(self._OBLIGATION_COLUMNS, row))
-        for field in self._OBLIGATION_JSON_FIELDS:
+    @classmethod
+    def _obligation(cls, row: tuple[Any, ...]) -> dict[str, Any]:
+        value = dict(zip(cls._OBLIGATION_COLUMNS, row))
+        for field in cls._OBLIGATION_JSON_FIELDS:
             raw = value.get(field)
             if field in {"payer_principal", "claimant_principal"}:
                 if not raw:
@@ -623,115 +624,129 @@ class SettlementSQLiteRepository:
         value["receipt"] = json.loads(value["receipt"]) if value["receipt"] else None
         return value
 
+    @classmethod
+    def upsert_settlement_obligation_in_transaction(
+        cls, conn: sqlite3.Connection, obligation: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Register bookkeeping inside the caller's transaction, without lifecycle I/O.
+
+        The caller owns commit/rollback so accepted-plan and obligation identity
+        can become durable together. Existing lifecycle state is never reset.
+        """
+        if not conn.in_transaction:
+            raise ValueError("obligation registration requires an active transaction")
+        now = cls._now()
+
+        def json_value(name: str, default: Any = None) -> str | None:
+            value = obligation.get(name, default)
+            return canonical_json(value) if value is not None else None
+
+        payer_principal = json_value("payer_principal")
+        claimant_principal = json_value("claimant_principal")
+        if payer_principal is None or claimant_principal is None:
+            raise ValueError(
+                "settlement obligation requires canonical principals"
+            )
+
+        conn.execute(
+            """
+            INSERT OR IGNORE INTO settlement_obligations
+              (obligation_ref, agreement_ref, obligation_index,
+               obligation_hash, obligation, mechanism_params,
+               payer_principal, claimant_principal, mechanism_ref,
+               mechanism_status, mechanism_state, buyer_action,
+               condition_anchor, fulfillment_ref, materialization_state,
+               condition_state, collection_state, reclaim_state,
+               materialization_receipt, status_receipt,
+               collection_receipt, reclaim_receipt, last_error,
+               version, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+                    ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                obligation["obligation_ref"],
+                obligation["agreement_ref"],
+                int(obligation["obligation_index"]),
+                obligation["obligation_hash"],
+                canonical_json(obligation["obligation"]),
+                canonical_json(obligation.get("mechanism_params") or {}),
+                payer_principal,
+                claimant_principal,
+                obligation.get("mechanism_ref"),
+                obligation.get("mechanism_status"),
+                canonical_json(obligation.get("mechanism_state") or {}),
+                json_value("buyer_action"),
+                obligation.get("condition_anchor"),
+                obligation.get("fulfillment_ref"),
+                obligation.get("materialization_state") or "pending",
+                obligation.get("condition_state") or "pending",
+                obligation.get("collection_state") or "pending",
+                obligation.get("reclaim_state") or "pending",
+                json_value("materialization_receipt"),
+                json_value("status_receipt"),
+                json_value("collection_receipt"),
+                json_value("reclaim_receipt"),
+                obligation.get("last_error"),
+                int(obligation.get("version") or 0),
+                now,
+                now,
+            ),
+        )
+        stored_binding = conn.execute(
+            "SELECT obligation_ref, obligation_hash, "
+            "payer_principal, claimant_principal "
+            "FROM settlement_obligations WHERE agreement_ref=? "
+            "AND obligation_index=?",
+            (
+                obligation["agreement_ref"],
+                int(obligation["obligation_index"]),
+            ),
+        ).fetchone()
+        if stored_binding is None:
+            raise RuntimeError("settlement obligation insert was lost")
+        if (
+            stored_binding[0] != obligation["obligation_ref"]
+            or stored_binding[1] != obligation["obligation_hash"]
+        ):
+            raise ValueError(
+                "agreement obligation index was reused with different terms"
+            )
+        for stored_principal, supplied_principal in zip(
+            stored_binding[2:],
+            (payer_principal, claimant_principal),
+            strict=True,
+        ):
+            if (
+                stored_principal is not None
+                and stored_principal != supplied_principal
+            ):
+                raise ValueError(
+                    "settlement obligation principal binding changed"
+                )
+        row = conn.execute(
+            f"SELECT {', '.join(cls._OBLIGATION_COLUMNS)} FROM settlement_obligations WHERE agreement_ref=? AND obligation_index=?",
+            (obligation["agreement_ref"], int(obligation["obligation_index"])),
+        ).fetchone()
+        if row is None:
+            raise RuntimeError("settlement obligation insert was lost")
+        stored = cls._obligation(row)
+        if (
+            stored["obligation_ref"] != obligation["obligation_ref"]
+            or stored["obligation_hash"] != obligation["obligation_hash"]
+        ):
+            raise ValueError(
+                "agreement obligation index was reused with different terms"
+            )
+        return stored
+
     async def upsert_settlement_obligation(
         self, obligation: dict[str, Any]
     ) -> dict[str, Any]:
         def run() -> dict[str, Any]:
-            now = self._now()
             conn = self._connect()
             try:
                 conn.execute("BEGIN IMMEDIATE")
-
-                def json_value(name: str, default: Any = None) -> str | None:
-                    value = obligation.get(name, default)
-                    return canonical_json(value) if value is not None else None
-
-                payer_principal = json_value("payer_principal")
-                claimant_principal = json_value("claimant_principal")
-                if payer_principal is None or claimant_principal is None:
-                    raise ValueError(
-                        "settlement obligation requires canonical principals"
-                    )
-
-                conn.execute(
-                    """
-                    INSERT OR IGNORE INTO settlement_obligations
-                      (obligation_ref, agreement_ref, obligation_index,
-                       obligation_hash, obligation, mechanism_params,
-                       payer_principal, claimant_principal, mechanism_ref,
-                       mechanism_status, mechanism_state, buyer_action,
-                       condition_anchor, fulfillment_ref, materialization_state,
-                       condition_state, collection_state, reclaim_state,
-                       materialization_receipt, status_receipt,
-                       collection_receipt, reclaim_receipt, last_error,
-                       version, created_at, updated_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-                            ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    """,
-                    (
-                        obligation["obligation_ref"],
-                        obligation["agreement_ref"],
-                        int(obligation["obligation_index"]),
-                        obligation["obligation_hash"],
-                        canonical_json(obligation["obligation"]),
-                        canonical_json(obligation.get("mechanism_params") or {}),
-                        payer_principal,
-                        claimant_principal,
-                        obligation.get("mechanism_ref"),
-                        obligation.get("mechanism_status"),
-                        canonical_json(obligation.get("mechanism_state") or {}),
-                        json_value("buyer_action"),
-                        obligation.get("condition_anchor"),
-                        obligation.get("fulfillment_ref"),
-                        obligation.get("materialization_state") or "pending",
-                        obligation.get("condition_state") or "pending",
-                        obligation.get("collection_state") or "pending",
-                        obligation.get("reclaim_state") or "pending",
-                        json_value("materialization_receipt"),
-                        json_value("status_receipt"),
-                        json_value("collection_receipt"),
-                        json_value("reclaim_receipt"),
-                        obligation.get("last_error"),
-                        int(obligation.get("version") or 0),
-                        now,
-                        now,
-                    ),
-                )
-                stored_binding = conn.execute(
-                    "SELECT obligation_ref, obligation_hash, "
-                    "payer_principal, claimant_principal "
-                    "FROM settlement_obligations WHERE agreement_ref=? "
-                    "AND obligation_index=?",
-                    (
-                        obligation["agreement_ref"],
-                        int(obligation["obligation_index"]),
-                    ),
-                ).fetchone()
-                if stored_binding is None:
-                    raise RuntimeError("settlement obligation insert was lost")
-                if (
-                    stored_binding[0] != obligation["obligation_ref"]
-                    or stored_binding[1] != obligation["obligation_hash"]
-                ):
-                    raise ValueError(
-                        "agreement obligation index was reused with different terms"
-                    )
-                for stored_principal, supplied_principal in zip(
-                    stored_binding[2:],
-                    (payer_principal, claimant_principal),
-                    strict=True,
-                ):
-                    if (
-                        stored_principal is not None
-                        and stored_principal != supplied_principal
-                    ):
-                        raise ValueError(
-                            "settlement obligation principal binding changed"
-                        )
-                row = conn.execute(
-                    f"SELECT {', '.join(self._OBLIGATION_COLUMNS)} FROM settlement_obligations WHERE agreement_ref=? AND obligation_index=?",
-                    (obligation["agreement_ref"], int(obligation["obligation_index"])),
-                ).fetchone()
-                if row is None:
-                    raise RuntimeError("settlement obligation insert was lost")
-                stored = self._obligation(row)
-                if (
-                    stored["obligation_ref"] != obligation["obligation_ref"]
-                    or stored["obligation_hash"] != obligation["obligation_hash"]
-                ):
-                    raise ValueError(
-                        "agreement obligation index was reused with different terms"
-                    )
+                stored = self.upsert_settlement_obligation_in_transaction(conn, obligation)
                 conn.commit()
                 return stored
             except Exception:

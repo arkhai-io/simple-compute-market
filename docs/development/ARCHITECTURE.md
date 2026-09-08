@@ -56,7 +56,7 @@ Core owns schema-opaque carriers and role structure around these phases: signed 
 
 Each domain-owned storefront validates one immutable `MarketDomainContract` at its composition boundary before constructing persistence, services, workers, or the HTTP application. The validated object is carried through common listing/negotiation/artifact bindings and lifecycle contexts. Domain contributions expose that contract through `market.storefront_contributions`; shared core dispatch resolves only the frozen domain identity/version and never guesses from a payload or imports the domain.
 
-The VM and bare-metal storefronts can run as separate one-domain processes or as installed contributions selected by a shared shell. Bare metal owns its seller policy, site bindings, and provisioning adapters and imports no VM services. The common binding schema freezes offering mode, domain identity/version, site, and Physical Resource for both shapes, so restart and composition changes do not change the authority selected by an accepted agreement.
+The VM and bare-metal storefronts can run as separate one-domain processes or as installed contributions selected by a shared shell. Bare metal owns its seller policy, site bindings, and provisioning adapters and imports no VM services. The common binding schema freezes offering mode, domain identity/version, and provenance for both shapes. Site-backed listings retain their selected authority; unbacked listings retain the absence of site, pool, and Physical Resource authority. Restart and composition changes cannot reinterpret either binding.
 
 The `arkhai-kit-storefront` distribution (`market_storefront_kit`) owns the
 shared FastAPI app, lifespan, container, ordered-route, middleware, Alkahest
@@ -210,9 +210,11 @@ singleton, module getter, installed-order fallback, global selection, or
 contract reconstruction.
 
 The common database owns immutable listing, negotiation-thread, and domain
-artifact bindings. They retain the selected site, mode, domain
-identity/version, and collision-safe provenance. Opening a thread inherits its
-listing binding before domain policy runs. Publication, negotiation,
+artifact bindings. They retain mode, domain identity/version, and collision-safe
+provenance. Site-backed bindings retain the selected site; the unbacked alternative
+uses SQL NULL for site, pool, and Physical Resource, with NULL-safe thread ownership
+guards. Domain admission decides which offers may be unbacked. Opening a thread
+inherits its listing binding before domain policy runs. Publication, negotiation,
 settlement, fulfillment, result recovery, and teardown resolve only that
 recorded binding against the frozen registry. Selected-site calls are pinned
 and never fan out. Removing a mode closes new publication but does not
@@ -245,7 +247,29 @@ no-op.
 
 Marketplace roles configure peer settlement mechanisms through one typed `[Settlement]` root. Its duplicate-free `priority` list contains canonical mechanism IDs; registered `stripe`, `alkahest`, and `contact` subsections own their mechanism policy and public client inputs. Identity, wallet, and chains remain independent shared resources. Composition roots register installed mechanisms explicitly, inject only the signer or EVM resources each declares, and pass every resulting client into the single `market_settlement_runtime` lifecycle.
 
-A market may settle by introduction: the `contact-exchange.v1` mechanism completes a deal with no payment and no provisioning — buyer and seller are put durably into contact with the context established during negotiation, revealed only after acceptance through the authenticated introductions surface. Its options are rateless (the mechanism declines scalar negotiation), its one obligation is non-financial, and contact payloads are bounded, deliberately persisted PII that never appears in listings or discovery.
+A market may settle by introduction: `contact-exchange.v1` has rateless options
+and one non-financial obligation, with no payment or provisioning. Acceptance
+and sharing are separate operations: new bare-metal contact acceptances commit
+an immutable plan and pending obligation bookkeeping atomically, with zero
+contact payloads or lifecycle effects. Explicit buyer-authorized introduction
+start captures both contacts and accepted context, then completes the obligation.
+Party-authorized reads serve that persisted reveal after restart. Older accepted
+plans without registered bookkeeping are not backfilled from opaque references.
+See [contact-exchange settlement](../../openspec/specs/contact-exchange-settlement/spec.md)
+and its [architecture](../../openspec/specs/contact-exchange-settlement/architecture.md).
+
+The bare-metal environment factory derives introduction-only operation from an
+enabled mechanism set containing only contact exchange. It constructs no site,
+capacity, provisioning, chain, or hosted financial runtime; physical health checks
+are not applicable. Synthetic file publication additionally requires no delivery
+callback. It validates the whole offer set before local listing intent and signed
+registry upserts, preserving stable IDs across bounded retry and restart; schema
+validation first obtains the signed registry schema. This is separate from
+capacity-event publication. See [storefront publication](../../openspec/specs/storefront-publication/spec.md#requirement-synthetic-contact-publication-validates-the-whole-file).
+
+Shared buyer negotiation represents absent opening, bound, and accepted amounts
+as absence, not zero, and remains mechanism-opaque. Priced comparisons remain
+unchanged. See [amountless negotiation](../../openspec/specs/buyer-orchestration/spec.md#requirement-amountless-buyer-negotiation-is-explicit).
 
 Each side may deliver its own copy of a revealed introduction to sinks its operator configures locally — a file, a local program, a webhook, mail, or any sink installed as a plugin. Delivery is recipient-side and self-addressed: the storefront delivers the buyer's contact to the seller's own destinations and the buyer's CLI delivers the seller's to theirs, and neither side ever sends anything to an address the counterparty supplied. It is never authoritative — a sink failure cannot fail a deal, change obligation servicing, or extend a counterparty's request — because the reveal is durable and idempotently re-readable, which is also why delivery is best-effort with explicit re-delivery rather than a queue. A delivered copy falls outside the introduction retention boundary: `delete_introduction` governs what the marketplace persists, not what a recipient's own mailbox or file already holds.
 
@@ -446,7 +470,7 @@ Fulfillment lifecycle identifiers are opaque UUIDv7 strings. They are not encode
 | `site_id` | Explicit authority/routing identity; never encoded into another ID |
 | `pool_id` | Globally unique pool identity with explicit site ownership where required |
 
-`obligation_ref` is the universal deal-settlement identity: every deal, regardless of settlement mechanism, has one durable `settlement_obligations` record keyed by its `obligation_ref` (derived from the agreement, obligation index, and canonical obligation content). A mechanism-issued identifier — the Alkahest `escrow_uid`, a hosted settlement reference, an introduction operation reference — is recorded on that record as the mechanism's `mechanism_ref`. Cross-mechanism status and tooling correlate deals by `obligation_ref`; mechanism-specific route families (such as `/api/v1/settle/{escrow_uid}`) remain each mechanism's own surface and expose the neutral `obligation_ref` in their status projections. Legacy escrows rows are backfilled with their neutral record at storefront startup; rows whose negotiation predates persisted settlement plans keep only their mechanism-surface identity.
+`obligation_ref` is the universal deal-settlement identity: registered obligations, regardless of settlement mechanism, have one durable `settlement_obligations` record keyed by their `obligation_ref` (derived from the agreement, obligation index, and canonical obligation content). A mechanism-issued identifier — the Alkahest `escrow_uid`, a hosted settlement reference, an introduction operation reference — is recorded on that record as the mechanism's `mechanism_ref`. Cross-mechanism status and tooling correlate deals by `obligation_ref`; mechanism-specific route families (such as `/api/v1/settle/{escrow_uid}`) remain each mechanism's own surface and expose the neutral `obligation_ref` in their status projections. Legacy escrows rows are backfilled with their neutral record at storefront startup; rows whose negotiation predates persisted settlement plans keep only their mechanism-surface identity. Older unstarted contact acceptances without a registered obligation remain unresolved by reference until an authorized explicit start supplies their negotiation identity; they have no automatic backfill.
 
 `fulfillment_uid` is a distinct, older identifier predating `fulfillment_id`: the on-chain settlement-claim identity a storefront's settlement mechanism (Alkahest today) issues for escrow arbitration. It is not part of the fulfillment-lifecycle UUIDv7 family above, is owned by the settlement mechanism rather than the fulfillment capability, and MUST NOT be confused with `fulfillment_id` — a storefront workflow row may legitimately carry both, for the same deal, meaning two different things.
 
@@ -570,7 +594,7 @@ Compose is organized by market domain and includes the shared development chain.
 
 ### Production and staging
 
-The deployment surfaces support independently selectable registries, VM and bare-metal storefront roles, compute provisioning, and optional development/test components. The umbrella chart uses the schema-opaque registry subchart for its default compute registry and may enable a second aliased API-credits registry. Each registry has its own schema path, authority signer Secret, descriptor, Service, and retained PVC. `helm/charts/bare-metal-storefront` installs the dedicated one-domain role with its own service, persistence boundary, health probes, public URL, external signer Secret, and external site-binding Secret; the umbrella/shared-shell chart may instead select installed domain contributions. Disabling one role creates no wait or reference from another.
+The deployment surfaces support independently selectable registries, VM and bare-metal storefront roles, compute provisioning, and optional development/test components. The umbrella chart uses the schema-opaque registry subchart for its default compute registry and may enable a second aliased API-credits registry. Each registry has its own schema path, authority signer Secret, descriptor, Service, and retained PVC. `helm/charts/bare-metal-storefront` installs the dedicated one-domain role with its own service, persistence boundary, health probes, public URL, external signer Secret, and, for physical composition, external site-binding Secret; the umbrella/shared-shell chart may instead select installed domain contributions. Disabling one role creates no wait or reference from another.
 
 Configuration resolution, ConfigMap/Secret mounting, stateful-service persistence strategy, and migration-at-startup conventions are covered in [`docs/development/DEPLOYMENT_AND_CONFIG.md`](DEPLOYMENT_AND_CONFIG.md) and [the deployment and state specification](../../openspec/specs/deployment-state/spec.md).
 

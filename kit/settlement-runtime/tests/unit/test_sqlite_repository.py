@@ -453,3 +453,20 @@ async def test_materialization_params_are_immutable_and_identity_preserving(
     )
     assert bound["obligation"] == retried["obligation"] == stored["obligation"]
     assert bound["mechanism_params"] == retried["mechanism_params"] == params
+
+
+def test_transaction_scoped_registration_requires_caller_transaction(tmp_path):
+    repository = SettlementSQLiteRepository(str(tmp_path / "settlement.db"))
+    record = SettlementObligationRecord.from_obligation(
+        agreement_ref="accepted-test", obligation_index=0, obligation=obligation(),
+    ).model_dump()
+    with sqlite3.connect(repository.db_path) as conn:
+        with pytest.raises(ValueError, match="active transaction"):
+            repository.upsert_settlement_obligation_in_transaction(conn, record)
+        conn.execute("BEGIN IMMEDIATE")
+        stored = repository.upsert_settlement_obligation_in_transaction(conn, record)
+        assert stored["materialization_state"] == "pending"
+        assert stored["mechanism_ref"] is None
+        assert conn.in_transaction
+        conn.rollback()
+        assert conn.execute("SELECT COUNT(*) FROM settlement_obligations").fetchone()[0] == 0

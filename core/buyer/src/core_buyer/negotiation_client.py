@@ -341,7 +341,7 @@ def _validate_settlement_acceptance(
     plan: SettlementPlan | None,
     expected_selection: SettlementSelection,
     advertised_option: SettlementOption | None,
-    agreed_amount: int,
+    agreed_amount: int | None,
     expected_plan: SettlementPlan | None,
     buyer_principal: Identity,
     trusted_seller_principals: TrustedIdentitySet,
@@ -685,8 +685,8 @@ def negotiate_with_seller(
     signer: Signer,
     listing_id: str,
     resolve_seller_principals: Callable[[], TrustedIdentitySet],
-    initial_price: float,
-    max_price: float,
+    initial_price: float | None,
+    max_price: float | None,
     unit_count: Optional[float] = None,
     provision_terms: Any | None = None,
     escrow_proposal: Any | None = None,
@@ -704,6 +704,9 @@ def negotiate_with_seller(
     validate_advertised_plan: Callable[[SettlementPlan], None] | None = None,
 ) -> NegotiationOutcome:
     """Run a synchronous negotiation with one seller, round-by-round.
+
+    Both price inputs are None for an explicitly amountless invocation, which
+    requires an exact advertised rateless option and rejects any monetary reply.
 
     `initial_price` is what the buyer opens with (can be lower than max
     to haggle). `max_price` is the buyer's absolute ceiling — any seller
@@ -781,6 +784,14 @@ def negotiate_with_seller(
         else None
     )
     expected_selection = settlement_selection
+    amountless = initial_price is None and max_price is None
+    if (initial_price is None) != (max_price is None):
+        raise ValueError("opening price and bound must both be present or both absent")
+    if amountless and (
+        advertised_option is None or advertised_option.rates
+        or (settlement_selection is None and resume is None)
+    ):
+        raise ValueError("amountless negotiation requires an advertised rateless option")
 
     if resume is not None:
         (
@@ -822,6 +833,8 @@ def negotiate_with_seller(
         if not isinstance(p, dict):
             return None
         v = (p.get("fields") or {}).get("amount")
+        if amountless and v is not None:
+            raise RuntimeError("amountless negotiation received a monetary amount")
         return int(v) if v is not None else None
 
     neg_id: str | None
@@ -869,8 +882,10 @@ def negotiate_with_seller(
                 "into absolute amounts."
             )
         scale = float(unit_count)
-        initial_amount = int(round(float(initial_price) * scale))
-        ceiling_amount = float(max_price) * scale
+        initial_amount = (
+            int(round(initial_price * scale)) if initial_price is not None else None
+        )
+        ceiling_amount = max_price * scale if max_price is not None else None
 
         # Pin the buyer's first proposal: the policy chain owns the
         # round-0 opening (ARCHITECTURE.md, "Buyer negotiation policy surface") — run it
@@ -931,6 +946,7 @@ def negotiate_with_seller(
                 f"reject make sense before the seller has said anything."
             )
         pinned_proposal = opening.proposal
+        _amount(pinned_proposal)
 
         new_body = {
             "listing_id": listing_id,
@@ -1059,18 +1075,14 @@ def negotiate_with_seller(
                     proposal=seller_counter_proposal,
                 )
             )
-        ceiling_amount = (
-            float(max_price) * float(unit_count)
-            if unit_count is not None
-            else float(max_price)
-        )
+        _amount(seller_counter_proposal)
+        scale = float(unit_count) if unit_count is not None else 1
+        ceiling_amount = max_price * scale if max_price is not None else None
         ctx = NegotiationContext(
             direction="minimize",
             our_reference_amount=ceiling_amount,
             our_opening_amount=(
-                float(initial_price) * float(unit_count)
-                if unit_count is not None
-                else float(initial_price)
+                initial_price * scale if initial_price is not None else None
             ),
             listing={},
             our_escrow_proposal=pinned_proposal,
@@ -1115,6 +1127,7 @@ def negotiate_with_seller(
                 raise RuntimeError(
                     f"chain returned {next_move.action!r} without a proposal"
                 )
+            _amount(next_move.proposal)
             body["proposal"] = next_move.proposal
         elif next_move.action in ("exit", "reject"):
             body["reason"] = next_move.reason or "buyer_exit"
@@ -1161,7 +1174,7 @@ def negotiate_with_seller(
                 if agreed_amount is None:
                     agreed_amount = _amount(next_move.proposal)
                 if expected_selection is not None:
-                    if agreed_amount is None:
+                    if agreed_amount is None and not amountless:
                         raise RuntimeError(
                             "seller accept state omitted the negotiated amount"
                         )
@@ -1258,7 +1271,7 @@ def negotiate_with_seller(
             if agreed_amount is None:
                 agreed_amount = _amount(next_move.proposal)
             if expected_selection is not None:
-                if agreed_amount is None:
+                if agreed_amount is None and not amountless:
                     raise RuntimeError(
                         "seller accept state omitted the negotiated amount"
                     )

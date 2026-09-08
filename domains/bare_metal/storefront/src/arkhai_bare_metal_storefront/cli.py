@@ -2,9 +2,13 @@
 
 from __future__ import annotations
 
+import json
 from importlib.metadata import PackageNotFoundError, version
+from pathlib import Path
 
 import typer
+
+from .contact_offers import run_contact_publication
 
 app = typer.Typer(no_args_is_help=True)
 
@@ -50,11 +54,22 @@ def serve_cmd(
 def publish_cmd() -> None:
     """Publish one authenticated round from fresh trusted-site projections."""
 
-    import json
-
     from .publication_cli import run_publication_once
 
     typer.echo(json.dumps(run_publication_once(), sort_keys=True))
+
+
+@app.command("publish-contacts")
+def publish_contacts_cmd(
+    offers: Path | None = typer.Option(None, "--offers", help="Strict synthetic contact offer JSON file."),
+) -> None:
+    """Reconcile immutable contact offers with the configured signed registry."""
+    try:
+        result = run_contact_publication(offers)
+    except RuntimeError as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(1) from None
+    typer.echo(json.dumps(result, sort_keys=True))
 
 
 @app.command("redeliver-introduction")

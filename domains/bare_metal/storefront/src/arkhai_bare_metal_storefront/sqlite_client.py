@@ -34,10 +34,12 @@ from core_storefront import (
 )
 from market_contact_exchange import (
     CONTACT_EXCHANGE_MIGRATIONS,
+    MECHANISM as CONTACT_MECHANISM,
     IntroductionRecord,
     insert_introduction,
     load_introduction,
 )
+from market_core.schemas import SettlementOption
 from market_settlement_runtime import settlement_migrations
 from market_identity import Identity
 from pydantic import BaseModel
@@ -156,15 +158,15 @@ class SQLiteClient(CoreSQLiteClient):
         await asyncio.to_thread(_save)
 
     async def count_open_bare_metal_resources(self) -> int:
-        """Count open specific-resource publications for operator status."""
+        """Count open bare-metal publications, including unbacked introductions."""
 
         def _count() -> int:
             conn = sqlite3.connect(self.db_path)
             try:
                 row = conn.execute(
-                    "SELECT COUNT(*) FROM derived_bare_metal_listings d "
-                    "JOIN listings l ON l.listing_id = d.listing_id "
-                    "WHERE d.status = 'open' AND l.status = 'open' "
+                    "SELECT COUNT(*) FROM storefront_listing_bindings b "
+                    "JOIN listings l ON l.listing_id = b.listing_id "
+                    "WHERE b.offering_mode = 'bare_metal' AND l.status = 'open' "
                     "AND COALESCE(l.paused, 0) = 0",
                 ).fetchone()
                 return int(row[0])
@@ -351,11 +353,28 @@ class SQLiteClient(CoreSQLiteClient):
         demands: list[dict[str, Any]] | None = None,
         paused: bool = False,
         oracle_address: str | None = None,
-        site_id: str,
-        pool_id: str,
-        physical_resource_id: str,
+        site_id: str | None,
+        pool_id: str | None,
+        physical_resource_id: str | None,
+        publication_intent: Mapping[str, Any] | None = None,
     ) -> None:
         normalized = self._market_domain.codecs.listing(listing)
+        if publication_intent is not None and site_id is not None:
+            raise ValueError("contact publication intent cannot carry site authority")
+        if site_id is None:
+            options = [SettlementOption.model_validate(value) for value in settlement_options or []]
+            if (
+                pool_id is not None or physical_resource_id is not None
+                or normalized.access_methods != ["none"]
+                or accepted_escrows or not options
+                or any(
+                    option.mechanism != CONTACT_MECHANISM
+                    or option.asset != "introduction" or option.rates
+                    or "bare_metal" in option.params
+                    for option in options
+                )
+            ):
+                raise ValueError("unbacked bare-metal listings require only contact exchange and no access")
         domain_binding = StorefrontDomainBinding(
             offering_mode="bare_metal",
             domain_identity=self._market_domain.identity,
@@ -363,7 +382,10 @@ class SQLiteClient(CoreSQLiteClient):
             contract_minor=self._market_domain.contract_version.minor,
         )
         source_envelope = {
-            "kind": "bare_metal.resource-projection.v1",
+            "kind": (
+                "bare_metal.introduction-offer.v1" if site_id is None
+                else "bare_metal.resource-projection.v1"
+            ),
             "schema_version": 1,
             "site_id": site_id,
             "pool_id": pool_id,
@@ -371,6 +393,8 @@ class SQLiteClient(CoreSQLiteClient):
             "machine_id": normalized.machine_id,
             "physical_host_id": normalized.physical_host_id,
         }
+        if publication_intent is not None:
+            source_envelope["publication_intent"] = dict(publication_intent)
         binding = StorefrontListingBinding.from_source_envelope(
             listing_id=listing_id,
             site_id=site_id,
@@ -381,10 +405,12 @@ class SQLiteClient(CoreSQLiteClient):
                 site_id=site_id,
                 offering_mode="bare_metal",
                 binding=domain_binding,
-                source_identity={
-                    "pool_id": pool_id,
-                    "physical_resource_id": physical_resource_id,
-                },
+                source_identity=(
+                    {"listing_id": listing_id} if site_id is None else {
+                        "pool_id": pool_id,
+                        "physical_resource_id": physical_resource_id,
+                    }
+                ),
             ),
             source_envelope=source_envelope,
             last_reconciled_at=updated_at,

@@ -59,6 +59,20 @@ without installing a servicing worker. Full servicing begins only after the
 composition can bind a real immutable fulfillment reference; a no-op executor
 would falsely advertise collectability.
 
+## Accepted-plan persistence
+
+`core_storefront.SQLiteClient.commit_settlement_plan` validates immutable plan
+and party bindings before calling optional local bookkeeping in the same SQLite
+transaction. The domain supplies the callback; core has no contact-mechanism
+knowledge. `SettlementSQLiteRepository` registers the obligation on that caller's
+connection without committing or resetting existing lifecycle state. This avoids
+a durable accepted plan whose newly returned obligation reference cannot be
+resolved, without starting a mechanism or storing contacts during acceptance.
+
+The transaction covers plan and bookkeeping, not the earlier opening transcript
+or later explicit settlement effects. Contact-specific pending/read behavior
+belongs to [contact exchange](../contact-exchange-settlement/spec.md).
+
 ## Settlement configuration registration
 
 Composition roots register installed settlement mechanisms explicitly. Each registration contributes its canonical ID, typed configuration, role applicability, preflight, client factory, listing-option builder, buyer compatibility, and optional command group. Core roles consume only ordered registrations and common readiness; they neither branch on mechanism IDs nor import concrete configuration models.
@@ -77,10 +91,12 @@ exact contract object plus its publication and legacy-migration hooks.
 
 Application, persistence, publication, negotiation, settlement, fulfillment,
 recovery, result, and teardown layers receive that same registry. Every listing
-binding freezes its selected contribution identity, contract version, Resource
-Pool offering mode, trusted site, and Physical Resource; negotiation copies the
-immutable binding before storing a domain artifact. Durable bindings resolve
-only to their pre-registered exact objects, and schema-opaque payloads are
+binding freezes its selected contribution identity, contract version, offering
+mode, and provenance; negotiation copies the immutable binding before storing a
+domain artifact. Site-backed provenance retains its selected site and optional
+pool/resource fields. Unbacked provenance has no site, pool, or Physical Resource
+authority. SQL NULL is a constrained alternative, not a missing routing default.
+Durable bindings resolve only to their pre-registered exact objects, and schema-opaque payloads are
 validated only by the selected contract. A one-domain storefront uses these
 same carriers with one explicit registration, never a separate executable or
 default, so adding a shared shell changes neither persistence nor routing.

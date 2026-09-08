@@ -478,8 +478,8 @@ these decision points.
 
 ### Requirement: Deal identity is mechanism-neutral for every mechanism
 
-Every deal, regardless of mechanism, MUST have a durable `settlement_obligations`
-record keyed by its `obligation_ref`, with any mechanism-issued identifier (such as an
+A deal's durable settlement bookkeeping, regardless of mechanism, MUST use a
+`settlement_obligations` record keyed by its `obligation_ref`, with any mechanism-issued identifier (such as an
 escrow uid) recorded as that mechanism's `mechanism_ref`. Cross-mechanism tooling MUST
 correlate deals by `obligation_ref`.
 
@@ -511,7 +511,64 @@ command assembly.
 - **THEN** market orchestration on that side proceeds unchanged and the sink is
   reported as a local delivery fault
 
+### Requirement: Unbacked storefront provenance
+
+Shared listing provenance SHALL be either site-backed or unbacked. The unbacked
+alternative SHALL have no site, pool, or Physical Resource authority; SQL NULL
+encodes that absence. Site-backed provenance SHALL retain its existing valid
+forms, including optional pool/resource fields. Core SHALL leave eligibility for
+unbacked offers to domain admission, without importing a settlement mechanism.
+
+Negotiation bindings SHALL inherit the exact listing domain and nullable site.
+Listing and negotiation provenance SHALL remain immutable with NULL-safe owner
+comparisons. The versioned transactional migration SHALL preserve existing
+bindings, negotiation rows, and immutable constraints.
+
+#### Scenario: A domain admits an unbacked offer
+
+- **WHEN** its listing opens a negotiation and the storefront restarts
+- **THEN** listing and thread retain absent site authority without a placeholder
+  site, pool, or resource
+
+#### Scenario: Partial physical authority is submitted
+
+- **WHEN** a caller supplies a pool or Physical Resource with no site
+- **THEN** model validation and SQL admission reject the provenance
+
+#### Scenario: Binding migration fails
+
+- **WHEN** a migration fails after rebuilding the binding table
+- **THEN** the transaction restores schema, constraints, and rows, and a later
+  successful retry records the migration exactly once
+
+### Requirement: Accepted-plan bookkeeping shares the commit transaction
+
+Core accepted-plan persistence MAY invoke an injected synchronous bookkeeping
+callback inside its SQLite transaction. The callback SHALL perform only local
+persistence, with no contact capture, lifecycle action, or network I/O. The
+settlement repository's transaction-scoped obligation registration SHALL require
+an active caller transaction, preserve existing lifecycle state, and reject
+conflicting obligation identity or principals. The caller owns commit/rollback.
+
+#### Scenario: Bookkeeping fails after an insert
+
+- **WHEN** bookkeeping raises after inserting an obligation during plan commit
+- **THEN** neither that accepted plan nor the new obligation becomes durable;
+  an earlier negotiation opening need not be removed
+
+#### Scenario: An existing obligation is registered again
+
+- **WHEN** the identical plan and bookkeeping are committed again
+- **THEN** the existing obligation's lifecycle state is not reset to pending
+
 ## Evidence
+
+- Unbacked model/SQL admission, immutable thread parity, migration preservation,
+  rollback, and rerun: `core/storefront/tests/unit/test_domain_binding_migrations.py`.
+- Caller-owned transaction requirement: `kit/settlement-runtime/tests/unit/test_sqlite_repository.py::test_transaction_scoped_registration_requires_caller_transaction`.
+- Accepted-plan/bookkeeping rollback and lifecycle preservation:
+  `domains/bare_metal/storefront/tests/test_contact_only_runtime.py::test_contact_acceptance_bookkeeping_rollback`
+  and `test_signed_environment_negotiation_consent_reveal_and_restart` in that file.
 
 - Import boundaries: `core/tests/unit/test_carrier_purity.py` and `domains/vms/storefront/tests/unit/test_architecture_imports.py`.
 - Core CLI fallback and shipped plugin contracts: `core/buyer/tests/unit/test_cli.py`, `domains/vms/buyer/tests/test_plugin_export.py`, and `domains/apicredits/buyer/tests/test_plugin_export.py`.

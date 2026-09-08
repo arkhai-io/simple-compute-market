@@ -1,0 +1,70 @@
+{
+  "schema_version": 1,
+  "offers": [
+    {
+      "listing_id": "synthetic-contact-h100",
+      "name": "SYNTHETIC TEST H100 introduction",
+      "machine_id": "synthetic-machine-h100",
+      "physical_host_id": "synthetic-host-h100",
+      "profile": "default",
+      "gpu_model": "H100",
+      "gpu_count": 8,
+      "region": "us-west",
+      "vcpu_count": 128,
+      "ram_gb": 1024,
+      "disk_gb": 8000
+    },
+    {
+      "listing_id": "synthetic-contact-a100",
+      "name": "SYNTHETIC TEST A100 introduction",
+      "machine_id": "synthetic-machine-a100",
+      "physical_host_id": "synthetic-host-a100",
+      "profile": "default",
+      "gpu_model": "A100",
+      "gpu_count": 4,
+      "region": "eu-central",
+      "vcpu_count": 64,
+      "ram_gb": 512,
+      "disk_gb": 4000
+    },
+    {
+      "listing_id": "synthetic-contact-l40s",
+      "name": "SYNTHETIC TEST L40S introduction",
+      "machine_id": "synthetic-machine-l40s",
+      "physical_host_id": "synthetic-host-l40s",
+      "profile": "default",
+      "gpu_model": "L40S",
+      "gpu_count": 2,
+      "region": "us-east",
+      "vcpu_count": 32,
+      "ram_gb": 256,
+      "disk_gb": 2000
+    },
+    {
+      "listing_id": "synthetic-contact-rtx4090",
+      "name": "SYNTHETIC TEST RTX 4090 introduction",
+      "machine_id": "synthetic-machine-rtx4090",
+      "physical_host_id": "synthetic-host-rtx4090",
+      "profile": "default",
+      "gpu_model": "RTX 4090",
+      "gpu_count": 1,
+      "region": "ap-southeast",
+      "vcpu_count": 16,
+      "ram_gb": 128,
+      "disk_gb": 1000
+    },
+    {
+      "listing_id": "synthetic-contact-t4",
+      "name": "SYNTHETIC TEST T4 introduction",
+      "machine_id": "synthetic-machine-t4",
+      "physical_host_id": "synthetic-host-t4",
+      "profile": "default",
+      "gpu_model": "T4",
+      "gpu_count": 2,
+      "region": "eu-west",
+      "vcpu_count": 24,
+      "ram_gb": 96,
+      "disk_gb": 500
+    }
+  ]
+}

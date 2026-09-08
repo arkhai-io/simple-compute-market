@@ -14,6 +14,7 @@ from arkhai_bare_metal import (
 )
 from core_storefront.publication_runner import PublicationPayload
 from market_alkahest import create_alkahest_registration
+from market_contact_exchange import MECHANISM as CONTACT_MECHANISM
 from market_contact_exchange import create_contact_exchange_registration
 from market_core.schemas import SettlementOption
 from market_hosted_settlement import (
@@ -77,6 +78,10 @@ class BareMetalStorefrontSettlementComposition:
     @property
     def enabled_mechanisms(self) -> tuple[str, ...]:
         return self.config.priority
+
+    @property
+    def introduction_only(self) -> bool:
+        return self.enabled_mechanisms == (CONTACT_MECHANISM,)
 
     @property
     def hosted_only(self) -> bool:

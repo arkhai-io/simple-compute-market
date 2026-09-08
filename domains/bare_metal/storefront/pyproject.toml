@@ -20,6 +20,8 @@ dependencies = [
     "arkhai-kit-settlement-runtime>=0.1.0",
     "arkhai-kit-storefront==0.1.0",
     "fastapi~=0.115.8",
+    "jsonschema>=4.20",
+    "referencing>=0.30",
     "typer>=0.12.0",
     "uvicorn~=0.34.0",
 ]
@@ -32,6 +34,7 @@ bare_metal = "arkhai_bare_metal_storefront.contribution:BARE_METAL_STOREFRONT_CO
 
 [dependency-groups]
 dev = [
+    "arkhai-core-buyer==0.3.2",
     "pytest>=8.3.4,<10.0.0",
     "pytest-asyncio>=0.25,<2.0",
 ]
@@ -56,3 +59,6 @@ pythonpath = ["src"]
 testpaths = ["tests"]
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
+
+[tool.hatch.build.targets.wheel.force-include]
+"examples/contact-offers.json" = "arkhai_bare_metal_storefront/examples/contact-offers.json"

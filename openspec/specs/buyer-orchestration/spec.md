@@ -85,6 +85,37 @@ Domain buyer adapters MUST own settlement compatibility checks and CLI parameter
 - **WHEN** the selected buyer policy rejects every advertised tuple
 - **THEN** the buyer reports no compatible format rather than negotiating malformed terms
 
+### Requirement: Amountless buyer negotiation is explicit
+
+The shared buyer SHALL require opening price and monetary bound to be both
+present or both absent. An amountless invocation SHALL carry a validated exact
+advertised rateless option and an explicit selection (or recorded resume
+selection). It SHALL preserve absent proposal and accepted amounts, not
+substitute zero, and SHALL reject monetary proposals or obligations. Core SHALL
+apply this contract without naming a mechanism. Priced invocations SHALL retain
+monetary comparisons and missing-amount refusal.
+
+The bare-metal `request-introduction` command SHALL select one exact advertised
+contact option, pass its full validated shape and absent prices to shared
+negotiation, and leave contact sharing to a separate start operation.
+
+#### Scenario: An amountless acceptance is returned
+
+- **WHEN** shared negotiation receives a signed accepted plan
+- **THEN** it validates selection, single-obligation shape, canonical parties,
+  asset, expiration, advertised semantics, and absent amount before returning it
+
+#### Scenario: A seller supplies zero as an introduction amount
+
+- **WHEN** an amountless invocation receives a proposal or accepted obligation
+  with any monetary amount, including zero
+- **THEN** the buyer refuses it rather than comparing against a fabricated bound
+
+#### Scenario: A priced acceptance omits money
+
+- **WHEN** a priced invocation receives an acceptance without its negotiated amount
+- **THEN** the buyer rejects it, preserving priced-path validation
+
 ### Requirement: Policy-specific opening constraints
 Buyer role documentation MUST expose any configured policy constraint that can terminate negotiation before a counter-round. For the current maximizing bisection policy, an explicit opening below the seller's advertised primary rate is unsupported; the default listed-price policy opens at that rate.
 
@@ -344,12 +375,19 @@ principal, obligation, authorization, and settlement references.
 
 ## Evidence
 
-- Core/domain import purity and entry-point composition: `core/buyer/tests/unit/test_carrier_purity.py`, `domains/vms/buyer/tests/test_plugin_export.py`, and `domains/apicredits/buyer/tests/test_plugin_export.py`.
+- Absent amounts versus zero, priced non-regression, and explicit input refusal:
+  `core/buyer/tests/unit/test_settlement_acceptance.py`.
+- Full selected-option forwarding:
+  `domains/bare_metal/buyer/tests/test_buyer_composition.py`.
+- Shared amountless negotiation over signed HTTP:
+  `domains/bare_metal/storefront/tests/test_contact_only_runtime.py::test_signed_environment_negotiation_consent_reveal_and_restart`.
+
+- Core/domain import purity and entry-point composition: `core/tests/unit/test_carrier_purity.py`, `domains/vms/buyer/tests/test_plugin_export.py`, and `domains/apicredits/buyer/tests/test_plugin_export.py`.
 - Injected orchestration and aggregation-policy control: `core/buyer/tests/unit/test_orchestrator.py` and `kit/alkahest/tests/unit/test_aggregation.py`.
 - Persisted negotiation resume and agreed-run settlement continuation: `domains/vms/buyer/tests/test_buyer_client_resume.py` and `domains/vms/buyer/tests/test_buy_resume_cli.py`.
 - Policy-owned negotiation behavior: VM buyer policy and client tests.
 - Constrained settlement preference and fallback precedence:
-  `core/buyer/tests/unit/test_escrow_selection.py`.
+  `domains/vms/buyer/tests/test_escrow_selection.py`.
 
 Simultaneous command registration for every installed domain plugin is not independently covered by the cited tests; the baseline claim is limited to the plugin boundary and each shipped plugin's export contract.
 

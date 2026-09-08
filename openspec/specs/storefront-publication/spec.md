@@ -118,7 +118,7 @@ A storefront's derived-listing mapping (`derived_compute_listings`, `derived_bar
 - **THEN** each candidate's derivation key is resource-keyed and distinct, and recording one candidate's mapping does not overwrite another's
 
 ### Requirement: Site-pinned claim routing
-A capacity claim for a listing with a known site mapping MUST be routed to exactly that site, with no fallback to a different site on refusal or error — this applies to every listing with a site mapping, whether the underlying capacity is fungible (pool-derived) or pinned to a specific physical resource, never only to resource-pinned listings. A listing with no recorded site mapping MAY be routed by placement policy across configured sites.
+A capacity claim for a listing with a known site mapping MUST be routed to exactly that site, with no fallback to a different site on refusal or error — this applies to every listing with a site mapping, whether the underlying capacity is fungible (pool-derived) or pinned to a specific physical resource, never only to resource-pinned listings. A capacity claim without a recorded site mapping MAY be routed by placement policy across configured sites. An explicitly unbacked introduction listing is not an unmapped capacity claim and grants no physical authority.
 
 #### Scenario: A mapped listing's site would lose to placement policy
 - **WHEN** a listing is mapped to one site but placement policy would otherwise prefer a different configured site with more available capacity
@@ -182,11 +182,16 @@ The shared storefront role MUST consume the selected market-domain contract for 
 - **THEN** the storefront surfaces the domain validation failure without coercing it through a different domain or a generic fallback
 
 ### Requirement: Complete bare-metal seller lifecycle
-A bare-metal storefront MUST validate listing, negotiation-message, agreed-terms, settlement materialization, receipt, and access-result artifacts through its installed domain contract. The listing binding MUST freeze the trusted `site_id`, Physical Resource identity, `bare_metal` offering mode, and contract identity/version; the accepted negotiation MUST copy that binding before persisting domain artifacts. Settlement and fulfillment MUST reload that binding and MUST NOT infer a site, executor, URL, credential, or domain from buyer payload data.
+A bare-metal storefront MUST validate listing, negotiation-message, agreed-terms, settlement materialization, receipt, and access-result artifacts through its installed domain contract. For a physical listing, the binding MUST freeze the trusted `site_id`, Physical Resource identity, `bare_metal` offering mode, and contract identity/version; the accepted negotiation MUST copy that binding before persisting domain artifacts. Settlement and fulfillment MUST reload that binding and MUST NOT infer a site, executor, URL, credential, or domain from buyer payload data.
 
 #### Scenario: Buyer accepts a bare-metal listing
-- **WHEN** authenticated negotiation accepts valid terms for a trusted listing
-- **THEN** the thread persists the canonical buyer and seller principals, exact listing/site/domain binding, agreement payloads, and settlement plan atomically
+- **GIVEN** the negotiation opening has persisted the canonical buyer and seller principals, exact listing/domain binding (including the site for physical listings), and opening transcript
+- **WHEN** authenticated negotiation accepts valid terms for that listing
+- **THEN** acceptance commits the settlement plan and any contact pending-obligation bookkeeping in one transaction
+- **AND** rollback leaves the earlier opening but no accepted settlement plan; it does not roll back the opening transcript
+
+The [shared persistence contract](../market-composition/architecture.md) owns
+this transaction boundary.
 
 #### Scenario: Accepted bare-metal agreement is fulfilled
 - **WHEN** settlement is verified and the buyer starts fulfillment
@@ -508,7 +513,7 @@ Migration MUST NOT guess units, synthesize partial clauses, or reinterpret
 
 ### Requirement: Durable bindings govern multi-domain publication
 
-Every storefront listing MUST have one immutable common mapping binding the listing ID, trusted site, explicit pool or Physical Resource provenance, offering mode, exact domain identity/version, collision-safe derivation identity, and public-safe versioned source envelope. Public `offer_resource.virtualization_type` MUST equal the recorded offering mode. Pricing, settlement clauses, and seller policy remain on the generic listing; secret, provider, credential, SSH, and private result material MUST NOT enter the binding or public offer.
+Every storefront listing MUST have one immutable common mapping binding the listing ID, offering mode, exact domain identity/version, collision-safe derivation identity, and public-safe versioned source envelope. Provenance MUST follow the site-backed or unbacked alternative in [market composition](../market-composition/spec.md#requirement-unbacked-storefront-provenance); an unbacked binding grants no site, pool, or Physical Resource authority. Public `offer_resource.virtualization_type` MUST equal the recorded offering mode. Pricing, settlement clauses, and seller policy remain on the generic listing; secret, provider, credential, SSH, and private result material MUST NOT enter the binding or public offer.
 
 #### Scenario: One pool exposes VM and bare-metal modes
 
@@ -562,7 +567,99 @@ remain valid with an empty escrow list.
 - **WHEN** its profile, authority, account, condition, or currency readiness fails
 - **THEN** only that hosted alternative is omitted and publication emits a safe clause-scoped blocker
 
+### Requirement: Synthetic contact publication validates the whole file
+
+The bare-metal `publish-contacts` command and opt-in startup publication SHALL
+share one loader for a strict JSON document: schema version 1, one to five offers,
+unique explicit listing IDs, bounded synthetic labels, positive GPU/CPU/RAM/disk
+dimensions, region, and a configured public contact profile. The file SHALL be at
+most 128 KiB. Offers and public profile terms SHALL include
+`SYNTHETIC TEST OFFER: no supply, payment, or provisioning.`
+
+The loader SHALL require introduction-only composition with no seller delivery
+callback. It SHALL prepare every offer, enforce the contact kit's
+[literal privacy guard](../contact-exchange-settlement/spec.md#requirement-literal-configured-contacts-stay-out-of-public-artifacts),
+obtain the signed registry filter specification, require `vms.compute/1`, validate
+all projected requests against that schema, and check every existing-ID conflict
+before creating listing intent or mutating the registry. Runtime database
+initialization and authenticated schema reads are not listing publication.
+
+Local artifacts SHALL use the typed `bare_metal.v1` listing, with no access or
+physical authority. Discovery SHALL additionally project flat GPU, region, CPU,
+RAM, and disk fields for the existing compute schema. Each offer SHALL carry one
+rateless contact option and no accepted escrows.
+
+#### Scenario: The last offer is invalid
+
+- **WHEN** the last entry fails public-content, schema, or existing-ID validation
+- **THEN** no listing intent or registry mutation is performed for the file
+- **AND** a configured-contact leak is refused before registry calls as well
+
+### Requirement: Contact publication preserves stable local intent
+
+Before the first registry upsert, all new intended listings SHALL be durable.
+Each listing and its public offer/option snapshot SHALL be stored together in an
+immutable unbacked source envelope. The file is validated as a whole but local
+listing transactions are per listing, not a whole-file transaction.
+
+An existing ID SHALL reject changed public intent, owner, typed listing, or
+options. Public offer/option content defines intent; regenerated timestamps and
+private contact payloads do not. A changed public offer requires a new ID. Closed
+or paused local listings SHALL block publication rather than reopen. IDs omitted
+from the file SHALL trigger no withdrawal, deletion, or closure. Reconciliation
+SHALL NOT rewrite accepted plans or revealed contacts.
+
+#### Scenario: An accepted offer is republished
+
+- **WHEN** the same public intent is reconciled after restart or a private
+  contact configuration change
+- **THEN** publication retains listing and option identities and leaves accepted
+  context and already captured contacts unchanged
+
+#### Scenario: Local lifecycle conflicts with the file
+
+- **WHEN** a file ID is closed or paused, or its public content changes
+- **THEN** publication refuses the conflict without reopening or rewriting it
+- **AND** unrelated or omitted IDs are left unchanged
+
+### Requirement: Contact registry retries are bounded and identity-preserving
+
+Every invocation SHALL upsert every intended ID, including previously confirmed
+IDs, through the seller-signed registry client. A registry write API key and
+independent registry authority/principal trust SHALL remain separate gates.
+Transport and server failures SHALL receive at most three attempts per offer
+with bounded backoff; non-retryable refusals SHALL fail without that retry ladder.
+Responses SHALL confirm the expected listing ID and open status.
+
+Synthetic publication diagnostics use generic validation messages or stage,
+optional listing ID, and confirmed count. Listing IDs are echoed verbatim,
+including when they contain configured contact values; these diagnostics are
+not a universal redaction boundary. Failure SHALL NOT claim uncertain remote
+effects are absent. Startup publication failure SHALL prevent HTTP serving; restart
+SHALL run the same reconciliation. There SHALL be no periodic publisher, queue,
+heartbeat, or implicit rollback of already published offers in this path.
+
+#### Scenario: A committed upsert loses its acknowledgement
+
+- **WHEN** a registry mutation commits but the acknowledgement is lost
+- **THEN** retries and later invocations reuse the same listing ID without
+  duplicates, even if the confirmed count is zero
+
+#### Scenario: Startup partially publishes
+
+- **WHEN** an earlier upsert succeeds and a later one fails
+- **THEN** startup fails without undoing local intent or earlier remote writes,
+  and the next invocation retries every intended ID
+
 ## Evidence
+
+- Whole-file schema/privacy refusal, intent-before-POST, lost acknowledgements,
+  stable retry/restart, omission, inactive/changed-ID refusal, typed/flat discovery,
+  signed trust and write-key gates, and accepted reveal stability:
+  `domains/bare_metal/storefront/tests/test_contact_publication.py`.
+- Per-listing immutable intent transaction and bounded signed upsert lifecycle:
+  `domains/bare_metal/storefront/src/arkhai_bare_metal_storefront/sqlite_client.py`
+  and `domains/bare_metal/storefront/src/arkhai_bare_metal_storefront/contact_offers.py`.
 
 - Canonical listing, negotiation, settlement, fulfillment, and stage-log principals: `core/storefront/tests/unit/test_identity_migrations.py`, `test_settle_identity_models.py`, `test_sqlite_client_escrow_fulfillment_identity.py`, and `test_stage_log_identity.py`.
 - Version 2 body binding, durable replay classification, exact-retry outcome recovery, and signed responses: `core/storefront/tests/unit/test_auth.py`, `domains/vms/storefront/tests/unit/test_service_peer_identity.py`, and `domains/vms/storefront/tests/integration/test_admin_api.py`.
@@ -571,11 +668,11 @@ remain valid with an empty escrow list.
 - Projection-backed candidate derivation defaults on once at parity with a retained local-table path: `domains/vms/storefront/tests/unit/test_config_loader.py::test_settings_toml_provides_baseline_defaults` and `test_use_site_projection_for_listings_can_still_be_disabled_explicitly`.
 - Generic publication source, runner, and plugin discovery: `core/storefront/tests/unit/test_publication_sources.py`, `test_publication_runner.py`, and `test_publication_plugins.py`.
 - Registry fan-out and publication persistence: `core/storefront/tests/unit/test_registry_publication.py` and `domains/vms/storefront/tests/unit/test_publications_wiring.py`.
-- Domain-runtime bundle and VM wiring: `core/storefront/tests/unit/test_domain_runtime.py` and `domains/vms/storefront/tests/unit/test_domain_runtime_wiring.py`.
+- Domain-runtime bundle and VM wiring: `core/storefront/tests/unit/test_domain_registry.py` and `domains/vms/storefront/tests/unit/test_domain_runtime_wiring.py`.
 - Global pause state: `domains/vms/storefront/tests/unit/test_order_pause_state.py` and `tests/integration/test_admin_api.py`.
 - Resource-count diagnosis: `domains/vms/storefront/src/market_storefront/services/system_service.py` and `e2e-tests/tests/smoke/test_storefront_smoke.py`.
 - Site-scoped derivation keys and collision resistance (VM and bare-metal): `domains/vms/storefront/tests/unit/test_reconciler.py`, `domains/bare_metal/tests/test_publication.py`, and `domains/bare_metal/tests/test_storefront_publication.py`.
-- Site-pinned claim routing, including the collision case placement policy would otherwise choose wrongly: `core/storefront/tests/unit/test_aggregation.py`. Mapped-listing routing reached through the real admin, negotiation-hold, and settlement/fulfillment entry points: `domains/vms/storefront/tests/integration/test_admin_api.py`, `domains/vms/storefront/tests/unit/test_two_phase_reserve.py`, and `domains/vms/storefront/tests/unit/test_settlement_jobs.py`.
+- Site-pinned claim routing, including the collision case placement policy would otherwise choose wrongly: `core/storefront/tests/unit/test_aggregation.py`. Mapped-listing routing reached through the real admin and negotiation-hold entry points: `domains/vms/storefront/tests/integration/test_admin_api.py` and `domains/vms/storefront/tests/unit/test_two_phase_reserve.py`.
 - Domain-owned listing-mode resolution, bucket-sourced fungible candidates, multi-member specific-resource derivation, the resource-keyed derivation-key collision fix, and the live (never persisted) hold-preference cap: `domains/vms/storefront/tests/unit/test_reconciler.py`, `domains/vms/storefront/tests/unit/test_listing_mode.py`, `domains/vms/storefront/tests/unit/test_sync_negotiation_hold_cap.py`, `domains/vms/storefront/tests/unit/test_remote_capacity_client.py`, and `domains/bare_metal/storefront/tests/test_publication.py`.
 - Region/SLA hint resolution (including SLA's storefront-wide trust gate) and negotiation-floor pricing-policy precedence: `domains/vms/storefront/tests/unit/test_pool_descriptors.py`, `domains/vms/storefront/tests/unit/test_pricing_resolution.py`, `domains/vms/storefront/tests/unit/test_reconciler.py`, and `domains/vms/storefront/tests/unit/test_cli_publish_helpers.py::TestPoolHintResolutionSettings`.
 - Structured publication defaults/imports and preview-first, typed, backed-up atomic migration with ambiguity refusal: `domains/vms/storefront/tests/unit/test_config_loader.py`, `test_resource_csv_importer.py`, and `test_publication_migration.py`.

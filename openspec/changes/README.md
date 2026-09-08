@@ -98,12 +98,23 @@ capacity-reservation-lifecycle-hardening ──► billable-capacity-reservation
 
 ## Roadmap goal — Make the settlement mechanism a composed choice
 
-Delivered; no active change remains. Both changes were archived 2026-08-19:
+The mechanism boundary is delivered. Both original changes were archived 2026-08-19:
 [`finish-settlement-mechanism-neutrality`](archive/2026-08-19-finish-settlement-mechanism-neutrality/)
 and [`contact-exchange-settlement-mechanism`](archive/2026-08-19-contact-exchange-settlement-mechanism/).
-[`ROADMAP.md`](../../docs/development/ROADMAP.md)'s Goal 6 carries the current state and names the one
-remaining gap — cross-domain contact-exchange composition beyond bare metal, and contact-payload
-retention automation — as unowned and needing a new change.
+[`ROADMAP.md`](../../docs/development/ROADMAP.md)'s Goal 6 carries the current state.
+Cross-domain contact composition and retention automation remain unowned; the
+bounded bare-metal change below owns its outstanding image and live qualification.
+
+```text
+contact-exchange mechanism → contact-only-bare-metal-runtime → image/live qualification
+```
+
+The runtime and synthetic publisher do not depend on physical-site fulfillment
+qualification; they also do not satisfy it.
+
+| Change | Status | Acceptance boundary |
+|---|---|---|
+| [`contact-only-bare-metal-runtime`](contact-only-bare-metal-runtime/) | implemented locally; permanent behavior promoted; image/live qualification open | Site-free startup, unbacked bindings, amountless negotiation, validated stable file publication, pending acceptance without contacts, explicit capture and party reads, and literal privacy guard; no release or deployment claim |
 
 ## Lesser goal — POOLS capacity and fulfillment foundation
 

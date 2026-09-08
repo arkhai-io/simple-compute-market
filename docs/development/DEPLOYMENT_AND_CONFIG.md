@@ -177,12 +177,11 @@ inventory, pool declaration, site authority, or credential blocks startup or
 scenario preflight; it never selects a test signer, default site, payload-
 guessed domain, direct executor, or provider simulator.
 
-The bare-metal image currently exposes the signed publication command seam but
-does not autonomously publish to the registry, and a public settlement address
-alone does not compose a settlement authority. Its stack may be brought up for
-operator integration, but it is not release-qualified or discoverable-deal
-evidence until accepted publication and settlement lifecycles are ready and
-the installed buyer completes real access and revocation.
+Bare-metal physical publication uses an explicit signed command; it has no
+periodic publisher. Introduction-only file publication can instead run at startup
+when explicitly configured, as described below. A public settlement address alone
+does not compose an authority. Local publication or introduction checks do not
+qualify an image, deployment, or physical access/revocation lifecycle.
 
 ## Stateful service persistence
 
@@ -439,6 +438,49 @@ Stripe credentials, or provider state. Those belong to the hosted service's
 independent release and chart. Marketplace packages consume the exact hosted
 client wheel and identity interface bound by that signed release manifest;
 editable sibling sources and compatible-major substitution are rejected.
+
+### Bare-metal introduction-only configuration
+
+The bare-metal environment factory reads `BARE_METAL_STOREFRONT_SETTLEMENT` as
+the strict shared JSON settlement root. A priority containing only
+`contact-exchange.v1` selects introduction-only composition. Seller identity,
+admin principals, public URL, and database path remain ordinary role inputs;
+trusted sites, wallet/chains, and hosted financial authority are not required.
+The factory uses its environment-and-file contract, not a Dynaconf profile loader.
+
+Without `BARE_METAL_STOREFRONT_CONTACT_OFFERS_PATH`, server startup performs no
+file publication. `bare-metal-storefront publish-contacts --offers PATH` runs an
+explicit reconciliation; setting that environment variable runs the same
+reconciliation before serving on each startup. Both require:
+
+- `BARE_METAL_STOREFRONT_REGISTRY_URL` and
+  `BARE_METAL_STOREFRONT_REGISTRY_AUTHORITY`;
+- `BARE_METAL_STOREFRONT_REGISTRY_PRINCIPALS`, a JSON list of public trust pins;
+- `BARE_METAL_STOREFRONT_REGISTRY_API_KEY_FILE`, naming the separate write-key file;
+- a bounded private seller contact and the referenced public profile with the
+  synthetic notice required by the [publication contract](../../openspec/specs/storefront-publication/spec.md#requirement-synthetic-contact-publication-validates-the-whole-file).
+
+The [packaged offer example](../../domains/bare_metal/storefront/examples/contact-offers.json)
+contains five synthetic offers and no private contacts. Public ConfigMaps and
+offer files must not contain contact payloads or bearer values. File publication
+requires no seller delivery callback; optional recipient delivery remains supported
+by general contact composition through `BARE_METAL_STOREFRONT_DELIVERY`.
+
+The bare-metal chart's optional `contactOffers` value references an existing offer
+ConfigMap (`configMap.name/key`) and registry URL, authority, principals, and
+`registry.apiKeySecret.name/key`. It mounts the offer and API-key files and omits
+the site environment input, even if physical chart defaults supply a site Secret.
+`siteBindingsSecret: null` makes that absence explicit. `settlementConfigSecret`
+and the identity credential Secret remain separate private inputs. The chart
+rejects Alkahest or ephemeral storage with `contactOffers` and retains one replica,
+Recreate, and a persistent SQLite volume for intent and introductions.
+
+Startup publication may partially succeed remotely before failing. Retain the
+volume and retry the same public intent; restart is not rollback or withdrawal.
+Local wheel, HTTP, or chart checks do not establish a published release or an
+executed image. Image dependency provenance and live activation require separate
+verification. The [publication architecture](../../openspec/specs/storefront-publication/architecture.md#synthetic-contact-file-publication)
+owns retry and identity semantics.
 
 ### Bare-metal hosted role configuration
 
