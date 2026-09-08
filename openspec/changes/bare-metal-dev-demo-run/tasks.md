@@ -196,6 +196,40 @@ buyer's; the scenario evidences only what the granted session reports.
 - [x] 6.5 Promotion: refresh identity, ordering and refusal semantics in
       `openspec/specs/storefront-publication/spec.md`.
 
+## 7. Settling an exactly selected agreement
+
+- [x] 7.1 Settlement resolves the accepted obligation from the committed plan
+      when the thread carries a selection envelope, and keeps the legacy escrow
+      proposal path unchanged.
+      `domains/bare_metal/storefront/src/arkhai_bare_metal_storefront/settlement_service.py`.
+- [x] 7.2 The resolver binds the accepted plan back to the committed record —
+      parties, obligation roles and principals, amount, asset, declared
+      conditions, selected mechanism, option and listing, and both physical
+      views (provision terms and the binding restating the host and access
+      method) against the domain terms artifact — and refuses with a typed
+      settlement error before any chain read or write. Numbers the opaque
+      mechanism carriers hold are parsed inside that refusal, so a malformed or
+      absent value is a refusal rather than an unhandled fault.
+- [x] 7.3 The shared Alkahest verifier takes the accepted obligation payload and
+      its accepted expiry as one explicit expected candidate, so an otherwise
+      matching escrow with a different future deadline is refused. The pair is
+      required in both directions — half of it is rejected at entry rather than
+      leaving the expiry unpinned — and proposal materialization stays the
+      default for every other caller.
+      `kit/alkahest/src/market_alkahest/escrow_verification.py`.
+- [x] 7.4 Regression: producer-shaped settlement over the real exact-selection
+      negotiation with a mocked verifier, one parametrized case per accepted-record
+      mismatch, plus a real-verifier expiry regression with only codec and chain
+      read substituted.
+      `domains/bare_metal/storefront/tests/test_settlement_canonical_selection.py`,
+      `kit/alkahest/tests/unit/test_escrow_verification_expected_terms.py`.
+- [x] 7.5 Promotion: settlement verification authority, accepted-record
+      consistency and the accepted-expiry boundary in
+      `openspec/specs/settlement-configuration/spec.md`. The consistency
+      contract is stated for the bare-metal Alkahest path that implements it;
+      other domains and mechanisms, including plans carrying several
+      obligations, are explicitly left unrestricted.
+
 ## Design promotion record
 
 | Accepted decision | Permanent location |
@@ -213,6 +247,7 @@ buyer's; the scenario evidences only what the granted session reports.
 | A mechanism builds its own accepted obligation through the same materialization the counterparty re-derives from, and receives the seller's settlement resources to do it | `openspec/specs/settlement-configuration/spec.md` |
 | Physical terms for an option that advertises no physical facts come from the seller's trusted listing and binding, and the hosted physical envelope is compared whole | `openspec/specs/negotiation-protocol/spec.md` |
 | A served listing is refreshed only when explicitly named, keeps its identifier, is validated against the tracked derivation and current availability, and publishes before local persistence so it stays retryable | `openspec/specs/storefront-publication/spec.md` |
+| A bare-metal Alkahest agreement settles against its committed accepted obligation, bound whole to the rest of the committed record, and its accepted expiry is verified exactly | `openspec/specs/settlement-configuration/spec.md` |
 
 Not promoted, and not implemented: host-side ownership records, tenant path
 isolation, destructive reclaim policies, and end-to-end demonstration evidence.

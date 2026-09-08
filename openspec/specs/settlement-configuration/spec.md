@@ -301,6 +301,50 @@ resulting mechanism parameters.
 - **THEN** the request is refused and no negotiation, obligation or capacity record
   is written
 
+### Requirement: An exactly selected agreement settles against its accepted obligation
+
+Settlement of an exactly selected agreement MUST verify the funded mechanism
+state against the immutable accepted obligation that agreement committed, never
+against the listing's current advertised terms: a listing may be republished
+under the same identity, so its advertised terms are not the financial authority
+for an agreement already accepted. The accepted obligation MUST NOT be rebuilt at
+settlement, and no accepted record may be rewritten to make verification pass.
+
+The accepted plan is that authority only while it still agrees with the rest of
+the committed record. For a bare-metal agreement settled through the Alkahest
+escrow rail — the path this contract is written for, and the only one that
+implements it — settlement MUST refuse, before any mechanism read or any write,
+an agreement whose plan does not carry exactly one Alkahest obligation, whose
+declared parties, obligation roles or principals differ from the negotiation's,
+whose amount, asset or mechanism payload disagrees with the committed agreement,
+whose declared conditions the mechanism does not verify, whose selected option is
+not the one the plan settles, or whose physical facts — provision terms and the
+binding restating them — differ from the committed domain terms artifact and
+listing. A value an opaque mechanism carrier holds in an unreadable form MUST be
+refused the same way rather than raised as a fault. Other domains and mechanisms
+keep their own plan shapes, including plans carrying several obligations; this
+requirement places no restriction on them.
+
+Where a mechanism verifies against an external system, the accepted obligation
+MUST be carried into that verification whole, including the accepted expiry that
+fixes the collect-versus-reclaim boundary. A verification interface that accepts
+an expected payload without its expiry leaves that boundary unpinned, and an
+otherwise matching state with a different deadline MUST NOT settle.
+
+#### Scenario: A funded escrow carries a different deadline
+
+- **WHEN** the funded escrow matches the accepted obligation payload but its
+  expiry is not the accepted one, earlier or later and still in the future
+- **THEN** verification fails and nothing is adopted or recorded
+
+#### Scenario: An accepted bare-metal record disagrees with itself
+
+- **WHEN** a bare-metal Alkahest plan's parties, roles, amount, asset, conditions,
+  selected option, physical binding or physical terms differ from the committed
+  thread and domain artifacts, or an opaque carrier holds an unreadable value
+- **THEN** settlement is refused with a settlement error before any mechanism read
+  or write
+
 ### Requirement: A domain buyer drives every rail its seller publishes
 
 A seller composition that installs several mechanism registrations publishes an

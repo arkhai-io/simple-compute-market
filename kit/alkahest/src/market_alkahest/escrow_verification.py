@@ -37,6 +37,7 @@ from __future__ import annotations
 import json
 import logging
 import time
+from collections.abc import Mapping
 from typing import Any
 
 from market_alkahest import alkahest as _codecs
@@ -251,6 +252,8 @@ async def verify_escrow_for_settlement(
     chain_name: str,
     alkahest_address_config_path: str | None,
     escrow_proposal: Any = None,
+    expected_obligation_data: Mapping[str, Any] | None = None,
+    expected_expiration_unix: int | None = None,
     escrow_kind: str = "erc20_escrow_obligation_default",
     now_unix: int | None = None,
     get_obligation_fn: Any = None,
@@ -281,6 +284,13 @@ async def verify_escrow_for_settlement(
     chain_name, alkahest_address_config_path:
         Used to resolve the canonical arbiter + escrow contract
         addresses for the chain (a static config lookup, not an RPC call).
+    expected_obligation_data, expected_expiration_unix:
+        The exact accepted obligation an already-committed agreement
+        pins, supplied together. When present they replace proposal
+        materialization as the single expected candidate, and the
+        accepted expiry must equal the attestation's. Absent (the
+        default), expected terms are materialized from the proposal as
+        before.
     escrow_proposal:
         The buyer's ``EscrowProposal``, persisted on the negotiation
         thread at /negotiate/new. When present, the verifier materializes
@@ -306,6 +316,18 @@ async def verify_escrow_for_settlement(
     EscrowVerificationError
         On any mismatch. Caller should map to HTTP 400.
     """
+    if (expected_obligation_data is None) != (expected_expiration_unix is None):
+        # The pair is one accepted candidate. Half of it would either drop the
+        # payload or leave the expiry unpinned, and an unpinned expiry matches
+        # any still-future deadline.
+        raise EscrowVerificationError(
+            "expected obligation data and expected expiration must be supplied "
+            "together"
+        )
+    if expected_obligation_data is not None and escrow_proposal is None:
+        raise EscrowVerificationError(
+            "expected obligation data requires the accepted escrow proposal"
+        )
     if alkahest_client is None:
         raise EscrowVerificationError(
             "AlkahestClient not configured — cannot verify escrow on chain"
@@ -356,7 +378,18 @@ async def verify_escrow_for_settlement(
                     f"against chain"
                 )
             effective_token = proposal_token
-        if build_obligation_data_fn is None:
+        if expected_obligation_data is not None:
+            # An accepted agreement already pins the exact funded obligation.
+            # Its expiry is part of that agreement — the collect-vs-reclaim
+            # boundary — so it is carried as an expected candidate rather than
+            # left unpinned, which would accept any still-future deadline.
+            expected_candidates = [
+                (
+                    _normalize_obligation_data(dict(expected_obligation_data)),
+                    int(expected_expiration_unix),
+                )
+            ]
+        elif build_obligation_data_fn is None:
             try:
                 expected_terms = _codecs.materialize_escrow_terms_from_proposal(
                     proposal=escrow_proposal,

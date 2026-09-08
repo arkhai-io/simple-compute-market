@@ -10,6 +10,8 @@ from market_core.schemas import EscrowProposal, SettlementPlan
 from market_settlement_runtime import SettlementRuntime
 from market_identity import Identity
 
+from arkhai_bare_metal import BareMetalTerms
+
 from .models import (
     BareMetalSettleRequest,
     BareMetalSettleResponse,
@@ -27,6 +29,219 @@ class SettlementRequestError(ValueError):
 
 VerifyEscrow = Callable[..., Awaitable[int]]
 PlanBuilder = Callable[..., dict[str, Any]]
+
+ALKAHEST_MECHANISM = "alkahest.v1"
+
+
+@dataclass(frozen=True)
+class _AcceptedAlkahestSettlement:
+    """The immutable accepted agreement an exact selection settles against."""
+
+    plan: SettlementPlan
+    proposal: EscrowProposal
+    obligation_data: dict[str, Any]
+    expiration_unix: int
+
+
+def _accepted_int(value: Any, *, field: str) -> int:
+    """Read one integer an accepted record carries in an opaque carrier.
+
+    Mechanism params, service terms and the selection envelope are opaque to
+    the plan schema, so a malformed or absent number reaches this resolver as
+    raw JSON. It is a refusal to settle, not a server fault.
+    """
+    try:
+        return int(value)
+    except (TypeError, ValueError) as exc:
+        raise SettlementRequestError(
+            f"accepted agreement carries an unreadable {field}"
+        ) from exc
+
+
+def _principal(value: Any) -> Identity:
+    try:
+        return Identity.model_validate(value)
+    except Exception as exc:
+        raise SettlementRequestError(
+            "accepted agreement names an unreadable principal"
+        ) from exc
+
+
+def _accepted_alkahest_settlement(
+    thread: Mapping[str, Any],
+    *,
+    agreed_amount: int,
+    listing_id: str,
+    terms: BareMetalTerms,
+    buyer_principal: Identity,
+    seller_principal: Identity,
+) -> _AcceptedAlkahestSettlement:
+    """Read the accepted obligation an exact-selection thread committed.
+
+    An exact selection persists a selection envelope rather than a legacy
+    escrow proposal, so the funded terms live only in the accepted plan. That
+    plan is the financial authority here: the listing's advertised terms are
+    mutable and a later refresh must never redefine what the buyer funded.
+
+    The plan is only that authority while it still agrees with the rest of the
+    committed record, so every party, role, selected option and physical fact
+    it declares is bound back to the thread and the domain terms artifact.
+    Anything inconsistent fails closed before a chain read or a write.
+    """
+    try:
+        plan = SettlementPlan.model_validate(thread.get("settlement_plan"))
+    except Exception as exc:
+        raise SettlementRequestError(
+            "accepted settlement plan is missing or invalid"
+        ) from exc
+    if len(plan.obligations) != 1:
+        raise SettlementRequestError(
+            "accepted settlement plan must carry one obligation"
+        )
+    if (
+        _principal(plan.buyer_principal) != buyer_principal
+        or _principal(plan.seller_principal) != seller_principal
+    ):
+        raise SettlementRequestError(
+            "accepted settlement plan names different parties"
+        )
+    obligation = plan.obligations[0]
+    params = obligation.params if isinstance(obligation.params, Mapping) else {}
+    data = params.get("obligation_data")
+    chain_name = str(params.get("chain_name") or "")
+    escrow_address = str(params.get("escrow_contract") or "")
+    token = str(data.get("token") or "") if isinstance(data, Mapping) else ""
+    if (
+        obligation.mechanism != ALKAHEST_MECHANISM
+        or not chain_name
+        or not escrow_address
+        or not isinstance(data, Mapping)
+        or not token
+        or obligation.expiration_unix is None
+    ):
+        raise SettlementRequestError(
+            "accepted obligation does not name a funded Alkahest escrow"
+        )
+    # The buyer funds and the seller collects; the reverse would let a
+    # reclaim-side record settle as a payment.
+    if obligation.payer != "buyer" or obligation.claimant != "seller":
+        raise SettlementRequestError(
+            "accepted obligation does not carry the negotiated settlement roles"
+        )
+    if (
+        _principal(obligation.payer_principal) != buyer_principal
+        or _principal(obligation.claimant_principal) != seller_principal
+    ):
+        raise SettlementRequestError(
+            "accepted obligation names different settlement parties"
+        )
+    if obligation.amount is None or int(obligation.amount) != agreed_amount:
+        raise SettlementRequestError(
+            "accepted obligation disagrees with the committed agreement"
+        )
+    if _accepted_int(data.get("amount"), field="obligation amount") != agreed_amount:
+        raise SettlementRequestError(
+            "accepted obligation data disagrees with the committed agreement"
+        )
+    if str(obligation.asset or "").lower() != token.lower():
+        raise SettlementRequestError(
+            "accepted obligation asset is not the funded token"
+        )
+    # Conditions are declarative for the servicing engine; for Alkahest the
+    # arbiter demand inside the params is authoritative, so a declared
+    # condition set here would be a second, unverified gate.
+    if obligation.conditions:
+        raise SettlementRequestError(
+            "accepted obligation declares conditions this mechanism does not verify"
+        )
+
+    physical = (plan.service_terms or {}).get("bare_metal.v1")
+    if not isinstance(physical, Mapping) or physical.get("listing_id") != listing_id:
+        raise SettlementRequestError(
+            "accepted agreement does not name the negotiated listing"
+        )
+    try:
+        accepted_terms = BareMetalTerms.model_validate(
+            physical.get("provision_terms")
+        )
+    except Exception as exc:
+        raise SettlementRequestError(
+            "accepted agreement carries no readable provision terms"
+        ) from exc
+    if accepted_terms.model_dump(mode="json", exclude_none=True) != terms.model_dump(
+        mode="json", exclude_none=True
+    ):
+        raise SettlementRequestError(
+            "accepted agreement disagrees with the committed bare-metal terms"
+        )
+    # The producer writes the same physical facts twice, in the provision
+    # terms and in the binding the listing was published from. A record whose
+    # two views disagree is not one agreement.
+    binding = physical.get("physical_binding")
+    if not isinstance(binding, Mapping):
+        raise SettlementRequestError(
+            "accepted agreement carries no physical binding"
+        )
+    if (
+        str(binding.get("physical_host_id") or "") != terms.physical_host_id
+        or str(binding.get("access_method") or "") != terms.access_method
+    ):
+        raise SettlementRequestError(
+            "accepted physical binding disagrees with the committed terms"
+        )
+
+    raw_selection = thread.get("buyer_escrow_proposal") or {}
+    selection = (
+        raw_selection.get("settlement_selection")
+        if isinstance(raw_selection, Mapping)
+        else None
+    )
+    if not isinstance(selection, Mapping):
+        raise SettlementRequestError("accepted agreement carries no exact selection")
+    mechanism = str(selection.get("mechanism") or "")
+    option_id = str(selection.get("option_id") or "")
+    mechanism_terms = (plan.service_terms or {}).get(ALKAHEST_MECHANISM)
+    if (
+        mechanism != ALKAHEST_MECHANISM
+        or str(physical.get("mechanism") or "") != ALKAHEST_MECHANISM
+        or not option_id
+        or str(physical.get("option_id") or "") != option_id
+        or not isinstance(mechanism_terms, Mapping)
+        or str(mechanism_terms.get("option_id") or "") != option_id
+        or str(mechanism_terms.get("listing_id") or "") != listing_id
+    ):
+        raise SettlementRequestError(
+            "accepted selection does not name the accepted settlement option"
+        )
+    if _accepted_int(
+        selection.get("expiration_unix"), field="selection expiration"
+    ) != int(obligation.expiration_unix):
+        raise SettlementRequestError(
+            "accepted selection disagrees with the accepted obligation"
+        )
+    if (
+        str(mechanism_terms.get("chain_name") or "") != chain_name
+        or str(mechanism_terms.get("escrow_contract") or "") != escrow_address
+        or _accepted_int(
+            mechanism_terms.get("expiration_unix"), field="settlement expiration"
+        )
+        != int(obligation.expiration_unix)
+    ):
+        raise SettlementRequestError(
+            "accepted settlement terms disagree with the accepted obligation"
+        )
+    return _AcceptedAlkahestSettlement(
+        plan=plan,
+        proposal=EscrowProposal(
+            chain_name=chain_name,
+            escrow_address=escrow_address,
+            fields={"token": token},
+            literal_fields={"token": token},
+            expiration_unix=int(obligation.expiration_unix),
+        ),
+        obligation_data=dict(data),
+        expiration_unix=int(obligation.expiration_unix),
+    )
 
 
 @dataclass(frozen=True)
@@ -113,7 +328,22 @@ class BareMetalSettlementService:
             raise SettlementRequestError(
                 "bare-metal agreement no longer matches its listing"
             )
-        proposal = EscrowProposal.model_validate(thread.get("buyer_escrow_proposal"))
+        raw_proposal = thread.get("buyer_escrow_proposal")
+        accepted: _AcceptedAlkahestSettlement | None = None
+        if isinstance(raw_proposal, Mapping) and "settlement_selection" in raw_proposal:
+            accepted = _accepted_alkahest_settlement(
+                thread,
+                agreed_amount=int(agreed_amount),
+                listing_id=str(thread["our_listing_id"]),
+                terms=terms,
+                buyer_principal=buyer_principal,
+                seller_principal=Identity.model_validate(
+                    thread["seller_principal"],
+                ),
+            )
+            proposal = accepted.proposal
+        else:
+            proposal = EscrowProposal.model_validate(raw_proposal)
         primary = await self.db.load_primary_escrow_for_negotiation(
             negotiation_id=request.negotiation_id,
         )
@@ -131,16 +361,23 @@ class BareMetalSettlementService:
             )
 
         try:
-            artifacts = self.build_plan(
-                proposal=proposal,
-                agreed_amount=int(agreed_amount),
-                duration_seconds=terms.duration_seconds,
-                buyer_principal=buyer_principal,
-                seller_principal=Identity.model_validate(thread["seller_principal"]),
-                seller_wallet_address=self.seller_wallet,
-                chain_config_paths=self.chain_config_paths,
-            )
-            plan = SettlementPlan.model_validate(artifacts.get("settlement_plan"))
+            if accepted is not None:
+                # The accepted plan is already committed and immutable;
+                # rebuilding it would re-derive funded terms from the listing.
+                plan = accepted.plan
+            else:
+                artifacts = self.build_plan(
+                    proposal=proposal,
+                    agreed_amount=int(agreed_amount),
+                    duration_seconds=terms.duration_seconds,
+                    buyer_principal=buyer_principal,
+                    seller_principal=Identity.model_validate(
+                        thread["seller_principal"],
+                    ),
+                    seller_wallet_address=self.seller_wallet,
+                    chain_config_paths=self.chain_config_paths,
+                )
+                plan = SettlementPlan.model_validate(artifacts.get("settlement_plan"))
         except SettlementRequestError:
             raise
         except Exception as exc:
@@ -208,6 +445,16 @@ class BareMetalSettlementService:
                     proposal.chain_name,
                 ),
                 escrow_proposal=proposal,
+                **(
+                    # Compare the chain against the exact bytes and deadline
+                    # the buyer funded, not against a re-derivation of them.
+                    {
+                        "expected_obligation_data": accepted.obligation_data,
+                        "expected_expiration_unix": accepted.expiration_unix,
+                    }
+                    if accepted is not None
+                    else {}
+                ),
             )
         except SettlementRequestError:
             raise
