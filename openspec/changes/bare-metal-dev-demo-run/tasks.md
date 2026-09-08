@@ -230,6 +230,26 @@ buyer's; the scenario evidences only what the granted session reports.
       other domains and mechanisms, including plans carrying several
       obligations, are explicitly left unrestricted.
 
+## 8. Reopening a tracked listing the registry still holds closed
+
+- [x] 8.1 Republication transitions the registry record to open explicitly and
+      confirms it by read-back before the round reports a publication; the
+      publish body carries terms only, so a registry that preserves the status
+      it holds would otherwise keep serving nothing.
+      `domains/bare_metal/storefront/src/arkhai_bare_metal_storefront/publication_cli.py`.
+- [x] 8.2 The reopen path advances the local and tracking records only after
+      that confirmation, matching the same-identifier refresh path, so a failed
+      or ambiguous transition stays retryable under the same identifier and
+      never creates a second listing.
+      `domains/bare_metal/src/arkhai_bare_metal/storefront_publication.py`.
+- [x] 8.3 Regression over a registry whose publish preserves an existing
+      record's status, driven from the real listing request serializer: normal
+      reopen, a record that stays closed, a rejected update, an unreadable
+      confirmation, and local records left closed with a clean retry.
+      `domains/bare_metal/storefront/tests/test_publication_reopen_registry.py`.
+- [x] 8.4 Promotion: explicit reopen transition, read-back confirmation and
+      ordering in `openspec/specs/storefront-publication/spec.md`.
+
 ## Design promotion record
 
 | Accepted decision | Permanent location |
@@ -248,6 +268,7 @@ buyer's; the scenario evidences only what the granted session reports.
 | Physical terms for an option that advertises no physical facts come from the seller's trusted listing and binding, and the hosted physical envelope is compared whole | `openspec/specs/negotiation-protocol/spec.md` |
 | A served listing is refreshed only when explicitly named, keeps its identifier, is validated against the tracked derivation and current availability, and publishes before local persistence so it stays retryable | `openspec/specs/storefront-publication/spec.md` |
 | A bare-metal Alkahest agreement settles against its committed accepted obligation, bound whole to the rest of the committed record, and its accepted expiry is verified exactly | `openspec/specs/settlement-configuration/spec.md` |
+| Reopening a tracked listing transitions the registry record to open explicitly, confirms it by read-back, and advances local records only afterwards | `openspec/specs/storefront-publication/spec.md` |
 
 Not promoted, and not implemented: host-side ownership records, tenant path
 isolation, destructive reclaim policies, and end-to-end demonstration evidence.

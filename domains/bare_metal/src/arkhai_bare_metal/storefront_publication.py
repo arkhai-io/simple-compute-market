@@ -384,6 +384,19 @@ def reopen_derived_bare_metal_listing_if_present(
         )
         return response
 
+    # Publication comes first here too. Marking the local and tracking records
+    # open before the registry serves the listing again would report a relist
+    # no buyer can see, and would leave a retry with nothing left to reopen.
+    response = publish_existing_listing(
+        listing_id=listing_id,
+        offer=offer,
+        accepted_escrows=accepted_escrows,
+        settlement_options=settlement_options or [],
+        publication_clauses=publication_clauses or [],
+        demands=demands,
+        max_duration_seconds=max_duration_seconds,
+        storefront_url=base_url,
+    )
     _write_listing_terms(
         db_path,
         listing_id=listing_id,
@@ -397,16 +410,7 @@ def reopen_derived_bare_metal_listing_if_present(
         candidate=candidate,
         status="open",
     )
-    return publish_existing_listing(
-        listing_id=listing_id,
-        offer=offer,
-        accepted_escrows=accepted_escrows,
-        settlement_options=settlement_options or [],
-        publication_clauses=publication_clauses or [],
-        demands=demands,
-        max_duration_seconds=max_duration_seconds,
-        storefront_url=base_url,
-    )
+    return response
 
 
 def resolve_refresh_target_derivation_key(

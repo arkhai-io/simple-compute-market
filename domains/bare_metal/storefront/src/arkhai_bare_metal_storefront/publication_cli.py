@@ -207,6 +207,59 @@ def _publish_registry_listing(
     return {"status": "published", "listing_id": listing_id}
 
 
+def _republish_open_listing(
+    client: SyncRegistryClient,
+    *,
+    listing_id: str,
+    offer: dict[str, Any],
+    accepted_escrows: list[dict[str, Any]],
+    settlement_options: list[dict[str, Any]],
+    demands: list[dict[str, Any]],
+    max_duration_seconds: int | None,
+    storefront_url: str,
+) -> dict[str, Any]:
+    """Republish a tracked listing and leave the registry serving it.
+
+    Publication carries terms only: the request body has no status field, so a
+    registry holding a closed record keeps it closed and reposting the terms
+    alone would report a relist that no buyer can see. The status transition is
+    therefore an explicit authenticated update, and the registry's own record is
+    read back before the round calls this a publication.
+
+    Every step names the same listing identifier and the terms are the ones
+    already accepted, so a failure at any point is retryable without creating a
+    second listing.
+    """
+    _publish_registry_listing(
+        client,
+        listing_id=listing_id,
+        offer=offer,
+        accepted_escrows=accepted_escrows,
+        settlement_options=settlement_options,
+        demands=demands,
+        max_duration_seconds=max_duration_seconds,
+        storefront_url=storefront_url,
+    )
+    try:
+        client.update_listing(
+            listing_id, UpdateListingRequest(updates={"status": "open"})
+        )
+    except Exception as exc:
+        raise _registry_failure("listing.update", exc) from None
+    try:
+        summary = client.get_listing(listing_id)
+    except Exception as exc:
+        raise _registry_failure("listing.read", exc) from None
+    # ``ListingSummary`` carries the listing identifier as ``id``.
+    if str(summary.id or "") != listing_id:
+        raise RuntimeError("registry returned a conflicting listing identity")
+    if str(summary.status or "").lower() != "open":
+        raise RuntimeError(
+            "registry listing did not become open after republication"
+        )
+    return {"status": "published", "listing_id": listing_id}
+
+
 def run_publication_once(*, refresh_listing_id: str | None = None) -> dict[str, Any]:
     """Publish one exact round from freshly authenticated site projections.
 
@@ -252,7 +305,7 @@ def run_publication_once(*, refresh_listing_id: str | None = None) -> dict[str, 
         return {"status": "closed", "listing_id": listing_id}
 
     def publish_existing_listing(*, listing_id: str, **values: Any) -> dict[str, Any]:
-        return _publish_registry_listing(
+        return _republish_open_listing(
             client,
             listing_id=listing_id,
             offer=values["offer"],

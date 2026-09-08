@@ -84,9 +84,30 @@ The storefront MUST expose enough operator state to distinguish global negotiati
 ### Requirement: Registry publication ownership
 A storefront MUST publish, update, close, and reconcile its listings against one or more configured registries using its publisher identity.
 
+Republication carries terms only. Where a registry preserves the lifecycle
+status of a record it already holds, reopening a tracked listing MUST explicitly
+transition that record to open through an authenticated update and MUST read the
+registry's own record back before the round reports a publication. Local and
+tracking records MUST advance only after that confirmation, so a rejected,
+unapplied or unreadable transition leaves the seller's records closed and the
+same identifier retryable. Every step names the existing identifier, so no retry
+creates a second listing.
+
 #### Scenario: Derived capacity disappears
 - **WHEN** authoritative capacity no longer supports a derived listing
 - **THEN** reconciliation closes that listing in configured registries without treating stale local state as authority
+
+#### Scenario: A closed registry record is relisted
+
+- **WHEN** capacity returns and a tracked closed listing is republished
+- **THEN** the registry record is transitioned to open under the same identifier
+  and confirmed by read-back before the local and tracking records are advanced
+
+#### Scenario: The registry record does not become open
+
+- **WHEN** the status transition is rejected, unapplied or unconfirmable
+- **THEN** the round reports the candidate as failed, the local and tracking
+  records stay closed, and repeating the round retries the same identifier
 
 ### Requirement: Explicit refresh of an open listing keeps its identity
 A publication round MUST leave an already-open derived listing untouched. An operator MAY name one tracked open listing for refresh, and the round MUST then republish that listing under its existing identifier from freshly built terms, never as a second listing identity, so agreements already accepted against it remain valid. The named target MUST be refused without any write unless it is tracked by this storefront's derivation, its local listing is open, and its resource is present in the current available candidates. Refresh MUST publish to the registry before replacing local terms, so a failed publication leaves the locally persisted terms unchanged and the same explicit refresh can be retried. That guarantee covers local state only: a publication that fails after the registry accepted the write leaves the registry advertising the new terms, and refresh MUST NOT be read as rollback or as atomicity across the two stores.
