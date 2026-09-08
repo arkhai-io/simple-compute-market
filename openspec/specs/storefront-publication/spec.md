@@ -88,6 +88,21 @@ A storefront MUST publish, update, close, and reconcile its listings against one
 - **WHEN** authoritative capacity no longer supports a derived listing
 - **THEN** reconciliation closes that listing in configured registries without treating stale local state as authority
 
+### Requirement: Explicit refresh of an open listing keeps its identity
+A publication round MUST leave an already-open derived listing untouched. An operator MAY name one tracked open listing for refresh, and the round MUST then republish that listing under its existing identifier from freshly built terms, never as a second listing identity, so agreements already accepted against it remain valid. The named target MUST be refused without any write unless it is tracked by this storefront's derivation, its local listing is open, and its resource is present in the current available candidates. Refresh MUST publish to the registry before replacing local terms, so a failed publication leaves the locally persisted terms unchanged and the same explicit refresh can be retried. That guarantee covers local state only: a publication that fails after the registry accepted the write leaves the registry advertising the new terms, and refresh MUST NOT be read as rollback or as atomicity across the two stores.
+
+#### Scenario: Settlement configuration changes for a served listing
+- **WHEN** an operator refreshes one tracked open listing by identifier
+- **THEN** the registry and the local record carry the new terms under the original listing identifier, and every other open listing is skipped
+
+#### Scenario: Refresh publication fails
+- **WHEN** registry publication of a refresh fails
+- **THEN** local terms are unchanged, the candidate is reported as failed, and repeating the refresh republishes the same identifier
+
+#### Scenario: Refresh names an untracked or unavailable listing
+- **WHEN** the named identifier is not a tracked open listing derived from a currently available resource
+- **THEN** the round is refused before any registry or local write
+
 ### Requirement: Canonical storefront market identities
 
 A storefront MUST represent listing ownership, negotiation parties and message senders, accepted terms and settlement plans, heartbeat parties, claim actors, settlement parties, administrator subjects, service-peer bindings, replay reservations, and identity-audit actors as complete canonical principals. Listing, negotiation, obligation, fulfillment, service-peer, and operation identifiers MUST remain stable subjects distinct from the principals authorized to act for them. An explicitly named EVM address inside a tagged chain-mechanism payload MAY identify a chain effect, but it MUST NOT authorize a marketplace action or replace a canonical principal.

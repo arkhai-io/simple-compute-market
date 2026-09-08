@@ -169,6 +169,33 @@ buyer's; the scenario evidences only what the granted session reports.
       acceptance inside existing capabilities and moves no goal. Typing: no mypy
       or ruff target is configured for these packages, so none was run.
 
+## 6. Refreshing a served listing after a settlement configuration change
+
+- [x] 6.1 `bare-metal-storefront publish --refresh-listing-id` names one tracked
+      open listing to republish under its existing identifier. Without it the
+      round still skips every open listing.
+      `domains/bare_metal/storefront/src/arkhai_bare_metal_storefront/cli.py`,
+      `.../publication_cli.py`.
+- [x] 6.2 The refresh reuses the round's own payload construction and the
+      same-identifier publication callback, and the runner reaches the candidate
+      because the round's skip set is narrowed by exactly the refreshed
+      derivation key.
+      `domains/bare_metal/src/arkhai_bare_metal/storefront_publication.py`,
+      `.../storefront_adapter.py`,
+      `domains/bare_metal/storefront/src/arkhai_bare_metal_storefront/publication.py`.
+- [x] 6.3 A target that is untracked, not locally open, or absent from the
+      current available candidates is refused before any write. Refresh
+      publishes to the registry before replacing local terms, so a failed
+      publication leaves the locally persisted terms unchanged and the same
+      refresh is retryable. The registry may already have accepted the changed
+      terms when the failure is ambiguous; nothing here rolls a remote write
+      back or makes the two stores atomic.
+- [x] 6.4 Regression at the real command, adapter and CLI seams over a temporary
+      SQLite database with no network:
+      `domains/bare_metal/storefront/tests/test_publication_refresh.py`.
+- [x] 6.5 Promotion: refresh identity, ordering and refusal semantics in
+      `openspec/specs/storefront-publication/spec.md`.
+
 ## Design promotion record
 
 | Accepted decision | Permanent location |
@@ -185,6 +212,7 @@ buyer's; the scenario evidences only what the granted session reports.
 | A run is bound to its authenticated discovery, and beginning is not delivery | `openspec/specs/settlement-configuration/spec.md` |
 | A mechanism builds its own accepted obligation through the same materialization the counterparty re-derives from, and receives the seller's settlement resources to do it | `openspec/specs/settlement-configuration/spec.md` |
 | Physical terms for an option that advertises no physical facts come from the seller's trusted listing and binding, and the hosted physical envelope is compared whole | `openspec/specs/negotiation-protocol/spec.md` |
+| A served listing is refreshed only when explicitly named, keeps its identifier, is validated against the tracked derivation and current availability, and publishes before local persistence so it stays retryable | `openspec/specs/storefront-publication/spec.md` |
 
 Not promoted, and not implemented: host-side ownership records, tenant path
 isolation, destructive reclaim policies, and end-to-end demonstration evidence.

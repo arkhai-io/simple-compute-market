@@ -55,7 +55,7 @@ def test_publish_command_reports_a_failed_candidate_as_failure(monkeypatch) -> N
     }
     monkeypatch.setattr(
         "arkhai_bare_metal_storefront.publication_cli.run_publication_once",
-        lambda: round_result,
+        lambda **_kwargs: round_result,
     )
 
     result = CliRunner().invoke(app, ["publish"])
@@ -75,7 +75,7 @@ def test_publish_command_succeeds_when_no_candidate_failed(monkeypatch) -> None:
     }
     monkeypatch.setattr(
         "arkhai_bare_metal_storefront.publication_cli.run_publication_once",
-        lambda: round_result,
+        lambda **_kwargs: round_result,
     )
 
     result = CliRunner().invoke(app, ["publish"])

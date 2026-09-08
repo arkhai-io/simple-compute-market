@@ -15,6 +15,8 @@ from arkhai_bare_metal import (
     BareMetalResourceProjection,
     TrustedBareMetalProjection,
     bare_metal_digest,
+    bare_metal_listing_candidates,
+    resolve_refresh_target_derivation_key,
 )
 from core_storefront.publication_command import (
     StorefrontPublicationCommandCallbacks,
@@ -205,8 +207,13 @@ def _publish_registry_listing(
     return {"status": "published", "listing_id": listing_id}
 
 
-def run_publication_once() -> dict[str, Any]:
-    """Publish one exact round from freshly authenticated site projections."""
+def run_publication_once(*, refresh_listing_id: str | None = None) -> dict[str, Any]:
+    """Publish one exact round from freshly authenticated site projections.
+
+    ``refresh_listing_id`` names one tracked open listing to republish under
+    its existing identifier, which an operator needs after settlement
+    configuration changes. Without it the round leaves open listings alone.
+    """
 
     runtime = build_runtime_from_environment()
     if runtime.settlement_composition is None:
@@ -257,11 +264,21 @@ def run_publication_once() -> dict[str, Any]:
         )
 
     projections = _projections(runtime)
+    refresh_listing_ids: frozenset[str] = frozenset()
+    refresh_key: str | None = None
+    if refresh_listing_id:
+        refresh_key = resolve_refresh_target_derivation_key(
+            runtime.db.db_path,
+            listing_id=refresh_listing_id,
+            candidates=bare_metal_listing_candidates(projections),
+        )
+        refresh_listing_ids = frozenset({refresh_listing_id})
     selection = build_bare_metal_publication_selection(
         build_bare_metal_storefront_registry(domain=runtime.domain),
         projection_snapshot=lambda: projections,
         close_listing=close_listing,
         publish_existing_listing=publish_existing_listing,
+        refresh_listing_ids=refresh_listing_ids,
     )
     publication_candidates: dict[int, dict[str, Any]] = {}
 
@@ -328,17 +345,28 @@ def run_publication_once() -> dict[str, Any]:
         )
         return {"status": "published", "listing_id": listing_id}
 
+    # A refresh has to reach a candidate whose listing is open, which the
+    # routine round skips wholesale. The skip set is instead computed here and
+    # narrowed by exactly the refreshed key, so every other open listing is
+    # still passed over.
+    skip_open = refresh_key is None
+    skip_ids: set[str] | None = None
+    if refresh_key is not None:
+        skip_ids = selection.open_keys(runtime.db.db_path) - {refresh_key}
+
     try:
         result = run_bare_metal_publication(
             selection,
             config=StorefrontPublicationCommandConfig(
                 db_path=runtime.db.db_path,
                 base_url=runtime.storefront_url,
+                skip_open=skip_open,
             ),
             callbacks=StorefrontPublicationCommandCallbacks(
                 build_payload=build_payload,
                 publish_offer=publish_offer,
             ),
+            skip_ids=skip_ids,
         )
         return to_jsonable_python(
             {

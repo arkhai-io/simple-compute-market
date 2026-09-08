@@ -47,14 +47,28 @@ def serve_cmd(
 
 
 @app.command("publish")
-def publish_cmd() -> None:
+def publish_cmd(
+    refresh_listing_id: str = typer.Option(
+        None,
+        "--refresh-listing-id",
+        help=(
+            "Republish this tracked open listing under its existing "
+            "identifier, e.g. after a settlement configuration change."
+        ),
+    ),
+) -> None:
     """Publish one authenticated round from fresh trusted-site projections."""
 
     import json
 
     from .publication_cli import run_publication_once
 
-    result = run_publication_once()
+    try:
+        result = run_publication_once(refresh_listing_id=refresh_listing_id)
+    except ValueError as exc:
+        # A refusal to refresh names an unusable selection, not a run failure,
+        # and nothing has been written when it is raised.
+        raise typer.BadParameter(str(exc)) from None
     typer.echo(json.dumps(result, sort_keys=True))
     # The round is reported before the exit status so a caller keeps the
     # per-candidate evidence, but any failed candidate must leave a nonzero

@@ -35,8 +35,14 @@ def build_bare_metal_publication_selection(
     projection_snapshot: ProjectionSnapshot,
     close_listing: CloseListing,
     publish_existing_listing: PublishExistingListing,
+    refresh_listing_ids: frozenset[str] = frozenset(),
 ) -> PublicationSourceSelection:
-    """Select the exact registered bare-metal publication capability."""
+    """Select the exact registered bare-metal publication capability.
+
+    ``refresh_listing_ids`` names the open listings an operator asked to
+    republish under their existing identifiers. It is empty for the routine
+    round, which leaves open listings untouched.
+    """
     registration = registry.resolve_mode("bare_metal")
     selection = build_storefront_publication_selection(
         registry,
@@ -45,6 +51,7 @@ def build_bare_metal_publication_selection(
                 "projection_snapshot": projection_snapshot,
                 "close_listing": close_listing,
                 "publish_existing_listing": publish_existing_listing,
+                "refresh_listing_ids": refresh_listing_ids,
             },
         },
     )

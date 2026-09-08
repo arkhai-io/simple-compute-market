@@ -81,10 +81,12 @@ from .storefront_publication import (
     close_stale_bare_metal_listings,
     closed_available_bare_metal_listing_ids,
     load_derived_bare_metal_listing,
+    load_derived_bare_metal_listing_by_id,
     mark_derived_bare_metal_listings_closed,
     open_bare_metal_listing_keys,
     record_derived_bare_metal_listing,
     reopen_derived_bare_metal_listing_if_present,
+    resolve_refresh_target_derivation_key,
     stale_open_bare_metal_listing_ids,
 )
 
@@ -138,7 +140,9 @@ __all__ = [
     "close_stale_bare_metal_listings",
     "closed_available_bare_metal_listing_ids",
     "load_derived_bare_metal_listing",
+    "load_derived_bare_metal_listing_by_id",
     "mark_derived_bare_metal_listings_closed",
+    "resolve_refresh_target_derivation_key",
     "derive_accepted_hosted_binding",
     "decode_bare_metal_hosted_option_facts",
     "validate_accepted_hosted_plan",
