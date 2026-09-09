@@ -1,7 +1,7 @@
 # Tasks — publish indicative listing rates
 
-Depends on `capacity-shape-pricing` and `unbacked-listing-publication`. Do not
-begin Section 2 before both have landed.
+Depends on `unbacked-listing-publication`. Do not begin Section 2 before it has
+landed.
 
 Validation levels below are named deliberately. Per `docs/development/TESTING.md`,
 integration means the real app, a real database, a wired DI container, and the
@@ -14,16 +14,21 @@ service's canonical typed client over `ASGITransport`.
       open question there. A filter comparing an hourly rate against a monthly one
       without normalizing is worse than no filter, so this must not be settled by
       an implementation default.
-- [ ] 1.2 **Decide whether a rate-bounded query carries a currency or token
-      dimension**, and record the reasoning. Likely answered by
-      `capacity-shape-pricing`'s vocabulary; confirm rather than assume.
+- [ ] 1.2 **Decide how the rate's asset is expressed and whether a rate-bounded
+      query carries one**, and record the reasoning. A listing already names assets
+      in its settlement options; reusing that vocabulary or stating a separate one
+      is a decision, not a default. Same normalization question as 1.1 and probably
+      the same answer.
 
 ## 2. Published shape
 
-- [ ] 2.1 Publish the indicative rate on `capacity-shape-pricing`'s
-      family-grouped capability shape. Do not introduce a private scalar
-      representation, even if the family-grouped shape is more work for this
-      change's own needs.
+- [ ] 2.1 Publish one asking rate for the listing's advertised shape, with its
+      asset and period. Do not decompose it per dimension — that is
+      `capacity-shape-pricing`'s work for the negotiation side, and a second
+      decomposition here would duplicate it.
+- [ ] 2.1a Confirm the field is expressible as a rate structure evaluated at the
+      advertised shape, so `capacity-shape-pricing` can later change where the
+      number comes from without changing the published field.
 - [ ] 2.2 Publish it for backed and unbacked listings alike. Confining it to
       unbacked listings would make its presence a second encoding of backing.
 - [ ] 2.3 Confirm the rate does not reach settlement options, escrow terms, or any

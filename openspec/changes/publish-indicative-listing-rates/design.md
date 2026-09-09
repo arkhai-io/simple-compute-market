@@ -13,9 +13,9 @@ marketplace offers there is comparison before contact.
 
 ## Goals / Non-Goals
 
-**Goals.** Publish a rate buyers can filter and compare on. Keep it on the shape
-pricing is converging toward. Make it normative that nothing is constructed from
-the number.
+**Goals.** Publish a rate buyers can filter and compare on. Keep it independent of
+the negotiation-side pricing work and forward-compatible with it. Make it normative
+that nothing is constructed from the number.
 
 **Non-Goals.** No settlement participation, no honesty enforcement, no change to
 negotiation-floor policy, no restriction to unbacked listings.
@@ -54,20 +54,39 @@ listing's dimensions as "the listing's fixed, seller-declared shape". A misleadi
 rate and a misleading shape are discovered the same way and reach the same control:
 registry curation, out of band.
 
-### The family-grouped shape, not a scalar
+### One rate per listing, not a per-dimension structure
 
-A single scalar plus a unit would be cheaper and would unblock this change today.
-Rejected because `capacity-shape-pricing` already has three consumers for the
-family-grouped shape, and a fourth private representation would be migrated by
-whoever next touches pricing — at which point the migration is someone else's
-cost, incurred to save this change a wait.
+An earlier version of this design made the rate adopt `capacity-shape-pricing`'s
+family-grouped shape, and accepted a dependency on that change and transitively on
+the unstarted `structured-capacity-requirements`. That was wrong about what
+`capacity-shape-pricing` is for.
 
-The price of that decision is honest and belongs in the record: this change is
-blocked on `capacity-shape-pricing`, which is blocked on
-`structured-capacity-requirements`, which is unstarted. Goal 7 therefore has a gap
-it cannot close on its own schedule. That was accepted deliberately in exchange
-for not blocking discovery, which `unbacked-listing-publication` delivers without
-this change.
+That change exists because negotiation has one degree of freedom, so a seller
+cannot answer "what would this cost with more RAM and fewer GPUs" — which is why
+`_reject_unsupported_resource_shape_request` rejects a buyer who names a shape at
+all, and why `_place_capacity_hold` records that seller policy prices only the
+listing's advertised shape. Per-dimension rates, an injectable aggregator, and a
+negotiated rate multiplier all exist to price a shape the buyer proposes.
+
+A published asking price prices a shape that does not vary. A listing advertises
+one shape; the seller's price for it is one number. Decomposing it per dimension
+would build the machinery for a question this surface never asks.
+
+**Forward compatibility, which is what makes this safe rather than expedient.**
+When `capacity-shape-pricing` gives a listing a minimum rate structure, the
+published asking price is that structure evaluated at the advertised shape. The
+field keeps its shape and its meaning; only where the number comes from changes.
+That is an internal change with no schema migration behind it, which is not true
+of the reverse — publishing a per-dimension structure now would commit buyers and
+registries to a shape before the change that defines it has been designed.
+
+**The accepted limitation.** A seller pricing RAM and GPUs differently cannot
+express that here, and a buyer comparing two listings that bundle different RAM is
+comparing bundled prices. Unbundling belongs to `capacity-shape-pricing`, which is
+building it for the negotiation side; a second decomposition here would be exactly
+the duplication that change exists to prevent. **Revisit trigger:** the first
+buyer request to filter or sort on a per-dimension rate, or `capacity-shape-pricing`
+landing.
 
 ### Exact filters, failing on missing
 
@@ -113,9 +132,11 @@ mechanism.
   statement that nothing is constructed from it, so no surface can present it as an
   agreed amount. Not fully mitigable: a number in a catalogue reads as a price, and
   the marketplace has no way to establish otherwise before a negotiation happens.
-- **[The dependency chain slips]** → Goal 7's rate-comparison gap stays open for
-  as long as it does. The mitigation is that discovery does not wait on it, which
-  is the entire reason this change is separate.
+- **[A flat rate is later regretted]** → If per-dimension comparison turns out to
+  be what buyers actually want, this field becomes a summary of something richer
+  rather than the whole story. Acceptable because the field survives that change
+  intact — it becomes a derived value — and because the alternative was blocking
+  comparison behind two unstarted changes.
 - **[Rate and dimension shapes diverge]** → The rate attaches to the same
   family-grouped capability shape the dimensions use. If
   `publish-multidimensional-listing-shape` moves that shape, this change moves
@@ -123,20 +144,20 @@ mechanism.
 
 ## Open questions
 
-- **Which rate periods are expressible?** Hourly is the obvious default, but
-  out-of-band deals are commonly monthly or per-commitment. Whether the shape
-  carries a period, and whether the filter normalizes across periods before
-  comparing, is deferred to `capacity-shape-pricing`'s vocabulary rather than
-  guessed here. A filter that compares an hourly rate against a monthly one
-  without normalizing would be worse than no filter.
-- **Does a rate-bounded query need a currency or token dimension?** Related, and
-  likely answered by the same vocabulary.
+- **Which rate periods are expressible, and does the filter normalize across
+  them?** Hourly is the obvious default, but supply arranged out of band is
+  commonly priced monthly or per commitment. A filter comparing an hourly rate
+  against a monthly one without normalizing would be worse than no filter. This is
+  now ours to decide rather than deferred to another change's vocabulary.
+- **How is the rate's asset expressed?** A listing already names assets in its
+  settlement options, so the asking rate either reuses that vocabulary or states
+  its own. Comparing two rates in different assets is the same normalization
+  problem as comparing two periods, and probably wants the same answer.
 
 ## Migration Plan
 
-1. Land `capacity-shape-pricing`.
-2. Publish the rate on the family-grouped shape.
-3. Add the filters.
+1. Publish the asking rate with its asset and period.
+2. Add the filters.
 
 Additive throughout. A listing that publishes no rate behaves as it does today
 except that it is excluded from rate-bounded queries, which is the intended

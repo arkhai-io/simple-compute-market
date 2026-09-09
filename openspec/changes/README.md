@@ -42,7 +42,7 @@ capacity-shape-envelope, negotiation-capacity-feasibility-probe (independent)
 | Change | Status | Acceptance boundary |
 |---|---|---|
 | [`publish-multidimensional-listing-shape`](publish-multidimensional-listing-shape/) | active; no blocking dependency | Publishes the capacity dimensions and offering mode a projection declares into each listing's `offer_resource`. Fixes a live defect: the registry's dimension and form-factor filters fail closed on missing fields, so they match nothing today. Also serves Goal 3 |
-| [`structured-capacity-requirements`](structured-capacity-requirements/) | design phase; not yet planned | Structured buyer-facing `requirements` shape, `offering_type` separated from the site-inventory `resource_type` discriminator, canonical claim vocabulary. Rates became a third consumer of its family-grouped shape (2026-08-06), so `capacity-shape-pricing` waits on this vocabulary before extending pricing beyond the `gpu` family |
+| [`structured-capacity-requirements`](structured-capacity-requirements/) | design phase; not yet planned | Structured buyer-facing `requirements` shape, `offering_type` separated from the site-inventory `resource_type` discriminator, canonical claim vocabulary. `capacity-shape-pricing` waits on this vocabulary before extending pricing beyond the `gpu` family. Goal 7's published asking rate no longer waits on it (2026-09-09) — a published price for a fixed advertised shape needs no per-dimension vocabulary |
 | [`capacity-shape-pricing`](capacity-shape-pricing/) | active; depends on `publish-multidimensional-listing-shape` and `structured-capacity-requirements`' vocabulary | Per-dimension rates carried inside the family-grouped capability shape, a replaceable price aggregator, and the negotiated quantity becoming a rate multiplier so concessions stay comparable when the shape changes |
 | [`capacity-shape-envelope`](capacity-shape-envelope/) | active; independent | Kit-level admissibility: whether a whole shape is one the seller will consider, and what range remains admissible for one dimension given the rest, behind an interface shaped for the occupancy-dependent feasible region expected later |
 | [`negotiation-capacity-feasibility-probe`](negotiation-capacity-feasibility-probe/) | active; independent | Verifies a requested shape against the authoritative site before terms are agreed, consuming nothing, reporting unservable distinctly from seller-declined. Shared prerequisite: also required before a held reservation can be billed |
@@ -119,10 +119,15 @@ contact-payload-retention ──► compose-contact-exchange-across-compute
 ```text
 capacity-resource-administration ──► project-capacity-resources-without-hosts ──┐
 rename-listing-cardinality-mode ────────────────────────────────────────────────┤
-pool-declared-advertisement-and-backing ────────────────────────────────────────┴──► unbacked-listing-publication ──┐
-                                                                                                                    ├──► publish-indicative-listing-rates
-structured-capacity-requirements ──► capacity-shape-pricing ────────────────────────────────────────────────────────┘
+pool-declared-advertisement-and-backing ────────────────────────────────────────┴──► unbacked-listing-publication ──► publish-indicative-listing-rates
 ```
+
+Goal 7 owns every change it needs. `publish-indicative-listing-rates` was
+originally graphed behind `capacity-shape-pricing` and transitively behind the
+unstarted `structured-capacity-requirements`; that dependency was removed once it
+was clear those changes price a shape a buyer proposes during negotiation, while a
+published asking price prices a listing's fixed advertised shape. The two remain
+forward-compatible — see that change's `design.md`.
 
 `pools-9-retire-local-physical-authority` is a **completion dependency** of
 `unbacked-listing-publication`, not a blocking one: implementation may proceed
@@ -142,7 +147,7 @@ advertisement change's subset rule depend on a concept its own dependent owned.
 | [`pool-declared-advertisement-and-backing`](pool-declared-advertisement-and-backing/) | active; no blocking dependency | Two pool declarations: what a pool's listings may advertise, separate from what its provider proves it can deliver; and whether the pool can be admitted against. A backed pool's advertisable set is constrained to a subset of its deliverable set, a malformed backing value fails closed, and both are derived for every existing pool on upgrade. Leaves `deliverable_modes` and every execution recheck untouched. Observable to operators only — no listing behaviour changes until `unbacked-listing-publication` reads the tags |
 | [`project-capacity-resources-without-hosts`](project-capacity-resources-without-hosts/) | blocked on `capacity-resource-administration`; spec delta pending | Inverts the resource-pool projection to iterate declared capacity resources and correlate host rows in, so a declaration with no executor host reaches storefronts instead of succeeding into a void. Also serves Goal 1 |
 | [`unbacked-listing-publication`](unbacked-listing-publication/) | blocked on the three above, plus a completion dependency on `pools-9-retire-local-physical-authority` | Backing as an explicit declared listing property: a tagged union over admission provenance, a binding discriminator distinct from the listing's origin site, pool advertise-authorization separated from execute-authorization, capacity-availability reconciliation scoped to backed listings while source-publication reconciliation applies to all, and an exact backing filter in the compute registry schema |
-| [`publish-indicative-listing-rates`](publish-indicative-listing-rates/) | blocked on `capacity-shape-pricing` and `unbacked-listing-publication`; spec delta pending its two decision gates | A seller's asking rate on the family-grouped capability shape with exact fail-on-missing filters, normatively a listing attribute rather than a settlement option rate — nothing is constructed from it. Closes Goal 7's comparison gap |
+| [`publish-indicative-listing-rates`](publish-indicative-listing-rates/) | blocked on `unbacked-listing-publication`; spec delta pending its two decision gates | A seller's asking rate on the family-grouped capability shape with exact fail-on-missing filters, normatively a listing attribute rather than a settlement option rate — nothing is constructed from it. Closes Goal 7's comparison gap |
 
 ## Lesser goal — POOLS capacity and fulfillment foundation
 

@@ -9,20 +9,27 @@ That gap is the difference between a catalogue and a directory. Goal 7's value
 statement is that a buyer gets one place to compare rates across backed and
 unbacked supply; without a published rate, the goal delivers half of it.
 
-The rate is separated from that change rather than carried by it because of its
-shape rather than its substance. `capacity-shape-pricing` is moving rates into
-the family-grouped capability shape and already has three consumers; a fourth
-private scalar representation added to avoid waiting would have to be migrated
-later by whoever touches pricing next. But `capacity-shape-pricing` is itself
-blocked on `structured-capacity-requirements`, which is unstarted — so binding
-discovery to that chain would block it behind two unstarted changes. Splitting
-lets discovery proceed and keeps the rate on the shape it belongs on.
+The rate is separated from that change because it is a distinct buyer-facing
+surface, not because it waits on one. An earlier version of this proposal made it
+depend on `capacity-shape-pricing`, on the reasoning that a rate belongs inside the
+family-grouped capability shape that change is building. That was a misreading of
+what `capacity-shape-pricing` is for: it exists so a seller can put a number on a
+shape a **buyer proposes during negotiation**, which is why it builds per-dimension
+rates, an injectable aggregator, and a negotiated rate multiplier. A listing's
+advertised shape does not vary — `_reject_unsupported_resource_shape_request`
+rejects any buyer who names one, precisely because seller policy prices only the
+advertised shape — so a published asking price for that listing is one number.
+
+Nothing about publishing it requires decomposing a shape into per-dimension rates.
+A buyer wanting to compare cost per GPU-hour across differently-shaped listings
+derives it from this rate and the dimensions `publish-multidimensional-listing-shape`
+publishes, which is a buyer-client computation rather than a seller decomposition.
 
 ## What Changes
 
-- Publish an indicative rate on compute listings in `offer_resource`, using
-  `capacity-shape-pricing`'s family-grouped capability shape rather than a
-  private scalar.
+- Publish a seller's asking rate for a compute listing's advertised shape in
+  `offer_resource`, as a rate with its asset and its unit of time. One rate per
+  listing, because a listing's advertised shape does not vary.
 - Add exact, fail-on-missing rate filters to `core/registry/filter-spec.yaml`,
   matching the convention every other `offer_resource` filter uses.
 - State normatively that the published rate is a **listing attribute** and not a
@@ -58,8 +65,14 @@ None.
 - Do not change negotiation-floor pricing policy, which is a separate
   storefront-side resolution with its own three-tier precedence.
 - Do not restrict the rate to unbacked listings. A backed listing may publish an
-  indicative asking rate too, and confining it would make the field mean
-  "unbacked" a second time.
+  asking rate too, and confining it would make the field mean "unbacked" a second
+  time.
+- Do not unbundle the rate across dimensions. A seller who prices RAM and GPUs
+  differently cannot express that here, and a buyer comparing two listings that
+  bundle different RAM is comparing bundled prices. That limitation is accepted for
+  this version and belongs to `capacity-shape-pricing`, which is building the
+  machinery for it; inventing a second decomposition here would be the duplication
+  that change exists to prevent.
 
 ## Impact
 
@@ -73,14 +86,16 @@ None.
 
 ## Dependencies and Related Changes
 
-- **Depends on `capacity-shape-pricing`** for the family-grouped rate shape, and
-  transitively on `structured-capacity-requirements` for the vocabulary that
-  change waits on.
 - **Depends on `unbacked-listing-publication`**, which makes the listings this
   change prices publishable and establishes the backing field alongside which the
   rate is filtered.
-- Coordinate with `publish-multidimensional-listing-shape`, which owns the
-  dimension shape the rate attaches to.
+- **Forward-compatible with `capacity-shape-pricing`**, not dependent on it. When a
+  listing carries a minimum rate structure, this published field becomes that
+  structure evaluated at the listing's advertised shape. The number's source
+  changes; the published field does not, so no schema migration follows.
+- Coordinate with `publish-multidimensional-listing-shape`, which publishes the
+  dimensions a buyer divides this rate by to compare across shapes. No ordering
+  dependency: a rate is comparable without them, and less useful.
 
 ## Permanent documentation impact
 
