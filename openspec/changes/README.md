@@ -119,7 +119,7 @@ contact-payload-retention ──► compose-contact-exchange-across-compute
 ```text
 capacity-resource-administration ──► project-capacity-resources-without-hosts ──┐
 rename-listing-cardinality-mode ────────────────────────────────────────────────┤
-pool-declared-advertisable-modes ───────────────────────────────────────────────┴──► unbacked-listing-publication ──┐
+pool-declared-advertisement-and-backing ────────────────────────────────────────┴──► unbacked-listing-publication ──┐
                                                                                                                     ├──► publish-indicative-listing-rates
 structured-capacity-requirements ──► capacity-shape-pricing ────────────────────────────────────────────────────────┘
 ```
@@ -130,14 +130,16 @@ before it, closeout may not. It owns promoting "projection is the listing-candid
 origination path" into `ARCHITECTURE.md`, alongside which this goal's own promoted
 text sits.
 
-`pool-declared-advertisable-modes` amends `resource-pool-management`, a contract
-established by the archived `pool-declared-offering-modes` change. No active change
-owns it, so there was nothing to split a minimal piece out of.
+`pool-declared-advertisement-and-backing` amends `resource-pool-management`, a
+contract established by the archived `pool-declared-offering-modes` change. No
+active change owns it, so there was nothing to split a minimal piece out of. It
+carries both new pool tags rather than one: splitting them across changes made the
+advertisement change's subset rule depend on a concept its own dependent owned.
 
 | Change | Status | Acceptance boundary |
 |---|---|---|
 | [`rename-listing-cardinality-mode`](rename-listing-cardinality-mode/) | active; independent; spec delta pending | Renames the `listing_mode` projection hint to `listing_cardinality_mode` and states its scope normatively, so a value that is not a cardinality is visibly out of place. Accepts the old key as a deprecated alias to prevent silent reclassification across version skew |
-| [`pool-declared-advertisable-modes`](pool-declared-advertisable-modes/) | active; no blocking dependency | A second pool mode declaration authorizing what a pool's listings may advertise, separate from what its provider proves it can deliver, with a backed pool's advertisable set constrained to a subset of its deliverable set. Leaves `deliverable_modes` and every execution recheck untouched |
+| [`pool-declared-advertisement-and-backing`](pool-declared-advertisement-and-backing/) | active; no blocking dependency | Two pool declarations: what a pool's listings may advertise, separate from what its provider proves it can deliver; and whether the pool can be admitted against. A backed pool's advertisable set is constrained to a subset of its deliverable set, a malformed backing value fails closed, and both are derived for every existing pool on upgrade. Leaves `deliverable_modes` and every execution recheck untouched. Observable to operators only — no listing behaviour changes until `unbacked-listing-publication` reads the tags |
 | [`project-capacity-resources-without-hosts`](project-capacity-resources-without-hosts/) | blocked on `capacity-resource-administration`; spec delta pending | Inverts the resource-pool projection to iterate declared capacity resources and correlate host rows in, so a declaration with no executor host reaches storefronts instead of succeeding into a void. Also serves Goal 1 |
 | [`unbacked-listing-publication`](unbacked-listing-publication/) | blocked on the three above, plus a completion dependency on `pools-9-retire-local-physical-authority`; spec delta pending its `derivation_key` decision gate | Backing as an explicit declared listing property: a tagged union over admission provenance, a binding discriminator distinct from the listing's origin site, pool advertise-authorization separated from execute-authorization, capacity-availability reconciliation scoped to backed listings while source-publication reconciliation applies to all, and an exact backing filter in the compute registry schema |
 | [`publish-indicative-listing-rates`](publish-indicative-listing-rates/) | blocked on `capacity-shape-pricing` and `unbacked-listing-publication`; spec delta pending its two decision gates | An indicative asking rate on the family-grouped capability shape with exact fail-on-missing filters, normatively a listing attribute rather than a settlement option rate. Closes Goal 7's comparison gap |

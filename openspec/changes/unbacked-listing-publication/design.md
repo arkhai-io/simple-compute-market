@@ -31,10 +31,12 @@ below.
 
 ### Vocabulary
 
-The terms this change is written in are settled, and they live here rather than
-in `ARCHITECTURE.md` until this change makes them true — task 7.7 promotes them at
-closeout. The alternatives considered are recorded because they are the kind that
-get re-proposed.
+The terms this change is written in are settled. They live here and in
+`pool-declared-advertisement-and-backing` rather than in `ARCHITECTURE.md` until
+they are true: that change promotes the Terms entries at its closeout, because a
+pool declaring its backing is the point at which the concept exists, and this
+change promotes the listing-level boundary statements at its own. The alternatives
+considered are recorded because they are the kind that get re-proposed.
 
 `capacity-backed` was promoted rather than replaced. The document already used the
 adjective in a load-bearing sentence — "Every capacity-backed candidate carries
@@ -190,34 +192,56 @@ and a declaration wider than its proof is narrowed to empty. For an execution-le
 seller the proved set is empty, so reading an advertise job out of that field
 authorizes nothing.
 
-`pool-declared-advertisable-modes` adds the second declaration, leaving
+`pool-declared-advertisement-and-backing` adds the second declaration, leaving
 `deliverable_modes` untouched and constraining a backed pool's advertisable set to
 a subset of its deliverable set. This change depends on it and consumes it: a
 listing derived from a pool may advertise only a mode that pool declares
 advertisable, backed or not, and `offer_resource.virtualization_type` continues to
 equal the recorded offering mode for every listing.
 
-### Absent backing in a projection is a version rule, not an inference
+That change also owns the `capacity_backing` pool declaration itself. An earlier
+split put the two tags in different changes and produced a dependency cycle — the
+advertisement change's subset rule is scoped to backed pools, so its normative text
+needed a concept owned by the change depending on it. Both tags are declarations a
+site makes about a pool; everything that reads them is storefront-side and belongs
+here.
+
+### Absent tags in a projection are a version rule, not an inference
 
 Backing must never be inferred from missing data — but an upgraded storefront will
-read older sites whose valid pools predate the field, and "no rule" is not an
-option. The cardinality rename got a deprecated alias for exactly this and backing
-initially got nothing.
+read older sites whose valid pools predate both new tags, and "no rule" is not an
+option. The cardinality rename got a deprecated alias for exactly this; the new
+tags initially got nothing.
 
-The resolution distinguishes two cases that a blanket default would conflate:
+The consuming rule is only tractable because the producing side guarantees
+completeness. `pool-declared-advertisement-and-backing` derives both values for
+every existing pool on upgrade and requires that a producer emitting either tag
+emits it for every pool it projects. Without that guarantee this rule collapses:
+an upgraded site holding legacy pools would emit the tags nowhere and read as an
+old producer indefinitely, and the first explicitly unbacked pool an operator
+created would turn every other pool into a partially-populated omission and fail
+nine working pools closed on a correct operator action.
 
-- A projection whose producer emits `capacity_backing` for **no** pool is an old
-  producer. Every pool in it is interpreted as capacity-backed, under a
-  compatibility rule that is explicit, logged, and time-limited with a stated
-  removal condition. Existing supply is semantically known to be backed, so this
-  states a fact about a producer version rather than guessing about a pool.
-- A projection that carries the field for some pools and omits it for one is a
+Given that guarantee, two cases:
+
+- A projection whose producer emits the tag for **no** pool predates it. For
+  `capacity_backing`, every pool is interpreted as backed. For
+  `advertisable_modes`, `deliverable_modes` is treated as the advertisement
+  authorization. Both are logged, and both are time-limited with a stated removal
+  condition. Neither is a permissive default: each reproduces the old contract
+  exactly, because under the old contract every pool was admissible and delivery
+  authorization was the only mode authorization there was.
+- A projection carrying a tag for some pools and omitting it for one is a
   **producer defect**, not an old producer, and that pool fails closed.
 
 That keeps never-infer true at the pool level, which is where the rule matters,
 while giving mixed-version deployments a defined behaviour. The alternative —
-refusing any projection without the field — is a much harder deployment contract
-and would make an upgraded storefront unable to read an unupgraded site at all.
+refusing any projection without the tags — would make an upgraded storefront
+unable to read an unupgraded site at all.
+
+A malformed value is neither case. `capacity_backing` outside `backed` and
+`unbacked` fails that pool closed on the consuming side too; a discriminator is not
+somewhere to apply a tolerant reading.
 
 Note this is a different problem from the registry republication below. That one
 concerns listings already published; this one concerns the site-to-storefront
@@ -297,7 +321,7 @@ For a discriminator, permissive matching is actively wrong. A buyer asking for
 unbacked listings would receive every legacy backed listing that simply predates
 the field — precisely the category they excluded. So the filter is exact and
 fails on missing, and existing listings are republished carrying explicit
-`capacity_backed`, since they are semantically known to be backed and should not
+`capacity_backing: backed`, since they are semantically known to be backed and should not
 depend on an absent field to be classified.
 
 ### One registry, not a second profile
@@ -429,18 +453,19 @@ adds no new storage category. What it must not add is an inventory model.
   implementation step, because choosing it quietly would settle a collision-safety
   property in a place no reviewer looks.
 - **Does an unbacked pool still have to name a fulfillment provider?**
-  `PoolCreate` requires one. `pool-declared-advertisable-modes` removes the reason
-  that was blocking — an execution-less seller no longer needs a provider that
+  `PoolCreate` requires one. `pool-declared-advertisement-and-backing` removes the
+  reason that was blocking — an execution-less seller no longer needs a provider that
   *proves a deliverable mode* — but the pool still names a provider it must never
   dispatch to. Deferred rather than resolved with a publication-only provider
   kind, which that change rejects for putting a no-op executor in the fleet; the
   fail-closed guard in `project-capacity-resources-without-hosts` is what makes it
   safe in the meantime.
-- **When is the absent-backing compatibility rule removed?** It is time-limited by
+- **When are the absent-tag compatibility rules removed?** Both are time-limited by
   design, and this repository has no fleet-wide deployment signal to gate removal
-  on, since sellers self-host their own site and storefront deployments. Same
-  shape as the cardinality alias's removal question, and deliberately not
-  prescribed in `tasks.md`.
+  on, since sellers self-host their own site and storefront deployments. Same shape
+  as the cardinality alias's removal question, and deliberately not prescribed in
+  `tasks.md`. Whether the two rules are removed together is itself open — they
+  arrive together but a deployment could plausibly upgrade past one first.
 - **Does a rate arbitrageur with no hardware run a site service?** The model
   assumes site-shaped sellers deploy one, which is materially lighter with no
   hosts — no executor connections, no playbooks, no watchdog — but is still a
@@ -457,12 +482,13 @@ adds no new storage category. What it must not add is an inventory model.
 1. Add the backing discriminator to the binding schema, covered by the existing
    immutability trigger. Additive; existing rows are capacity-backed. `site_id`
    is untouched and stays `NOT NULL`.
-2. Introduce the admission-provenance union with `CapacityBinding` unchanged as
-   one variant.
+2. Introduce `PublicationBinding` with its `admission` discriminator, narrowing
+   `CapacityBinding` to the backed form rather than leaving it unchanged, and widen
+   `PublicationCandidate.binding` to it.
 3. Scope site-pinned routing and capacity reconciliation to backed listings, and
    split pool advertise-authorization from execute-authorization.
 4. Add the projected property and publish backing.
-5. Republish existing listings carrying explicit `capacity_backed`, then add the
+5. Republish existing listings carrying explicit `capacity_backing: backed`, then add the
    exact registry filter. In that order — a filter added first would exclude every
    legacy listing from backed queries in the window before republication
    completes.

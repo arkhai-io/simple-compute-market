@@ -2,7 +2,7 @@
 
 Depends on `rename-listing-cardinality-mode`,
 `project-capacity-resources-without-hosts`, and
-`pool-declared-advertisable-modes`. Do not begin Section 2 before all three have
+`pool-declared-advertisement-and-backing`. Do not begin Section 2 before all three have
 landed.
 
 Validation levels below are named deliberately. Per `docs/development/TESTING.md`,
@@ -61,7 +61,7 @@ does not satisfy the no-raw-calls rule.
 
 ## 3. Requirement scoping
 
-- [ ] 3.1 Consume `pool-declared-advertisable-modes`: a listing derived from a
+- [ ] 3.1 Consume `pool-declared-advertisement-and-backing`: a listing derived from a
       pool may advertise only a mode that pool declares advertisable, backed or
       not. Do not read advertisement authorization out of `deliverable_modes` and
       do not make the pool conjunct vacuous — the first authorizes nothing for an
@@ -97,12 +97,16 @@ does not satisfy the no-raw-calls rule.
 - [ ] 4.1 Carry `capacity_backing` as a declared projected pool property, read
       live from the current projection and never persisted into storefront-local
       storage.
-- [ ] 4.1a Implement the producer-version compatibility rule. A projection whose
-      producer emits `capacity_backing` for no pool is an old producer and every
-      pool in it is interpreted as capacity-backed, logged, under a rule with a
-      stated removal condition. A projection carrying the field for some pools and
-      omitting it for one is a producer defect and that pool fails closed. Do not
-      collapse these into one default — the second case is the never-infer rule.
+- [ ] 4.1a Implement the producer-version compatibility rules for both new pool
+      tags. A projection whose producer emits a tag for no pool predates it:
+      `capacity_backing` resolves to backed, and `deliverable_modes` serves as
+      advertisement authorization. Log both, under rules with stated removal
+      conditions. A projection carrying a tag for some pools and omitting it for one
+      is a producer defect and that pool fails closed. Do not collapse these into
+      one default — the second case is the never-infer rule.
+- [ ] 4.1b Fail a pool closed when its `capacity_backing` value is outside `backed`
+      and `unbacked`. A discriminator is not somewhere to apply the tolerant reading
+      the cardinality hint gets.
 - [ ] 4.4 Implement the backing transition as close-and-republish. When a source
       declaration's projected backing changes, the existing listing closes and a
       new listing binds with a new durable identity and the new discriminator.
@@ -119,7 +123,7 @@ does not satisfy the no-raw-calls rule.
 ## 5. Published shape and filter
 
 - [ ] 5.1 Publish backing in `offer_resource`.
-- [ ] 5.2 Republish existing listings carrying explicit `capacity_backed` before
+- [ ] 5.2 Republish existing listings carrying explicit `capacity_backing: backed` before
       adding the filter. They are semantically known to be backed and must not
       depend on an absent field to be classified.
 - [ ] 5.3 Add an exact `on_missing: fail` backing filter to
@@ -162,13 +166,17 @@ does not satisfy the no-raw-calls rule.
       canonical site client parses it, and the storefront consumes that exact
       response. This is a new interservice field and belongs in the
       client-to-API jurisdiction, not in a serializer unit test.
-- [ ] 6.10 **Integration.** Old-producer skew: a projection emitting the field for
-      no pool resolves every pool as capacity-backed and logs the compatibility
-      rule. A projection emitting it for some pools and omitting it for one fails
-      closed on that pool.
-- [ ] 6.11 **System.** One representative mixed-version deployment, if mixed
-      site/storefront versions are supported. If they are not, record that
-      decision rather than omitting the coverage silently.
+- [ ] 6.10 **Integration.** Old-producer skew for both tags: a projection emitting
+      `capacity_backing` for no pool resolves every pool as backed; a projection
+      emitting `advertisable_modes` for no pool authorizes advertisement from
+      `deliverable_modes`, so a previously valid backed listing from an unupgraded
+      site still publishes. Both log the compatibility rule. A projection emitting
+      either tag for some pools and omitting it for one fails closed on that pool.
+- [ ] 6.10a **Integration.** A projection carrying a `capacity_backing` value
+      outside `backed` and `unbacked` fails that pool closed.
+- [ ] 6.11 **System.** One representative mixed-version deployment covering both
+      tags, if mixed site/storefront versions are supported. If they are not, record
+      that decision rather than omitting the coverage silently.
 - [ ] 6.12 **Integration.** Backing flip: a source declaration changes from
       unbacked to backed, the old listing closes, and a new listing binds with a
       different durable identity. Assert the original binding row is unmodified —
@@ -203,22 +211,23 @@ does not satisfy the no-raw-calls rule.
       dependency graph in `openspec/changes/README.md`, including the completion
       dependency on `pools-9-retire-local-physical-authority` for the
       origination statement this change consumes and does not own.
-- [ ] 7.7 **Promotion.** Promote the vocabulary and boundary statements to
+- [ ] 7.7 **Promotion.** Promote the listing-level boundary statements to
       `docs/development/ARCHITECTURE.md` now that they are true, and complete the
-      design-promotion record below. This is the point at which the permanent map
-      gains the backing vocabulary — not earlier.
+      design-promotion record below. The Terms entries are not promoted here:
+      `pool-declared-advertisement-and-backing` promotes those at its own closeout,
+      because a pool declaring its backing is the point at which the concept becomes
+      true. Confirm they landed there rather than promoting them twice.
 
 ## Design promotion record
 
 | Accepted decision | Permanent location |
 |---|---|
-| `capacity-backed` / `unbacked` defined; backing means an admission authority exists, not that hardware does | `docs/development/ARCHITECTURE.md#terms` |
 | Backing is declared, never inferred, and is independent of cardinality and settlement mechanism | `docs/development/ARCHITECTURE.md` — "Storefront capacity boundary" |
 | A listing's origin site is not its admission authority; the binding carries both separately | `openspec/specs/storefront-publication/spec.md` |
 | Pool advertise-authorization is separate from execute-authorization | `openspec/specs/storefront-publication/spec.md` |
 | Site-pinned routing and capacity-availability reconciliation are capacity-backed requirements; source-publication reconciliation applies to all listings | `openspec/specs/storefront-publication/spec.md` |
 | An unbacked listing has no source-inventory record | `openspec/specs/storefront-publication/spec.md` |
 | Backing transitions are close-and-republish, not in-place | `openspec/specs/storefront-publication/spec.md` |
-| Absent projected backing is a producer-version compatibility rule, not a per-pool inference | `openspec/specs/storefront-publication/spec.md` |
+| Absent projected pool tags are producer-version compatibility rules, not per-pool inferences; a malformed backing value fails closed | `openspec/specs/storefront-publication/spec.md` |
 | Claim construction describes what happens when capacity admission is requested | `openspec/specs/site-capacity/spec.md` |
 | Backing is filtered exactly and fail-on-missing | `openspec/specs/registry-discovery/spec.md` |

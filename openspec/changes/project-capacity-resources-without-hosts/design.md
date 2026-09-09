@@ -79,10 +79,17 @@ paths that still need it rather than to rely on those paths happening to check.
 
 `capacity-resource-administration` makes the capacity resource "the authoritative
 declaration of a Physical Resource's sellable capacity". Read as one claim, that
-sentence does not survive this change: a resource with no correlated host has no
-Physical Resource to be the sellable capacity *of*, and downstream work needs a
-declaration that is authoritative for shape without implying anything is
-admissible against it.
+sentence conflates two things: being authoritative for what is declared sellable,
+and implying that something can be sold against it.
+
+A hostless resource still has a Physical Resource — that term means the real supply
+resource, "host, pod allocation, storage, power, or bandwidth", and this change's
+own delta has a hostless resource projecting its Physical Resource identity. What a
+missing `Host` removes is the executor connection record, not the supply the
+declaration describes. So the problem is not that there is nothing for the capacity
+to be *of*; it is that "sellable" carries an admission implication the declaration
+should not be making on its own, and downstream work needs a declaration
+authoritative for shape without it.
 
 The alternative considered was a second site-owned declaration object carrying
 shape for resources that are not admissible. Rejected, because it reintroduces

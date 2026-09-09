@@ -22,8 +22,10 @@ migration that unwinds a fabricated site.
 
 ## What Changes
 
-- Carry `capacity_backing` as a declared, projected pool property, a peer of
-  `listing_cardinality_mode`. Absent capacity data never implies it.
+- Consume `capacity_backing` from the projection, read live and never persisted
+  into storefront-local storage. Absent capacity data never implies it; the pool
+  declaration and its migration belong to
+  `pool-declared-advertisement-and-backing`.
 - Add an explicit backing discriminator to `storefront_listing_bindings`, covered
   by the existing immutability trigger. `site_id` remains `NOT NULL` and
   populated for every listing: it is the listing's *origin* site, which an
@@ -32,14 +34,16 @@ migration that unwinds a fabricated site.
 - Introduce an unbacked admission provenance alongside `CapacityBinding`, as a
   tagged union. Only code that reserves, commits, releases, schedules, or
   dispatches requires the `CapacityBinding` variant.
-- Consume `pool-declared-advertisable-modes`: a listing derived from a pool may
+- Consume `pool-declared-advertisement-and-backing`: a listing derived from a pool may
   advertise only a mode that pool declares advertisable. `deliverable_modes` keeps
   its meaning and its execution rechecks untouched.
-- Define what an upgraded storefront does with a projection carrying no
-  `capacity_backing`: a producer emitting it for no pool is an old producer and
-  its pools are interpreted as backed under an explicit, logged, time-limited
-  rule; a producer emitting it for some pools and omitting it for one is defective
-  and that pool fails closed.
+- Define what an upgraded storefront does with a projection carrying neither new
+  pool tag. A producer emitting a tag for no pool predates it: `capacity_backing`
+  resolves to backed, and `deliverable_modes` serves as advertisement
+  authorization — each reproducing the old contract rather than defaulting
+  permissively, under an explicit, logged, time-limited rule. A producer emitting a
+  tag for some pools and omitting it for one is defective and that pool fails
+  closed. A malformed `capacity_backing` value fails that pool closed as well.
 - Implement a backing transition as close-and-republish rather than an in-place
   update, since the durable discriminator is immutable.
 - Scope the site-pinned claim-routing requirement, the capacity reconciliation
@@ -98,17 +102,21 @@ None. This is a posture within existing capabilities, not a new domain.
   and a filter. Adding filters changes the etag, so buyers re-fetch; the header
   states filters may be added without a version bump.
 - Affected data: existing listings are republished carrying explicit
-  `capacity_backed`. Without that step an exact filter would exclude them from
-  backed queries and a permissive one would include them in unbacked queries.
+  `capacity_backing: backed`. Without that step an exact filter would exclude them
+  from backed queries and a permissive one would include them in unbacked queries.
+  This is a registry concern and is separate from the site-side pool migration the
+  prerequisite owns.
 - Not affected: capacity admission, reservation, scheduling, fulfillment, or any
   provider path. An unbacked listing never reaches them.
 
 ## Dependencies and Related Changes
 
-- **Depends on `pool-declared-advertisable-modes`.** Without a declaration that
-  authorizes advertising a mode independently of proving delivery, an
-  execution-less seller's pool authorizes no mode at all and nothing derived from
-  it can advertise anything.
+- **Depends on `pool-declared-advertisement-and-backing`.** Without a declaration
+  that authorizes advertising a mode independently of proving delivery, an
+  execution-less seller's pool authorizes no mode and nothing derived from it can
+  advertise anything. That change also declares `capacity_backing` on the pool and
+  guarantees a producer emits it for every pool, which is what makes this change's
+  version-skew rule tractable rather than a guess.
 - **Depends on `rename-listing-cardinality-mode`.** Landing the rename first is
   what makes `capacity_backing` and the cardinality hint visibly independent
   rather than looking like one field being widened.
@@ -127,11 +135,12 @@ None. This is a posture within existing capabilities, not a new domain.
 
 ## Permanent documentation impact
 
-- [x] `docs/development/ARCHITECTURE.md` — the Terms table gains capacity-backed
-      and unbacked listing entries, and the "Storefront capacity boundary"
+- [x] `docs/development/ARCHITECTURE.md` — the "Storefront capacity boundary"
       subsection gains the declared-not-inferred rule and backing's independence
-      from cardinality and settlement. These are promoted at this change's
-      closeout, when they become true, and not before.
+      from cardinality and settlement, promoted at this change's closeout when they
+      become true. The Terms entries are promoted earlier, by
+      `pool-declared-advertisement-and-backing`, since a pool declaring its backing
+      is when the concept exists.
 - [x] Existing subsystem specification —
       `openspec/specs/storefront-publication/spec.md` and
       `openspec/specs/registry-discovery/spec.md`.
@@ -140,9 +149,6 @@ None. This is a posture within existing capabilities, not a new domain.
 
 ### Knowledge to promote
 
-- `capacity-backed` and `unbacked` as defined terms, with backing meaning an
-  admission authority exists rather than hardware existing —
-  `docs/development/ARCHITECTURE.md#terms`.
 - Backing is declared, never inferred from absent capacity data, and is
   independent of both the cardinality hint and the settlement mechanism —
   `docs/development/ARCHITECTURE.md`, "Storefront capacity boundary".

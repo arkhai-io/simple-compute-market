@@ -31,10 +31,12 @@ ignore the channel.
   across the projection producer, the storefront consumers, and
   `openspec/specs/storefront-publication/spec.md`'s "Domain-owned publication and
   hold hints" requirement.
-- Accept the previous key as a deprecated alias on ingestion for one release, so
-  a projection produced by an unupgraded site is not silently reclassified to the
-  structural default. Emit an operator-visible deprecation notice when the alias
-  is taken.
+- Accept the previous key as a deprecated alias on ingestion for a compatibility
+  window, so a projection produced by an unupgraded site is not silently
+  reclassified to the structural default. Emit an operator-visible deprecation
+  notice when the alias is taken. When the window closes is an open question in
+  `design.md`, not a fixed release count — sellers self-host their own deployments
+  and there is no fleet-wide signal to gate removal on.
 - Record in the requirement that the enum's scope is cardinality: how many
   candidates a pool yields and how each is identified. A value describing what is
   offered, how it settles, or whether capacity backs it is out of scope.
@@ -60,10 +62,11 @@ None.
 
 - Do not add a value to the enum. Both current values remain, with the same
   semantics.
-- Do not introduce, define, or reference a backing property.
-  `docs/development/ARCHITECTURE.md` defines the term and
-  `unbacked-listing-publication` owns the field. This change must remain
-  reviewable as a rename.
+- Do not add a value to the cardinality enum for anything other than a
+  cardinality. What is offered, how a deal settles, and whether an admission
+  authority stands behind a listing each have or will have their own field, owned
+  by `pool-declared-advertisement-and-backing` and `unbacked-listing-publication`.
+  This change must remain reviewable as a rename.
 - Do not change how a `fungible` pool's publishable range is computed, or how a
   `specific_resource` pool derives one candidate per member.
 - Do not rename `offering_mode`, `deliverable_modes`, or
