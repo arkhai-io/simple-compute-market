@@ -21,6 +21,7 @@ reinit: ## Upgrade and reinstall changed internal wheel dependencies
 		--upgrade-package arkhai-compute-provisioning --reinstall-package arkhai-compute-provisioning \
 		--upgrade-package arkhai-kit-alkahest   --reinstall-package arkhai-kit-alkahest \
 		--upgrade-package arkhai-kit-contact-exchange --reinstall-package arkhai-kit-contact-exchange \
+		--upgrade-package arkhai-kit-delivery --reinstall-package arkhai-kit-delivery \
 		--upgrade-package arkhai-kit-identity  --reinstall-package arkhai-kit-identity \
 		--upgrade-package arkhai-kit-policy     --reinstall-package arkhai-kit-policy \
 		--upgrade-package arkhai-kit-site-client --reinstall-package arkhai-kit-site-client \

@@ -9,7 +9,6 @@ import urllib.error
 from pathlib import Path
 
 import pytest
-
 from market_delivery import DeliveryError, introduction_delivery_event
 from market_delivery.builtin.command_sink import build_command_sink
 from market_delivery.builtin.file_sink import build_file_sink
@@ -221,7 +220,9 @@ def test_smtp_sink_sends_one_rendered_message(monkeypatch) -> None:
         def __exit__(self, *exc):
             return False
 
-        def starttls(self):
+        def starttls(self, *, context):
+            assert context.check_hostname
+            assert context.verify_mode == 2
             sent["starttls"] = True
 
         def login(self, username, password):
@@ -264,7 +265,9 @@ def test_smtp_sink_reports_a_refusing_server_without_the_password(monkeypatch) -
         def __exit__(self, *exc):
             return False
 
-        def starttls(self):
+        def starttls(self, *, context):
+            assert context.check_hostname
+            assert context.verify_mode == 2
             pass
 
         def login(self, username, password):

@@ -6,29 +6,33 @@ import asyncio
 import base64
 import json
 import os
+import selectors
 import socket
 import sqlite3
 import subprocess
-import selectors
-from pathlib import Path
 import threading
 import time
 from contextlib import contextmanager
+from pathlib import Path
 
 import httpx
 import pytest
 import uvicorn
-from typer.testing import CliRunner
-from arkhai_bare_metal_storefront.cli import app as cli_app
 from arkhai_bare_metal import BareMetalProvisionTerms
+from arkhai_bare_metal_storefront.cli import app as cli_app
 from arkhai_bare_metal_storefront.contact_offers import (
-    NOTICE, OFFERS_PATH_ENV, ContactPublicationError, contact_registry,
-    load_contact_offers, reconcile_contact_offers,
+    NOTICE,
+    OFFERS_PATH_ENV,
+    ContactPublicationError,
+    contact_registry,
+    load_contact_offers,
+    reconcile_contact_offers,
 )
 from arkhai_bare_metal_storefront.domain_runtime import get_market_domain_contract
 from arkhai_bare_metal_storefront.runtime import build_runtime_from_environment
 from arkhai_bare_metal_storefront.server import (
-    build_bare_metal_storefront_app, build_bare_metal_storefront_registry,
+    build_bare_metal_storefront_app,
+    build_bare_metal_storefront_registry,
 )
 from core_buyer.introductions import IntroductionTransport
 from core_buyer.negotiation_client import load_buyer_chain, negotiate_with_seller
@@ -37,6 +41,8 @@ from market_core.schemas import SettlementSelection
 from market_identity import Ed25519Signer, TrustedIdentitySet
 from market_settlement_runtime import derive_obligation_ref
 from registry_client import ListingRequest
+from typer.testing import CliRunner
+
 # Deterministic synthetic test-only keys and bearer value. NEVER deploy live.
 SELLER_SEED = bytes([17]) * 32
 SELLER = Ed25519Signer(SELLER_SEED)
@@ -76,7 +82,7 @@ def serve(application, *, lifespan="on", before_start=None):
 def registry_process(tmp_path, signer):
     root = Path(__file__).resolve().parents[4]
     directory = root / "core/registry"
-    python = directory / ".venv/bin/python"
+    python = Path(os.environ.get("REGISTRY_TEST_PYTHON", directory / ".venv/bin/python"))
     if not python.exists():
         pytest.skip("initialize the registry's independent locked environment")
     credential = tmp_path / "registry-credential"
@@ -378,7 +384,7 @@ def test_full_file_refuses_escaped_contact_before_intent_or_publication(
         with pytest.raises(ContactPublicationError) as rejected:
             asyncio.run(reconcile_contact_offers(runtime, loaded, registry))
     assert rejected.value.stage == "private_contact_in_public_offer"
-    assert rejected.value.listing_id == contaminated["listing_id"]
+    assert rejected.value.listing_id is None
     assert rejected.value.confirmed == 0
     assert contact not in str(rejected.value)
     assert requests == []

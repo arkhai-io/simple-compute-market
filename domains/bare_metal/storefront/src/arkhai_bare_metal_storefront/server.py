@@ -4,17 +4,19 @@ from __future__ import annotations
 
 import asyncio
 import os
+import time
 from collections.abc import Callable, Iterable
 from importlib import import_module
 from typing import Any
 
 from core_storefront.app_composition import StorefrontAppConfig
-from core_storefront.escrow_identity import backfill_escrow_obligation_records
 from core_storefront.domain_registry import (
-    StorefrontDomainRegistry,
     StorefrontDomainRegistration,
+    StorefrontDomainRegistry,
 )
+from core_storefront.escrow_identity import backfill_escrow_obligation_records
 from core_storefront.stage_log import set_stage_event_db_path, stage_event
+from market_contact_exchange.delivery_state import recover
 from market_core import MarketDomainContract
 from market_storefront_kit import (
     NegotiationWatchdogPolicy,
@@ -25,12 +27,14 @@ from market_storefront_kit import (
     run_negotiation_watchdog,
 )
 
+from .api import _authorize_introduction_request
 from .api import router as http_router
 from .contact_offers import OFFERS_PATH_ENV, publish_contact_offers
+from .delivery import build_contact_delivery_worker
 from .domain_runtime import get_market_domain_contract
-from .runtime import BareMetalStorefrontRuntime, build_runtime_from_environment
+from .introduction_routes import build_bare_metal_introduction_service
 from .response_auth import authenticate_response
-
+from .runtime import BareMetalStorefrontRuntime, build_runtime_from_environment
 
 DESCRIPTION = (
     "Seller-side storefront for the Arkhai bare-metal marketplace.\n\n"
@@ -51,6 +55,16 @@ def _negotiation_watchdog_policy() -> NegotiationWatchdogPolicy:
 
 
 async def _start_runtime(runtime: BareMetalStorefrontRuntime) -> None:
+    await runtime.db.contact_transaction(lambda conn: recover(conn, int(time.time())))
+    composition = runtime.settlement_composition
+    if composition is not None and "contact-exchange.v1" in composition.enabled_mechanisms:
+        contact = composition.config.mechanism_config("contact").contact_payload
+        if contact is not None:
+            service = build_bare_metal_introduction_service(db=runtime.db, repository=runtime.settlement_repository, settlement_runtime=runtime.settlement_runtime, seller_contact=contact, authorize_request=_authorize_introduction_request)
+            worker = runtime.contact_delivery_worker or build_contact_delivery_worker(runtime, service)
+            task = asyncio.create_task(worker.run())
+            runtime.contact_delivery_tasks.add(task)
+            task.add_done_callback(runtime.contact_delivery_tasks.discard)
     if path := os.environ.get(OFFERS_PATH_ENV):
         await publish_contact_offers(runtime, path)
     set_stage_event_db_path(runtime.db.db_path)
@@ -70,6 +84,13 @@ async def _start_runtime(runtime: BareMetalStorefrontRuntime) -> None:
         )
     if runtime.settlement_worker is not None:
         asyncio.create_task(runtime.settlement_worker.run())
+
+
+async def _stop_runtime(runtime: BareMetalStorefrontRuntime) -> None:
+    tasks = tuple(runtime.contact_delivery_tasks)
+    for task in tasks:
+        task.cancel()
+    await asyncio.gather(*tasks, return_exceptions=True)
 
 
 def build_bare_metal_storefront_registry(
@@ -122,6 +143,7 @@ def build_bare_metal_storefront_app(
     service_hooks = StorefrontServiceHooks(
         build=build_services,
         start=_start_runtime,
+        stop=_stop_runtime,
     )
     return build_composed_storefront_app(
         StorefrontComposition(

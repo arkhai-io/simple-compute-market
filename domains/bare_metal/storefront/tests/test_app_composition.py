@@ -1,17 +1,12 @@
 from __future__ import annotations
 
 from dataclasses import replace
-from types import SimpleNamespace
 from importlib.metadata import entry_points
-
-import pytest
-from fastapi import APIRouter
-from market_core import DomainCapability
-from core_storefront.domain_plugins import STOREFRONT_CONTRIBUTION_GROUP
-from core_storefront.domain_registry import StorefrontDomainRegistryError
+from types import SimpleNamespace
 
 import arkhai_bare_metal_storefront.runtime as runtime_module
 import arkhai_bare_metal_storefront.server as server_module
+import pytest
 from arkhai_bare_metal_storefront.contribution import (
     BARE_METAL_STOREFRONT_CONTRIBUTION,
 )
@@ -21,6 +16,10 @@ from arkhai_bare_metal_storefront.server import (
     build_bare_metal_storefront_app,
     build_bare_metal_storefront_registry,
 )
+from core_storefront.domain_plugins import STOREFRONT_CONTRIBUTION_GROUP
+from core_storefront.domain_registry import StorefrontDomainRegistryError
+from fastapi import APIRouter
+from market_core import DomainCapability
 
 
 def _registry(domain=None):
@@ -111,7 +110,7 @@ async def test_lifespan_exposes_exact_bare_metal_runtime_without_global_lookup(
     monkeypatch,
 ) -> None:
     domain = get_market_domain_contract()
-    runtime = SimpleNamespace(domain=domain)
+    runtime = SimpleNamespace(domain=domain, contact_delivery_tasks=set())
     started = []
 
     async def start(selected):

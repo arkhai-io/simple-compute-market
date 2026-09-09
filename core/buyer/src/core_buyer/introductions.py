@@ -8,8 +8,8 @@ from typing import Any
 
 from market_identity import Identity, Signer, TrustedIdentitySet
 
-from core_buyer.orchestrator import DEFAULT_HTTP_TIMEOUT
 from core_buyer.orchestration import _signed_json
+from core_buyer.orchestrator import DEFAULT_HTTP_TIMEOUT
 
 IntroductionProjection = dict[str, Any]
 
@@ -66,6 +66,28 @@ class IntroductionTransport:
             timeout=self.request_timeout,
             resolve_response_principals=self.resolve_seller_principals,
         )
+
+    def review(self, *, body: dict[str, Any]) -> IntroductionProjection:
+        return self._request("/api/v1/introductions/reviews", "POST", "introduction_review", body["obligation_ref"], body)
+
+    def finalize(self, *, body: dict[str, Any]) -> IntroductionProjection:
+        return self._request("/api/v1/introductions", "POST", "introduction_start", body["obligation_ref"], body)
+
+    def finalization_read(self, *, obligation_ref: str, finalization_id: str) -> IntroductionProjection:
+        return self._request(f"/api/v1/introductions/{obligation_ref}/finalizations/{finalization_id}", "GET", "introduction_finalization_read", f"introduction-finalization:{obligation_ref}:{finalization_id}", None)
+
+    def cancel_finalization(self, *, body: dict[str, Any]) -> IntroductionProjection:
+        ref, fid = body["obligation_ref"], body["finalization_id"]
+        return self._request(f"/api/v1/introductions/{ref}/finalizations/{fid}/cancel", "POST", "introduction_finalization_cancel", f"introduction-finalization:{ref}:{fid}", body)
+
+    def delivery_read(self, *, obligation_ref: str) -> IntroductionProjection:
+        return self._request(f"/api/v1/introductions/{obligation_ref}/delivery", "GET", "introduction_delivery_read", obligation_ref, None)
+
+    def _request(self, path: str, method: str, operation: str, resource: str, body: dict[str, Any] | None) -> IntroductionProjection:
+        return _signed_json(self.seller_url.rstrip("/") + path, body,
+            signer=self.signer, principal=self.principal, method=method,
+            operation=operation, resource=resource, timeout=self.request_timeout,
+            resolve_response_principals=self.resolve_seller_principals)
 
 
 __all__ = ["IntroductionProjection", "IntroductionTransport"]

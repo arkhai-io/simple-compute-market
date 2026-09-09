@@ -31,14 +31,16 @@ from core_buyer import (
     report_delivery,
     resolve_buyer_action_policy,
 )
-from core_buyer.negotiation_client import negotiate_with_seller
-from core_buyer.profile_service import BuyerProfileService
-from market_contact_exchange import MECHANISM as CONTACT_MECHANISM
 from core_buyer.deal_helpers import (
     load_deal_context,
     open_run_log,
     settlement_acceptance_fields,
 )
+from core_buyer.negotiation_client import negotiate_with_seller
+from core_buyer.profile_service import BuyerProfileService
+from core_buyer.run_log import RunLog
+from market_contact_exchange import MECHANISM as CONTACT_MECHANISM
+from market_core.schemas import SettlementOption, SettlementPlan, SettlementSelection
 from market_hosted_settlement import (
     FundingMode,
     FundingSelection,
@@ -46,11 +48,9 @@ from market_hosted_settlement import (
     create_stripe_command_group,
     payer_command_context_from_config,
 )
-from core_buyer.run_log import RunLog
-from market_core.schemas import SettlementOption, SettlementPlan, SettlementSelection
 from market_identity import TrustedIdentitySet
-from pydantic_core import to_jsonable_python
 from market_settlement_runtime import derive_obligation_ref
+from pydantic_core import to_jsonable_python
 
 from .config import (
     fresh_identity,
@@ -744,6 +744,8 @@ def request_introduction(
 
 
 def _deliver_locally(projection: Any, deal: Any, sinks: Any, log: Any) -> None:
+    if "delivery_policy" in projection.get("introduction", {}):
+        raise typer.BadParameter("two-sided contact delivery does not authorize local forwarding")
     """Send the buyer's own copy onward, after the answer has been printed.
 
     Never fatal: the reveal is durable and re-readable, so a sink that fails

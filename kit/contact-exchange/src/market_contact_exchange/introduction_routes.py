@@ -47,6 +47,7 @@ class IntroductionAgreement:
     buyer_principal: Identity
     seller_principal: Identity
     introduction_package: Mapping[str, Any]
+    expiration_unix: int = 0
 
 
 @dataclass(frozen=True, slots=True)
@@ -101,6 +102,12 @@ class LoadIntroduction(Protocol):
 
 
 class CompleteIntroduction(Protocol):
+    """Return only after successful lifecycle convergence; raise otherwise.
+
+    Busy, pending and manual intervention are not completion. Callers may
+    release delivery work after a successful return, including during recovery.
+    """
+
     def __call__(self, agreement: IntroductionAgreement) -> Awaitable[None]: ...
 
 
@@ -180,10 +187,11 @@ class IntroductionRouteService:
         seller_contact: Mapping[str, str],
         mechanism_id: str = MECHANISM,
         deliver: DeliverIntroduction | None = None,
+        allow_missing_seller: bool = False,
     ) -> None:
         self._callbacks = callbacks
         self._seller_contact = validate_contact_payload(seller_contact)
-        if not self._seller_contact:
+        if not self._seller_contact and not allow_missing_seller:
             raise ValueError("introduction reveal requires a seller contact payload")
         self._mechanism_id = mechanism_id
         self._deliver = deliver
@@ -244,6 +252,10 @@ class IntroductionRouteService:
         replay = self._replay(auth)
         if replay is not None:
             return replay
+        if "delivery_policy" in agreement.introduction_package:
+            raise IntroductionRouteError(409, {"code": "delivery_policy_required"})
+        if not self._seller_contact:
+            raise IntroductionRouteError(503, "contact-exchange reveal is unavailable")
         # "First reveal" has to be observed before persisting, because persist
         # is idempotent: a repeat start with a fresh request id is not a replay
         # and returns the same record, and delivering again for it would tell

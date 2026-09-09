@@ -71,3 +71,6 @@ affinity: {}
 #     principals: [{scheme: ed25519, identifier: "<canonical public principal>"}]
 #     apiKeySecret: {name: contact-registry-write, key: api-key}
 contactOffers: null
+
+# Optional private two-sided contact delivery settings; no default enrollment.
+deliveryConfigSecret: null

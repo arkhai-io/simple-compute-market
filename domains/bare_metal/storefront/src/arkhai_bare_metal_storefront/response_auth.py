@@ -6,14 +6,13 @@ import json
 from dataclasses import dataclass
 from typing import Any
 
+from core_storefront.auth import AuthenticatedPrincipal, signed_response_headers
 from fastapi import Request
 from fastapi.responses import JSONResponse, Response
 from market_identity import EMPTY_BODY
-
 from market_storefront_kit import get_storefront_container
 
 from .runtime import BareMetalStorefrontRuntime
-from core_storefront.auth import AuthenticatedPrincipal, signed_response_headers
 
 
 @dataclass(frozen=True)
@@ -83,6 +82,8 @@ async def authenticate_response(request: Request, call_next):
             status_code=500,
         )
 
+    if request.url.path.startswith("/api/v1/introductions"):
+        response.headers["Cache-Control"] = "no-store"
     context = getattr(request.state, "marketplace_response_auth", None)
     if context is None:
         return response

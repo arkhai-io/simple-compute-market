@@ -115,6 +115,7 @@ qualification; they also do not satisfy it.
 | Change | Status | Acceptance boundary |
 |---|---|---|
 | [`contact-only-bare-metal-runtime`](contact-only-bare-metal-runtime/) | implemented locally; permanent behavior promoted; image/live qualification open | Site-free startup, unbacked bindings, amountless negotiation, validated stable file publication, pending acceptance without contacts, explicit capture and party reads, and literal privacy guard; no release or deployment claim |
+| [`two-sided-contact-delivery`](two-sided-contact-delivery/) | implementation candidate; independent review and consumer qualification pending | Explicit buyer finalization, separately configured contact and email route per party, storefront-owned durable recipient intents, verified TLS and historical storefront-delivery protection; synthetic local qualification only, no release claim |
 
 ## Lesser goal — POOLS capacity and fulfillment foundation
 

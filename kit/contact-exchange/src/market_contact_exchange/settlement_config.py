@@ -19,9 +19,17 @@ from market_settlement_runtime import (
     SettlementPublicationClause,
     SettlementRole,
 )
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    field_validator,
+    model_serializer,
+    model_validator,
+)
 
 from .client import ContactExchangeClient
+from .delivery_contract import DeliveryPolicy, bound_payload
 
 MECHANISM = "contact-exchange.v1"
 CONTACT_CONFIG_KEY = "contact"
@@ -47,21 +55,7 @@ _CLAUSE_OPERATORS = frozenset(
 def validate_contact_payload(value: Mapping[str, str]) -> dict[str, str]:
     """Bound one opaque contact payload; shared by config and the reveal route."""
 
-    payload = dict(value)
-    if len(payload) > _MAX_PAYLOAD_ENTRIES:
-        raise ValueError(
-            f"contact payload allows at most {_MAX_PAYLOAD_ENTRIES} entries"
-        )
-    for key, item in payload.items():
-        if not isinstance(key, str) or not key or len(key) > _MAX_PAYLOAD_KEY_CHARS:
-            raise ValueError("contact payload keys must be short and non-empty")
-        if (
-            not isinstance(item, str)
-            or not item.strip()
-            or len(item) > _MAX_PAYLOAD_VALUE_CHARS
-        ):
-            raise ValueError("contact payload values must be non-blank and bounded")
-    return payload
+    return bound_payload(dict(value))
 
 
 def contains_contact_value(public: Any, contact: str) -> bool:
@@ -90,6 +84,22 @@ class ContactProfile(BaseModel):
 
     channel: str = Field(min_length=1, max_length=_MAX_CHANNEL_CHARS)
     terms: str = Field(min_length=1, max_length=_MAX_TERMS_CHARS)
+
+    delivery_policy: DeliveryPolicy | None = Field(default=None)
+
+    @model_serializer(mode="wrap")
+    def omit_absent_policy(self, handler: Any) -> dict[str, Any]:
+        result = handler(self)
+        if self.delivery_policy is None:
+            result.pop("delivery_policy", None)
+        return result
+
+    @field_validator("delivery_policy", mode="before")
+    @classmethod
+    def reject_null_policy(cls, value: Any) -> Any:
+        if value is None:
+            raise ValueError("delivery policy cannot be null")
+        return value
 
     @field_validator("channel")
     @classmethod
@@ -251,6 +261,8 @@ def contact_option_builder(
         "terms": profile.terms,
         "claimant_principal": _principal_json(resources.get("claimant_principal")),
     }
+    if profile.delivery_policy is not None:
+        params["delivery_policy"] = profile.delivery_policy.model_dump(mode="json")
     if any(
         contains_contact_value(params, value)
         for value in config.contact_payload.values()
@@ -287,6 +299,12 @@ def contact_buyer_compatibility(
     config = ContactSettlementConfig.model_validate(section)
     if not config.enabled:
         return False
+    params = _value(option, "params", {})
+    if "delivery_policy" in params:
+        try:
+            DeliveryPolicy.model_validate(params["delivery_policy"])
+        except ValueError:
+            return False
     return (
         _value(option, "mechanism") == MECHANISM
         and _value(option, "asset") == INTRODUCTION_ASSET
@@ -333,6 +351,9 @@ def contact_accepted_obligation_builder(
         "channel": params.get("channel"),
         "terms": params.get("terms"),
     }
+    if "delivery_policy" in params:
+        policy = DeliveryPolicy.model_validate(params["delivery_policy"])
+        introduction_package["delivery_policy"] = policy.model_dump(mode="json")
     listing_id = context.get("listing_id")
     if isinstance(listing_id, str) and listing_id:
         introduction_package["listing_id"] = listing_id

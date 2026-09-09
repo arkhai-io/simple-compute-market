@@ -12,10 +12,11 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from core_storefront.identity_config import IdentityConfig, resolve_storefront_signer
-from market_identity import Identity, IdentityScheme, Signer, TrustedIdentitySet
 from market_alkahest import create_alkahest_registration
+from market_contact_exchange.delivery_contract import ContactDeliveryConfig
 from market_core import MarketDomainContract, validate_domain_contract
 from market_hosted_settlement import PortableRemoteFulfillmentRef, canonical_json
+from market_identity import Identity, IdentityScheme, Signer, TrustedIdentitySet
 from market_settlement_runtime import (
     SettlementRuntime,
     SettlementServicingWorker,
@@ -27,33 +28,33 @@ from market_storefront_kit import (
     build_alkahest_clients,
 )
 
+from .delivery import (
+    build_introduction_delivery,
+    load_storefront_delivery_sinks,
+    storefront_delivery_section,
+)
 from .domain_runtime import get_market_domain_contract
-from .negotiation import default_seller_round_hook
-from .negotiation_service import BareMetalNegotiationService
-from .settlement import build_bare_metal_settlement_plan
-from .settlement_service import BareMetalSettlementService
 from .fulfillment_service import BareMetalFulfillmentService
 from .hosted_lifecycle import BareMetalHostedLifecycleCallbacks
 from .hosted_routes import (
     BareMetalHostedDomainCallbacks,
     lifecycle_domain_callbacks,
 )
-from .delivery import (
-    build_introduction_delivery,
-    load_storefront_delivery_sinks,
-    storefront_delivery_section,
-)
-from .sqlite_client import SQLiteClient
-from .site_clients import (
-    BareMetalSiteBinding,
-    build_trusted_site_clients,
-    parse_site_bindings,
-)
+from .negotiation import default_seller_round_hook
+from .negotiation_service import BareMetalNegotiationService
+from .settlement import build_bare_metal_settlement_plan
 from .settlement_composition import (
     ALKAHEST_MECHANISM,
     BareMetalStorefrontSettlementComposition,
     default_hosted_selection_dispatch,
 )
+from .settlement_service import BareMetalSettlementService
+from .site_clients import (
+    BareMetalSiteBinding,
+    build_trusted_site_clients,
+    parse_site_bindings,
+)
+from .sqlite_client import SQLiteClient
 
 
 def _portable_evidence_reference(
@@ -119,6 +120,9 @@ class BareMetalStorefrontRuntime:
     chain_clients: Mapping[str, Any] = field(default_factory=dict)
     chain_config_paths: Mapping[str, str | None] = field(default_factory=dict)
     introduction_delivery: Any | None = field(default=None, repr=False)
+    contact_delivery_config: ContactDeliveryConfig | None = field(default=None, repr=False)
+    contact_delivery_worker: Any | None = field(default=None, repr=False)
+    contact_delivery_tasks: set[Any] = field(default_factory=set, repr=False, compare=False)
     escrow_verifier: Callable[..., Awaitable[int]] = field(
         default_factory=lambda: create_alkahest_registration().settlement_verifier
     )
@@ -434,13 +438,19 @@ def build_runtime_from_environment(
                 "bare-metal storefront trusted site composition is invalid",
             ) from exc
     try:
-        delivery_sinks = load_storefront_delivery_sinks(storefront_delivery_section())
+        section = storefront_delivery_section()
+        contact_delivery_config = None
+        if section is not None and "schema_version" in section:
+            contact_delivery_config = ContactDeliveryConfig.model_validate(section)
+            section = None
+        delivery_sinks = load_storefront_delivery_sinks(section)
     except (TypeError, ValueError, json.JSONDecodeError) as exc:
         raise RuntimeError(
             "BARE_METAL_STOREFRONT_DELIVERY must be a strict [Delivery] section"
         ) from exc
     runtime = BareMetalStorefrontRuntime(
         introduction_delivery=build_introduction_delivery(delivery_sinks.sinks),
+        contact_delivery_config=contact_delivery_config,
         db=db,
         domain=selected_domain,
         seller_principal=identity_config.principal,

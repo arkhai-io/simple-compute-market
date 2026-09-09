@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import smtplib
+import ssl
 from collections.abc import Mapping
 from email.message import EmailMessage
 from typing import Any
@@ -45,10 +46,12 @@ def build_smtp_sink(settings: Mapping[str, Any]) -> DeliverySink:
         try:
             with smtplib.SMTP(config.host, config.port, timeout=timeout) as client:
                 if config.start_tls:
-                    client.starttls()
+                    client.starttls(context=ssl.create_default_context())
                 if config.username is not None:
                     client.login(config.username, config.password or "")
-                client.send_message(message)
+                refused = client.send_message(message)
+                if refused:
+                    raise DeliveryError("the mail server refused a recipient")
         except smtplib.SMTPAuthenticationError as exc:
             raise DeliveryError("the mail server rejected the configured login") from exc
         except smtplib.SMTPException as exc:

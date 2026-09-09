@@ -32,11 +32,33 @@ def _add_contact_introductions(conn: sqlite3.Connection) -> None:
     )
 
 
+def _add_contact_delivery(conn: sqlite3.Connection) -> None:
+    conn.execute("""CREATE TABLE IF NOT EXISTS contact_finalizations (
+        obligation_ref TEXT NOT NULL, finalization_id TEXT NOT NULL,
+        agreement_ref TEXT NOT NULL, status TEXT NOT NULL, code TEXT,
+        expires_at INTEGER, salt BLOB, buyer_fingerprint TEXT,
+        seller_fingerprint TEXT, token_digest TEXT, committed_fingerprint TEXT,
+        PRIMARY KEY (obligation_ref,finalization_id))""")
+    conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS contact_one_finalization ON contact_finalizations(obligation_ref) WHERE status='committed'")
+    conn.execute("""CREATE TABLE IF NOT EXISTS contact_delivery_intents (
+        intent_id TEXT PRIMARY KEY, obligation_ref TEXT NOT NULL,
+        recipient_role TEXT NOT NULL, policy_kind TEXT NOT NULL,
+        status TEXT NOT NULL, route TEXT, attempts INTEGER NOT NULL,
+        attempt_id TEXT, claim_expires_at INTEGER, next_attempt_at INTEGER,
+        failure_code TEXT,
+        UNIQUE(obligation_ref,recipient_role,policy_kind))""")
+    conn.execute("""CREATE TABLE IF NOT EXISTS contact_delivery_attempts (
+        attempt_id TEXT PRIMARY KEY, intent_id TEXT NOT NULL,
+        started_at INTEGER NOT NULL, finished_at INTEGER,
+        status TEXT NOT NULL, failure_code TEXT)""")
+
+
 CONTACT_EXCHANGE_MIGRATIONS = (
     SettlementMigration(
         CONTACT_EXCHANGE_INTRODUCTIONS_MIGRATION_ID,
         _add_contact_introductions,
     ),
+    SettlementMigration("20260909_007_contact_delivery", _add_contact_delivery),
 )
 
 

@@ -59,6 +59,7 @@
     },
     "alkahestEnabled": {"type": "boolean"},
     "settlementConfigSecret": {"$ref": "#/definitions/secretReference"},
+    "deliveryConfigSecret": {"anyOf": [{"type": "null"}, {"$ref": "#/definitions/deliverySecretReference"}]},
     "databasePath": {"type": "string", "minLength": 1, "pattern": "^/"},
     "persistence": {
       "type": "object",
@@ -185,6 +186,13 @@
           ]
         },
         "pullPolicy": {"enum": ["Always", "IfNotPresent", "Never"]}
+      }
+    },
+    "deliverySecretReference": {
+      "type": "object", "additionalProperties": false, "required": ["name", "key"],
+      "properties": {
+        "name": {"type": "string", "maxLength": 253, "pattern": "^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)*$"},
+        "key": {"type": "string", "minLength": 1, "maxLength": 253, "pattern": "^[A-Za-z0-9_.-]+$"}
       }
     },
     "secretReference": {

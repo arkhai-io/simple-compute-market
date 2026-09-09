@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+import json
 import uuid
 from collections.abc import Awaitable, Callable, Mapping
 from typing import Any
@@ -17,6 +19,7 @@ from market_contact_exchange import (
     IntroductionRouteCallbacks,
     IntroductionRouteService,
 )
+from market_contact_exchange.delivery_routes import ContactDeliveryRouteService
 from market_core.schemas import SettlementObligation, SettlementPlan
 from market_identity import Identity
 from market_settlement_runtime import (
@@ -56,9 +59,42 @@ async def _accepted_introduction(
             buyer_principal=Identity.model_validate(obligation.payer_principal),
             seller_principal=Identity.model_validate(obligation.claimant_principal),
             introduction_package=dict(package) if isinstance(package, Mapping) else {},
+            expiration_unix=obligation.expiration_unix,
         ),
         obligation,
     )
+
+
+async def legacy_delivery_allowed(db: SQLiteClient, agreement: IntroductionAgreement) -> bool:
+    """Local file-publication provenance cannot authorize legacy forwarding."""
+    package = agreement.introduction_package
+    if "delivery_policy" in package:
+        return False
+    listing_id = package.get("listing_id")
+    thread = await db.load_negotiation_thread_row(negotiation_id=agreement.agreement_ref)
+    if not thread or thread.get("our_listing_id") != listing_id or not listing_id:
+        return False
+    binding = await db.load_listing_binding(listing_id=listing_id)
+    listing = await db.load_listing(listing_id=listing_id)
+    if binding is None or listing is None:
+        return False
+    try:
+        source = json.loads(binding.source_envelope_json)
+        if not isinstance(source, dict) or source.get("schema_version") != 1:
+            return False
+        if "publication_intent" not in source:
+            return True
+        intent = source["publication_intent"]
+        if not isinstance(intent, dict) or set(intent) not in ({"offer", "settlement_options"}, {"offer", "settlement_options", "schema_version", "delivery_policy"}):
+            return False
+        options = intent["settlement_options"]
+        if options != listing.get("settlement_options") or not any(option.get("option_id") == package.get("option_id") for option in options):
+            return False
+        # Both recognized versions are immutable file-publication intent, not
+        # permission to dispatch through the current legacy sink configuration.
+        return False
+    except (TypeError, ValueError, AttributeError):
+        return False
 
 
 def build_bare_metal_introduction_service(
@@ -72,6 +108,7 @@ def build_bare_metal_introduction_service(
         Awaitable[AuthorizedIntroductionRequest],
     ],
     deliver: DeliverIntroduction | None = None,
+    delivery_snapshot: Any = None,
 ) -> IntroductionRouteService:
     """Install bare-metal accepted-state interpretation into the reveal service."""
 
@@ -115,8 +152,7 @@ def build_bare_metal_introduction_service(
         return await db.load_contact_introduction(obligation_ref=obligation_ref)
 
     async def complete(agreement: IntroductionAgreement) -> None:
-        """Drive the one non-financial obligation to collected; every step is
-        idempotent, so a retried start converges instead of failing."""
+        """Return only after authoritative successful lifecycle convergence."""
 
         _, obligation = await _accepted_introduction(
             db,
@@ -127,28 +163,51 @@ def build_bare_metal_introduction_service(
             agreement_ref=agreement.agreement_ref,
             obligations=[obligation.model_dump(mode="json")],
         )
-        await settlement_runtime.materialize(
+        materialized = await settlement_runtime.materialize(
             obligation_ref=agreement.obligation_ref,
             local_principal=agreement.buyer_principal,
             worker_id=_worker("introduction-materialize"),
         )
+        if materialized.status != "succeeded":
+            raise RuntimeError("introduction materialization has not succeeded")
         await settlement_runtime.bind_fulfillment(
             agreement.obligation_ref,
             f"introduction:{agreement.obligation_ref}",
             local_principal=agreement.seller_principal,
         )
-        await settlement_runtime.check(
+        checked = await settlement_runtime.check(
             obligation_ref=agreement.obligation_ref,
             local_principal=agreement.seller_principal,
             worker_id=_worker("introduction-check"),
         )
-        await settlement_runtime.collect(
+        if checked.status != "succeeded":
+            raise RuntimeError("introduction conditions have not succeeded")
+        collected = await settlement_runtime.collect(
             obligation_ref=agreement.obligation_ref,
             local_principal=agreement.seller_principal,
             worker_id=_worker("introduction-collect"),
         )
+        # A competing live collector returns busy without raising. Only a
+        # journaled success permits either caller to release delivery intents.
+        if collected.status != "succeeded":
+            raise RuntimeError("introduction collection has not succeeded")
 
-    return IntroductionRouteService(
+    pending: set[asyncio.Task[Any]] = set()
+
+    def guarded_delivery(projection: Mapping[str, Any], agreement: IntroductionAgreement) -> None:
+        async def dispatch() -> None:
+            try:
+                if deliver is not None and await legacy_delivery_allowed(db, agreement):
+                    deliver(projection, agreement)
+            except Exception:
+                pass
+        task = asyncio.create_task(dispatch())
+        pending.add(task)
+        task.add_done_callback(pending.discard)
+
+    return ContactDeliveryRouteService(
+        transaction=db.contact_transaction,
+        snapshot=delivery_snapshot or (lambda agreement: (dict(seller_contact), None)),
         callbacks=IntroductionRouteCallbacks(
             prepare=prepare,
             authorize=authorize_request,
@@ -157,7 +216,7 @@ def build_bare_metal_introduction_service(
             complete=complete,
         ),
         seller_contact=seller_contact,
-        deliver=deliver,
+        deliver=guarded_delivery if deliver is not None else None,
     )
 
 

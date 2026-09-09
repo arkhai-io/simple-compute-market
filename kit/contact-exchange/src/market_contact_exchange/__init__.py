@@ -1,6 +1,15 @@
 """Introduction-only settlement mechanism: contact exchange."""
 
 from .client import ContactExchangeClient
+from .delivery_contract import (
+    ContactDeliveryConfig,
+    DeliveryPolicy,
+    EmailRoute,
+    FinalizationCancel,
+    IntroductionFinalize,
+    IntroductionReview,
+    finalization_resource,
+)
 from .introduction_routes import (
     AuthorizedIntroductionRequest,
     DeliverIntroduction,
@@ -26,19 +35,21 @@ from .settlement_config import (
     ContactProfile,
     ContactPublicationInput,
     ContactSettlementConfig,
-    contains_contact_value,
     contact_accepted_obligation_builder,
     contact_buyer_compatibility,
     contact_channel_projection,
     contact_client_factory,
     contact_option_builder,
     contact_preflight,
+    contains_contact_value,
     create_contact_exchange_registration,
     validate_contact_payload,
     validate_contact_publication_input,
 )
 
 __all__ = [
+    "DeliveryPolicy", "ContactDeliveryConfig", "EmailRoute", "IntroductionReview",
+    "IntroductionFinalize", "FinalizationCancel", "finalization_resource",
     "CONTACT_CONFIG_KEY",
     "CONTACT_EXCHANGE_INTRODUCTIONS_MIGRATION_ID",
     "CONTACT_EXCHANGE_MIGRATIONS",

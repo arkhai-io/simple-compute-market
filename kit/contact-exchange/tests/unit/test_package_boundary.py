@@ -5,9 +5,17 @@ from pathlib import Path
 
 _ALLOWED_IMPORT_ROOTS = {
     "__future__",
+    "asyncio",
+    "base64",
+    "hashlib",
+    "hmac",
+    "secrets",
+    "time",
+    "uuid",
     "collections",
     "dataclasses",
     "json",
+    "logging",
     "market_contact_exchange",
     "market_core",
     "market_identity",

@@ -1,10 +1,10 @@
 """Schema-opaque HTTP routes owned by the bare-metal composition."""
 
 from __future__ import annotations
-import base64
 
-from collections.abc import Mapping
+import base64
 import json
+from collections.abc import Mapping
 from typing import Annotated, Any
 
 from core_storefront.auth import AuthError, authenticate_request
@@ -19,37 +19,45 @@ from core_storefront.models.negotiation_models import (
 )
 from core_storefront.models.system_models import AdminPauseResponse
 from fastapi import APIRouter, Body, HTTPException, Query, Request
-
+from market_contact_exchange import MECHANISM as CONTACT_MECHANISM
 from market_contact_exchange import (
     AuthorizedIntroductionRequest,
     ContactSettlementConfig,
     IntroductionRouteError,
     IntroductionStart,
 )
-from market_contact_exchange import MECHANISM as CONTACT_MECHANISM
+from market_contact_exchange.delivery_contract import (
+    FinalizationCancel,
+    FinalizationId,
+    IntroductionFinalize,
+    IntroductionReview,
+    ObligationRef,
+)
 from market_identity import EMPTY_BODY, Identity
-from market_storefront_kit import get_storefront_container
 from market_settlement_runtime import (
     HostedSettlementRouteError,
     HostedSettlementStart,
 )
+from market_storefront_kit import get_storefront_container
+from pydantic import TypeAdapter, ValidationError
+
+from .fulfillment_service import BareMetalFulfillmentError
+from .hosted_routes import build_bare_metal_hosted_route_service
+from .introduction_routes import build_bare_metal_introduction_service
 from .models import (
     BareMetalAccessDeliveryResponse,
-    BareMetalFulfillRequest,
     BareMetalFulfillmentResponse,
     BareMetalFulfillmentResultResponse,
+    BareMetalFulfillRequest,
     BareMetalHealthResponse,
     BareMetalSettleRequest,
     BareMetalSettleResponse,
     BareMetalSettleStatusResponse,
 )
-from .fulfillment_service import BareMetalFulfillmentError
 from .negotiation_service import NegotiationRequestError
+from .response_auth import bind_response_auth, bind_response_contract
 from .runtime import BareMetalStorefrontRuntime
 from .settlement_service import SettlementRequestError
-from .hosted_routes import build_bare_metal_hosted_route_service
-from .introduction_routes import build_bare_metal_introduction_service
-from .response_auth import bind_response_auth, bind_response_contract
 
 router = APIRouter()
 
@@ -196,9 +204,12 @@ async def _authorize_introduction_request(
     body: Mapping[str, Any] | None,
 ) -> AuthorizedIntroductionRequest:
     runtime = _runtime(request)
+    if (request.query_params or b"%" in request.scope.get("raw_path", b"")
+        or (body is None and await request.body())):
+        raise IntroductionRouteError(422, {"code": "review_invalid"})
     bind_response_contract(request, operation=operation, resource=resource)
     role = request.headers.get("X-Market-Role", "buyer")
-    if role not in {"buyer", "seller"}:
+    if role not in {"buyer", "seller"} or (operation in {"introduction_start", "introduction_review", "introduction_finalization_read", "introduction_finalization_cancel"} and role != "buyer"):
         raise IntroductionRouteError(403, "caller is not an introduction party")
     try:
         authenticated = await authenticate_request(
@@ -235,11 +246,19 @@ def _introduction_service(request: Request) -> Any:
     ):
         raise HTTPException(status_code=404, detail="contact exchange is disabled")
     section = composition.config.mechanism_config("contact")
-    if not isinstance(section, ContactSettlementConfig) or not section.contact_payload:
+    if not isinstance(section, ContactSettlementConfig):
         raise HTTPException(
             status_code=503,
             detail="contact-exchange reveal is unavailable",
         )
+    def snapshot(agreement: Any) -> Any:
+        current = runtime.settlement_composition.config.mechanism_config("contact")
+        profile = current.profiles.get(agreement.introduction_package.get("profile"))
+        config = runtime.contact_delivery_config
+        if profile is None or profile.delivery_policy is None or profile.delivery_policy.model_dump(mode="json") != agreement.introduction_package.get("delivery_policy"):
+            config = None
+        return dict(current.contact_payload), config
+
     return build_bare_metal_introduction_service(
         db=runtime.db,
         repository=runtime.settlement_repository,
@@ -247,16 +266,21 @@ def _introduction_service(request: Request) -> Any:
         seller_contact=section.contact_payload,
         authorize_request=_authorize_introduction_request,
         deliver=runtime.introduction_delivery,
+        delivery_snapshot=snapshot,
     )
 
 
 @router.post("/api/v1/introductions")
 async def start_introduction(
-    body: IntroductionStart,
     request: Request,
 ) -> Mapping[str, Any]:
     try:
+        raw = await request.json()
+        carrier = IntroductionFinalize if isinstance(raw, dict) and "schema_version" in raw else IntroductionStart
+        body = carrier.model_validate(raw)
         return await _introduction_service(request).start(request, body)
+    except (ValidationError, ValueError) as exc:
+        raise HTTPException(422, detail={"code": "review_invalid"}) from exc
     except IntroductionRouteError as exc:
         raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
 
@@ -270,6 +294,58 @@ async def read_introduction(
         return await _introduction_service(request).read(request, obligation_ref)
     except IntroductionRouteError as exc:
         raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
+
+
+def _introduction_path(ref: str, fid: str | None = None) -> None:
+    try:
+        TypeAdapter(ObligationRef).validate_python(ref)
+        if fid is not None:
+            TypeAdapter(FinalizationId).validate_python(fid)
+    except ValidationError as exc:
+        raise HTTPException(422, detail={"code": "review_invalid"}) from exc
+
+
+@router.post("/api/v1/introductions/reviews")
+async def review_introduction(request: Request) -> Any:
+    try:
+        body = IntroductionReview.model_validate(await request.json())
+        return await _introduction_service(request).review(request, body)
+    except (ValidationError, ValueError) as exc:
+        raise HTTPException(422, detail={"code": "review_invalid"}) from exc
+    except IntroductionRouteError as exc:
+        raise HTTPException(exc.status_code, detail=exc.detail) from exc
+
+
+@router.get("/api/v1/introductions/{obligation_ref}/finalizations/{finalization_id}")
+async def read_finalization(obligation_ref: str, finalization_id: str, request: Request) -> Any:
+    _introduction_path(obligation_ref, finalization_id)
+    try:
+        return await _introduction_service(request).finalization_read(request, obligation_ref, finalization_id)
+    except IntroductionRouteError as exc:
+        raise HTTPException(exc.status_code, detail=exc.detail) from exc
+
+
+@router.post("/api/v1/introductions/{obligation_ref}/finalizations/{finalization_id}/cancel")
+async def cancel_finalization(obligation_ref: str, finalization_id: str, request: Request) -> Any:
+    _introduction_path(obligation_ref, finalization_id)
+    try:
+        body = FinalizationCancel.model_validate(await request.json())
+        if body.obligation_ref != obligation_ref or body.finalization_id != finalization_id:
+            raise ValueError("path mismatch")
+        return await _introduction_service(request).cancel(request, body)
+    except (ValidationError, ValueError) as exc:
+        raise HTTPException(422, detail={"code": "review_invalid"}) from exc
+    except IntroductionRouteError as exc:
+        raise HTTPException(exc.status_code, detail=exc.detail) from exc
+
+
+@router.get("/api/v1/introductions/{obligation_ref}/delivery")
+async def read_delivery(obligation_ref: str, request: Request) -> Any:
+    _introduction_path(obligation_ref)
+    try:
+        return await _introduction_service(request).delivery_read(request, obligation_ref)
+    except IntroductionRouteError as exc:
+        raise HTTPException(exc.status_code, detail=exc.detail) from exc
 
 
 @router.post("/api/v1/settlements")

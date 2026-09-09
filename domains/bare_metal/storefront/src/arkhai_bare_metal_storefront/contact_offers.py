@@ -13,7 +13,15 @@ from typing import Any, Literal
 import httpx
 from arkhai_bare_metal import BareMetalListing
 from jsonschema import Draft202012Validator
-from market_contact_exchange import MECHANISM, ContactSettlementConfig, contains_contact_value
+from market_contact_exchange import (
+    MECHANISM,
+    ContactSettlementConfig,
+    contains_contact_value,
+)
+from market_contact_exchange.delivery_contract import (
+    ContactDeliveryConfig,
+    DeliveryPolicy,
+)
 from market_identity import Identity, TrustedIdentitySet
 from market_settlement_runtime import SettlementPublicationClause
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -77,13 +85,26 @@ class ContactOffers(BaseModel):
         return self
 
 
+class ContactDeliveryOffers(ContactOffers):
+    schema_version: Literal[2]
+    delivery_policy: DeliveryPolicy
+
+    @model_validator(mode="after")
+    def delivery_ids(self) -> "ContactDeliveryOffers":
+        if any(not offer.listing_id.startswith("synthetic-contact-delivery-") or offer.listing_id == "synthetic-contact-delivery-" for offer in self.offers):
+            raise ValueError("invalid delivery listing ID")
+        return self
+
+
 def load_contact_offers(path: str | Path) -> ContactOffers:
     try:
         with Path(path).open("rb") as stream:
             data = stream.read(131073)
         if len(data) > 131072:
             raise ValueError("offer file exceeds 128 KiB")
-        return ContactOffers.model_validate_json(data)
+        raw = json.loads(data)
+        model = ContactDeliveryOffers if isinstance(raw, dict) and type(raw.get("schema_version")) is int and raw["schema_version"] == 2 else ContactOffers
+        return model.model_validate(raw)
     except (OSError, ValueError):
         # Validation exceptions can include operator-supplied field values.
         raise RuntimeError("contact publication: invalid offer file") from None
@@ -100,10 +121,10 @@ class ContactPublicationError(RuntimeError):
     def __init__(self, stage: str, *, confirmed: int = 0, listing_id: str | None = None):
         self.stage = stage
         self.confirmed = confirmed
-        self.listing_id = listing_id
+        self.listing_id = None
         super().__init__(
             f"contact publication failed at {stage}; confirmed={confirmed}; "
-            f"listing_id={listing_id or 'none'}; remote outcome may be uncertain"
+            "remote outcome may be uncertain"
         )
 
 
@@ -141,6 +162,12 @@ async def prepare_contact_offers(
         raise ContactPublicationError("introduction_only_composition_required")
     if runtime.introduction_delivery is not None:
         raise ContactPublicationError("delivery_must_be_absent")
+    delivery_mode = isinstance(document, ContactDeliveryOffers)
+    if delivery_mode:
+        try:
+            ContactDeliveryConfig.model_validate(runtime.contact_delivery_config)
+        except ValueError:
+            raise ContactPublicationError("delivery_configuration_unavailable") from None
     section = ContactSettlementConfig.model_validate(composition.config.mechanisms["contact"])
     if not section.contact_payload:
         raise ContactPublicationError("contact_configuration_incomplete")
@@ -150,6 +177,10 @@ async def prepare_contact_offers(
         profile = section.profiles.get(offer.profile)
         if profile is None or NOTICE not in profile.terms:
             raise ContactPublicationError("synthetic_profile_notice_required", listing_id=offer.listing_id)
+        if delivery_mode and profile.delivery_policy != document.delivery_policy:
+            raise ContactPublicationError("delivery_policy_required")
+        if not delivery_mode and profile.delivery_policy is not None:
+            raise ContactPublicationError("delivery_policy_not_admitted")
         payload = await composition.publication_payload(
             candidate=offer.registry_offer(),
             clauses=[SettlementPublicationClause(
@@ -166,12 +197,19 @@ async def prepare_contact_offers(
             offer=offer.registry_offer(), accepted_escrows=[],
             settlement_options=list(payload.settlement_options),
         )
+        private_values = list(section.contact_payload.values())
+        if delivery_mode:
+            config = runtime.contact_delivery_config
+            private_values.extend([config.seller_route.address, config.smtp.username, config.smtp.password, config.smtp.host, config.smtp.sender])
         if any(
             contains_contact_value(request.to_dict(), value)
-            for value in section.contact_payload.values()
+            for value in private_values
         ):
             raise ContactPublicationError("private_contact_in_public_offer", listing_id=offer.listing_id)
         intent = {"offer": request.offer, "settlement_options": request.settlement_options}
+        if delivery_mode:
+            intent["schema_version"] = 2
+            intent["delivery_policy"] = document.delivery_policy.model_dump(mode="json")
         prepared.append(PreparedContactOffer(offer, request, intent))
     return tuple(prepared)
 

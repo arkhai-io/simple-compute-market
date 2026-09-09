@@ -21,9 +21,6 @@ from arkhai_bare_metal import (
     BareMetalTerms,
     derive_bare_metal_fulfillment_identity,
 )
-from core_storefront.sqlite_client import SQLiteClient as CoreSQLiteClient
-from core_storefront.sqlite_migrations import MigrationLike
-from market_core import MarketDomainContract, validate_domain_contract
 from core_storefront import (
     StorefrontDomainBinding,
     StorefrontDomainRegistration,
@@ -32,16 +29,21 @@ from core_storefront import (
     StorefrontThreadBinding,
     build_storefront_derivation_key,
 )
+from core_storefront.sqlite_client import SQLiteClient as CoreSQLiteClient
+from core_storefront.sqlite_migrations import MigrationLike
 from market_contact_exchange import (
     CONTACT_EXCHANGE_MIGRATIONS,
-    MECHANISM as CONTACT_MECHANISM,
     IntroductionRecord,
     insert_introduction,
     load_introduction,
 )
+from market_contact_exchange import (
+    MECHANISM as CONTACT_MECHANISM,
+)
+from market_core import MarketDomainContract, validate_domain_contract
 from market_core.schemas import SettlementOption
-from market_settlement_runtime import settlement_migrations
 from market_identity import Identity
+from market_settlement_runtime import settlement_migrations
 from pydantic import BaseModel
 
 from .domain_runtime import get_market_domain_contract
@@ -49,6 +51,7 @@ from .migrations import BARE_METAL_STOREFRONT_MIGRATIONS
 from .models import BareMetalHostedLifecycle
 
 T = TypeVar("T", bound=BaseModel)
+R = TypeVar("R")
 
 
 class SQLiteClient(CoreSQLiteClient):
@@ -86,6 +89,14 @@ class SQLiteClient(CoreSQLiteClient):
             *CONTACT_EXCHANGE_MIGRATIONS,
             *BARE_METAL_STOREFRONT_MIGRATIONS,
         )
+
+    async def contact_transaction(self, action: Callable[[sqlite3.Connection], R]) -> R:
+        """Serialize contact fences, immutable capture, and recipient claims."""
+        def run() -> R:
+            with sqlite3.connect(self.db_path) as conn:
+                conn.execute("BEGIN IMMEDIATE")
+                return action(conn)
+        return await asyncio.to_thread(run)
 
     async def save_contact_introduction(
         self,

@@ -42,6 +42,13 @@ spec:
             - name: BARE_METAL_STOREFRONT_EVM_ADDRESS
               value: {{ required "sellerEvmAddress is required when Alkahest is enabled" .Values.sellerEvmAddress | quote }}
             {{- end }}
+            {{- if .Values.deliveryConfigSecret }}
+            - name: BARE_METAL_STOREFRONT_DELIVERY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ required "bare-metal delivery config Secret name is required" .Values.deliveryConfigSecret.name | quote }}
+                  key: {{ required "bare-metal delivery config Secret key is required" .Values.deliveryConfigSecret.key | quote }}
+            {{- end }}
             - name: BARE_METAL_STOREFRONT_SETTLEMENT
               valueFrom:
                 secretKeyRef:

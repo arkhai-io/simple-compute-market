@@ -12,7 +12,9 @@ import asyncio
 import json
 import logging
 import os
+import sqlite3
 from collections.abc import Mapping
+from functools import partial
 from typing import Any
 
 from market_contact_exchange import (
@@ -20,6 +22,7 @@ from market_contact_exchange import (
     IntroductionAgreement,
     introduction_projection,
 )
+from market_contact_exchange.delivery_runtime import ContactDeliveryWorker
 from market_delivery import (
     ConfiguredSink,
     DeliveryOutcome,
@@ -30,8 +33,9 @@ from market_delivery import (
     introduction_delivery_event,
     load_delivery_config,
 )
+from market_delivery.builtin.smtp_attempt import send_bounded_smtp
 
-from .introduction_routes import load_revealed_introduction
+from .introduction_routes import legacy_delivery_allowed, load_revealed_introduction
 
 logger = logging.getLogger(__name__)
 
@@ -129,6 +133,8 @@ async def redeliver_introduction(
     """
 
     record, agreement = await load_revealed_introduction(db, obligation_ref)
+    if not await legacy_delivery_allowed(db, agreement):
+        raise ValueError("legacy contact redelivery is not authorized")
     event = introduction_delivery_event(
         introduction_projection(record, for_role="seller"),
         role="seller",
@@ -145,3 +151,27 @@ __all__ = [
     "redeliver_introduction",
     "storefront_delivery_section",
 ]
+
+
+def _owns_delivery_attempt(db_path: str, intent_id: str, attempt_id: str) -> bool:
+    with sqlite3.connect(db_path, timeout=1) as conn:
+        return conn.execute("SELECT 1 FROM contact_delivery_intents WHERE intent_id=? AND attempt_id=? AND status='sending'", (intent_id, attempt_id)).fetchone() is not None
+
+
+def build_contact_delivery_worker(runtime: Any, service: Any) -> ContactDeliveryWorker:
+    async def send(record: Any, role: str, route: dict[str, str], intent_id: str, attempt_id: str, deadline: float) -> tuple[str, str | None]:
+        config = runtime.contact_delivery_config
+        if config is None:
+            return "failed", "configuration_unavailable"
+        agreement = await service._callbacks.prepare(record.agreement_ref, record.obligation_ref)
+        event = introduction_delivery_event(
+            introduction_projection(record, for_role=role), role=role,
+            agreement_ref=record.agreement_ref,
+            counterparty=agreement.seller_principal if role == "buyer" else agreement.buyer_principal,
+        )
+        return await asyncio.to_thread(
+            send_bounded_smtp, config.smtp.model_dump(mode="json"), route["address"],
+            event.rendered, record.obligation_ref, intent_id, deadline=deadline,
+            before_data=partial(_owns_delivery_attempt, runtime.db.db_path, intent_id, attempt_id),
+        )
+    return ContactDeliveryWorker(transaction=runtime.db.contact_transaction, prepare=service._callbacks.prepare, complete=service._callbacks.complete, send=send)
