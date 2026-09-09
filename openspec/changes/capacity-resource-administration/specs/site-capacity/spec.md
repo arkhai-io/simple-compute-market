@@ -3,12 +3,23 @@
 ### Requirement: Operator-administered capacity declarations
 
 A site authority MUST accept operator-administered capacity resources as the
-authoritative declaration of a Physical Resource's sellable capacity, across every
-capacity dimension the declaration carries. A capacity declaration MUST be able to
+authoritative declaration of sellable capacity for one Physical Resource identity,
+across every capacity dimension the declaration carries. A declaration is
+authoritative for shape and quantity — what is declared sellable and how much of
+it there is. Whether that declaration may be admitted against is a separate
+property resolved outside the declaration, and a capacity resource MUST remain a
+complete and authoritative declaration of its own shape regardless of that
+property. A capacity declaration MUST be able to
 express more than one dimension, and the authority MUST NOT require any particular
 dimension to be present. Where an operator has declared capacity for a Physical
 Resource, no other inventory record SHALL supply or override that resource's
 projected capacity.
+
+#### Scenario: Shape authority is not admission authority
+
+- **WHEN** a consumer reads a declared capacity resource
+- **THEN** the declared shape and quantity are authoritative
+- **AND** whether the declaration may be admitted against is resolved outside the declaration itself
 
 #### Scenario: Operator declares multidimensional capacity
 

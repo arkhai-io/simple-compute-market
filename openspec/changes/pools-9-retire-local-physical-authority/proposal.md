@@ -210,10 +210,15 @@ listing-derivation surfaces only.
 
 ## Permanent documentation impact
 
-- [ ] `docs/development/ARCHITECTURE.md` — likely no change; `pools-8`
-      already confirmed the current text's "storefront is not the source
-      of truth for physical resources" principle covers this change's own
-      direction. Re-confirm at implementation time rather than assuming.
+- [x] `docs/development/ARCHITECTURE.md` — the "Storefront capacity boundary"
+      subsection. `pools-8` confirmed the existing "storefront is not the source
+      of truth for physical resources" principle already covers this change's
+      direction, but nothing in the permanent map says that projection is the
+      listing-candidate origination path. That becomes true when this change
+      retires the retained local-table path, so it promotes here rather than in
+      a downstream change that would inherit an unstated premise. Goal 7's
+      unbacked-listing work depends on the statement existing and does not own
+      it.
 - [x] Existing subsystem specification — `openspec/specs/storefront-publication/spec.md`'s
       "Storefronts cache independent site projections" requirement, which
       already carries the "projection-backed derivation defaults on once

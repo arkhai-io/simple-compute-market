@@ -213,6 +213,7 @@ Per `openspec/README.md#plan-closeout-requirements`.
 |---|---|
 | The storefront holds no physical-resource, host, or physical-allocation authority | `openspec/specs/storefront-publication/spec.md` — "Storefront holds no physical-resource authority" |
 | Projection-backed derivation is the only listing-candidate path, not the default one | `openspec/specs/storefront-publication/spec.md` — "Storefronts cache independent site projections" (modified) |
+| Projection is the listing-candidate origination path; a local-table path is a rollback opt-in, not a second supported category | `docs/development/ARCHITECTURE.md` — "Storefront capacity boundary" |
 | Commercial pool overrides are upserted against projected pools; an absent row falls through | `openspec/specs/storefront-publication/spec.md` — "Commercial pool override administration" |
 | Freeze-then-redirect, and that rollback past the cutover is a code rollback | `openspec/specs/storefront-publication/spec.md`, as a scenario on the modified projection requirement |
 | Why `region`/`sla` survive (commercial override tier, not a missing projection field) | This change's `design.md`; the surviving behavior itself is the override requirement above |
