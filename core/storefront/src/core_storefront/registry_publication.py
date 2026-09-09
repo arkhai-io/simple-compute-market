@@ -13,7 +13,7 @@ import inspect
 import json
 import logging
 from collections.abc import Awaitable, Callable
-from typing import Any
+from typing import Any, TypedDict
 
 logger = logging.getLogger(__name__)
 
@@ -23,6 +23,16 @@ RegistryTargetSelector = Callable[[str, list[str]], Awaitable[list[str]]]
 ListingRequestFactory = Callable[..., Any]
 UpdateListingRequestFactory = Callable[..., Any]
 PublishEvent = Callable[..., Any]
+
+
+class RegistryPublicationResult(TypedDict):
+    """Public per-target outcome without request or credential-bearing detail."""
+
+    registry_url: str
+    success: bool
+    registry_assigned_id: str | None
+    error_type: str | None
+    status_code: int | None
 
 
 def ensure_json_obj(value: Any, default: Any) -> Any:
@@ -63,33 +73,72 @@ async def publish_listing_to_registries(
     demands = ensure_json_obj(listing_dict.get("demands"), [])
     max_duration_seconds = listing_dict.get("max_duration_seconds")
 
+    listing_storefront_url = listing_dict.get("storefront_url")
+    if not isinstance(listing_storefront_url, str) or not listing_storefront_url:
+        return {
+            "status": "error",
+            "listing_id": listing_id,
+            "message": "listing storefront_url is required for publication",
+        }
+    if storefront_url is not None and listing_storefront_url != storefront_url:
+        return {
+            "status": "error",
+            "listing_id": listing_id,
+            "message": "listing storefront_url differs from configured storefront URL",
+        }
+
     try:
-        listing_storefront_url = listing_dict.get("storefront_url")
-        if not isinstance(listing_storefront_url, str) or not listing_storefront_url:
-            raise ValueError("listing storefront_url is required for publication")
-        if storefront_url is not None and listing_storefront_url != storefront_url:
-            raise ValueError(
-                "listing storefront_url differs from configured storefront URL"
-            )
-        async with registry_client_factory() as registry_client:
-            request = listing_request_factory(
-                listing_id=listing_id,
-                offer=offer_resource,
-                accepted_escrows=accepted_escrows,
-                settlement_options=settlement_options,
-                demands=demands,
-                max_duration_seconds=max_duration_seconds,
-                storefront_url=listing_storefront_url,
-            )
+        request = listing_request_factory(
+            listing_id=listing_id,
+            offer=offer_resource,
+            accepted_escrows=accepted_escrows,
+            settlement_options=settlement_options,
+            demands=demands,
+            max_duration_seconds=max_duration_seconds,
+            storefront_url=listing_storefront_url,
+        )
+    except Exception as exc:
+        return _publication_failure(listing_id, "preparation", exc)
+
+    results: list[dict[str, Any]] | None = None
+    failure_stage = "setup"
+    try:
+        registry_context = registry_client_factory()
+        async with registry_context as registry_client:
+            failure_stage = "fanout"
             payloads = {url: request for url in registry_client.urls}
             results = await registry_client.publish_listing_per_registry(
                 payloads=payloads,
             )
-        if record_publications is not None:
+            failure_stage = "context"
+    except Exception as exc:
+        return _publication_failure(
+            listing_id,
+            failure_stage,
+            exc,
+            results=results,
+        )
+    if results is None:
+        return _publication_failure(
+            listing_id,
+            "fanout",
+            RuntimeError("registry fanout returned no result collection"),
+        )
+
+    if record_publications is not None:
+        try:
             await record_publications(listing_id, results)
-        if any(r["success"] for r in results):
-            logger.info("[REGISTRY] Published listing %s", listing_id)
-            if on_published is not None:
+        except Exception as exc:
+            return _publication_failure(
+                listing_id,
+                "persistence",
+                exc,
+                results=results,
+            )
+
+    if any(r["success"] for r in results):
+        if on_published is not None:
+            try:
                 await _maybe_await(
                     on_published(
                         listing_id=listing_id,
@@ -102,18 +151,33 @@ async def publish_listing_to_registries(
                         max_duration_seconds=max_duration_seconds,
                     )
                 )
-            return {"status": "published", "listing_id": listing_id}
+            except Exception as exc:
+                return _publication_failure(
+                    listing_id,
+                    "event",
+                    exc,
+                    results=results,
+                )
+        logger.info("[REGISTRY] Published listing %s", listing_id)
+        return {
+            "status": "published",
+            "listing_id": listing_id,
+            "registry_results": _public_registry_results(results),
+        }
 
-        first_err = next((r["error"] for r in results if r["error"]), "unknown")
-        logger.warning(
-            "[REGISTRY] Failed to publish listing %s: %s",
-            listing_id,
-            first_err,
-        )
-        return {"status": "error", "listing_id": listing_id, "message": first_err}
-    except Exception as exc:
-        logger.warning("[REGISTRY] Failed to publish listing %s: %s", listing_id, exc)
-        return {"status": "error", "listing_id": listing_id, "message": str(exc)}
+    public_results = _public_registry_results(results)
+    failure_message = _registry_failure_message(public_results)
+    logger.warning(
+        "[REGISTRY] Failed to publish listing %s: %s",
+        listing_id,
+        failure_message,
+    )
+    return {
+        "status": "error",
+        "listing_id": listing_id,
+        "message": failure_message,
+        "registry_results": public_results,
+    }
 
 
 async def close_listing_in_registries(
@@ -193,3 +257,64 @@ async def _maybe_await(value: Any) -> Any:
     if inspect.isawaitable(value):
         return await value
     return value
+
+
+def _public_registry_results(
+    results: list[dict[str, Any]],
+) -> list[RegistryPublicationResult]:
+    """Project internal write receipts into stable, non-sensitive outcomes."""
+    return [
+        RegistryPublicationResult(
+            registry_url=result["registry_url"],
+            success=result["success"],
+            registry_assigned_id=result.get("registry_assigned_id"),
+            error_type=result.get("error_type"),
+            status_code=result.get("status_code"),
+        )
+        for result in results
+    ]
+
+
+def _registry_failure_message(
+    results: list[RegistryPublicationResult],
+) -> str:
+    """Describe the first failure without exposing exception or response text."""
+    failure = next((result for result in results if not result["success"]), None)
+    if failure is None:
+        return "registry publication failed"
+    error_type = failure["error_type"] or "RegistryError"
+    status_code = failure["status_code"]
+    if status_code is not None:
+        return f"registry publication failed ({error_type}, HTTP {status_code})"
+    return f"registry publication failed ({error_type})"
+
+
+def _publication_failure(
+    listing_id: str,
+    failure_stage: str,
+    exc: Exception,
+    *,
+    results: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    """Return an orchestration failure without exposing exception detail."""
+    error_type = type(exc).__name__
+    status_code = getattr(exc, "status_code", None)
+    if not isinstance(status_code, int):
+        status_code = None
+    status_suffix = f", HTTP {status_code}" if status_code is not None else ""
+    message = (
+        f"registry publication {failure_stage} failed "
+        f"({error_type}{status_suffix})"
+    )
+    logger.warning("[REGISTRY] Listing %s: %s", listing_id, message)
+    response: dict[str, Any] = {
+        "status": "error",
+        "listing_id": listing_id,
+        "message": message,
+        "failure_stage": failure_stage,
+        "error_type": error_type,
+        "status_code": status_code,
+    }
+    if results is not None:
+        response["registry_results"] = _public_registry_results(results)
+    return response

@@ -380,7 +380,9 @@ class TestPublishOrderRecordsPublications:
             )
 
         assert result["status"] == "error"
-        assert "exact configured fanout" in result["message"]
+        assert result["failure_stage"] == "setup"
+        assert result["error_type"] == "ValueError"
+        assert "registry_results" not in result
         client.publish_listing_per_registry.assert_not_awaited()
         assert await patched_sqlite.load_publications(
             listing_id="Lfanout-mismatch"

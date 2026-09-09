@@ -306,7 +306,7 @@ isolation, destructive reclaim policies, and end-to-end demonstration evidence.
       `core/registry-client/src/registry_client/models.py`,
       `core/registry-client/tests/test_listing_request.py`,
       `core/registry/tests/integration/test_listings.py`.
-- [ ] 10.2 Preserve `MultiRegistryClient`'s at-least-one aggregate write
+- [x] 10.2 Preserve `MultiRegistryClient`'s at-least-one aggregate write
       contract while returning the ordered per-registry outcomes through the
       publication result and supporting authenticated same-registry preflight
       and readback. Model confirmed, write-unconfirmed and known failed-write
