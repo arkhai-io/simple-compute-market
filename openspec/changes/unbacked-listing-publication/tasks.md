@@ -91,8 +91,15 @@ than re-deciding them.
       capacity-backed listings.
 - [ ] 3.5 Keep source-publication reconciliation applying to every listing: a
       removed or disabled source declaration closes its published listing, and a
-      changed shape updates it deterministically. This is a separate loop from
-      3.4 and must not be scoped away with it.
+      changed declaration is reflected deterministically. This is a separate loop
+      from 3.4 and must not be scoped away with it.
+- [ ] 3.5a Distinguish identity-bearing source changes from payload-only ones. The VM
+      source envelope carries `site_id`, `pool_id`, `resource_id`, and `gpu_count`,
+      and `derivation_key` hashes it, so changing a declared shape field in that
+      envelope changes the key — and the binding is immutable, so it cannot be an
+      in-place update. Identity-bearing changes close and republish; payload-only
+      changes may update in place. Enumerate which published fields fall on each side
+      before implementing, and record it.
 - [ ] 3.6 Add the requirement that an unbacked listing has no source-inventory
       record on the storefront: no derived-listing row, no local resource table.
       This does not exempt it from source-publication reconciliation per 3.5.
@@ -109,9 +116,14 @@ than re-deciding them.
 
 ## 4. Projection and publication
 
-- [ ] 4.1 Carry `capacity_backing` as a declared projected pool property, read
-      live from the current projection and never persisted into storefront-local
-      storage.
+- [ ] 4.1 Read `capacity_backing` live from the current projection at each point of
+      need, and do not cache the projected pool tag as storefront-local inventory.
+      This is distinct from the durable backing discriminator on the listing binding,
+      which is derived from it at publication and is immutable: the pool tag is a site
+      fact the storefront reads, the discriminator is a storefront fact about a bound
+      listing. Do not collapse the two — caching the tag makes the storefront an
+      authority on a site fact, and re-deriving the discriminator per read lets a
+      bound listing change category.
 - [ ] 4.1a Implement the producer-version compatibility rules for both new pool
       tags. A projection whose producer emits a tag for no pool predates it:
       `capacity_backing` resolves to backed, and `deliverable_modes` serves as
@@ -176,8 +188,11 @@ than re-deciding them.
 - [ ] 6.4 **Integration.** Publish and query backing through the canonical
       `RegistryClient` against the real registry app.
 - [ ] 6.5 **Integration.** Removing or disabling a source declaration closes its
-      published unbacked listing; a changed shape updates it. This is the loop
-      3.5 keeps and nothing else covers.
+      published unbacked listing. This is the loop 3.5 keeps and nothing else covers.
+- [ ] 6.5a **Integration.** A declared shape change that alters the derivation
+      envelope closes the old listing and publishes a new one with a different
+      derivation key, leaving the original binding row unmodified. A payload-only
+      change, if any exist after 3.5a's enumeration, retains identity.
 - [ ] 6.6 **Integration.** A backed listing's publication path is unchanged.
 - [ ] 6.7 **System.** Backed and unbacked listings from one storefront are
       returned by one buyer query across running services.
@@ -256,6 +271,7 @@ than re-deciding them.
 | Site-pinned routing and capacity-availability reconciliation are capacity-backed requirements; source-publication reconciliation applies to all listings | `openspec/specs/storefront-publication/spec.md` |
 | An unbacked listing has no source-inventory record | `openspec/specs/storefront-publication/spec.md` |
 | Backing transitions are close-and-republish, not in-place | `openspec/specs/storefront-publication/spec.md` |
+| Identity-bearing source changes close and republish; payload-only changes may update in place | `openspec/specs/storefront-publication/spec.md` |
 | Absent projected pool tags are producer-version compatibility rules, not per-pool inferences; a malformed backing value fails closed | `openspec/specs/storefront-publication/spec.md` |
 | Claim construction describes what happens when capacity admission is requested | `openspec/specs/site-capacity/spec.md` |
 | A published shape comes from its source declaration on every listing; a declaration with no quantity is refused rather than defaulted | `openspec/specs/storefront-publication/spec.md` |

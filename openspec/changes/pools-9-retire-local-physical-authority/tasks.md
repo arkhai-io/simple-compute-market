@@ -52,6 +52,12 @@ return.
 - [ ] 0.5 Confirm no fixture, bulk import path, or e2e setup relies on an in-place
       provider swap. If one does, migrate it to the two-pool path rather than
       exempting it.
+- [ ] 0.6 Confirm `capacity-resource-administration`'s drain invariant covers the
+      migration path this section creates. Moving a member to a second pool while it
+      holds a live obligation would rewrite that obligation's authority, so the
+      two-pool workflow is only safe with the drain rule in place. If that change has
+      not landed, this section's guidance is incomplete rather than wrong — say so at
+      the refusal rather than implying migration is always available.
 
 ## 1. Re-ground and build the commercial override write path
 

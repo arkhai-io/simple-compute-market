@@ -52,7 +52,24 @@ and `unbacked`. `backed` means an admission authority stands behind the pool;
 against it.
 
 `capacity_backing` MUST be fixed at pool creation. Replace and patch MUST reject a
-request supplying a backing value differing from the pool's own. Moving inventory
+request supplying a backing value differing from the pool's own, and a request
+omitting it MUST preserve the stored value rather than resetting it to a replacement
+default. Resetting an immutable field to a default is a change to it, so the general
+policy-tag replacement semantics — under which an omitted optional tag is reset — do
+not reach this tag. This exception derives from immutability, not from the separate
+exception for secret provider-configuration fields, which exists because a caller
+cannot restate a value a read never returns.
+
+Authoritative document import MUST preserve a stored backing value that the document
+omits, for the same reason and so that an old-format document edited and re-imported
+after migration does not wipe a migrated tag. Canonical export MUST always emit the
+value explicitly, so a round-tripped document carries it.
+
+Where a create request omits `capacity_backing`, the authority MUST record `backed`
+explicitly rather than storing an absent value, under a bounded compatibility rule
+with a stated removal condition. Every pool therefore carries an explicit value,
+which is what the preservation rule above and the projection's completeness
+requirement both depend on. Moving inventory
 between backed and unbacked supply is a second pool declaring the intended backing
 with its capacity resources migrated across — the same shape as moving inventory to
 a different executor, and for the same reason: backing is a property every listing
@@ -82,6 +99,23 @@ derivation, and each derived value MUST be reported at INFO.
 - **WHEN** migration derives its initial values
 - **THEN** its advertisable set is exactly `[vm]` and its backing is `backed`
 - **AND** both conclusions are reported and its advertising surface is unchanged
+
+#### Scenario: Replacement omits backing
+
+- **WHEN** a replace or patch request for an existing pool omits `capacity_backing`
+- **THEN** the stored backing value is preserved rather than reset to a replacement default
+
+#### Scenario: An old-format document is re-imported after migration
+
+- **GIVEN** a pool whose backing was recorded by migration
+- **WHEN** an authoritative document omitting `capacity_backing` is imported for that pool
+- **THEN** the stored backing value is preserved
+- **AND** canonical export of that pool emits the value explicitly
+
+#### Scenario: Create omits backing
+
+- **WHEN** a pool is created with no `capacity_backing` value
+- **THEN** `backed` is recorded explicitly rather than left absent
 
 #### Scenario: Backing is changed on an existing pool
 

@@ -40,11 +40,26 @@ consolidation exists to remove, so capacity moves in full.
   compatibility endpoint to a documented operator administration surface.
 - Add a startup capacity-definitions import mirroring
   `import_pool_definitions_if_configured` exactly: a new `capacity_definitions_path`
-  setting resolved the same way as `pool_definitions_path`, an idempotent diff-based
-  import that runs on every startup, and a registered
-  `ComputeProvisioningStartupStep`. Idempotence is what makes every-startup import
-  correct rather than a re-seeding hazard, the same reasoning the pool-definitions
-  import already records.
+  setting resolved the same way as `pool_definitions_path`, reconciliation through
+  the existing `DefinitionDocumentImporter`, and a registered
+  `ComputeProvisioningStartupStep`. **Corrected 2026-09-09:** an earlier version of
+  this bullet described an idempotent diff applied on every startup, which was the
+  pool import's behaviour when this change was written. `DEPLOYMENT_AND_CONFIG.md`
+  has since established the opposite rule — "a process start is not a submission",
+  and import "is idempotent with respect to the document, not the database" — so
+  capacity definitions follow the same digest gate: reconcile a new or edited
+  document, do nothing for an unchanged one, reconcile regardless of digest on an
+  explicit import, and commit the digest in the same transaction as the apply.
+  Mirroring the pool import exactly is still the instruction; what that means has
+  changed underneath it.
+- Make the legacy scalar mirror's dimension name composition-supplied rather than the
+  hardcoded `PRIMARY_DIMENSION = "gpu_count"`, and stop writing it when a caller
+  declares capacity explicitly. Without this, the domain-neutral declaration contract
+  below cannot be satisfied: an `api_credits`-only declaration acquires a manufactured
+  GPU dimension on its way through `register_resource`.
+- Forbid moving a capacity resource between Resource Pools while it has live capacity
+  obligations. A reservation's pool is resolved through the resource's *current*
+  `pool_id`, so reassignment rewrites the authority under an existing reservation.
 - **BREAKING (deployment/data):** make `Host` executor identity only — addressing,
   SSH credentials, Ansible alias, pool membership, enabled state. Retire
   `gpu_count`/`gpu_model` as capacity sources and retire `_project_host`'s
@@ -92,7 +107,7 @@ None.
   between `capacity` and `attributes`.
 - `physical-provisioning`: host inventory is executor identity and MUST NOT be the
   authoritative source of sellable capacity dimensions; the compute provisioner
-  imports capacity definitions at startup on the same idempotent contract as pool
+  imports capacity definitions at startup on the same digest-gated contract as pool
   definitions.
 
 ## Non-Goals

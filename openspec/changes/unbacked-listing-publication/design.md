@@ -302,33 +302,32 @@ Note this is a different problem from the registry republication below. That one
 concerns listings already published; this one concerns the site-to-storefront
 contract from which new and reconciled listings are derived.
 
-### Rates are split out, and the goal is not complete without them
+### Rates are a separate change, not a blocked one
 
-Buyers need a rate or the catalogue supports discovery but not comparison. The
-rate is nevertheless not in this change, because its *shape* is: the family-grouped
-capability shape `capacity-shape-pricing` is building already has three consumers,
-and adding a fourth private scalar representation to avoid waiting would be the
-expensive kind of shortcut. `capacity-shape-pricing` is itself blocked on
-`structured-capacity-requirements`, which is unstarted, so binding this change to
-it would block discovery on a two-deep chain.
+Buyers need a rate or the catalogue supports discovery but not comparison. The rate
+is nevertheless not in this change, because it is a distinct buyer-facing surface
+with its own decisions about periods and assets.
 
-`publish-indicative-listing-rates` owns the rate and carries that dependency. The
-roadmap goal keeps the comparison promise and shows it as an open gap rather than
-narrowing to what lands first.
+An earlier version of this section said the rate was *blocked* behind
+`capacity-shape-pricing` and transitively behind the unstarted
+`structured-capacity-requirements`. That was corrected: those changes price a shape
+a buyer proposes during negotiation, while a published asking price prices a
+listing's fixed advertised shape, which is one number.
+`publish-indicative-listing-rates` depends only on this change.
 
-What is settled and recorded here, because it constrains that change: the rate is
-a **listing attribute**, not a settlement option rate. The mechanism these deals
-settle through declines scalar participation, and its design records the rejected
-alternative — encoding exotic contracts as rates was considered and rejected,
-because the scalar machinery exists for mechanisms that want it and this class of
-terms does not reduce to one number. Un-declining scalar participation would put a
-number in a settlement option that the runtime does arithmetic on and an
-obligation implies, with nothing behind it for a deal agreed out of band.
+What is settled here, because it constrains that change: the rate is a **listing
+attribute**, not a settlement option rate. The mechanism these deals settle through
+declines scalar participation, and its design records the rejected alternative —
+encoding exotic contracts as rates was considered and rejected, because the scalar
+machinery exists for mechanisms that want it and this class of terms does not reduce
+to one number. Un-declining it would put a number in a settlement option that the
+runtime does arithmetic on and an obligation implies, with nothing behind it for a
+deal agreed out of band.
 
-That is a statement about what the system constructs from the number, not about
-how much a buyer should believe it. Like every other published field, a rate is a
-seller assertion; what distinguishes it is that no settlement option or obligation
-is derived from it.
+That is a statement about what the system constructs from the number, not about how
+much a buyer should believe it. Like every other published field, a rate is a seller
+assertion; what distinguishes it is that no settlement option or obligation is
+derived from it.
 
 ### An unbacked pool still names a provider, and that is accepted
 
@@ -555,12 +554,10 @@ adds no new storage category. What it must not add is an inventory model.
   protect themselves at the address they reveal; a severable alias per storefront
   needs no code today, while a per-deal alias would need the contact payload to
   become a resolver rather than a static configuration value.
-- **[A goal that cannot be completed by its own changes]** → Splitting rates out
-  means Goal 7 has a gap it cannot close until `structured-capacity-requirements`
-  and `capacity-shape-pricing` land, neither of which this campaign owns. That is
-  a scheduling cost accepted deliberately, so discovery is not blocked behind an
-  unstarted chain. It is recorded in the roadmap's gap table rather than hidden by
-  narrowing the goal.
+- **[Discovery lands before comparison]** → Splitting rates out means a window in
+  which buyers can find unbacked supply but not compare it on price.
+  `publish-indicative-listing-rates` depends only on this change, so the window is
+  a sequencing gap rather than an open-ended one.
 - **[Republication misses a listing]** → A listing left without an explicit
   backing value is invisible to an exact filter in both directions. Verify by
   counting listings without the field after republication rather than by
@@ -579,12 +576,6 @@ adds no new storage category. What it must not add is an inventory model.
   called?** Now more than cosmetic: if the central type is `PublicationBinding`
   with capacity as one admission variant, the package and the type both name a
   variant rather than the concept. Deferred; no task renames either.
-- **What is the `derivation_key` shape for an unbacked listing?** Expected to
-  fall out of the projection's source identity, since these listings are
-  projected, and the column is `NOT NULL UNIQUE` so it needs an answer before
-  anything binds. A decision gate in `tasks.md` rather than an ordinary
-  implementation step, because choosing it quietly would settle a collision-safety
-  property in a place no reviewer looks.
 - **When are the absent-tag compatibility rules removed?** Both are time-limited by
   design, and this repository has no fleet-wide deployment signal to gate removal
   on, since sellers self-host their own site and storefront deployments. Same shape

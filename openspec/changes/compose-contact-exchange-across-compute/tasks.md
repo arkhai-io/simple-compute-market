@@ -41,6 +41,22 @@ before it has.
       capacity-backed, in both directions: a backed listing may settle by
       introduction, and an unbacked listing is not required to.
 
+## 3b. Per-origin contact resolution
+
+- [ ] 3b.1 Make the seller's contact payload resolvable from a listing's origin
+      rather than a single storefront-wide configuration value. The origin site is
+      already on the durable listing binding and copied to the negotiation thread, so
+      no new lookup is needed at acceptance.
+- [ ] 3b.2 Resolve a single-origin deployment to the value it configures today, so
+      existing operators see no change.
+- [ ] 3b.3 Refuse acceptance when a listing's origin has no configured payload,
+      rather than falling back to another origin's. Revealing the wrong seller's
+      contact details is a disclosure failure, not a degraded result.
+- [ ] 3b.4 **Integration.** Two origins configured behind one storefront: a deal on
+      each listing reveals that origin's payload, and neither reveals the other's.
+- [ ] 3b.5 **Integration.** An origin with no configured payload refuses at
+      acceptance rather than revealing a fallback.
+
 ## 4. Delivery
 
 - [ ] 4.1 Wire delivery dispatch in each newly composing domain, seller-side off
@@ -57,7 +73,12 @@ before it has.
 - [ ] 5.2 Add a scenario covering the `obligation_ref` mismatch refusal, so the
       promoted security check is normative rather than incidental.
 - [ ] 5.3 Update `openspec/specs/introduction-delivery/spec.md` for availability
-      across composing domains.
+      across composing domains, and for delivery reaching the seller at the listing's
+      origin.
+- [ ] 5.4 State in `openspec/specs/contact-exchange-settlement/spec.md` that the
+      seller's contact payload is resolved from a listing's origin, with a scenario
+      for two origins behind one storefront and one for an origin with no configured
+      payload.
 
 ## 6. Validation
 
@@ -94,3 +115,4 @@ before it has.
 | Accepted-state interpretation and the obligation drive sequence have one implementation | `openspec/specs/contact-exchange-settlement/spec.md` |
 | A composing domain supplies persistence and configured values, not lifecycle logic | `openspec/specs/contact-exchange-settlement/spec.md` |
 | Delivery is available across composing domains and remains non-authoritative | `openspec/specs/introduction-delivery/spec.md` |
+| The seller's contact payload is resolved per listing origin, not per storefront | `openspec/specs/contact-exchange-settlement/spec.md` |

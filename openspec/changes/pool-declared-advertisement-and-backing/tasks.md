@@ -24,6 +24,19 @@ service's canonical typed client over `ASGITransport`.
 - [ ] 1.3a Fix `capacity_backing` at creation: replace and patch reject a differing
       value and leave the pool unchanged. A rejected request must not clear the
       existing value on its way out.
+- [ ] 1.3b Preserve a stored backing value on omission, in replace, patch, and
+      authoritative import. The general rule resets an omitted optional policy tag to
+      the replacement default — `PoolReplace.policy_tags` defaults to `{}` and the
+      service assigns `pool.policy_tags = data.policy_tags` wholesale — and applying
+      that to an immutable field would change it by omission. Do not reuse the
+      secret-provider-field rationale; that exception exists because a caller cannot
+      restate an unreadable value, which is not true here.
+- [ ] 1.3c Record `backed` explicitly when a create request omits the value, with a
+      stated removal condition for the compatibility rule. Do not leave it absent:
+      the preservation rule and the projection's emit-on-every-pool requirement both
+      assume every pool carries a value.
+- [ ] 1.3d Emit `capacity_backing` explicitly in canonical export, so a round-tripped
+      document carries it and re-import is a no-op rather than a reset.
 - [ ] 1.4 Carry both tags through create, replace, patch, bulk import, projection,
       and canonical export on the existing policy-tag channel and precedence.
 - [ ] 1.5 Leave `deliverable_modes` untouched — meaning, derivation, migration, and
@@ -67,8 +80,14 @@ service's canonical typed client over `ASGITransport`.
       administration API and its canonical client. The claim is not that a model
       accepts the value — it is that the real administration path does not demand
       fake execution configuration.
-- [ ] 4.3 **Integration.** Create, replace, and bulk import each round-trip an
-      explicit backing value through the canonical pool client.
+- [ ] 4.3 **Integration.** Through the canonical pool client: create, replace, and
+      bulk import each round-trip an explicit backing value; and — the case that
+      matters more — replace, patch, and import each **omitting** the value preserve
+      it rather than resetting. The explicit-value happy path would pass against an
+      implementation that resets on omission.
+- [ ] 4.3a **Integration.** An old-format authoritative document imported for a
+      migrated pool preserves the migrated backing, and canonical export of that pool
+      emits it explicitly.
 - [ ] 4.4 **Integration.** A backed pool's widened advertisable declaration is
       rejected on write, and the same declaration arriving through an ingested
       projection is rejected there too.

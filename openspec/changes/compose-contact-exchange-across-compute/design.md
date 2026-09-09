@@ -85,6 +85,34 @@ single special case, and it is why this change and `unbacked-listing-publication
 have no dependency in either direction. It is also why no pool-level or listing-level
 field may name a settlement mechanism.
 
+### One contact per origin
+
+`ContactSettlementConfig.contact_payload` is a single value bound from storefront
+configuration at acceptance. That is coherent at one seller per storefront and stops
+being coherent the moment one storefront publishes for several seller sites — which
+is exactly the shape the 1:N site-to-storefront work introduces, and which Goal 7's
+own system coverage exercises with two seller sites behind one storefront.
+
+A storefront-wide payload in that deployment does not degrade gracefully. It reveals
+one seller's contact details for another seller's listing: a correctness failure that
+discloses the wrong party's personal information, not a missing feature.
+
+So the payload is resolved from the listing's origin. The origin site is already on
+the durable listing binding and copied to the negotiation thread, so the input is
+present at acceptance without a new lookup. A deployment with one origin resolves to
+the value it configures today, which is what keeps this from being a breaking change
+for existing operators.
+
+The alternative was a release contract restricting introductions to one seller per
+storefront. Rejected: it would make Goal 7's stated value — discovery and a
+trustworthy introduction across sellers — untrue for the multi-seller case the goal
+exists to serve, and the restriction would have to be enforced somewhere rather than
+merely documented.
+
+Making the payload resolvable is also the hook per-deal aliasing would need. That is
+noted rather than built here; choosing an alias per deal is a separate decision from
+knowing which seller's contact to reveal.
+
 ### Retention first
 
 This change is gated on `contact-payload-retention` rather than coordinating with

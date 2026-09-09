@@ -33,6 +33,13 @@ beyond bare metal as an unowned gap.
   seller in any of them can settle by introduction.
 - Extend introduction delivery to those domains, so a revealed introduction
   reaches its owner rather than only being readable.
+- Resolve the seller's contact payload per listing origin rather than per
+  storefront. `ContactSettlementConfig.contact_payload` is one static value for a
+  whole storefront, which is coherent only at one seller per storefront. Goal 7
+  publishes listings from several seller sites through one storefront, so a
+  storefront-wide payload would reveal the wrong seller's contact details. The
+  payload becomes resolvable from the listing's origin site; a single-origin
+  deployment resolves to the same value it configures today.
 - State normatively that accepted-state interpretation for this mechanism has one
   implementation, and that a composing domain supplies persistence and values
   rather than lifecycle logic.
@@ -45,7 +52,10 @@ beyond bare metal as an unowned gap.
   drive sequence have one implementation; a composing domain supplies persistence
   and configured values.
 - `introduction-delivery`: delivery is available to every composing domain rather
-  than to bare metal alone.
+  than to bare metal alone, and reaches the seller at the origin the listing came
+  from.
+- `contact-exchange-settlement`: the seller's contact payload is resolved from a
+  listing's origin rather than from one static storefront-wide value.
 
 ### New Capabilities
 
@@ -59,6 +69,8 @@ None.
   `design.md`, constrained by this.
 - Do not change the reveal surface, its authentication, its idempotency, or the
   option shape.
+- Do not build per-deal contact aliasing. Making the payload resolvable is the hook
+  aliasing would also need, but choosing an alias per deal is a separate concern.
 - Do not add scalar participation. The mechanism declines it, and
   `unbacked-listing-publication` publishes rates as listing attributes precisely
   so that decision holds.
@@ -86,8 +98,10 @@ None.
   `kit-storefront-composition-seam`, which own where kit-owned storefront runtime
   sits. The promoted glue's home should follow their seam rather than inventing a
   parallel one.
-- Independent of `unbacked-listing-publication`. Either can land first; neither
-  assumes the other.
+- Independent of `unbacked-listing-publication` for the composition work. Either can
+  land first; neither assumes the other. Per-origin contact resolution is what makes
+  Goal 7's multi-seller value claim true, though, so Goal 7 is not complete for
+  introductions until it lands — see `design.md`.
 - Discharges the remaining half of the recorded open gap for cross-domain
   contact-exchange composition in `docs/development/ROADMAP.md`.
 

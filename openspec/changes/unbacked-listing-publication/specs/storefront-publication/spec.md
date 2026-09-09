@@ -38,8 +38,11 @@ identity MUST accept either.
 ### Requirement: Backing is declared by the projected pool
 
 A storefront MUST resolve a listing's backing from the declared value on the
-projected pool it derives from, read live from the current projection and never
-persisted into storefront-local storage. Backing MUST NOT be inferred from absent
+projected pool it derives from, reading that projected tag live at each point of
+need and never caching it as storefront-local inventory. The backing discriminator
+recorded on a listing's durable binding is derived from that value at publication
+and is immutable; it is a storefront fact about a bound listing rather than a cached
+copy of a site fact, and the two MUST NOT be conflated. Backing MUST NOT be inferred from absent
 capacity data, an empty projection, or a stale generation.
 
 A projection whose producer declares backing for no pool it projects predates the
@@ -98,7 +101,17 @@ listings because only they reach those layers.
 
 Source-publication reconciliation MUST apply to every listing regardless of
 backing: a removed or disabled source declaration MUST close the listings derived
-from it, and a changed declared shape MUST update them deterministically.
+from it, and a changed source declaration MUST be reflected deterministically in
+what is published.
+
+How a change is reflected depends on whether it alters the listing's derivation
+identity. A change to a field the derivation source envelope carries produces a
+different derivation key, and the durable binding is immutable, so such a change
+MUST close the existing listing and publish a newly derived one. A change confined
+to payload outside the derivation identity MAY update the existing listing in place.
+An implementation MUST NOT attempt an in-place update for an identity-bearing
+change: the binding cannot record it, so the published listing and its durable
+identity would disagree.
 
 Capacity-availability reconciliation and its close-before-reopen sequencing MUST
 apply only to capacity-backed listings. An unbacked listing has no availability to
@@ -114,10 +127,21 @@ it from source-publication reconciliation.
 - **WHEN** a capacity resource or pool an unbacked listing derives from is removed or disabled
 - **THEN** the published listing closes
 
-#### Scenario: An unbacked listing's declared shape changes
+#### Scenario: A declared shape change alters derivation identity
 
-- **WHEN** the declared shape behind an unbacked listing changes
-- **THEN** the published listing is updated deterministically without entering capacity-availability reconciliation
+- **WHEN** a source declaration changes a field the derivation source envelope carries
+- **THEN** the existing listing closes and a newly derived listing is published with a different derivation key
+- **AND** the original binding row is unmodified
+
+#### Scenario: A source change outside derivation identity
+
+- **WHEN** a source declaration changes only fields outside the derivation source envelope
+- **THEN** the existing listing is updated in place and retains its derivation identity
+
+#### Scenario: An unbacked listing's source changes
+
+- **WHEN** the declaration behind an unbacked listing changes
+- **THEN** the change is reflected without entering capacity-availability reconciliation
 
 #### Scenario: Capacity deltas do not reach an unbacked listing
 

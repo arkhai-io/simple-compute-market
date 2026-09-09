@@ -148,7 +148,10 @@ change did not previously have -- see "Dependencies and Related Changes".
   immutability is what lets an unbacked pool's backing be unchangeable, and the same
   argument applies to the executor. Landed here rather than in Goal 7 because it is
   a provisioning-side authority rule this change's campaign already owns, and no
-  operator relies on in-place swap.)**
+  operator relies on in-place swap.)** The migration path this creates depends on
+  `capacity-resource-administration`'s drain invariant: a reservation's pool is
+  resolved through the resource's current `pool_id`, so moving a member under a live
+  obligation would rewrite that obligation's authority.
 
 ## Capabilities
 

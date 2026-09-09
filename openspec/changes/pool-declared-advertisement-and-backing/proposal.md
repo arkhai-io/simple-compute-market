@@ -35,6 +35,11 @@ makes the first's safety rule expressible. They belong in one change.
   be admitted against, with values `backed` and `unbacked`. A malformed value is
   rejected on write and fails closed on ingestion; a discriminator must never be
   guessed.
+- Define omission semantics for that tag against the existing replacement rule.
+  Replace, patch, and authoritative import preserve a stored value the request
+  omits, because resetting an immutable field to a default is a change to it. Create
+  with no value records `backed` explicitly, so every pool carries one. Canonical
+  export always emits it.
 - Require that a `backed` pool's advertisable set is a subset of its deliverable
   set, enforced on write and on projection ingestion. Leave an `unbacked` pool's
   advertisable set independent of its deliverable set, which will ordinarily be

@@ -221,7 +221,57 @@ composition root like `unit_claim_keys` already is.
 This change takes the smaller of the two: make the name composition-supplied, and stop
 writing it when the caller declared capacity explicitly. Retiring the scalar is a schema
 change touching every legacy single-quantity caller, and is recorded below as deferred
-rather than folded in.
+rather than folded in. **Planned 2026-09-09 as Section 4b** — this decision previously
+had no implementation task while task 1.4 said to add nothing to
+`ResourceRegisterRequest`, so an implementer would have had to invent the semantics
+while coding. The domain-neutral declaration contract this change states cannot hold
+without it.
+
+### The import contract changed underneath this change (added 2026-09-09)
+
+This change was written when the pool-definitions import applied its document on every
+startup, and it mirrored that reasoning explicitly: idempotence was said to make an
+every-startup import safe. `DEPLOYMENT_AND_CONFIG.md` has since established the
+opposite — "a process start is not a submission", and import "is idempotent with
+respect to the document, not the database", because "re-running it against state
+something else changed reverts that change". `DefinitionDocumentImporter` implements
+the digest gate, and `import_pool_definitions_if_configured` is now a one-line
+delegation to it.
+
+So the instruction to mirror the pool import exactly is still correct; what it means
+has changed. Capacity definitions follow the digest gate.
+
+This matters more here than it would for pools, because this change also promotes
+`PUT /api/v1/capacity/resources/{resource_id}` to an operator administration surface.
+An unchanged mounted document reapplied on an unrelated restart would silently revert
+capacity an operator had administered through that API — exactly the failure the
+digest gate was introduced to prevent, arriving through a second reconciliation path in
+the same service.
+
+### Reassignment rewrites authority under live reservations (added 2026-09-09)
+
+`register_resource` writes `bucket.pool_id = effective_pool_id` on update, and
+`backing_pool_id_in_session` resolves a reservation's pool by reading the resource's
+*current* `pool_id` — its docstring says "return the current reservation debit pool".
+So moving a resource between pools changes which authority an already-existing
+reservation resolves to, without the reservation changing.
+
+That was latent while nothing made cross-pool movement a supported workflow. Two
+changes now do: `pools-9-retire-local-physical-authority` makes "create a second pool
+and migrate members across" the answer to a pool's provider being fixed at creation,
+and `unbacked-listing-publication` makes the same move the answer to a pool's backing
+being fixed. Both would exercise it.
+
+A drain invariant is the smaller fix: a resource may not move while it holds a live
+obligation resolved through its pool. The alternative — recording pool provenance on
+the reservation itself — introduces a second source of truth for a reservation's pool
+and is a much larger change for the same guarantee.
+
+Backed-to-unbacked is where this matters most, because an unbacked pool must never
+participate in reservation behaviour and reassignment would hand it a live one.
+Unbacked-to-backed is safe by construction, since an unbacked resource holds no
+reservations, but the invariant is stated generically rather than scoped to backing:
+the same hazard exists for a backed-to-backed executor migration.
 
 ## Risks / Trade-offs
 

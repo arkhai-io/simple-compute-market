@@ -130,6 +130,39 @@ why backing does not need to appear in the derivation source envelope.
 The same argument applies to a pool's provider, which
 `pools-9-retire-local-physical-authority` fixes at creation for the same reason.
 
+### Omission preserves an immutable value; it does not reset it
+
+`resource-pool-management` says a full PUT omitting optional policy tags resets them
+to the replacement default, and the service implements that literally —
+`PoolReplace.policy_tags` defaults to `{}` and replacement assigns the whole map.
+Applied to `capacity_backing` that would change an immutable field by omitting it,
+which is the same operation the immutability rule refuses when it is supplied
+explicitly. So omission preserves.
+
+That derivation matters more than the conclusion. The spec already carries one
+exception to replacement semantics, for secret provider-configuration fields, and its
+reasoning is specific: a value a read never returns cannot be restated by a caller
+performing a full replacement. Backing is readable, so that argument does not
+transfer, and copying it would put a wrong rationale next to a right rule.
+
+The same applies to authoritative document import, and it matters most on upgrade: a
+deployment whose pool document predates this change, edited and re-imported after
+migration, would otherwise wipe the backing value migration recorded. Canonical export
+emitting the value explicitly closes the loop, so a document round-tripped through
+export carries it and re-import is a no-op.
+
+Create with no value records `backed` explicitly rather than leaving it absent. The
+alternative — requiring an explicit value from every client — breaks every existing
+caller and fixture on the day it lands, for a field whose only correct value for
+existing supply is `backed` anyway. Recording it explicitly is what makes the
+preservation rule and the projection's emit-on-every-pool requirement true of every
+pool rather than only of migrated ones.
+
+Note the asymmetry with `advertisable_modes`, where absence authorizes nothing. The
+two defaults point opposite ways and both are right: an empty advertisable set is the
+safe reading, while an unbacked default would stop every existing pool reserving.
+Stated here so the difference reads as deliberate rather than as an oversight.
+
 ### A malformed backing value fails closed
 
 `capacity_backing` is a discriminator, so an unrecognized value is refused rather

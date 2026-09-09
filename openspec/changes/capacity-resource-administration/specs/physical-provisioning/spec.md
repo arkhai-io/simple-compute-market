@@ -45,9 +45,17 @@ operator-supplied declaration MUST win over any derivable legacy value.
 ### Requirement: Capacity definitions import at startup
 
 A compute provisioner MUST import a configured capacity-definitions document before
-serving requests, applying it as an idempotent difference against current
-declarations on every startup rather than only when no declarations exist. A
-configured document that cannot be read MUST fail startup rather than be skipped
+serving requests, under the same reconciliation contract as resource-pool
+definitions: the provisioner records the digest of the document it last reconciled
+and applies a document only when the current one differs, and an explicit import
+request reconciles regardless of the digest. The digest MUST be recorded in the same
+transaction as the apply.
+
+A process start MUST NOT be treated as a submission. Reapplying an unchanged
+document would revert capacity administration performed through the API since the
+last import, which is the failure this contract exists to prevent.
+
+A configured document that cannot be read MUST fail startup rather than be skipped
 silently, and the import MUST run after resource-pool definitions so a declaration
 can reference an existing pool.
 
@@ -57,6 +65,17 @@ can reference an existing pool.
   restarts the provisioner
 - **THEN** the edited declarations are applied, rather than being ignored because
   declarations already existed
+
+#### Scenario: An unchanged document is present at restart
+
+- **GIVEN** capacity has been administered through the API since the last import
+- **WHEN** the provisioner restarts with the same capacity-definitions document
+- **THEN** no reconciliation occurs and the API administration survives
+
+#### Scenario: An operator explicitly imports an unchanged document
+
+- **WHEN** an operator requests an import of a document whose digest matches the recorded one
+- **THEN** the document is reconciled anyway, because the operator has asked
 
 #### Scenario: Configured document is missing
 

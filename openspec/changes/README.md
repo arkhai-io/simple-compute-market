@@ -112,7 +112,7 @@ contact-payload-retention ──► compose-contact-exchange-across-compute
 | Change | Status | Acceptance boundary |
 |---|---|---|
 | [`contact-payload-retention`](contact-payload-retention/) | active; no blocking dependency; spec delta pending its open decision | Makes the existing bounded-PII retention requirement executable: a configured window with an explicit default, an idempotent deletion path preserving the settled obligation record, a sweep, and disclosure of the window to both parties at reveal |
-| [`compose-contact-exchange-across-compute`](compose-contact-exchange-across-compute/) | blocked on `contact-payload-retention`; spec delta pending its two decision gates | Promotes the domain-neutral introduction composition glue out of bare metal so accepted-state interpretation has one implementation, composes the mechanism in the remaining compute-family domains, and extends delivery to them |
+| [`compose-contact-exchange-across-compute`](compose-contact-exchange-across-compute/) | blocked on `contact-payload-retention`; spec delta pending its two decision gates | Promotes the domain-neutral introduction composition glue out of bare metal so accepted-state interpretation has one implementation, composes the mechanism in the remaining compute-family domains, extends delivery to them, and resolves the seller's contact payload per listing origin rather than per storefront. Goal 7's multi-seller introduction value depends on that last part |
 
 ## Roadmap goal — Sell capacity the marketplace cannot admit against
 
@@ -121,6 +121,13 @@ capacity-resource-administration ──► project-capacity-resources-without-ho
 rename-listing-cardinality-mode ────────────────────────────────────────────────┤
 pool-declared-advertisement-and-backing ────────────────────────────────────────┴──► unbacked-listing-publication ──► publish-indicative-listing-rates
 ```
+
+`capacity-resource-administration` is a Goal 7 prerequisite and was groomed for it
+(2026-09-09): digest-gated capacity-definition import, a planned
+composition-supplied mirror dimension, and a drain invariant forbidding a capacity
+resource from moving pools under a live obligation.
+`pools-9-retire-local-physical-authority` depends on that invariant too — its
+two-pool executor-migration path has the same hazard.
 
 Goal 7 owns every change it needs. `publish-indicative-listing-rates` was
 originally graphed behind `capacity-shape-pricing` and transitively behind the
@@ -143,9 +150,9 @@ advertisement change's subset rule depend on a concept its own dependent owned.
 
 | Change | Status | Acceptance boundary |
 |---|---|---|
-| [`rename-listing-cardinality-mode`](rename-listing-cardinality-mode/) | active; independent; spec delta pending | Renames the `listing_mode` projection hint to `listing_cardinality_mode` and states its scope normatively, so a value that is not a cardinality is visibly out of place. Accepts the old key as a deprecated alias to prevent silent reclassification across version skew |
+| [`rename-listing-cardinality-mode`](rename-listing-cardinality-mode/) | active; independent | Renames the `listing_mode` projection hint to `listing_cardinality_mode` and states its scope normatively, so a value that is not a cardinality is visibly out of place. Accepts the old key as a deprecated alias to prevent silent reclassification across version skew |
 | [`pool-declared-advertisement-and-backing`](pool-declared-advertisement-and-backing/) | active; no blocking dependency | Two pool declarations: what a pool's listings may advertise, separate from what its provider proves it can deliver; and whether the pool can be admitted against. A backed pool's advertisable set is constrained to a subset of its deliverable set, a malformed backing value fails closed, and both are derived for every existing pool on upgrade. Leaves `deliverable_modes` and every execution recheck untouched. Observable to operators only — no listing behaviour changes until `unbacked-listing-publication` reads the tags |
-| [`project-capacity-resources-without-hosts`](project-capacity-resources-without-hosts/) | blocked on `capacity-resource-administration`; spec delta pending | Inverts the resource-pool projection to iterate declared capacity resources and correlate host rows in, so a declaration with no executor host reaches storefronts instead of succeeding into a void. Also serves Goal 1 |
+| [`project-capacity-resources-without-hosts`](project-capacity-resources-without-hosts/) | blocked on `capacity-resource-administration` | Inverts the resource-pool projection to iterate declared capacity resources and correlate host rows in, so a declaration with no executor host reaches storefronts instead of succeeding into a void. Also serves Goal 1 |
 | [`unbacked-listing-publication`](unbacked-listing-publication/) | blocked on the three above, plus a completion dependency on `pools-9-retire-local-physical-authority` | Backing as an explicit declared listing property: a tagged union over admission provenance, a binding discriminator distinct from the listing's origin site, pool advertise-authorization separated from execute-authorization, capacity-availability reconciliation scoped to backed listings while source-publication reconciliation applies to all, and an exact backing filter in the compute registry schema |
 | [`publish-indicative-listing-rates`](publish-indicative-listing-rates/) | blocked on `unbacked-listing-publication`; spec delta pending its two decision gates | A seller's asking rate on the family-grouped capability shape with exact fail-on-missing filters, normatively a listing attribute rather than a settlement option rate — nothing is constructed from it. Closes Goal 7's comparison gap |
 

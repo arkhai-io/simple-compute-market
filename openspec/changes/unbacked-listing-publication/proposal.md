@@ -22,8 +22,13 @@ migration that unwinds a fabricated site.
 
 ## What Changes
 
-- Consume `capacity_backing` from the projection, read live and never persisted
-  into storefront-local storage. Absent capacity data never implies it; the pool
+- Consume `capacity_backing` from the projection. The **projected pool tag** is read
+  live at each point of need and is never cached as storefront-local inventory, like
+  every other policy tag. The **listing's backing discriminator**, derived from it at
+  publication, is durable and immutable on the binding. Those are different things
+  and the distinction is load-bearing: caching the pool tag would make the storefront
+  an authority on a site fact, while deriving the discriminator per read would let a
+  bound listing change category. Absent capacity data never implies either; the pool
   declaration and its migration belong to
   `pool-declared-advertisement-and-backing`.
 - Add an explicit backing discriminator to `storefront_listing_bindings`, covered
