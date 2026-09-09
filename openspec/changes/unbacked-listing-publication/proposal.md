@@ -54,9 +54,12 @@ migration that unwinds a fabricated site.
 - Publish backing in `offer_resource` and add an exact, fail-on-missing registry
   filter for it, republishing existing listings as explicitly backed so no listing
   relies on an absent field to be classified.
-- Publish an unbacked listing's capacity from its source declaration's quantity,
-  identified as declared rather than currently available, and refuse a declaration
-  carrying no quantity rather than substituting a default.
+- Refuse a source declaration carrying no quantity where derivation needs one,
+  rather than substituting a default that would be indistinguishable in the
+  published listing from a declared shape. Publish no second field describing how
+  strong a listing's shape claim is: every published field is a seller assertion on
+  every listing, and the exhaustibility difference is already carried by the
+  published backing value.
 
 ## Capabilities
 

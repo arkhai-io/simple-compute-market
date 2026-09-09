@@ -25,10 +25,12 @@ lets discovery proceed and keeps the rate on the shape it belongs on.
   private scalar.
 - Add exact, fail-on-missing rate filters to `core/registry/filter-spec.yaml`,
   matching the convention every other `offer_resource` filter uses.
-- State normatively that the published rate is **indicative**: it is what the
-  seller is asking, it is a listing attribute rather than a settlement option
-  rate, and nothing in the system holds a party to it. On an unbacked listing
-  there is no agreed amount — absent, not zero.
+- State normatively that the published rate is a **listing attribute** and not a
+  settlement option rate: no settlement option, escrow term, or accepted obligation
+  is constructed from it, and an agreed amount is absent rather than zero until one
+  is negotiated. This describes what the system builds from the number, not how
+  much a buyer should believe it — like every published field, a rate is a seller
+  assertion, and nothing in the marketplace verifies any of them.
 - State that a listing publishing no rate is excluded from a rate-bounded query
   rather than passing it.
 
@@ -49,8 +51,10 @@ None.
 - Do not make the rate a settlement option rate, and do not add scalar
   participation to a mechanism that declines it. The two are different carriers
   with different guarantees; see `design.md`.
-- Do not build a rate-honesty control. Registry curation is the intended control
-  and sits outside the registry service boundary.
+- Do not build a rate-honesty control, and do not imply one exists. Registry
+  curation is the control for a misleading rate exactly as it is for a misleading
+  compute shape, it sits outside the registry service boundary, and it is out of
+  band in both cases.
 - Do not change negotiation-floor pricing policy, which is a separate
   storefront-side resolution with its own three-tier precedence.
 - Do not restrict the rate to unbacked listings. A backed listing may publish an
@@ -90,8 +94,8 @@ None.
 
 ### Knowledge to promote
 
-- The published rate is indicative — a listing attribute, not a settlement option
-  rate, with no agreed amount implied —
+- The published rate is a listing attribute, not a settlement option rate: nothing
+  is constructed from it and an agreed amount is absent until negotiated —
   `openspec/specs/registry-discovery/spec.md`.
 - A listing publishing no rate is excluded from a rate-bounded query rather than
   passing it — `openspec/specs/registry-discovery/spec.md`.

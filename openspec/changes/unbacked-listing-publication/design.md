@@ -148,7 +148,7 @@ and the `or 1` default would silently bake a meaningless quantity into the ident
 That premise was wrong: an unbacked pool's capacity resources declare shape *and*
 quantity, and what is absent is availability rather than declared capacity. The
 `or 1` hazard is real but the fix is to refuse a declaration carrying no quantity
-rather than to omit the field — see the declared-not-available decision below.
+rather than to omit the field — see the seller-assertion decision below.
 
 ### The concrete binding type, traced
 
@@ -325,6 +325,11 @@ terms does not reduce to one number. Un-declining scalar participation would put
 number in a settlement option that the runtime does arithmetic on and an
 obligation implies, with nothing behind it for a deal agreed out of band.
 
+That is a statement about what the system constructs from the number, not about
+how much a buyer should believe it. Like every other published field, a rate is a
+seller assertion; what distinguishes it is that no settlement option or obligation
+is derived from it.
+
 ### An unbacked pool still names a provider, and that is accepted
 
 `PoolCreate` requires a provider, so an execution-less seller's pool names a
@@ -388,30 +393,52 @@ The two loops separate cleanly:
 Stating both is what keeps "unbacked cannot be exhausted" true without
 accidentally making "deleted unbacked advertisements never disappear" true.
 
-### Published capacity is declared, not currently available
+### Every published field is a seller assertion, including on backed listings
 
-An unbacked pool's capacity resources declare shape and quantity — that is what
-`capacity-resource-administration` makes them authoritative for, and a hostless
-resource projects its declared capacity. So an unbacked listing has a quantity to
-publish; what it lacks is availability.
+Two earlier drafts of this design tried to make an unbacked listing's published
+capacity weaker than a backed one's — first as "declared rather than admitted",
+then as "untested rather than falsifiable". Both were wrong, and the code says so
+plainly. `compute_capacity_claim_from_order`'s docstring, describing the **backed**
+path, calls the dimension map "the listing's fixed, seller-declared shape, so
+admission checks that every requested dimension fits". Reservation checks that what
+a buyer asked for fits inside what the seller declared and that the site has an
+unreserved unit matching it. Nothing verifies that a host has the RAM. An Ansible
+run can still hand over less than advertised.
 
-That creates a subtler honesty problem than the one backing solves. A backed
-fungible listing's published slice is bounded by what a single member can
-*currently satisfy* — a number the site will admit against. An unbacked listing's
-can only be what the seller declared. Same field, two meanings, and a buyer
-comparing them is comparing an admitted quantity against a claim.
+So a published shape is a seller assertion on every listing, and the marketplace
+has no mechanism that makes one assertion stronger than another. A buyer misled
+about a backed listing's RAM and a buyer misled about an unbacked seller's
+inventory discover it the same way — by inspecting what they got, cancelling, and
+reporting the storefront to the registry. Registry curation is the control in both
+cases, out of band, and this goal adds none.
 
-So the listing identifies its published capacity as declared rather than currently
-available, normatively rather than as a presentation concern. This is the same
-treatment the indicative rate gets in `publish-indicative-listing-rates`, and for
-the same reason: the separation backing buys is undone if the dimension fields
-quietly carry the stronger meaning.
+"Admitted" was the specific error. It is capacity-reservation vocabulary — whether
+a request to reserve is granted — and stretching it into a claim-strength property
+imported a guarantee that does not exist. It should not appear in this campaign's
+language.
 
-A declaration carrying no quantity is refused rather than defaulted. The existing
-`int(candidate.get("gpu_count") or 1)` would substitute a plausible-looking 1,
-indistinguishable from a declared single-GPU listing — the same substituted-value
-hazard the projection change avoids by omitting executor fields rather than
-emptying them.
+**What actually differs** is narrower: a backed listing's published quantity is
+additionally bounded by the availability its site projects, so it moves as capacity
+is reserved and released. An unbacked listing's does not move, because reservations
+are no-ops and any number of buyers can settle against it. That is exhaustibility,
+and the published backing value already tells a buyer which kind of listing they
+are looking at. Publishing a second field to restate it would be exactly the
+redundant encoding this campaign has removed everywhere else, so no such field is
+added.
+
+**What survives, on independent grounds.** A source declaration carrying no
+quantity where derivation needs one is refused rather than defaulted. The existing
+`int(candidate.get("gpu_count") or 1)` would substitute a plausible-looking 1 that
+is indistinguishable in the published listing from a declared single-GPU shape.
+That is derivation integrity — a fabricated value entering the durable and
+published record — and it has nothing to do with claim strength.
+
+**The refusals in this change are guards, not controls.** Capacity operations
+rejecting an unbacked listing at the type boundary, and claim construction refusing
+one, exist so a no-op cannot silently succeed and leave a reservation record with
+no authority behind it. They protect the system from a bug in itself. They are not
+controls on what a seller may publish and do not imply the marketplace verifies
+anything.
 
 ### Backing is filtered exactly, and existing listings are republished
 

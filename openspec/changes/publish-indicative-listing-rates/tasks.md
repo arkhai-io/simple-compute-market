@@ -42,13 +42,15 @@ service's canonical typed client over `ASGITransport`.
 ## 4. Specification
 
 - [ ] 4.1 State in `openspec/specs/registry-discovery/spec.md` that the published
-      rate is indicative: a listing attribute, not a settlement option rate, with
-      no agreed amount implied and none constructed from it.
+      rate is a listing attribute and not a settlement option rate: no settlement
+      option, escrow term, or accepted obligation is constructed from it, and an
+      agreed amount is absent until negotiated. Write it as a statement about what
+      the system builds, not about how strong the claim is — every published field
+      is a seller assertion and the spec must not imply otherwise.
 - [ ] 4.2 Add a scenario for a rate-bounded query against a listing publishing no
       rate.
-- [ ] 4.3 Add a scenario confirming two listings advertising the same rate have
-      made the same claim rather than the same commitment — expressed as the
-      absence of any obligation or option derived from the field.
+- [ ] 4.3 Add a scenario confirming no settlement option, escrow term, or accepted
+      obligation carries a value derived from the published rate.
 
 ## 5. Validation
 
@@ -64,16 +66,16 @@ service's canonical typed client over `ASGITransport`.
 ## 6. Closeout
 
 - [ ] 6.1 **Comment hygiene.** Run `make check-comment-hygiene` and resolve every
-      match. The local rationale to keep is why the rate is not a settlement
-      option rate.
+      match. The local rationale to keep is why nothing is constructed from the
+      rate — not any claim about how much a buyer should trust it.
 - [ ] 6.2 **Import placement.** Review imports this change added or touched and
       migrate function-level ones to module level where no genuine circular
       import or documented lazy-load reason exists. Verify against the real test
       suite.
 - [ ] 6.3 **Documentation compliance.** Re-check accepted decisions against
-      `openspec/README.md`'s placement table. The indicative status states
-      behaviour implementations must satisfy, so confirm it landed as a normative
-      requirement rather than as design prose.
+      `openspec/README.md`'s placement table. That nothing is constructed from the
+      rate is behaviour implementations must satisfy, so confirm it landed as a
+      normative requirement rather than as design prose.
 - [ ] 6.4 **Narrative compression.** Shorten completed-task notes to final
       behaviour, the two Section 1 decision outcomes, and the accepted
       rate-honesty risk with its revisit trigger.
@@ -89,5 +91,5 @@ service's canonical typed client over `ASGITransport`.
 
 | Accepted decision | Permanent location |
 |---|---|
-| The published rate is indicative — a listing attribute, not a settlement option rate | `openspec/specs/registry-discovery/spec.md` |
+| The published rate is a listing attribute, not a settlement option rate: nothing is constructed from it | `openspec/specs/registry-discovery/spec.md` |
 | A listing publishing no rate is excluded from a rate-bounded query | `openspec/specs/registry-discovery/spec.md` |

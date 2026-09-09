@@ -33,7 +33,7 @@ identity MUST accept either.
 #### Scenario: A capacity operation receives an unbacked listing
 
 - **WHEN** a reservation, commit, release, scheduling, or dispatch operation is attempted for an unbacked listing
-- **THEN** the operation is refused before any effect
+- **THEN** the operation is refused before any effect, so no reservation record is created with no authority behind it
 
 ### Requirement: Backing is declared by the projected pool
 
@@ -130,31 +130,43 @@ The requirement that a trusted listing mapping routes to exactly one site for cl
 construction MUST apply to capacity-backed listings. An unbacked listing constructs
 no reservation claim, so it has no claim to route.
 
+Refusing claim construction for an unbacked listing is a fail-closed guard against
+a reservation record with no authority behind it. It is not a control on what a
+seller may publish, and no requirement in this capability verifies a seller's
+claims.
+
 #### Scenario: An unbacked listing is queried for a claim route
 
 - **WHEN** claim construction is attempted for an unbacked listing
 - **THEN** no claim is constructed and the attempt is refused
 
-### Requirement: Published capacity on an unbacked listing is declared, not available
+### Requirement: A listing's published shape comes from its source declaration
 
-A capacity-backed listing's published capacity is bounded by what its site can
-currently admit. An unbacked listing has no availability, so its published capacity
-MUST be the quantity its source declaration carries, and the listing MUST identify
-it as declared rather than currently available.
+A listing's published compute shape is derived from the shape its source
+declaration carries, for capacity-backed and unbacked listings alike. Nothing in
+publication verifies that shape against hardware, and this requirement makes no
+claim that it does.
 
-A source declaration behind an unbacked listing that carries no quantity is
-defective. Derivation MUST refuse it rather than substituting a default, because a
-substituted quantity is indistinguishable from a declared one.
+A source declaration carrying no quantity where the derivation needs one is
+defective. Derivation MUST refuse the candidate rather than substituting a
+default, because a substituted quantity is indistinguishable in the published
+listing from a declared one.
 
-#### Scenario: An unbacked listing publishes capacity
-
-- **WHEN** a storefront derives a listing from an unbacked pool whose capacity resource declares a quantity
-- **THEN** the published capacity is that declared quantity, identified as declared rather than currently available
+Where a listing is capacity-backed, the published quantity is additionally bounded
+by the availability its site projects, so it moves as capacity is reserved and
+released. An unbacked listing has no availability to bound it and no reservation
+consumes it; that difference is carried by the listing's published backing and
+MUST NOT be encoded a second time in a separate published field.
 
 #### Scenario: A source declaration carries no quantity
 
-- **WHEN** a source declaration behind an unbacked listing carries no quantity
+- **WHEN** a source declaration behind a listing carries no quantity and the derivation needs one
 - **THEN** derivation refuses the candidate rather than publishing a substituted default
+
+#### Scenario: An unbacked listing's published quantity does not move
+
+- **WHEN** any number of buyers settle against an unbacked listing
+- **THEN** its published quantity is unchanged, because no reservation consumes it
 
 ### Requirement: A backing change closes and republishes
 

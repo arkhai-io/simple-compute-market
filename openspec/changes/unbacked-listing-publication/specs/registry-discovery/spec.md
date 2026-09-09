@@ -4,8 +4,14 @@
 
 A compute listing MUST publish whether an admission authority stands behind it.
 The value is part of the compute listing shape rather than an optional annotation,
-because a buyer cannot otherwise tell a listing the marketplace will admit against
-from one that is an advertisement.
+because a buyer cannot otherwise tell a listing they can reserve capacity against
+from one where reservation is a no-op and any number of buyers may settle against
+the same supply.
+
+This value describes what the marketplace will do with the listing, not how far a
+buyer should trust it. Every field a listing publishes is a seller assertion, and
+no requirement in this capability verifies any of them for either kind of
+listing.
 
 A registry filter on backing MUST match exactly and MUST exclude a listing that
 does not publish the field. A permissive match would return listings a buyer

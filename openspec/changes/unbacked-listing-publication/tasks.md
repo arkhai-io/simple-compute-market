@@ -122,10 +122,12 @@ than re-deciding them.
 - [ ] 4.1b Fail a pool closed when its `capacity_backing` value is outside `backed`
       and `unbacked`. A discriminator is not somewhere to apply the tolerant reading
       the cardinality hint gets.
-- [ ] 4.3a Publish an unbacked listing's capacity from its source declaration's
-      quantity, identified as declared rather than currently available. Refuse a
-      declaration carrying no quantity rather than substituting the existing
-      `or 1` default, which is indistinguishable from a declared single-GPU listing.
+- [ ] 4.3a Refuse a source declaration carrying no quantity where derivation needs
+      one, rather than substituting the existing `int(... or 1)` default — a
+      substituted 1 is indistinguishable in the published listing from a declared
+      single-GPU shape. Do not add a published field describing how strong the
+      shape claim is; every published field is a seller assertion on every listing,
+      and backing already carries the exhaustibility difference.
 - [ ] 4.4 Implement the backing transition as close-and-republish. When a source
       declaration's projected backing changes, the existing listing closes and a
       new listing binds with a new durable identity and the new discriminator.
@@ -256,6 +258,6 @@ than re-deciding them.
 | Backing transitions are close-and-republish, not in-place | `openspec/specs/storefront-publication/spec.md` |
 | Absent projected pool tags are producer-version compatibility rules, not per-pool inferences; a malformed backing value fails closed | `openspec/specs/storefront-publication/spec.md` |
 | Claim construction describes what happens when capacity admission is requested | `openspec/specs/site-capacity/spec.md` |
-| Published capacity on an unbacked listing is declared, not currently available | `openspec/specs/storefront-publication/spec.md` |
+| A published shape comes from its source declaration on every listing; a declaration with no quantity is refused rather than defaulted | `openspec/specs/storefront-publication/spec.md` |
 | A listing advertises only a mode its pool declares advertisable, backed or not | `openspec/specs/storefront-publication/spec.md` |
 | Backing is filtered exactly and fail-on-missing | `openspec/specs/registry-discovery/spec.md` |

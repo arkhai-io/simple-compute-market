@@ -14,8 +14,8 @@ marketplace offers there is comparison before contact.
 ## Goals / Non-Goals
 
 **Goals.** Publish a rate buyers can filter and compare on. Keep it on the shape
-pricing is converging toward. Make its indicative status normative rather than
-implied.
+pricing is converging toward. Make it normative that nothing is constructed from
+the number.
 
 **Non-Goals.** No settlement participation, no honesty enforcement, no change to
 negotiation-floor policy, no restriction to unbacked listings.
@@ -42,8 +42,17 @@ behind that number, and putting it in the carrier that is supposed to be
 authoritative about what was agreed misrepresents exactly the thing the carrier
 exists to represent.
 
-The consequence worth stating normatively: two listings advertising the same rate
-have made the same *claim*, not the same commitment.
+The consequence worth stating normatively is about construction, not credence: no
+settlement option, escrow term, or accepted obligation is derived from the
+published rate, and an agreed amount is absent until one is negotiated.
+
+What this decision deliberately does **not** say is that a published rate is a
+weaker kind of claim than a published compute shape. Every field in a listing is a
+seller assertion — nothing in the marketplace verifies that a host has the RAM it
+advertises either, and `compute_capacity_claim_from_order` describes even a backed
+listing's dimensions as "the listing's fixed, seller-declared shape". A misleading
+rate and a misleading shape are discovered the same way and reach the same control:
+registry curation, out of band.
 
 ### The family-grouped shape, not a scalar
 
@@ -100,10 +109,10 @@ mechanism.
 
 ## Risks / Trade-offs
 
-- **[Buyers read an indicative rate as a quote]** → Mitigated by making the
-  indicative status normative in the capability spec rather than a presentation
-  concern, so any surface rendering the field has a contract to render it
-  against. Not fully mitigable: a number in a catalogue reads as a price.
+- **[Buyers read an asking rate as a quote]** → Partly mitigated by the normative
+  statement that nothing is constructed from it, so no surface can present it as an
+  agreed amount. Not fully mitigable: a number in a catalogue reads as a price, and
+  the marketplace has no way to establish otherwise before a negotiation happens.
 - **[The dependency chain slips]** → Goal 7's rate-comparison gap stays open for
   as long as it does. The mitigation is that discovery does not wait on it, which
   is the entire reason this change is separate.
