@@ -1,10 +1,13 @@
 ## Why
 
-The whole-host lifecycle has never run against a real host. This change carries
-only what a single controlled demonstration on one reserved development host
-needs: publish, purchase, reserve, grant access by Ansible, connect as the
-unprivileged tenant, request teardown, observe the buyer key refused, and see
-the released capacity published again.
+The whole-host lifecycle needs one coherent, reviewable path from publication
+through accepted settlement, fulfillment, unprivileged access, teardown, and
+same-identifier republication. The controlled actual-host demonstration proved
+that path on one reserved development host and exposed two pieces of follow-up
+work: bare metal still owns publication sequencing that belongs in the shared
+capacity-publication module, and accepted settlement is constructed and checked
+at several seams that should share one mechanism-owned derivation without
+weakening domain-owned physical validation.
 
 ## What Changes
 
@@ -21,10 +24,33 @@ the released capacity published again.
   without money.
 - Add a test target for the bare-metal provisioning adapter, whose suite had no
   way to run.
+- Drive the Alkahest rail through the shared mechanism registration and accepted
+  obligation builder, while keeping the hosted envelope and seller payout
+  fallback compatible.
+- Bind settlement to the committed accepted plan and its exact physical terms,
+  rather than reinterpreting mutable listing terms during settlement.
+- Refresh and reopen a tracked listing under the same identifier, with registry
+  success confirmed before local terms or lifecycle state changes.
+- Move refresh/reopen sequencing into `kit/capacity-publication` behind a small
+  domain-delegate seam. Core registry fanout keeps its existing at-least-one
+  success contract; callers retain the per-registry outcomes needed to expose
+  partial failure and safely retry failed targets only within the exact same
+  publication intent. A later invocation is a new intent and addresses every
+  intended configured target; stale success never satisfies changed terms or a
+  different lifecycle transition.
+- Extend the existing listing publication request with optional explicit status.
+  The key is omitted when unset. Reopen requests `open`; refresh omits status and
+  therefore preserves the state already held by the registry.
+- Compare same-target readback against the canonical publisher-owned fields
+  exposed by the typed listing DTO before committing local state. Distinguish a
+  confirmed success, a known failed write, and a successful write whose readback
+  is unknown.
 
 ## Scope limits
 
-This is a controlled demonstration, not production tenancy support.
+This remains a controlled demonstration and compatibility-preserving
+consolidation, not production tenancy support or a generalized registry-policy
+platform.
 
 Explicitly out of scope, and not claimed: hostile-tenant isolation, filesystem
 path hardening against a tenant that rewrites its own home, destructive reclaim
@@ -34,6 +60,21 @@ fixed harmless remote command, a known dedicated account, and a host whose state
 is checked by an operator preflight beforehand. Unsafe host state stops the run
 rather than being repaired or defended against.
 
+Also out of scope: a configurable publication quorum, automatic reconciliation
+policy, a new E2E harness, changed accepted settlement envelopes, removal of the
+wallet-derived seller payout fallback, and a new machine-lease wire
+discriminator. Multi-registry writes preserve their current compatibility rule:
+one accepted write remains aggregate transport success. Bare-metal local commit
+requires at least one confirmed readback, every target's result remains visible,
+and partial convergence remains an operator-visible candidate failure. Whether
+recovery is invoked only by an explicit operator action or by a later
+reconciliation loop remains a separate policy decision.
+
+vLLM serving, model-cache preparation or persistence, GPU allocation or
+qualification, and GPU-specific host configuration are deferred. They are not
+prerequisites for this bare-metal publication/settlement consolidation and no
+capacity in this change is reserved for them.
+
 ## Capabilities
 
 ### Modified Capabilities
@@ -42,6 +83,18 @@ rather than being repaired or defended against.
   account a whole-host access action may name, and a host row persists a
   tenant-facing endpoint distinct from the one the provisioner connects
   through.
+- `settlement-configuration`: bare-metal Alkahest acceptance and settlement use
+  the mechanism-owned accepted obligation and bind it to the exact committed
+  agreement; later consolidation removes duplicate construction without
+  changing accepted envelopes or payout fallback.
+- `negotiation-protocol`: trusted seller inventory and binding remain the
+  authority for physical terms; buyer input cannot supply physical access
+  authority.
+- `storefront-publication`: refresh preserves listing identity and lifecycle
+  state, while reopen sends an explicit optional `open` status and confirms the
+  canonical publisher-owned advertised record before local mutation. Shared
+  lifecycle sequencing moves into the capacity-publication module through
+  domain persistence delegates.
 
 ## Permanent documentation impact
 
@@ -49,7 +102,7 @@ rather than being repaired or defended against.
 
 ### Knowledge to promote
 
-Four changes here are durable production behaviour, not demonstration
+The following changes are durable production behaviour, not demonstration
 scaffolding, and are owed a permanent home once reviewed:
 
 1. **Account admission.** Grant and reclaim admit the account against the
@@ -67,6 +120,18 @@ scaffolding, and are owed a permanent home once reviewed:
    sets the strict Ansible environment together, and refuses to render without
    the Secret reference. Destination:
    `openspec/specs/deployment-state/spec.md`.
+5. **Accepted settlement ownership.** Mechanism-owned accepted-obligation
+   construction and domain-owned agreement validation remain distinct, with
+   accepted envelopes and payout fallback preserved. Destination:
+   `openspec/specs/settlement-configuration/spec.md` and, for physical selection,
+   `openspec/specs/negotiation-protocol/spec.md`.
+6. **Publication lifecycle.** The capacity-publication module owns
+   refresh/reopen ordering and delegates domain persistence; optional status is
+   omitted for refresh and explicit for reopen; canonical remote confirmation
+   precedes local mutation; existing at-least-one registry success remains
+   compatible while partial failures remain visible. Destination:
+   `openspec/specs/storefront-publication/spec.md` and
+   `openspec/specs/storefront-publication/architecture.md`.
 
 Deliberately **not** promoted: anything about hostile-tenant isolation,
 destructive reclaim policies, or a demonstrated live run. An earlier revision
@@ -77,3 +142,8 @@ and are not reinstated here.
 
 No shipped caller supplies a tenant account name, so account admission changes
 no current path. The buyer environment input defaults to today's behaviour.
+Optional publication status is omitted by default, so existing request bodies
+remain unchanged. The shared publication consolidation is intended to replace
+bare-metal sequencing, not layer a second path over it. The downstream VM
+consumer of `kit/capacity-publication` must qualify before completion because an
+earlier environment could not exercise it.

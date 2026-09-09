@@ -272,3 +272,132 @@ buyer's; the scenario evidences only what the granted session reports.
 
 Not promoted, and not implemented: host-side ownership records, tenant path
 isolation, destructive reclaim policies, and end-to-end demonstration evidence.
+
+## 9. Publication consolidation design
+
+- [x] 9.1 Reconcile the change scope in `proposal.md` with the implemented buyer
+      crypto rail, seller acceptance, exact settlement, refresh, and reopen work.
+- [x] 9.2 Record the current registry request/readback DTO, existing
+      at-least-one multi-registry write success, per-registry result persistence,
+      and remote-before-local ordering in `design.md` with source citations.
+- [x] 9.3 Accept the proposed optional explicit publication status: omit it when
+      unset, omit it for refresh, and send `open` for reopen. Record the later
+      normative amendment without editing the permanent spec in this
+      documentation-only submilestone.
+- [x] 9.4 Reject configurable quorum scope. Preserve aggregate compatibility,
+      expose partial results through the CLI's existing failed-candidate path,
+      and restrict failed-target filtering to the exact same current operation
+      intent. A later invocation addresses all intended targets; persisted old
+      success is not a cross-operation retry token. Leave automatic retry
+      scheduling as an open policy.
+- [x] 9.5 Record settlement consolidation as required later scope while
+      preserving mechanism ownership, accepted envelopes, hosted behavior,
+      wallet-derived payout fallback, and the legacy settlement path.
+- [x] 9.6 Record later qualification obligations: deterministic default
+      development-environment alignment, the existing single E2E scenario,
+      actual-host-only mutation, and the downstream VM consumer of the changed
+      capacity-publication kit.
+
+## 10. Publication implementation sequence — separately reviewed slices
+
+- [ ] 10.1 Add optional `status` to `ListingRequest`, omitting the key when
+      unset, with registry-client serialization and registry integration
+      coverage. Files:
+      `core/registry-client/src/registry_client/models.py`,
+      `core/registry-client/tests/test_listing_request.py`,
+      `core/registry/tests/integration/test_listings.py`.
+- [ ] 10.2 Preserve `MultiRegistryClient`'s at-least-one aggregate write
+      contract while returning the ordered per-registry outcomes through the
+      publication result and supporting authenticated same-registry preflight
+      and readback. Model confirmed, write-unconfirmed and known failed-write
+      target results distinctly; transport-unknown and confirmation-mismatch
+      results also require read-only reconfirmation rather than blind writes. Do
+      not add quorum configuration or a generic intent journal. Files:
+      `core/storefront/src/core_storefront/multi_registry_client.py`,
+      `core/storefront/src/core_storefront/registry_publication.py`,
+      `core/storefront/tests/unit/test_multi_registry_identity.py`,
+      `core/storefront/tests/unit/test_registry_publication.py`.
+- [ ] 10.3 Deepen `PublicationRuntime`: distinct refresh/reopen operations,
+      exact current-operation intent identity, typed canonical same-target
+      confirmation, and one domain commit delegate invoked only after compatible
+      aggregate success. Every new invocation addresses all intended targets;
+      only an exact in-flight retry filters to known failed targets, while
+      write-unconfirmed targets receive read-only reconfirmation. Refresh
+      preflight writes only after a found eligible/open record or authenticated
+      404; every other error is unknown/no-write. Reopen requests explicit
+      `open`; refresh omits status. Treat a concurrent status change as a
+      mismatch, not an atomicity guarantee. Files:
+      `kit/capacity-publication/src/market_capacity_publication/publication.py`,
+      `kit/capacity-publication/src/market_capacity_publication/__init__.py`,
+      `kit/capacity-publication/tests/unit/test_publication.py`, and
+      `kit/capacity-publication/tests/integration/test_publication_runtime.py`.
+- [ ] 10.3a Regression cases: changed terms after an older success; reopen after
+      a successful refresh; successful write with interrupted readback; retry of
+      only a known failed subset inside the same intent; refresh preflight
+      non-404 uncertainty with no write; and concurrent status mismatch.
+- [ ] 10.4 Replace bare-metal CLI lifecycle sequencing with the kit interface;
+      retain domain-owned candidate/binding validation and persistence. Refresh
+      replaces terms without changing status/paused; reopen changes terms and
+      clears paused only after confirmed remote success. Files:
+      `domains/bare_metal/src/arkhai_bare_metal/storefront_publication.py`,
+      `domains/bare_metal/src/arkhai_bare_metal/storefront_adapter.py`,
+      `domains/bare_metal/storefront/src/arkhai_bare_metal_storefront/publication.py`,
+      `domains/bare_metal/storefront/src/arkhai_bare_metal_storefront/publication_cli.py`,
+      `domains/bare_metal/storefront/pyproject.toml`,
+      `domains/bare_metal/storefront/uv.lock`,
+      `domains/bare_metal/storefront/Makefile`,
+      `domains/bare_metal/tests/test_storefront_adapter.py`,
+      `domains/bare_metal/tests/test_storefront_publication.py`,
+      `domains/bare_metal/storefront/tests/test_publication.py`,
+      `domains/bare_metal/storefront/tests/test_publication_refresh.py`, and
+      `domains/bare_metal/storefront/tests/test_publication_reopen_registry.py`.
+      Preserve the current JSON-before-exit behavior and the existing exit-1
+      rule whenever `failed` contains a candidate. A partially converged
+      candidate remains explicit in `failed`, even though shared aggregate
+      consumers retain at-least-one success; do not introduce another exit code.
+- [ ] 10.5 Rebuild the capacity-publication wheel and qualify focused package,
+      registry, storefront, import-boundary, and typing checks. Qualify the
+      downstream VM consumer with the changed kit installed; disclose any
+      unavailable check rather than substituting another suite.
+- [ ] 10.6 Promote the implemented lifecycle behavior to
+      `openspec/specs/storefront-publication/spec.md` and the module/seam
+      rationale to `openspec/specs/storefront-publication/architecture.md`.
+      Update repository architecture, capability index, roadmap, and campaign
+      index only where their current-state text requires it, and record every
+      promotion in the design-promotion table.
+- [ ] 10.7 Closeout: run `make check-comment-hygiene`; review imports touched by
+      this milestone and move them to module level wherever safe; verify
+      documentation placement and every cited path; compress completed-task
+      narrative after moving durable rationale into `design.md`; check roadmap
+      and campaign-index currency; complete promotion only after code review;
+      run strict OpenSpec validation and `git diff --check`.
+
+## 11. Required later settlement consolidation
+
+- [ ] 11.1 Assess construction duplicated across the mechanism-owned accepted
+      obligation builder, bare-metal negotiation composition, buyer acceptance,
+      and seller settlement resolver. Name the smallest shared artifact/interface
+      that removes duplicate construction while leaving physical validation in
+      the domain.
+- [ ] 11.2 Consolidate only after a separate reviewed plan. Preserve accepted
+      Alkahest and hosted envelopes, wallet-derived seller payout fallback,
+      exact accepted-expiry verification, and the legacy escrow-proposal path.
+- [ ] 11.3 Close out the later settlement section with focused unit and
+      integration coverage, permanent settlement/negotiation specification
+      promotion, comment/import hygiene, narrative compression, roadmap and
+      campaign-index checks, cross-reference validation, and post-review
+      promotion.
+
+## 12. Later E2E and actual-host qualification
+
+- [ ] 12.1 Keep deterministic default development-environment values aligned
+      across bare-metal and VM consumers and retain the existing bare-metal E2E
+      scenario as the only cross-service harness.
+- [ ] 12.2 Keep host/account mutation in the operator-controlled actual-host
+      lane. Default package/E2E validation remains host-independent; no new
+      actual-host script path is added merely to test publication consolidation.
+- [ ] 12.3 Run the authorized actual-host campaign only after its own review
+      gate, with exact source/artifact provenance, retained-resource declaration,
+      and cleanup evidence.
+- [ ] 12.4 Keep vLLM, model-cache lifecycle, GPU allocation/qualification, and
+      GPU-specific host configuration deferred to a separately proposed change.
