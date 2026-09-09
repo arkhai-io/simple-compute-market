@@ -331,7 +331,25 @@ isolation, destructive reclaim policies, and end-to-end demonstration evidence.
       `kit/capacity-publication/src/market_capacity_publication/__init__.py`,
       `kit/capacity-publication/tests/unit/test_publication.py`, and
       `kit/capacity-publication/tests/integration/test_publication_runtime.py`.
-- [ ] 10.3a Regression cases: changed terms after an older success; reopen after
+- [x] 10.3a Extract the prerequisite core reuse seam without changing kit or
+      domain behavior: the factory-opening publication wrapper and an
+      opened-client helper share request construction, fanout, callbacks, safe
+      results, and receipt preservation. Optional status is absent from legacy
+      factory kwargs unless explicit. Exact subsets reject duplicate,
+      unconfigured, and empty targets before I/O and retain configured order.
+      Expose only immutable public publisher and configured target
+      authority/trust identity metadata. Files:
+      `core/storefront/src/core_storefront/registry_publication.py`,
+      `core/storefront/src/core_storefront/multi_registry_client.py`,
+      `core/storefront/tests/unit/test_registry_publication.py`, and
+      `core/storefront/tests/unit/test_multi_registry_identity.py`.
+- [ ] 10.3b Resolve the cross-consumer and concurrency boundary before changing
+      the kit: retain VM and API-credit disabled-discovery policies through
+      explicit adapters or record an accepted compatibility decision; use an
+      immutable intent-bound operation/result passed explicitly to recovery or
+      keep recovery within the executing call, never a shared mutable current
+      intent slot. This task adds no automatic retry or journal framework.
+- [ ] 10.3c Regression cases: changed terms after an older success; reopen after
       a successful refresh; successful write with interrupted readback; retry of
       only a known failed subset inside the same intent; refresh preflight
       non-404 uncertainty with no write; and concurrent status mismatch.
@@ -357,8 +375,8 @@ isolation, destructive reclaim policies, and end-to-end demonstration evidence.
       consumers retain at-least-one success; do not introduce another exit code.
 - [ ] 10.5 Rebuild the capacity-publication wheel and qualify focused package,
       registry, storefront, import-boundary, and typing checks. Qualify the
-      downstream VM consumer with the changed kit installed; disclose any
-      unavailable check rather than substituting another suite.
+      downstream VM and API-credit consumers with the changed kit installed;
+      disclose any unavailable check rather than substituting another suite.
 - [ ] 10.6 Promote the implemented lifecycle behavior to
       `openspec/specs/storefront-publication/spec.md` and the module/seam
       rationale to `openspec/specs/storefront-publication/architecture.md`.

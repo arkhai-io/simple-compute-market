@@ -35,7 +35,7 @@ from dataclasses import dataclass
 from typing import Any, NotRequired, TypedDict
 
 from market_config.registry_url import lookup_registry_auth, normalize_registry_url
-from market_identity import Signer, TrustedIdentitySet
+from market_identity import Identity, Signer, TrustedIdentitySet
 
 
 from registry_client import (
@@ -64,6 +64,16 @@ class RegistryAuthorityTrust:
             raise ValueError("registry authority name must be non-empty text")
         if not isinstance(self.principals, TrustedIdentitySet):
             raise TypeError("registry authority principals must be a TrustedIdentitySet")
+
+
+@dataclass(frozen=True, slots=True)
+class RegistryTargetIdentity:
+    """Public identity metadata for one configured registry target."""
+
+    configured_url: str
+    normalized_url: str
+    authority: str
+    principals: TrustedIdentitySet
 
 
 class PublishResult(TypedDict):
@@ -150,6 +160,25 @@ class MultiRegistryClient:
     @property
     def urls(self) -> list[str]:
         return list(self._urls)
+
+    @property
+    def publisher_identity(self) -> Identity:
+        """Return the public identity used to authenticate registry requests."""
+        return self._signer.identity
+
+    @property
+    def registry_targets(self) -> tuple[RegistryTargetIdentity, ...]:
+        """Return ordered public trust metadata without transport credentials."""
+        return tuple(
+            RegistryTargetIdentity(
+                configured_url=url,
+                normalized_url=normalized_url,
+                authority=self._expected_registries[normalized_url].authority,
+                principals=self._expected_registries[normalized_url].principals,
+            )
+            for url in self._urls
+            for normalized_url in (normalize_registry_url(url),)
+        )
 
     async def __aenter__(self) -> "MultiRegistryClient":
         for url in self._urls:

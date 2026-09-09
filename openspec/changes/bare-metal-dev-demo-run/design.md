@@ -140,6 +140,32 @@ durable physical binding, and local persistence. The bare-metal CLI becomes a
 composition/reporting adapter and no longer carries a parallel lifecycle
 implementation.
 
+#### Core reuse slice before lifecycle integration
+
+The first implementation slice does not change the kit or a domain. Core
+storefront exposes one narrow helper for a caller that already holds an opened
+`MultiRegistryClient`. The existing factory-opening wrapper and that helper
+share request construction, ordered fanout, callback handling, aggregate
+projection, receipt preservation, and safe exception categorization. The
+opened-client helper may select an exact target subset, but it validates the
+complete subset before I/O, rejects unknown or duplicate normalized URLs, and
+emits payloads in configured order. An explicitly empty subset is a targeting
+failure with no writes; it cannot mean all configured targets or a successful
+no-op. Omitting lifecycle status preserves the legacy request-factory call
+shape, while an explicit status is forwarded to the typed request.
+
+`MultiRegistryClient` also exposes immutable public configuration metadata:
+the publisher's public signer identity and, in configured order, each target's
+configured and normalized URL plus its configured authority/trusted principal
+set. This view is derived from constructor-validated configuration, not a
+remote response, and excludes authentication tokens, signer material, clients,
+and mutable internal configuration. It supplies identity inputs for a later
+intent without making core interpret domain terms or lifecycle policy.
+
+This slice deliberately adds no recovery state, retry loop, confirmation
+policy, or domain adapter. Existing factory-wrapper callers retain their normal
+enabled/disabled and at-least-one-success behavior.
+
 ### 3. Preserve visible partial failure and target retries narrowly
 
 The transport aggregate remains compatible: one registry accepting the write is
@@ -339,6 +365,24 @@ loop invokes recovery automatically is unresolved. This change adds no
 scheduler, retry interval, backoff configuration, or background reconciliation
 policy. Until a separate decision is accepted, recovery remains an explicit
 caller/operator action.
+
+Before lifecycle implementation, two interface choices still require explicit
+review:
+
+- Existing VM and API-credit consumers may assign different meanings to
+  disabled discovery/publication. Their policies must be retained through
+  explicit adapters, or changed only by a separately accepted compatibility
+  decision. Bare-metal confirmation requirements do not silently redefine
+  those consumers.
+- Recovery state cannot live in a single mutable slot on a shared
+  `PublicationRuntime`. A later design must either return an immutable
+  operation/result value bound to publisher, configured target identity,
+  canonical request and transition and require callers to pass it explicitly
+  to recovery, or keep recovery entirely within the executing call. No
+  automatic retry or journal framework is implied.
+
+Qualification after that later interface change must include both downstream
+VM and API-credit consumers of the capacity-publication kit.
 
 ## Permanent documentation promotion
 

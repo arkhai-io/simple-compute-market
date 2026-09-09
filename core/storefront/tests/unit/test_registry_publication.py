@@ -4,9 +4,12 @@ import asyncio
 from dataclasses import dataclass
 from typing import Any
 
+from registry_client import ListingRequest as RegistryListingRequest
+
 from core_storefront.registry_publication import (
     close_listing_in_registries,
     ensure_json_obj,
+    publish_listing_with_client,
     publish_listing_to_registries,
 )
 
@@ -79,6 +82,26 @@ class FakeRegistryClient:
         ]
 
 
+def _publish_result(
+    registry_url: str,
+    *,
+    success: bool,
+    error_type: str | None = None,
+    status_code: int | None = None,
+) -> dict[str, Any]:
+    listing_id = "L-parity"
+    return {
+        "registry_url": registry_url,
+        "success": success,
+        "response": {"listing_id": listing_id} if success else None,
+        "error": None if success else "redacted by publication boundary",
+        "error_type": error_type,
+        "status_code": status_code,
+        "payload": {"listing_id": listing_id},
+        "registry_assigned_id": listing_id if success else None,
+    }
+
+
 def test_ensure_json_obj_decodes_strings() -> None:
     assert ensure_json_obj('{"gpu_model": "H200"}', {}) == {"gpu_model": "H200"}
     assert ensure_json_obj("not-json", {}) == {}
@@ -139,6 +162,151 @@ def test_publish_listing_to_registries_builds_payload_and_records_results() -> N
     assert client.published["http://r1"].storefront_url == "http://seller"
     assert recorded[0][0] == "L1"
     assert events[0]["offer_resource"] == {"gpu_model": "H200"}
+
+
+def test_opened_client_helper_matches_factory_wrapper_results_and_callbacks() -> None:
+    listing = {
+        "listing_id": "L-parity",
+        "offer_resource": {"gpu_model": "H200"},
+        "accepted_escrows": [],
+        "storefront_url": "http://seller",
+    }
+    outcomes = [
+        None,
+        [
+            _publish_result("http://r1", success=False, error_type="ConnectError"),
+            _publish_result("http://r2", success=True),
+        ],
+        [
+            _publish_result("http://r1", success=False, error_type="ConnectError"),
+            _publish_result(
+                "http://r2",
+                success=False,
+                error_type="RegistryClientError",
+                status_code=403,
+            ),
+        ],
+    ]
+
+    for publish_results in outcomes:
+        wrapped_client = FakeRegistryClient()
+        opened_client = FakeRegistryClient()
+        wrapped_client.publish_results = publish_results
+        opened_client.publish_results = publish_results
+        wrapped_records: list[tuple[str, list[dict[str, Any]]]] = []
+        opened_records: list[tuple[str, list[dict[str, Any]]]] = []
+        wrapped_events: list[dict[str, Any]] = []
+        opened_events: list[dict[str, Any]] = []
+
+        async def run() -> tuple[dict[str, Any], dict[str, Any]]:
+            wrapped = await publish_listing_to_registries(
+                listing,
+                enabled=True,
+                registry_client_factory=lambda: wrapped_client,
+                listing_request_factory=ListingRequest,
+                storefront_url="http://seller",
+                record_publications=lambda listing_id, results: _record(
+                    wrapped_records, listing_id, results
+                ),
+                on_published=lambda **kwargs: wrapped_events.append(kwargs),
+            )
+            opened = await publish_listing_with_client(
+                listing,
+                registry_client=opened_client,
+                listing_request_factory=ListingRequest,
+                storefront_url="http://seller",
+                record_publications=lambda listing_id, results: _record(
+                    opened_records, listing_id, results
+                ),
+                on_published=lambda **kwargs: opened_events.append(kwargs),
+            )
+            return wrapped, opened
+
+        wrapped, opened = asyncio.run(run())
+
+        assert opened == wrapped
+        assert opened_records == wrapped_records
+        assert opened_events == wrapped_events
+        assert opened_client.published is not None
+        assert list(opened_client.published) == ["http://r1", "http://r2"]
+
+
+def test_opened_client_helper_omits_default_status_and_sends_explicit_open() -> None:
+    listing = {
+        "listing_id": "L-status",
+        "offer_resource": {},
+        "accepted_escrows": [],
+        "storefront_url": "http://seller",
+    }
+    legacy_client = FakeRegistryClient()
+    explicit_client = FakeRegistryClient()
+
+    async def run() -> None:
+        legacy = await publish_listing_with_client(
+            listing,
+            registry_client=legacy_client,
+            listing_request_factory=ListingRequest,
+            storefront_url="http://seller",
+        )
+        explicit = await publish_listing_with_client(
+            listing,
+            registry_client=explicit_client,
+            listing_request_factory=RegistryListingRequest,
+            storefront_url="http://seller",
+            status="open",
+        )
+        assert legacy["status"] == "published"
+        assert explicit["status"] == "published"
+
+    asyncio.run(run())
+
+    assert legacy_client.published is not None
+    assert not hasattr(legacy_client.published["http://r1"], "status")
+    assert explicit_client.published is not None
+    request = explicit_client.published["http://r1"]
+    assert isinstance(request, RegistryListingRequest)
+    assert request.to_dict()["status"] == "open"
+
+
+def test_opened_client_helper_validates_subset_before_write_in_configured_order() -> None:
+    listing = {
+        "listing_id": "L-subset",
+        "offer_resource": {},
+        "accepted_escrows": [],
+        "storefront_url": "http://seller",
+    }
+    ordered_client = FakeRegistryClient()
+    ordered_client.urls = ["http://r1", "http://r2", "http://r3"]
+
+    async def publish(client: FakeRegistryClient, targets: list[str]) -> dict[str, Any]:
+        return await publish_listing_with_client(
+            listing,
+            registry_client=client,
+            listing_request_factory=ListingRequest,
+            storefront_url="http://seller",
+            target_registry_urls=targets,
+        )
+
+    ordered = asyncio.run(
+        publish(ordered_client, ["HTTP://R3/", "http://r1"])
+    )
+
+    assert ordered["status"] == "published"
+    assert ordered_client.published is not None
+    assert list(ordered_client.published) == ["http://r1", "http://r3"]
+
+    for targets in (
+        ["http://r1", "HTTP://R1/"],
+        ["http://unknown"],
+        [],
+    ):
+        rejected_client = FakeRegistryClient()
+        rejected = asyncio.run(publish(rejected_client, targets))
+        assert rejected["status"] == "error"
+        assert rejected["failure_stage"] == "targeting"
+        assert rejected["error_type"] == "ValueError"
+        assert "registry_results" not in rejected
+        assert rejected_client.published is None
 
 
 def test_publish_listing_preserves_mixed_target_order_and_aggregate_success() -> None:
@@ -307,6 +475,8 @@ def test_publish_listing_setup_failure_is_categorized_and_redacted(caplog) -> No
 
 def test_publish_listing_context_failure_retains_known_receipts(caplog) -> None:
     marker = "PRIVATE_CONTEXT_MARKER"
+    recorded: list[tuple[str, list[dict[str, Any]]]] = []
+    events: list[dict[str, Any]] = []
 
     class FailingExitRegistryClient(FakeRegistryClient):
         async def __aexit__(self, *args: Any) -> None:
@@ -326,6 +496,10 @@ def test_publish_listing_context_failure_retains_known_receipts(caplog) -> None:
             registry_client_factory=lambda: client,
             listing_request_factory=ListingRequest,
             storefront_url="http://seller",
+            record_publications=lambda listing_id, results: _record(
+                recorded, listing_id, results
+            ),
+            on_published=lambda **kwargs: events.append(kwargs),
         )
 
     with caplog.at_level("WARNING"):
@@ -339,6 +513,8 @@ def test_publish_listing_context_failure_retains_known_receipts(caplog) -> None:
         "http://r2",
     ]
     assert all(item["success"] for item in result["registry_results"])
+    assert recorded == []
+    assert events == []
     assert marker not in repr(result)
     assert marker not in caplog.text
 

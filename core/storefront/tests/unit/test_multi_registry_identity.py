@@ -11,6 +11,7 @@ from registry_client import RegistryClientError
 from core_storefront.multi_registry_client import (
     MultiRegistryClient,
     RegistryAuthorityTrust,
+    RegistryTargetIdentity,
 )
 
 
@@ -64,6 +65,54 @@ def test_multi_registry_rejects_ambiguous_normalized_configuration() -> None:
                 "HTTPS://REGISTRY.EXAMPLE/": trust,
             },
         )
+
+
+def test_public_identity_metadata_is_ordered_immutable_and_credential_free() -> None:
+    signer = Ed25519Signer(bytes(range(32)))
+    authority_a = Ed25519Signer(bytes(range(1, 33))).identity
+    authority_b = Ed25519Signer(bytes(range(2, 34))).identity
+    trust_a = RegistryAuthorityTrust(
+        authority="registry-a",
+        principals=TrustedIdentitySet(identities=(authority_a,)),
+    )
+    trust_b = RegistryAuthorityTrust(
+        authority="registry-b",
+        principals=TrustedIdentitySet(identities=(authority_b,)),
+    )
+    secret = "PRIVATE_AUTH_MARKER"
+
+    client = MultiRegistryClient(
+        ["HTTPS://R1.EXAMPLE/", "https://r2.example/"],
+        signer=signer,
+        caller_role="seller",
+        expected_registries={
+            "https://r1.example": trust_a,
+            "https://r2.example": trust_b,
+        },
+        auth={"https://r1.example": secret},
+    )
+
+    assert client.publisher_identity == signer.identity
+    assert client.registry_targets == (
+        RegistryTargetIdentity(
+            configured_url="HTTPS://R1.EXAMPLE/",
+            normalized_url="https://r1.example",
+            authority="registry-a",
+            principals=trust_a.principals,
+        ),
+        RegistryTargetIdentity(
+            configured_url="https://r2.example/",
+            normalized_url="https://r2.example",
+            authority="registry-b",
+            principals=trust_b.principals,
+        ),
+    )
+    assert isinstance(client.registry_targets, tuple)
+    with pytest.raises(AttributeError):
+        setattr(client.registry_targets[0], "authority", "replacement")
+    assert client.registry_targets[0].authority == "registry-a"
+    assert secret not in repr(client.publisher_identity)
+    assert secret not in repr(client.registry_targets)
 
 
 def test_exact_target_read_uses_that_registrys_auth_and_trust() -> None:
