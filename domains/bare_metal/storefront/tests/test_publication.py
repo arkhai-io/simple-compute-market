@@ -467,6 +467,7 @@ def test_one_shot_publication_builds_registry_from_runtime_domain(monkeypatch):
         "BARE_METAL_STOREFRONT_OFFER_EXPIRES_AT": "2026-08-17T04:00:00Z",
         "BARE_METAL_STOREFRONT_FULFILLMENT_DEADLINE": "2026-08-17T03:30:00Z",
         "BARE_METAL_STOREFRONT_MAX_DURATION_SECONDS": "3600",
+        "BARE_METAL_STOREFRONT_REGISTRY_URL": "https://registry.example",
     }.items():
         monkeypatch.setenv(name, value)
 

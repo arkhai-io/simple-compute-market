@@ -280,29 +280,27 @@ _LISTING_TERMS_ASSIGNMENT = """
 """
 
 
-def _write_listing_terms(
+def commit_derived_bare_metal_listing(
     db_path: str,
     *,
     listing_id: str,
     base_url: str,
+    candidate: dict[str, Any],
     offer: dict[str, Any],
     accepted_escrows: list[dict[str, Any]],
     demands: list[dict[str, Any]],
     max_duration_seconds: int | None,
     settlement_options: list[dict[str, Any]] | None,
     publication_clauses: list[dict[str, Any]] | None,
-    lifecycle: str = "",
+    reopen: bool,
 ) -> None:
-    """Replace a tracked listing's advertised terms in place.
-
-    ``lifecycle`` carries any status assignment the caller needs. A refresh of
-    an already-open listing leaves it empty: the listing's status and paused
-    flag are operator state that republishing its terms must not silently
-    change.
-    """
+    """Atomically commit confirmed terms and derived lifecycle state."""
+    listing = BareMetalListing.model_validate(candidate["listing"])
+    lifecycle = "status = 'open', paused = 0," if reopen else ""
     conn = sqlite3.connect(db_path)
     try:
-        conn.execute(
+        conn.execute("BEGIN IMMEDIATE")
+        listing_update = conn.execute(
             f"UPDATE listings SET {lifecycle}{_LISTING_TERMS_ASSIGNMENT}"
             " WHERE listing_id = ?",
             (
@@ -316,7 +314,31 @@ def _write_listing_terms(
                 listing_id,
             ),
         )
+        if listing_update.rowcount != 1:
+            raise ValueError("bare-metal lifecycle listing is not tracked")
+        derived_update = conn.execute(
+            """
+            UPDATE derived_bare_metal_listings
+            SET site_id = ?, physical_resource_id = ?, machine_id = ?,
+                physical_host_id = ?, status = 'open',
+                last_reconciled_at = STRFTIME('%Y-%m-%dT%H:%M:%fZ', 'now')
+            WHERE listing_id = ? AND derivation_key = ?
+            """,
+            (
+                str(candidate["site_id"]),
+                str(candidate["physical_resource_id"]),
+                listing.machine_id,
+                listing.physical_host_id,
+                listing_id,
+                str(candidate["derivation_key"]),
+            ),
+        )
+        if derived_update.rowcount != 1:
+            raise ValueError("bare-metal lifecycle derivation is not tracked")
         conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
     finally:
         conn.close()
 
@@ -349,24 +371,13 @@ def reopen_derived_bare_metal_listing_if_present(
     if not derived or not derived.get("listing_id"):
         return None
     listing_id = str(derived["listing_id"])
-    terms = {
-        "offer": offer,
-        "accepted_escrows": accepted_escrows,
-        "demands": demands,
-        "max_duration_seconds": max_duration_seconds,
-        "settlement_options": settlement_options,
-        "publication_clauses": publication_clauses,
-    }
     if derived.get("listing_status") == "open":
         if listing_id not in refresh_listing_ids:
             return None
-        # Registry publication comes first on this path. A listing that is
-        # already open is being served: if publication fails, local terms must
-        # stay exactly as advertised, and the operator can retry the same
-        # explicit refresh. The registry accepts a repeated same-identifier
-        # publication, so a failure after this point is retryable too.
-        response = publish_existing_listing(
+        return publish_existing_listing(
             listing_id=listing_id,
+            transition="refresh",
+            candidate=candidate,
             offer=offer,
             accepted_escrows=accepted_escrows,
             settlement_options=settlement_options or [],
@@ -375,20 +386,11 @@ def reopen_derived_bare_metal_listing_if_present(
             max_duration_seconds=max_duration_seconds,
             storefront_url=base_url,
         )
-        _write_listing_terms(db_path, listing_id=listing_id, base_url=base_url, **terms)
-        record_derived_bare_metal_listing(
-            db_path,
-            listing_id=listing_id,
-            candidate=candidate,
-            status="open",
-        )
-        return response
 
-    # Publication comes first here too. Marking the local and tracking records
-    # open before the registry serves the listing again would report a relist
-    # no buyer can see, and would leave a retry with nothing left to reopen.
-    response = publish_existing_listing(
+    return publish_existing_listing(
         listing_id=listing_id,
+        transition="reopen",
+        candidate=candidate,
         offer=offer,
         accepted_escrows=accepted_escrows,
         settlement_options=settlement_options or [],
@@ -397,20 +399,6 @@ def reopen_derived_bare_metal_listing_if_present(
         max_duration_seconds=max_duration_seconds,
         storefront_url=base_url,
     )
-    _write_listing_terms(
-        db_path,
-        listing_id=listing_id,
-        base_url=base_url,
-        lifecycle="status = 'open', paused = 0,",
-        **terms,
-    )
-    record_derived_bare_metal_listing(
-        db_path,
-        listing_id=listing_id,
-        candidate=candidate,
-        status="open",
-    )
-    return response
 
 
 def resolve_refresh_target_derivation_key(

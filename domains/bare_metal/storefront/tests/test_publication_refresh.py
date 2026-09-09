@@ -22,6 +22,12 @@ from core_storefront.publication_command import (
 )
 from core_storefront.publication_runner import PublicationPayload
 from market_alkahest import AlkahestSettlementConfig, create_alkahest_registration
+from market_capacity_publication import (
+    PublicationLifecycleResult,
+    PublicationTargetResult,
+    PublicationTargetState,
+    PublicationTransition,
+)
 from market_contact_exchange import MECHANISM as CONTACT_MECHANISM
 from market_identity import Ed25519Signer
 from market_settlement_runtime import (
@@ -127,7 +133,7 @@ def _local_terms(db_path: str, listing_id: str) -> dict:
     conn = sqlite3.connect(db_path)
     try:
         row = conn.execute(
-            "SELECT accepted_escrows, settlement_options, status"
+            "SELECT accepted_escrows, settlement_options, status, paused"
             " FROM listings WHERE listing_id = ?",
             (listing_id,),
         ).fetchone()
@@ -137,6 +143,7 @@ def _local_terms(db_path: str, listing_id: str) -> dict:
         "accepted_escrows": json.loads(row[0]),
         "settlement_options": json.loads(row[1]),
         "status": row[2],
+        "paused": bool(row[3]),
     }
 
 
@@ -180,18 +187,36 @@ def _run(
     )
 
 
+def _committing_publication(db_path: str, calls: list[dict] | None = None):
+    def publish_existing_listing(**values):
+        if calls is not None:
+            calls.append(values)
+        storefront_publication.commit_derived_bare_metal_listing(
+            db_path,
+            listing_id=values["listing_id"],
+            base_url=values["storefront_url"],
+            candidate=values["candidate"],
+            offer=values["offer"],
+            accepted_escrows=values["accepted_escrows"],
+            demands=values["demands"],
+            max_duration_seconds=values["max_duration_seconds"],
+            settlement_options=values["settlement_options"],
+            publication_clauses=values["publication_clauses"],
+            reopen=values["transition"] == "reopen",
+        )
+        return {"status": "published", "listing_id": values["listing_id"]}
+
+    return publish_existing_listing
+
+
 def test_refresh_republishes_the_same_identity_and_matches_local_terms(tmp_path):
     db_path = _tracked_open_listing(tmp_path)
     published = []
 
-    def publish_existing_listing(**values):
-        published.append(values)
-        return {"status": "published", "listing_id": values["listing_id"]}
-
     result = _run(
         db_path,
         refresh_listing_ids=frozenset({_TRACKED_LISTING_ID}),
-        publish_existing_listing=publish_existing_listing,
+        publish_existing_listing=_committing_publication(db_path, published),
     )
 
     assert result.failed == []
@@ -202,6 +227,125 @@ def test_refresh_republishes_the_same_identity_and_matches_local_terms(tmp_path)
     assert local["accepted_escrows"] == published[0]["accepted_escrows"]
     assert local["settlement_options"] == published[0]["settlement_options"]
     assert local["status"] == "open"
+
+
+def test_partial_refresh_stays_in_failed_with_ordered_target_summary(tmp_path):
+    db_path = _tracked_open_listing(tmp_path)
+
+    result = _run(
+        db_path,
+        refresh_listing_ids=frozenset({_TRACKED_LISTING_ID}),
+        publish_existing_listing=lambda **_values: PublicationLifecycleResult(
+            status="partial",
+            listing_id=_TRACKED_LISTING_ID,
+            transition=PublicationTransition.REFRESH,
+            local_committed=True,
+            partial=True,
+            target_results=(
+                PublicationTargetResult(
+                    "https://registry-a.example",
+                    PublicationTargetState.CONFIRMED,
+                    wrote=True,
+                ),
+                PublicationTargetResult(
+                    "https://registry-b.example",
+                    PublicationTargetState.WRITE_FAILED,
+                    wrote=True,
+                    error_type="RegistryClientError",
+                    status_code=403,
+                ),
+            ),
+        ).to_dict(),
+    )
+
+    assert result.published == []
+    assert result.failed_count == 1
+    assert "registry-a.example=confirmed" in result.failed[0][1]
+    assert "registry-b.example=write_failed" in result.failed[0][1]
+
+
+def test_confirmed_commit_is_atomic_and_preserves_refresh_pause_state(tmp_path):
+    db_path = _tracked_open_listing(tmp_path)
+    candidate = _candidate()
+    conn = sqlite3.connect(db_path)
+    try:
+        conn.execute(
+            "UPDATE listings SET paused = 1 WHERE listing_id = ?",
+            (_TRACKED_LISTING_ID,),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    callback = _committing_publication(db_path)
+    callback(
+        listing_id=_TRACKED_LISTING_ID,
+        transition="refresh",
+        candidate=candidate,
+        offer={**candidate["offer_resource"], "virtualization_type": "bare_metal"},
+        accepted_escrows=[_CHANGED_ESCROW],
+        settlement_options=[],
+        publication_clauses=[],
+        demands=[],
+        max_duration_seconds=7200,
+        storefront_url=_STOREFRONT_URL,
+    )
+    assert _local_terms(db_path, _TRACKED_LISTING_ID)["paused"] is True
+
+    conn = sqlite3.connect(db_path)
+    try:
+        conn.execute(
+            "UPDATE listings SET status = 'closed' WHERE listing_id = ?",
+            (_TRACKED_LISTING_ID,),
+        )
+        conn.execute(
+            "UPDATE derived_bare_metal_listings SET status = 'closed' "
+            "WHERE listing_id = ?",
+            (_TRACKED_LISTING_ID,),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+    callback(
+        listing_id=_TRACKED_LISTING_ID,
+        transition="reopen",
+        candidate=candidate,
+        offer={**candidate["offer_resource"], "virtualization_type": "bare_metal"},
+        accepted_escrows=[_CHANGED_ESCROW],
+        settlement_options=[],
+        publication_clauses=[],
+        demands=[],
+        max_duration_seconds=7200,
+        storefront_url=_STOREFRONT_URL,
+    )
+    reopened = _local_terms(db_path, _TRACKED_LISTING_ID)
+    assert reopened["status"] == "open"
+    assert reopened["paused"] is False
+
+    conn = sqlite3.connect(db_path)
+    try:
+        conn.execute(
+            "DELETE FROM derived_bare_metal_listings WHERE listing_id = ?",
+            (_TRACKED_LISTING_ID,),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+    before = _local_terms(db_path, _TRACKED_LISTING_ID)
+    with pytest.raises(ValueError, match="derivation is not tracked"):
+        callback(
+            listing_id=_TRACKED_LISTING_ID,
+            transition="refresh",
+            candidate=candidate,
+            offer={**candidate["offer_resource"], "virtualization_type": "bare_metal"},
+            accepted_escrows=[_ORIGINAL_ESCROW],
+            settlement_options=[],
+            publication_clauses=[],
+            demands=[],
+            max_duration_seconds=7200,
+            storefront_url=_STOREFRONT_URL,
+        )
+    assert _local_terms(db_path, _TRACKED_LISTING_ID) == before
 
 
 def test_a_failed_refresh_leaves_local_terms_intact_and_retries_clean(tmp_path):
@@ -225,13 +369,10 @@ def test_a_failed_refresh_leaves_local_terms_intact_and_retries_clean(tmp_path):
         _ORIGINAL_ESCROW
     ]
 
-    def publish_existing_listing(**values):
-        return {"status": "published", "listing_id": values["listing_id"]}
-
     retried = _run(
         db_path,
         refresh_listing_ids=frozenset({_TRACKED_LISTING_ID}),
-        publish_existing_listing=publish_existing_listing,
+        publish_existing_listing=_committing_publication(db_path),
     )
 
     assert retried.failed == []
@@ -396,14 +537,10 @@ def test_a_canonical_payload_refresh_publishes_and_persists_both_carriers(
     payload = build()
     published = []
 
-    def publish_existing_listing(**values):
-        published.append(values)
-        return {"status": "published", "listing_id": values["listing_id"]}
-
     result = _run(
         db_path,
         refresh_listing_ids=frozenset({_TRACKED_LISTING_ID}),
-        publish_existing_listing=publish_existing_listing,
+        publish_existing_listing=_committing_publication(db_path, published),
         payload=payload,
     )
 
@@ -456,12 +593,8 @@ def _agreement_rows(db_path: str) -> list:
         conn.close()
 
 
-@pytest.mark.parametrize(
-    "failure",
-    ["ambiguous-registry-success", "local-persistence-failure"],
-)
-def test_a_refresh_interrupted_after_publication_retries_under_the_same_identity(
-    tmp_path, monkeypatch, failure
+def test_a_local_refresh_commit_failure_retries_under_the_same_identity(
+    tmp_path, monkeypatch
 ):
     db_path = _tracked_open_listing(tmp_path)
     _accepted_agreement(db_path)
@@ -469,29 +602,18 @@ def test_a_refresh_interrupted_after_publication_retries_under_the_same_identity
     payload = _contact_composition_payload()
     attempts = []
 
-    def publish_existing_listing(**values):
+    def refuse_local_write(*_args, **_kwargs):
+        raise sqlite3.OperationalError("database is locked")
+
+    monkeypatch.setattr(
+        storefront_publication,
+        "commit_derived_bare_metal_listing",
+        refuse_local_write,
+    )
+
+    def first_publish(**values):
         attempts.append(values["listing_id"])
-        return {"status": "published", "listing_id": values["listing_id"]}
-
-    if failure == "ambiguous-registry-success":
-
-        def first_publish(**values):
-            # The registry accepted this write; the caller never learns it did,
-            # so the remote may already advertise the new terms.
-            publish_existing_listing(**values)
-            raise RuntimeError(
-                "connection reset after the registry accepted the write"
-            )
-
-    else:
-        first_publish = publish_existing_listing
-
-        def refuse_local_write(*_args, **_kwargs):
-            raise sqlite3.OperationalError("database is locked")
-
-        monkeypatch.setattr(
-            storefront_publication, "_write_listing_terms", refuse_local_write
-        )
+        return _committing_publication(db_path)(**values)
 
     interrupted = _run(
         db_path,
@@ -502,8 +624,6 @@ def test_a_refresh_interrupted_after_publication_retries_under_the_same_identity
 
     assert interrupted.published == []
     assert interrupted.failed_count == 1
-    # The interruption happened after the registry accepted the publication,
-    # under the original identifier.
     assert attempts == [_TRACKED_LISTING_ID]
     assert _local_terms(db_path, _TRACKED_LISTING_ID)["accepted_escrows"] == [
         _ORIGINAL_ESCROW
@@ -511,6 +631,11 @@ def test_a_refresh_interrupted_after_publication_retries_under_the_same_identity
     assert _agreement_rows(db_path) == agreements
 
     monkeypatch.undo()
+
+    def publish_existing_listing(**values):
+        attempts.append(values["listing_id"])
+        return _committing_publication(db_path)(**values)
+
     retried = _run(
         db_path,
         refresh_listing_ids=frozenset({_TRACKED_LISTING_ID}),
@@ -558,6 +683,34 @@ def test_the_publish_command_reports_a_refused_refresh_target(monkeypatch):
 
     assert result.exit_code != 0
     assert "not a tracked bare-metal listing" in result.output
+
+
+def test_the_publish_command_keeps_partial_target_receipts_and_exits_nonzero(
+    monkeypatch,
+):
+    partial = (
+        "registry publication is only partially confirmed: "
+        "https://registry-a.example=confirmed, "
+        "https://registry-b.example=write_failed"
+    )
+    monkeypatch.setattr(
+        publication_cli,
+        "run_publication_once",
+        lambda **_kwargs: {
+            "closed": [],
+            "published": [],
+            "failed": [[{"derivation_key": "fixture"}, partial]],
+            "skipped": [],
+        },
+    )
+
+    result = CliRunner().invoke(
+        app, ["publish", "--refresh-listing-id", _TRACKED_LISTING_ID]
+    )
+
+    assert result.exit_code == 1
+    assert "confirmed" in result.output
+    assert "write_failed" in result.output
 
 
 def test_the_tracked_open_target_resolves_to_its_derivation_key(tmp_path):

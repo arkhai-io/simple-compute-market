@@ -187,6 +187,15 @@ fan-out, durable publication result recording, and close-before-reopen
 lifecycle. A domain contribution supplies only schema-opaque candidates and
 codecs plus hooks that resolve each listing's durable capacity binding.
 
+For explicit refresh and reopen, the kit also owns authenticated exact-target
+preflight/readback and an immutable current-operation result used by explicit
+recovery. Core constructs and fans out the typed registry request; the kit does
+not duplicate transport. Each domain supplies explicit eligibility,
+disabled-publication, and atomic local-commit policy. This keeps ordinary
+publication's at-least-one-success compatibility while a confirmed lifecycle
+operation reports every nonconfirmed target as partial and commits locally only
+after safe receipt persistence and at least one matching readback.
+
 Every capacity-backed candidate carries
 `CapacityBinding(site_id, offering_mode, source_id)`. The site ID comes from
 trusted local composition, the offering mode must be declared by the selected

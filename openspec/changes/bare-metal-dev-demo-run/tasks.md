@@ -317,7 +317,7 @@ isolation, destructive reclaim policies, and end-to-end demonstration evidence.
       `core/storefront/src/core_storefront/registry_publication.py`,
       `core/storefront/tests/unit/test_multi_registry_identity.py`,
       `core/storefront/tests/unit/test_registry_publication.py`.
-- [ ] 10.3 Deepen `PublicationRuntime`: distinct refresh/reopen operations,
+- [x] 10.3 Deepen `PublicationRuntime`: distinct refresh/reopen operations,
       exact current-operation intent identity, typed canonical same-target
       confirmation, and one domain commit delegate invoked only after compatible
       aggregate success. Every new invocation addresses all intended targets;
@@ -343,17 +343,20 @@ isolation, destructive reclaim policies, and end-to-end demonstration evidence.
       `core/storefront/src/core_storefront/multi_registry_client.py`,
       `core/storefront/tests/unit/test_registry_publication.py`, and
       `core/storefront/tests/unit/test_multi_registry_identity.py`.
-- [ ] 10.3b Resolve the cross-consumer and concurrency boundary before changing
+- [x] 10.3b Resolve the cross-consumer and concurrency boundary before changing
       the kit: retain VM and API-credit disabled-discovery policies through
       explicit adapters or record an accepted compatibility decision; use an
       immutable intent-bound operation/result passed explicitly to recovery or
       keep recovery within the executing call, never a shared mutable current
       intent slot. This task adds no automatic retry or journal framework.
-- [ ] 10.3c Regression cases: changed terms after an older success; reopen after
+- [x] 10.3c Regression cases: changed terms after an older success; reopen after
       a successful refresh; successful write with interrupted readback; retry of
       only a known failed subset inside the same intent; refresh preflight
-      non-404 uncertainty with no write; and concurrent status mismatch.
-- [ ] 10.4 Replace bare-metal CLI lifecycle sequencing with the kit interface;
+      non-404 uncertainty with no write; concurrent status mismatch; durable
+      receipt/event retry without repeated writes; exact candidate/payload
+      identity; and partial bare-metal reopen recovery without a repeated local
+      commit.
+- [x] 10.4 Replace bare-metal CLI lifecycle sequencing with the kit interface;
       retain domain-owned candidate/binding validation and persistence. Refresh
       replaces terms without changing status/paused; reopen changes terms and
       clears paused only after confirmed remote success. Files:
@@ -373,11 +376,15 @@ isolation, destructive reclaim policies, and end-to-end demonstration evidence.
       rule whenever `failed` contains a candidate. A partially converged
       candidate remains explicit in `failed`, even though shared aggregate
       consumers retain at-least-one success; do not introduce another exit code.
+      Implementation used the existing storefront publication composition file
+      rather than adding `storefront_adapter.py`; no separate adapter or root-
+      domain test file was needed. VM and API-credit publication hooks now state
+      their disabled-publication compatibility policy explicitly.
 - [ ] 10.5 Rebuild the capacity-publication wheel and qualify focused package,
       registry, storefront, import-boundary, and typing checks. Qualify the
       downstream VM and API-credit consumers with the changed kit installed;
       disclose any unavailable check rather than substituting another suite.
-- [ ] 10.6 Promote the implemented lifecycle behavior to
+- [x] 10.6 Promote the implemented lifecycle behavior to
       `openspec/specs/storefront-publication/spec.md` and the module/seam
       rationale to `openspec/specs/storefront-publication/architecture.md`.
       Update repository architecture, capability index, roadmap, and campaign

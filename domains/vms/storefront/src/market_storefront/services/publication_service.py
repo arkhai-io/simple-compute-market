@@ -17,8 +17,10 @@ from market_capacity_publication import (
     BoundListing,
     CapacityBinding,
     CapacityBindingError,
+    DisabledPublicationPolicy,
     PublicationCandidate,
     PublicationRuntime,
+    PublicationTransition,
     ReconciliationPlan,
 )
 from registry_client import ListingRequest, UpdateListingRequest
@@ -49,9 +51,43 @@ class VmPublicationHooks:
         except RuntimeError:
             return None
 
+    async def validate_lifecycle(
+        self,
+        candidate: PublicationCandidate[Listing],
+        transition: PublicationTransition,
+        *,
+        previous_local_committed: bool,
+    ) -> None:
+        del previous_local_committed
+        if transition is not PublicationTransition.REOPEN:
+            raise ValueError("VM publication supports lifecycle reopen only")
+
+    def disabled_publication_policy(
+        self,
+        transition: PublicationTransition,
+    ) -> DisabledPublicationPolicy:
+        return (
+            DisabledPublicationPolicy.COMMIT_LOCAL
+            if transition is PublicationTransition.REOPEN
+            else DisabledPublicationPolicy.SKIP_LOCAL
+        )
+
+    async def commit_candidate(
+        self,
+        candidate: PublicationCandidate[Listing],
+        transition: PublicationTransition,
+    ) -> None:
+        if transition is not PublicationTransition.REOPEN:
+            raise ValueError("VM publication supports lifecycle reopen only")
+        await self._db.update_listing(
+            listing_id=candidate.listing_id,
+            status="open",
+        )
+
 
 def _make_registry_client():
     from core_storefront.multi_registry_client import MultiRegistryClient
+
     import market_storefront.container as container
     from market_storefront.utils.config import get_registry_authorities
 

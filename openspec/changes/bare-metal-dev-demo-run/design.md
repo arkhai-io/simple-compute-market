@@ -2,26 +2,23 @@
 
 ## Context
 
-The implemented change now spans the controlled actual-host path, shared
-Alkahest integration, exact accepted-settlement validation, and same-identifier
-publication refresh/reopen. The implementation is intentionally split across
-shared modules and bare-metal adapters, but publication lifecycle sequencing is
-still duplicated: `kit/capacity-publication` has a reusable runtime while the
-bare-metal CLI owns the stronger remote-confirmation-before-local-mutation path.
-
-The next implementation work deepens the shared module rather than creating a
-new platform. Its interface must hide ordering, result interpretation, and retry
-targeting while domain adapters retain physical candidate validation and local
-terms persistence.
+The implemented change spans the controlled actual-host path, shared Alkahest
+integration, exact accepted-settlement validation, and same-identifier
+publication refresh/reopen. Publication lifecycle sequencing is split by
+authority: core owns typed transport, `kit/capacity-publication` owns confirmed
+refresh/reopen ordering and current-intent recovery, and domain adapters own
+candidate meaning and local persistence. The bare-metal CLI only composes and
+reports that path; it no longer owns a parallel lifecycle implementation.
 
 ## Current source facts
 
 ### Registry request and readback shape
 
-- `core/registry-client/src/registry_client/models.py:181` defines
-  `ListingRequest`. `to_dict()` currently emits `listing_id`, `offer_resource`,
+- `core/registry-client/src/registry_client/models.py` defines
+  `ListingRequest`. `to_dict()` emits `listing_id`, `offer_resource`,
   `accepted_escrows`, `settlement_options`, `demands`,
-  `max_duration_seconds`, and `storefront_url`; it has no status field.
+  `max_duration_seconds`, and `storefront_url`. Optional `status` occupies a
+  trailing backward-compatible constructor position and is omitted when unset.
 - `core/registry/src/api/listing_routes.py:71` updates an existing listing under
   the same identifier. Lines 78-90 replace non-`None` advertised fields and
   change status only when the request body contains the `status` key. Lines
@@ -39,9 +36,10 @@ terms persistence.
   `max_duration_seconds`. Publisher principals are parsed into
   `TrustedIdentitySet`.
 
-Readback comparison will use those typed DTO properties after normalization,
+Readback comparison uses those typed DTO properties after normalization,
 not invented wire keys. It compares listing `id`, lifecycle `status`, canonical
-`publisher_principals`, `storefront_url`, `offer`, `accepted_escrows`,
+publisher ownership (the authenticated signer must be in
+`publisher_principals`), `storefront_url`, `offer`, `accepted_escrows`,
 `settlement_options`, `demands`, and `max_duration_seconds`. Mapping key order is
 irrelevant under canonical JSON; list order remains significant because the DTO
 does not define set semantics. Numeric publisher ID, timestamps, `extra`, and
@@ -209,8 +207,11 @@ them as a cross-operation retry token and does not add a generic intent journal.
 If the operation ends, a later invocation follows the new-intent rules above.
 Configured target order remains deterministic.
 
-This is a current-operation target-selection rule, not automatic reconciliation
-policy or a generalized retry framework.
+This is implemented as an immutable `PublicationLifecycleResult` carrying its
+`PublicationIntent`; callers must pass that result explicitly to `recover()`.
+There is no mutable runtime current-intent slot. It remains a current-operation
+target-selection rule, not automatic reconciliation policy or a generalized
+retry framework.
 
 ### 4. Confirm each successful registry through the typed DTO
 
@@ -264,6 +265,25 @@ Every target ends in one of these explicit result states:
 4. `write_unknown`: a transport interruption leaves the write outcome unknown;
 5. `confirmation_mismatch`: authenticated readback returns a record that does
    not match the exact current intent.
+
+Preflight uncertainty is separately represented as `preflight_unknown`. A 4xx
+response other than request-timeout is treated as a definitive rejected write;
+5xx, request-timeout, and transport failures remain ambiguous `write_unknown`
+outcomes. Lifecycle persistence records only safe error type/status categories,
+never raw exception text. A context, receipt-persistence, event, or local-commit
+failure preserves every already-known target receipt and reports its own stage.
+Confirmed preflight matches also require durable receipts before local commit.
+The immutable result records whether receipt persistence and publication-event
+delivery completed, so recovery retries only the outstanding side effect and
+does not reinterpret remote confirmation as durable local evidence. Repeated
+persistence or event failure continues to block local commit without repeating
+an already-confirmed registry write.
+
+Before lifecycle validation can open a registry client or apply disabled-mode
+local policy, the candidate identifier must exactly equal the identifier in its
+serialized payload. Fanout receives the canonical request built by that check,
+preventing a candidate bound as one listing from transmitting another listing
+identity.
 
 `write_unconfirmed`, `write_unknown`, and `confirmation_mismatch` are not known
 failed writes and do not authorize another write. Recovery first performs
@@ -366,37 +386,30 @@ scheduler, retry interval, backoff configuration, or background reconciliation
 policy. Until a separate decision is accepted, recovery remains an explicit
 caller/operator action.
 
-Before lifecycle implementation, two interface choices still require explicit
-review:
-
-- Existing VM and API-credit consumers may assign different meanings to
-  disabled discovery/publication. Their policies must be retained through
-  explicit adapters, or changed only by a separately accepted compatibility
-  decision. Bare-metal confirmation requirements do not silently redefine
-  those consumers.
-- Recovery state cannot live in a single mutable slot on a shared
-  `PublicationRuntime`. A later design must either return an immutable
-  operation/result value bound to publisher, configured target identity,
-  canonical request and transition and require callers to pass it explicitly
-  to recovery, or keep recovery entirely within the executing call. No
-  automatic retry or journal framework is implied.
+The cross-consumer and concurrency choices are resolved. VM and API-credit
+adapters explicitly retain their existing disabled-publication behavior: reopen
+commits locally, while their unsupported refresh transition is rejected during
+lifecycle validation. Bare metal requires the confirmed enabled path and skips
+local mutation when publication is disabled.
+Recovery accepts an explicit immutable operation result bound to publisher,
+configured target trust, canonical request, transition, and capacity binding;
+concurrent calls share no mutable intent state.
+Bare-metal recovery also receives whether the same intent already committed
+locally. A partial reopen that advanced the local listing to open therefore
+expects that open state during recovery, while fresh reopen still rejects an
+already-open listing. Both paths reload durable binding, derivation, and current
+availability before registry I/O.
 
 Qualification after that later interface change must include both downstream
 VM and API-credit consumers of the capacity-publication kit.
 
-## Permanent documentation promotion
+## Design promotion record
 
-After implementation and code review:
-
-- Promote optional-status omission, refresh/reopen ordering, typed canonical
-  confirmation, at-least-one aggregate compatibility, partial-result visibility,
-  and failed-target retry semantics to
-  `openspec/specs/storefront-publication/spec.md`.
-- Promote the shared module/interface and domain-adapter rationale to
-  `openspec/specs/storefront-publication/architecture.md`.
-- Update `docs/development/ARCHITECTURE.md` only if its repository-wide module
-  ownership description is no longer accurate after implementation.
-- Promote settlement construction ownership and preserved compatibility to
-  `openspec/specs/settlement-configuration/spec.md` and physical authority to
-  `openspec/specs/negotiation-protocol/spec.md` after the later settlement
-  consolidation is implemented.
+| Material decision | Permanent destination | State |
+|---|---|---|
+| Optional-status omission, exact-target preflight/readback, immutable intent recovery, safe partial results, and local commit ordering | `openspec/specs/storefront-publication/spec.md` | Promoted for publication milestone review |
+| Core transport, kit lifecycle, and explicit domain-adapter ownership | `openspec/specs/storefront-publication/architecture.md` | Promoted for publication milestone review |
+| Repository-wide capacity-publication ownership | `docs/development/ARCHITECTURE.md` | Updated for publication milestone review |
+| Roadmap currency | `docs/development/ROADMAP.md` | No edit: the roadmap already names the kit publication runtime and all three composed consumers; this submilestone does not complete its goal |
+| Campaign index currency | `openspec/changes/README.md` | No edit: the encompassing change remains under review with settlement and final qualification still incomplete, so no dependency is newly unblocked |
+| Settlement construction ownership and physical authority | `openspec/specs/settlement-configuration/spec.md`; `openspec/specs/negotiation-protocol/spec.md` | Deferred until the separately reviewed settlement consolidation |
