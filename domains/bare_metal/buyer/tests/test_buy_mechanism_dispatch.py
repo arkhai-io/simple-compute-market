@@ -476,10 +476,10 @@ def test_the_pinned_payee_is_read_out_of_the_encoded_demand(world) -> None:
     never be decoded at all: an unreadable payee also fails the pin.
     """
     from arkhai_bare_metal_buyer.settlement_composition import (
-        _accepted_payout_address,
         bare_metal_escrow_proposal,
         validate_accepted_alkahest_plan,
     )
+    from market_alkahest.plans import decode_accepted_alkahest_obligation
     from market_core.schemas import SettlementPlan
 
     proposal = bare_metal_escrow_proposal(
@@ -494,9 +494,7 @@ def test_the_pinned_payee_is_read_out_of_the_encoded_demand(world) -> None:
         "this plan carries the payee only as an encoded demand; if that changes "
         "the decode below is no longer what the pin relies on"
     )
-    read_back = _accepted_payout_address(
-        obligation, chain_name=CHAIN, address_config_path=None
-    )
+    read_back = decode_accepted_alkahest_obligation(obligation).payout_address
     assert (read_back or "").lower() == SELLER_PAYOUT.lower()
 
     validate_accepted_alkahest_plan(

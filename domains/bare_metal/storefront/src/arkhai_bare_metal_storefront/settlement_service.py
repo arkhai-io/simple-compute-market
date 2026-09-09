@@ -7,6 +7,10 @@ from dataclasses import dataclass
 from typing import Any
 
 from market_core.schemas import EscrowProposal, SettlementPlan
+from market_alkahest.plans import (
+    AcceptedAlkahestObligation,
+    decode_accepted_alkahest_obligation,
+)
 from market_settlement_runtime import SettlementRuntime
 from market_identity import Identity
 
@@ -38,9 +42,7 @@ class _AcceptedAlkahestSettlement:
     """The immutable accepted agreement an exact selection settles against."""
 
     plan: SettlementPlan
-    proposal: EscrowProposal
-    obligation_data: dict[str, Any]
-    expiration_unix: int
+    terms: AcceptedAlkahestObligation
 
 
 def _accepted_int(value: Any, *, field: str) -> int:
@@ -88,8 +90,9 @@ def _accepted_alkahest_settlement(
     it declares is bound back to the thread and the domain terms artifact.
     Anything inconsistent fails closed before a chain read or a write.
     """
+    raw_plan = thread.get("settlement_plan")
     try:
-        plan = SettlementPlan.model_validate(thread.get("settlement_plan"))
+        plan = SettlementPlan.model_validate(raw_plan)
     except Exception as exc:
         raise SettlementRequestError(
             "accepted settlement plan is missing or invalid"
@@ -106,22 +109,20 @@ def _accepted_alkahest_settlement(
             "accepted settlement plan names different parties"
         )
     obligation = plan.obligations[0]
-    params = obligation.params if isinstance(obligation.params, Mapping) else {}
-    data = params.get("obligation_data")
-    chain_name = str(params.get("chain_name") or "")
-    escrow_address = str(params.get("escrow_contract") or "")
-    token = str(data.get("token") or "") if isinstance(data, Mapping) else ""
-    if (
-        obligation.mechanism != ALKAHEST_MECHANISM
-        or not chain_name
-        or not escrow_address
-        or not isinstance(data, Mapping)
-        or not token
-        or obligation.expiration_unix is None
-    ):
+    raw_obligations = (
+        raw_plan.get("obligations") if isinstance(raw_plan, Mapping) else None
+    )
+    raw_obligation = (
+        raw_obligations[0]
+        if isinstance(raw_obligations, list) and len(raw_obligations) == 1
+        else obligation.model_dump(mode="json")
+    )
+    try:
+        accepted = decode_accepted_alkahest_obligation(raw_obligation)
+    except Exception as exc:
         raise SettlementRequestError(
             "accepted obligation does not name a funded Alkahest escrow"
-        )
+        ) from exc
     # The buyer funds and the seller collects; the reverse would let a
     # reclaim-side record settle as a payment.
     if obligation.payer != "buyer" or obligation.claimant != "seller":
@@ -135,25 +136,13 @@ def _accepted_alkahest_settlement(
         raise SettlementRequestError(
             "accepted obligation names different settlement parties"
         )
-    if obligation.amount is None or int(obligation.amount) != agreed_amount:
+    if accepted.amount != agreed_amount:
         raise SettlementRequestError(
             "accepted obligation disagrees with the committed agreement"
         )
-    if _accepted_int(data.get("amount"), field="obligation amount") != agreed_amount:
-        raise SettlementRequestError(
-            "accepted obligation data disagrees with the committed agreement"
-        )
-    if str(obligation.asset or "").lower() != token.lower():
-        raise SettlementRequestError(
-            "accepted obligation asset is not the funded token"
-        )
-    # Conditions are declarative for the servicing engine; for Alkahest the
-    # arbiter demand inside the params is authoritative, so a declared
-    # condition set here would be a second, unverified gate.
-    if obligation.conditions:
-        raise SettlementRequestError(
-            "accepted obligation declares conditions this mechanism does not verify"
-        )
+    chain_name = accepted.escrow_terms.chain_name
+    assert chain_name is not None
+    escrow_address = accepted.escrow_terms.escrow_contract
 
     physical = (plan.service_terms or {}).get("bare_metal.v1")
     if not isinstance(physical, Mapping) or physical.get("listing_id") != listing_id:
@@ -232,15 +221,7 @@ def _accepted_alkahest_settlement(
         )
     return _AcceptedAlkahestSettlement(
         plan=plan,
-        proposal=EscrowProposal(
-            chain_name=chain_name,
-            escrow_address=escrow_address,
-            fields={"token": token},
-            literal_fields={"token": token},
-            expiration_unix=int(obligation.expiration_unix),
-        ),
-        obligation_data=dict(data),
-        expiration_unix=int(obligation.expiration_unix),
+        terms=accepted,
     )
 
 
@@ -341,7 +322,7 @@ class BareMetalSettlementService:
                     thread["seller_principal"],
                 ),
             )
-            proposal = accepted.proposal
+            proposal = accepted.terms.verifier_proposal
         else:
             proposal = EscrowProposal.model_validate(raw_proposal)
         primary = await self.db.load_primary_escrow_for_negotiation(
@@ -449,8 +430,10 @@ class BareMetalSettlementService:
                     # Compare the chain against the exact bytes and deadline
                     # the buyer funded, not against a re-derivation of them.
                     {
-                        "expected_obligation_data": accepted.obligation_data,
-                        "expected_expiration_unix": accepted.expiration_unix,
+                        "expected_obligation_data": accepted.terms.obligation_data,
+                        "expected_expiration_unix": (
+                            accepted.terms.escrow_terms.expiration_unix
+                        ),
                     }
                     if accepted is not None
                     else {}

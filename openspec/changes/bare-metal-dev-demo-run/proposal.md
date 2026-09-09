@@ -27,6 +27,9 @@ weakening domain-owned physical validation.
 - Drive the Alkahest rail through the shared mechanism registration and accepted
   obligation builder, while keeping the hosted envelope and seller payout
   fallback compatible.
+- Decode and re-materialize accepted Alkahest payment terms through that
+  mechanism's plan codec, while retaining domain-owned party, selection and
+  physical validation.
 - Bind settlement to the committed accepted plan and its exact physical terms,
   rather than reinterpreting mutable listing terms during settlement.
 - Refresh and reopen a tracked listing under the same identifier, with registry
@@ -84,8 +87,8 @@ capacity in this change is reserved for them.
   tenant-facing endpoint distinct from the one the provisioner connects
   through.
 - `settlement-configuration`: bare-metal Alkahest acceptance and settlement use
-  the mechanism-owned accepted obligation and bind it to the exact committed
-  agreement; later consolidation removes duplicate construction without
+  the mechanism-owned accepted obligation and accepted-term projection, bind it
+  to the exact committed agreement, and avoid duplicate payment parsing without
   changing accepted envelopes or payout fallback.
 - `negotiation-protocol`: trusted seller inventory and binding remain the
   authority for physical terms; buyer input cannot supply physical access
@@ -147,3 +150,5 @@ remain unchanged. The shared publication consolidation is intended to replace
 bare-metal sequencing, not layer a second path over it. The downstream VM
 consumer of `kit/capacity-publication` must qualify before completion because an
 earlier environment could not exercise it.
+The accepted Alkahest projection is in-process only; accepted-plan, funding and
+verification wire payloads remain unchanged, as do hosted and legacy settlement.

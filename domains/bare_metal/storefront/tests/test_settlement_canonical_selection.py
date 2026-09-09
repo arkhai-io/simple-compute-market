@@ -237,6 +237,42 @@ async def test_exact_selection_settles_against_the_accepted_obligation(tmp_path)
     assert len(_escrow_rows(runtime.db.db_path)) == 1
 
 
+async def test_listing_refresh_cannot_redefine_historical_accepted_terms(tmp_path):
+    calls: list[dict[str, Any]] = []
+
+    async def verifier(**kwargs):
+        calls.append(kwargs)
+        return 0
+
+    runtime = await _runtime(tmp_path, verifier)
+    negotiation_id = await _accepted_negotiation(runtime)
+    thread = await runtime.db.load_negotiation_thread_row(
+        negotiation_id=negotiation_id,
+    )
+    accepted = thread["settlement_plan"]["obligations"][0]
+    conn = sqlite3.connect(runtime.db.db_path)
+    try:
+        conn.execute(
+            "UPDATE listings SET settlement_options = ? WHERE listing_id = ?",
+            (json.dumps([]), LISTING_ID),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    await runtime.settlement_service().verify(
+        escrow_uid=ESCROW_UID,
+        request=_settle_request(negotiation_id),
+        buyer_principal=BUYER_SIGNER.identity,
+    )
+
+    assert len(calls) == 1
+    assert calls[0]["expected_obligation_data"] == (
+        accepted["params"]["obligation_data"]
+    )
+    assert calls[0]["expected_expiration_unix"] == accepted["expiration_unix"]
+
+
 def _corrupt(plan: dict[str, Any], corruption: str) -> None:
     """Break one committed fact while leaving the rest of the plan valid."""
     obligation = plan["obligations"][0]
@@ -245,6 +281,8 @@ def _corrupt(plan: dict[str, Any], corruption: str) -> None:
         obligation["amount"] = str(int(obligation["amount"]) + 1)
     elif corruption == "chain":
         obligation["params"].pop("chain_name")
+    elif corruption == "contract":
+        obligation["params"]["escrow_contract"] = ""
     elif corruption == "obligations":
         plan["obligations"] = []
     elif corruption == "buyer-principal":
@@ -279,6 +317,18 @@ def _corrupt(plan: dict[str, Any], corruption: str) -> None:
         physical.pop("physical_binding")
     elif corruption == "unreadable-amount":
         obligation["params"]["obligation_data"]["amount"] = "not-an-integer"
+    elif corruption == "nested-amount":
+        obligation["params"]["obligation_data"]["amount"] = str(
+            int(obligation["amount"]) + 1
+        )
+    elif corruption == "nested-token":
+        obligation["params"]["obligation_data"]["token"] = "0x" + "de" * 20
+    elif corruption == "arbiter":
+        obligation["params"]["obligation_data"]["arbiter"] = None
+    elif corruption == "demand":
+        obligation["params"]["obligation_data"]["demand"] = "not-hex"
+    elif corruption == "expiry":
+        obligation["expiration_unix"] = True
     elif corruption == "unreadable-settlement-expiry":
         plan["service_terms"]["alkahest.v1"]["expiration_unix"] = None
     else:  # pragma: no cover - guards a mistyped parameter
@@ -290,6 +340,7 @@ def _corrupt(plan: dict[str, Any], corruption: str) -> None:
     [
         "amount",
         "chain",
+        "contract",
         "obligations",
         "buyer-principal",
         "claimant-principal",
@@ -306,6 +357,11 @@ def _corrupt(plan: dict[str, Any], corruption: str) -> None:
         "binding-access",
         "binding-missing",
         "unreadable-amount",
+        "nested-amount",
+        "nested-token",
+        "arbiter",
+        "demand",
+        "expiry",
         "unreadable-settlement-expiry",
     ],
 )

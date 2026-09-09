@@ -286,6 +286,15 @@ it so a mechanism that materializes against a chain accepts using the same
 address book and payout wallet it published from. The domain MUST NOT read the
 resulting mechanism parameters.
 
+The mechanism codec MUST also own decoding of its accepted obligation into the
+typed terms used for funding and verification. For an accepted Alkahest scalar
+token obligation, that decoder MUST preserve the exact obligation data and
+expiry, reject disagreement between the top-level and funded amount or between
+the asset and funded token, and reject malformed chain, contract, arbiter,
+demand or unsupported declared-condition carriers before an external read or
+write. This projection is an in-process view of the existing accepted
+obligation; it MUST NOT introduce another accepted-plan or wire representation.
+
 #### Scenario: An advertised on-chain option is exactly selected
 
 - **WHEN** a buyer selects an option advertising an accepted escrow and no expiry,
@@ -300,6 +309,13 @@ resulting mechanism parameters.
   obligation builder
 - **THEN** the request is refused and no negotiation, obligation or capacity record
   is written
+
+#### Scenario: An accepted Alkahest amount carrier disagrees
+
+- **WHEN** an accepted Alkahest obligation's top-level amount or asset differs
+  from the amount or token in its funded obligation data
+- **THEN** mechanism decoding fails before funding, chain verification or
+  settlement persistence
 
 ### Requirement: An exactly selected agreement settles against its accepted obligation
 
@@ -330,6 +346,12 @@ MUST be carried into that verification whole, including the accepted expiry that
 fixes the collect-versus-reclaim boundary. A verification interface that accepts
 an expected payload without its expiry leaves that boundary unpinned, and an
 otherwise matching state with a different deadline MUST NOT settle.
+
+An Alkahest seller MUST obtain the verifier proposal, exact obligation data and
+expiry from the mechanism-owned accepted-term projection. Domain validation of
+parties, roles, selection identity and physical terms remains mandatory and
+MUST run before chain access. A later listing refresh MUST NOT replace any of
+those accepted payment inputs.
 
 #### Scenario: A funded escrow carries a different deadline
 
@@ -379,6 +401,11 @@ The comparison SHALL be against the mechanism's own canonical materialization of
 the buyer's proposal, not an enumerated list of fields. A mechanism that encodes
 terms inside a funded payload — an arbiter or payee within the obligation data —
 would otherwise pass a top-level check while funding different terms.
+
+For Alkahest, payout decoding and whole-obligation re-materialization SHALL be
+owned by the Alkahest codec and shared by acceptance and funding consumers. The
+buyer SHALL fund the exact accepted obligation data and expiry returned by that
+codec; it SHALL NOT reconstruct a second mechanism payload in domain code.
 
 Where the buyer cannot derive a value from its own proposal, such as the address
 the seller will be paid at when the listing advertises none, the specification

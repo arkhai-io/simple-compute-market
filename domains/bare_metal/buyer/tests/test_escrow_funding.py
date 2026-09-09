@@ -180,6 +180,58 @@ def test_a_chain_the_kit_does_not_know_is_refused(chain, created) -> None:
     assert created.calls == []
 
 
+@pytest.mark.parametrize("expiration_unix", [True, "2000000000", 2_000_000_000.0])
+def test_non_integer_raw_expiry_fails_before_chain_resolution_or_funding(
+    monkeypatch, created, expiration_unix
+) -> None:
+    monkeypatch.setattr(
+        buyer_escrow,
+        "resolve_buyer_chain",
+        lambda _chain_name: (_ for _ in ()).throw(
+            AssertionError("invalid expiry must fail before chain resolution")
+        ),
+    )
+
+    with pytest.raises(BareMetalEscrowError, match="invalid Alkahest terms"):
+        fund_accepted_obligation(
+            _obligation(expiration_unix=expiration_unix),
+            private_key=FIXTURE_KEY,
+        )
+
+    assert created.calls == []
+
+
+@pytest.mark.parametrize(
+    ("path", "value"),
+    [
+        (("amount",), "1001"),
+        (("asset",), "0x" + "ff" * 20),
+        (("conditions",), [{"kind": "unverified"}]),
+        (("params", "obligation_data", "amount"), "1001"),
+        (("params", "obligation_data", "token"), "0x" + "ff" * 20),
+        (("params", "obligation_data", "arbiter"), None),
+        (("params", "obligation_data", "demand"), "not-hex"),
+    ],
+)
+def test_incoherent_accepted_terms_fail_before_funding(
+    chain, created, path, value
+) -> None:
+    obligation = _obligation()
+    target = obligation
+    for key in path[:-1]:
+        target = target[key]
+    target[path[-1]] = value
+
+    with pytest.raises(BareMetalEscrowError):
+        fund_accepted_obligation(
+            obligation,
+            private_key=FIXTURE_KEY,
+            chain=chain,
+        )
+
+    assert created.calls == []
+
+
 def test_the_funding_address_is_derived_from_the_key() -> None:
     assert funding_address(FIXTURE_KEY).startswith("0x")
     assert funding_address(FIXTURE_KEY) == funding_address(FIXTURE_KEY)

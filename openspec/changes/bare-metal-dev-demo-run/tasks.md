@@ -399,15 +399,20 @@ isolation, destructive reclaim policies, and end-to-end demonstration evidence.
 
 ## 11. Required later settlement consolidation
 
-- [ ] 11.1 Assess construction duplicated across the mechanism-owned accepted
+- [x] 11.1 Assess construction duplicated across the mechanism-owned accepted
       obligation builder, bare-metal negotiation composition, buyer acceptance,
       and seller settlement resolver. Name the smallest shared artifact/interface
       that removes duplicate construction while leaving physical validation in
-      the domain.
-- [ ] 11.2 Consolidate only after a separate reviewed plan. Preserve accepted
+      the domain. The duplicate consumers are buyer acceptance, buyer funding and
+      seller verification; negotiation composition, obligation selection and the
+      legacy proposal path retain their distinct ownership.
+- [x] 11.2 Consolidate only after a separate reviewed plan. Preserve accepted
       Alkahest and hosted envelopes, wallet-derived seller payout fallback,
       exact accepted-expiry verification, and the legacy escrow-proposal path.
-- [ ] 11.3 Close out the later settlement section with focused unit and
+      The shared Alkahest plan codec now provides the validated accepted-term
+      projection and whole-mechanism re-materialization check; the three domain
+      consumers no longer parse those mechanism carriers independently.
+- [x] 11.3 Close out the later settlement section with focused unit and
       integration coverage, permanent settlement/negotiation specification
       promotion, comment/import hygiene, narrative compression, roadmap and
       campaign-index checks, cross-reference validation, and post-review

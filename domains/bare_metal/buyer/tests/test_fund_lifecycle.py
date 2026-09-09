@@ -171,7 +171,7 @@ def test_a_hosted_obligation_is_not_funded_as_alkahest(world) -> None:
 
 
 # --------------------------------------------------------------------------
-# The obligation reader, which decides what gets funded
+# The accepted-obligation funding boundary
 # --------------------------------------------------------------------------
 
 
@@ -202,10 +202,19 @@ def test_a_hosted_obligation_is_not_funded_as_alkahest(world) -> None:
         ),
     ],
 )
-def test_an_unfundable_obligation_is_refused(overrides, reason) -> None:
+def test_an_unfundable_obligation_is_refused(monkeypatch, overrides, reason) -> None:
     """Refused before a chain client is built, so nothing is signed or sent."""
+    monkeypatch.setattr(
+        buyer_escrow,
+        "resolve_buyer_chain",
+        lambda _chain_name: (_ for _ in ()).throw(
+            AssertionError("invalid terms must fail before chain resolution")
+        ),
+    )
     with pytest.raises(BareMetalEscrowError):
-        buyer_escrow._obligation_parts(_obligation(**overrides))
+        buyer_escrow.fund_accepted_obligation(
+            _obligation(**overrides), private_key=FIXTURE_KEY
+        )
 
 
 def test_an_unconfigured_chain_is_named_in_the_refusal(monkeypatch) -> None:

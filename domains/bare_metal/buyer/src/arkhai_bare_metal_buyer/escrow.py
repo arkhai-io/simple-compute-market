@@ -17,6 +17,7 @@ from collections.abc import Mapping
 from typing import Any
 
 from market_config.config_loader import ChainConfig, chains_from_config
+from market_alkahest.plans import decode_accepted_alkahest_obligation
 
 
 class BareMetalEscrowError(RuntimeError):
@@ -56,27 +57,6 @@ def funding_address(private_key: str) -> str:
         raise BareMetalEscrowError("funding key is not a usable EVM key") from exc
 
 
-def _obligation_parts(obligation: Mapping[str, Any]) -> tuple[str, str, dict, int]:
-    if str(obligation.get("mechanism") or "") != "alkahest.v1":
-        raise BareMetalEscrowError("accepted obligation is not an Alkahest obligation")
-    params = obligation.get("params")
-    if not isinstance(params, Mapping):
-        raise BareMetalEscrowError("accepted obligation carries no mechanism params")
-    chain_name = str(params.get("chain_name") or "")
-    escrow_contract = str(params.get("escrow_contract") or "")
-    obligation_data = params.get("obligation_data")
-    expiration_unix = obligation.get("expiration_unix")
-    if not chain_name or not escrow_contract:
-        raise BareMetalEscrowError(
-            "accepted obligation names no chain or escrow contract"
-        )
-    if not isinstance(obligation_data, Mapping) or not obligation_data:
-        raise BareMetalEscrowError("accepted obligation carries no obligation data")
-    if isinstance(expiration_unix, bool) or not isinstance(expiration_unix, int):
-        raise BareMetalEscrowError("accepted obligation has no integer expiry")
-    return chain_name, escrow_contract, dict(obligation_data), expiration_unix
-
-
 def fund_accepted_obligation(
     obligation: Mapping[str, Any],
     *,
@@ -98,9 +78,17 @@ def fund_accepted_obligation(
         resolve_alkahest_address_config,
     )
 
-    chain_name, escrow_contract, obligation_data, expiration_unix = _obligation_parts(
-        obligation
-    )
+    try:
+        accepted = decode_accepted_alkahest_obligation(obligation)
+    except Exception as exc:
+        raise BareMetalEscrowError(
+            "accepted obligation has invalid Alkahest terms"
+        ) from exc
+    chain_name = accepted.escrow_terms.chain_name
+    assert chain_name is not None
+    escrow_contract = accepted.escrow_terms.escrow_contract
+    obligation_data = accepted.obligation_data
+    expiration_unix = accepted.escrow_terms.expiration_unix
     resolved = chain if chain is not None else resolve_buyer_chain(chain_name)
     # Read as an attribute, not with a defaulting `getattr`: a misspelled field
     # would otherwise resolve to None and silently fall back to the bundled

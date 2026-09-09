@@ -28,8 +28,8 @@ from typing import Any
 
 from market_alkahest import ALKAHEST_MECHANISM_ID
 from market_alkahest.proposals import escrow_proposal_from_accepted_entry
-from market_alkahest.plans import materialize_settlement_plan_from_proposal
-from market_alkahest.schemas import EscrowProposal, accepted_recipient_address
+from market_alkahest.plans import validate_accepted_alkahest_obligation
+from market_alkahest.schemas import EscrowProposal
 from market_core.schemas import SettlementOption, SettlementPlan
 
 HOSTED_MECHANISM = "fiat.stripe.v1"
@@ -82,73 +82,6 @@ def bare_metal_escrow_proposal(
     )
 
 
-def _recipient_from_encoded_demand(
-    obligation_data: Mapping[str, Any],
-    *,
-    chain_name: str,
-    address_config_path: str | None,
-) -> str | None:
-    """Decode the payee from an encoded demand using the arbiter's own codec.
-
-    The arbiter address selects the codec, so a demand encoded for a kind that
-    binds something other than a recipient is not read as one.
-    """
-    from alkahest_py import RecipientArbiterDemandData
-    from market_alkahest.alkahest import address_to_slot
-
-    arbiter = obligation_data.get("arbiter")
-    encoded = obligation_data.get("demand")
-    if not isinstance(arbiter, str) or not isinstance(encoded, str):
-        return None
-    try:
-        kind = address_to_slot(chain_name, arbiter, config_path=address_config_path)
-    except Exception:
-        return None
-    if kind != "recipient_arbiter":
-        return None
-    try:
-        decoded = RecipientArbiterDemandData.decode(
-            bytes.fromhex(encoded.removeprefix("0x"))
-        )
-    except Exception:
-        return None
-    recipient = getattr(decoded, "recipient", None)
-    return recipient if isinstance(recipient, str) and recipient else None
-
-
-def _accepted_payout_address(
-    obligation: Any,
-    *,
-    chain_name: str,
-    address_config_path: str | None,
-) -> str | None:
-    """The address the accepted obligation would pay, wherever the kind puts it.
-
-    Only a candidate: the whole obligation is re-derived from it and compared, so
-    a wrong reading fails that comparison rather than being trusted.
-    """
-    params = obligation.params or {}
-    obligation_data = params.get("obligation_data")
-    if isinstance(obligation_data, Mapping):
-        recipient = accepted_recipient_address(
-            {"demand": {"demand_data": dict(obligation_data)}}
-        )
-        if recipient:
-            return recipient
-        recipient = _recipient_from_encoded_demand(
-            obligation_data,
-            chain_name=chain_name,
-            address_config_path=address_config_path,
-        )
-        if recipient:
-            return recipient
-    for condition in obligation.conditions or []:
-        recipient = accepted_recipient_address({"demand": dict(condition)})
-        if recipient:
-            return recipient
-    return None
-
-
 def validate_accepted_alkahest_plan(
     *,
     plan: SettlementPlan | Mapping[str, Any],
@@ -184,66 +117,18 @@ def validate_accepted_alkahest_plan(
     enforced by that same validator and are deliberately not repeated.
     """
     accepted = SettlementPlan.model_validate(plan)
-    obligation = accepted.obligations[0]
-    params = obligation.params or {}
-    if obligation.amount is None:
-        raise BareMetalBuyerMechanismError(
-            "accepted obligation carries no scalar amount to re-derive from"
-        )
-    agreed_amount = int(obligation.amount)
-
-    if str(params.get("chain_name") or "") != proposal.chain_name:
-        raise BareMetalBuyerMechanismError(
-            "accepted obligation settles on a chain the buyer did not propose"
-        )
-    if str(params.get("escrow_contract") or "").lower() != (
-        proposal.escrow_address.lower()
-    ):
-        raise BareMetalBuyerMechanismError(
-            "accepted obligation names an escrow the buyer did not propose"
-        )
-
-    derived_payout = _accepted_payout_address(
-        obligation,
-        chain_name=proposal.chain_name,
-        address_config_path=address_config_path,
-    )
-    payout = seller_payout_address or derived_payout
-    if not payout:
-        raise BareMetalBuyerMechanismError(
-            "accepted obligation names no payout address to verify against"
-        )
-    if seller_payout_address is not None:
-        if (derived_payout or "").lower() != seller_payout_address.lower():
-            raise BareMetalBuyerMechanismError(
-                "accepted obligation pays an address other than the pinned seller"
-            )
-
     try:
-        expected_plan = materialize_settlement_plan_from_proposal(
+        validate_accepted_alkahest_obligation(
+            obligation=accepted.obligations[0],
             proposal=proposal,
-            seller_wallet_address=payout,
-            agreed_amount=agreed_amount,
             duration_seconds=duration_seconds,
-            addr_config_path=address_config_path,
+            address_config_path=address_config_path,
+            seller_payout_address=seller_payout_address,
         )
     except Exception as exc:
         raise BareMetalBuyerMechanismError(
             "accepted obligation could not be re-derived from the buyer proposal"
         ) from exc
-
-    expected = expected_plan.obligations[0].model_dump(mode="json")
-    actual = obligation.model_dump(mode="json")
-    # Compared as whole mappings: the point is to catch a field nobody listed.
-    if actual.get("params") != expected.get("params"):
-        raise BareMetalBuyerMechanismError(
-            "accepted obligation funds escrow data the buyer did not propose"
-        )
-    if actual.get("conditions") != expected.get("conditions"):
-        raise BareMetalBuyerMechanismError(
-            "accepted obligation gates collection on conditions the buyer did "
-            "not propose"
-        )
 
 
 __all__ = [

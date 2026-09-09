@@ -345,6 +345,44 @@ legacy escrow-proposal path.
   qualification because earlier evidence could not exercise that consumer with
   the changed kit installed.
 
+### 8. Decode accepted Alkahest terms once without changing their wire
+
+The remaining settlement duplication is confined to three consumers of the
+same accepted Alkahest obligation. Buyer acceptance separately decodes the
+recipient demand before re-materializing the obligation, buyer funding extracts
+the chain, contract, payload and expiry again, and seller settlement repeats
+that extraction before constructing the proposal view used by the verifier.
+The negotiation service is not duplicate payment construction: it invokes the
+mechanism-owned accepted-obligation builder and adds domain-owned physical
+service terms. The buyer's single-obligation selection and the seller's legacy
+proposal path likewise remain separate compatibility boundaries.
+
+`market_alkahest.plans` owns a frozen, non-serialized
+`AcceptedAlkahestObligation` projection over the existing typed obligation and
+escrow terms. Its decoder validates the mechanism carriers, exact top-level and
+nested amount agreement, asset/token agreement, expiry, arbiter/demand shape,
+and the absence of a second declared condition gate. It preserves the accepted
+obligation-data mapping for funding and verification and exposes the existing
+verifier-compatible `EscrowProposal` view. Recipient decoding uses the
+configured Alkahest address book when available and remains optional for a
+demand kind that does not encode a recipient.
+
+The Alkahest-owned acceptance validator re-materializes through the existing
+proposal-to-plan function and compares the whole mechanism params and
+conditions. It does not replace the shared buyer's principal, role, amount,
+asset, expiry or selected-option checks. The seller continues to validate plan
+parties, obligation roles and principals, selected option/listing/mechanism,
+physical provision terms and physical binding before chain access. The decoder
+does not interpret any bare-metal field.
+
+No accepted carrier or serialized field changes. The seller's wallet remains
+the materializer fallback when publication named no recipient, an explicitly
+accepted recipient remains part of the immutable funded demand, and hosted and
+legacy proposal paths remain untouched. Funding uses the exact accepted payload
+and expiry. A persisted escrow UID still prevents a second funding call; the
+external-write-before-run-log crash window remains an explicit limitation and
+no journal, scheduler or automatic recovery mechanism is added.
+
 ## Rejected alternatives
 
 ### Configurable registry quorum
@@ -412,4 +450,4 @@ VM and API-credit consumers of the capacity-publication kit.
 | Repository-wide capacity-publication ownership | `docs/development/ARCHITECTURE.md` | Updated for publication milestone review |
 | Roadmap currency | `docs/development/ROADMAP.md` | No edit: the roadmap already names the kit publication runtime and all three composed consumers; this submilestone does not complete its goal |
 | Campaign index currency | `openspec/changes/README.md` | No edit: the encompassing change remains under review with settlement and final qualification still incomplete, so no dependency is newly unblocked |
-| Settlement construction ownership and physical authority | `openspec/specs/settlement-configuration/spec.md`; `openspec/specs/negotiation-protocol/spec.md` | Deferred until the separately reviewed settlement consolidation |
+| Accepted Alkahest decoding, whole-payload re-materialization, and retained domain physical authority | `openspec/specs/settlement-configuration/spec.md`; `openspec/specs/settlement-configuration/architecture.md`; existing `openspec/specs/negotiation-protocol/spec.md` physical-authority requirement | Promoted for settlement milestone review |
