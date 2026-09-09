@@ -21,6 +21,9 @@ service's canonical typed client over `ASGITransport`.
       other value on write; fail the pool closed on ingestion. Do not resolve a
       malformed or absent discriminator to a default — that is the one behaviour
       that would let a listing claim an admission authority it does not have.
+- [ ] 1.3a Fix `capacity_backing` at creation: replace and patch reject a differing
+      value and leave the pool unchanged. A rejected request must not clear the
+      existing value on its way out.
 - [ ] 1.4 Carry both tags through create, replace, patch, bulk import, projection,
       and canonical export on the existing policy-tag channel and precedence.
 - [ ] 1.5 Leave `deliverable_modes` untouched — meaning, derivation, migration, and
@@ -71,6 +74,8 @@ service's canonical typed client over `ASGITransport`.
       projection is rejected there too.
 - [ ] 4.5 **Integration.** A malformed backing value is rejected on write, and a
       projection carrying one fails that pool closed.
+- [ ] 4.5a **Integration.** A replace or patch changing an existing pool's backing is
+      rejected and the pool's backing survives.
 - [ ] 4.6 **Integration.** Migration derives both values on a database written by
       the previous version, and the resolved values are unchanged from before.
 - [ ] 4.7 **Integration.** A projection from the migrated producer carries both tags
@@ -116,5 +121,6 @@ service's canonical typed client over `ASGITransport`.
 | Advertisement authorization and delivery authorization are separate declarations | `openspec/specs/resource-pool-management/spec.md` |
 | A backed pool's advertisable set is a subset of its deliverable set; an unbacked pool's is independent | `openspec/specs/resource-pool-management/spec.md` |
 | A malformed backing value fails closed and never resolves to a default | `openspec/specs/resource-pool-management/spec.md` |
+| Backing is fixed at pool creation; moving between backed and unbacked supply is a second pool with migrated resources | `openspec/specs/resource-pool-management/spec.md` |
 | A producer emitting these tags emits them on every pool it projects | `openspec/specs/resource-pool-management/spec.md` |
 | Existing pools derive an advertisable set from their proved deliverable set and `backed` backing on upgrade | `openspec/specs/resource-pool-management/spec.md` |

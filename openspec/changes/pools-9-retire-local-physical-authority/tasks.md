@@ -33,6 +33,26 @@ sized to land independently in roughly a day each. Sections 1–3 are additive
 or inert and safe to deploy alone. Section 4 is the point of no config-flip
 return.
 
+## 0. Fix a pool's executor at creation
+
+- [ ] 0.1 Reject a differing provider in `ResourcePoolService.replace_pool` and the
+      patch path, instead of deleting the old handler's configuration and
+      reassigning `pool.provider`. Rejection must not delete the existing
+      configuration on its way out — a refused request leaves the pool exactly as it
+      was.
+- [ ] 0.2 Leave provider configuration replaceable and patchable within the declared
+      provider. This forbids changing which executor a pool routes to, not how that
+      executor is configured.
+- [ ] 0.3 **Unit.** Replace with a differing provider is rejected and the existing
+      configuration survives; replace with the same provider and new configuration
+      succeeds.
+- [ ] 0.4 **Integration.** The same two cases through the real pool administration
+      API and its canonical client, since the deletion this removes happens inside a
+      transaction a service-level test can miss.
+- [ ] 0.5 Confirm no fixture, bulk import path, or e2e setup relies on an in-place
+      provider swap. If one does, migrate it to the two-pool path rather than
+      exempting it.
+
 ## 1. Re-ground and build the commercial override write path
 
 Nothing may be deleted before this section lands: `_sync_compute_pool_for_resource`

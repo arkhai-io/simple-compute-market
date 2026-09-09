@@ -10,20 +10,22 @@ integration means the real app, a real database, a wired DI container, and the
 service's canonical typed client over `ASGITransport`; a hand-built HTTP payload
 does not satisfy the no-raw-calls rule.
 
-## 0. Decision gates
+## 0. Settled preconditions
 
-- [ ] 0.1 **Decide the `derivation_key` shape for an unbacked listing** and record
-      the reasoning in `design.md`. The column is `NOT NULL UNIQUE`, so a
-      collision-safety property is being settled; it is an open question there and
-      must not be resolved by an ordinary implementation step.
-- [ ] 0.2 **Trace `PublicationBinding` through every consumer before writing it.**
-      `PublicationCandidate`, the durable `storefront_listing_bindings` row, the
-      negotiation thread copy, `bind_fulfillment_context`, reservation, release,
-      and provider dispatch. Each site either reads only common fields and takes
-      `PublicationBinding`, or performs an effect and takes the narrowed backed
-      form. Record any site needing both — that is a site where the separation is
-      wrong, and casting past it would defeat the type-level refusal this design
-      relies on.
+Both decision gates are resolved; `design.md` carries the reasoning. These tasks
+confirm the conclusions still hold against the code at implementation time rather
+than re-deciding them.
+
+- [ ] 0.1 Confirm `build_storefront_derivation_key` is reused unchanged, with the
+      VM source envelope carrying the same fields it carries today and backing
+      absent from it. Backing is fixed at pool creation, so a supply move is a move
+      between pools and the key differs by `pool_id`; if pool-level backing
+      immutability has not landed, stop — the unique index will block
+      close-and-republish.
+- [ ] 0.2 Confirm the completed binding trace still matches the code, in particular
+      that no consumer has appeared needing both `PublicationBinding` and the
+      narrowed backed form. One that does is a signal the separation is wrong, not
+      a site to cast past.
 
 ## 1. Binding schema
 
@@ -57,7 +59,20 @@ does not satisfy the no-raw-calls rule.
       to check availability, so this should be a type change rather than a branch;
       if a branch proves necessary, record why.
 - [ ] 2.4 Confirm reserve, commit, release, schedule, and dispatch require the
-      `CapacityBinding` variant and refuse at the type boundary.
+      narrowed backed variant and refuse at the type boundary.
+- [ ] 2.5 Relax the two identity-only `isinstance(..., CapacityBinding)` guards in
+      the VM negotiation runtime — the one before settlement-artifact construction
+      and the one on the negotiation opening, which leads into
+      `require_capacity_binding`'s site-and-mode comparison. Left as they are they
+      reject every unbacked listing at negotiation time. Keep the third, before the
+      capacity hold, narrowing it to the backed form.
+- [ ] 2.6 Widen the `PublicationDomainHooks.binding_for_listing` protocol return and
+      move both implementing domains with it. This is a kit-boundary change, not a
+      storefront-local one.
+- [ ] 2.7 Update `apicredits`' `capacity_binding_from_offer` and
+      `publication_service` for the new types. API credits are capacity-backed by a
+      quota resource, so no behaviour changes — but the types and the protocol
+      signature do, and omitting this domain would break its build.
 
 ## 3. Requirement scoping
 
@@ -107,13 +122,18 @@ does not satisfy the no-raw-calls rule.
 - [ ] 4.1b Fail a pool closed when its `capacity_backing` value is outside `backed`
       and `unbacked`. A discriminator is not somewhere to apply the tolerant reading
       the cardinality hint gets.
+- [ ] 4.3a Publish an unbacked listing's capacity from its source declaration's
+      quantity, identified as declared rather than currently available. Refuse a
+      declaration carrying no quantity rather than substituting the existing
+      `or 1` default, which is indistinguishable from a declared single-GPU listing.
 - [ ] 4.4 Implement the backing transition as close-and-republish. When a source
       declaration's projected backing changes, the existing listing closes and a
       new listing binds with a new durable identity and the new discriminator.
       Do not let a generic source-reconciliation path attempt an in-place update:
       the discriminator is immutable, so an in-place attempt either aborts at the
       trigger or silently updates the public payload while leaving the durable
-      category wrong.
+      category wrong. Because pool backing is fixed at creation, the transition
+      arrives as a move between pools rather than as a changed value on one.
 - [ ] 4.2 Derive unbacked candidates from the projection through the existing
       derivation path, using the `derivation_key` shape decided in 0.1.
 - [ ] 4.3 Confirm no unbacked listing enters the capacity-availability
@@ -177,11 +197,17 @@ does not satisfy the no-raw-calls rule.
 - [ ] 6.11 **System.** One representative mixed-version deployment covering both
       tags, if mixed site/storefront versions are supported. If they are not, record
       that decision rather than omitting the coverage silently.
-- [ ] 6.12 **Integration.** Backing flip: a source declaration changes from
-      unbacked to backed, the old listing closes, and a new listing binds with a
-      different durable identity. Assert the original binding row is unmodified —
-      an in-place update that aborted at the trigger and an in-place update that
+- [ ] 6.12 **Integration.** Backing flip: supply moves from an unbacked pool to a
+      backed one, the old listing closes, and a new listing binds with a different
+      durable identity and derivation key. Assert the original binding row is
+      unmodified — an in-place update that aborted at the trigger and one that
       succeeded look the same from the published side.
+- [ ] 6.14 **Integration.** An unbacked listing reaches acceptance and
+      settlement-artifact construction. This is what the two relaxed negotiation
+      guards would otherwise break, and it fails loudly rather than subtly, so it is
+      worth its own case rather than folding into 6.2.
+- [ ] 6.15 **Unit.** A source declaration carrying no quantity is refused rather than
+      published with a substituted default.
 - [ ] 6.13 **Integration.** After 5.2, no listing in storefront-local state remains
       without an explicit backing value. Count, do not sample. Published registry
       copies are a separate concern: confirming those is rollout evidence across
@@ -230,4 +256,6 @@ does not satisfy the no-raw-calls rule.
 | Backing transitions are close-and-republish, not in-place | `openspec/specs/storefront-publication/spec.md` |
 | Absent projected pool tags are producer-version compatibility rules, not per-pool inferences; a malformed backing value fails closed | `openspec/specs/storefront-publication/spec.md` |
 | Claim construction describes what happens when capacity admission is requested | `openspec/specs/site-capacity/spec.md` |
+| Published capacity on an unbacked listing is declared, not currently available | `openspec/specs/storefront-publication/spec.md` |
+| A listing advertises only a mode its pool declares advertisable, backed or not | `openspec/specs/storefront-publication/spec.md` |
 | Backing is filtered exactly and fail-on-missing | `openspec/specs/registry-discovery/spec.md` |

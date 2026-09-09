@@ -137,6 +137,19 @@ change did not previously have -- see "Dependencies and Related Changes".
   the documented caller of `patch_resource` -- the provisioning service's
   `LeaseWatchdog` -- no longer makes that call.
 
+- Fix a Resource Pool's provider at creation. `ResourcePoolService.replace_pool`
+  currently permits an in-place executor swap — when the supplied provider differs
+  it calls `delete_config` on the old handler, reassigns `pool.provider`, and
+  writes configuration through the new one — which silently reinterprets which
+  executor the pool's existing members belong to. Replace and patch reject a
+  differing provider; moving inventory to another executor is a second pool plus
+  member migration. Provider configuration stays replaceable within the declared
+  provider. **(2026-09-09 addition, arriving from Goal 7's design review: pool-level
+  immutability is what lets an unbacked pool's backing be unchangeable, and the same
+  argument applies to the executor. Landed here rather than in Goal 7 because it is
+  a provisioning-side authority rule this change's campaign already owns, and no
+  operator relies on in-place swap.)**
+
 ## Capabilities
 
 ### New Capabilities

@@ -51,6 +51,14 @@ and `unbacked`. `backed` means an admission authority stands behind the pool;
 `unbacked` means none does, so nothing may be reserved, committed, or released
 against it.
 
+`capacity_backing` MUST be fixed at pool creation. Replace and patch MUST reject a
+request supplying a backing value differing from the pool's own. Moving inventory
+between backed and unbacked supply is a second pool declaring the intended backing
+with its capacity resources migrated across — the same shape as moving inventory to
+a different executor, and for the same reason: backing is a property every listing
+derived from the pool inherits, so changing it in place would silently reinterpret
+listings already published.
+
 A value outside that set MUST be rejected on write and MUST fail that pool closed
 on projection ingestion. A discriminator MUST NOT resolve to a default: unlike a
 cardinality hint, where a structural default is a reasonable assumption about how
@@ -74,6 +82,12 @@ derivation, and each derived value MUST be reported at INFO.
 - **WHEN** migration derives its initial values
 - **THEN** its advertisable set is exactly `[vm]` and its backing is `backed`
 - **AND** both conclusions are reported and its advertising surface is unchanged
+
+#### Scenario: Backing is changed on an existing pool
+
+- **WHEN** a replace or patch request supplies a `capacity_backing` value differing from the pool's own
+- **THEN** the request is rejected and the pool's backing is unchanged
+- **AND** the supported path is a second pool declaring the intended backing with capacity resources migrated across
 
 #### Scenario: A malformed backing value is written
 

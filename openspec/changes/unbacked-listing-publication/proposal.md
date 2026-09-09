@@ -52,8 +52,11 @@ migration that unwinds a fabricated site.
   or changed source declaration must close or update its published listing
   whether or not the listing was backed.
 - Publish backing in `offer_resource` and add an exact, fail-on-missing registry
-  filter for it, republishing existing listings as explicitly backed so no
-  listing relies on an absent field to be classified.
+  filter for it, republishing existing listings as explicitly backed so no listing
+  relies on an absent field to be classified.
+- Publish an unbacked listing's capacity from its source declaration's quantity,
+  identified as declared rather than currently available, and refuse a declaration
+  carrying no quantity rather than substituting a default.
 
 ## Capabilities
 
@@ -91,9 +94,12 @@ None. This is a posture within existing capabilities, not a new domain.
 ## Impact
 
 - Affected code: `core/storefront`'s binding schema and migrations,
-  `kit/capacity-publication`'s provenance types and publication runtime, the
-  storefront-side projection ingestion, and the compute domains' publication
-  candidate derivation.
+  `kit/capacity-publication`'s provenance types, publication runtime, and the
+  `PublicationDomainHooks` protocol, the storefront-side projection ingestion, the
+  VM negotiation runtime's binding guards, and both the VM and API-credit domains'
+  publication candidate derivation and capacity clients. API-credit behaviour does
+  not change — it is capacity-backed by a quota resource — but its types move with
+  the protocol.
 - Affected specification: `openspec/specs/storefront-publication/spec.md`,
   `openspec/specs/registry-discovery/spec.md`, and
   `openspec/specs/site-capacity/spec.md`, whose claim-identity requirement asserts

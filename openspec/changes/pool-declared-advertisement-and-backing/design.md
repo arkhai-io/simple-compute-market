@@ -108,6 +108,28 @@ correct operator action would detonate nine working pools. Deriving on upgrade a
 requiring complete emission is what prevents that; the consumer's rule then only
 has to distinguish "no pool has it" from "some pool is missing it."
 
+### Backing is fixed at creation
+
+Every listing derived from a pool inherits its backing, so changing it in place
+would silently reinterpret listings already published — a buyer holding a listing
+reference would find the claim behind it altered without the listing changing. The
+supported path is a second pool declaring the intended backing with capacity
+resources migrated across.
+
+This has a consequence downstream worth stating here, because it is the reason the
+rule is normative rather than advisory. `unbacked-listing-publication` makes a
+backing change close-and-republish at the listing level, and
+`storefront_listing_bindings` is immutable with a `NOT NULL UNIQUE`
+`derivation_key`. If a pool's backing could change in place, the republished
+listing would derive from the same site, pool, mode, and domain identity, hash to
+the same key, and collide with the closed listing's surviving row — the transition
+would deadlock on the unique index. Pool replacement gives the new listing a
+different `pool_id` and therefore a different key by construction, which is also
+why backing does not need to appear in the derivation source envelope.
+
+The same argument applies to a pool's provider, which
+`pools-9-retire-local-physical-authority` fixes at creation for the same reason.
+
 ### A malformed backing value fails closed
 
 `capacity_backing` is a discriminator, so an unrecognized value is refused rather

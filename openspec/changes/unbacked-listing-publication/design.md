@@ -122,6 +122,34 @@ re-derives the category from missing data reclassifies listings whenever data go
 missing for an unrelated reason. The discriminator is covered by the existing
 immutability trigger, so a listing cannot change category after binding.
 
+### The derivation key needs no new shape
+
+`build_storefront_derivation_key` takes `site_id`, `offering_mode`, the domain
+binding, and an opaque `source_identity`, canonicalizes them, and hashes. Every
+input exists for an unbacked listing: the origin site is populated, the mode
+resolves from the frozen registration, and the domain binding is unchanged. Its two
+guards — non-empty site and mode equality with the durable binding — both hold. So
+the existing builder is reused unchanged and the VM domain's versioned source
+envelope carries the same fields it carries today.
+
+Backing deliberately does **not** go into the envelope. An earlier reading of
+close-and-republish suggested it had to: `derivation_key` is `NOT NULL UNIQUE`, the
+binding row is immutable and survives a listing closing, so a republished listing
+deriving from the same site, pool, mode, and domain would collide on the unique
+index and the transition would deadlock. But backing is fixed at pool creation, so
+a supply move between backed and unbacked is a move between *pools*. The `pool_id`
+differs, the key differs by construction, and putting backing in the envelope as
+well would be redundant encoding of something that cannot vary independently of a
+field already there.
+
+An earlier draft also proposed omitting capacity-derived fields from the envelope
+for unbacked listings, on the premise that an unbacked pool has no capacity data
+and the `or 1` default would silently bake a meaningless quantity into the identity.
+That premise was wrong: an unbacked pool's capacity resources declare shape *and*
+quantity, and what is absent is availability rather than declared capacity. The
+`or 1` hazard is real but the fix is to refuse a declaration carrying no quantity
+rather than to omit the field — see the declared-not-available decision below.
+
 ### The concrete binding type, traced
 
 A first draft said the common identity fields stay on the binding, the union is
@@ -150,14 +178,41 @@ and survives the correction.
 `PublicationCandidate.binding` widens to `PublicationBinding`, and the runtime's
 comparison stays a comparison of the whole binding, unchanged in behaviour.
 
-The trace that has to hold before implementation, and the reason this is a
-decision gate rather than a design assertion: the same type through
-`PublicationCandidate`, the durable `storefront_listing_bindings` row, the
-negotiation thread copy, `bind_fulfillment_context`, reservation, release, and
-provider dispatch. Each of those either reads only common fields — in which case
-it takes `PublicationBinding` — or performs an effect, in which case it takes the
-narrowed backed form. Any site that needs both is a site where the separation is
-wrong and needs re-examining rather than casting.
+**The trace, completed.** Every non-test consumer was classified, and no site needs
+both forms — which was the test of whether the separation is right.
+
+Taking `PublicationBinding`: `PublicationCandidate.binding` and `BoundListing.binding`;
+`PublicationRuntime._require_persisted_binding`, which compares supplied against
+durable; the `PublicationDomainHooks.binding_for_listing` protocol return;
+`require_capacity_binding` in the VM negotiation runtime, which compares `site_id`
+and `offering_mode` and nothing else; settlement-artifact construction, which
+carries site, mode, and source; and the binding constructors in both domains'
+capacity clients, `listing_service`, and `publication_service`.
+
+Taking the narrowed backed form: `CapacityRuntime.require_binding`, which validates
+the site is a configured capacity site, and its reserve, commit, and release
+operations; the reservation binding constructed in the VM admin controller; and the
+capacity hold in the negotiation runtime.
+
+Three consequences that were not visible before the trace:
+
+**Two of the VM negotiation runtime's three `isinstance(..., CapacityBinding)`
+guards become wrong.** The guard before the capacity hold is correct and stays,
+narrowing to the backed form. But the guard before settlement-artifact construction
+and the guard on the negotiation opening both protect identity-only work — the
+second leads directly into `require_capacity_binding`, which compares site and mode
+alone. Left as they are, they would reject every unbacked listing at negotiation
+time with "VM negotiation has no frozen capacity binding": a runtime failure on
+exactly the path the integration coverage exists to protect. They relax to identity
+checks.
+
+**`PublicationDomainHooks` is a protocol**, so widening its return type is a
+kit-boundary change that both implementing domains move with.
+
+**`apicredits` is in scope.** It has its own `capacity_binding_from_offer` and
+`publication_service`. API credits are capacity-backed by a quota resource, so
+nothing about their behaviour changes, but their types and the protocol signature
+move.
 
 Naming note: `authority` was considered and rejected for the discriminator,
 because the word already carries a specific architectural meaning — which
@@ -270,6 +325,29 @@ terms does not reduce to one number. Un-declining scalar participation would put
 number in a settlement option that the runtime does arithmetic on and an
 obligation implies, with nothing behind it for a deal agreed out of band.
 
+### An unbacked pool still names a provider, and that is accepted
+
+`PoolCreate` requires a provider, so an execution-less seller's pool names a
+fulfillment provider it must never dispatch to. This is an accepted decision rather
+than an open question, because leaving it open would misrepresent something we are
+knowingly shipping.
+
+What made it a problem is gone. The blocking reason was that a pool could only
+authorize a mode its provider *proved* it could deliver, so an execution-less seller
+authorized nothing; `pool-declared-advertisement-and-backing` removes that. What
+remains is a named provider that is never reached, and three things make that safe:
+the pool declares no admission authority, so no capacity path is reachable;
+`project-capacity-resources-without-hosts` requires placement and dispatch to fail
+closed for a resource with no executor correlation; and a configuration-free
+provider already exists, so naming one requires no fabricated configuration.
+
+The alternative — a publication-only provider kind — is rejected in that change for
+putting a no-op executor in the fleet, where every dispatch path would depend on a
+handler doing nothing rather than on a declaration saying nothing.
+
+**Revisit trigger:** the first time a dispatch path is reached for an unbacked pool,
+or the first operator confusion about which provider to name.
+
 ### Backing is immutable per durable listing
 
 An earlier roadmap sentence said the same listing becomes capacity-backed later.
@@ -279,8 +357,11 @@ the trigger is the property worth keeping: moving from "no admission guarantee" 
 and a buyer holding a listing reference should not have it change meaning
 underneath them.
 
-So unbacked to backed is **close and republish**: the old listing closes, a new
-one binds with capacity provenance. What the roadmap sentence was actually
+So unbacked to backed is **close and republish**: the old listing closes, a new one
+binds with capacity provenance. Because a pool's backing is itself fixed at
+creation, this is not a listing-level mechanism the storefront invents — a supply
+move is a move between pools, and the new listing derives from a different pool with
+a different derivation identity. What the roadmap sentence was actually
 arguing survives — no new domain, no new registry, no migration unwinding a
 fabricated site — and it is reworded to say that instead.
 
@@ -306,6 +387,31 @@ The two loops separate cleanly:
 
 Stating both is what keeps "unbacked cannot be exhausted" true without
 accidentally making "deleted unbacked advertisements never disappear" true.
+
+### Published capacity is declared, not currently available
+
+An unbacked pool's capacity resources declare shape and quantity — that is what
+`capacity-resource-administration` makes them authoritative for, and a hostless
+resource projects its declared capacity. So an unbacked listing has a quantity to
+publish; what it lacks is availability.
+
+That creates a subtler honesty problem than the one backing solves. A backed
+fungible listing's published slice is bounded by what a single member can
+*currently satisfy* — a number the site will admit against. An unbacked listing's
+can only be what the seller declared. Same field, two meanings, and a buyer
+comparing them is comparing an admitted quantity against a claim.
+
+So the listing identifies its published capacity as declared rather than currently
+available, normatively rather than as a presentation concern. This is the same
+treatment the indicative rate gets in `publish-indicative-listing-rates`, and for
+the same reason: the separation backing buys is undone if the dimension fields
+quietly carry the stronger meaning.
+
+A declaration carrying no quantity is refused rather than defaulted. The existing
+`int(candidate.get("gpu_count") or 1)` would substitute a plausible-looking 1,
+indistinguishable from a declared single-GPU listing — the same substituted-value
+hazard the projection change avoids by omitting executor fields rather than
+emptying them.
 
 ### Backing is filtered exactly, and existing listings are republished
 
@@ -452,14 +558,6 @@ adds no new storage category. What it must not add is an inventory model.
   anything binds. A decision gate in `tasks.md` rather than an ordinary
   implementation step, because choosing it quietly would settle a collision-safety
   property in a place no reviewer looks.
-- **Does an unbacked pool still have to name a fulfillment provider?**
-  `PoolCreate` requires one. `pool-declared-advertisement-and-backing` removes the
-  reason that was blocking — an execution-less seller no longer needs a provider that
-  *proves a deliverable mode* — but the pool still names a provider it must never
-  dispatch to. Deferred rather than resolved with a publication-only provider
-  kind, which that change rejects for putting a no-op executor in the fleet; the
-  fail-closed guard in `project-capacity-resources-without-hosts` is what makes it
-  safe in the meantime.
 - **When are the absent-tag compatibility rules removed?** Both are time-limited by
   design, and this repository has no fleet-wide deployment signal to gate removal
   on, since sellers self-host their own site and storefront deployments. Same shape
