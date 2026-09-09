@@ -300,7 +300,7 @@ isolation, destructive reclaim policies, and end-to-end demonstration evidence.
 
 ## 10. Publication implementation sequence — separately reviewed slices
 
-- [ ] 10.1 Add optional `status` to `ListingRequest`, omitting the key when
+- [x] 10.1 Add optional `status` to `ListingRequest`, omitting the key when
       unset, with registry-client serialization and registry integration
       coverage. Files:
       `core/registry-client/src/registry_client/models.py`,

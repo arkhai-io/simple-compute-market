@@ -16,8 +16,15 @@ from registry_client.models import (
 from src.main import app
 
 
-def _listing_request(listing_id: str | None = None, **offer_extras) -> ListingRequest:
+def _listing_request(
+    listing_id: str | None = None,
+    *,
+    status: str | None = None,
+    **offer_extras,
+) -> ListingRequest:
     kwargs = {} if listing_id is None else {"listing_id": listing_id}
+    if status is not None:
+        kwargs["status"] = status
     return ListingRequest(
         offer={"gpu_model": "A100", "region": "us-west", **offer_extras},
         accepted_escrows=[
@@ -79,6 +86,50 @@ class TestGetOrder:
 
 
 class TestPublishOrder:
+    async def test_omitted_status_defaults_a_new_listing_open(
+        self,
+        registry_client,
+    ):
+        await registry_client.publish_listing(_listing_request("pub-default-open"))
+
+        listing = await registry_client.get_listing("pub-default-open")
+
+        assert listing.status == "open"
+
+    async def test_omitted_status_preserves_an_existing_closed_listing(
+        self,
+        registry_client,
+    ):
+        request = _listing_request("pub-preserve-closed")
+        await registry_client.publish_listing(request)
+        await registry_client.update_listing(
+            request.listing_id,
+            UpdateListingRequest(updates={"status": "closed"}),
+        )
+
+        await registry_client.publish_listing(request)
+
+        listing = await registry_client.get_listing(request.listing_id)
+        assert listing.status == "closed"
+
+    async def test_explicit_open_status_changes_an_existing_closed_listing(
+        self,
+        registry_client,
+    ):
+        listing_id = "pub-explicit-open"
+        await registry_client.publish_listing(_listing_request(listing_id))
+        await registry_client.update_listing(
+            listing_id,
+            UpdateListingRequest(updates={"status": "closed"}),
+        )
+
+        await registry_client.publish_listing(
+            _listing_request(listing_id, status="open")
+        )
+
+        listing = await registry_client.get_listing(listing_id)
+        assert listing.status == "open"
+
     async def test_publish_lazily_creates_publisher(
         self,
         registry_client,
