@@ -384,6 +384,13 @@ isolation, destructive reclaim policies, and end-to-end demonstration evidence.
       registry, storefront, import-boundary, and typing checks. Qualify the
       downstream VM and API-credit consumers with the changed kit installed;
       disclose any unavailable check rather than substituting another suite.
+      The bare-metal storefront build graph now names registry-client, config
+      and Alkahest producers, and its reinit explicitly refreshes registry-client
+      and config. Relevant setup targets use their checked-in locks with exact
+      same-version wheel reinstall inventories and without upgrade-driven
+      version re-resolution. Keep this task open until the
+      canonical installed-wheel and downstream checks complete outside any
+      sandbox-limited database environment.
 - [x] 10.6 Promote the implemented lifecycle behavior to
       `openspec/specs/storefront-publication/spec.md` and the module/seam
       rationale to `openspec/specs/storefront-publication/architecture.md`.
@@ -422,7 +429,11 @@ isolation, destructive reclaim policies, and end-to-end demonstration evidence.
 
 - [ ] 12.1 Keep deterministic default development-environment values aligned
       across bare-metal and VM consumers and retain the existing bare-metal E2E
-      scenario as the only cross-service harness.
+      scenario as the only cross-service harness. The controlled-dependency
+      tests that execute that scenario live under `e2e-tests/tests/integration`;
+      only pure parsing and projection checks remain under `tests/unit`. Keep
+      this task open until the full offline qualification and default-alignment
+      audit complete.
 - [ ] 12.2 Keep host/account mutation in the operator-controlled actual-host
       lane. Default package/E2E validation remains host-independent; no new
       actual-host script path is added merely to test publication consolidation.

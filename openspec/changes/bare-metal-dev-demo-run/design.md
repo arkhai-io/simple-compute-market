@@ -383,6 +383,74 @@ and expiry. A persisted escrow UID still prevents a second funding call; the
 external-write-before-run-log crash window remains an explicit limitation and
 no journal, scheduler or automatic recovery mechanism is added.
 
+### 9. Make installed-wheel refresh deterministic and place scenario tests by level
+
+The bare-metal storefront's root distribution target now explicitly builds the
+three corrected producers—registry-client, config and Alkahest—before building
+the storefront wheel. Other reinstalled internal wheels remain prerequisites
+supplied by the established build flow; this target does not claim complete
+producer closure. The storefront reinit also names registry-client and config
+explicitly so their newly built same-version wheels cannot remain installed
+from an older build.
+
+Bare-metal storefront, Alkahest and E2E setup use `uv sync --locked` with their
+exact `--reinstall-package` inventories and without `--upgrade-package`.
+The lock is the dependency-selection boundary; reinstall refreshes changed
+same-version wheel bytes, while upgrade would request version re-resolution and
+can make an otherwise current lock fail the locked check. `--frozen` is not
+used. Locked dry runs without upgrade resolved the existing locks and retained
+15 bare-metal storefront, 2 Alkahest and 24 E2E reinstall requests. If a
+checked-in lock is stale because package metadata actually changed, setup must
+fail and request an intentional reviewed lock refresh rather than silently
+rewriting dependency metadata. Package-contract tests assert the exact
+reinstall inventories and absence of upgrade flags. Canonical execution remains
+required because source-only tests cannot prove which same-version wheel an
+installed environment loaded.
+
+The production complete-deal scenario remains unchanged at
+`e2e-tests/tests/e2e/roles/scenarios/bare_metal/test_bare_metal_deal.py`.
+Its controlled-dependency orchestration suite moves from `tests/unit` to
+`tests/integration`: it executes the real scenario and observes command order,
+cleanup and fail-closed behavior, so it is integration coverage under
+`docs/development/TESTING.md` even though external boundaries are substituted.
+Only pure access-proof, receipt and fulfillment-envelope parsing cases remain
+in the unit module.
+
+The two placements run together through the existing test target:
+
+```bash
+make -C e2e-tests test \
+  PYTEST_ARGS='-q tests/unit/test_bare_metal_scenario_boundaries.py tests/integration/test_bare_metal_scenario_boundaries.py'
+```
+
+| Existing case | Owning coverage after placement |
+|---|---|
+| Complete controlled-dependency scenario | Offline integration |
+| Publication while leased and after release | Offline integration |
+| Frozen key and host-pinning arguments reach both SSH calls | Offline integration |
+| Stale open listing while leased fails | Offline integration |
+| Failure after purchase still requests teardown | Offline integration |
+| Settlement precedes delivery | Offline integration |
+| No-op settlement fails | Offline integration |
+| Privileged or incomplete session proof fails | Offline integration, plus direct unit parsing cases |
+| Privilege proof is judged before teardown | Offline integration |
+| Ordinary unprivileged session passes | Offline integration, plus direct unit parsing case |
+| Receipt envelope identifies the leased host | Direct unit validation |
+| Receipt/executor host contradiction fails | Direct unit validation |
+| Fulfillment state comes from the declared envelope | Direct unit validation |
+| Lease never reaches active | Offline integration |
+| Terminal fulfillment failure is reported directly | Offline integration |
+| Teardown failure is reported directly | Offline integration |
+| Asserted run-log events are produced by the real run log | Offline integration |
+| Discovery is bound to the configured registry and authority | Offline integration |
+
+This placement introduces no second production harness and removes none of the
+adverse-path assertions. The existing listing-contract and SSH-probe unit suites
+continue to own exhaustive listing-envelope, SSH classification, key isolation
+and host-trust transformations. Actual-host setup, account mutation, management
+probing and rollback remain operator-controlled infrastructure responsibilities;
+they are not replaced by the offline integration suite.
+
 ## Rejected alternatives
 
 ### Configurable registry quorum
