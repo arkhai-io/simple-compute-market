@@ -45,8 +45,8 @@ and is immutable; it is a storefront fact about a bound listing rather than a ca
 copy of a site fact, and the two MUST NOT be conflated. Backing MUST NOT be inferred from absent
 capacity data, an empty projection, or a stale generation.
 
-A projection whose producer declares backing for no pool it projects predates the
-declaration. Every pool in such a projection MUST resolve as capacity-backed under an explicit,
+A producer that declares backing for none of the pools it projects predates the
+declaration itself. Every pool in such a projection MUST resolve as capacity-backed under an explicit,
 logged compatibility rule, because every pool was admissible before the declaration
 existed. That rule is retained until a future change acquires a reliable signal that
 no producer relies on it; self-hosted sites may lag without bound, so no release count

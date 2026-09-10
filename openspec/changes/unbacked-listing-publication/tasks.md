@@ -83,8 +83,10 @@ than re-deciding them.
       execution-less seller, and the second would let a pool proving no VM
       delivery advertise VMs.
 - [ ] 3.2 Leave offering-mode resolution from the frozen registration unchanged,
-      and leave the `offer_resource.virtualization_type` equality requirement
-      intact for every listing.
+      and leave the `listing_resource.offering_mode` equality requirement
+      intact for every listing. This change lands after
+      `settle-listing-vocabulary`, so the published shape and its offering-mode
+      field carry their settled names.
 - [ ] 3.3 Scope the site-pinned claim-routing requirement to capacity-backed
       listings.
 - [ ] 3.4 Scope capacity-availability reconciliation and close-before-reopen to
@@ -103,9 +105,14 @@ than re-deciding them.
 - [ ] 3.6 Add the requirement that an unbacked listing has no source-inventory
       record on the storefront: no derived-listing row, no local resource table.
       This does not exempt it from source-publication reconciliation per 3.5.
-- [ ] 3.7 Add a normative scenario for the backing transition: projected backing
-      changes, the old listing closes, a new listing binds with a different
-      durable identity and the new discriminator.
+- [ ] 3.7 Add a normative scenario for the backing transition as close-and-republish:
+      the seller's supply moves to a pool with different backing, the listing derived
+      from the old pool closes, and a new listing binds from the new pool with a
+      different durable identity and the new discriminator. Write it as a move
+      between pools rather than as a changed value on one — pool backing is fixed at
+      creation, so the transition cannot arrive as a mutation of an existing pool's
+      declaration, and a scenario written that way would describe a path the code
+      must refuse. Task 4.4 implements this transition; the two must agree.
 - [ ] 3.8 Scope `openspec/specs/site-capacity/spec.md`'s "Storefront
       capacity-claim identity" requirement. Its prose says a pool-only listing
       "produces a pool-scoped reservation claim" unconditionally; its four
@@ -156,13 +163,13 @@ than re-deciding them.
 
 ## 5. Published shape and filter
 
-- [ ] 5.1 Publish backing in `offer_resource`.
+- [ ] 5.1 Publish backing in `listing_resource`.
 - [ ] 5.2 Republish existing listings carrying explicit `capacity_backing: backed` before
       adding the filter. They are semantically known to be backed and must not
       depend on an absent field to be classified.
 - [ ] 5.3 Add an exact `on_missing: fail` backing filter to
       `core/registry/filter-spec.yaml`, matching the convention every other
-      `offer_resource` filter uses. Permissive matching is wrong for a
+      `listing_resource` filter uses. Permissive matching is wrong for a
       discriminator: a buyer asking for unbacked listings would otherwise receive
       every legacy backed listing that predates the field.
 - [ ] 5.4 Confirm an unbacked listing validates against the existing `anyOf` on
