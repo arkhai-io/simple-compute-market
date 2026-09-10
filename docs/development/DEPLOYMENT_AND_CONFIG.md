@@ -448,10 +448,12 @@ admin principals, public URL, and database path remain ordinary role inputs;
 trusted sites, wallet/chains, and hosted financial authority are not required.
 The factory uses its environment-and-file contract, not a Dynaconf profile loader.
 
-Without `BARE_METAL_STOREFRONT_CONTACT_OFFERS_PATH`, server startup performs no
-file publication. `bare-metal-storefront publish-contacts --offers PATH` runs an
-explicit reconciliation; setting that environment variable runs the same
-reconciliation before serving on each startup. Both require:
+If neither `BARE_METAL_STOREFRONT_CONTACT_OFFERS_PATH` nor
+`BARE_METAL_STOREFRONT_CONTACT_DECLARATIONS_PATH` is configured, server startup
+performs no file publication. `bare-metal-storefront publish-contacts --offers PATH`
+runs an explicit synthetic-file reconciliation; setting
+`BARE_METAL_STOREFRONT_CONTACT_OFFERS_PATH` runs the same reconciliation before
+serving on each startup. Both synthetic publication entry points require:
 
 - `BARE_METAL_STOREFRONT_REGISTRY_URL` and
   `BARE_METAL_STOREFRONT_REGISTRY_AUTHORITY`;
@@ -481,6 +483,60 @@ Local wheel, HTTP, or chart checks do not establish a published release or an
 executed image. Image dependency provenance and live activation require separate
 verification. The [publication architecture](../../openspec/specs/storefront-publication/architecture.md#synthetic-contact-file-publication)
 owns retry and identity semantics.
+
+### Bare-metal general declaration publication
+
+`bare-metal-storefront publish-declarations --offers PATH` explicitly publishes
+one strict schema-3 `ContactDeclarationOffers` file. Setting
+`BARE_METAL_STOREFRONT_CONTACT_DECLARATIONS_PATH` runs the same reconciliation
+before serving on each startup. Without either contact file environment variable,
+startup publishes no file. Configuring both this path and
+`BARE_METAL_STOREFRONT_CONTACT_OFFERS_PATH` fails before either publishes.
+The existing `publish-contacts` command, v1/v2 synthetic examples and 128-KiB,
+one-to-five-offer loader remain unchanged.
+
+General files contain 1–256 exact `{declaration, profile}` entries and at most
+1048576 UTF-8 bytes, including whitespace. The domain parser rejects duplicate
+keys, unknown fields, coercion and unsupported versions. Both listing and
+declaration IDs must be unique in the batch; listing IDs start with
+`declared-contact-` and a nonempty identifier suffix. The packaged
+[TEST declaration example](../../domains/bare_metal/storefront/examples/contact-declarations.json)
+contains six synthetic third-party declarations, no private contacts and no
+physical registrations. All machine facts remain operator assertions.
+
+Use the same introduction-only settlement composition and signed registry
+URL/authority/principal/write-key inputs as synthetic file publication. The
+selected profile must explicitly configure `context_contract: "accepted-listing.v1"`
+and the exact two-sided `contact-delivery.v1` policy. Its public `terms` must
+contain this literal, which also becomes the listing description:
+
+> CONTACT-ONLY: machine facts are operator declarations; ownership and availability are unverified; no payment or physical commitment.
+
+The publisher refuses missing notice rather than altering authored terms. A
+bounded private seller `contact_payload` and strict schema-2
+`BARE_METAL_STOREFRONT_DELIVERY` configuration (seller's own route and SMTP) are
+required; legacy seller delivery callbacks are not admitted. Authored shareable
+text may use the bounded `{"text": "..."}` payload. Missing methods or routes
+are never invented. These private values belong only in role-owned secret
+configuration, never the declaration file, public profiles or registry requests.
+Publication does not deliver mail or authorize disclosure. Buyers consuming
+context-eligible options need an acceptance adapter that validates the advertised
+context contract; the generic buyer's default exact-param comparison refuses the
+additional context digest rather than silently accepting it.
+
+The entire file passes public/profile/privacy, signed `vms.compute/1` schema and
+existing-ID preflight before listing writes or registry POSTs. Runtime database
+initialization and authenticated schema reads remain permitted. Discovery stays
+`vms.compute`; negotiation stays `bare_metal.v1`. There is no site, pool, Physical
+Resource, machine or physical-host authority behind a declaration.
+
+Keep the SQLite volume after partial failure and retry identical intent. All new
+intents are durable before the first registry POST, but local transactions are
+per listing, not per file. Every invocation upserts all intended IDs with bounded
+retry. A confirmed count does not rule out other remote effects. Changed intent
+requires a new listing ID; closed/paused IDs refuse. Omitted IDs are not withdrawn,
+and no accepted or historical intent is backfilled. This startup option is not a
+periodic publisher, rollout command, or qualification of a release or deployment.
 
 ### Bare-metal hosted role configuration
 

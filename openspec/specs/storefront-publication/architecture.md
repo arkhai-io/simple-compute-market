@@ -172,3 +172,28 @@ and [deployment inputs](../../../docs/development/DEPLOYMENT_AND_CONFIG.md#bare-
 A `ContactDeclaration` records seller assertions, including third-party machine facts, not verified ownership, availability or physical inventory registration. Its local listing projection has a declaration ID and no machine or physical-host ID. The immutable binding has null site, pool and Physical Resource authority. The schema-3 intent freezes the declaration and exact context-eligible options; admission compares both to the local listing before persistence. Site-backed invariants and synthetic historical intents remain distinct.
 
 The schema-3 `ContactDeclarationOffers` bytes parser bounds a general input batch to 256 entries and one MiB. These are finite parsing/preflight safety bounds, not capacity limits. The `declared-contact-` listing namespace separates general file input from historical synthetic IDs; database ownership/conflict checks remain the publisher's responsibility. Parsing has no file I/O or publication side effects and does not enroll startup into publication. The existing v1/v2 synthetic loaders remain unchanged. See the [exact carriers](../contact-exchange-settlement/spec.md#general-declaration-file-boundary) and [acceptance integrity path](../contact-exchange-settlement/spec.md#accepted-context-and-integrity).
+
+## General declaration file publication
+
+`publish-declarations` consumes the domain's bounded schema-3 carrier separately
+from the v1/v2 synthetic fixture loader. Public machine facts may describe
+third-party machines; they remain operator assertions, never physical admission
+or verified ownership/availability. A fixed contact-only notice appears in the
+registry description and must already occur in the selected public profile terms.
+The publisher does not rewrite authored terms or invent contacts from machine facts.
+
+The public declaration, exact context-eligible contact option and null physical
+authority compose through the existing immutable admission boundary. The whole
+file passes configuration, configured-private-literal, signed registry schema and
+existing-ID preflight before listing writes or registry POSTs. Initialization and
+read-only schema acquisition remain outside that gate. Public discovery projects
+flat machine fields into `vms.compute/1`; the local artifact stays `bare_metal.v1`.
+
+The declaration publisher shares the synthetic path's per-listing transactions
+and at-most-three-attempt signed upsert lifecycle. Every new intent is durable
+before the first POST. Database failures can leave earlier local intent; registry
+failures can leave partial or uncertain remote effects. Restart with unchanged
+intent reuses identities. Neither omission nor startup withdraws, backfills or
+reinterprets historical work. Physical publication retains its independent
+trusted-site checks. The [configuration contract](../../../docs/development/DEPLOYMENT_AND_CONFIG.md#bare-metal-general-declaration-publication)
+defines explicit command/startup enrollment and profile prerequisites.

@@ -8,7 +8,7 @@ from pathlib import Path
 
 import typer
 
-from .contact_offers import run_contact_publication
+from .contact_offers import run_contact_publication, run_declaration_publication
 
 app = typer.Typer(no_args_is_help=True)
 
@@ -66,6 +66,19 @@ def publish_contacts_cmd(
     """Reconcile immutable contact offers with the configured signed registry."""
     try:
         result = run_contact_publication(offers)
+    except RuntimeError as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(1) from None
+    typer.echo(json.dumps(result, sort_keys=True))
+
+
+@app.command("publish-declarations")
+def publish_declarations_cmd(
+    offers: Path | None = typer.Option(None, "--offers", help="Strict public contact declaration JSON file."),
+) -> None:
+    """Publish operator declarations without physical inventory authority."""
+    try:
+        result = run_declaration_publication(offers)
     except RuntimeError as exc:
         typer.echo(str(exc), err=True)
         raise typer.Exit(1) from None

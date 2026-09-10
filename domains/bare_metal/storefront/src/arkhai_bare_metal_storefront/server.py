@@ -29,7 +29,13 @@ from market_storefront_kit import (
 
 from .api import _authorize_introduction_request
 from .api import router as http_router
-from .contact_offers import OFFERS_PATH_ENV, publish_contact_offers
+from .contact_offers import (
+    DECLARATIONS_PATH_ENV,
+    OFFERS_PATH_ENV,
+    ContactPublicationError,
+    publish_contact_declarations,
+    publish_contact_offers,
+)
 from .delivery import build_contact_delivery_worker
 from .domain_runtime import get_market_domain_contract
 from .introduction_routes import build_bare_metal_introduction_service
@@ -55,6 +61,12 @@ def _negotiation_watchdog_policy() -> NegotiationWatchdogPolicy:
 
 
 async def _start_runtime(runtime: BareMetalStorefrontRuntime) -> None:
+    offers_path = os.environ.get(OFFERS_PATH_ENV)
+    declarations_path = os.environ.get(DECLARATIONS_PATH_ENV)
+    if offers_path and declarations_path:
+        raise ContactPublicationError("conflicting_publication_paths")
+    if declarations_path:
+        await publish_contact_declarations(runtime, declarations_path)
     await runtime.db.contact_transaction(lambda conn: recover(conn, int(time.time())))
     composition = runtime.settlement_composition
     if composition is not None and "contact-exchange.v1" in composition.enabled_mechanisms:
@@ -65,8 +77,8 @@ async def _start_runtime(runtime: BareMetalStorefrontRuntime) -> None:
             task = asyncio.create_task(worker.run())
             runtime.contact_delivery_tasks.add(task)
             task.add_done_callback(runtime.contact_delivery_tasks.discard)
-    if path := os.environ.get(OFFERS_PATH_ENV):
-        await publish_contact_offers(runtime, path)
+    if offers_path:
+        await publish_contact_offers(runtime, offers_path)
     set_stage_event_db_path(runtime.db.db_path)
     policy = _negotiation_watchdog_policy()
     asyncio.create_task(

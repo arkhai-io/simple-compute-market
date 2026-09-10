@@ -1,4 +1,4 @@
-"""Opt-in synthetic contact offers with immutable local publication intent."""
+"""Opt-in contact file publication with immutable local intent."""
 
 from __future__ import annotations
 
@@ -12,6 +12,12 @@ from typing import Any, Literal
 
 import httpx
 from arkhai_bare_metal import BareMetalListing
+from arkhai_bare_metal.contact_contract import (
+    MAX_DECLARATION_FILE_BYTES,
+    ContactDeclarationOffer,
+    ContactDeclarationOffers,
+    parse_contact_declaration_offers,
+)
 from jsonschema import Draft202012Validator
 from market_contact_exchange import (
     MECHANISM,
@@ -19,19 +25,31 @@ from market_contact_exchange import (
     contains_contact_value,
 )
 from market_contact_exchange.delivery_contract import (
+    DELIVERY_POLICY,
     ContactDeliveryConfig,
     DeliveryPolicy,
 )
+from market_contact_exchange.source_contract import CONTEXT_CONTRACT
 from market_identity import Identity, TrustedIdentitySet
 from market_settlement_runtime import SettlementPublicationClause
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 from referencing import Registry
 from registry_client import ListingRequest, RegistryClientError, SyncRegistryClient
 
+from .contact_context import (
+    ContactDeclarationSource,
+    ContactPublicationIntent,
+    declaration_listing,
+)
 from .runtime import BareMetalStorefrontRuntime, build_runtime_from_environment
 
 NOTICE = "SYNTHETIC TEST OFFER: no supply, payment, or provisioning."
 OFFERS_PATH_ENV = "BARE_METAL_STOREFRONT_CONTACT_OFFERS_PATH"
+DECLARATIONS_PATH_ENV = "BARE_METAL_STOREFRONT_CONTACT_DECLARATIONS_PATH"
+DECLARATION_NOTICE = (
+    "CONTACT-ONLY: machine facts are operator declarations; ownership and availability "
+    "are unverified; no payment or physical commitment."
+)
 
 
 class ContactOffer(BaseModel):
@@ -110,11 +128,31 @@ def load_contact_offers(path: str | Path) -> ContactOffers:
         raise RuntimeError("contact publication: invalid offer file") from None
 
 
+def load_contact_declarations(path: str | Path) -> ContactDeclarationOffers:
+    try:
+        with Path(path).open("rb") as stream:
+            return parse_contact_declaration_offers(stream.read(MAX_DECLARATION_FILE_BYTES + 1))
+    except (OSError, ValueError):
+        raise ContactPublicationError("invalid_declaration_file") from None
+
+
 @dataclass(frozen=True)
 class PreparedContactOffer:
-    offer: ContactOffer
+    offer: ContactOffer | ContactDeclarationOffer
     request: ListingRequest
     intent: dict[str, Any]
+
+    @property
+    def listing_id(self) -> str:
+        if isinstance(self.offer, ContactDeclarationOffer):
+            return self.offer.declaration.listing_id
+        return self.offer.listing_id
+
+    @property
+    def listing(self) -> BareMetalListing:
+        if isinstance(self.offer, ContactDeclarationOffer):
+            return declaration_listing(self.offer.declaration)
+        return self.offer.listing()
 
 
 class ContactPublicationError(RuntimeError):
@@ -214,23 +252,111 @@ async def prepare_contact_offers(
     return tuple(prepared)
 
 
+async def prepare_contact_declarations(
+    runtime: BareMetalStorefrontRuntime, document: ContactDeclarationOffers,
+) -> tuple[PreparedContactOffer, ...]:
+    # Revalidate Python callers too: frozen models may contain mutable lists.
+    try:
+        document = ContactDeclarationOffers.model_validate(document.model_dump(mode="json"))
+    except (TypeError, ValueError):
+        raise ContactPublicationError("invalid_declaration_file") from None
+    composition = runtime.settlement_composition
+    if not runtime.introduction_only or composition is None:
+        raise ContactPublicationError("introduction_only_composition_required")
+    if runtime.introduction_delivery is not None:
+        raise ContactPublicationError("delivery_must_be_absent")
+    try:
+        delivery = ContactDeliveryConfig.model_validate(runtime.contact_delivery_config)
+        section = ContactSettlementConfig.model_validate(composition.config.mechanisms["contact"])
+    except (TypeError, ValueError):
+        raise ContactPublicationError("delivery_configuration_unavailable") from None
+    if not section.contact_payload:
+        raise ContactPublicationError("contact_configuration_incomplete")
+    private_values = [*section.contact_payload.values(), delivery.seller_route.address,
+                      delivery.smtp.username, delivery.smtp.password, delivery.smtp.host,
+                      delivery.smtp.sender]
+    prepared = []
+    now = datetime.now(timezone.utc)
+    for offer in document.offers:
+        declaration = offer.declaration
+        profile = section.profiles.get(offer.profile)
+        if profile is None or DECLARATION_NOTICE not in profile.terms:
+            raise ContactPublicationError("declaration_profile_notice_required")
+        if profile.context_contract != CONTEXT_CONTRACT or profile.delivery_policy != DELIVERY_POLICY:
+            raise ContactPublicationError("context_profile_required")
+        public_offer = {
+            **declaration_listing(declaration).model_dump(mode="json", exclude_none=True),
+            **declaration.machine_details.model_dump(mode="json"),
+            "name": declaration.name, "description": DECLARATION_NOTICE,
+        }
+        try:
+            payload = await composition.publication_payload(
+                candidate=public_offer,
+                clauses=[SettlementPublicationClause(
+                    mechanism=MECHANISM, asset="introduction",
+                    mechanism_input={"profile": offer.profile},
+                )],
+                offer_expires_at=now + timedelta(hours=1), funding_deadlines={},
+                fulfillment_deadline=now + timedelta(hours=1),
+            )
+            if payload.accepted_escrows or len(payload.settlement_options) != 1:
+                raise ValueError("contact option unavailable")
+            intent = ContactPublicationIntent.model_validate({
+                "schema_version": 3, "declaration": declaration.model_dump(mode="json"),
+                "settlement_options": list(payload.settlement_options),
+            })
+            if any(option.params.claimant_principal != runtime.seller_principal
+                   for option in intent.settlement_options):
+                raise ValueError("option owner mismatch")
+        except (TypeError, ValueError):
+            raise ContactPublicationError("contact_option_unavailable") from None
+        request = ListingRequest(
+            listing_id=declaration.listing_id, storefront_url=runtime.storefront_url,
+            offer=public_offer, accepted_escrows=[],
+            settlement_options=[option.model_dump(mode="json") for option in intent.settlement_options],
+        )
+        public_intent = intent.model_dump(mode="json")
+        if any(contains_contact_value({"request": request.to_dict(), "intent": public_intent}, value)
+               for value in private_values):
+            raise ContactPublicationError("private_contact_in_public_offer")
+        prepared.append(PreparedContactOffer(offer, request, public_intent))
+    return tuple(prepared)
+
+
 async def _check_existing(runtime: BareMetalStorefrontRuntime, item: PreparedContactOffer) -> bool:
-    row = await runtime.db.load_listing(listing_id=item.offer.listing_id)
+    row = await runtime.db.load_listing(listing_id=item.listing_id)
     if row is None:
         return False
-    binding = await runtime.db.load_listing_binding(listing_id=item.offer.listing_id)
-    local_offer = await runtime.db.load_bare_metal_listing_payload(listing_id=item.offer.listing_id)
+    binding = await runtime.db.load_listing_binding(listing_id=item.listing_id)
+    if isinstance(item.offer, ContactDeclarationOffer):
+        try:
+            if binding is None:
+                raise ValueError("missing binding")
+            source = ContactDeclarationSource.model_validate_json(binding.source_envelope_json)
+            if (
+                source.declaration_id != item.offer.declaration.declaration_id
+                or source.publication_intent.model_dump(mode="json") != item.intent
+                or binding.pool_id is not None or binding.physical_resource_id is not None
+                or binding.binding.offering_mode != "bare_metal"
+                or binding.binding.domain_identity != runtime.domain.identity
+                or binding.binding.contract_major != runtime.domain.contract_version.major
+                or binding.binding.contract_minor != runtime.domain.contract_version.minor
+            ):
+                raise ValueError("binding mismatch")
+        except (TypeError, ValueError):
+            raise ContactPublicationError("immutable_intent_conflict") from None
+    local_offer = await runtime.db.load_bare_metal_listing_payload(listing_id=item.listing_id)
     if (
         binding is None or binding.site_id is not None
         or json.loads(binding.source_envelope_json).get("publication_intent") != item.intent
         or Identity.model_validate(row["seller_principal"]) != runtime.seller_principal
-        or local_offer != item.offer.listing()
+        or local_offer != item.listing
         or row.get("accepted_escrows")
         or row.get("settlement_options") != item.request.settlement_options
     ):
-        raise ContactPublicationError("immutable_intent_conflict", listing_id=item.offer.listing_id)
+        raise ContactPublicationError("immutable_intent_conflict", listing_id=item.listing_id)
     if row.get("status") != "open" or row.get("paused"):
-        raise ContactPublicationError("local_offer_inactive", listing_id=item.offer.listing_id)
+        raise ContactPublicationError("local_offer_inactive", listing_id=item.listing_id)
     return True
 
 
@@ -239,6 +365,13 @@ async def reconcile_contact_offers(
 ) -> dict[str, Any]:
     """Validate all inputs, persist local intent, then retry stable registry upserts."""
     prepared = await prepare_contact_offers(runtime, document)
+    return await _reconcile_prepared(runtime, prepared, registry)
+
+
+async def _reconcile_prepared(
+    runtime: BareMetalStorefrontRuntime, prepared: tuple[PreparedContactOffer, ...],
+    registry: SyncRegistryClient,
+) -> dict[str, Any]:
     try:
         spec = await asyncio.to_thread(registry.get_filter_spec)
         if (spec.schema_id, spec.schema_version) != ("vms.compute", 1):
@@ -254,9 +387,9 @@ async def reconcile_contact_offers(
     for item, present in zip(prepared, existing, strict=True):
         if not present:
             await runtime.db.upsert_bare_metal_listing(
-                listing_id=item.offer.listing_id, status="open", created_at=now, updated_at=now,
+                listing_id=item.listing_id, status="open", created_at=now, updated_at=now,
                 seller_principal=runtime.seller_principal, storefront_url=runtime.storefront_url,
-                listing=item.offer.listing(), accepted_escrows=[],
+                listing=item.listing, accepted_escrows=[],
                 settlement_options=item.request.settlement_options,
                 site_id=None, pool_id=None, physical_resource_id=None,
                 publication_intent=item.intent,
@@ -270,18 +403,18 @@ async def reconcile_contact_offers(
         for attempt in range(3):
             try:
                 response = await asyncio.to_thread(registry.publish_listing, item.request)
-                if response.get("listing_id") != item.offer.listing_id or response.get("status") != "open":
-                    raise ContactPublicationError("registry_identity_or_status", confirmed=confirmed, listing_id=item.offer.listing_id)
+                if response.get("listing_id") != item.listing_id or response.get("status") != "open":
+                    raise ContactPublicationError("registry_identity_or_status", confirmed=confirmed, listing_id=item.listing_id)
                 confirmed += 1
                 break
             except (httpx.TransportError, RegistryClientError) as exc:
                 retryable = isinstance(exc, httpx.TransportError) or getattr(exc, "status_code", 0) >= 500
                 if not retryable or attempt == 2:
-                    raise ContactPublicationError("registry_publish", confirmed=confirmed, listing_id=item.offer.listing_id) from None
+                    raise ContactPublicationError("registry_publish", confirmed=confirmed, listing_id=item.listing_id) from None
                 await asyncio.sleep(0.25 * (2 ** attempt))
             except (TypeError, ValueError):
-                raise ContactPublicationError("registry_response_authentication", confirmed=confirmed, listing_id=item.offer.listing_id) from None
-    return {"status": "published", "confirmed": confirmed, "listing_ids": [item.offer.listing_id for item in prepared]}
+                raise ContactPublicationError("registry_response_authentication", confirmed=confirmed, listing_id=item.listing_id) from None
+    return {"status": "published", "confirmed": confirmed, "listing_ids": [item.listing_id for item in prepared]}
 
 
 async def publish_contact_offers(runtime: BareMetalStorefrontRuntime, path: str | Path) -> dict[str, Any]:
@@ -297,3 +430,26 @@ def run_contact_publication(path: str | Path | None = None) -> dict[str, Any]:
     if not selected_path:
         raise ContactPublicationError("offer_path_required")
     return asyncio.run(publish_contact_offers(build_runtime_from_environment(), selected_path))
+
+
+async def reconcile_contact_declarations(
+    runtime: BareMetalStorefrontRuntime, document: ContactDeclarationOffers,
+    registry: SyncRegistryClient,
+) -> dict[str, Any]:
+    prepared = await prepare_contact_declarations(runtime, document)
+    return await _reconcile_prepared(runtime, prepared, registry)
+
+
+async def publish_contact_declarations(
+    runtime: BareMetalStorefrontRuntime, path: str | Path,
+) -> dict[str, Any]:
+    prepared = await prepare_contact_declarations(runtime, load_contact_declarations(path))
+    with contact_registry(runtime) as registry:
+        return await _reconcile_prepared(runtime, prepared, registry)
+
+
+def run_declaration_publication(path: str | Path | None = None) -> dict[str, Any]:
+    selected_path = path or os.environ.get(DECLARATIONS_PATH_ENV)
+    if not selected_path:
+        raise ContactPublicationError("declaration_path_required")
+    return asyncio.run(publish_contact_declarations(build_runtime_from_environment(), selected_path))

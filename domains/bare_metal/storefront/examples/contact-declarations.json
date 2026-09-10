@@ -1,0 +1,107 @@
+{
+  "schema_version": 3,
+  "offers": [
+    {
+      "declaration": {
+        "schema_version": 1,
+        "listing_id": "declared-contact-test-1",
+        "declaration_id": "test-declaration-1",
+        "name": "SYNTHETIC TEST third-party declaration 1",
+        "machine_details": {
+          "gpu_model": "H100",
+          "gpu_count": 8,
+          "vcpu_count": 128,
+          "ram_gb": 1024,
+          "disk_gb": 8000,
+          "region": "us-west"
+        }
+      },
+      "profile": "default"
+    },
+    {
+      "declaration": {
+        "schema_version": 1,
+        "listing_id": "declared-contact-test-2",
+        "declaration_id": "test-declaration-2",
+        "name": "SYNTHETIC TEST third-party declaration 2",
+        "machine_details": {
+          "gpu_model": "A100",
+          "gpu_count": 4,
+          "vcpu_count": 64,
+          "ram_gb": 512,
+          "disk_gb": 4000,
+          "region": "eu-central"
+        }
+      },
+      "profile": "default"
+    },
+    {
+      "declaration": {
+        "schema_version": 1,
+        "listing_id": "declared-contact-test-3",
+        "declaration_id": "test-declaration-3",
+        "name": "SYNTHETIC TEST third-party declaration 3",
+        "machine_details": {
+          "gpu_model": "L40S",
+          "gpu_count": 2,
+          "vcpu_count": 32,
+          "ram_gb": 256,
+          "disk_gb": 2000,
+          "region": "us-east"
+        }
+      },
+      "profile": "default"
+    },
+    {
+      "declaration": {
+        "schema_version": 1,
+        "listing_id": "declared-contact-test-4",
+        "declaration_id": "test-declaration-4",
+        "name": "SYNTHETIC TEST third-party declaration 4",
+        "machine_details": {
+          "gpu_model": "RTX 4090",
+          "gpu_count": 1,
+          "vcpu_count": 16,
+          "ram_gb": 128,
+          "disk_gb": 1000,
+          "region": "ap-southeast"
+        }
+      },
+      "profile": "default"
+    },
+    {
+      "declaration": {
+        "schema_version": 1,
+        "listing_id": "declared-contact-test-5",
+        "declaration_id": "test-declaration-5",
+        "name": "SYNTHETIC TEST third-party declaration 5",
+        "machine_details": {
+          "gpu_model": "T4",
+          "gpu_count": 2,
+          "vcpu_count": 24,
+          "ram_gb": 96,
+          "disk_gb": 500,
+          "region": "eu-west"
+        }
+      },
+      "profile": "default"
+    },
+    {
+      "declaration": {
+        "schema_version": 1,
+        "listing_id": "declared-contact-test-6",
+        "declaration_id": "test-declaration-6",
+        "name": "SYNTHETIC TEST third-party declaration 6",
+        "machine_details": {
+          "gpu_model": "H100",
+          "gpu_count": 8,
+          "vcpu_count": 128,
+          "ram_gb": 1024,
+          "disk_gb": 8000,
+          "region": "us-west"
+        }
+      },
+      "profile": "default"
+    }
+  ]
+}

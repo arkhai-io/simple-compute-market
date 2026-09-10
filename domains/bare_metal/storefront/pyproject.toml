@@ -62,3 +62,4 @@ asyncio_default_fixture_loop_scope = "function"
 
 [tool.hatch.build.targets.wheel.force-include]
 "examples/contact-offers.json" = "arkhai_bare_metal_storefront/examples/contact-offers.json"
+"examples/contact-declarations.json" = "arkhai_bare_metal_storefront/examples/contact-declarations.json"
