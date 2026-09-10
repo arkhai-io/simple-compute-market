@@ -72,5 +72,9 @@ affinity: {}
 #     apiKeySecret: {name: contact-registry-write, key: api-key}
 contactOffers: null
 
+# Opt-in general declarations; the same reference shape as contactOffers.
+# The modes are mutually exclusive. File contents are validated by the runtime.
+contactDeclarations: null
+
 # Optional private two-sided contact delivery settings; no default enrollment.
 deliveryConfigSecret: null

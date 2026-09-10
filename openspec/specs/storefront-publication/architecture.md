@@ -198,6 +198,21 @@ reinterprets historical work. Physical publication retains its independent
 trusted-site checks. The [configuration contract](../../../docs/development/DEPLOYMENT_AND_CONFIG.md#bare-metal-general-declaration-publication)
 defines explicit command/startup enrollment and profile prerequisites.
 
+The chart selects general publication through default-null `contactDeclarations`,
+separately from historical `contactOffers`. Both hooks use the same public-file
+and independent registry trust/write-key references, mounts, site exclusion and
+startup allowance. Their mutual exclusion keeps the runtime loader choice explicit
+without inspecting file contents in Helm. The general hook sets only
+`BARE_METAL_STOREFRONT_CONTACT_DECLARATIONS_PATH`, and requires its ConfigMap and
+API-key references to name an addressable object and a data key Kubernetes can
+project as a file, excluding the reserved `.` and `..`-prefixed keys. The historical
+hook's and the delivery reference's checks are unchanged, so they still accept
+values the general hook refuses.
+Declaration and profile validation remain in the installed runtime.
+Private settlement and delivery configuration never enter the public file or chart
+values. Default physical, runtime-only and historical publication renders retain
+their bytes when the general hook is absent.
+
 ## Local publication-to-exchange qualification
 
 The installed general declaration command and signed registry client form the

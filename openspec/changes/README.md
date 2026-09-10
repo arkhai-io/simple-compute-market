@@ -110,6 +110,7 @@ contact-exchange mechanism → contact-only-bare-metal-runtime → image/live qu
 two-sided-contact-delivery → contact-source-contracts ┬→ general-contact-declaration-publication
                                                     └→ contact-source-exchange
 general publication + reviewed exchange → qualify-declared-contact-exchange (archived; local source qualified)
+general-contact-declaration-publication → add-contact-declarations-chart (archived; explicit chart enrollment)
 ```
 
 The runtime and synthetic publisher do not depend on physical-site fulfillment
@@ -123,6 +124,7 @@ qualification; they also do not satisfy it.
 | [`general-contact-declaration-publication`](general-contact-declaration-publication/) | source reviewed; permanent behavior promoted; not activated | Explicit general declaration file/CLI/startup publication through immutable unbacked intent, whole-file preflight and bounded signed registry retries; historical synthetic and physical paths retained; no activation claim |
 | [`contact-source-exchange`](contact-source-exchange/) | source reviewed; permanent behavior promoted; not activated | Whole-text seller authoring, immutable reviewed capture and recipient-specific rendering; signed HTTP/SQLite restart, lost response, deterministic fences and fake-SMTP evidence; no inbox or exactly-once claim |
 | [`qualify-declared-contact-exchange`](archive/2026-09-10-qualify-declared-contact-exchange/) | archived; local source qualification only | Installed six-declaration publication through signed discovery, exact retained TEST acceptance, reviewed capture, restart and independent frozen recipient copies; no release or activation claim |
+| [`add-contact-declarations-chart`](archive/2026-09-10-add-contact-declarations-chart/) | archived; reviewed source hook and permanent documentation | Explicit general declaration ConfigMap/registry references, exclusive startup selection and historical render-byte parity; no runtime carrier, release or activation change |
 
 ## Lesser goal — POOLS capacity and fulfillment foundation
 

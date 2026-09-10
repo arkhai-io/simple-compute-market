@@ -59,7 +59,7 @@
     },
     "alkahestEnabled": {"type": "boolean"},
     "settlementConfigSecret": {"$ref": "#/definitions/secretReference"},
-    "deliveryConfigSecret": {"anyOf": [{"type": "null"}, {"$ref": "#/definitions/deliverySecretReference"}]},
+    "deliveryConfigSecret": {"anyOf": [{"type": "null"}, {"$ref": "#/definitions/resourceDataReference"}]},
     "databasePath": {"type": "string", "minLength": 1, "pattern": "^/"},
     "persistence": {
       "type": "object",
@@ -126,6 +126,38 @@
         }
       ]
     },
+    "contactDeclarations": {
+      "allOf": [
+        {"$ref": "#/properties/contactOffers"},
+        {
+          "anyOf": [
+            {"type": "null"},
+            {
+              "type": "object",
+              "properties": {
+                "configMap": {
+                  "allOf": [
+                    {"$ref": "#/definitions/resourceDataReference"},
+                    {"$ref": "#/definitions/projectableDataKey"}
+                  ]
+                },
+                "registry": {
+                  "type": "object",
+                  "properties": {
+                    "apiKeySecret": {
+                      "allOf": [
+                        {"$ref": "#/definitions/resourceDataReference"},
+                        {"$ref": "#/definitions/projectableDataKey"}
+                      ]
+                    }
+                  }
+                }
+              }
+            }
+          ]
+        }
+      ]
+    },
     "resources": {"type": "object"},
     "nodeSelector": {"type": "object"},
     "tolerations": {"type": "array"},
@@ -133,14 +165,19 @@
   },
   "allOf": [
     {
-      "if": {
+      "not": {
+        "required": ["contactOffers", "contactDeclarations"],
         "properties": {
-          "contactOffers": {
-            "type": "object"
-          }
-        },
-        "required": [
-          "contactOffers"
+          "contactOffers": {"type": "object"},
+          "contactDeclarations": {"type": "object"}
+        }
+      }
+    },
+    {
+      "if": {
+        "anyOf": [
+          {"required": ["contactOffers"], "properties": {"contactOffers": {"type": "object"}}},
+          {"required": ["contactDeclarations"], "properties": {"contactDeclarations": {"type": "object"}}}
         ]
       },
       "then": {
@@ -188,11 +225,22 @@
         "pullPolicy": {"enum": ["Always", "IfNotPresent", "Never"]}
       }
     },
-    "deliverySecretReference": {
+    "resourceDataReference": {
       "type": "object", "additionalProperties": false, "required": ["name", "key"],
       "properties": {
         "name": {"type": "string", "maxLength": 253, "pattern": "^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)*$"},
         "key": {"type": "string", "minLength": 1, "maxLength": 253, "pattern": "^[A-Za-z0-9_.-]+$"}
+      }
+    },
+    "projectableDataKey": {
+      "description": "Overlay for a data key the pod projects as a file: Kubernetes rejects '.' and any key starting with '..', so such a key can never name a readable entry.",
+      "properties": {
+        "key": {
+          "allOf": [
+            {"not": {"const": "."}},
+            {"not": {"pattern": "^\\.\\."}}
+          ]
+        }
       }
     },
     "secretReference": {

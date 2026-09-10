@@ -468,14 +468,29 @@ offer files must not contain contact payloads or bearer values. File publication
 requires no seller delivery callback; optional recipient delivery remains supported
 by general contact composition through `BARE_METAL_STOREFRONT_DELIVERY`.
 
-The bare-metal chart's optional `contactOffers` value references an existing offer
-ConfigMap (`configMap.name/key`) and registry URL, authority, principals, and
-`registry.apiKeySecret.name/key`. It mounts the offer and API-key files and omits
-the site environment input, even if physical chart defaults supply a site Secret.
-`siteBindingsSecret: null` makes that absence explicit. `settlementConfigSecret`
-and the identity credential Secret remain separate private inputs. The chart
-rejects Alkahest or ephemeral storage with `contactOffers` and retains one replica,
+The bare-metal chart's default-null `contactOffers` and `contactDeclarations`
+values select historical synthetic and general declaration startup publication,
+respectively. They are mutually exclusive. Each references an existing public
+ConfigMap (`configMap.name/key`) plus `registry.url`, `registry.authority`,
+`registry.principals` and the separate `registry.apiKeySecret.name/key`. Both mount
+the public file read-only at `/etc/arkhai/contact-offers/offers.json` and the write
+key at `/etc/arkhai/contact-registry/api-key`; only the selected mode's startup
+variable is emitted. No file contents or private contact inputs belong in values.
+`contactDeclarations` requires syntactically valid ConfigMap and API-key Secret
+names and data keys, excluding `.` and any key beginning with `..`. Malformed
+coordinates fail rendering; resource existence and file contents remain separate
+cluster and runtime checks. `contactOffers` and `deliveryConfigSecret` keep their
+existing reference checks unchanged.
+
+Either mode omits the site environment input even if physical defaults supply a
+site Secret. `siteBindingsSecret: null` makes that absence explicit. The chart
+rejects Alkahest or ephemeral publication storage and retains one replica,
 Recreate, and a persistent SQLite volume for intent and introductions.
+`settlementConfigSecret`, the identity credential Secret and optional
+`deliveryConfigSecret.name/key` remain independent private references. Delivery
+projects only `BARE_METAL_STOREFRONT_DELIVERY` into the main runtime when explicitly
+configured; neither publication hook enrolls delivery by itself. With both hooks
+null, historical physical/runtime-only manifests and startup behavior are unchanged.
 
 Startup publication may partially succeed remotely before failing. Retain the
 volume and retry the same public intent; restart is not rollback or withdrawal.

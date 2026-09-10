@@ -1,3 +1,7 @@
+{{- if and .Values.contactOffers .Values.contactDeclarations -}}
+{{- fail "contactOffers and contactDeclarations are mutually exclusive" -}}
+{{- end -}}
+{{- $publication := .Values.contactOffers | default .Values.contactDeclarations -}}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -63,15 +67,15 @@ spec:
                 secretKeyRef:
                   name: {{ required "bare-metal storefront identity credential Secret name is required" .Values.identity.credentialSecret.name | quote }}
                   key: {{ required "bare-metal storefront identity credential Secret key is required" .Values.identity.credentialSecret.key | quote }}
-            {{- if and .Values.siteBindingsSecret (not .Values.contactOffers) }}
+            {{- if and .Values.siteBindingsSecret (not $publication) }}
             - name: BARE_METAL_STOREFRONT_SITES
               valueFrom:
                 secretKeyRef:
                   name: {{ required "bare-metal storefront site bindings Secret name is required" .Values.siteBindingsSecret.name | quote }}
                   key: {{ required "bare-metal storefront site bindings Secret key is required" .Values.siteBindingsSecret.key | quote }}
             {{- end }}
-            {{- with .Values.contactOffers }}
-            - name: BARE_METAL_STOREFRONT_CONTACT_OFFERS_PATH
+            {{- with $publication }}
+            - name: {{ if $.Values.contactDeclarations }}BARE_METAL_STOREFRONT_CONTACT_DECLARATIONS_PATH{{ else }}BARE_METAL_STOREFRONT_CONTACT_OFFERS_PATH{{ end }}
               value: /etc/arkhai/contact-offers/offers.json
             - name: BARE_METAL_STOREFRONT_REGISTRY_URL
               value: {{ .registry.url | quote }}
@@ -89,7 +93,7 @@ spec:
           volumeMounts:
             - name: data
               mountPath: {{ .Values.persistence.mountPath | quote }}
-            {{- if .Values.contactOffers }}
+            {{- if $publication }}
             - name: contact-offers
               mountPath: /etc/arkhai/contact-offers
               readOnly: true
@@ -101,7 +105,7 @@ spec:
             httpGet:
               path: /health
               port: http
-            failureThreshold: {{ if .Values.contactOffers }}100{{ else }}30{{ end }}
+            failureThreshold: {{ if $publication }}100{{ else }}30{{ end }}
             periodSeconds: 2
           livenessProbe:
             httpGet:
@@ -125,7 +129,7 @@ spec:
           {{- else }}
           emptyDir: {}
           {{- end }}
-        {{- with .Values.contactOffers }}
+        {{- with $publication }}
         - name: contact-offers
           configMap:
             name: {{ .configMap.name | quote }}
