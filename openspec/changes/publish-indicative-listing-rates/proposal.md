@@ -27,9 +27,16 @@ publishes, which is a buyer-client computation rather than a seller decompositio
 
 ## What Changes
 
-- Publish a seller's asking rate for a compute listing's advertised shape in
-  `offer_resource`, as a rate with its asset and its unit of time. One rate per
-  listing, because a listing's advertised shape does not vary.
+- Publish a seller's asking rate for a compute listing's advertised shape in the
+  published listing shape, as a rate with its asset and the period it is quoted per.
+  One rate per listing, because a listing's advertised shape does not vary.
+- Draw the period from the canonical time-unit vocabulary settlement rates already
+  use, which currently holds only `hour` — parity with what the VM and bare-metal
+  domains support, since both compute against an inline hourly divisor. A seller
+  pricing monthly cannot express it in this version.
+- Match rate filters on the period rather than normalizing across it. A buyer
+  shopping hourly is not asking for supply quoted monthly, because a monthly quote
+  signals a monthly commitment.
 - Add exact, fail-on-missing rate filters to `core/registry/filter-spec.yaml`,
   matching the convention every other `offer_resource` filter uses.
 - State normatively that the published rate is a **listing attribute** and not a
@@ -67,6 +74,9 @@ None.
 - Do not restrict the rate to unbacked listings. A backed listing may publish an
   asking rate too, and confining it would make the field mean "unbacked" a second
   time.
+- Do not add a time period to the settlement vocabulary. Widening
+  `PER_UNIT_SECONDS` touches every arithmetic path that reads it and is settlement
+  work rather than publication work.
 - Do not unbundle the rate across dimensions. A seller who prices RAM and GPUs
   differently cannot express that here, and a buyer comparing two listings that
   bundle different RAM is comparing bundled prices. That limitation is accepted for
@@ -79,6 +89,8 @@ None.
 - Affected code: the compute domains' publication candidate derivation and the
   registry filter evaluation.
 - Affected specification: `openspec/specs/registry-discovery/spec.md`.
+- Affected sequencing: lands after `settle-listing-vocabulary`, so the published
+  shape is `listing_resource` and its offering-mode field is `offering_mode`.
 - Affected registry deployment: `core/registry/filter-spec.yaml` gains fields and
   filters; the etag changes and buyers re-fetch, without a version bump.
 - Not affected: settlement options, escrow terms, negotiation policy, or any

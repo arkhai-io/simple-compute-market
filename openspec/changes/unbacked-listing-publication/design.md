@@ -587,11 +587,12 @@ adds no new storage category. What it must not add is an inventory model.
   hosts — no executor connections, no playbooks, no watchdog — but is still a
   service. If that proves too heavy, a storefront-hosted path returns as a
   separate question, and with it the broker-identity problem this design avoided.
-- **Where does the seller's contact payload live under one storefront serving
-  several sellers?** Not this change's concern while settlement is out of scope,
-  but the current one-static-payload-per-storefront shape is coherent only at one
-  seller per storefront. Named here because the constraint is invisible from
-  inside `compose-contact-exchange-across-compute`.
+**Resolved since drafting.** Where the seller's contact payload lives under one
+storefront serving several sellers is no longer open:
+`compose-contact-exchange-across-compute` owns resolving it per listing origin, and
+Goal 7 is complete for discovery but not for introductions across sellers until that
+lands. Recorded here rather than deleted because this change's system coverage
+publishes from two seller sites, which is what made the constraint visible.
 
 ## Migration Plan
 

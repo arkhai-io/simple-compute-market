@@ -15,7 +15,8 @@ marketplace offers there is comparison before contact.
 
 **Goals.** Publish a rate buyers can filter and compare on. Keep it independent of
 the negotiation-side pricing work and forward-compatible with it. Make it normative
-that nothing is constructed from the number.
+that nothing is constructed from the number, and that a rate carries the period it
+is quoted per.
 
 **Non-Goals.** No settlement participation, no honesty enforcement, no change to
 negotiation-floor policy, no restriction to unbacked listings.
@@ -126,12 +127,57 @@ deployment rather than of the market.
 systematically from agreed ones, or the first operator request for a delisting
 mechanism.
 
+### The period is `hour`, because that is all parity means
+
+The rate carries the period it is quoted per, drawn from the same canonical
+time-unit vocabulary settlement rates already use — and that vocabulary currently
+holds exactly one entry. `PER_UNIT_SECONDS` in `core/src/market_core/schemas.py`
+is `{"hour": 3600}`. `RateValue.per` defaults to `"hour"`. The VM settlement path
+computes `total_price = hourly_rate.amount * duration_seconds // 3600` with the
+divisor inline, and the bare-metal buyer CLI refuses a listing that does not
+"advertise an hourly rate".
+
+So parity with what the VM and bare-metal domains support is `hour` and nothing
+else. There is no second time period in the system to be at parity with. API credits
+use counted units (`per="token"`), which `compute_rate_unit_total` explicitly
+separates from time-unit rates, so they are a different axis rather than a second
+period.
+
+**The limitation this accepts.** Supply arranged out of band is commonly priced
+monthly or per commitment — this design said so itself before the decision was made.
+A seller who prices that way cannot express it in this version; they publish an
+hourly equivalent or no rate. That is a real gap for the exact sellers unbacked
+listings exist to serve, and it is accepted because adding a time period means
+adding it to `PER_UNIT_SECONDS` and to every arithmetic path that reads it, which is
+settlement work rather than publication work. **Revisit trigger:** a second entry in
+`PER_UNIT_SECONDS`, or the first seller request to publish a non-hourly asking rate.
+
+### The filter matches the period rather than normalizing across it
+
+A rate-bounded query names the period it is asking about, and a listing quoted in a
+different period does not match — it is excluded rather than converted.
+
+Normalizing was the alternative and is rejected on demand-side grounds rather than
+arithmetic ones. A buyer shopping for on-demand capacity at an hourly rate is not
+looking for supply quoted monthly, because a monthly quote signals a monthly
+commitment. Converting one to the other would return supply whose *terms* the buyer
+did not ask for, dressed as a price match. Excluding it is the more useful answer
+even though the arithmetic is trivial.
+
+With one period in the vocabulary this rule has no observable effect today. It is
+stated now so that adding a second period does not silently turn every hourly query
+into a cross-period comparison.
+
 ## Risks / Trade-offs
 
 - **[Buyers read an asking rate as a quote]** → Partly mitigated by the normative
   statement that nothing is constructed from it, so no surface can present it as an
   agreed amount. Not fully mitigable: a number in a catalogue reads as a price, and
   the marketplace has no way to establish otherwise before a negotiation happens.
+- **[Hourly-only excludes the sellers this serves]** → Out-of-band supply is often
+  priced monthly, and those sellers publish an hourly equivalent or nothing.
+  Mitigated only by the revisit trigger; the alternative is adding a time period to
+  the settlement vocabulary, which is not this change's surface.
 - **[A flat rate is later regretted]** → If per-dimension comparison turns out to
   be what buyers actually want, this field becomes a summary of something richer
   rather than the whole story. Acceptable because the field survives that change
@@ -144,15 +190,10 @@ mechanism.
 
 ## Open questions
 
-- **Which rate periods are expressible, and does the filter normalize across
-  them?** Hourly is the obvious default, but supply arranged out of band is
-  commonly priced monthly or per commitment. A filter comparing an hourly rate
-  against a monthly one without normalizing would be worse than no filter. This is
-  now ours to decide rather than deferred to another change's vocabulary.
 - **How is the rate's asset expressed?** A listing already names assets in its
-  settlement options, so the asking rate either reuses that vocabulary or states
-  its own. Comparing two rates in different assets is the same normalization
-  problem as comparing two periods, and probably wants the same answer.
+  settlement options, so the asking rate either reuses that vocabulary or states its
+  own. This remains open and is the reason the spec delta covers the period and
+  filter rules but not the field's full shape.
 
 ## Migration Plan
 

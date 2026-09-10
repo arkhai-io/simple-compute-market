@@ -7,18 +7,21 @@ Validation levels below are named deliberately. Per `docs/development/TESTING.md
 integration means the real app, a real database, a wired DI container, and the
 service's canonical typed client over `ASGITransport`.
 
-## 1. Decision gates
+## 1. Decision gate
 
-- [ ] 1.1 **Decide which rate periods are expressible and whether the filter
-      normalizes across them**, and record the reasoning in `design.md`. It is an
-      open question there. A filter comparing an hourly rate against a monthly one
-      without normalizing is worse than no filter, so this must not be settled by
-      an implementation default.
-- [ ] 1.2 **Decide how the rate's asset is expressed and whether a rate-bounded
-      query carries one**, and record the reasoning. A listing already names assets
-      in its settlement options; reusing that vocabulary or stating a separate one
-      is a decision, not a default. Same normalization question as 1.1 and probably
-      the same answer.
+Periods and filter semantics are settled; `design.md` carries the reasoning. The
+asset question remains open and is why the spec delta covers the period and filter
+rules but not the field's full shape.
+
+- [ ] 1.1 **Decide how the rate's asset is expressed and whether a rate-bounded
+      query carries one**, and record the reasoning in `design.md`. A listing already
+      names assets in its settlement options; reusing that vocabulary or stating a
+      separate one is a decision, not a default. Complete the spec delta once it is
+      resolved.
+- [ ] 1.2 Confirm `PER_UNIT_SECONDS` still holds exactly `{"hour": 3600}` at
+      implementation time. The hourly-only decision is parity with what the VM and
+      bare-metal domains support, and a second entry appearing there changes what
+      parity means rather than merely widening an option.
 
 ## 2. Published shape
 
@@ -26,6 +29,11 @@ service's canonical typed client over `ASGITransport`.
       asset and period. Do not decompose it per dimension — that is
       `capacity-shape-pricing`'s work for the negotiation side, and a second
       decomposition here would duplicate it.
+- [ ] 2.1b Draw the period from `PER_UNIT_SECONDS` rather than a private list, so a
+      published period and a settlement period cannot diverge. Refuse a period
+      outside it rather than storing an uninterpretable value. In practice this means
+      `hour` only; the constraint is written against the vocabulary so a second entry
+      widens both surfaces at once.
 - [ ] 2.1a Confirm the field is expressible as a rate structure evaluated at the
       advertised shape, so `capacity-shape-pricing` can later change where the
       number comes from without changing the published field.
@@ -38,7 +46,12 @@ service's canonical typed client over `ASGITransport`.
 
 - [ ] 3.1 Add exact `on_missing: fail` rate filters to
       `core/registry/filter-spec.yaml`, matching the convention every other
-      `offer_resource` filter uses.
+      published-shape filter uses. Note this change lands after
+      `settle-listing-vocabulary`, so the paths are `listing_resource`.
+- [ ] 3.1a Make a rate-bounded query name its period and match only listings quoting
+      it. Do not convert across periods. With one period in the vocabulary this has
+      no observable effect today; it is implemented now so adding a second period
+      does not silently turn every hourly query into a cross-period comparison.
 - [ ] 3.2 Confirm a listing publishing no rate is excluded from a rate-bounded
       query rather than passing it.
 - [ ] 3.3 Record the etag consequence: adding filters changes the spec's etag and
@@ -59,8 +72,11 @@ service's canonical typed client over `ASGITransport`.
 
 ## 5. Validation
 
-- [ ] 5.1 **Unit.** Exhaustive rate-filter matching, including missing rate,
-      boundary values, and whichever period and currency cases Section 1 settles.
+- [ ] 5.1 **Unit.** Exhaustive rate-filter matching: missing rate, boundary values,
+      a period outside the canonical vocabulary refused at publication, and — with a
+      synthetic second period injected into the vocabulary — a cross-period query
+      excluding rather than converting. The last case has no production path today
+      and is the one that protects the rule when a second period arrives.
 - [ ] 5.2 **Integration.** Publish and query rates through the canonical
       `RegistryClient` against the real registry app.
 - [ ] 5.3 **Integration.** Confirm no settlement option, escrow term, or accepted
@@ -82,8 +98,8 @@ service's canonical typed client over `ASGITransport`.
       rate is behaviour implementations must satisfy, so confirm it landed as a
       normative requirement rather than as design prose.
 - [ ] 6.4 **Narrative compression.** Shorten completed-task notes to final
-      behaviour, the two Section 1 decision outcomes, and the accepted
-      rate-honesty risk with its revisit trigger.
+      behaviour, the asset decision from 1.1, and the accepted rate-honesty and
+      hourly-only risks with their revisit triggers.
 - [ ] 6.5 **Roadmap currency.** Remove this change's row from Goal 7's gap table
       in `docs/development/ROADMAP.md`. If this closes Goal 7's last gap, the goal
       is removed and its result absorbed into permanent documentation rather than
@@ -98,3 +114,5 @@ service's canonical typed client over `ASGITransport`.
 |---|---|
 | The published rate is a listing attribute, not a settlement option rate: nothing is constructed from it | `openspec/specs/registry-discovery/spec.md` |
 | A listing publishing no rate is excluded from a rate-bounded query | `openspec/specs/registry-discovery/spec.md` |
+| A published rate carries its period from the canonical time-unit vocabulary | `openspec/specs/registry-discovery/spec.md` |
+| Rate filters match the period rather than normalizing across it | `openspec/specs/registry-discovery/spec.md` |
