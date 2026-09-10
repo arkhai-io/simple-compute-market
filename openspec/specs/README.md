@@ -60,3 +60,12 @@ For a cross-cutting change:
 2. Read the owning capability's `architecture.md` for design intent and limits.
 3. Read its `spec.md` for the enforceable current contract.
 4. Inspect active changes for proposed deltas before editing either permanent document.
+
+## Declared contact qualification ownership
+
+General declaration publication belongs to [storefront publication](storefront-publication/spec.md),
+exact acceptance and reviewed capture to [contact exchange](contact-exchange-settlement/spec.md),
+and independent frozen recipient copies to [introduction delivery](introduction-delivery/spec.md).
+The [local installed-wheel journey](../../domains/bare_metal/storefront/tests/test_declared_contact_qualification.py)
+checks their join without asserting a generic buyer adapter, physical authority,
+release, deployment or inbox delivery.

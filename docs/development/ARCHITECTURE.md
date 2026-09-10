@@ -271,7 +271,7 @@ Shared buyer negotiation represents absent opening, bound, and accepted amounts
 as absence, not zero, and remains mechanism-opaque. Priced comparisons remain
 unchanged. See [amountless negotiation](../../openspec/specs/buyer-orchestration/spec.md#requirement-amountless-buyer-negotiation-is-explicit).
 
-Each side may deliver its own copy of a revealed introduction to sinks its operator configures locally — a file, a local program, a webhook, mail, or any sink installed as a plugin. Delivery is recipient-side and self-addressed: the storefront delivers the buyer's contact to the seller's own destinations and the buyer's CLI delivers the seller's to theirs, and neither side ever sends anything to an address the counterparty supplied. It is never authoritative — a sink failure cannot fail a deal, change obligation servicing, or extend a counterparty's request — because the reveal is durable and idempotently re-readable, which is also why delivery is best-effort with explicit re-delivery rather than a queue. A delivered copy falls outside the introduction retention boundary: `delete_introduction` governs what the marketplace persists, not what a recipient's own mailbox or file already holds.
+For legacy local-sink delivery, each side may deliver its own copy of a revealed introduction to sinks its operator configures locally — a file, a local program, a webhook, mail, or any sink installed as a plugin. Delivery is recipient-side and self-addressed: the storefront delivers the buyer's contact to the seller's own destinations and the buyer's CLI delivers the seller's to theirs, and neither side ever sends anything to an address the counterparty supplied. It is never authoritative — a sink failure cannot fail a deal, change obligation servicing, or extend a counterparty's request — because the reveal is durable and idempotently re-readable, which is also why delivery is best-effort with explicit re-delivery rather than a queue. A delivered copy falls outside the introduction retention boundary: `delete_introduction` governs what the marketplace persists, not what a recipient's own mailbox or file already holds.
 
 The shared CLI comparison grammar has two typed uses. Resource queries derive their fields, aliases, operators, types, and missing-value semantics from the active registry filter specification and carry its ETag. Settlement clauses use common option identity fields plus mechanism-owned public projections. Buyer clauses are correlated ordered alternatives after resource filtering; storefront clauses are complete option-construction inputs. Provider, secret, raw RPC, and administrator fields are outside both languages.
 
@@ -685,3 +685,12 @@ Authoritative funding is the gate into the existing selected-site capacity and f
 ## Contact source authority
 
 Human-authored shareable text stays in a bounded private contact payload, separate from each party's own delivery route. Explicitly context-eligible bare-metal contact options capture seller-declared machine facts from immutable unbacked publication intent at acceptance and bind the context digest into the obligation; protected reads never reconstruct those facts from a registry. Declaration identifiers confer no physical authority. Core retains schema-opaque bindings, bare metal owns declaration validation/capture, and the contact kit owns text/option carriers and review binding. See the [source contract](../../openspec/specs/contact-exchange-settlement/spec.md#primitive-rules) and [declaration admission](../../openspec/specs/storefront-publication/spec.md#requirement-declaration-admission-preserves-immutable-option-provenance).
+
+For explicitly selected two-sided contact delivery, the storefront instead owns
+two durable recipient intents and uses each party's separately captured own route.
+Settlement completion gates sending, not acceptance or review. The
+[local declared exchange qualification](../../domains/bare_metal/storefront/tests/test_declared_contact_qualification.py)
+joins the installed general publication command, signed registry discovery,
+explicit TEST acceptance callback and frozen recipient copies. This does not add
+a production generic-buyer adapter, change hosted purchase commands, qualify
+physical supply or establish release/deployment evidence.

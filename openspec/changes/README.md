@@ -109,7 +109,7 @@ bounded bare-metal change below owns its outstanding image and live qualificatio
 contact-exchange mechanism → contact-only-bare-metal-runtime → image/live qualification
 two-sided-contact-delivery → contact-source-contracts ┬→ general-contact-declaration-publication
                                                     └→ contact-source-exchange
-general publication + reviewed exchange → combined local source qualification
+general publication + reviewed exchange → qualify-declared-contact-exchange (archived; local source qualified)
 ```
 
 The runtime and synthetic publisher do not depend on physical-site fulfillment
@@ -118,10 +118,11 @@ qualification; they also do not satisfy it.
 | Change | Status | Acceptance boundary |
 |---|---|---|
 | [`contact-only-bare-metal-runtime`](contact-only-bare-metal-runtime/) | implemented locally; permanent behavior promoted; image/live qualification open | Site-free startup, unbacked bindings, amountless negotiation, validated stable file publication, pending acceptance without contacts, explicit capture and party reads, and literal privacy guard; no release or deployment claim |
-| [`two-sided-contact-delivery`](two-sided-contact-delivery/) | implementation candidate; independent review and consumer qualification pending | Explicit buyer finalization, separately configured contact and email route per party, storefront-owned durable recipient intents, verified TLS and historical storefront-delivery protection; synthetic local qualification only, no release claim |
+| [`two-sided-contact-delivery`](two-sided-contact-delivery/) | service behavior reviewed/promoted; consumer qualification remains separately open | Explicit buyer finalization, separately configured contact and email route per party, storefront-owned durable recipient intents, verified TLS and historical storefront-delivery protection; synthetic local qualification only, no release claim |
 | [`contact-source-contracts`](contact-source-contracts/) | source reviewed; permanent behavior promoted; not activated | Strict whole-text, unbacked declaration/file and accepted-context contracts; public vectors and minimal acceptance integrity; general inventory and full exchange consumers may use the frozen contract |
 | [`general-contact-declaration-publication`](general-contact-declaration-publication/) | source reviewed; permanent behavior promoted; not activated | Explicit general declaration file/CLI/startup publication through immutable unbacked intent, whole-file preflight and bounded signed registry retries; historical synthetic and physical paths retained; no activation claim |
 | [`contact-source-exchange`](contact-source-exchange/) | source reviewed; permanent behavior promoted; not activated | Whole-text seller authoring, immutable reviewed capture and recipient-specific rendering; signed HTTP/SQLite restart, lost response, deterministic fences and fake-SMTP evidence; no inbox or exactly-once claim |
+| [`qualify-declared-contact-exchange`](archive/2026-09-10-qualify-declared-contact-exchange/) | archived; local source qualification only | Installed six-declaration publication through signed discovery, exact retained TEST acceptance, reviewed capture, restart and independent frozen recipient copies; no release or activation claim |
 
 ## Lesser goal — POOLS capacity and fulfillment foundation
 

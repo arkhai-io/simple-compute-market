@@ -257,14 +257,16 @@ file/CLI/startup publication path with whole-file preflight and immutable signed
 registry retries, without physical authority. Whole-text exchange preserves reviewed
 text and accepted context through immutable capture and recipient-specific rendering;
 signed HTTP/SQLite and fake-SMTP tests cover restart, drift, cancellation fences and
-lost finalization responses. Combined publication-to-delivery qualification remains
-separate work. Local source validation is not deployment or inbox evidence.
+lost finalization responses. The [local declared exchange journey](../../domains/bare_metal/storefront/tests/test_declared_contact_qualification.py)
+joins installed general publication and signed discovery of six TEST declarations
+to exact callback-validated acceptance, reviewed capture, durable completion,
+restart and independent recipient outcomes. The generic buyer default is unchanged;
+local source validation is not physical supply, deployment or inbox evidence.
 
 What deliberately remains: the `escrows` table and the `/api/v1/settle/{escrow_uid}` route family serve as the Alkahest mechanism surface (retirement needs deployment evidence), hosted-specific servicing gates guard hosted's own surfaces, and pre-plan legacy escrow rows keep only their mechanism-surface identity.
 
 | Open gap | Owned by |
 |---|---|
-| Combined declared-publication-to-delivery source qualification | [Qualification #225](https://github.com/arkhai-io/simple-compute-market/issues/225), consuming the implemented declaration publisher and reviewed text/context exchange |
 | Introduction-only image provenance and live deployment qualification | [`contact-only-bare-metal-runtime`](../../openspec/changes/contact-only-bare-metal-runtime/) |
 | Cross-domain contact-exchange composition beyond bare metal; contact-payload retention automation | Unowned — needs a new change; background in [`contact-exchange-settlement-mechanism`](../../openspec/changes/archive/2026-08-19-contact-exchange-settlement-mechanism/) |
 | Delivery beyond bare metal, and a second event producer (a settled charge, a completed escrow) | Unowned — needs a new change; background in [`add-introduction-delivery-sinks`](../../openspec/changes/archive/2026-08-19-add-introduction-delivery-sinks/) |

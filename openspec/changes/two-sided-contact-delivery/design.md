@@ -229,3 +229,15 @@ required mechanism reference, and an unselected Helm shim failure corrected with
 an explicitly selected already-installed version. These failed runs are not passing
 candidate evidence. This remains a bounded source fix pending independent review;
 the scheduled-reconciliation gap and post-review promotion gate are unchanged.
+
+## Current bounded service evidence
+
+Service behavior is source-reviewed and promoted in contact-exchange-settlement,
+introduction-delivery and storefront-publication. The repository-owned
+`domains/bare_metal/storefront/tests/test_declared_contact_qualification.py` joins
+real local general publication and signed discovery to installed buyer/seller
+exchange and fake recipient delivery. Shared Bun vectors prove scalar/canonical
+parity, not a complete independent consumer implementation. Historical incomplete
+consumer tasks remain incomplete; source qualification does not establish consent-
+copy cleanup, scheduled client reconciliation, physical supply, release or activation.
+No completed task or frozen carrier is replaced by this clarification.

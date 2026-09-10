@@ -214,11 +214,21 @@ supply finalized content.
 
 ### Requirement: Explicit-policy SMTP outcomes are conservative and bounded
 
+Recipient attempts and terminal outcomes SHALL remain independent.
 Explicit-policy delivery SHALL require verified STARTTLS before authentication
 or DATA. A positive DATA acknowledgement SHALL remain accepted despite QUIT
 failure. Unknown DATA acceptance SHALL enter needs-review, never automatic
 resend. Temporary refusal retries SHALL be finite; attempt ownership and time
 bounds SHALL fence stale senders. No redelivery API is supplied for this policy.
+
+#### Scenario: One recipient temporarily refuses the message
+
+- **WHEN** one finalized recipient receives positive DATA acknowledgement and the
+  other temporarily refuses delivery
+- **THEN** the accepted recipient is not resent while the other follows its own
+  bounded retry state
+- **AND** both eventual copies retain the same frozen context and only their
+  respective counterparty contact; terminal routes are removed
 
 #### Scenario: DATA acknowledgement is lost
 
@@ -242,3 +252,7 @@ bounds SHALL fence stale senders. No redelivery API is supplied for this policy.
   recovery fences and terminal route cleanup.
 - `domains/bare_metal/storefront/tests/test_http_contact_source_exchange.py`
   drives signed HTTP, disposable SQLite, restart and both fake-SMTP recipient copies.
+
+- `domains/bare_metal/storefront/tests/test_declared_contact_qualification.py`
+  joins real signed publication/discovery to both frozen SMTP copies, including
+  one temporary recipient refusal, independent retry and terminal restart.

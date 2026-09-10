@@ -677,3 +677,32 @@ Kubernetes deployment topology (no Helm chart) does not yet have an
 equivalent deployment-config story — see the "Migrations at startup"
 section above and the relevant subsystem's `architecture.md` for how
 such a service currently starts up instead.
+
+## Local declared contact qualification
+
+The repository-owned integration entry is
+`domains/bare_metal/storefront/tests/test_declared_contact_qualification.py`.
+After building internal wheels into `.dist`, install the seller and buyer packages
+from those wheels, explicitly reinstall changed distributions, and initialize the
+registry's separate locked environment. Run from the repository root:
+
+```sh
+REGISTRY_TEST_PYTHON="$PWD/core/registry/.venv/bin/python" \
+  domains/bare_metal/storefront/.venv/bin/python -m pytest -o pythonpath= \
+  domains/bare_metal/storefront/tests/test_declared_contact_qualification.py -q -s
+```
+
+The empty pytest source-path override is required for installed-wheel evidence.
+The test starts disposable loopback services, invokes the installed
+`publish-declarations` command with the packaged six-entry TEST example, discovers
+those IDs through the signed registry client, and uses only fake SMTP. It prints
+sanitized public option/context and bounded outcome evidence, not contact text,
+routes, credentials or operator files. Source/wheel/imported-file hash parity and
+exact wheel versions must accompany a qualification receipt; a passing source-path
+test alone is not installed-wheel evidence. The registry application itself runs
+from source with wheel-installed internal dependencies, not as a released image.
+
+The TEST callback independently checks retained advertised selection expectations;
+the generic buyer default still refuses context-eligible acceptance without such
+an explicitly supplied validator. This recipe neither invokes the hosted-only
+purchase CLI nor authorizes real publication, SMTP, deployment or activation.

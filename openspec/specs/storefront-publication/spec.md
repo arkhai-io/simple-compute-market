@@ -739,3 +739,10 @@ New declarations SHALL persist the strict schema-3 intent and unbacked declarati
 
 The installed bare-metal contribution supplies an independently runnable seller composition. Shared shells consume that contribution and the common immutable binding and lifecycle contexts; they do not replace the domain-owned codecs, seller policy, provisioning adapters, or fulfillment hook.
 
+## Local declaration qualification evidence
+
+`domains/bare_metal/storefront/tests/test_declared_contact_qualification.py` starts
+with an empty owned signed loopback registry, invokes the installed
+`publish-declarations` command on the six packaged TEST declarations, and discovers
+those exact IDs before acceptance. It is a publication-to-exchange integration
+check, not a seeded-listing substitute or physical supply qualification.

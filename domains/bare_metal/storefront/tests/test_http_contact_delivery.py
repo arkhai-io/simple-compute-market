@@ -86,6 +86,10 @@ def delivery_environment(environment, monkeypatch):
     config["contact"]["profiles"]["default"]["delivery_policy"] = POLICY
     monkeypatch.setenv("BARE_METAL_STOREFRONT_SETTLEMENT", json.dumps(config))
     monkeypatch.setenv("BARE_METAL_STOREFRONT_DELIVERY", json.dumps(DELIVERY_CONFIG))
+    return install_smtp_boundary(monkeypatch)
+
+
+def install_smtp_boundary(monkeypatch):
     sent, workers = [], []
     factory = server.build_contact_delivery_worker
 

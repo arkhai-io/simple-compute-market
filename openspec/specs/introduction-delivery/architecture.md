@@ -38,3 +38,10 @@ local sinks retain their separate explicit operator-redelivery contract.
 Local SQLite/HTTP and fake-SMTP evidence does not establish deployment, recipient
 inbox delivery or an exactly-once guarantee. Recipient-owned copies also remain
 outside marketplace retention control.
+
+The [declared exchange journey](../../../domains/bare_metal/storefront/tests/test_declared_contact_qualification.py)
+checks recipient independence after durable settlement completion and restart:
+a temporary seller-recipient refusal leaves the buyer-recipient's accepted
+attempt untouched. Both eventual message context blocks are byte-equal after
+MIME line-ending decoding and retain the captured package's scalar facts. Fake
+SMTP is the only mail boundary in this qualification; it is not inbox evidence.

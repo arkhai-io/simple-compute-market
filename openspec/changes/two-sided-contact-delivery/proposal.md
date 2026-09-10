@@ -51,3 +51,13 @@ configuration to `docs/development/DEPLOYMENT_AND_CONFIG.md`; owner boundaries t
 `docs/development/ARCHITECTURE.md`. Update Goal 6 in
 `docs/development/ROADMAP.md` and the active-change/capability indexes. No proposed
 behavior is promoted to a permanent current-state contract in this docs stage.
+
+## Service qualification clarification
+
+The service-side policy, capture, completion gates and recipient delivery are
+implemented and promoted in the owning current subsystem contracts. The local
+installed-wheel publication-to-exchange journey is recorded by
+[qualify-declared-contact-exchange](../archive/2026-09-10-qualify-declared-contact-exchange/proposal.md).
+Earlier proposal-stage statements remain historical. This clarification does not
+complete buyer-application consent-copy cleanup, scheduled client reconciliation,
+release or activation; it does not revise the frozen contract.

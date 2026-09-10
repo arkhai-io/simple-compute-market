@@ -197,3 +197,13 @@ intent reuses identities. Neither omission nor startup withdraws, backfills or
 reinterprets historical work. Physical publication retains its independent
 trusted-site checks. The [configuration contract](../../../docs/development/DEPLOYMENT_AND_CONFIG.md#bare-metal-general-declaration-publication)
 defines explicit command/startup enrollment and profile prerequisites.
+
+## Local publication-to-exchange qualification
+
+The installed general declaration command and signed registry client form the
+entry to the [local qualification journey](../../../domains/bare_metal/storefront/tests/test_declared_contact_qualification.py).
+The operator fixture supplies public declarations independently of the seller's
+accepted reply; local immutable intent supplies provenance. No site or physical
+registration is constructed. Separating this journey from the focused admission
+and retry matrices proves the publication/exchange join without duplicating their
+negative cases. Local source qualification does not certify the declared machines.

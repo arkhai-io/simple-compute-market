@@ -90,3 +90,12 @@
 | Shared carrier/owner boundaries | `docs/development/ARCHITECTURE.md` | Proposed; post-code-review |
 | Exact private config/optional Secret hook | `docs/development/DEPLOYMENT_AND_CONFIG.md` | Proposed; post-code-review |
 | Goal 6 current state/gaps and sequencing | `docs/development/ROADMAP.md`, `openspec/changes/README.md`, `openspec/specs/README.md` | Index registration in docs stage; behavior currency after code review |
+
+## Appended service qualification disposition
+
+The service-side source and owning permanent contracts are reviewed/promoted.
+`qualify-declared-contact-exchange` supplies the joined local installed-wheel
+publication/exchange evidence and owns its own post-review archival closeout.
+The original completed tasks above are preserved; unchecked consumer qualification
+and broader closeout are not marked done by service-only evidence. No frozen
+contract, original task history or activation boundary changes here.

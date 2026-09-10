@@ -98,3 +98,18 @@ The [delivery renderer](../introduction-delivery/architecture.md) consumes only
 recipient projections of this record. Neither rendering nor recovery recaptures
 machine facts from the registry. Local fake-SMTP and lost-HTTP-response tests
 qualify these source boundaries, not inbox delivery or exactly-once delivery.
+
+## Qualification and client scope
+
+The [local declared exchange journey](../../../domains/bare_metal/storefront/tests/test_declared_contact_qualification.py)
+uses wheel-installed seller and buyer libraries with a separately locked registry
+source application. It starts with real publication and signed discovery, then
+retains exact advertised params, conditions, declaration/machine and requested
+terms before negotiation. Its explicit TEST callback compares the full accepted
+package after universal core checks. A substituted machine with a recomputed
+context digest still fails that comparison.
+
+This callback is not a new production buyer adapter. The generic buyer default
+continues to refuse the additional accepted-context digest; the hosted-only
+purchase CLI is not a contact acceptance surface. Source, wheel and imported-file
+parity qualify only the tested local packages, not release images or activation.
