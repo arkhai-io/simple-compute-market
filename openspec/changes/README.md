@@ -107,6 +107,7 @@ bounded bare-metal change below owns its outstanding image and live qualificatio
 
 ```text
 contact-exchange mechanism → contact-only-bare-metal-runtime → image/live qualification
+two-sided-contact-delivery → contact-source-contracts → general inventory and full exchange consumers
 ```
 
 The runtime and synthetic publisher do not depend on physical-site fulfillment
@@ -116,6 +117,7 @@ qualification; they also do not satisfy it.
 |---|---|---|
 | [`contact-only-bare-metal-runtime`](contact-only-bare-metal-runtime/) | implemented locally; permanent behavior promoted; image/live qualification open | Site-free startup, unbacked bindings, amountless negotiation, validated stable file publication, pending acceptance without contacts, explicit capture and party reads, and literal privacy guard; no release or deployment claim |
 | [`two-sided-contact-delivery`](two-sided-contact-delivery/) | implementation candidate; independent review and consumer qualification pending | Explicit buyer finalization, separately configured contact and email route per party, storefront-owned durable recipient intents, verified TLS and historical storefront-delivery protection; synthetic local qualification only, no release claim |
+| [`contact-source-contracts`](contact-source-contracts/) | source reviewed; permanent behavior promoted; not activated | Strict whole-text, unbacked declaration/file and accepted-context contracts; public vectors and minimal acceptance integrity; general inventory and full exchange consumers may use the frozen contract |
 
 ## Lesser goal — POOLS capacity and fulfillment foundation
 

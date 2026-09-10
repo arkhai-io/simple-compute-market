@@ -46,6 +46,7 @@ from market_identity import Identity
 from market_settlement_runtime import settlement_migrations
 from pydantic import BaseModel
 
+from .contact_context import ContactDeclarationSource, validate_declaration_intent
 from .domain_runtime import get_market_domain_contract
 from .migrations import BARE_METAL_STOREFRONT_MIGRATIONS
 from .models import BareMetalHostedLifecycle
@@ -370,6 +371,18 @@ class SQLiteClient(CoreSQLiteClient):
         publication_intent: Mapping[str, Any] | None = None,
     ) -> None:
         normalized = self._market_domain.codecs.listing(listing)
+        context_options = any(
+            "context_contract" in option.get("params", {})
+            for option in settlement_options or []
+        )
+        if normalized.declaration_id is not None or context_options:
+            if site_id is not None or normalized.declaration_id is None:
+                raise ValueError("invalid_contact_provenance")
+            intent = validate_declaration_intent(
+                publication_intent, listing_id, normalized, settlement_options or [],
+            )
+            if any(option.params.claimant_principal != seller_principal for option in intent.settlement_options):
+                raise ValueError("invalid_contact_provenance")
         if publication_intent is not None and site_id is not None:
             raise ValueError("contact publication intent cannot carry site authority")
         if site_id is None:
@@ -406,6 +419,12 @@ class SQLiteClient(CoreSQLiteClient):
         }
         if publication_intent is not None:
             source_envelope["publication_intent"] = dict(publication_intent)
+        if normalized.declaration_id is not None:
+            source_envelope = ContactDeclarationSource(
+                kind="bare_metal.introduction-declaration.v1", schema_version=1,
+                site_id=None, pool_id=None, physical_resource_id=None,
+                declaration_id=normalized.declaration_id, publication_intent=intent,
+            ).model_dump(mode="json")
         binding = StorefrontListingBinding.from_source_envelope(
             listing_id=listing_id,
             site_id=site_id,

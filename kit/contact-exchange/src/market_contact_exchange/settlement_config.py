@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+import hashlib
 import re
 from collections.abc import Mapping
-from typing import Any
+from typing import Any, Literal
 
 from market_core.schemas import SettlementOption, derive_settlement_option_id
+from market_identity import canonical_json
 from market_settlement_runtime import (
     AcceptedObligationArtifacts,
     ComparisonOperator,
@@ -30,6 +32,7 @@ from pydantic import (
 
 from .client import ContactExchangeClient
 from .delivery_contract import DeliveryPolicy, bound_payload
+from .source_contract import ContextContactOption
 
 MECHANISM = "contact-exchange.v1"
 CONTACT_CONFIG_KEY = "contact"
@@ -86,15 +89,18 @@ class ContactProfile(BaseModel):
     terms: str = Field(min_length=1, max_length=_MAX_TERMS_CHARS)
 
     delivery_policy: DeliveryPolicy | None = Field(default=None)
+    context_contract: Literal["accepted-listing.v1"] | None = None
 
     @model_serializer(mode="wrap")
     def omit_absent_policy(self, handler: Any) -> dict[str, Any]:
         result = handler(self)
         if self.delivery_policy is None:
             result.pop("delivery_policy", None)
+        if self.context_contract is None:
+            result.pop("context_contract", None)
         return result
 
-    @field_validator("delivery_policy", mode="before")
+    @field_validator("delivery_policy", "context_contract", mode="before")
     @classmethod
     def reject_null_policy(cls, value: Any) -> Any:
         if value is None:
@@ -107,6 +113,12 @@ class ContactProfile(BaseModel):
         if value != value.strip():
             raise ValueError("contact channel must be trimmed")
         return value
+
+    @model_validator(mode="after")
+    def context_requires_delivery(self) -> ContactProfile:
+        if self.context_contract is not None and self.delivery_policy is None:
+            raise ValueError("accepted context requires delivery policy")
+        return self
 
 
 class ContactPublicationInput(BaseModel):
@@ -263,6 +275,8 @@ def contact_option_builder(
     }
     if profile.delivery_policy is not None:
         params["delivery_policy"] = profile.delivery_policy.model_dump(mode="json")
+    if profile.context_contract is not None:
+        params["context_contract"] = profile.context_contract
     if any(
         contains_contact_value(params, value)
         for value in config.contact_payload.values()
@@ -280,6 +294,8 @@ def contact_option_builder(
         "rates": [],
         "params": params,
     }
+    if profile.context_contract is not None:
+        option = ContextContactOption.model_validate(option).model_dump(mode="json")
     return {"accepted_escrows": [], "settlement_options": [option]}
 
 
@@ -305,6 +321,13 @@ def contact_buyer_compatibility(
             DeliveryPolicy.model_validate(params["delivery_policy"])
         except ValueError:
             return False
+    if "context_contract" in params:
+        try:
+            ContextContactOption.model_validate(
+                dict(option) if isinstance(option, Mapping) else option.model_dump(mode="json")
+            )
+        except (AttributeError, TypeError, ValueError):
+            return False
     return (
         _value(option, "mechanism") == MECHANISM
         and _value(option, "asset") == INTRODUCTION_ASSET
@@ -326,6 +349,8 @@ def contact_accepted_obligation_builder(
 
     config = ContactSettlementConfig.model_validate(section)
     selected = SettlementOption.model_validate(option)
+    if "context_contract" in selected.params:
+        ContextContactOption.model_validate(selected.model_dump(mode="json"))
     if selected.rates:
         raise ValueError("contact exchange declines scalar rates")
     buyer = _principal_json(context.get("buyer_principal"))
@@ -354,6 +379,17 @@ def contact_accepted_obligation_builder(
     if "delivery_policy" in params:
         policy = DeliveryPolicy.model_validate(params["delivery_policy"])
         introduction_package["delivery_policy"] = policy.model_dump(mode="json")
+    if "context_contract" in params:
+        if params["context_contract"] != "accepted-listing.v1" or "delivery_policy" not in params:
+            raise ValueError("invalid accepted context contract")
+        introduction_package["context_contract"] = params["context_contract"]
+        accepted_context = context.get("accepted_context")
+        if not isinstance(accepted_context, Mapping) or not accepted_context:
+            raise ValueError("accepted listing context is required")
+        introduction_package["accepted_context"] = dict(accepted_context)
+        params["accepted_context_digest"] = hashlib.sha256(
+            canonical_json(accepted_context)
+        ).hexdigest()
     listing_id = context.get("listing_id")
     if isinstance(listing_id, str) and listing_id:
         introduction_package["listing_id"] = listing_id

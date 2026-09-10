@@ -166,3 +166,9 @@ and [deployment inputs](../../../docs/development/DEPLOYMENT_AND_CONFIG.md#bare-
 - [Site capacity](../site-capacity/spec.md)
 - [Fulfillment](../fulfillment/spec.md)
 - [Settlement servicing](../settlement-servicing/spec.md)
+
+## Unbacked machine declarations
+
+A `ContactDeclaration` records seller assertions, including third-party machine facts, not verified ownership, availability or physical inventory registration. Its local listing projection has a declaration ID and no machine or physical-host ID. The immutable binding has null site, pool and Physical Resource authority. The schema-3 intent freezes the declaration and exact context-eligible options; admission compares both to the local listing before persistence. Site-backed invariants and synthetic historical intents remain distinct.
+
+The schema-3 `ContactDeclarationOffers` bytes parser bounds a general input batch to 256 entries and one MiB. These are finite parsing/preflight safety bounds, not capacity limits. The `declared-contact-` listing namespace separates general file input from historical synthetic IDs; database ownership/conflict checks remain the publisher's responsibility. Parsing has no file I/O or publication side effects and does not enroll startup into publication. The existing v1/v2 synthetic loaders remain unchanged. See the [exact carriers](../contact-exchange-settlement/spec.md#general-declaration-file-boundary) and [acceptance integrity path](../contact-exchange-settlement/spec.md#accepted-context-and-integrity).

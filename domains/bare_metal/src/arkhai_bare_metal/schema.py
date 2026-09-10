@@ -8,14 +8,16 @@ provider integrations live in separate packages that depend on this package.
 from __future__ import annotations
 
 import hashlib
+from collections.abc import Mapping
 from datetime import datetime
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, model_serializer, model_validator
 
+from .contact_contract import ContactMachineDetails, Identifier
 from .provision_terms import BareMetalProvisionTerms
 
-BARE_METAL_SCHEMA_KIND = "bare_metal.v1"
+BARE_METAL_SCHEMA_KIND: Literal["bare_metal.v1"] = "bare_metal.v1"
 BARE_METAL_EXECUTOR_KIND = "bare_metal"
 SSH_ACCESS_METHOD = "ssh"
 NODE_GRANT_ACCESS_ACTION = "node_grant_access"
@@ -44,10 +46,13 @@ class BareMetalListing(BaseModel):
 
     kind: Literal["bare_metal.v1"] = BARE_METAL_SCHEMA_KIND
     virtualization_type: Literal["bare_metal"] = "bare_metal"
-    machine_id: str = Field(
+    declaration_id: Identifier | None = None
+    machine_id: str | None = Field(
+        default=None,
         description="Bare-metal executor-local machine identity.",
     )
-    physical_host_id: str = Field(
+    physical_host_id: str | None = Field(
+        default=None,
         description="Stable physical host identity for cross-mode accounting.",
     )
     access_methods: list[str] = Field(
@@ -73,11 +78,54 @@ class BareMetalListing(BaseModel):
         description="Domain-specific hardware capabilities for discovery.",
     )
 
+    @model_validator(mode="before")
+    @classmethod
+    def declaration_shape(cls, value: Any) -> Any:
+        if isinstance(value, Mapping) and "declaration_id" in value:
+            if value["declaration_id"] is None or set(value) - {
+                "kind", "virtualization_type", "declaration_id", "access_methods",
+                "site", "capabilities",
+            }:
+                raise ValueError("invalid contact declaration listing")
+            site = value.get("site")
+            capabilities = value.get("capabilities")
+            if (
+                not isinstance(site, Mapping) or set(site) != {"region"}
+                or not isinstance(capabilities, Mapping) or "region" in capabilities
+                or type(value.get("access_methods")) is not list
+                or value["access_methods"] != ["none"]
+            ):
+                raise ValueError("invalid contact declaration listing")
+            ContactMachineDetails.model_validate({**capabilities, "region": site["region"]})
+        return value
+
+    @model_serializer(mode="wrap")
+    def serialize_identity(self, handler: Any) -> dict[str, Any]:
+        result = handler(self)
+        if self.declaration_id is None:
+            result.pop("declaration_id", None)
+        else:
+            result.pop("machine_id", None)
+            result.pop("physical_host_id", None)
+            result.pop("min_duration_seconds", None)
+            result.pop("max_duration_seconds", None)
+        return result
+
     @model_validator(mode="after")
     def _validate_listing(self) -> "BareMetalListing":
-        for field_name in ("machine_id", "physical_host_id"):
-            if not str(getattr(self, field_name)).strip():
-                raise ValueError(f"{field_name} must be non-empty")
+        if self.declaration_id is not None:
+            if (
+                self.machine_id is not None or self.physical_host_id is not None
+                or self.access_methods != ["none"]
+                or self.min_duration_seconds is not None
+                or self.max_duration_seconds is not None
+            ):
+                raise ValueError("contact declaration cannot carry physical identity or access")
+        else:
+            for field_name in ("machine_id", "physical_host_id"):
+                value = getattr(self, field_name)
+                if not value or not value.strip():
+                    raise ValueError(f"{field_name} must be non-empty")
         if not self.access_methods:
             raise ValueError("access_methods must contain at least one method")
         if any(not str(method).strip() for method in self.access_methods):

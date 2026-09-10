@@ -14,6 +14,7 @@ from arkhai_bare_metal import (
     BareMetalTerms,
     validate_buyer_selection,
 )
+from arkhai_bare_metal.contact_contract import ContactAcceptedTerms
 from core_storefront.models.negotiation_models import (
     NegotiateNewRequest,
     NegotiateNewResponse,
@@ -34,6 +35,7 @@ from market_identity import Identity
 from market_settlement_runtime import AcceptedObligationArtifacts, SettlementObligationRecord
 from market_settlement_runtime.sqlite_repository import SettlementSQLiteRepository
 
+from .contact_context import capture_contact_context, validate_accepted_contact_context
 from .negotiation import BareMetalSellerRoundHook
 from .sqlite_client import SQLiteClient
 
@@ -404,12 +406,26 @@ class BareMetalNegotiationService:
                 options=options,
                 selected_option=selected_option,
             )
+        accepted_context = None
+        if selected_option.mechanism == CONTACT_MECHANISM and "context_contract" in selected_option.params:
+            try:
+                trusted_listing = await self.db.load_bare_metal_listing_payload(listing_id=request.listing_id)
+                if trusted_listing is None:
+                    raise ValueError("missing contact listing projection")
+                ContactAcceptedTerms.model_validate(request.provision_terms.payload)
+                accepted_context = capture_contact_context(
+                    binding=listing_binding, listing=trusted_listing,
+                    selected_option=selected_option, message=message,
+                )
+            except (TypeError, ValueError):
+                raise NegotiationRequestError("invalid_contact_provenance") from None
         built = self._build_accepted_obligation(
             build_obligation,
             selected_option=selected_option,
             request=request,
             buyer_principal=buyer_principal,
             message=message,
+            accepted_context=accepted_context,
             selection=selection,
         )
         proposed_amount = _selection_proposal_amount(request)
@@ -431,6 +447,8 @@ class BareMetalNegotiationService:
                 service_terms={**built.service_terms, **service_terms},
                 obligations=[SettlementObligation.model_validate(built.obligation)],
             )
+            if selected_option.mechanism == CONTACT_MECHANISM:
+                validate_accepted_contact_context(plan)
         except (TypeError, ValueError) as exc:
             raise NegotiationRequestError(
                 "selected listing option cannot produce an exact accepted plan"
@@ -584,6 +602,7 @@ class BareMetalNegotiationService:
         buyer_principal: Identity,
         message: BareMetalMessage,
         selection: SettlementSelection,
+        accepted_context: dict[str, Any] | None = None,
     ) -> AcceptedObligationArtifacts:
         try:
             return build_obligation(
@@ -595,6 +614,7 @@ class BareMetalNegotiationService:
                     "duration_seconds": message.duration_seconds,
                     "domain_param_keys": ("bare_metal",),
                     "listing_id": request.listing_id,
+                    "accepted_context": accepted_context,
                 },
             )
         except (TypeError, ValueError) as exc:

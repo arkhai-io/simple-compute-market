@@ -62,3 +62,11 @@ This guard is case-sensitive literal matching. It does not infer unconfigured
 private data, normalize Unicode or case, parse URLs, or undo arbitrary encodings.
 Operators remain responsible for keeping all public inputs free of private data;
 the guard is not general data-loss prevention.
+
+## Frozen text and accepted listing context
+
+The private `ContactText` profile reuses one existing `text` entry, preserving one complete reviewed blurb within the established 512-scalar limit. It does not reinterpret arbitrary old contact maps. Routes remain independently owned and private. Review commits to exact text, own route, parties, the full accepted package and seller snapshot; context drift therefore invalidates a prior review without a second approval mechanism.
+
+Explicit `context_contract: "accepted-listing.v1"` eligibility separates new capture from historical packages. Bare-metal acceptance validates an immutable declaration intent and selected option, captures the machine facts and non-access terms, and gives the kit an opaque domain value. The kit hashes that value into the obligation. This avoids a recursive plan hash and any upward domain dependency. Protected accepted lookup checks the stored context against the obligation rather than reconstructing it from registry or current configuration. Public fact digests are not substitutes for the keyed, private review fingerprints.
+
+The [source carrier tables](spec.md#primitive-rules) own exact shapes, Unicode rules, digests, failure behavior and versions. Declaration/file admission is described by [storefront publication](../storefront-publication/spec.md#requirement-general-declaration-input-has-finite-strict-bounds). No historical plan or obligation is backfilled.

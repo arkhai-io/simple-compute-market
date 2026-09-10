@@ -1,0 +1,1 @@
+- Schema-vector generation against partially refreshed internal wheels produced stale snapshots; all producer wheels must be rebuilt and reinstalled before generation, followed by source/wheel/installed parity checks.

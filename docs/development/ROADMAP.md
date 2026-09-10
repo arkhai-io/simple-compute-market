@@ -247,10 +247,19 @@ define these boundaries. Synthetic publication has no delivery callback; general
 recipient-side delivery remains optional. Older unregistered contact acceptances
 are not automatically backfilled.
 
+Explicit context-eligible contact options now bind accepted machine declarations
+to immutable publication provenance, with strict whole-text and bounded general-file
+carriers and packaged conformance vectors. Declaration IDs confer no physical
+authority; historical options and IDs remain unchanged. The
+[carrier contract](../../openspec/specs/contact-exchange-settlement/spec.md#primitive-rules)
+is implemented; general publication and full text/context delivery remain separate
+consumer work.
+
 What deliberately remains: the `escrows` table and the `/api/v1/settle/{escrow_uid}` route family serve as the Alkahest mechanism surface (retirement needs deployment evidence), hosted-specific servicing gates guard hosted's own surfaces, and pre-plan legacy escrow rows keep only their mechanism-surface identity.
 
 | Open gap | Owned by |
 |---|---|
+| General operator declaration publication and full editable-text exchange integration | [Publication #223](https://github.com/arkhai-io/simple-compute-market/issues/223), [exchange #224](https://github.com/arkhai-io/simple-compute-market/issues/224), and [qualification #225](https://github.com/arkhai-io/simple-compute-market/issues/225), consuming the implemented source contract |
 | Introduction-only image provenance and live deployment qualification | [`contact-only-bare-metal-runtime`](../../openspec/changes/contact-only-bare-metal-runtime/) |
 | Cross-domain contact-exchange composition beyond bare metal; contact-payload retention automation | Unowned — needs a new change; background in [`contact-exchange-settlement-mechanism`](../../openspec/changes/archive/2026-08-19-contact-exchange-settlement-mechanism/) |
 | Delivery beyond bare metal, and a second event producer (a settled charge, a completed escrow) | Unowned — needs a new change; background in [`add-introduction-delivery-sinks`](../../openspec/changes/archive/2026-08-19-add-introduction-delivery-sinks/) |

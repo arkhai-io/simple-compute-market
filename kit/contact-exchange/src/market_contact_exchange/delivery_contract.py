@@ -118,6 +118,26 @@ def bound_payload(value: dict[str, str]) -> dict[str, str]:
     return value
 
 
+class ContactText(StrictCarrier):
+    """One whole private blurb serialized as an existing contact payload."""
+
+    text: str = Field(min_length=1, max_length=512, repr=False)
+
+    @field_validator("text")
+    @classmethod
+    def whole_blurb(cls, value: str) -> str:
+        bound_payload({"text": value})
+        return value
+
+
+def parse_contact_text(value: object) -> ContactText:
+    """Validate the text profile without exposing input in diagnostics."""
+    try:
+        return ContactText.model_validate(value)
+    except ValueError:
+        raise ValueError("invalid_contact_text") from None
+
+
 class IntroductionReview(StrictCarrier):
     schema_version: Literal[2]
     negotiation_id: NegotiationId

@@ -27,6 +27,7 @@ from market_settlement_runtime import (
     derive_obligation_ref,
 )
 
+from .contact_context import validate_accepted_contact_context
 from .sqlite_client import SQLiteClient
 
 
@@ -51,6 +52,7 @@ async def _accepted_introduction(
     )
     if expected_ref != obligation_ref:
         raise ValueError("requested obligation does not match the accepted plan")
+    validate_accepted_contact_context(plan)
     package = plan.service_terms.get(CONTACT_MECHANISM)
     return (
         IntroductionAgreement(
