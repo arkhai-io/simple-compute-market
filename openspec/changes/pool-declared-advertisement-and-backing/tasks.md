@@ -31,8 +31,10 @@ service's canonical typed client over `ASGITransport`.
       that to an immutable field would change it by omission. Do not reuse the
       secret-provider-field rationale; that exception exists because a caller cannot
       restate an unreadable value, which is not true here.
-- [ ] 1.3c Record `backed` explicitly when a create request omits the value, with a
-      stated removal condition for the compatibility rule. Do not leave it absent:
+- [ ] 1.3c Record `backed` explicitly when a create request omits the value. The
+      compatibility rule is retained indefinitely rather than given a release count —
+      sellers self-host and may lag without bound, so a date would be a number with
+      nothing behind it. Do not leave the value absent:
       the preservation rule and the projection's emit-on-every-pool requirement both
       assume every pool carries a value.
 - [ ] 1.3d Emit `capacity_backing` explicitly in canonical export, so a round-tripped

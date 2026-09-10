@@ -45,16 +45,26 @@ immediately; renaming first means they are written against the final names.
   `kit/site`, `kit/fulfillment`, both provisioning adapters, and the storefront
   claim builders. One name for the value `pool_delivers_offering_mode` already
   compares against `deliverable_modes`.
-- **`offer_resource` → `listing_resource`**, and the `offer` alias for it removed
-  from the registry client. `offer` is left to mean a negotiation message.
+- **`offer_resource` → `listing_resource`** marketplace-wide, and the `offer` alias
+  for it removed from the registry client. `offer` is left to mean a negotiation
+  message. This is a generic registry envelope field, so it moves in all three
+  deployed filter specifications — compute, API credits, and introductions — each
+  with its own version bump, not only in the compute schema.
 - **`virtualization_type` → `offering_mode`** in the published listing shape, its
   filter, the `VirtualizationType` enum, and the buyer CLI flags. The published
   field is required to equal the recorded offering mode and is assigned from it;
   the current name also asserts a virtualization type for `bare_metal`, which is
   not one.
-- **Retire `executor` as vocabulary.** `host` is the word for the machine. This
-  reverses `capacity-resource-administration`'s "Host is executor identity only"
-  to connection identity, and `project-capacity-resources-without-hosts`' executor
+- **Retire `executor` as a synonym**, not as a word. `provisioning/compute`'s
+  `ExecutorAdapter`, `ExecutorAdapterRegistry`, and `ExecutorActionEnvelope` are a
+  real action-dispatch abstraction — they validate parameters, submit work, and
+  validate results and credentials — and that abstraction keeps the name. What is
+  retired is `executor` standing in for the machine, the offering mode, or the
+  provider. The adapter's *selector* moves with everything else:
+  `ExecutorAdapter.executor_kind` becomes `offering_mode`, so an executor adapter is
+  selected by the offering mode it serves. This reverses
+  `capacity-resource-administration`'s "Host is executor identity only" to
+  connection identity, and `project-capacity-resources-without-hosts`' executor
   correlation language to host correlation.
 - **`schema.id: vms.compute` → `compute.market`**, matching the
   `introductions.market` convention and stopping the compute-family schema from
@@ -65,6 +75,15 @@ immediately; renaming first means they are written against the final names.
 - No compatibility window and no aliases for any of the above, except the
   `listing_mode` ingestion alias, which is kept because that key is optional and
   its silent absence resolves to a structural default rather than an error.
+- **Migrate the persisted state.** These names are not only on the wire.
+  `CapacityReservation.executor_kind` is a real column, `scheduling_requirements` is
+  a `Column(JSON)` whose stored value is compared structurally for settlement
+  idempotency, and `offer_resource` is persisted as JSON in storefront listings and
+  registry rows. Each gets an explicit strategy; see `design.md`'s migration matrix.
+  The cutover uses the identity-contract pattern already documented in
+  `DEPLOYMENT_AND_CONFIG.md`: quiesce authenticated mutations, migrate the
+  identity-bearing state, verify every participant reports the pinned version, then
+  resume.
 
 ## Capabilities
 
@@ -72,10 +91,16 @@ immediately; renaming first means they are written against the final names.
 
 - `storefront-publication`: the cardinality hint is named for its scope; the
   published listing shape and its offering-mode field carry their settled names.
-- `registry-discovery`: the compute schema identity, the listing shape key, and the
-  offering-mode field and filter carry their settled names.
-- `site-capacity`: the capacity claim's offering-mode field carries its settled
-  name.
+- `registry-discovery`: the schema identity, the listing shape key, and the
+  offering-mode field and filter carry their settled names, across every deployed
+  filter specification.
+- `site-capacity`: the capacity claim's offering-mode field carries its settled name.
+- `resource-pool-management`: the policy-metadata requirement names
+  `listing_cardinality_mode`.
+- `physical-provisioning`: release-status lookup is selected by `offering_mode`, and
+  the executor-adapter abstraction is selected by it.
+- `deployment-state`: the compute filter specification is selected by its new schema
+  identity.
 
 ### New Capabilities
 
@@ -92,7 +117,10 @@ None. No behaviour changes anywhere in this change.
   to be separate from.
 - Do not introduce `offering_type`. `structured-capacity-requirements` should drop
   it: the concept exists three times over and this change collapses it to one.
-- Do not change any behaviour. A behavioural diff in this change is a defect.
+- Do not change business semantics. This change **does** change observable contract
+  behaviour on purpose — retired names are rejected, schema identities and versions
+  move, old clients stop being compatible, CLI flags change — so "no behaviour
+  change" is not the validation oracle. See `design.md`.
 - Do not add a compatibility window for the wire renames. See `design.md` for why
   the window is closing rather than open.
 
@@ -113,10 +141,18 @@ None. No behaviour changes anywhere in this change.
 - Affected deployment: a storefront and its sites must deploy together for the claim
   wire, and buyer clients must move with the registries they query. Both are true of
   every known deployment today.
+- Affected persisted state: one column rename, two JSON backfills, and three
+  filter-specification version bumps.
 - Affected in-flight changes: `capacity-resource-administration`,
   `project-capacity-resources-without-hosts`, `unbacked-listing-publication`,
-  `publish-indicative-listing-rates`, and `structured-capacity-requirements` all
-  reference at least one renamed name.
+  `publish-indicative-listing-rates`, `structured-capacity-requirements`,
+  `bare-metal-buyer-domain`, `pools-7-storefront-fulfillment-cutover`,
+  `pools-9-retire-local-physical-authority`, and
+  `publish-multidimensional-listing-shape` reference at least one renamed name.
+  Three of them carry it in **active spec deltas** —
+  `multi-domain-storefront-composition` and both of `pools-8`'s — which is the path
+  by which retired vocabulary would synchronize back into permanent specifications,
+  so those are corrected rather than left to their owners.
 
 ## Dependencies and Related Changes
 
@@ -124,8 +160,12 @@ None. No behaviour changes anywhere in this change.
 - **Prerequisite for `unbacked-listing-publication`** and therefore for the rest of
   Goal 7, which is a deliberate cost: Goal 7 waits on this so its own changes are
   written against settled names rather than renamed after landing.
-- `structured-capacity-requirements` should drop its `offering_type` item once this
-  lands, which removes one of its three items.
+- **Amends `structured-capacity-requirements`** to use `offering_mode` rather than
+  proposing `offering_type`. That change has no spec deltas, so nothing of its
+  vocabulary can reach a permanent specification — but two simultaneously active
+  designs disagreeing about the canonical name for one concept is the condition this
+  change exists to end. Whether the item survives at all is left to that change's
+  owner; whether it may introduce a fourth name is not.
 - Coordinate with `pool-declared-advertisement-and-backing`, which adds
   `advertisable_modes` and `capacity_backing` alongside the hint renamed here. No
   ordering dependency; adjacent lines.
@@ -135,7 +175,8 @@ None. No behaviour changes anywhere in this change.
 - [x] `docs/development/ARCHITECTURE.md` — the four occurrences using `executor` in
       the offering-mode sense, and any use of `offer_resource`.
 - [x] Existing subsystem specification — `storefront-publication` (spec and
-      architecture companion), `registry-discovery`, `site-capacity`.
+      architecture companion), `registry-discovery`, `site-capacity`,
+      `resource-pool-management`, `physical-provisioning`, `deployment-state`.
 - [ ] New subsystem specification
 - [ ] No permanent documentation change
 
@@ -148,5 +189,6 @@ None. No behaviour changes anywhere in this change.
   `openspec/specs/registry-discovery/spec.md`.
 - The cardinality hint's normative scope —
   `openspec/specs/storefront-publication/spec.md`.
-- `executor` is retired; the machine is a host, the handler is a provider, the mode
-  is an offering mode — `docs/development/ARCHITECTURE.md`.
+- `executor` names an action-dispatch abstraction and nothing else; the machine is a
+  host, the handler is a provider, the mode is an offering mode —
+  `docs/development/ARCHITECTURE.md`.

@@ -95,10 +95,12 @@ depends on.
       `register_resource` currently injects it when absent and then reads it back for
       `mirrored_units`; both sites need the supplied name and the explicit-declaration
       case.
-- [ ] 4b.3 Define `total_units`' behaviour when an explicit capacity map contains no
-      mirror dimension, and record the decision. The existing consistency check
-      compares them when both are present; what it means when only one is is a
-      decision, not a default.
+- [ ] 4b.3 Make `total_units` optional and absent where the declaration names no
+      mirror dimension. **Decided 2026-09-09** rather than left as a gate: the
+      existing consistency check compares the scalar against its mirrored dimension
+      when both are present, so absence keeps that check meaningful while a
+      substituted zero would make it assert a false equality. Retiring the scalar
+      entirely remains deferred.
 - [ ] 4b.4 Wire the VM composition to its existing mirror dimension so no behaviour
       changes there.
 - [ ] 4b.5 Wire the API-credit composition to its own dimension, matching how it
@@ -107,7 +109,8 @@ depends on.
       still read correctly, and record how a row written before this change is
       interpreted after it.
 - [ ] 4b.7 **Unit.** An explicit multidimensional declaration with no compute
-      dimension is stored as declared, with no manufactured GPU dimension.
+      dimension is stored as declared, with no manufactured GPU dimension, and its
+      scalar unit total is absent rather than zero.
 - [ ] 4b.8 **Unit.** The VM composition's legacy scalar fallback maps to its
       configured mirror dimension; the API-credit composition's does not become
       `gpu_count`.
@@ -127,7 +130,10 @@ depends on.
 - [ ] 4c.3 **Integration, real DB transaction.** A resource holding a live reservation
       cannot cross a pool boundary; the same resource can once its obligations are
       drained. Cover both in one test so the refusal is not mistaken for a resource
-      that could never move.
+      that could never move. Keep the coverage generic: this change does not depend on
+      `pool-declared-advertisement-and-backing`, so a backed-to-unbacked case would
+      exercise terminology that may not exist yet when this lands. That
+      specialization belongs to the Goal 7 change that introduces it.
 - [ ] 4c.4 Confirm no existing fixture, bulk import, or e2e setup reassigns a resource
       under a live obligation. If one does, drain it rather than exempting it.
 
@@ -229,7 +235,7 @@ Per `openspec/README.md#plan-closeout-requirements`.
 | Accepted decision | Permanent location |
 |---|---|
 | Capacity resources are authoritative for the declared sellable shape and quantity across every dimension; admission authority is resolved separately | `openspec/specs/site-capacity/spec.md` — "Operator-administered capacity declarations" |
-| A capacity declaration names no mandatory dimension; the legacy mirror's dimension is composition-supplied | `openspec/specs/site-capacity/spec.md` |
+| A capacity declaration names no mandatory dimension; the legacy mirror's dimension is composition-supplied and its scalar total is absent where there is no mirror dimension | `openspec/specs/site-capacity/spec.md` |
 | A capacity resource does not move pools under live capacity obligations | `openspec/specs/site-capacity/spec.md` |
 | Capacity definitions reconcile on a document digest, not on process start | `openspec/specs/physical-provisioning/spec.md` |
 | Projected attributes must not contradict projected capacity | `openspec/specs/site-capacity/spec.md` — "Projected inventory is internally consistent" |

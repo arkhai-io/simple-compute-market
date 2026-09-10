@@ -576,12 +576,12 @@ adds no new storage category. What it must not add is an inventory model.
   called?** Now more than cosmetic: if the central type is `PublicationBinding`
   with capacity as one admission variant, the package and the type both name a
   variant rather than the concept. Deferred; no task renames either.
-- **When are the absent-tag compatibility rules removed?** Both are time-limited by
-  design, and this repository has no fleet-wide deployment signal to gate removal
-  on, since sellers self-host their own site and storefront deployments. Same shape
-  as the cardinality alias's removal question, and deliberately not prescribed in
-  `tasks.md`. Whether the two rules are removed together is itself open — they
-  arrive together but a deployment could plausibly upgrade past one first.
+- **When are the absent-tag compatibility rules removed?** Deliberately indefinite
+  rather than time-limited: there is no fleet-wide deployment signal to gate removal
+  on, since sellers self-host their own site and storefront deployments, so a release
+  count would be a number with nothing behind it. Removal waits on a future change
+  acquiring such a signal. Whether the two rules are removed together is itself open —
+  they arrive together but a deployment could plausibly upgrade past one first.
 - **Does a rate arbitrageur with no hardware run a site service?** The model
   assumes site-shaped sellers deploy one, which is materially lighter with no
   hosts — no executor connections, no playbooks, no watchdog — but is still a

@@ -70,7 +70,11 @@ root, the way domain-specific claim aliases already are, rather than fixed in th
 shared capacity module.
 
 Where a caller declares capacity explicitly, the authority MUST NOT add a mirror
-dimension to that declaration. A declaration naming only dimensions a domain owns —
+dimension to that declaration. The legacy scalar unit total MUST be optional, and
+MUST be absent where the declaration names no mirror dimension — the existing
+consistency check between the scalar and its mirrored dimension compares them when
+both are present, so absence rather than a substituted zero is what keeps that check
+meaningful. A declaration naming only dimensions a domain owns —
 for example a credit balance with no compute dimension — MUST be stored as declared.
 
 #### Scenario: A declaration names no compute dimension
@@ -78,6 +82,12 @@ for example a credit balance with no compute dimension — MUST be stored as dec
 - **WHEN** an operator declares capacity consisting only of a domain's own unit dimension
 - **THEN** the stored declaration contains exactly that dimension
 - **AND** no GPU or other compute dimension is manufactured
+
+#### Scenario: A declaration has no mirror dimension to total
+
+- **WHEN** a declaration names no dimension the legacy scalar mirrors
+- **THEN** the scalar unit total is absent rather than zero
+- **AND** the consistency check between the scalar and its mirrored dimension does not apply
 
 #### Scenario: A composition supplies its mirror dimension
 
@@ -106,10 +116,4 @@ provider or different capacity backing.
 #### Scenario: A drained resource is reassigned
 
 - **WHEN** a reassignment is requested for a capacity resource with no live capacity obligation
-- **THEN** the reassignment succeeds
-
-#### Scenario: An unbacked resource is reassigned
-
-- **GIVEN** a capacity resource in a pool declaring no capacity backing, which therefore holds no reservations
-- **WHEN** it is reassigned to a pool declaring capacity backing
 - **THEN** the reassignment succeeds

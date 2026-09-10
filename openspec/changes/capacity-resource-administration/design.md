@@ -12,7 +12,7 @@ Re-verify anything load-bearing before implementing; the codebase will have move
 | Concern | Seeding path | Runtime API | Idempotence |
 |---|---|---|---|
 | Hosts | `app_runtime.seed_inventory_if_empty` from `inventory_ini` or `resolved_inventory_path` | `POST /api/v1/hosts` and siblings, `POST /api/v1/hosts/import` | Skipped entirely when the table is non-empty; `/hosts/import` always upserts |
-| Resource pools | `app_runtime.import_pool_definitions_if_configured` from `resolved_pool_definitions_path` | `POST`/`PUT`/`PATCH /api/v1/pools` | Diff-based, runs at **every** startup |
+| Resource pools | `app_runtime.import_pool_definitions_if_configured` from `resolved_pool_definitions_path` | `POST`/`PUT`/`PATCH /api/v1/pools` | Digest-gated: reconciled when the document differs from the last one recorded (see the 2026-09-09 note below; this table originally read "every startup") |
 | Sellable capacity | **none** | `PUT /api/v1/capacity/resources/{resource_id}` only | n/a |
 
 The registered startup steps are `apply-ansible-config`,
@@ -22,11 +22,11 @@ nothing derives them from hosts.
 
 The two seeding paths differ deliberately and the difference is instructive. Host
 seeding is skip-if-non-empty so operator edits made through the API survive a pod
-restart. Pool import is unconditional-but-idempotent, and its in-code comment states
-why: because `import_pools` is diff-based, re-running it every startup is the correct
-behavior rather than a re-seeding hazard. Capacity definitions are a declared
-inventory in the same sense pool definitions are, so this change follows the pool
-idiom, not the host one — see "Decisions".
+restart. Pool import reconciles a declared document — originally on every startup,
+now gated on the document's digest for the same reason host seeding is
+skip-if-non-empty: reapplying unchanged state reverts administration performed since.
+Capacity definitions are a declared inventory in the same sense pool definitions are,
+so this change follows the pool idiom, not the host one — see "Decisions".
 
 ### Why a host-only deployment still works today
 
@@ -137,13 +137,15 @@ harmlessly — the rollback risk is one-directional and small.
 ### Startup import follows the pool-definitions idiom, not the host idiom
 
 `capacity_definitions_path` resolves exactly as `pool_definitions_path` does
-(`config.py`'s `resolved_*_path` property, empty string meaning unset), the import is
-diff-based and idempotent, it runs on every startup, and it raises on a configured
-path that does not exist rather than silently skipping — all matching
-`import_pool_definitions_if_configured`. Choosing the host idiom (skip-if-non-empty)
-instead would make an operator's declared capacity file silently inert after the
-first boot, which is the failure mode the pool import's own comment was written to
-avoid.
+(`config.py`'s `resolved_*_path` property, empty string meaning unset), reconciliation
+goes through the same `DefinitionDocumentImporter` gated on the document digest, and
+a configured path that does not exist raises rather than silently skipping — all
+matching `import_pool_definitions_if_configured` as it now behaves. Choosing the host
+idiom (skip-if-non-empty) instead would make an operator's *edited* capacity file
+silently inert after the first boot, which is what the pool idiom exists to avoid;
+the digest gate avoids that without reapplying an unchanged document, which is the
+opposite failure. See "The import contract changed underneath this change" below for
+why an earlier version of this section said "every startup".
 
 Ordering within `startup_steps()` matters: capacity import must run after
 `import-pool-definitions`, because a capacity resource names a `pool_id` and the

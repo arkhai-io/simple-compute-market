@@ -66,8 +66,10 @@ after migration does not wipe a migrated tag. Canonical export MUST always emit 
 value explicitly, so a round-tripped document carries it.
 
 Where a create request omits `capacity_backing`, the authority MUST record `backed`
-explicitly rather than storing an absent value, under a bounded compatibility rule
-with a stated removal condition. Every pool therefore carries an explicit value,
+explicitly rather than storing an absent value, as a compatibility rule. The rule is
+retained until a future change acquires a reliable signal that no client relies on
+it; sellers self-host their own deployments and may lag without bound, so no release
+count or date is a meaningful removal condition. Every pool therefore carries an explicit value,
 which is what the preservation rule above and the projection's completeness
 requirement both depend on. Moving inventory
 between backed and unbacked supply is a second pool declaring the intended backing

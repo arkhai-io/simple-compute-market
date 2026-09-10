@@ -46,9 +46,11 @@ copy of a site fact, and the two MUST NOT be conflated. Backing MUST NOT be infe
 capacity data, an empty projection, or a stale generation.
 
 A projection whose producer declares backing for no pool it projects predates the
-declaration. Every pool in such a projection MUST resolve as capacity-backed under
-an explicit, logged compatibility rule, because every pool was admissible before
-the declaration existed. A projection declaring backing for some pools and omitting
+declaration. Every pool in such a projection MUST resolve as capacity-backed under an explicit,
+logged compatibility rule, because every pool was admissible before the declaration
+existed. That rule is retained until a future change acquires a reliable signal that
+no producer relies on it; self-hosted sites may lag without bound, so no release count
+is a meaningful removal condition. A projection declaring backing for some pools and omitting
 it for another it projects is malformed, and the omitting pool MUST fail closed. A
 declared value outside the accepted set MUST fail that pool closed.
 

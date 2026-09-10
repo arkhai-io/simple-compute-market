@@ -1,3 +1,13 @@
+<!-- Amended 2026-09-09 by settle-listing-vocabulary: this change proposed
+`offering_type` as a new name for what the codebase already calls `offering_mode`
+at the storefront and on pool declarations, `executor_kind` on the capacity claim
+wire, and `virtualization_type` in the published listing. That change collapses all
+of them to `offering_mode`, so every occurrence below now reads `offering_mode` and
+no new name is introduced. Whether this item has anything left to do once the
+concept is settled is this change's owner's call — the concept already exists on the
+wire and is required there, so the separation from the site-inventory discriminator
+may already be complete. -->
+
 ## Why
 
 POOLS-7 Section 11.2 fixed `most_available`'s claim-blindness bug (a
@@ -50,7 +60,7 @@ requirement structure grouped by resource family:
 
 ```json
 {
-    "offering_type": "vm",
+    "offering_mode": "vm",
     "requirements": {
         "cpu": {"count": 8},
         "memory": {"gib": 32},
@@ -82,10 +92,10 @@ step at all today (`dict_resource_satisfies_claim` reads a wire
 snapshot's `attributes` unmodified), so this closes that gap rather
 than only mirroring it cosmetically.
 
-### 2. Separate `offering_type` from `resource_type`
+### 2. Separate `offering_mode` from `resource_type`
 
-Introduce `offering_type` (candidate names considered:
-`offering_type`, `fulfillment_type`, `market_type` — `offering_type`
+Introduce `offering_mode` (candidate names considered:
+`offering_mode`, `fulfillment_type`, `market_type` — `offering_mode`
 is preferred, see Alternatives) as the buyer-facing concept of *what is
 being purchased* (`vm`, `bare-metal`, `pod`, `api_credits`), distinct
 from `resource_type` (the existing site-inventory-adapter discriminator,
@@ -94,11 +104,11 @@ e.g. `compute.gpu`, that `kit/site`'s admission logic already checks).
 Section 11.2 already uses it correctly, at the site-inventory layer, and
 nothing here requires touching that.
 
-Whether `offering_type` needs to appear on the wire at all depends on
+Whether `offering_mode` needs to appear on the wire at all depends on
 routing: today, every storefront only ever talks to site authorities
 within its own domain (VM's storefront never reaches a bare-metal site),
 so the domain boundary itself already establishes the type, and
-`offering_type` may not need to be a real claim field until a shared,
+`offering_mode` may not need to be a real claim field until a shared,
 cross-domain capacity endpoint exists. This change should confirm that
 architecture is still true before deciding whether to add the field
 now or defer it further.
@@ -136,7 +146,7 @@ This is a two-speed migration:
   or the `dimensions`/`attributes` split those already implement correctly.
 - Do not touch `resource_type`'s existing meaning or its POOLS-7 Section
   11.2 usage.
-- Do not require every domain to adopt `offering_type` if routing already
+- Do not require every domain to adopt `offering_mode` if routing already
   makes it redundant — decide this explicitly during design, not by
   default inclusion.
 - Do not rename the persisted `"required_attributes"` wire key without a
@@ -163,7 +173,7 @@ This is a two-speed migration:
 - The `dimensions`/`attributes` split's invariant (quantitative vs.
   categorical) and why a structured `requirements` shape doesn't
   weaken it — `openspec/specs/site-capacity/architecture.md`
-- `resource_type` vs. `offering_type`'s distinct scopes — `docs/development/ARCHITECTURE.md`'s
+- `resource_type` vs. `offering_mode`'s distinct scopes — `docs/development/ARCHITECTURE.md`'s
   vocabulary table, `openspec/specs/site-capacity/spec.md`
 
 ## Dependencies and Related Changes
