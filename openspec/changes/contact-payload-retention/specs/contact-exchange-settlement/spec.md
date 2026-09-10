@@ -8,11 +8,17 @@ started, and MUST be deletable as part of the deal lifecycle without disturbing 
 settled obligation record. A deal that never starts its introduction MUST persist no
 contact data.
 
-A composing storefront MUST carry a retention window as configuration with an
-explicit operator default. An implicit unbounded default MUST NOT be used: it reads
-as the absence of a policy rather than a decision, and it leaves nothing to
-disclose. An operator MAY configure indefinite retention, which is a different and
-better state than never having considered the question.
+A composing storefront MUST carry a retention window as configuration with a
+stated default. An unset window MUST mean indefinite retention and MUST cause no
+deletion, so an operator wanting today's behaviour can say so explicitly rather
+than relying on an unstated absence of policy.
+
+The window MUST be applied as an aggregate policy over the storefront's holdings
+and MUST be read live wherever it is used. It MUST NOT be recorded per
+introduction and enforced from the recorded value: retention is not a term agreed
+with a counterparty, and a pinned window would exempt exactly the rows an operator
+shortening the policy most needs to remove. Configuring a finite window is the
+operator's consent to delete existing payloads past it.
 
 Deletion MUST remove both parties' contact payloads for one introduction while
 leaving the settled obligation record, the deal's terminal state, and the
@@ -21,19 +27,31 @@ deal-settlement identity that cross-mechanism status and tooling correlate by, s
 removing the record to remove contact data would erase a deal that legitimately
 happened rather than the personal details it carried.
 
+Deletion MUST be reachable both through a scheduled sweep over payloads past the
+window and through an operator-invoked path for one introduction on request, and
+both MUST invoke one shared deletion operation. Neither path substitutes for the
+other: a policy honoured only on operator action is not automatic, and a scheduled
+sweep cannot serve an out-of-schedule request for a single party.
+
 Deletion MUST be idempotent. Deleting an already-deleted or never-revealed
 introduction MUST converge rather than fail, because a partially failed sweep is
 exactly when a retry occurs. An authenticated read arriving after deletion MUST
 return a clean already-deleted outcome rather than a partially populated
 introduction package.
 
-The effective retention window MUST be disclosed to both parties through the same
-projection that carries the reveal, which is the one point both are guaranteed to
-read. The disclosure MUST be scoped to what the storefront retains. Each side may
-have delivered its own copy of the reveal to locally configured sinks, and
-`delete_introduction` governs what the marketplace persists rather than what a
-recipient's own mailbox or file already holds, so a disclosure stated without that
-scope would be a false claim about where the data is.
+The effective window MUST be readable from the storefront before a buyer commits
+contact data. The buyer's payload accompanies the introduction start, so a window
+disclosed only at reveal is disclosed after the point a party could decline. The
+window MUST additionally be disclosed through the projection that carries the
+reveal, and both surfaces MUST read the same live value so they cannot disagree.
+
+Both disclosures MUST state current storefront policy rather than a commitment:
+the operator may change the window or remove a payload directly at any time, and
+nothing the storefront publishes binds them. Both MUST be scoped to what the
+storefront retains. Each side may have delivered its own copy of the reveal to
+locally configured sinks, and deletion governs what the marketplace persists rather
+than what a recipient's own mailbox or file already holds, so a disclosure stated
+without that scope would be a false claim about where the data is.
 
 #### Scenario: Unstarted deals hold no contact data
 
@@ -67,10 +85,35 @@ scope would be a false claim about where the data is.
 - **THEN** it receives a clean already-deleted outcome rather than a partially
   populated introduction package
 
+#### Scenario: The window is shortened after a reveal
+
+- **WHEN** an operator shortens the retention window below the age of an
+  already-revealed introduction
+- **THEN** the next sweep deletes that introduction's payloads
+- **AND** no window recorded at reveal exempts it
+
+#### Scenario: The window is unset
+
+- **WHEN** a storefront's retention window is unset
+- **THEN** payloads are retained indefinitely and the sweep deletes nothing
+
+#### Scenario: Both invocation paths share one handler
+
+- **WHEN** an operator invokes deletion for one introduction and the scheduled
+  sweep deletes another
+- **THEN** both remove the payloads through the same deletion operation
+
+#### Scenario: A buyer reads the window before negotiating
+
+- **WHEN** a buyer queries a storefront before starting an introduction
+- **THEN** the effective retention window is readable from the storefront
+- **AND** it is the same live value the reveal projection later discloses
+
 #### Scenario: The window is disclosed at reveal
 
 - **WHEN** a party reads a revealed introduction
 - **THEN** the projection carrying the reveal also carries the effective retention
   window
-- **AND** the disclosure is scoped to storefront retention and does not state or
-  imply that copies already delivered to configured sinks are covered
+- **AND** the disclosure states current storefront policy rather than a commitment
+- **AND** it is scoped to storefront retention and does not state or imply that
+  copies already delivered to configured sinks are covered

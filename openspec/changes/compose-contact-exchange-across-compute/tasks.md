@@ -9,17 +9,30 @@ before it has.
       parts (accepted-state interpretation, `obligation_ref` re-derivation, the
       obligation drive sequence) and domain-supplied parts (persistence client,
       configured values). Record the split before moving anything.
-- [ ] 1.2 **Decision gate:** decide where the promoted glue lives, and record the
-      reasoning in `design.md`. It is an open question there. The constraints are
-      the mechanism kit's asserted package boundary and the composition seam that
-      owns kit-side storefront runtime; do not place it by default.
-- [ ] 1.3 **Decision gate:** decide which compute-family domains this change
-      composes, and record the reasoning. Also open in `design.md`.
+- [ ] 1.2 Promote into a new module in `kit/contact-exchange`, taking the
+      negotiation-thread read and the settlement-obligation read as declared
+      Protocols. `design.md` records why: the kit already imports `sqlite3` and
+      owns its own table, migration, and row functions, and the promoted bodies
+      need two injected callables rather than any persistence type.
+- [ ] 1.2a Add `uuid` to the kit's permitted import roots in its package-boundary
+      test, as an explicit reviewable line, for worker-id generation in the drive
+      sequence. Leave the deny list — `fastapi`, `httpx`, `market_alkahest`,
+      `requests`, `stripe`, `hosted_settlement_client` — exactly as it is.
+- [ ] 1.2b Do not land the glue in `kit/storefront`. It declares
+      `arkhai-kit-alkahest` and `alkahest-py` as hard runtime dependencies, which
+      would make settlement by introduction depend on a different mechanism's SDK.
+- [ ] 1.3 Compose VM, and only VM. `domains/` holds three domains but only VM and
+      bare metal register a `market.storefront_contributions` entry point; API
+      credits has its own registry schema identity and is a separate market family.
+      Bare metal already composes the mechanism, so VM is the remaining
+      compute-family domain.
+- [ ] 1.3a Record API credits as out of scope with its reason, so a later reader
+      does not read the omission as an oversight.
 
 ## 2. Promote
 
-- [ ] 2.1 Move the domain-neutral bodies to the chosen home with persistence
-      injected through the existing callback contract.
+- [ ] 2.1 Move the domain-neutral bodies into the kit module with both domain
+      reads injected as Protocols through the existing callback contract.
 - [ ] 2.2 Promote the bodies unchanged. A promotion that also alters a check is
       unreviewable, and these checks are security checks — the `obligation_ref`
       re-derivation is what prevents a reveal against an obligation the accepted
@@ -33,10 +46,15 @@ before it has.
 
 ## 3. Compose
 
-- [ ] 3.1 Register the mechanism in each domain chosen in 1.3, supplying
-      persistence and configured values only.
-- [ ] 3.2 Add each domain's introduction persistence, matching the shape the
-      promoted contract expects.
+- [ ] 3.1 Register the mechanism in the VM storefront's settlement composition,
+      which currently registers Alkahest and Stripe only, supplying persistence and
+      configured values only.
+- [ ] 3.2 Add VM's introduction persistence as thin wrappers over the kit's
+      `insert_introduction` and `load_introduction`, matching the shape the promoted
+      contract expects. VM's SQLite client already exposes
+      `load_negotiation_thread_row` with the signature the promoted glue calls.
+- [ ] 3.2a Add the contact-exchange migrations to VM's migration tuple at the same
+      seam that already composes `*settlement_migrations()`.
 - [ ] 3.3 Confirm composition is independent of whether a listing is
       capacity-backed, in both directions: a backed listing may settle by
       introduction, and an unbacked listing is not required to.
@@ -59,8 +77,9 @@ before it has.
 
 ## 4. Delivery
 
-- [ ] 4.1 Wire delivery dispatch in each newly composing domain, seller-side off
-      the reveal's critical path and buyer-side inline.
+- [ ] 4.1 Wire delivery dispatch in the VM storefront, seller-side off the
+      reveal's critical path and buyer-side inline, through the same injected
+      dispatch seam bare metal uses.
 - [ ] 4.2 Confirm delivery remains non-authoritative and that re-delivery reads
       the durable reveal rather than reconstructing one.
 
@@ -100,7 +119,8 @@ before it has.
 - [ ] 7.3 **Documentation compliance.** Re-check accepted decisions against
       `openspec/README.md`'s placement table.
 - [ ] 7.4 **Narrative compression.** Shorten completed-task notes to final
-      behaviour, the two decision-gate outcomes, and any remaining open work.
+      behaviour, and any remaining open work. The promoted home and the composing
+      domain set are recorded in `design.md`; do not restate their reasoning here.
 - [ ] 7.5 **Roadmap currency.** Update Goal 6's open-gap row in
       `docs/development/ROADMAP.md`: cross-domain contact-exchange composition is
       owned by this change rather than unowned.

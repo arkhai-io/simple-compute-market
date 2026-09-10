@@ -29,10 +29,12 @@ beyond bare metal as an unowned gap.
   re-derivation, and the obligation drive sequence, with persistence injected.
 - Leave the bare-metal storefront holding only its persistence client and its
   configured values, matching how it composes every other kit mechanism.
-- Compose the mechanism in the remaining compute-family storefront domains, so a
-  seller in any of them can settle by introduction.
-- Extend introduction delivery to those domains, so a revealed introduction
-  reaches its owner rather than only being readable.
+- Compose the mechanism in the VM storefront, the one remaining compute-family
+  domain, so a seller there can settle by introduction. Bare metal already
+  composes it; API credits is a separate market family with its own registry
+  schema identity and is out of scope.
+- Extend introduction delivery to VM, so a revealed introduction reaches its owner
+  rather than only being readable.
 - Resolve the seller's contact payload per listing origin rather than per
   storefront. `ContactSettlementConfig.contact_payload` is one static value for a
   whole storefront, which is coherent only at one seller per storefront. Goal 7
@@ -63,10 +65,11 @@ None.
 
 ## Non-Goals
 
-- Do not give the mechanism kit a persistence dependency. Its package boundary is
-  asserted by test and is part of why the mechanism composes cleanly; persistence
-  is injected, not imported. Where the promoted glue lands is an open question in
-  `design.md`, constrained by this.
+- Do not give the mechanism kit a framework, HTTP client, or foreign-mechanism
+  dependency. Its package boundary is asserted by test and is part of why the
+  mechanism composes cleanly. The promoted glue lands in the kit and takes both
+  domain reads as injected Protocols, so it adds no persistence type; the boundary
+  test's deny list is unchanged and `uuid` is the only permitted root added.
 - Do not change the reveal surface, its authentication, its idempotency, or the
   option shape.
 - Do not build per-deal contact aliasing. Making the payload resolvable is the hook
@@ -80,9 +83,10 @@ None.
 
 ## Impact
 
-- Affected code: the bare-metal storefront's introduction composition, the
-  promoted glue's new home, the remaining compute-family storefront composition
-  roots, and their delivery wiring.
+- Affected code: the bare-metal storefront's introduction composition, a new
+  module and one boundary-test line in `kit/contact-exchange`, and the VM
+  storefront's settlement composition, introduction persistence, migration tuple,
+  and delivery wiring.
 - Affected specification: `openspec/specs/contact-exchange-settlement/spec.md`,
   `openspec/specs/introduction-delivery/spec.md`.
 - Not affected: the mechanism kit's registration, option builder, settlement
@@ -94,10 +98,11 @@ None.
   multiplies the number of deployments holding contact payloads, and the
   retention obligation is currently satisfied only in principle. The dependency is
   a gate, not a coordination note.
-- Coordinate with `bare-metal-and-credits-domain-stacks` and
-  `kit-storefront-composition-seam`, which own where kit-owned storefront runtime
-  sits. The promoted glue's home should follow their seam rather than inventing a
-  parallel one.
+- No longer coupled to `bare-metal-and-credits-domain-stacks` or
+  `kit-storefront-composition-seam` for placement. Those own where kit-owned
+  *storefront* runtime sits; the promoted glue is mechanism-shaped and lands in the
+  mechanism kit, so it does not need their seam. `kit/storefront` was rejected as
+  a home because it declares hard Alkahest dependencies — see `design.md`.
 - Independent of `unbacked-listing-publication` for the composition work. Either can
   land first; neither assumes the other. Per-origin contact resolution is what makes
   Goal 7's multi-seller value claim true, though, so Goal 7 is not complete for

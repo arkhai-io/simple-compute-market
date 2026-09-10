@@ -55,10 +55,48 @@ callbacks, and the domain supplies them. Promoting the *bodies* of prepare and
 complete while leaving persistence injected keeps the kit boundary intact and
 leaves the domain supplying values rather than logic.
 
-Where the promoted bodies live is genuinely open — the mechanism kit cannot hold
-them if they need persistence types, and a storefront-side kit is the obvious
-alternative but should follow the composition seam that owns kit-side storefront
-runtime rather than inventing a parallel home.
+### The promoted bodies live in the mechanism kit
+
+An earlier version of this design left the home open on the reasoning that the
+mechanism kit could not hold the bodies if they needed persistence types. That
+premise turned out to be wrong in two independent ways.
+
+**The kit already holds persistence.** `market_contact_exchange` imports
+`sqlite3`, owns the `contact_introductions` DDL and its migration, and ships
+`insert_introduction`, `load_introduction`, and `delete_introduction` operating on
+an injected connection. Its boundary test permits `sqlite3` explicitly. What that
+test actually forbids is the list it asserts against — `fastapi`, `httpx`,
+`market_alkahest`, `requests`, `stripe`, `hosted_settlement_client` — which is
+frameworks, HTTP clients, and other mechanisms, not storage.
+
+**The promoted bodies need no persistence types anyway.** Reading the bare-metal
+glue, the domain-neutral parts need exactly two things from the domain: a
+negotiation-thread read keyed by negotiation id, returning a mapping carrying a
+terminal state and a settlement plan; and a settlement-obligation read for the
+reference-only fallback path. Everything else is `market_core.schemas`,
+`market_identity`, and `market_settlement_runtime`, all already kit dependencies.
+Two narrow async callables expressed as Protocols is precisely the pattern the
+reveal service already uses for prepare, authorize, persist, load, and complete,
+and the pattern `NegotiationRepository` uses in the storefront kit's negotiation
+watchdog. So persistence stays injected in the strict sense the decision above
+wants, and the kit acquires no knowledge of any domain's schema.
+
+The kit is also not being asked to learn a foreign vocabulary. It already accepts
+a `negotiation_id` on the start route and already calls `derive_obligation_ref`
+against it, so agreements and their references are within its existing scope.
+
+**`kit/storefront` was the obvious alternative and is worse, on a dependency
+ground rather than a taste one.** Its `pyproject.toml` declares
+`arkhai-kit-alkahest` and `alkahest-py` as hard runtime dependencies. Landing
+mechanism-neutral introduction glue there would make settlement by introduction
+depend on a different settlement mechanism's SDK — the coupling the mechanism's
+own boundary test exists to prevent, relocated one package up rather than
+avoided.
+
+One boundary amendment is needed: `uuid` joins the kit's permitted import roots,
+for worker-id generation in the drive sequence. That is stdlib and not a
+weakening, but it belongs in the test as an explicit reviewable line. The deny
+list stays exactly as it is.
 
 ### Delivery follows composition
 
@@ -129,25 +167,50 @@ whole point of this change.
   the bodies unchanged first and composing a second domain only after the
   bare-metal path passes its existing coverage against the promoted
   implementation.
-- **[The promoted home is wrong]** → Named as an open question rather than
-  guessed. Landing it in the wrong place is recoverable; landing it in the
-  mechanism kit and acquiring a persistence dependency there is much less so,
-  because the boundary test is what currently makes the kit's neutrality
-  checkable.
+- **[The promoted home is wrong]** → The kit is chosen on the evidence that it
+  already holds its own persistence and that the promoted bodies need only two
+  injected callables, so the neutrality the boundary test checks is preserved
+  rather than spent. The residual risk is that a later requirement does need a
+  persistence type in the kit; mitigated by keeping the boundary test's deny list
+  unchanged, so acquiring a framework, HTTP client, or foreign mechanism
+  dependency still fails loudly.
 - **[Delivery multiplies configured sinks]** → Each composing domain's operator
   configures their own sinks, and each sink is a place a contact payload comes to
   rest outside the storefront's retention control. This is the reason retention
   disclosure is scoped to storefront retention rather than stated absolutely.
 
+### The compute family is VM and bare metal, so this change composes VM
+
+The candidate set is smaller than "the compute family" suggests. `domains/` holds
+`vms`, `bare_metal`, and `apicredits`, but only VM and bare metal register a
+`market.storefront_contributions` entry point — they are the compute-family shell.
+API credits ships its own registry filter specification under schema identity
+`api_credits`, distinct from the compute family's, and is a different market family
+rather than a compute form factor. Bare metal already composes the mechanism. So
+the remaining compute-family domain is exactly one: VM.
+
+The cost is low enough that deferring it would cost more than doing it. VM's
+SQLite client already exposes `load_negotiation_thread_row` with the identical
+keyword signature the glue calls, and already composes `*settlement_migrations()`
+in its migration tuple at the same seam bare metal uses to add the contact-exchange
+migrations. Because the kit owns the table and the row functions, VM's persistence
+side is two thin `asyncio.to_thread` wrappers over the kit's insert and load, plus
+one registration line in a settlement composition that currently registers only
+Alkahest and Stripe.
+
+The blast-radius argument against composing broadly does not bite at one domain.
+Composing VM is what demonstrates the promotion is genuinely domain-neutral — a
+promotion validated only against the domain it came from demonstrates very little —
+and the sequencing already requires bare metal's existing coverage to pass against
+the promoted implementation before VM is touched.
+
+API credits is out of scope, for the reason above rather than by omission: separate
+market family, separate registry schema identity, not a compute-family storefront
+contribution. It may compose later; nothing in this change's shape prevents it.
+
 ## Open questions
 
-- **Where does the promoted glue live?** Constrained by the mechanism kit's
-  package boundary and by the composition seam that owns kit-side storefront
-  runtime. Deferred; no task places it.
-- **Which compute-family domains compose it in this change?** Composing all of
-  them at once maximises the duplication avoided and the blast radius; composing
-  one proves the promotion with less. Deferred to planning rather than decided
-  here.
+None. The promoted home and the composing domain set are both decided above.
 
 ## Migration Plan
 
