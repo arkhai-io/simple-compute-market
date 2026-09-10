@@ -1,1 +1,0 @@
-# TOMBSTONE: delete this file — the unbacked-listing-vocabulary change no longer exists; the backing vocabulary is settled design carried in openspec/changes/unbacked-listing-publication/design.md and promoted to ARCHITECTURE.md at that change's closeout.
