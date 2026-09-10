@@ -87,10 +87,10 @@ None. This is a posture within existing capabilities, not a new domain.
 - Do not create a domain, a kit, or a provisioning resource-pool type. Backing is
   orthogonal to what is traded; a domain named for how it settles would be wrong
   on the first hosted-settled unbacked listing.
-- Do not publish rates. `publish-indicative-listing-rates` owns the indicative
-  rate and its filter, because the rate shape depends on work this change does
-  not want to wait on. Discovery without comparison is the acceptance boundary
-  here.
+- Do not publish rates. `publish-indicative-listing-rates` owns the seller's
+  asking rate and its filters, because that surface has its own asset, period,
+  filter-grammar, and seller-authoring decisions — not because its shape waits on
+  other work. Discovery without comparison is the acceptance boundary here.
 - Do not add a settlement mechanism or compose one.
   `compose-contact-exchange-across-compute` owns that, and this change must
   remain true for any mechanism.

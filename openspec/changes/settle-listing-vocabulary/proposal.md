@@ -104,7 +104,9 @@ immediately; renaming first means they are written against the final names.
 
 ### New Capabilities
 
-None. No behaviour changes anywhere in this change.
+None. This change adds no capability; it renames vocabulary across existing
+ones. It does change observable contract behaviour on purpose — see Non-Goals
+and `design.md` — so "no behaviour change" is not its validation oracle.
 
 ## Non-Goals
 

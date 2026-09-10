@@ -1,6 +1,6 @@
 # Tasks — publish indicative listing rates
 
-Depends on `unbacked-listing-publication`. Do not begin Section 2 before it has
+Depends on `unbacked-listing-publication`. Do not begin Section 3 before it has
 landed.
 
 Validation levels below are named deliberately. Per `docs/development/TESTING.md`,
@@ -9,20 +9,17 @@ service's canonical typed client over `ASGITransport`.
 
 ## 1. Settled decisions to confirm against code
 
-No decision gate remains open. Periods, filter semantics, the carrier separation,
-and the asset expression are all settled in `design.md`; the tasks below confirm
-the code facts each decision rests on still hold, and stop rather than proceed if
-one has moved.
+No decision gate remains open. The tasks below confirm the code facts each
+decision rests on still hold, and stop rather than proceed if one has moved.
 
-- [ ] 1.1 Confirm `PER_UNIT_SECONDS` still holds exactly `{"hour": 3600}` at
-      implementation time. The hourly-only decision is parity with what the VM and
-      bare-metal domains support, and a second entry appearing there changes what
-      parity means rather than merely widening an option.
+- [ ] 1.1 Confirm `PER_UNIT_SECONDS` still holds exactly `{"hour": 3600}`. The
+      hourly-only rule is a local asking-rate contract validated against that table
+      for parity, not a rule inherited from it — a second entry appearing there
+      does not automatically widen publication.
 - [ ] 1.2 Confirm `SettlementPublicationClause` still expresses a published rate as
-      an opaque `asset` string, positive decimal `rate` text without an exponent,
-      and a canonical lowercase `per`, with rate and unit required together. The
-      asking rate reuses that vocabulary rather than stating a second one; if the
-      clause has changed shape, the asking rate follows it rather than diverging.
+      an opaque `asset` string and positive decimal `rate` text without an exponent,
+      with rate and unit required together. The asking rate reuses that vocabulary
+      rather than stating a second one.
 - [ ] 1.3 Confirm the settlement clause grammar still restricts `asset` to equality
       operators. The exclude-rather-than-convert rule for assets depends on no
       surface ordering or converting them.
@@ -31,157 +28,262 @@ one has moved.
       listing-level field necessary rather than a filter over the settlement
       carrier; if that mechanism gains a rate, revisit the carrier decision before
       implementing.
+- [ ] 1.5 Confirm `_local_pool_pricing` still scopes the storefront's per-pool
+      commercial table to `home_site` only. The no-default-off-site rule relies on
+      that tier already being structurally unavailable for a remote origin's pool.
 
-## 2. Published shape
+## 2. Generic registry prerequisite
 
-- [ ] 2.1 Publish one asking rate for the listing's advertised shape, carrying its
-      amount, asset, and period. Do not decompose it per dimension — that is
-      `capacity-shape-pricing`'s work for the negotiation side, and a second
-      decomposition here would duplicate it.
-- [ ] 2.1a Confirm the field is expressible as a rate structure evaluated at the
-      advertised shape, so `capacity-shape-pricing` can later change where the
-      number comes from without changing the published field.
-- [ ] 2.1b Draw the period from `PER_UNIT_SECONDS` rather than a private list, so a
-      published period and a settlement period cannot diverge. Refuse a period
-      outside it rather than storing an uninterpretable value. In practice this means
-      `hour` only; the constraint is written against the vocabulary so a second entry
-      widens both surfaces at once.
-- [ ] 2.1c Carry the asset as an opaque non-empty identifier of the same kind
-      `settlement_options[*].asset` already carries. Do not require a contract
-      address, decimals, or a chain identity, and do not interpret the identifier
-      beyond equality comparison — an asking rate quoted in an off-chain currency
-      must be expressible, since hosted fiat is already a registered mechanism and
-      out-of-band supply is commonly priced in one.
-- [ ] 2.1d Carry the amount as decimal text. Base units need a companion decimals
-      field to be read, and a numeric encoding is lossy: 18-decimal base units pass
-      2^53 at ordinary values, JSON numbers are doubles in most parsers, and SQLite
-      INTEGER is int64. Reuse the repository's existing decimal-text convention
-      rather than adding a second one.
-- [ ] 2.1e Refuse publication of a rate missing its asset or its period. All three
-      parts travel together, mirroring the existing rate-and-unit-together
-      invariant on the settlement publication clause.
-- [ ] 2.2 Publish it for backed and unbacked listings alike. Confining it to
+The engine cannot evaluate this change's field as it stands, and neither gap is
+fixable by adding filter-spec entries. Section 4 is blocked on this section.
+
+- [ ] 2.1 Add an exact-decimal declared value type to the filter specification
+      vocabulary — wire and stored representation a decimal-text string, comparison
+      domain exact decimal. Extend `ValueType`, add the coercion branch, widen
+      `_Range`'s bound domain, and accept decimal-text resolved values in range
+      evaluation. Today `_Range.min`/`max` are `float | int`, `number` coerces with
+      `float(raw)`, and range evaluation filters resolved values through
+      `isinstance(v, (int, float))`, so a decimal-text listing value matches no
+      range at all.
+- [ ] 2.1a Leave the existing `number` type's behaviour unchanged. It is declared on
+      `sla` today and on every JSON-number field another deployment's spec declares;
+      retyping its comparison domain would silently change their semantics.
+- [ ] 2.1b Add the buyer-side mapping entry to `QueryValueType.DECIMAL`. No
+      rendering change is needed: `_scalar` already emits
+      `format(value.normalize(), "f")` with no binary-float conversion, so the
+      client is already exact end to end.
+- [ ] 2.1c Confirm a registry refuses to load a spec declaring a value type it does
+      not implement rather than ignoring it. `FilterDecl` forbids extras and
+      `ValueType` is a closed `Literal`, so this is current behaviour to preserve
+      and the reason the engine must ship before any spec that uses the new type.
+- [ ] 2.2 Add a `requires` list to `FilterDecl` naming other declared filters that
+      must accompany it, and refuse a query supplying a filter without them. Make
+      the dependency one-directional: a co-required filter supplied alone stays a
+      valid constraint.
+- [ ] 2.2a Read `requires` from the specification in both the registry and the
+      buyer query compiler. Do not encode any specific field's dependency in code —
+      `registry-discovery` requires the compiler to resolve every rule from the
+      active specification and add no domain fields, so a conditional naming
+      `asking_rate` would violate a normative requirement rather than merely being
+      inelegant.
+- [ ] 2.2b Follow the shape `strict.<name>` already establishes: a cross-cutting
+      query concern resolved before the criterion loop, whose target is validated
+      against the declared filter set.
+- [ ] 2.2c Reject at spec-validation time a `requires` entry naming an undeclared
+      filter, naming its own declaration, or participating in a cycle.
+
+## 3. Published shape and seller authoring
+
+- [ ] 3.1 Publish one `asking_rate` object on the listing resource carrying
+      `amount`, `asset`, and `period`. Freeze the shape as `design.md` records it —
+      a sibling of the flattened dimension fields, not nested under a capability
+      family. `publish-multidimensional-listing-shape` keeps the flattened
+      convention inside the listing resource, and a listing-wide price belongs to no
+      family.
+- [ ] 3.1a Carry `amount` as exact decimal text, `asset` as an opaque non-empty
+      identifier requiring no contract address, decimals, or chain identity, and
+      `period` as `hour`. Validate the period against `PER_UNIT_SECONDS` for parity
+      while keeping the normative rule local to the asking rate.
+- [ ] 3.1b Refuse publication of a rate missing its amount, asset, or period.
+- [ ] 3.2 Read the rate from a declaration on the origin site's Resource Pool,
+      carried in the projected domain-owned `pricing` policy tag as a sibling of the
+      per-model structure rather than a member of it. No `resource-pool-management`
+      change follows: that capability already declares `pricing` domain-neutral and
+      opaque with unknown tags forward-compatible.
+- [ ] 3.2a Allow the storefront's per-pool override and `[pricing]` config default
+      to resolve an asking rate **only** for `home_site` pools. Never apply either
+      to a pool at another origin — a storefront-wide default reaching a remote
+      seller's listing advertises the aggregator's price as that seller's.
+- [ ] 3.2b Publish no asking rate where a pool declares none and no default
+      applies. The listing publishes normally and is absent from rate-bounded
+      discovery.
+- [ ] 3.2c Fail a pool closed on a malformed or partial asking-rate declaration
+      rather than falling through. This diverges from `_VALID_HINT_FIELD`'s
+      treat-as-absent convention deliberately; `design.md` records why, and the
+      divergence should not be "fixed" toward fall-through later.
+- [ ] 3.3 Publish it for backed and unbacked listings alike. Confining it to
       unbacked listings would make its presence a second encoding of backing.
-- [ ] 2.3 Confirm the rate does not reach settlement options, escrow terms, or any
-      accepted-obligation content.
-- [ ] 2.4 Do not populate the asking rate from a mechanism rate, and do not write a
-      published asking rate into a settlement carrier. Both directions are refused:
-      deriving either would make the field's provenance unreadable, and it is
-      undefinable for a listing advertising escrows in several assets at several
-      rates. Keep the asking rate seller-stated publication input.
-- [ ] 2.5 Confirm a listing carrying both an asking rate and a mechanism rate
+- [ ] 3.4 Do not populate the asking rate from a mechanism rate, and do not write a
+      published asking rate into a settlement carrier. Both directions are refused.
+- [ ] 3.5 Confirm a listing carrying both an asking rate and a mechanism rate
       publishes without either being reconciled against the other, and that a
-      disagreement between them is not a publication error. The relationship is
-      stated, not enforced; see `design.md`.
+      disagreement between them is not a publication error.
+- [ ] 3.6 Republish in place on a rate change: an amount, asset, or period change
+      republishes derived listings under their existing durable identity, and a
+      removal republishes them without a rate. Route it through source-publication
+      reconciliation, not capacity reconciliation. Only a backing change closes and
+      republishes under a new identity.
 
-## 3. Filters
+## 4. Filters
 
-- [ ] 3.1 Add exact `on_missing: fail` rate filters to
-      `core/registry/filter-spec.yaml`, matching the convention every other
-      published-shape filter uses. Note this change lands after
+Blocked on Section 2. Adding these declarations to a spec served by an engine
+without the new primitives fails spec loading.
+
+- [ ] 4.1 Declare `asking_rate_max`, `asking_rate_min`, `asking_rate_asset`, and
+      `asking_rate_period` in `core/registry/filter-spec.yaml` with the exact paths,
+      ops, types, and alias kinds `design.md` fixes. This change lands after
       `settle-listing-vocabulary`, so the paths are `listing_resource`.
-- [ ] 3.1a Make a rate-bounded query name its period and match only listings quoting
-      it. Do not convert across periods. With one period in the vocabulary this has
-      no observable effect today; it is implemented now so adding a second period
-      does not silently turn every hourly query into a cross-period comparison.
-- [ ] 3.1b Make a rate-bounded query name its asset and match only listings quoting
-      it, with equality comparison only. Do not convert across assets: conversion
-      needs an external exchange rate that moves continuously, would make one
-      query's result depend on when it ran, and would make the registry an authority
-      on relative asset value.
-- [ ] 3.1c Refuse a rate bound that names no asset or no period rather than
-      evaluating it against an unstated dimension.
-- [ ] 3.2 Confirm a listing publishing no rate is excluded from a rate-bounded
+- [ ] 4.1a Make all four `on_missing: fail`, matching every other published-shape
+      filter and its stated reason.
+- [ ] 4.1b Declare `requires: [asking_rate_asset, asking_rate_period]` on both
+      bound filters, so the co-requirement lives in the specification.
+- [ ] 4.1c Match only listings quoting the named period; do not convert across
+      periods. With one accepted period this has no observable effect today; it is
+      implemented now so accepting a second does not silently turn every hourly
+      query into a cross-period comparison.
+- [ ] 4.1d Match assets by equality only; do not convert across them. Conversion
+      needs an external exchange rate that moves continuously and would make the
+      registry an authority on relative asset value.
+- [ ] 4.2 Confirm a listing publishing no rate is excluded from a rate-bounded
       query rather than passing it.
-- [ ] 3.3 Record the etag consequence: adding filters changes the spec's etag and
+- [ ] 4.3 Record the etag consequence: adding filters changes the spec's etag and
       buyers re-fetch, without a version bump.
 
-## 4. Specification
+## 5. Specification
 
-- [ ] 4.1 State in `openspec/specs/registry-discovery/spec.md` that the published
-      rate is a listing attribute and not a settlement option rate: no settlement
-      option, escrow term, or accepted obligation is constructed from it, and an
-      agreed amount is absent until negotiated. Write it as a statement about what
-      the system builds, not about how strong the claim is — every published field
-      is a seller assertion and the spec must not imply otherwise.
-- [ ] 4.1a State that the asking rate and a mechanism rate are independent
-      carriers: not required to agree, neither correcting the other, and neither
-      derived from the other. This is the statement that keeps a listing carrying
-      both from having two prices with no stated relationship.
-- [ ] 4.1b State the rate's three-part shape — amount as decimal text, opaque asset
-      identifier, period from the canonical vocabulary — and that all three are
-      required together.
-- [ ] 4.2 Add a scenario for a rate-bounded query against a listing publishing no
-      rate.
-- [ ] 4.3 Add a scenario confirming no settlement option, escrow term, or accepted
-      obligation carries a value derived from the published rate.
-- [ ] 4.4 Add a scenario for a rate quoted in an asset with no contract address,
-      decimals, or chain identity, so the off-chain case is normative rather than
-      incidental.
+- [ ] 5.1 State the two engine capabilities in
+      `openspec/specs/registry-discovery/spec.md`: an exact-decimal declared value
+      type whose comparison never passes through binary floating point and which
+      leaves the JSON-number type unchanged, and declarative filter
+      co-requirements resolved from the specification by both the registry and the
+      buyer compiler.
+- [ ] 5.2 State the asking rate's frozen shape there — `amount` as decimal text,
+      opaque `asset`, `period` as the supported time-rate unit, all three required
+      together, one per listing, never decomposed or nested under a family.
+- [ ] 5.3 State that the published rate is a listing attribute and not a settlement
+      option rate: nothing is constructed from it and an agreed amount is absent
+      until negotiated. Write it as a statement about what the system builds, not
+      about how strong the claim is — every published field is a seller assertion
+      and the spec must not imply otherwise.
+- [ ] 5.4 State that the asking rate and a mechanism rate are independent carriers:
+      not required to agree, neither correcting the other, neither derived from the
+      other.
+- [ ] 5.5 State in `openspec/specs/storefront-publication/spec.md` that the asking
+      rate is declared at the listing's origin pool, that storefront override and
+      default apply to `home_site` pools only, that a malformed declaration fails
+      its pool closed, that the rate is never derived from or written into a
+      settlement carrier, and that a rate change republishes in place. This is
+      publication provenance rather than registry behaviour and does not belong in
+      `registry-discovery`.
+- [ ] 5.6 Add scenarios for: a rate-bounded query against a listing publishing no
+      rate; no settlement option, escrow term, or obligation carrying a derived
+      value; a rate quoted in an asset with no contract address, decimals, or chain
+      identity; a rate bound refused for a missing asset or period; and an exact
+      comparison at a precision a double cannot hold.
 
-## 5. Validation
+## 6. Cross-change reconciliation
 
-- [ ] 5.1 **Unit.** Exhaustive rate-filter matching: missing rate, boundary values,
-      a period outside the canonical vocabulary refused at publication, a rate
-      missing its asset or period refused at publication, a query bound missing its
-      asset or period refused, a listing quoting an unqueried asset excluded, and —
-      with a synthetic second period injected into the vocabulary — a cross-period
-      query excluding rather than converting. The last case has no production path
-      today and is the one that protects the rule when a second period arrives.
-- [ ] 5.1a **Unit.** A decimal-text amount large enough to lose precision as a
-      double or overflow int64 round-trips through publication and filtering
-      exactly. This is the reason for the encoding and the regression that would
-      otherwise appear only at 18-decimal scale.
-- [ ] 5.2 **Integration.** Publish and query rates through the canonical
-      `RegistryClient` against the real registry app.
-- [ ] 5.3 **Integration.** Confirm no settlement option, escrow term, or accepted
-      obligation carries a value derived from the published rate, and that a
-      published asking rate is not populated from a mechanism rate.
-- [ ] 5.3a **Integration.** A listing advertising a rateless option publishes an
-      asking rate and is returned by a rate-bounded query, while its option remains
-      rateless. This is the case a filter over the settlement carrier could not
-      have served.
-- [ ] 5.4 **System.** A buyer query bounded by rate returns backed and unbacked
-      listings together and excludes listings publishing no rate.
+- [ ] 6.1 Amend `capacity-shape-pricing`'s design and its `storefront-publication`
+      delta so its single-rate compatibility reading names the negotiation-side rate
+      explicitly and cannot be read as reinterpreting a published asking rate as a
+      primary-dimension rate. The two are distinct quantities: a catalogue price and
+      a negotiation rate structure. A storefront may derive the former from the
+      latter where seller policy says so; the structure never subsumes it.
+- [ ] 6.2 Correct `docs/development/ROADMAP.md`'s Goal 7 current-state claim that
+      "no compute listing publishes a price at all". A seller price is published
+      today inside the escrow and settlement-option rate carriers; what is missing
+      is a listing-level asking rate and any filter over a rate value. This is
+      permanent current-state documentation and the sentence is false today
+      independent of whether this change lands, so correct it in the design branch
+      rather than at closeout.
+- [ ] 6.3 Correct this change's row in `openspec/changes/README.md`, which still
+      records an open decision gate on the rate asset and a partial delta.
 
-## 6. Closeout
+## 7. Validation
 
-- [ ] 6.1 **Comment hygiene.** Run `make check-comment-hygiene` and resolve every
+- [ ] 7.1 **Unit.** Exact-decimal comparator behaviour directly: bounds at, above,
+      and below a value; inclusive against exclusive at equality; a value with more
+      significant digits than a double holds; and a resolved listing value of the
+      wrong shape.
+- [ ] 7.2 **Unit.** Co-requirement declaration validation: unknown target,
+      self-reference, cycle, one-directional supply, and criterion construction for
+      a satisfied co-requirement.
+- [ ] 7.3 **Unit.** Rate model validation and matching: missing rate, boundary
+      values, a period outside the supported unit refused at publication, a rate
+      missing its asset or period refused at publication, a listing quoting an
+      unqueried asset excluded, and — with a synthetic second period injected — a
+      cross-period query excluding rather than converting. The last case has no
+      production path today and is what protects the rule when a second period
+      arrives.
+- [ ] 7.4 **Integration.** Exact decimal round-trip end to end: a high-precision
+      amount published and queried through the canonical `RegistryClient` against
+      the real registry app, matching or excluding on its true value. This is the
+      claim task 5.1a previously mislabelled as unit — proving the client
+      serializes it, HTTP parsing retains it, the registry builds the criterion, and
+      a decimal-text listing value compares exactly is integration under
+      `TESTING.md`, and a direct comparator test does not establish it.
+- [ ] 7.5 **Integration.** A valid three-part rate query through the canonical
+      `RegistryClient`; and a narrow raw-ASGI request supplying an amount bound
+      without its asset, to prove the registry itself refuses rather than relying on
+      client-side validation. The raw request is the rejection-contract exception
+      `TESTING.md` permits.
+- [ ] 7.6 **Integration.** Seller authoring through the real pool administration
+      client and projection: a declared asking rate reaches the storefront
+      publication candidate and then the registry. A mocked candidate dictionary
+      does not establish this contract.
+- [ ] 7.7 **Integration.** No-default-off-site: a storefront configured with a
+      pricing default publishes for a remote origin's pool that declares no rate,
+      and the listing carries none.
+- [ ] 7.8 **Integration.** Rate lifecycle: change amount, asset, and period and
+      confirm the existing listing is republished under its intended identity;
+      remove the declaration and confirm the listing remains discoverable but absent
+      from rate-bounded queries.
+- [ ] 7.9 **Integration.** A malformed declaration fails its pool closed rather
+      than publishing a fallback or a rateless listing.
+- [ ] 7.10 **Integration.** No settlement option, escrow term, or accepted
+      obligation carries a value derived from the published rate, and a published
+      asking rate is not populated from a mechanism rate. Exercise through the real
+      storefront composition.
+- [ ] 7.11 **Integration.** A listing advertising a rateless option publishes an
+      asking rate and is returned by a rate-bounded query while its option remains
+      rateless. This is the case a filter over the settlement carrier could not have
+      served.
+- [ ] 7.12 **System.** A buyer query bounded by rate returns backed and unbacked
+      listings together and excludes listings publishing no rate. This requires the
+      deployed multi-service environment; an in-process app does not establish it.
+- [ ] 7.13 **System.** Multi-seller provenance: one storefront publishing for two
+      seller sites, each site's declared asking rate reaching only its own listings.
+
+## 8. Closeout
+
+- [ ] 8.1 **Comment hygiene.** Run `make check-comment-hygiene` and resolve every
       match. The local rationale to keep is why nothing is constructed from the
-      rate, and why the asking rate is not derived from a mechanism rate — not any
-      claim about how much a buyer should trust either.
-- [ ] 6.2 **Import placement.** Review imports this change added or touched and
+      rate, why the asking rate is not derived from a mechanism rate, and why a
+      malformed declaration fails closed against the resolver's fall-through
+      convention — not any claim about how much a buyer should trust either rate.
+- [ ] 8.2 **Import placement.** Review imports this change added or touched and
       migrate function-level ones to module level where no genuine circular
       import or documented lazy-load reason exists. Verify against the real test
       suite.
-- [ ] 6.3 **Documentation compliance.** Re-check accepted decisions against
-      `openspec/README.md`'s placement table. That nothing is constructed from the
-      rate, and that the two carriers are independent, are both behaviour
-      implementations must satisfy, so confirm they landed as normative
-      requirements rather than as design prose.
-- [ ] 6.4 **Narrative compression.** Shorten completed-task notes to final
-      behaviour, and the accepted rate-honesty, two-disagreeing-prices, and
-      hourly-only risks with their revisit triggers. The asset and carrier
-      decisions are recorded in `design.md`; do not restate their reasoning here.
-- [ ] 6.5 **Roadmap currency.** Remove this change's row from Goal 7's gap table
-      in `docs/development/ROADMAP.md`, and correct the goal's statement that "no
-      compute listing publishes a price at all" — a price is published today inside
-      the escrow and settlement-option rate carriers, and what this change adds is a
-      listing-level asking rate and the first filter over a rate value. If this
-      closes Goal 7's last gap, the goal is removed and its result absorbed into
-      permanent documentation rather than left as an empty table — check the
-      remaining rows before deciding.
-- [ ] 6.6 **Campaign index currency.** Update this change's row and Goal 7's
+- [ ] 8.3 **Documentation compliance.** Re-check accepted decisions against
+      `openspec/README.md`'s placement table. Confirm the two engine capabilities
+      landed in `registry-discovery` and the provenance rules in
+      `storefront-publication`, rather than both in one capability.
+- [ ] 8.4 **Narrative compression.** Shorten completed-task notes to final
+      behaviour, and the accepted rate-honesty, two-disagreeing-prices,
+      no-default-off-site, and hourly-only risks with their revisit triggers. The
+      asset, engine, and authority decisions are recorded in `design.md`; do not
+      restate their reasoning here.
+- [ ] 8.5 **Roadmap currency.** Remove this change's row from Goal 7's gap table in
+      `docs/development/ROADMAP.md`. The current-state price sentence is corrected
+      earlier, in task 6.2. If this closes Goal 7's last gap, the goal is removed
+      and its result absorbed into permanent documentation rather than left as an
+      empty table — check the remaining rows before deciding.
+- [ ] 8.6 **Campaign index currency.** Update this change's row and Goal 7's
       dependency graph in `openspec/changes/README.md`.
-- [ ] 6.7 **Promotion.** Complete the design-promotion record below.
+- [ ] 8.7 **Promotion.** Complete the design-promotion record below.
 
 ## Design promotion record
 
 | Accepted decision | Permanent location |
 |---|---|
+| An exact-decimal declared value type whose comparison never passes through binary floating point | `openspec/specs/registry-discovery/spec.md` |
+| Declarative filter co-requirements, resolved from the specification by registry and buyer alike | `openspec/specs/registry-discovery/spec.md` |
+| The asking rate's frozen shape: decimal-text amount, opaque asset, supported time-rate period, all required together | `openspec/specs/registry-discovery/spec.md` |
 | The published rate is a listing attribute, not a settlement option rate: nothing is constructed from it | `openspec/specs/registry-discovery/spec.md` |
-| A listing publishing no rate is excluded from a rate-bounded query | `openspec/specs/registry-discovery/spec.md` |
-| A published rate carries its period from the canonical time-unit vocabulary | `openspec/specs/registry-discovery/spec.md` |
-| A published rate carries an opaque asset identifier and a decimal-text amount, all three parts required together | `openspec/specs/registry-discovery/spec.md` |
 | The asking rate and a mechanism rate are independent carriers; neither is derived from the other | `openspec/specs/registry-discovery/spec.md` |
 | Rate filters match the period and the asset rather than normalizing across them | `openspec/specs/registry-discovery/spec.md` |
+| A listing publishing no rate is excluded from a rate-bounded query | `openspec/specs/registry-discovery/spec.md` |
+| The asking rate is declared at the listing's origin pool; storefront override and default apply to home-site pools only | `openspec/specs/storefront-publication/spec.md` |
+| A malformed asking-rate declaration fails its pool closed | `openspec/specs/storefront-publication/spec.md` |
+| An asking-rate change republishes the listing in place through source publication | `openspec/specs/storefront-publication/spec.md` |

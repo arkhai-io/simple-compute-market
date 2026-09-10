@@ -1,29 +1,119 @@
 ## ADDED Requirements
 
+### Requirement: The filter grammar can compare exact decimal values
+
+The filter specification MUST support a declared value type whose wire and stored
+representation is a decimal-text string and whose comparison domain is exact
+decimal. Range bounds declared under it MUST be parsed as exact decimals, resolved
+listing values MUST be accepted when they are decimal text, and comparison MUST
+NOT pass through a binary floating-point representation at any point.
+
+The existing JSON-number value type MUST be left unchanged. Retyping its
+comparison domain would alter the meaning of filters that other deployments'
+specifications already declare, so exact decimal comparison MUST be a distinct
+declared type that a specification opts into.
+
+A registry MUST refuse to load a filter specification declaring a value type it
+does not implement, rather than ignoring the declaration. A specification whose
+comparison semantics the engine cannot honour MUST NOT be served, because a
+silently-ignored type would evaluate every query under semantics the operator did
+not declare.
+
+A buyer resource-query compiler MUST render a bound of this type without loss and
+MUST resolve its type from the specification like any other.
+
+#### Scenario: A bound compares against a high-precision listing value
+
+- **WHEN** a buyer bounds a query against a decimal-text field and a listing's
+  value carries more significant digits than a binary double represents exactly
+- **THEN** the comparison is exact and the listing matches or is excluded on its
+  true value
+
+#### Scenario: A decimal-text value is compared at the bound
+
+- **WHEN** a listing's decimal-text value equals an inclusive bound exactly
+- **THEN** it matches, and it does not match an exclusive bound of the same value
+
+#### Scenario: A registry is given a specification it cannot honour
+
+- **WHEN** a registry configured with an engine that does not implement a declared
+  value type loads that filter specification
+- **THEN** it refuses the specification rather than serving queries under
+  substituted semantics
+
+#### Scenario: The existing number type is unaffected
+
+- **WHEN** a filter declared under the JSON-number value type is evaluated
+- **THEN** its behaviour is unchanged by the presence of the decimal type
+
+### Requirement: A filter may declare co-required filters
+
+A filter declaration MAY name other declared filters that MUST be supplied
+alongside it. A query supplying a filter without every filter it co-requires MUST
+be refused rather than evaluated, because a constraint missing a dimension it
+depends on has no interpretation.
+
+The dependency MUST be one-directional: a co-required filter supplied on its own
+remains a valid constraint in its own right.
+
+Both the registry and the buyer resource-query compiler MUST resolve
+co-requirements from the active filter specification. Neither MUST encode a
+specific field's dependency in code, consistent with the requirement that every
+field, operator, type, alias, and missing-value rule is resolved from the
+specification and that no domain field is added.
+
+Specification validation MUST reject a co-requirement naming an undeclared filter,
+naming its own declaration, or participating in a cycle. Each is a specification
+defect that would otherwise surface as a query that can never be satisfied.
+
+#### Scenario: A co-required filter is missing from a query
+
+- **WHEN** a buyer supplies a filter whose declaration co-requires another and
+  omits it
+- **THEN** the query is refused rather than evaluated against an unstated dimension
+
+#### Scenario: A co-required filter is supplied alone
+
+- **WHEN** a buyer supplies only a filter that others co-require
+- **THEN** the query is evaluated normally as a constraint on that field
+
+#### Scenario: A client bypasses compiler validation
+
+- **WHEN** a request reaches the registry supplying a filter without its
+  co-requirements, without having been compiled by the buyer client
+- **THEN** the registry refuses it
+
+#### Scenario: A specification declares a cyclic co-requirement
+
+- **WHEN** a filter specification declares co-requirements that form a cycle, name
+  an undeclared filter, or name their own declaration
+- **THEN** specification validation fails rather than the registry serving it
+
 ### Requirement: A listing may publish the seller's asking rate
 
 A compute listing MAY publish the rate its seller is asking for the listing's
-advertised shape. A published rate MUST carry three parts together — an amount,
-the asset it is quoted in, and the period it is quoted per — and publication MUST
-be refused when any one of them is absent, because an amount alone cannot be read
-and a bound cannot be evaluated against it.
+advertised shape, as an `asking_rate` object on the published listing resource
+carrying `amount`, `asset`, and `period`. All three MUST be present together, and
+publication MUST be refused when any is absent: an amount alone cannot be read and
+a bound cannot be evaluated against it.
 
-The period MUST be drawn from the same canonical time-unit vocabulary settlement
-rates use, so a published period and a settlement period cannot diverge. The asset
-MUST be an opaque, non-empty identifier of the same kind a settlement option's
-published asset already carries; it MUST NOT require an on-chain contract address,
-token decimals, or a chain identity, so that a rate quoted in an off-chain
-currency is expressible. No surface may interpret the identifier beyond comparing
-it for equality.
+`amount` MUST be exact decimal text. A binary floating-point encoding cannot
+represent ordinary decimal prices, and a base-unit integer encoding cannot
+represent a fraction and needs a companion decimals field to be interpreted.
 
-The amount MUST be carried as decimal text rather than as a number or as
-base units. Base units cannot be interpreted without a companion decimals field,
-and amounts in this domain routinely exceed what a 64-bit integer or an IEEE-754
-double holds, so a numeric encoding would be lossy at ordinary values.
+`asset` MUST be an opaque, non-empty identifier of the same kind a settlement
+option's published asset already carries. It MUST NOT require an on-chain contract
+address, token decimals, or a chain identity, so a rate quoted in an off-chain
+currency is expressible. No surface may interpret it beyond comparing it for
+equality.
 
-One rate is published per listing. A listing's advertised shape does not vary, so
-the rate MUST NOT be decomposed per capacity dimension; pricing a shape a buyer
-proposes is negotiation-side work and is not this field.
+`period` MUST be the currently supported time-rate unit, `hour`. A period outside
+that MUST be refused at publication. Accepting a further period is a decision for
+a later version rather than a consequence of a settlement-side change.
+
+One rate is published per listing, as a single catalogue price for a shape that
+does not vary. It MUST NOT be decomposed per capacity dimension, and it MUST NOT be
+nested under a capability family: it prices the whole listing.
 
 The published rate is a listing attribute and not a settlement option rate. No
 settlement option, escrow term, or accepted obligation may be constructed from it,
@@ -34,8 +124,9 @@ the marketplace verifies any of them.
 
 #### Scenario: A listing publishes an asking rate
 
-- **WHEN** a seller publishes a listing carrying an asking rate with its asset and period
-- **THEN** the amount, asset, and period appear in the published listing shape
+- **WHEN** a seller publishes a listing carrying an asking rate
+- **THEN** the published listing resource carries an `asking_rate` object with its
+  amount, asset, and period
 - **AND** the amount appears as decimal text
 - **AND** no settlement option or obligation carries a value derived from them
 
@@ -46,7 +137,7 @@ the marketplace verifies any of them.
 
 #### Scenario: A rate is quoted in an unsupported period
 
-- **WHEN** a listing publishes a rate whose period is outside the canonical time-unit vocabulary
+- **WHEN** a listing publishes a rate whose period is not the supported time-rate unit
 - **THEN** publication is refused rather than storing an uninterpretable period
 
 #### Scenario: A rate is quoted in an off-chain asset
@@ -73,11 +164,8 @@ the other. A buyer comparing on the asking rate while negotiating against a
 mechanism rate is the ordinary relationship between a published field and its
 negotiated outcome, and no surface may present one as authoritative for the other.
 
-Neither may be derived from the other. A storefront MUST NOT populate the asking
-rate from a mechanism rate, and MUST NOT write a published asking rate into a
-settlement option, escrow term, or obligation. Deriving either direction would make
-the field's provenance unreadable, and it is undefinable for a listing advertising
-escrows in several assets at several rates.
+Neither may be derived from the other, in either direction. A published asking
+rate MUST NOT be written into a settlement option, escrow term, or obligation.
 
 A listing that settles through a mechanism declining scalar participation carries
 no mechanism rate at all. Such a listing MUST still be able to publish an asking
@@ -88,7 +176,6 @@ for supply agreed out of band.
 
 - **WHEN** a listing publishes an asking rate and also advertises escrow rate slots
 - **THEN** both appear in the published shape
-- **AND** the asking rate is not derived from the escrow rate
 - **AND** no settlement option, escrow term, or obligation carries a value derived from the asking rate
 
 #### Scenario: The two published rates disagree
@@ -105,9 +192,15 @@ for supply agreed out of band.
 
 ### Requirement: Rate filters match the period and asset rather than normalizing across them
 
+The compute filter specification MUST declare exact, fail-on-missing filters over
+the asking rate's amount, asset, and period. The amount filters MUST use the exact
+decimal comparison type and MUST co-require the asset and period filters, so the
+refusal below is declared in the specification rather than encoded in the registry
+or the buyer client.
+
 A rate-bounded query MUST name the asset and the period it asks about, and MUST be
-refused rather than evaluated when either is absent: a bare bound has no
-interpretation, since it states neither what is being counted nor per what.
+refused rather than evaluated when either is absent: a bare bound states neither
+what is being counted nor per what.
 
 A listing quoting a different period MUST be excluded rather than converted,
 because a period signals the commitment a seller expects: a buyer shopping hourly
@@ -148,3 +241,9 @@ unstated rate has not been shown to satisfy a stated bound.
 
 - **WHEN** a buyer bounds a query by rate and a listing publishes none
 - **THEN** that listing is excluded from the result
+
+#### Scenario: A rate bound compares exactly
+
+- **WHEN** a listing's asking amount carries more significant digits than a binary
+  double represents exactly and a buyer bounds a query near it
+- **THEN** the listing is matched or excluded on its exact value

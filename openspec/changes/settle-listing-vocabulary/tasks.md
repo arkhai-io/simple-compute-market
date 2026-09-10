@@ -275,4 +275,4 @@ effects; an assertion that changes for any other reason is the defect.
 | The cardinality hint's normative scope; absence encodes "no cardinality question" | `openspec/specs/storefront-publication/spec.md` |
 | A seller's published shape is a listing; `offer` is a negotiation message | `openspec/specs/registry-discovery/spec.md` |
 | The compute schema identity names the family, not one domain | `openspec/specs/registry-discovery/spec.md` |
-| `executor` is retired: the machine is a host, the handler is a provider, the mode is an offering mode | `docs/development/ARCHITECTURE.md` |
+| `executor` names only the action-dispatch abstraction; its synonym uses are retired — the machine is a host, the handler is a provider, the mode is an offering mode | `docs/development/ARCHITECTURE.md` |
