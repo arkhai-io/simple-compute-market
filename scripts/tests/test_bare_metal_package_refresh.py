@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+import tomllib
 from pathlib import Path
 
 
@@ -15,6 +16,9 @@ ALKAHEST_MAKE = (REPO_ROOT / "kit" / "alkahest" / "Makefile").read_text(
     encoding="utf-8"
 )
 E2E_MAKE = (REPO_ROOT / "e2e-tests" / "Makefile").read_text(encoding="utf-8")
+E2E_PROJECT = tomllib.loads(
+    (REPO_ROOT / "e2e-tests" / "pyproject.toml").read_text(encoding="utf-8")
+)
 
 
 def _target(makefile: str, name: str) -> str:
@@ -36,6 +40,13 @@ def test_bare_metal_storefront_builds_every_directly_refreshed_producer() -> Non
         "dist-alkahest",
     ):
         assert prerequisite in declaration
+
+
+def test_e2e_declares_bare_metal_contract_test_packages_directly() -> None:
+    dependencies = E2E_PROJECT["project"]["dependencies"]
+
+    assert "arkhai-bare-metal-buyer>=0.1.4" in dependencies
+    assert "arkhai-bare-metal-storefront>=0.2.5" in dependencies
 
 
 def _flag_packages(target: str, flag: str) -> tuple[str, ...]:
@@ -92,6 +103,8 @@ def test_locked_reinit_preserves_exact_wheel_reinstall_inventory() -> None:
                 "arkhai-vms-buyer",
                 "arkhai-vms-storefront",
                 "arkhai-bare-metal",
+                "arkhai-bare-metal-buyer",
+                "arkhai-bare-metal-storefront",
                 "arkhai-compute-provisioning",
                 "arkhai-vms-provisioning-operator-client",
                 "arkhai-apicredits-buyer",

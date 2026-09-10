@@ -90,7 +90,7 @@ listing. Reopen may do so only after the accepted remote result is confirmed.
 
 ### 1. Extend the existing publication request with optional status
 
-`ListingRequest` will gain `status: str | None = None`. `to_dict()` will include
+`ListingRequest` has `status: str | None = None`. `to_dict()` includes
 `status` only when it is not `None`.
 
 - New publication and refresh leave it unset, preserving their existing wire
@@ -100,13 +100,12 @@ listing. Reopen may do so only after the accepted remote result is confirmed.
 - The separate `UpdateListingRequest` remains available to existing callers;
   this change does not remove or redefine it.
 
-This requires a later normative amendment to
-`openspec/specs/storefront-publication/spec.md`: republication MAY carry an
+The normative contract in `openspec/specs/storefront-publication/spec.md`
+records that republication MAY carry an
 explicit lifecycle status; omission MUST preserve an existing registry record's
 status; refresh MUST omit status; reopen MUST carry `open`; and no local mutation
 may occur until authenticated readback confirms the request's canonical
-publisher-owned advertised fields, identity, and status. The permanent spec is
-not edited in this documentation-only submilestone.
+publisher-owned advertised fields, identity, and status.
 
 ### 2. Put the lifecycle seam in the capacity-publication module
 
@@ -451,6 +450,17 @@ and host-trust transformations. Actual-host setup, account mutation, management
 probing and rollback remain operator-controlled infrastructure responsibilities;
 they are not replaced by the offline integration suite.
 
+The ordinary local and Docker E2E profiles remain VM-oriented and do not select
+the actual-host bare-metal lane. Bare-metal registry authority, purchase,
+settlement, chain, management-probe, and publication inputs default to absent;
+selecting the acceptance lane turns absence into a failure rather than borrowing
+another domain's development endpoint. Host-key trust has a separate gate:
+without `KNOWN_HOSTS_FILE` the scenario uses trust on first use, while
+`REQUIRE_VERIFIED_HOST_KEY=true` rejects that fallback and requires an
+operator-managed pin. The verification gate defaults to false. This preserves
+common development conventions where they apply without inventing a default
+physical host or authority or claiming independently verified host trust.
+
 ## Rejected alternatives
 
 ### Configurable registry quorum
@@ -484,7 +494,7 @@ state within the current operation instead of adding a journal platform.
 
 ## Remaining policy choice
 
-The implementation will support explicit current-intent recovery: known failed
+The implementation supports explicit current-intent recovery: known failed
 writes may receive the identical request, while unconfirmed or unknown outcomes
 receive authenticated read-only reconfirmation. Whether a future reconciliation
 loop invokes recovery automatically is unresolved. This change adds no
@@ -506,8 +516,24 @@ expects that open state during recovery, while fresh reopen still rejects an
 already-open listing. Both paths reload durable binding, derivation, and current
 availability before registry I/O.
 
-Qualification after that later interface change must include both downstream
-VM and API-credit consumers of the capacity-publication kit.
+Offline qualification includes both downstream VM and API-credit consumers of
+the capacity-publication kit. The E2E package declares and explicitly reinstalls
+both bare-metal packages used by its two buyer/storefront contract tests, and
+those tests reside at the integration level. Their distinct adverse mutations
+remain intact while their assertions now distinguish the stable buyer-facing
+re-derivation error from its exact underlying validation cause. The reviewed
+lock refresh and locked reinit succeeded, and the canonical installed six-file
+suite passed all 61 cases. Focused packaging checks passed all 4 cases. This is
+offline evidence only: release tooling remains 208 passed and 2 failed on
+independently reproduced baseline defects, so the repository-wide aggregate is
+not green. Helm rendering passes, and live qualification remains separately
+gated.
+
+The active change carries five delta specifications reconstructed from the
+thirteen exact normative requirement blocks already promoted to permanent
+specifications. They introduce no new behavior; they preserve the change
+contract required for strict validation, synchronization comparison, and later
+archival provenance.
 
 ## Design promotion record
 
@@ -517,5 +543,9 @@ VM and API-credit consumers of the capacity-publication kit.
 | Core transport, kit lifecycle, and explicit domain-adapter ownership | `openspec/specs/storefront-publication/architecture.md` | Promoted for publication milestone review |
 | Repository-wide capacity-publication ownership | `docs/development/ARCHITECTURE.md` | Updated for publication milestone review |
 | Roadmap currency | `docs/development/ROADMAP.md` | No edit: the roadmap already names the kit publication runtime and all three composed consumers; this submilestone does not complete its goal |
-| Campaign index currency | `openspec/changes/README.md` | No edit: the encompassing change remains under review with settlement and final qualification still incomplete, so no dependency is newly unblocked |
+| Campaign index currency | `openspec/changes/README.md` | Updated for offline closeout review; strict validation/review and separately gated live work remain explicit |
 | Accepted Alkahest decoding, whole-payload re-materialization, and retained domain physical authority | `openspec/specs/settlement-configuration/spec.md`; `openspec/specs/settlement-configuration/architecture.md`; existing `openspec/specs/negotiation-protocol/spec.md` physical-authority requirement | Promoted for settlement milestone review |
+| Lock-stable same-version wheel refresh for the three affected targets | `docs/development/ARCHITECTURE.md` | Promoted for offline qualification review; explicitly not repository-wide |
+| Offline production-scenario orchestration test placement | `docs/development/TESTING.md` | Promoted for offline qualification review |
+| Offline qualification versus actual-host evidence | `docs/development/DEPLOYMENT_AND_CONFIG.md` | Promoted for offline qualification review |
+| Active delta provenance for the five modified capabilities | `openspec/changes/bare-metal-dev-demo-run/specs/` | Reconstructed exactly from already-promoted normative blocks; scoped OpenSpec 1.13.0 strict validation passes |

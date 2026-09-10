@@ -52,6 +52,9 @@ SSH_PUBLIC_KEY = "ssh-ed25519 " + base64.b64encode(b"x" * 32).decode()
 DURATION_SECONDS = 7200
 RATE_PER_HOUR = 1000
 EXPIRATION_UNIX = 1_900_000_000
+BUYER_REDERIVATION_ERROR = (
+    "^accepted obligation could not be re-derived from the buyer proposal$"
+)
 
 ACCEPTED_ESCROW = {
     "chain_name": CHAIN,
@@ -192,36 +195,36 @@ def _tampered(reply: dict[str, Any], mutate) -> SettlementPlan:
     [
         pytest.param(
             lambda ob: ob["params"]["obligation_data"].update({"amount": "1"}),
-            "escrow data the buyer did not propose",
+            "accepted Alkahest amount carriers disagree",
             id="nested-amount",
         ),
         pytest.param(
             lambda ob: ob["params"]["obligation_data"].update(
                 {"token": "0x" + "cc" * 20}
             ),
-            "escrow data the buyer did not propose",
+            "accepted Alkahest asset and token disagree",
             id="nested-token",
         ),
         pytest.param(
             lambda ob: ob["params"]["obligation_data"].update(
                 {"demand": "0x" + "00" * 32}
             ),
-            "pays an address other than the pinned seller",
+            "accepted Alkahest payout differs from the pinned seller",
             id="payout-demand",
         ),
         pytest.param(
             lambda ob: ob["params"].update({"chain_name": "arbitrum_sepolia"}),
-            "settles on a chain the buyer did not propose",
+            "accepted Alkahest chain differs from the proposal",
             id="chain",
         ),
         pytest.param(
             lambda ob: ob["params"].update({"escrow_contract": "0x" + "dd" * 20}),
-            "names an escrow the buyer did not propose",
+            "accepted Alkahest escrow differs from the proposal",
             id="escrow-contract",
         ),
         pytest.param(
             lambda ob: ob.update({"conditions": [{"arbiter": "0x" + "ee" * 20}]}),
-            "conditions the buyer did not propose",
+            "accepted Alkahest obligation declares unsupported conditions",
             id="conditions",
         ),
     ],
@@ -230,8 +233,19 @@ async def test_buyer_refuses_an_altered_accepted_obligation(
     tmp_path, mutate, detail
 ) -> None:
     reply, proposal, _ = await _accepted(tmp_path)
+    accepted = SettlementPlan.model_validate(reply["settlement_plan"])
 
-    with pytest.raises(BareMetalBuyerMechanismError, match=detail):
+    validate_accepted_alkahest_plan(
+        plan=accepted,
+        proposal=proposal,
+        duration_seconds=DURATION_SECONDS,
+        address_config_path=None,
+        seller_payout_address=SELLER_WALLET,
+    )
+
+    with pytest.raises(
+        BareMetalBuyerMechanismError, match=BUYER_REDERIVATION_ERROR
+    ) as exc_info:
         validate_accepted_alkahest_plan(
             plan=_tampered(reply, mutate),
             proposal=proposal,
@@ -239,6 +253,8 @@ async def test_buyer_refuses_an_altered_accepted_obligation(
             address_config_path=None,
             seller_payout_address=SELLER_WALLET,
         )
+    assert type(exc_info.value.__cause__) is ValueError
+    assert str(exc_info.value.__cause__) == detail
 
 
 async def test_buyer_refuses_an_accepted_plan_paying_another_address(
@@ -247,12 +263,27 @@ async def test_buyer_refuses_an_accepted_plan_paying_another_address(
     """The payout the buyer pinned is the one the whole obligation must imply."""
 
     reply, proposal, _ = await _accepted(tmp_path)
+    accepted = SettlementPlan.model_validate(reply["settlement_plan"])
 
-    with pytest.raises(BareMetalBuyerMechanismError, match="pinned seller"):
+    validate_accepted_alkahest_plan(
+        plan=accepted,
+        proposal=proposal,
+        duration_seconds=DURATION_SECONDS,
+        address_config_path=None,
+        seller_payout_address=SELLER_WALLET,
+    )
+
+    with pytest.raises(
+        BareMetalBuyerMechanismError, match=BUYER_REDERIVATION_ERROR
+    ) as exc_info:
         validate_accepted_alkahest_plan(
-            plan=SettlementPlan.model_validate(reply["settlement_plan"]),
+            plan=accepted,
             proposal=proposal,
             duration_seconds=DURATION_SECONDS,
             address_config_path=None,
             seller_payout_address="0x" + "cc" * 20,
         )
+    assert type(exc_info.value.__cause__) is ValueError
+    assert str(exc_info.value.__cause__) == (
+        "accepted Alkahest payout differs from the pinned seller"
+    )

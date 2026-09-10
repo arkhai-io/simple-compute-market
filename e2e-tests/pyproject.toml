@@ -33,6 +33,8 @@ dependencies = [
     "arkhai-core-registry-client>=0.11.0",
     "arkhai-kit-alkahest>=0.1.0",
     "arkhai-kit-site-client>=0.1.0",
+    "arkhai-bare-metal-buyer>=0.1.4",
+    "arkhai-bare-metal-storefront>=0.2.5",
 	"arkhai-vms-storefront>=0.3.0",
     "arkhai-vms-provisioning-operator-client>=0.3.0",
     # The buyer's `market` CLI, run as a subprocess by the buyer-machine

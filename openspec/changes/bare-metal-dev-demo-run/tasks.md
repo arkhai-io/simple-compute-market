@@ -145,7 +145,7 @@ buyer's; the scenario evidences only what the granted session reports.
       mechanism validator and the seller's composition; it does not by itself
       exercise the buyer client's own serializer or its outer acceptance checks.
       `domains/bare_metal/storefront/tests/test_alkahest_exact_selection.py`,
-      `e2e-tests/tests/unit/test_bare_metal_alkahest_selection_contract.py`,
+      `e2e-tests/tests/integration/test_bare_metal_alkahest_selection_contract.py`,
       `domains/bare_metal/storefront/tests/test_http_negotiation.py`.
 - [x] 5.5 Round trip through the production buyer client: its request signing and
       serialization, the composed storefront app, its signed reply, the client's
@@ -153,7 +153,7 @@ buyer's; the scenario evidences only what the granted session reports.
       callback. Only the socket is substituted. Refusals cover expiry, listing
       bounds, unadvertised access, another listing's option, buyer-supplied
       physical identities and an untrusted seller principal.
-      `e2e-tests/tests/unit/test_bare_metal_alkahest_client_roundtrip.py`.
+      `e2e-tests/tests/integration/test_bare_metal_alkahest_client_roundtrip.py`.
 - [x] 5.6 Promotion: mechanism-owned accepted obligation and acceptance context in
       `openspec/specs/settlement-configuration/spec.md`; trusted physical
       composition, selection expiry and the whole-envelope comparison in
@@ -380,7 +380,7 @@ isolation, destructive reclaim policies, and end-to-end demonstration evidence.
       rather than adding `storefront_adapter.py`; no separate adapter or root-
       domain test file was needed. VM and API-credit publication hooks now state
       their disabled-publication compatibility policy explicitly.
-- [ ] 10.5 Rebuild the capacity-publication wheel and qualify focused package,
+- [x] 10.5 Rebuild the capacity-publication wheel and qualify focused package,
       registry, storefront, import-boundary, and typing checks. Qualify the
       downstream VM and API-credit consumers with the changed kit installed;
       disclose any unavailable check rather than substituting another suite.
@@ -388,21 +388,40 @@ isolation, destructive reclaim policies, and end-to-end demonstration evidence.
       and Alkahest producers, and its reinit explicitly refreshes registry-client
       and config. Relevant setup targets use their checked-in locks with exact
       same-version wheel reinstall inventories and without upgrade-driven
-      version re-resolution. Keep this task open until the
-      canonical installed-wheel and downstream checks complete outside any
-      sandbox-limited database environment.
+      version re-resolution. Canonical locked storefront, Alkahest and E2E
+      setup completed with unchanged locks, and the reviewed package suites and
+      Helm render passed. The E2E project now declares and explicitly reinstalls
+      the bare-metal buyer and storefront packages, and the two cross-package
+      contract tests reside under integration. The reviewed E2E lock refresh
+      and locked reinit succeed. After the exact buyer-boundary assertions were
+      aligned without changing their distinct mutations, the canonical installed
+      six-file E2E selection and real-client suite passed all 61 cases. Focused
+      packaging checks passed all 4 cases. The required owning package, registry,
+      storefront, import-boundary, typing, VM and API-credit checks are recorded
+      in the completed implementation tasks above.
 - [x] 10.6 Promote the implemented lifecycle behavior to
       `openspec/specs/storefront-publication/spec.md` and the module/seam
       rationale to `openspec/specs/storefront-publication/architecture.md`.
       Update repository architecture, capability index, roadmap, and campaign
       index only where their current-state text requires it, and record every
       promotion in the design-promotion table.
-- [ ] 10.7 Closeout: run `make check-comment-hygiene`; review imports touched by
+- [x] 10.7 Closeout: run `make check-comment-hygiene`; review imports touched by
       this milestone and move them to module level wherever safe; verify
       documentation placement and every cited path; compress completed-task
       narrative after moving durable rationale into `design.md`; check roadmap
       and campaign-index currency; complete promotion only after code review;
       run strict OpenSpec validation and `git diff --check`.
+      Comment/import hygiene, documentation placement, cross-references,
+      roadmap and campaign-index currency, promotion, and diff checks are ready
+      for review. OpenSpec 1.13.0 is available: its first scoped strict run
+      failed because this behavior-changing change had no delta specifications;
+      after reconstructing the five capability deltas from the exact thirteen
+      already-promoted requirement blocks, scoped strict validation passes.
+      Independent review found no remaining findings, and the corrected
+      canonical installed E2E run passed all 61 cases. Release tooling remains
+      208 passed and 2 failed on defects independently reproduced at the
+      baseline. The Helm render passes; the repository-wide aggregate is not
+      green, and neither unrelated release failure is changed by this campaign.
 
 ## 11. Required later settlement consolidation
 
@@ -427,16 +446,20 @@ isolation, destructive reclaim policies, and end-to-end demonstration evidence.
 
 ## 12. Later E2E and actual-host qualification
 
-- [ ] 12.1 Keep deterministic default development-environment values aligned
+- [x] 12.1 Keep deterministic default development-environment values aligned
       across bare-metal and VM consumers and retain the existing bare-metal E2E
       scenario as the only cross-service harness. The controlled-dependency
       tests that execute that scenario live under `e2e-tests/tests/integration`;
-      only pure parsing and projection checks remain under `tests/unit`. Keep
-      this task open until the full offline qualification and default-alignment
-      audit complete.
-- [ ] 12.2 Keep host/account mutation in the operator-controlled actual-host
+      only pure parsing and projection checks remain under `tests/unit`.
+      Generic local and Docker profiles remain VM-oriented; the bare-metal lane
+      defaults its authority, purchase, settlement and operator-command inputs
+      to absent and fails when an explicitly selected acceptance lane lacks
+      them. Static and offline scenario coverage passed.
+- [x] 12.2 Keep host/account mutation in the operator-controlled actual-host
       lane. Default package/E2E validation remains host-independent; no new
       actual-host script path is added merely to test publication consolidation.
+      The configuration and test audit found no host mutation in default
+      package or offline E2E execution.
 - [ ] 12.3 Run the authorized actual-host campaign only after its own review
       gate, with exact source/artifact provenance, retained-resource declaration,
       and cleanup evidence.

@@ -177,12 +177,15 @@ inventory, pool declaration, site authority, or credential blocks startup or
 scenario preflight; it never selects a test signer, default site, payload-
 guessed domain, direct executor, or provider simulator.
 
-The bare-metal image currently exposes the signed publication command seam but
-does not autonomously publish to the registry, and a public settlement address
-alone does not compose a settlement authority. Its stack may be brought up for
-operator integration, but it is not release-qualified or discoverable-deal
-evidence until accepted publication and settlement lifecycles are ready and
-the installed buyer completes real access and revocation.
+The bare-metal image exposes the operator-invoked signed publication command,
+including confirmed same-identifier refresh and reopen, and composes the shared
+accepted-settlement lifecycle. It still does not publish autonomously, and a
+public settlement address alone does not compose a settlement authority.
+Installed-wheel and offline scenario qualification establish package and
+orchestration behavior only. Bringing up the stack is not discoverable-deal or
+physical-host evidence; that requires separately approved publication, rental,
+real buyer access, teardown, revocation, capacity restoration, and financial
+closeout against reviewed artifacts and operator-supplied authorities.
 
 ## Stateful service persistence
 

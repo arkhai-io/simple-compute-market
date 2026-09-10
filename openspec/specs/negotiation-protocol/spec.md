@@ -231,7 +231,7 @@ builds.
   writes: `domains/bare_metal/storefront/tests/test_alkahest_exact_selection.py`.
 - Production buyer client round trip over the composed seller app, and the hosted
   physical envelope key set:
-  `e2e-tests/tests/unit/test_bare_metal_alkahest_client_roundtrip.py` and
+  `e2e-tests/tests/integration/test_bare_metal_alkahest_client_roundtrip.py` and
   `domains/bare_metal/storefront/tests/test_http_negotiation.py`.
 - Synchronous new/continue HTTP behavior and lossless uint256-domain persistence: `domains/vms/storefront/tests/integration/test_negotiate_controller.py`.
 - Thread message ordering, terminal detection, exact message authorship, and uint256-domain storage: `domains/vms/storefront/tests/unit/test_negotiation_thread.py`.

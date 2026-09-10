@@ -85,3 +85,31 @@ def test_bare_metal_stack_keeps_role_credentials_and_state_separate():
         "bare-metal-storefront-data",
     ):
         assert f"{name}:" in domain_compose
+
+
+def test_generic_profiles_do_not_select_actual_host_bare_metal_inputs():
+    defaults = tomllib.loads(
+        (_REPO_ROOT / "e2e-tests/settings.toml").read_text(encoding="utf-8")
+    )["default"]["bare_metal"]
+
+    assert defaults["registry_principals"] == []
+    assert defaults["require_acceptance_lane"] is False
+    for key in (
+        "registry_url",
+        "registry_authority",
+        "buy_args",
+        "settle_command",
+        "buyer_chain_name",
+        "buyer_chain_rpc_url",
+        "buyer_alkahest_address_config_path",
+        "known_hosts_file",
+        "management_probe_command",
+        "publish_command",
+    ):
+        assert defaults[key] == ""
+
+    for profile in ("config-local.yml", "config-docker.yml"):
+        contents = (_REPO_ROOT / "e2e-tests/config" / profile).read_text(
+            encoding="utf-8"
+        )
+        assert "bare_metal:" not in contents

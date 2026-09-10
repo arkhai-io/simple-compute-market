@@ -48,6 +48,9 @@ weakening domain-owned physical validation.
   exposed by the typed listing DTO before committing local state. Distinguish a
   confirmed success, a known failed write, and a successful write whose readback
   is unknown.
+- Make the three affected installed-wheel qualification targets lock-stable
+  while retaining explicit same-version artifact reinstall, and place offline
+  production-scenario orchestration under the integration test level.
 
 ## Scope limits
 
@@ -82,6 +85,9 @@ capacity in this change is reserved for them.
 
 ### Modified Capabilities
 
+- `deployment-state`: whole-host deployment renders Alkahest chain material only
+  when enabled, carries optional write-scoped registry authentication safely,
+  and makes strict provisioning host-key pinning an explicit opt-in.
 - `physical-provisioning`: the executing authority admits the operating-system
   account a whole-host access action may name, and a host row persists a
   tenant-facing endpoint distinct from the one the provisioner connects
@@ -135,6 +141,12 @@ scaffolding, and are owed a permanent home once reviewed:
    compatible while partial failures remain visible. Destination:
    `openspec/specs/storefront-publication/spec.md` and
    `openspec/specs/storefront-publication/architecture.md`.
+7. **Qualification ownership.** Lock-stable same-version wheel refresh for the
+   three affected targets belongs in `docs/development/ARCHITECTURE.md`; offline
+   production-scenario orchestration belongs in
+   `docs/development/TESTING.md`; the distinction between offline qualification
+   and actual-host evidence belongs in
+   `docs/development/DEPLOYMENT_AND_CONFIG.md`.
 
 Deliberately **not** promoted: anything about hostile-tenant isolation,
 destructive reclaim policies, or a demonstrated live run. An earlier revision
@@ -152,3 +164,6 @@ consumer of `kit/capacity-publication` must qualify before completion because an
 earlier environment could not exercise it.
 The accepted Alkahest projection is in-process only; accepted-plan, funding and
 verification wire payloads remain unchanged, as do hosted and legacy settlement.
+The three affected locked refresh targets do not imply that every repository
+environment has been converted, nor that one distribution target builds every
+wheel an installed environment may reinstall.

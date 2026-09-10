@@ -11,9 +11,10 @@ CONFIG_DIRECTORY ?= $(PWD)/config
 MODULE ?= contracts
 
 # Path to the monorepo .dist/ wheel directory, relative to e2e-tests/.
-# Used by uv when resolving pure-Python internal packages (arkhai-vms-buyer,
-# arkhai-kit-policy, arkhai-vms-storefront, and the VM operator client) that are distributed as wheels rather than editable
-# source installs.  The Dockerfile passes --find-links /dist on the uv sync
+# Used by uv when resolving pure-Python internal packages (including domain
+# buyer/storefront contributions, policy, and operator clients) that are
+# distributed as wheels rather than editable source installs. The Dockerfile
+# passes --find-links /dist on the uv sync
 # CLI instead; this variable is for local development only.
 DIST_DIR ?= ../.dist
 
@@ -52,6 +53,8 @@ reinit: init-venv
 	--reinstall-package arkhai-vms-buyer \
 	--reinstall-package arkhai-vms-storefront \
 	--reinstall-package arkhai-bare-metal \
+	--reinstall-package arkhai-bare-metal-buyer \
+	--reinstall-package arkhai-bare-metal-storefront \
 	--reinstall-package arkhai-compute-provisioning \
 	--reinstall-package arkhai-vms-provisioning-operator-client \
 	--reinstall-package arkhai-apicredits-buyer
