@@ -6,6 +6,7 @@ from collections.abc import Mapping
 from typing import Any
 
 import pytest
+from market_alkahest import AlkahestSettlementConfig
 from apicredits_storefront.domain_runtime import get_market_domain_contract
 from apicredits_storefront.negotiation_runtime import (
     _accepted_selection_artifacts,
@@ -291,11 +292,29 @@ def test_scalar_amount_must_match_the_mechanism_build() -> None:
         )
 
 
-def test_composition_dispatch_surfaces_only_obligation_builders() -> None:
+@pytest.mark.parametrize(
+    ("alkahest", "expected_mechanisms"),
+    [
+        (None, {"fiat.stripe.v1"}),
+        (AlkahestSettlementConfig(), {"fiat.stripe.v1"}),
+        (
+            AlkahestSettlementConfig(enabled=True),
+            {"alkahest.v1", "fiat.stripe.v1"},
+        ),
+    ],
+    ids=("alkahest-absent", "alkahest-disabled", "alkahest-enabled"),
+)
+def test_composition_dispatch_surfaces_only_obligation_builders(
+    alkahest: AlkahestSettlementConfig | None,
+    expected_mechanisms: set[str],
+) -> None:
     registry = build_storefront_settlement_registry()
+    mechanisms = {"stripe": StripeSettlementConfig()}
+    if alkahest is not None:
+        mechanisms["alkahest"] = alkahest
     config = SettlementConfig(
         priority=("alkahest.v1", "fiat.stripe.v1"),
-        mechanisms={"stripe": StripeSettlementConfig()},
+        mechanisms=mechanisms,
     )
     composition = ApiCreditsSettlementComposition(
         domain=_DOMAIN,
@@ -313,7 +332,7 @@ def test_composition_dispatch_surfaces_only_obligation_builders() -> None:
         failure_policy=None,
     )
     dispatch = composition.accepted_obligation_dispatch()
-    assert set(dispatch) == {"fiat.stripe.v1"}
+    assert set(dispatch) == expected_mechanisms
     built = dispatch["fiat.stripe.v1"](
         _hosted_option(),
         {
