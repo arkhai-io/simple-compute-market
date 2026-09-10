@@ -1,6 +1,6 @@
 # Tasks — unbacked listing publication
 
-Depends on `rename-listing-cardinality-mode`,
+Depends on `settle-listing-vocabulary`,
 `project-capacity-resources-without-hosts`, and
 `pool-declared-advertisement-and-backing`. Do not begin Section 2 before all three have
 landed.

@@ -265,7 +265,7 @@ The hint that governs how many candidates a pool yields is named `listing_mode`,
 
 | Open gap | Owned by |
 |---|---|
-| The cardinality hint's name does not state its scope, inviting values that are not cardinalities | [`rename-listing-cardinality-mode`](../../openspec/changes/rename-listing-cardinality-mode/) |
+| Four names refer to the offering mode and `offer` refers to three different things, so this goal's new published fields would land under names about to change | [`settle-listing-vocabulary`](../../openspec/changes/settle-listing-vocabulary/) |
 | A pool can only authorize a mode its provider proves it can deliver, so a seller with no execution integration can advertise nothing, and no pool can say whether it can be admitted against at all | [`pool-declared-advertisement-and-backing`](../../openspec/changes/pool-declared-advertisement-and-backing/) |
 | A declared capacity resource with no executor host reaches no storefront, because the projection enumerates host inventory | [`project-capacity-resources-without-hosts`](../../openspec/changes/project-capacity-resources-without-hosts/) |
 | An unbacked listing has no legal binding shape, listing origin is not distinguished from admission authority, and the compute registry schema carries no backing field | [`unbacked-listing-publication`](../../openspec/changes/unbacked-listing-publication/) |

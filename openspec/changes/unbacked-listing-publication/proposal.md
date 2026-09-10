@@ -131,7 +131,7 @@ None. This is a posture within existing capabilities, not a new domain.
   advertise anything. That change also declares `capacity_backing` on the pool and
   guarantees a producer emits it for every pool, which is what makes this change's
   version-skew rule tractable rather than a guess.
-- **Depends on `rename-listing-cardinality-mode`.** Landing the rename first is
+- **Depends on `settle-listing-vocabulary`.** Landing the rename first is
   what makes `capacity_backing` and the cardinality hint visibly independent
   rather than looking like one field being widened.
 - **Depends on `project-capacity-resources-without-hosts`.** A seller with no

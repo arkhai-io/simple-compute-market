@@ -118,7 +118,7 @@ contact-payload-retention ──► compose-contact-exchange-across-compute
 
 ```text
 capacity-resource-administration ──► project-capacity-resources-without-hosts ──┐
-rename-listing-cardinality-mode ────────────────────────────────────────────────┤
+settle-listing-vocabulary ────────────────────────────────────────────────┤
 pool-declared-advertisement-and-backing ────────────────────────────────────────┴──► unbacked-listing-publication ──► publish-indicative-listing-rates
 ```
 
@@ -150,7 +150,7 @@ advertisement change's subset rule depend on a concept its own dependent owned.
 
 | Change | Status | Acceptance boundary |
 |---|---|---|
-| [`rename-listing-cardinality-mode`](rename-listing-cardinality-mode/) | active; independent | Renames the `listing_mode` projection hint to `listing_cardinality_mode` and states its scope normatively, so a value that is not a cardinality is visibly out of place. Accepts the old key as a deprecated alias to prevent silent reclassification across version skew |
+| [`settle-listing-vocabulary`](settle-listing-vocabulary/) | active; independent | One name for the offering mode across the claim wire, pool declarations, the durable binding, and the published listing — retiring `executor_kind`, `virtualization_type`, and the proposed `offering_type`. `offer_resource` becomes `listing_resource` and `offer` returns to meaning a negotiation message. The compute schema identity names its family. `executor` is retired as vocabulary. The cardinality hint keeps its deprecated ingestion alias; the wire renames get none |
 | [`pool-declared-advertisement-and-backing`](pool-declared-advertisement-and-backing/) | active; no blocking dependency | Two pool declarations: what a pool's listings may advertise, separate from what its provider proves it can deliver; and whether the pool can be admitted against. A backed pool's advertisable set is constrained to a subset of its deliverable set, a malformed backing value fails closed, and both are derived for every existing pool on upgrade. Leaves `deliverable_modes` and every execution recheck untouched. Observable to operators only — no listing behaviour changes until `unbacked-listing-publication` reads the tags |
 | [`project-capacity-resources-without-hosts`](project-capacity-resources-without-hosts/) | blocked on `capacity-resource-administration` | Inverts the resource-pool projection to iterate declared capacity resources and correlate host rows in, so a declaration with no executor host reaches storefronts instead of succeeding into a void. Also serves Goal 1 |
 | [`unbacked-listing-publication`](unbacked-listing-publication/) | blocked on the three above, plus a completion dependency on `pools-9-retire-local-physical-authority` | Backing as an explicit declared listing property: a tagged union over admission provenance, a binding discriminator distinct from the listing's origin site, pool advertise-authorization separated from execute-authorization, capacity-availability reconciliation scoped to backed listings while source-publication reconciliation applies to all, and an exact backing filter in the compute registry schema |

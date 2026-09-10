@@ -52,3 +52,31 @@ A `fungible` pool's publishable capacity range is bounded by what a single membe
 
 - **WHEN** pricing precedence resolves `min_price` or a token-address policy hint for a listing candidate
 - **THEN** the storefront may use those values only for negotiation-floor or demand policy and derives every settlement option exclusively from the effective complete typed clause list
+
+## MODIFIED Requirements
+
+### Requirement: Trusted listing mappings route to one site
+Every storefront listing MUST have one immutable common mapping binding the listing ID, trusted site, explicit pool or Physical Resource provenance, offering mode, exact domain identity/version, collision-safe derivation identity, and public-safe versioned source envelope. Public `listing_resource.offering_mode` MUST equal the recorded offering mode. The published field, the durable binding, the projected pool declaration, and the capacity claim MUST all name that value `offering_mode`; no surface may use a second name for it. Pricing, settlement clauses, and seller policy remain on the generic listing; secret, provider, credential, SSH, and private result material MUST NOT enter the binding or public offer.
+
+A seller's published shape is a listing, not an offer. The published shape MUST be named `listing_resource`, and `offer` MUST be reserved for a negotiation message either party sends. No surface may accept a second spelling of the published shape.
+
+#### Scenario: Publication binds a listing
+
+- **WHEN** a storefront publishes a listing candidate
+- **THEN** the durable mapping records the trusted site, provenance, offering mode, domain identity and version, derivation identity, and source envelope
+- **AND** the published `listing_resource.offering_mode` equals the recorded offering mode
+
+#### Scenario: A normalized listing disagrees with its binding
+
+- **WHEN** a normalized domain listing projects an `offering_mode` different from its registration or durable binding
+- **THEN** publication is refused rather than publishing a listing whose public mode disagrees with its provenance
+
+#### Scenario: A published shape is submitted under the retired key
+
+- **WHEN** a listing is submitted carrying the published shape under `offer_resource` or `offer`
+- **THEN** it is rejected rather than accepted under a second spelling
+
+#### Scenario: Another site could satisfy the claim
+
+- **WHEN** the bound site refuses a listing claim while another configured site has compatible capacity
+- **THEN** the storefront reports the bound-site refusal and the other site receives zero calls
