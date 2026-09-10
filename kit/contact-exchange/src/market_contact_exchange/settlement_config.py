@@ -132,9 +132,13 @@ class ContactPublicationInput(BaseModel):
 class ContactSettlementConfig(BaseModel):
     """Strict contact-exchange settings.
 
-    ``contact_payload`` is the seller's held contact data: bounded, opaque,
-    and revealed only through the authenticated introduction surface after
-    acceptance. It must never reach readiness details, options, or listings.
+    ``contact_payload`` holds the seller's explicitly shareable contact data.
+    A whole plain-text blurb uses the ``ContactText`` profile, exactly
+    ``{"text": <blurb>}``; other maps remain opaque. Configuration never generates
+    text or derives a delivery route. The separate own route authorizes where
+    this party receives the counterparty's copy. Contact data is revealed only
+    through the authenticated introduction surface after acceptance and must
+    never reach readiness details, options, or listings.
     """
 
     model_config = ConfigDict(extra="forbid", frozen=True, strict=True)

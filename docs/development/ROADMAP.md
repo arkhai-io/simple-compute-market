@@ -254,15 +254,17 @@ authority; historical options and IDs remain unchanged. The
 [carrier contract](../../openspec/specs/contact-exchange-settlement/spec.md#primitive-rules)
 is implemented. General operator declarations additionally have an explicit
 file/CLI/startup publication path with whole-file preflight and immutable signed
-registry retries, without physical authority. Full text/context exchange and
-cross-consumer qualification remain separate work; local publication is not
-activation evidence.
+registry retries, without physical authority. Whole-text exchange preserves reviewed
+text and accepted context through immutable capture and recipient-specific rendering;
+signed HTTP/SQLite and fake-SMTP tests cover restart, drift, cancellation fences and
+lost finalization responses. Combined publication-to-delivery qualification remains
+separate work. Local source validation is not deployment or inbox evidence.
 
 What deliberately remains: the `escrows` table and the `/api/v1/settle/{escrow_uid}` route family serve as the Alkahest mechanism surface (retirement needs deployment evidence), hosted-specific servicing gates guard hosted's own surfaces, and pre-plan legacy escrow rows keep only their mechanism-surface identity.
 
 | Open gap | Owned by |
 |---|---|
-| Full editable-text exchange and cross-consumer qualification | [Exchange #224](https://github.com/arkhai-io/simple-compute-market/issues/224) and [qualification #225](https://github.com/arkhai-io/simple-compute-market/issues/225), consuming the implemented declaration publisher |
+| Combined declared-publication-to-delivery source qualification | [Qualification #225](https://github.com/arkhai-io/simple-compute-market/issues/225), consuming the implemented declaration publisher and reviewed text/context exchange |
 | Introduction-only image provenance and live deployment qualification | [`contact-only-bare-metal-runtime`](../../openspec/changes/contact-only-bare-metal-runtime/) |
 | Cross-domain contact-exchange composition beyond bare metal; contact-payload retention automation | Unowned — needs a new change; background in [`contact-exchange-settlement-mechanism`](../../openspec/changes/archive/2026-08-19-contact-exchange-settlement-mechanism/) |
 | Delivery beyond bare metal, and a second event producer (a settled charge, a completed escrow) | Unowned — needs a new change; background in [`add-introduction-delivery-sinks`](../../openspec/changes/archive/2026-08-19-add-introduction-delivery-sinks/) |

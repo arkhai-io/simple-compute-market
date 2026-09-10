@@ -6,6 +6,16 @@ introduction deal delivers the counterparty contact it already holds to
 destinations its own operator configured, without the marketplace learning any
 delivery protocol or the deal depending on delivery succeeding.
 
+## Scope
+
+The local installed-plugin requirements below describe legacy recipient-owned
+sink delivery. Agreements explicitly selecting the two-sided email delivery
+policy instead use storefront-owned durable recipient intents and the
+explicit-policy requirements below; they do not acquire legacy redelivery or
+counterparty-destination behavior. Contact sharing and settlement completion are
+owned by [contact exchange](../contact-exchange-settlement/spec.md). Both paths
+reuse the mechanism-neutral event renderer.
+
 ## Requirements
 
 ### Requirement: Delivery is local, self-addressed, and recipient-side
@@ -171,3 +181,64 @@ sink.
 - **WHEN** the configured endpoint returns a failure status
 - **THEN** the failure is reported locally and the introduction, its obligation, and
   the counterparty's request are unaffected
+
+### Requirement: Explicit-policy delivery renders frozen recipient content
+
+For the explicit two-sided email delivery policy, the storefront SHALL render
+only each recipient's frozen counterparty contact and accepted introduction
+package. Nested JSON context SHALL be readable plain-text fields, with scalar
+strings preserved verbatim and no HTML, template, shell or header interpretation.
+The buyer copy SHALL contain seller text; the seller copy SHALL contain buyer
+text. Configured routes SHALL NOT enter shared content unless independently
+authored in the shared blurb. No mutable listing or configuration lookup SHALL
+supply finalized content.
+
+#### Scenario: Whole text and accepted machine context reach both recipients
+
+- **WHEN** an eligible introduction is reviewed, finalized and released for delivery
+- **THEN** both copies include frozen listing identity, machine details and accepted
+  terms, and each contains only its counterparty's whole blurb
+- **AND** whitespace, combining Unicode and inert markup in that blurb remain intact
+
+#### Scenario: Route-only addresses remain private
+
+- **WHEN** a party configures a route separately from the shared blurb
+- **THEN** the other party's message body contains no such route address
+- **AND** each SMTP message addresses only its own recipient
+
+#### Scenario: Restart does not rewrite or redeliver a terminal exchange
+
+- **WHEN** delivery resumes after listing/configuration changes and restart
+- **THEN** content and recipient routes come from the immutable capture
+- **AND** terminal recipient intents are not resent and contain no route
+
+### Requirement: Explicit-policy SMTP outcomes are conservative and bounded
+
+Explicit-policy delivery SHALL require verified STARTTLS before authentication
+or DATA. A positive DATA acknowledgement SHALL remain accepted despite QUIT
+failure. Unknown DATA acceptance SHALL enter needs-review, never automatic
+resend. Temporary refusal retries SHALL be finite; attempt ownership and time
+bounds SHALL fence stale senders. No redelivery API is supplied for this policy.
+
+#### Scenario: DATA acknowledgement is lost
+
+- **WHEN** a connection fails after DATA without a known positive acknowledgement
+- **THEN** the intent requires review, retains no route and is not retried blindly
+
+#### Scenario: TLS verification or cleanup fails
+
+- **WHEN** STARTTLS is missing or its certificate cannot be verified
+- **THEN** authentication and message transmission are refused
+- **AND** a later QUIT failure cannot reverse an already positive DATA acknowledgement
+
+## Evidence
+
+- `kit/delivery/tests/unit/test_events.py` proves readable deterministic nested
+  context and verbatim inert text.
+- `kit/delivery/tests/unit/test_smtp_attempt.py` proves verified TLS refusal,
+  unknown DATA acknowledgement, positive DATA acknowledgement despite failed or
+  blocked QUIT, and bounded process ownership.
+- `kit/contact-exchange/tests/unit/test_delivery_state.py` proves durable retry,
+  recovery fences and terminal route cleanup.
+- `domains/bare_metal/storefront/tests/test_http_contact_source_exchange.py`
+  drives signed HTTP, disposable SQLite, restart and both fake-SMTP recipient copies.

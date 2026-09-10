@@ -9,7 +9,7 @@ needs no second delivery system.
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Iterator, Mapping
 from typing import Any, Literal
 
 from market_identity import Identity
@@ -56,6 +56,20 @@ class DeliveryEvent(BaseModel):
         return self.model_dump(mode="json")
 
 
+def _context_lines(key: str, value: Any, indent: str = "  ") -> Iterator[str]:
+    """Expand JSON containers without interpreting domain fields or scalar text."""
+    if isinstance(value, Mapping) and value:
+        yield f"{indent}{key}:"
+        for child in sorted(value):
+            yield from _context_lines(child, value[child], indent + "  ")
+    elif isinstance(value, list) and value:
+        yield f"{indent}{key}:"
+        for index, item in enumerate(value):
+            yield from _context_lines(str(index), item, indent + "  ")
+    else:
+        yield f"{indent}{key}: {value}"
+
+
 def _render(event_fields: Mapping[str, Any]) -> str:
     """Render one event as a stable, readable block.
 
@@ -81,7 +95,7 @@ def _render(event_fields: Mapping[str, Any]) -> str:
         lines.append("")
         lines.append("Agreed introduction:")
         for key in [*known, *extra]:
-            lines.append(f"  {key}: {context[key]}")
+            lines.extend(_context_lines(key, context[key]))
 
     contact = event_fields.get("contact") or {}
     lines.append("")

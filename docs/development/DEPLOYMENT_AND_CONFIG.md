@@ -538,6 +538,36 @@ requires a new listing ID; closed/paused IDs refuse. Omitted IDs are not withdra
 and no accepted or historical intent is backfilled. This startup option is not a
 periodic publisher, rollout command, or qualification of a release or deployment.
 
+### Explicit whole-text contact authoring and delivery
+
+The seller authors a complete shareable plain-text blurb in the private
+`contact.contact_payload` of `BARE_METAL_STOREFRONT_SETTLEMENT` as
+`{"text":"Seller's explicitly authored shareable blurb"}`. The `ContactText`
+profile permits 1–512 Unicode scalar values with at least one nonblank scalar;
+it neither trims nor normalizes. Existing opaque contact maps remain supported
+without automatic conversion. Public profile `terms` describe the commercial
+introduction, not contact text. No runtime template or generation from configured
+methods is supplied: any authoring aid must result in explicitly reviewed text.
+
+`BARE_METAL_STOREFRONT_DELIVERY` is a separate private JSON document containing
+`schema_version: 2`, `mode: "two-sided-contact"`, the seller's own
+`seller_route: {kind: email, address: ...}`, and `smtp` settings (`host`, `port`,
+`sender`, `username`, `password`, and fixed `timeout_seconds: 10`). A route does
+not enroll a profile: explicit two-sided delivery
+requires its public `delivery_policy`; accepted declaration capture additionally
+requires `context_contract: "accepted-listing.v1"`. The buyer supplies its own
+reviewed contact payload and own route in the existing signed v2 review/finalize
+request. Neither party's route is copied into shared text automatically.
+
+Store this configuration in private role inputs, not public offer files,
+ConfigMaps, logs or command output. SMTP credentials and current public profile
+text can rotate without rewriting accepted terms. Pre-consent contact/route
+drift requires another review; missing required configuration remains unavailable.
+After finalization both contacts, routes and accepted context remain frozen.
+See [contact exchange](../../openspec/specs/contact-exchange-settlement/spec.md)
+and [delivery](../../openspec/specs/introduction-delivery/spec.md) for recovery
+and historical no-outbound behavior. Local validation is not activation evidence.
+
 ### Bare-metal hosted role configuration
 
 `arkhai-bare-metal-buyer` is an installed core buyer-domain wheel. Its TOML contains a registry URL, registry authority/trust pins, and bounded public defaults only; the XDG buyer profile service resolves the fresh or run-recorded signer. The `bare-metal` commands use authenticated discovery and the shared schema-opaque hosted storefront transport. Raw payer/instrument/provider values and action material are not domain configuration or durable CLI output.

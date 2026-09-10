@@ -70,3 +70,31 @@ The private `ContactText` profile reuses one existing `text` entry, preserving o
 Explicit `context_contract: "accepted-listing.v1"` eligibility separates new capture from historical packages. Bare-metal acceptance validates an immutable declaration intent and selected option, captures the machine facts and non-access terms, and gives the kit an opaque domain value. The kit hashes that value into the obligation. This avoids a recursive plan hash and any upward domain dependency. Protected accepted lookup checks the stored context against the obligation rather than reconstructing it from registry or current configuration. Public fact digests are not substitutes for the keyed, private review fingerprints.
 
 The [source carrier tables](spec.md#primitive-rules) own exact shapes, Unicode rules, digests, failure behavior and versions. Declaration/file admission is described by [storefront publication](../storefront-publication/spec.md#requirement-general-declaration-input-has-finite-strict-bounds). No historical plan or obligation is backfilled.
+
+## Reviewed exchange and recipient rendering
+
+The explicit delivery policy uses the same accepted package and immutable contact
+record as protected party reads. Review binds caller text/route and the seller
+snapshot; finalization captures one record and two awaiting-completion intents
+in the role-owned SQLite transaction. Completion and SMTP are different stages:
+only journaled settlement success releases intents, while a committed retry
+observes the record without taking another completion lease.
+
+Accepted profile terms and channel belong to the accepted package, not current
+configuration. Their later edits and SMTP credential rotation do not change the
+reviewed facts. Seller contact/route drift still invalidates a pending review;
+missing required configuration remains unavailable. No extra fingerprint or
+schema is needed. After capture the record and routes remain frozen, and terminal
+recipient states remove routing data from the intents.
+
+A caller validating a signed acceptance must compare the package, obligation
+params and conditions against independently retained advertised option,
+declaration, machine and requested-term expectations. Internal digest consistency
+alone does not establish that the seller returned the caller's selection. The
+shared buyer performs universal acceptance checks before invoking its supplied
+callback; it imports no storefront validator.
+
+The [delivery renderer](../introduction-delivery/architecture.md) consumes only
+recipient projections of this record. Neither rendering nor recovery recaptures
+machine facts from the registry. Local fake-SMTP and lost-HTTP-response tests
+qualify these source boundaries, not inbox delivery or exactly-once delivery.

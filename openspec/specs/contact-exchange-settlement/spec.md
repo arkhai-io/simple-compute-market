@@ -239,7 +239,59 @@ A bare-metal contact declaration SHALL use a declaration identifier with no mach
 
 The source carriers SHALL conform to the field, canonicalization and compatibility tables below; their fixtures are packaged in the contact-exchange wheel.
 
+### Requirement: Reviewed text and context survive finalization unchanged
+
+For an explicitly delivery-enabled agreement, finalization SHALL atomically store
+one immutable introduction and exactly two recipient intents awaiting successful
+settlement completion. The record SHALL retain the exact reviewed buyer text,
+seller contact snapshot and accepted package. A committed retry SHALL observe
+that capture without replacing it or racing the completion owner. Recovery SHALL
+release intents only after journaled materialization, condition and collection
+success, never on busy, pending or manual-required results.
+
+#### Scenario: Reviewed inputs change before capture
+
+- **WHEN** buyer text or own route, seller text or own route, parties or the
+  accepted package changes after review
+- **THEN** existing review/provenance fences refuse finalization without an
+  introduction or recipient intents
+- **AND** missing required profile or delivery configuration remains unavailable,
+  not implicit consent to another configuration
+
+#### Scenario: Current public settings change without changing accepted inputs
+
+- **WHEN** current public profile terms/channel or SMTP credentials rotate but the
+  accepted package, contact snapshots and recipient routes remain unchanged
+- **THEN** finalization retains the accepted package rather than substituting
+  current public settings or requiring an expanded review fingerprint
+
+#### Scenario: A finalize response is lost
+
+- **WHEN** the server commits finalization but the caller loses its HTTP response
+- **THEN** authenticated owner status and an exact retry after restart recover the
+  same committed introduction and exactly two intents, without a replacement send
+
+#### Scenario: Cancellation races a delayed request
+
+- **WHEN** cancellation commits before a delayed review or finalization transaction
+- **THEN** the delayed request cannot create an introduction or intents
+- **AND** cancellation after committed finalization reports committed, not cancelled
+
+#### Scenario: Accepted and captured facts outlive mutable sources
+
+- **WHEN** a listing is withdrawn after acceptance or settings change after capture
+- **THEN** both recipient projections and subsequent rendering use the frozen
+  accepted package and contact record, not a current registry or configuration lookup
+- **AND** historical no-outbound records acquire neither jobs nor fabricated provenance
+
 ## Evidence
+
+- Whole-text review/store/render parity, independent retained acceptance checks,
+  recursive privacy canaries, lost finalization response, deterministic cancellation
+  fences and historical no-job restart:
+  `domains/bare_metal/storefront/tests/test_http_contact_source_exchange.py`.
+- Journaled completion, contention and recovery before send:
+  `domains/bare_metal/storefront/tests/test_http_contact_delivery.py`.
 
 - Environment composition, health, admission, signed pending reads, explicit
   capture, party refusal, restart, rollback, and old unregistered references:
