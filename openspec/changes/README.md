@@ -42,7 +42,7 @@ capacity-shape-envelope, negotiation-capacity-feasibility-probe (independent)
 | Change | Status | Acceptance boundary |
 |---|---|---|
 | [`publish-multidimensional-listing-shape`](publish-multidimensional-listing-shape/) | active; no blocking dependency | Publishes the capacity dimensions and offering mode a projection declares into each listing's `offer_resource`. Fixes a live defect: the registry's dimension and form-factor filters fail closed on missing fields, so they match nothing today. Also serves Goal 3 |
-| [`structured-capacity-requirements`](structured-capacity-requirements/) | design phase; not yet planned | Structured buyer-facing `requirements` shape, `offering_type` separated from the site-inventory `resource_type` discriminator, canonical claim vocabulary. Rates became a third consumer of its family-grouped shape (2026-08-06), so `capacity-shape-pricing` waits on this vocabulary before extending pricing beyond the `gpu` family |
+| [`structured-capacity-requirements`](structured-capacity-requirements/) | design phase; not yet planned | Structured buyer-facing `requirements` shape, `offering_type` separated from the site-inventory `resource_type` discriminator, canonical claim vocabulary. `capacity-shape-pricing` waits on this vocabulary before extending pricing beyond the `gpu` family. Goal 7's published asking rate no longer waits on it (2026-09-09) — a published price for a fixed advertised shape needs no per-dimension vocabulary |
 | [`capacity-shape-pricing`](capacity-shape-pricing/) | active; depends on `publish-multidimensional-listing-shape` and `structured-capacity-requirements`' vocabulary | Per-dimension rates carried inside the family-grouped capability shape, a replaceable price aggregator, and the negotiated quantity becoming a rate multiplier so concessions stay comparable when the shape changes |
 | [`capacity-shape-envelope`](capacity-shape-envelope/) | active; independent | Kit-level admissibility: whether a whole shape is one the seller will consider, and what range remains admissible for one dimension given the rest, behind an interface shaped for the occupancy-dependent feasible region expected later |
 | [`negotiation-capacity-feasibility-probe`](negotiation-capacity-feasibility-probe/) | active; independent | Verifies a requested shape against the authoritative site before terms are agreed, consuming nothing, reporting unservable distinctly from seller-declined. Shared prerequisite: also required before a held reservation can be billed |
@@ -98,12 +98,63 @@ capacity-reservation-lifecycle-hardening ──► billable-capacity-reservation
 
 ## Roadmap goal — Make the settlement mechanism a composed choice
 
-Delivered; no active change remains. Both changes were archived 2026-08-19:
+The mechanism work is delivered; both changes were archived 2026-08-19:
 [`finish-settlement-mechanism-neutrality`](archive/2026-08-19-finish-settlement-mechanism-neutrality/)
 and [`contact-exchange-settlement-mechanism`](archive/2026-08-19-contact-exchange-settlement-mechanism/).
-[`ROADMAP.md`](../../docs/development/ROADMAP.md)'s Goal 6 carries the current state and names the one
-remaining gap — cross-domain contact-exchange composition beyond bare metal, and contact-payload
-retention automation — as unowned and needing a new change.
+[`ROADMAP.md`](../../docs/development/ROADMAP.md)'s Goal 6 carries the current state.
+
+Two changes now own what that goal recorded as its remaining gap.
+
+```text
+contact-payload-retention ──► compose-contact-exchange-across-compute
+```
+
+| Change | Status | Acceptance boundary |
+|---|---|---|
+| [`contact-payload-retention`](contact-payload-retention/) | active; no blocking dependency; design-complete | Makes the existing bounded-PII retention requirement executable: a 30-day-default window applied as an aggregate policy read live, one deletion handler shared by a scheduled sweep and an operator-invoked path, and disclosure of the window both before a buyer commits contact data and again at reveal. The deletion primitive already exists in the mechanism kit with no caller |
+| [`compose-contact-exchange-across-compute`](compose-contact-exchange-across-compute/) | blocked on `contact-payload-retention`; design-complete | Promotes the domain-neutral introduction composition glue out of bare metal so accepted-state interpretation has one implementation, composes the mechanism in the VM storefront — the one remaining compute-family domain — extends delivery to it, and resolves the seller's contact payload per listing origin rather than per storefront. Goal 7's multi-seller introduction value depends on that last part |
+
+## Roadmap goal — Sell capacity the marketplace cannot admit against
+
+```text
+capacity-resource-administration ──► project-capacity-resources-without-hosts ──┐
+settle-listing-vocabulary ────────────────────────────────────────────────┤
+pool-declared-advertisement-and-backing ────────────────────────────────────────┴──► unbacked-listing-publication ──► publish-indicative-listing-rates
+```
+
+`capacity-resource-administration` is a Goal 7 prerequisite and was groomed for it
+(2026-09-09): digest-gated capacity-definition import, a planned
+composition-supplied mirror dimension, and a drain invariant forbidding a capacity
+resource from moving pools under a live obligation.
+`pools-9-retire-local-physical-authority` depends on that invariant too — its
+two-pool executor-migration path has the same hazard.
+
+Goal 7 owns every change it needs. `publish-indicative-listing-rates` was
+originally graphed behind `capacity-shape-pricing` and transitively behind the
+unstarted `structured-capacity-requirements`; that dependency was removed once it
+was clear those changes price a shape a buyer proposes during negotiation, while a
+published asking price prices a listing's fixed advertised shape. The two remain
+forward-compatible — see that change's `design.md`.
+
+`pools-9-retire-local-physical-authority` is a **completion dependency** of
+`unbacked-listing-publication`, not a blocking one: implementation may proceed
+before it, closeout may not. It owns promoting "projection is the listing-candidate
+origination path" into `ARCHITECTURE.md`, alongside which this goal's own promoted
+text sits.
+
+`pool-declared-advertisement-and-backing` amends `resource-pool-management`, a
+contract established by the archived `pool-declared-offering-modes` change. No
+active change owns it, so there was nothing to split a minimal piece out of. It
+carries both new pool tags rather than one: splitting them across changes made the
+advertisement change's subset rule depend on a concept its own dependent owned.
+
+| Change | Status | Acceptance boundary |
+|---|---|---|
+| [`settle-listing-vocabulary`](settle-listing-vocabulary/) | active; independent | One name for the offering mode across the claim wire, pool declarations, the durable binding, and the published listing — retiring `executor_kind`, `virtualization_type`, and the proposed `offering_type`. `offer_resource` becomes `listing_resource` and `offer` returns to meaning a negotiation message. The compute schema identity names its family. `executor` keeps only its action-dispatch meaning; its uses as a synonym for the machine, the handler, or the mode are retired. The cardinality hint keeps its deprecated ingestion alias; the wire renames get none |
+| [`pool-declared-advertisement-and-backing`](pool-declared-advertisement-and-backing/) | active; no blocking dependency | Two pool declarations: what a pool's listings may advertise, separate from what its provider proves it can deliver; and whether the pool can be admitted against. A backed pool's advertisable set is constrained to a subset of its deliverable set, a malformed backing value fails closed, and both are derived for every existing pool on upgrade. Leaves `deliverable_modes` and every execution recheck untouched. Observable to operators only — no listing behaviour changes until `unbacked-listing-publication` reads the tags |
+| [`project-capacity-resources-without-hosts`](project-capacity-resources-without-hosts/) | blocked on `capacity-resource-administration` | Inverts the resource-pool projection to iterate declared capacity resources and correlate host rows in, so a declaration with no executor host reaches storefronts instead of succeeding into a void. Also serves Goal 1 |
+| [`unbacked-listing-publication`](unbacked-listing-publication/) | blocked on the three above, plus a completion dependency on `pools-9-retire-local-physical-authority` | Backing as an explicit declared listing property: a tagged union over admission provenance, a binding discriminator distinct from the listing's origin site, pool advertise-authorization separated from execute-authorization, capacity-availability reconciliation scoped to backed listings while source-publication reconciliation applies to all, and an exact backing filter in the compute registry schema |
+| [`publish-indicative-listing-rates`](publish-indicative-listing-rates/) | blocked on `unbacked-listing-publication`; design-complete | A seller's asking rate for a listing's advertised shape as a frozen three-part object — decimal-text amount, opaque asset, `hour` period — declared at the listing's origin pool, with no storefront default reaching another origin. Filters match the period and asset rather than normalizing across either. Normatively a listing attribute rather than a settlement option rate: nothing is constructed from it. Carries two generic filter-engine primitives it cannot work without: an exact-decimal declared value type and declarative filter co-requirements. Closes Goal 7's comparison gap |
 
 ## Lesser goal — POOLS capacity and fulfillment foundation
 

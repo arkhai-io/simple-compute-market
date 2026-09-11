@@ -31,9 +31,12 @@ unpriceable rather than free.
 
 #### Scenario: A listing advertises a single rate from before rate structures existed
 
-- **WHEN** commercial resolution reads a listing carrying one advertised rate
+- **WHEN** commercial resolution reads a listing carrying one resolved
+  negotiation-side rate
 - **THEN** it is interpreted as a rate structure pricing the primary dimension only,
   and the price produced for that listing's own shape is unchanged
+- **AND** a published listing-level asking rate is not read as that single rate and
+  is not reinterpreted as a primary-dimension rate
 
 ### Requirement: Price aggregation is replaceable
 

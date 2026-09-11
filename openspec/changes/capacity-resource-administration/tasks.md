@@ -80,23 +80,97 @@ authority.
 - [ ] 4.5 Run the VM e2e scenarios that depend on projected capacity shape, and the
       `kit/site` ledger and router suites.
 
+## 4b. Composition-supplied mirror dimension
+
+`design.md`'s "The primary-dimension fallback writes a GPU name into every domain"
+accepted this fix; it previously had no task, so an implementer would have had to
+invent the semantics while coding. Retiring the scalar mirror entirely remains
+deferred — this is the smaller half that the domain-neutral declaration contract
+depends on.
+
+- [ ] 4b.1 Make the dimension the legacy scalar mirror tracks composition-supplied,
+      the way `unit_claim_keys` already is, rather than the module-level
+      `PRIMARY_DIMENSION = "gpu_count"` in `kit/site/ledger.py`.
+- [ ] 4b.2 Stop writing a mirror dimension into a caller's explicit capacity map.
+      `register_resource` currently injects it when absent and then reads it back for
+      `mirrored_units`; both sites need the supplied name and the explicit-declaration
+      case.
+- [ ] 4b.3 Make `total_units` optional and absent where the declaration names no
+      mirror dimension. **Decided 2026-09-09** rather than left as a gate: the
+      existing consistency check compares the scalar against its mirrored dimension
+      when both are present, so absence keeps that check meaningful while a
+      substituted zero would make it assert a false equality. Retiring the scalar
+      entirely remains deferred.
+- [ ] 4b.4 Wire the VM composition to its existing mirror dimension so no behaviour
+      changes there.
+- [ ] 4b.5 Wire the API-credit composition to its own dimension, matching how it
+      already overrides `unit_claim_keys` to `("units",)`.
+- [ ] 4b.6 Confirm legacy rows whose scalar mirror was written under the old constant
+      still read correctly, and record how a row written before this change is
+      interpreted after it.
+- [ ] 4b.7 **Unit.** An explicit multidimensional declaration with no compute
+      dimension is stored as declared, with no manufactured GPU dimension, and its
+      scalar unit total is absent rather than zero.
+- [ ] 4b.8 **Unit.** The VM composition's legacy scalar fallback maps to its
+      configured mirror dimension; the API-credit composition's does not become
+      `gpu_count`.
+- [ ] 4b.9 **Integration.** One typed-client case registering a resource whose
+      declaration names no compute dimension.
+
+## 4c. Pool reassignment drain rule
+
+- [ ] 4c.1 Refuse reassignment of a capacity resource that holds a live capacity
+      obligation — hold, reservation, assignment, or workload — resolved through its
+      pool. `register_resource` currently writes `bucket.pool_id = effective_pool_id`
+      unconditionally on update, and `backing_pool_id_in_session` resolves a
+      reservation's pool through the resource's *current* `pool_id`, so reassignment
+      rewrites the authority under an existing reservation.
+- [ ] 4c.2 Leave the resource in its current pool when a reassignment is refused. A
+      partial move is worse than a refused one.
+- [ ] 4c.3 **Integration, real DB transaction.** A resource holding a live reservation
+      cannot cross a pool boundary; the same resource can once its obligations are
+      drained. Cover both in one test so the refusal is not mistaken for a resource
+      that could never move. Keep the coverage generic: this change does not depend on
+      `pool-declared-advertisement-and-backing`, so a backed-to-unbacked case would
+      exercise terminology that may not exist yet when this lands. That
+      specialization belongs to the Goal 7 change that introduces it.
+- [ ] 4c.4 Confirm no existing fixture, bulk import, or e2e setup reassigns a resource
+      under a live obligation. If one does, drain it rather than exempting it.
+
 ## 5. Startup import
 
 - [ ] 5.1 Add `capacity_definitions_path` to `settings.toml` and its
       `resolved_capacity_definitions_path` property in `config.py`, mirroring
       `pool_definitions_path` exactly, including empty-string-means-unset.
-- [ ] 5.2 Add the import step: diff-based, idempotent, runs on every startup, raises
-      on a configured path that does not exist. Document at the step why it is
-      unconditional rather than skip-if-empty, since the adjacent host seeding uses
-      the opposite idiom and a reader will ask.
+- [ ] 5.2 Add the import step through the existing `DefinitionDocumentImporter`
+      rather than a second reconciliation path: gate on the recorded document digest,
+      reconcile a new or edited document, do nothing for an unchanged one, reconcile
+      regardless of digest on an explicit import, and commit the digest in the same
+      transaction as the apply. Raise on a configured path that does not exist.
+      **Corrected 2026-09-09:** this task previously said "runs on every startup",
+      which was the pool import's behaviour when this change was written.
+      `DEPLOYMENT_AND_CONFIG.md` has since established that a process start is not a
+      submission and that reapplying an unchanged document reverts administration
+      performed since; capacity resources have an API administration surface, so this
+      change would have introduced exactly that regression.
 - [ ] 5.3 Register the step in `startup_steps()` **after** `import-pool-definitions`,
       since a declaration may reference a pool.
 - [ ] 5.4 Run the Section 2 derivation as part of startup for hosts with legacy data
       and no declaration, so an INI-only deployment retains published capacity once
       the fallback is gone.
-- [ ] 5.5 Integration tests: definitions applied on a restart after an edit;
+- [ ] 5.5 **Integration.** Definitions applied on a restart after an edit;
       configured-but-missing path fails startup; unconfigured path proceeds;
       declaration referencing a pool resolves.
+- [ ] 5.6 **Integration.** An unchanged document at restart does not overwrite
+      capacity administered through the API since the last import. This is the
+      regression the digest gate exists to prevent and the happy-path cases above do
+      not cover it.
+- [ ] 5.7 **Integration.** An explicit import reconciles a document whose digest
+      matches the recorded one.
+- [ ] 5.8 Confirm the digest and the reconciliation commit in one transaction,
+      reusing the failure pattern the existing definition-document coverage uses. A
+      digest committed after an already-committed apply is indistinguishable at the
+      next startup from one recorded before a crash.
 
 ## 6. Operator surface and deployment wiring
 
@@ -160,9 +234,12 @@ Per `openspec/README.md#plan-closeout-requirements`.
 
 | Accepted decision | Permanent location |
 |---|---|
-| Capacity resources are the authoritative declaration of sellable capacity across every dimension | `openspec/specs/site-capacity/spec.md` — "Operator-administered capacity declarations" |
+| Capacity resources are authoritative for the declared sellable shape and quantity across every dimension; admission authority is resolved separately | `openspec/specs/site-capacity/spec.md` — "Operator-administered capacity declarations" |
+| A capacity declaration names no mandatory dimension; the legacy mirror's dimension is composition-supplied and its scalar total is absent where there is no mirror dimension | `openspec/specs/site-capacity/spec.md` |
+| A capacity resource does not move pools under live capacity obligations | `openspec/specs/site-capacity/spec.md` |
+| Capacity definitions reconcile on a document digest, not on process start | `openspec/specs/physical-provisioning/spec.md` |
 | Projected attributes must not contradict projected capacity | `openspec/specs/site-capacity/spec.md` — "Projected inventory is internally consistent" |
 | Host inventory is executor identity, not capacity authority | `openspec/specs/physical-provisioning/spec.md` — "Host inventory is executor identity"; `docs/development/ARCHITECTURE.md` authority-boundaries table |
 | Legacy host capacity is derived into declarations rather than retained as a fallback tier | `openspec/specs/physical-provisioning/spec.md` — "Legacy host capacity is derived into declarations" |
-| Capacity definitions import is unconditional-but-idempotent, after pool definitions | `openspec/specs/physical-provisioning/spec.md` — "Capacity definitions import at startup" |
+| Capacity definitions import is digest-gated, after pool definitions | `openspec/specs/physical-provisioning/spec.md` — "Capacity definitions import at startup" |
 | Why capacity declaration is separate from executor inventory, and why splitting dimensions across both was rejected | `openspec/specs/site-capacity/architecture.md` |

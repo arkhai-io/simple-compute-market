@@ -124,16 +124,30 @@ independently per field. Extending that per dimension rather than inventing a se
 precedence keeps one mental model, and the existing resolver already falls through
 missing tiers per field — the behavior a partially-specified rate structure needs.
 
-### Compatibility with existing single-rate listings
+### Compatibility with existing single-rate negotiation pricing
 
-A listing today advertises one rate. After this change it advertises a rate structure.
-An existing listing must remain interpretable, and the natural reading is a structure
-whose only priced dimension is the primary one — which reproduces today's price for
-today's shapes exactly.
+Commercial resolution today produces one negotiation-side rate per listing. After
+this change it produces a rate structure. An existing listing must remain
+interpretable, and the natural reading is a structure whose only priced dimension is
+the primary one — which reproduces today's price for today's shapes exactly.
 
 This is stated as a decision rather than left implicit because the alternative — a
 migration that rewrites published listings — would republish every listing in the
 market for a semantically identical result.
+
+**This reading applies to the negotiation-side rate only, and not to a published
+asking rate.** `publish-indicative-listing-rates` adds a second kind of single
+advertised rate: a listing-wide catalogue price on the published listing resource,
+from which nothing is constructed. The two are distinct quantities. The rate
+structure this change introduces is per-dimension negotiation pricing, so a seller
+can price a shape a buyer proposes; the asking rate prices the one shape a listing
+advertises, and is what a buyer compares on before contacting anyone.
+
+A storefront **may** derive an asking rate by evaluating a seller's rate structure
+at the listing's advertised shape, where the seller's declared policy says so. It is
+not required to, and this change's structure does not replace, subsume, or
+reinterpret a published asking rate as a primary-dimension rate. Reading it that way
+would silently redefine a catalogue price as a negotiation rate.
 
 ## Risks / Trade-offs
 

@@ -2,11 +2,11 @@
 
 ### Requirement: Domain-neutral publication hint keys
 
-Resource Pool policy metadata MUST support stable domain-neutral keys for `listing_mode` and `max_reservation_hold_seconds` without defining domain-specific listing-mode values in the shared Resource Pool capability. Unknown policy tags MUST remain forward-compatible opaque metadata.
+Resource Pool policy metadata MUST support stable domain-neutral keys for `listing_cardinality_mode` and `max_reservation_hold_seconds` without defining domain-specific listing-cardinality-mode values in the shared Resource Pool capability. Unknown policy tags MUST remain forward-compatible opaque metadata.
 
 #### Scenario: Domain interprets listing mode
 
-- **WHEN** VM, bare-metal, or API-credit publication reads a Resource Pool's `listing_mode`
+- **WHEN** VM, bare-metal, or API-credit publication reads a Resource Pool's `listing_cardinality_mode`
 - **THEN** the selected domain validates and interprets the value without adding its enum or default rule to the shared Resource Pool package
 
 #### Scenario: Consumer does not support a hint

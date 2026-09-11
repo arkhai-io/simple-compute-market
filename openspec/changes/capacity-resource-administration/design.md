@@ -12,7 +12,7 @@ Re-verify anything load-bearing before implementing; the codebase will have move
 | Concern | Seeding path | Runtime API | Idempotence |
 |---|---|---|---|
 | Hosts | `app_runtime.seed_inventory_if_empty` from `inventory_ini` or `resolved_inventory_path` | `POST /api/v1/hosts` and siblings, `POST /api/v1/hosts/import` | Skipped entirely when the table is non-empty; `/hosts/import` always upserts |
-| Resource pools | `app_runtime.import_pool_definitions_if_configured` from `resolved_pool_definitions_path` | `POST`/`PUT`/`PATCH /api/v1/pools` | Diff-based, runs at **every** startup |
+| Resource pools | `app_runtime.import_pool_definitions_if_configured` from `resolved_pool_definitions_path` | `POST`/`PUT`/`PATCH /api/v1/pools` | Digest-gated: reconciled when the document differs from the last one recorded (see the 2026-09-09 note below; this table originally read "every startup") |
 | Sellable capacity | **none** | `PUT /api/v1/capacity/resources/{resource_id}` only | n/a |
 
 The registered startup steps are `apply-ansible-config`,
@@ -22,11 +22,11 @@ nothing derives them from hosts.
 
 The two seeding paths differ deliberately and the difference is instructive. Host
 seeding is skip-if-non-empty so operator edits made through the API survive a pod
-restart. Pool import is unconditional-but-idempotent, and its in-code comment states
-why: because `import_pools` is diff-based, re-running it every startup is the correct
-behavior rather than a re-seeding hazard. Capacity definitions are a declared
-inventory in the same sense pool definitions are, so this change follows the pool
-idiom, not the host one — see "Decisions".
+restart. Pool import reconciles a declared document — originally on every startup,
+now gated on the document's digest for the same reason host seeding is
+skip-if-non-empty: reapplying unchanged state reverts administration performed since.
+Capacity definitions are a declared inventory in the same sense pool definitions are,
+so this change follows the pool idiom, not the host one — see "Decisions".
 
 ### Why a host-only deployment still works today
 
@@ -137,13 +137,15 @@ harmlessly — the rollback risk is one-directional and small.
 ### Startup import follows the pool-definitions idiom, not the host idiom
 
 `capacity_definitions_path` resolves exactly as `pool_definitions_path` does
-(`config.py`'s `resolved_*_path` property, empty string meaning unset), the import is
-diff-based and idempotent, it runs on every startup, and it raises on a configured
-path that does not exist rather than silently skipping — all matching
-`import_pool_definitions_if_configured`. Choosing the host idiom (skip-if-non-empty)
-instead would make an operator's declared capacity file silently inert after the
-first boot, which is the failure mode the pool import's own comment was written to
-avoid.
+(`config.py`'s `resolved_*_path` property, empty string meaning unset), reconciliation
+goes through the same `DefinitionDocumentImporter` gated on the document digest, and
+a configured path that does not exist raises rather than silently skipping — all
+matching `import_pool_definitions_if_configured` as it now behaves. Choosing the host
+idiom (skip-if-non-empty) instead would make an operator's *edited* capacity file
+silently inert after the first boot, which is what the pool idiom exists to avoid;
+the digest gate avoids that without reapplying an unchanged document, which is the
+opposite failure. See "The import contract changed underneath this change" below for
+why an earlier version of this section said "every startup".
 
 Ordering within `startup_steps()` matters: capacity import must run after
 `import-pool-definitions`, because a capacity resource names a `pool_id` and the
@@ -221,7 +223,57 @@ composition root like `unit_claim_keys` already is.
 This change takes the smaller of the two: make the name composition-supplied, and stop
 writing it when the caller declared capacity explicitly. Retiring the scalar is a schema
 change touching every legacy single-quantity caller, and is recorded below as deferred
-rather than folded in.
+rather than folded in. **Planned 2026-09-09 as Section 4b** — this decision previously
+had no implementation task while task 1.4 said to add nothing to
+`ResourceRegisterRequest`, so an implementer would have had to invent the semantics
+while coding. The domain-neutral declaration contract this change states cannot hold
+without it.
+
+### The import contract changed underneath this change (added 2026-09-09)
+
+This change was written when the pool-definitions import applied its document on every
+startup, and it mirrored that reasoning explicitly: idempotence was said to make an
+every-startup import safe. `DEPLOYMENT_AND_CONFIG.md` has since established the
+opposite — "a process start is not a submission", and import "is idempotent with
+respect to the document, not the database", because "re-running it against state
+something else changed reverts that change". `DefinitionDocumentImporter` implements
+the digest gate, and `import_pool_definitions_if_configured` is now a one-line
+delegation to it.
+
+So the instruction to mirror the pool import exactly is still correct; what it means
+has changed. Capacity definitions follow the digest gate.
+
+This matters more here than it would for pools, because this change also promotes
+`PUT /api/v1/capacity/resources/{resource_id}` to an operator administration surface.
+An unchanged mounted document reapplied on an unrelated restart would silently revert
+capacity an operator had administered through that API — exactly the failure the
+digest gate was introduced to prevent, arriving through a second reconciliation path in
+the same service.
+
+### Reassignment rewrites authority under live reservations (added 2026-09-09)
+
+`register_resource` writes `bucket.pool_id = effective_pool_id` on update, and
+`backing_pool_id_in_session` resolves a reservation's pool by reading the resource's
+*current* `pool_id` — its docstring says "return the current reservation debit pool".
+So moving a resource between pools changes which authority an already-existing
+reservation resolves to, without the reservation changing.
+
+That was latent while nothing made cross-pool movement a supported workflow. Two
+changes now do: `pools-9-retire-local-physical-authority` makes "create a second pool
+and migrate members across" the answer to a pool's provider being fixed at creation,
+and `unbacked-listing-publication` makes the same move the answer to a pool's backing
+being fixed. Both would exercise it.
+
+A drain invariant is the smaller fix: a resource may not move while it holds a live
+obligation resolved through its pool. The alternative — recording pool provenance on
+the reservation itself — introduces a second source of truth for a reservation's pool
+and is a much larger change for the same guarantee.
+
+Backed-to-unbacked is where this matters most, because an unbacked pool must never
+participate in reservation behaviour and reassignment would hand it a live one.
+Unbacked-to-backed is safe by construction, since an unbacked resource holds no
+reservations, but the invariant is stated generically rather than scoped to backing:
+the same hazard exists for a backed-to-backed executor migration.
 
 ## Risks / Trade-offs
 

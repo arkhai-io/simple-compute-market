@@ -24,7 +24,7 @@ Each derivation key MUST include the owning `site_id`, offering mode, exact doma
 ## ADDED Requirements
 
 ### Requirement: Published offering mode is exact and pool-authorized
-Every compute-family listing MUST persist one canonical offering mode and exact domain binding before publication. The public `offer_resource.virtualization_type` MUST equal that recorded mode using the registry's existing `vm`, `bare_metal`, or explicitly supported vocabulary. A candidate MUST be published only when the selected Resource Pool currently declares that exact deliverable mode and the registered domain can normalize the complete listing; absence or withdrawal MUST NOT widen to another mode.
+Every compute-family listing MUST persist one canonical offering mode and exact domain binding before publication. The public `listing_resource.offering_mode` MUST equal that recorded mode using the registry's existing `vm`, `bare_metal`, or explicitly supported vocabulary. A candidate MUST be published only when the selected Resource Pool currently declares that exact deliverable mode and the registered domain can normalize the complete listing; absence or withdrawal MUST NOT widen to another mode.
 
 #### Scenario: A pool declares VM and bare metal
 - **WHEN** independent VM and bare-metal publication policies both produce valid candidates from a pool declaring both modes
@@ -39,7 +39,7 @@ Every compute-family listing MUST persist one canonical offering mode and exact 
 - **THEN** reconciliation closes the listing against new negotiations while the accepted record retains its binding for recovery and teardown
 
 #### Scenario: Public mode and durable binding disagree
-- **WHEN** a publication attempt carries `virtualization_type="vm"` for a record bound to `bare_metal`
+- **WHEN** a publication attempt carries `offering_mode="vm"` for a record bound to `bare_metal`
 - **THEN** publication fails before a registry write and does not rewrite either value
 
 ### Requirement: Listing and mapping bindings are immutable

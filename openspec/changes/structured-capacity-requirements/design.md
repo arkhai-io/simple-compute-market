@@ -184,18 +184,18 @@ original Section 11.2 implementation:
 11.2's `_VM_RESOURCE_TYPE = "compute.gpu"` constant) is concept 3 — a
 site-internal inventory-adapter discriminator. The buyer should not need
 to know a VM site models capacity through a `compute.gpu` adapter; a
-site might satisfy an `offering_type: "vm"` request from several
+site might satisfy an `offering_mode: "vm"` request from several
 internal resource rows (host CPU capacity, host RAM capacity, GPU
 capacity, VM quota capacity) without the buyer ever seeing
 `resource_type` at all.
 
 **Naming alternatives considered for the new, separate concept:**
-`market_type`, `fulfillment_type`, `offering_type`. `offering_type` is
+`market_type`, `fulfillment_type`, `offering_mode`. `offering_mode` is
 preferred: it describes what the buyer is purchasing without overloading
 "domain" (an internal repository-layering term) or "resource type" (the
 existing inventory-adapter term).
 
-**Open question, not yet resolved:** whether `offering_type` needs to be
+**Open question, not yet resolved:** whether `offering_mode` needs to be
 a real wire field at all. If a storefront can only ever reach
 domain-matching site endpoints (true today — VM's storefront never talks
 to a bare-metal site), the domain boundary itself already establishes

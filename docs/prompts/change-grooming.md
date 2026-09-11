@@ -38,9 +38,7 @@ Represent a file requiring deletion by replacing its entire contents
 with a single-line tombstone comment stating the reason, at the file's
 original path:
 
-```python
 # TOMBSTONE: delete this file — <one-sentence reason>
-```
 
 Do not create a separate deletion manifest or a suffixed copy alongside
 the original — one file, one mechanism. Tombstone references must not

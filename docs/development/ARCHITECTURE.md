@@ -191,7 +191,10 @@ Every capacity-backed candidate carries
 `CapacityBinding(site_id, offering_mode, source_id)`. The site ID comes from
 trusted local composition, the offering mode must be declared by the selected
 Resource Pool and must equal the public offer's mode, and the opaque source ID
-identifies the pool, quota resource, or Physical Resource. Publication,
+identifies the pool, quota resource, or Physical Resource. The offering mode
+itself resolves from the frozen contribution registration; the Resource Pool's
+declaration is a separate authorization gate, rechecked at each execution layer,
+and applies only where a pool was selected. Publication,
 reservation, commit, release, and restart recovery reload and compare that
 exact binding. An unknown site, missing mode, changed binding, or incomplete
 candidate fails closed; the runtime never invents a home site, scans other
@@ -366,6 +369,8 @@ The storefront owns capacity offerings and projections used to publish and negot
 Specific-resource listings are a valid opt-in: the seller exposes a concrete resource and permits the buyer to constrain placement. The ordinary fungible path reserves capacity and lets fulfillment scheduling select a settlement resource.
 
 Storefront capacity pools and provisioning resource pools are separate concepts. Mapping is explicit configuration or attributes, never a cross-service foreign key.
+
+Which registry a listing is published to is an operator curation decision, expressed by forking a filter spec, rather than a property of the listing. A registry deployment serves one filter spec and buyer commands match its declared schema identity, so listing shape is deployment-scoped — but the compute family's form factors share one schema identity rather than needing a registry each. Separate profiles exist for listings whose shape genuinely differs, such as the sparse option-only profile an introduction market ships.
 
 ### Site authority
 

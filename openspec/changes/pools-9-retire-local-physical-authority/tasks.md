@@ -33,6 +33,32 @@ sized to land independently in roughly a day each. Sections 1–3 are additive
 or inert and safe to deploy alone. Section 4 is the point of no config-flip
 return.
 
+## 0. Fix a pool's executor at creation
+
+- [ ] 0.1 Reject a differing provider in `ResourcePoolService.replace_pool` and the
+      patch path, instead of deleting the old handler's configuration and
+      reassigning `pool.provider`. Rejection must not delete the existing
+      configuration on its way out — a refused request leaves the pool exactly as it
+      was.
+- [ ] 0.2 Leave provider configuration replaceable and patchable within the declared
+      provider. This forbids changing which executor a pool routes to, not how that
+      executor is configured.
+- [ ] 0.3 **Unit.** Replace with a differing provider is rejected and the existing
+      configuration survives; replace with the same provider and new configuration
+      succeeds.
+- [ ] 0.4 **Integration.** The same two cases through the real pool administration
+      API and its canonical client, since the deletion this removes happens inside a
+      transaction a service-level test can miss.
+- [ ] 0.5 Confirm no fixture, bulk import path, or e2e setup relies on an in-place
+      provider swap. If one does, migrate it to the two-pool path rather than
+      exempting it.
+- [ ] 0.6 Confirm `capacity-resource-administration`'s drain invariant covers the
+      migration path this section creates. Moving a member to a second pool while it
+      holds a live obligation would rewrite that obligation's authority, so the
+      two-pool workflow is only safe with the drain rule in place. If that change has
+      not landed, this section's guidance is incomplete rather than wrong — say so at
+      the refusal rather than implying migration is always available.
+
 ## 1. Re-ground and build the commercial override write path
 
 Nothing may be deleted before this section lands: `_sync_compute_pool_for_resource`
@@ -213,6 +239,7 @@ Per `openspec/README.md#plan-closeout-requirements`.
 |---|---|
 | The storefront holds no physical-resource, host, or physical-allocation authority | `openspec/specs/storefront-publication/spec.md` — "Storefront holds no physical-resource authority" |
 | Projection-backed derivation is the only listing-candidate path, not the default one | `openspec/specs/storefront-publication/spec.md` — "Storefronts cache independent site projections" (modified) |
+| Projection is the listing-candidate origination path; a local-table path is a rollback opt-in, not a second supported category | `docs/development/ARCHITECTURE.md` — "Storefront capacity boundary" |
 | Commercial pool overrides are upserted against projected pools; an absent row falls through | `openspec/specs/storefront-publication/spec.md` — "Commercial pool override administration" |
 | Freeze-then-redirect, and that rollback past the cutover is a code rollback | `openspec/specs/storefront-publication/spec.md`, as a scenario on the modified projection requirement |
 | Why `region`/`sla` survive (commercial override tier, not a missing projection field) | This change's `design.md`; the surviving behavior itself is the override requirement above |

@@ -239,8 +239,47 @@ What deliberately remains: the `escrows` table and the `/api/v1/settle/{escrow_u
 
 | Open gap | Owned by |
 |---|---|
-| Cross-domain contact-exchange composition beyond bare metal; contact-payload retention automation | Unowned — needs a new change; background in [`contact-exchange-settlement-mechanism`](../../openspec/changes/archive/2026-08-19-contact-exchange-settlement-mechanism/) |
-| Delivery beyond bare metal, and a second event producer (a settled charge, a completed escrow) | Unowned — needs a new change; background in [`add-introduction-delivery-sinks`](../../openspec/changes/archive/2026-08-19-add-introduction-delivery-sinks/) |
+| The retention window exists as a requirement with no implementation: no configured window, no deletion path, no disclosure to either party | [`contact-payload-retention`](../../openspec/changes/contact-payload-retention/) |
+| Contact exchange is composed on bare metal only, and its accepted-state interpretation lives in that domain rather than having one implementation | [`compose-contact-exchange-across-compute`](../../openspec/changes/compose-contact-exchange-across-compute/) |
+| A second delivery event producer (a settled charge, a completed escrow) | Unowned — needs a new change; background in [`add-introduction-delivery-sinks`](../../openspec/changes/archive/2026-08-19-add-introduction-delivery-sinks/) |
+
+Delivery beyond bare metal is no longer a separate gap: it follows composition and is in that change's scope.
+
+---
+
+## Goal 7 — Sell capacity the marketplace cannot admit against
+
+**Value.** A large share of real capacity trade is arranged directly between the parties, on terms too exotic to parametrize and with no escrow, payment custody, or automated provisioning anywhere in the deal. The marketplace's value there is discovery and a trustworthy introduction. Today such a seller cannot list at all: every listing must name a trusted site and an admissible source, so a seller with nothing to admit against has to either fabricate an authority that admits forever — a value the admission, commit, release, and restart-recovery paths would then trust — or stay out of the market.
+
+Making backing an explicit property is what lets that seller in without weakening the promise for everyone else. A listing that claims admissible capacity still gets every check it gets today; a listing that claims nothing gets none, because there is nothing to check. The gain is supply-side: a seller who will not integrate escrow or hand over SSH credentials can still be discovered, and a buyer gets one catalogue to compare rates across both kinds of supply.
+
+The same property serves market families with no physical supply behind them at all, which is where the qualifier originated. Nothing about it is compute-specific.
+
+**Current state.** Nothing supports it. There is no notion of a listing that cannot be admitted against, and the vocabulary for one does not yet exist in [`ARCHITECTURE.md`](ARCHITECTURE.md) — it is carried in [`unbacked-listing-publication`](../../openspec/changes/unbacked-listing-publication/)'s design until that change makes it true.
+
+Settlement by introduction is a working mechanism with rateless options, a durable authenticated reveal, and delivery to each side, so the settlement half of an out-of-band deal already exists. What does not exist is a listing shape it can attach to.
+
+The durable listing binding carries a site and pool or Physical Resource provenance with no way to say which of those is an admission authority and which is merely where the listing came from. A Resource Pool declares only the modes its configured provider proves it can deliver, and an unproved declaration is narrowed to empty rather than retained — so a seller who intends no execution integration authorizes no mode and can advertise nothing, with fabricated provider configuration the only way through. A pool also has no way to say whether it can be admitted against, because today every pool can. The resource-pool projection enumerates executor host inventory, so a seller who declares sellable capacity with no host behind it declares into a void — the declaration succeeds and no projection entry appears. The compute registry schema carries no backing field, so a buyer cannot exclude supply nothing stands behind. A seller price is published today, but only inside the settlement carriers — the escrow and settlement-option rate structures — and no filter reads a rate value, so it cannot be compared on. Supply that settles by introduction carries no rate at all, because that mechanism's options are rateless by design. Rate comparison is therefore unavailable to backed and unbacked supply alike, for two different reasons.
+
+The hint that governs how many candidates a pool yields is named `listing_mode`, which reads as though it governs how a pool is listed generally. That ambiguity has already produced a proposal to encode backing or settlement inside it, which would couple inventory declaration to settlement mechanism.
+
+| Open gap | Owned by |
+|---|---|
+| Four names refer to the offering mode and `offer` refers to three different things, so this goal's new published fields would land under names about to change | [`settle-listing-vocabulary`](../../openspec/changes/settle-listing-vocabulary/) |
+| A pool can only authorize a mode its provider proves it can deliver, so a seller with no execution integration can advertise nothing, and no pool can say whether it can be admitted against at all | [`pool-declared-advertisement-and-backing`](../../openspec/changes/pool-declared-advertisement-and-backing/) |
+| A declared capacity resource with no executor host reaches no storefront, because the projection enumerates host inventory | [`project-capacity-resources-without-hosts`](../../openspec/changes/project-capacity-resources-without-hosts/) |
+| An unbacked listing has no legal binding shape, listing origin is not distinguished from admission authority, and the compute registry schema carries no backing field | [`unbacked-listing-publication`](../../openspec/changes/unbacked-listing-publication/) |
+| No compute listing publishes a price, so supply cannot be compared on rate | [`publish-indicative-listing-rates`](../../openspec/changes/publish-indicative-listing-rates/) |
+
+The published rate is one number for a listing's advertised shape, not a per-dimension structure. A seller pricing RAM and GPUs differently cannot express that, and a buyer comparing two listings that bundle different RAM is comparing bundled prices — an accepted limitation for this goal. Unbundling belongs to [`capacity-shape-pricing`](../../openspec/changes/capacity-shape-pricing/), which builds per-dimension rates so a seller can price a shape a buyer proposes during negotiation; that is a different surface from a published asking price, and this goal does not wait on it.
+
+This goal is not complete on a queryable listing alone. Its value statement is discovery *and* a trustworthy introduction, so closing it requires one release-qualified business scenario in which unbacked discovery reaches a usable introduction through whichever composition change owns that mechanism — today [`compose-contact-exchange-across-compute`](../../openspec/changes/compose-contact-exchange-across-compute/), which serves Goal 6 and is not a dependency of the changes above.
+
+That change also owns the piece this goal's multi-seller shape requires: the seller's contact payload is one static storefront-wide value today, which reveals the wrong seller's details once one storefront publishes for several seller sites. Resolving it per listing origin is the only answer compatible with the scoped one-storefront-to-many-sites direction, and until it lands this goal is complete for discovery but not for introductions across sellers.
+
+Finite unbacked listings and hosted settlement over them are anticipated and unowned. They are the reason backing is modelled as a listing property rather than as a domain: a seller's supply becomes capacity-backed later without a new domain, a new registry, or a migration unwinding a fabricated site. Backing itself is immutable per durable listing — an unbacked listing does not become backed, it closes and a backed one is published in its place — because moving from no admission guarantee to a named authority is a material provenance change a buyer holding a listing reference should not have happen underneath them.
+
+Two consequences of this posture are accepted rather than solved. Nothing keeps a listed rate current or honest, since a seller pays nothing to advertise one they will not honour; the intended control is registry curation, which sits outside the registry service boundary and is not implemented here. And an unbacked listing cannot be exhausted, which closes capacity-exhaustion abuse but not abuse of whatever the settlement mechanism reveals.
 
 ---
 

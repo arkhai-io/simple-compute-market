@@ -137,6 +137,22 @@ change did not previously have -- see "Dependencies and Related Changes".
   the documented caller of `patch_resource` -- the provisioning service's
   `LeaseWatchdog` -- no longer makes that call.
 
+- Fix a Resource Pool's provider at creation. `ResourcePoolService.replace_pool`
+  currently permits an in-place executor swap — when the supplied provider differs
+  it calls `delete_config` on the old handler, reassigns `pool.provider`, and
+  writes configuration through the new one — which silently reinterprets which
+  executor the pool's existing members belong to. Replace and patch reject a
+  differing provider; moving inventory to another executor is a second pool plus
+  member migration. Provider configuration stays replaceable within the declared
+  provider. **(2026-09-09 addition, arriving from Goal 7's design review: pool-level
+  immutability is what lets an unbacked pool's backing be unchangeable, and the same
+  argument applies to the executor. Landed here rather than in Goal 7 because it is
+  a provisioning-side authority rule this change's campaign already owns, and no
+  operator relies on in-place swap.)** The migration path this creates depends on
+  `capacity-resource-administration`'s drain invariant: a reservation's pool is
+  resolved through the resource's current `pool_id`, so moving a member under a live
+  obligation would rewrite that obligation's authority.
+
 ## Capabilities
 
 ### New Capabilities
@@ -210,10 +226,15 @@ listing-derivation surfaces only.
 
 ## Permanent documentation impact
 
-- [ ] `docs/development/ARCHITECTURE.md` — likely no change; `pools-8`
-      already confirmed the current text's "storefront is not the source
-      of truth for physical resources" principle covers this change's own
-      direction. Re-confirm at implementation time rather than assuming.
+- [x] `docs/development/ARCHITECTURE.md` — the "Storefront capacity boundary"
+      subsection. `pools-8` confirmed the existing "storefront is not the source
+      of truth for physical resources" principle already covers this change's
+      direction, but nothing in the permanent map says that projection is the
+      listing-candidate origination path. That becomes true when this change
+      retires the retained local-table path, so it promotes here rather than in
+      a downstream change that would inherit an unstated premise. Goal 7's
+      unbacked-listing work depends on the statement existing and does not own
+      it.
 - [x] Existing subsystem specification — `openspec/specs/storefront-publication/spec.md`'s
       "Storefronts cache independent site projections" requirement, which
       already carries the "projection-backed derivation defaults on once

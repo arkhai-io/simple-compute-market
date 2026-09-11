@@ -6,7 +6,7 @@ This change captures design decisions and open questions carried forward
 from POOLS-7 Section 11's code review (see `design.md`). Nothing here has
 an implementation plan yet. Before any task list is written:
 
-1. Resolve the open question in `design.md`: does `offering_type` need to
+1. Resolve the open question in `design.md`: does `offering_mode` need to
    exist on the wire today, or is domain-boundary routing sufficient
    until a shared cross-domain capacity endpoint exists?
 2. Confirm the final `requirements` shape with whatever
@@ -23,7 +23,7 @@ an implementation plan yet. Before any task list is written:
 Once those are resolved, this file gets a real plan phase: sections for
 the domain-layer `requirements` parser (VM first), the shared
 matching-contract confirmation (should not need to change), the
-`offering_type` field (if accepted), and the staged wire-key
+`offering_mode` field (if accepted), and the staged wire-key
 compatibility migration (if accepted).
 
 That plan must end with the seven-part closeout task defined in
