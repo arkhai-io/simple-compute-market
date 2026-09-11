@@ -185,7 +185,7 @@ def list_bare_metal(
     buyer_config = load_bare_metal_buyer_config(config)
     identity = fresh_identity()
     with registry_client(buyer_config, identity) as client:
-        response = client.list_listings(limit=limit, virtualization_type="bare_metal")
+        response = client.list_listings(limit=limit, offering_mode="bare_metal")
     _json(response)
 
 

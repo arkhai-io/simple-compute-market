@@ -163,7 +163,7 @@ async def db(tmp_path):
         status="open",
         created_at=datetime.now().isoformat(),
         updated_at=datetime.now().isoformat(),
-        offer_resource={
+        listing_resource={
             "kind": "api_credits.v1",
             "service_name": "Acme Inference",
             "openapi_url": "https://api.acme.example/openapi.json",

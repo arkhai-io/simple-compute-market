@@ -14,7 +14,7 @@ from .hosted_contract import (
     bare_metal_digest,
     bind_bare_metal_hosted_option,
 )
-from .schema import BARE_METAL_EXECUTOR_KIND, BareMetalListing, SSH_ACCESS_METHOD
+from .schema import BARE_METAL_OFFERING_MODE, BareMetalListing, SSH_ACCESS_METHOD
 
 _SUPPORTED_PROFILES = frozenset({"card.v1", "us_bank_transfer.v1", "us_ach_debit.v1"})
 
@@ -29,7 +29,7 @@ class BareMetalHostedPublicationPolicy(BaseModel):
         "us_bank_transfer.v1",
         "us_ach_debit.v1",
     )
-    executor_kind: str = Field(default=BARE_METAL_EXECUTOR_KIND, min_length=1)
+    offering_mode: str = Field(default=BARE_METAL_OFFERING_MODE, min_length=1)
     access_method: str = Field(default=SSH_ACCESS_METHOD, min_length=1)
     min_funding_window_seconds: int = Field(default=60, gt=0)
     min_fulfillment_window_seconds: int = Field(default=60, gt=0)
@@ -168,7 +168,7 @@ def build_ready_bare_metal_hosted_options(
                 }
             ),
             site_id=str(candidate["site_id"]),
-            executor_kind=policy.executor_kind,
+            offering_mode=policy.offering_mode,
             resource_selection="specific",
             physical_resource_id=str(candidate["physical_resource_id"]),
             physical_host_id=listing.physical_host_id,

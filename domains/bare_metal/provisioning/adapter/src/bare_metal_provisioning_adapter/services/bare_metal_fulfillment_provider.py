@@ -6,7 +6,7 @@ from datetime import datetime
 from typing import Any, Literal
 
 from arkhai_bare_metal import (
-    BARE_METAL_EXECUTOR_KIND,
+    BARE_METAL_OFFERING_MODE,
     BareMetalAccessResult,
     BareMetalLeaseCreate,
     BareMetalMaterialization,
@@ -138,10 +138,10 @@ class BareMetalFulfillmentProvider(FulfillmentProvider):
         resource: SettlementResource,
         materialization: BareMetalMaterialization,
     ) -> None:
-        if resource.executor_kind != BARE_METAL_EXECUTOR_KIND:
+        if resource.offering_mode != BARE_METAL_OFFERING_MODE:
             raise ProviderConfigInvalidError(
                 "bare-metal provider cannot execute offering mode "
-                f"{resource.executor_kind!r}"
+                f"{resource.offering_mode!r}"
             )
         expected_machine = cls._resource_value(resource, "machine_id")
         expected_host = cls._resource_value(resource, "physical_host_id")
@@ -239,7 +239,7 @@ class BareMetalFulfillmentProvider(FulfillmentProvider):
             contract = ExecutorActionEnvelope(
                 capacity_reservation_id=operation.capacity_reservation_id,
                 deal_ref={lease.settlement_identity_kind: lease.settlement_identity},
-                executor_kind=BARE_METAL_EXECUTOR_KIND,
+                offering_mode=BARE_METAL_OFFERING_MODE,
                 action_kind=NODE_GRANT_ACCESS_ACTION,
                 idempotency_key=f"{operation.capacity_reservation_id}:grant-access",
                 parameters=lease.model_dump(mode="json", exclude_none=True),
@@ -272,10 +272,10 @@ class BareMetalFulfillmentProvider(FulfillmentProvider):
         self._validate_pool_config(pool_config)
         metadata = self._metadata(settlement_result.provider_metadata)
         resource = settlement_result.resource
-        if resource.executor_kind != BARE_METAL_EXECUTOR_KIND:
+        if resource.offering_mode != BARE_METAL_OFFERING_MODE:
             raise ProviderConfigInvalidError(
                 "bare-metal teardown cannot execute offering mode "
-                f"{resource.executor_kind!r}"
+                f"{resource.offering_mode!r}"
             )
         if self._resource_value(resource, "machine_id") != metadata.machine_id:
             raise ProviderConfigInvalidError(
@@ -323,7 +323,7 @@ class BareMetalFulfillmentProvider(FulfillmentProvider):
             contract = ExecutorActionEnvelope(
                 capacity_reservation_id=operation.capacity_reservation_id,
                 deal_ref={lease.settlement_identity_kind: lease.settlement_identity},
-                executor_kind=BARE_METAL_EXECUTOR_KIND,
+                offering_mode=BARE_METAL_OFFERING_MODE,
                 action_kind=NODE_RECLAIM_ACCESS_ACTION,
                 idempotency_key=f"{operation.capacity_reservation_id}:reclaim-access",
                 parameters=lease.model_dump(mode="json", exclude_none=True),

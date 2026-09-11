@@ -146,7 +146,7 @@ def test_core_runner_publishes_exact_opaque_bare_metal_payload(tmp_path):
                 [],
                 7200,
             ),
-            publish_offer=lambda offer, accepted, demands, maximum: (
+            publish_listing=lambda offer, accepted, demands, maximum: (
                 offers.append((offer, accepted, demands, maximum))
                 or {"listing_id": "listing-1", "status": "published"}
             ),
@@ -159,7 +159,7 @@ def test_core_runner_publishes_exact_opaque_bare_metal_payload(tmp_path):
         (
             {
                 "kind": "bare_metal.v1",
-                "virtualization_type": "bare_metal",
+                "offering_mode": "bare_metal",
                 "machine_id": "machine-1",
                 "physical_host_id": "physical-host-1",
                 "access_methods": ["ssh"],

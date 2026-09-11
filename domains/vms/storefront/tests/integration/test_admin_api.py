@@ -255,7 +255,7 @@ class TestHealthEndpoint:
 
         assert result.site_projections is None
 
-    async def test_system_status_surfaces_listing_mode_explanations(
+    async def test_system_status_surfaces_listing_cardinality_mode_explanations(
         self, db, service_client
     ):
         """Same real end-to-end round trip as
@@ -267,29 +267,29 @@ class TestHealthEndpoint:
         SystemService-level unit test.
         """
         explanations = {
-            "site-a": {"gpu-pool": "unrecognized listing_mode 'bogus', using 'fungible'"},
+            "site-a": {"gpu-pool": "unrecognized listing_cardinality_mode 'bogus', using 'fungible'"},
         }
         _container.resolved_system_service = SystemService(
             sqlite_client=db,
             marketplace_signer=_MARKETPLACE_SIGNER,
-            listing_mode_explanation_provider=lambda: explanations,
+            listing_cardinality_mode_explanation_provider=lambda: explanations,
         )
         result = await service_client.get_system_status()
 
-        assert result.listing_mode_explanations == explanations
+        assert result.listing_cardinality_mode_explanations == explanations
 
-    async def test_health_omits_listing_mode_explanations(
+    async def test_health_omits_listing_cardinality_mode_explanations(
         self, db, service_client
     ):
         """The fast liveness probe (/health) must not carry this field either."""
         _container.resolved_system_service = SystemService(
             sqlite_client=db,
             marketplace_signer=_MARKETPLACE_SIGNER,
-            listing_mode_explanation_provider=lambda: {"site-a": {}},
+            listing_cardinality_mode_explanation_provider=lambda: {"site-a": {}},
         )
         result = await service_client.get_health()
 
-        assert result.listing_mode_explanations is None
+        assert result.listing_cardinality_mode_explanations is None
 
 
 # ---------------------------------------------------------------------------
@@ -434,7 +434,7 @@ async def _seed_dynamic_listing_pool_rows(
             "gpu_model": "H200",
             "region": "California, US",
             "vm_host": "host-1",
-            "virtualization_type": "vm",
+            "offering_mode": "vm",
         },
     )
     for gpu_count in range(1, 5):
@@ -444,13 +444,13 @@ async def _seed_dynamic_listing_pool_rows(
             status="open",
             created_at="2026-01-01T00:00:00",
             updated_at="2026-01-01T00:00:00",
-            offer_resource={
+            listing_resource={
                 "resource_id": "pool-h200-1",
                 "gpu_model": "H200",
                 "gpu_count": gpu_count,
                 "region": "California, US",
                 "sla": 99.0,
-                "virtualization_type": "vm",
+                "offering_mode": "vm",
             },
             accepted_escrows=[{
                 "chain_name": "anvil",
@@ -494,7 +494,7 @@ def _fake_pool_site():
             "gpu_model": "H200",
             "region": "California, US",
             "vm_host": "host-1",
-            "virtualization_type": "vm",
+            "offering_mode": "vm",
         },
     )
     return fake
@@ -503,7 +503,7 @@ def _fake_pool_site():
 async def _ledger_hold(capacity, *, gpu_count: int = 2) -> str:
     reserved = await capacity.reserve(
         claim={
-            "executor_kind": "vm",
+            "offering_mode": "vm",
             "resource_id": "pool-h200-1",
             "gpu_count": gpu_count,
         },
@@ -605,7 +605,7 @@ class TestFulfillmentEvents:
             attributes={
                 "gpu_model": "H200",
                 "vm_host": "host-1",
-                "virtualization_type": "vm",
+                "offering_mode": "vm",
             },
         )
 

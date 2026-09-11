@@ -207,7 +207,7 @@ def _good_listing() -> dict:
                 "rates": [{"field": "amount", "per": "hour", "value": "100"}],
             }
         ],
-        "offer_resource": {"gpu_model": "H200", "gpu_count": 1},
+        "listing_resource": {"gpu_model": "H200", "gpu_count": 1},
     }
 
 
@@ -340,7 +340,7 @@ class TestExtractTokenContractFromListing:
                     }
                 ]
             ),
-            "offer_resource": {"gpu_model": "H200"},
+            "listing_resource": {"gpu_model": "H200"},
         }
         assert _extract_token_contract_from_listing(listing) == TOKEN
 
@@ -353,13 +353,13 @@ class TestExtractTokenContractFromListing:
                     "literal_fields": {},
                 }
             ],
-            "offer_resource": {"gpu_model": "H200"},
+            "listing_resource": {"gpu_model": "H200"},
         }
         with pytest.raises(EscrowVerificationError, match="Cannot extract token"):
             _extract_token_contract_from_listing(listing)
 
     def test_empty_accepted_escrows_raises(self):
-        listing = {"accepted_escrows": [], "offer_resource": {"gpu_model": "H200"}}
+        listing = {"accepted_escrows": [], "listing_resource": {"gpu_model": "H200"}}
         with pytest.raises(EscrowVerificationError, match="Cannot extract token"):
             _extract_token_contract_from_listing(listing)
 

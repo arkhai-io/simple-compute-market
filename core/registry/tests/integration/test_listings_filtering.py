@@ -51,7 +51,7 @@ def _make_listing(db_session, publisher, listing_id: str, **offer_extras) -> Lis
     row = Listing(
         listing_id=listing_id,
         publisher_id=publisher.publisher_id,
-        offer_resource=offer,
+        listing_resource=offer,
         accepted_escrows=[
             {
                 "chain_name": "anvil",
@@ -85,23 +85,23 @@ async def test_gpu_model_filter_narrows_results(
 
 
 @pytest.mark.asyncio
-async def test_filters_match_double_encoded_offer_resource(
+async def test_filters_match_double_encoded_listing_resource(
     _raw_client, db_session, maker_publisher
 ):
-    """A listing whose offer_resource/accepted_escrows were stored as JSON
+    """A listing whose listing_resource/accepted_escrows were stored as JSON
     *strings* (a publisher that double-encoded them) is still filterable and
     comes back decoded on the wire.
 
     Regression for a discovery break where the storefront forwarded its
-    stringified ``offer_resource`` SQLite column into the registry's JSON
-    column. The ``$.offer_resource.gpu_model`` predicate resolved to nothing,
+    stringified ``listing_resource`` SQLite column into the registry's JSON
+    column. The ``$.listing_resource.gpu_model`` predicate resolved to nothing,
     so ``on_missing: fail`` dropped every listing and
     ``market buy --resource gpu_model=A100`` matched no seller.
     """
     row = Listing(
         listing_id="stringified-offer",
         publisher_id=maker_publisher.publisher_id,
-        offer_resource=json.dumps({"gpu_model": "A100", "region": "us-west"}),
+        listing_resource=json.dumps({"gpu_model": "A100", "region": "us-west"}),
         accepted_escrows=json.dumps(
             [
                 {
@@ -122,10 +122,10 @@ async def test_filters_match_double_encoded_offer_resource(
     assert resp.status_code == 200
     items = {item["listing_id"]: item for item in resp.json()["items"]}
     assert "stringified-offer" in items, (
-        "double-encoded offer_resource should still match the gpu_model filter"
+        "double-encoded listing_resource should still match the gpu_model filter"
     )
-    assert isinstance(items["stringified-offer"]["offer_resource"], dict), (
-        "offer_resource should be decoded to an object on the wire"
+    assert isinstance(items["stringified-offer"]["listing_resource"], dict), (
+        "listing_resource should be decoded to an object on the wire"
     )
 
 

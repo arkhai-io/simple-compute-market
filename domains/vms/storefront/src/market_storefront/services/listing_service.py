@@ -338,18 +338,18 @@ class ListingService:
         from domains.vms.listings.models import ComputeResource
 
         try:
-            normalized_offer = self._normalize_token_resource(request.offer)
-            offering_mode = normalized_offer.get("virtualization_type")
+            normalized_offer = self._normalize_token_resource(request.listing_resource)
+            offering_mode = normalized_offer.get("offering_mode")
             if offering_mode != self._binding.offering_mode:
                 raise ValueError(
-                    "offer_resource.virtualization_type must match the "
+                    "listing_resource.offering_mode must match the "
                     f"selected offering mode {self._binding.offering_mode!r}"
                 )
             self._domain.codecs.listing(normalized_offer)
-            offer_resource = parse_resource_from_dict(normalized_offer)
+            listing_resource = parse_resource_from_dict(normalized_offer)
         except Exception as exc:
             raise ValueError(f"Invalid offer resource: {exc}") from exc
-        if not isinstance(offer_resource, ComputeResource):
+        if not isinstance(listing_resource, ComputeResource):
             raise ValueError(
                 "Listing offer must be a compute resource (the buyer-as-maker "
                 "token-offer shape was removed with the demand_resource cutover)."
@@ -361,7 +361,7 @@ class ListingService:
             for d in (request.demands or [])
         ]
         return (
-            offer_resource,
+            listing_resource,
             list(request.accepted_escrows),
             [],
             demands,
@@ -403,7 +403,7 @@ class ListingService:
             listing_id=str(uuid.uuid4()),
             storefront_url=BASE_URL_OVERRIDE,
             seller_principal=self._marketplace_signer.identity,
-            offer_resource=offer,
+            listing_resource=offer,
             accepted_escrows=accepted_escrows,
             settlement_options=settlement_options,
             demands=demands,
@@ -446,7 +446,7 @@ class ListingService:
                 status="open",
                 created_at=now_iso,
                 updated_at=now_iso,
-                offer_resource=listing_dict.get("offer_resource"),
+                listing_resource=listing_dict.get("listing_resource"),
                 accepted_escrows=listing_dict.get("accepted_escrows"),
                 settlement_options=listing_dict.get("settlement_options"),
                 publication_clauses=[

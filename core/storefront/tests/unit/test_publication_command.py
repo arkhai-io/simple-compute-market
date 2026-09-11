@@ -20,7 +20,7 @@ def _source(candidate: dict[str, Any] | None = None) -> PublicationSource:
         close_stale=lambda _db, _url: ["stale-1"],
         available_candidates=lambda _db: [candidate],
         skip_keys=lambda c: {str(c["resource_id"])},
-        offer_resource=lambda c: {"resource_id": c["resource_id"]},
+        listing_resource=lambda c: {"resource_id": c["resource_id"]},
         record_published=lambda _db, c, listing_id: c.__setitem__("listing_id", listing_id),
         reopen_existing=lambda *_args: None,
         reopen_error_label="reopen test",
@@ -33,7 +33,7 @@ def test_build_storefront_publication_command_wraps_selection() -> None:
     base_url="http://seller", )
     callbacks = StorefrontPublicationCommandCallbacks(
         build_payload=lambda *_args: ([{}], [], None),
-        publish_offer=lambda *_args: {"status": "published"},
+        publish_listing=lambda *_args: {"status": "published"},
     )
 
     command = build_storefront_publication_command(
@@ -56,7 +56,7 @@ def test_run_storefront_publication_command_uses_config_flags() -> None:
     skip_open=False,)
     callbacks = StorefrontPublicationCommandCallbacks(
         build_payload=lambda *_args: ([{}], [], None),
-        publish_offer=lambda offer, *_args: {
+        publish_listing=lambda offer, *_args: {
             "status": "published",
             "listing_id": offer["resource_id"],
         },
@@ -89,7 +89,7 @@ def test_run_storefront_publication_command_honors_skip_ids() -> None:
         skip_open=False,),
         callbacks=StorefrontPublicationCommandCallbacks(
             build_payload=lambda *_args: ([{}], [], None),
-            publish_offer=lambda *_args: {"status": "published"},
+            publish_listing=lambda *_args: {"status": "published"},
         ),
         skip_ids={"vms"},
     )

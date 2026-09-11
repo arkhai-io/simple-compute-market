@@ -67,7 +67,7 @@ def test_authority_delegates_reservation_queries_and_anonymous_events():
 
 def test_authority_maps_generic_vm_executor_metadata_only_at_ledger_boundary():
     """CapacityReservation carries no VM-domain-specific column names --
-    the adapter passes executor_kind/executor_target/executor_ref straight
+    the adapter passes offering_mode/executor_target/executor_ref straight
     through to the ledger unchanged, with no legacy vm_host/vm_target
     synthesis. Physical placement identity (vm_host) and lease-target
     identity (vm_target) both live in the generic executor_ref/
@@ -78,13 +78,13 @@ def test_authority_maps_generic_vm_executor_metadata_only_at_ledger_boundary():
 
     attached = authority.attach_lease_reservation(
         capacity_reservation_id="alloc-1",
-        executor_kind="vm",
+        offering_mode="vm",
         executor_target="tenant-vm",
         executor_ref={"vm_host": "kvm-1"},
     )
     updated = authority.update_reservation_fields(
         "alloc-1",
-        executor_kind="vm",
+        offering_mode="vm",
         executor_target="tenant-vm-2",
         executor_ref={"vm_host": "kvm-2"},
     )

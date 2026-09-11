@@ -304,7 +304,7 @@ scenarios at every level:
   bindings, lifecycle carriers, publication fan-out, and schema-opaque result
   dispatch;
 - VM storefront tests cover installed contribution wiring, exact public
-  `virtualization_type`, configured source selection, negotiation/settlement
+  `offering_mode`, configured source selection, negotiation/settlement
   adapters, selected-site capacity calls, restart recovery, and transactional
   legacy migration;
 - bare-metal domain/storefront tests own only bare-metal codecs, publication

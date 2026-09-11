@@ -34,7 +34,7 @@ class AnsibleJobParams:
 
     vm_host: str
     vm_action: str
-    executor_kind: str
+    offering_mode: str
     vm_target: Optional[str] = None
 
     # Domain-neutral executor contract.  ``vm_*`` remains the compatibility

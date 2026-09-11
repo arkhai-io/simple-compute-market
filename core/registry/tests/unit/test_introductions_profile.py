@@ -21,7 +21,7 @@ def _listing(**overrides) -> dict:
     listing = {
         "listing_id": "intro-1",
         "storefront_url": "https://broker.example",
-        "offer_resource": {"description": "8x H100 blocks, private broker"},
+        "listing_resource": {"description": "8x H100 blocks, private broker"},
         "settlement_options": [
             {
                 "option_id": "aa" * 32,
@@ -49,7 +49,7 @@ def test_profile_loads_with_schema_identity(spec) -> None:
 
 def test_sparse_listings_stay_discoverable(spec) -> None:
     sparse = _listing(
-        offer_resource={},
+        listing_resource={},
         settlement_options=[
             {
                 "option_id": "bb" * 32,

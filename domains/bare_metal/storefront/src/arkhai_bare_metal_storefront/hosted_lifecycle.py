@@ -546,7 +546,7 @@ class BareMetalHostedLifecycleCallbacks:
         }
         claim = {
             "dimensions": {"units": 1},
-            "executor_kind": facts.executor_kind,
+            "offering_mode": facts.offering_mode,
         }
         if facts.resource_selection == "specific":
             claim["resource_id"] = facts.physical_resource_id
@@ -796,7 +796,7 @@ class BareMetalHostedLifecycleCallbacks:
             )
         public_result = BareMetalLeaseReadyResult(
             site_id=facts.site_id,
-            executor_kind=facts.executor_kind,
+            offering_mode=facts.offering_mode,
             resource_selection=facts.resource_selection,
             physical_resource_id=facts.physical_resource_id,
             capacity_reservation_ref=reservation_id,

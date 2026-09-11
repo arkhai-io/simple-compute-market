@@ -50,17 +50,17 @@ class ComputeContractService:
                 f"reservation {envelope.capacity_reservation_id!r} is "
                 f"{reservation.get('state')!r}, not 'leased'"
             )
-        expected_executor = reservation.get("executor_kind")
+        expected_executor = reservation.get("offering_mode")
         if not expected_executor:
             raise ExecutorMismatchError(
                 "reservation has no explicit executor identity"
             )
-        if envelope.executor_kind != expected_executor:
+        if envelope.offering_mode != expected_executor:
             raise ExecutorMismatchError(
                 f"reservation executor is {expected_executor!r}, "
-                f"not {envelope.executor_kind!r}"
+                f"not {envelope.offering_mode!r}"
             )
-        adapter = self._adapters.get(envelope.executor_kind)
+        adapter = self._adapters.get(envelope.offering_mode)
         validated = adapter.validate_parameters(
             envelope.action_kind,
             envelope.parameters,
@@ -71,7 +71,7 @@ class ComputeContractService:
 
     def get_job(self, job_id: str) -> ProvisioningJob:
         record = self._job_service.get_contract_job_record(job_id)
-        adapter = self._adapters.get(str(record["executor_kind"]))
+        adapter = self._adapters.get(str(record["offering_mode"]))
         result = (
             adapter.validate_result(str(record["action_kind"]), record["result"])
             if record["result"] is not None

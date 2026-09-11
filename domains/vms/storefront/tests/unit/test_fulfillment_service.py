@@ -82,13 +82,13 @@ async def _seed_bound_listing(
         status="open",
         created_at="2026-01-01T00:00:00",
         updated_at="2026-01-01T00:00:00",
-        offer_resource={
+        listing_resource={
             "resource_id": "pool-h200-1",
             "gpu_model": "H200",
             "gpu_count": gpu_count,
             "region": "California, US",
             "sla": 99.0,
-            "virtualization_type": "vm",
+            "offering_mode": "vm",
         },
         accepted_escrows=_compute_listing(gpu_count=gpu_count)["accepted_escrows"],
         demands=[],
@@ -113,13 +113,13 @@ def _compute_listing(*, gpu_count: int = 1) -> dict:
         "listing_id": f"listing-{gpu_count}x",
         "seller_principal": _TEST_SELLER_PRINCIPAL.model_dump(mode="json"),
         "buyer_principal": _TEST_BUYER_PRINCIPAL.model_dump(mode="json"),
-        "offer_resource": {
+        "listing_resource": {
             "resource_id": "pool-h200-1",
             "gpu_model": "H200",
             "gpu_count": gpu_count,
             "region": "California, US",
             "sla": 99.0,
-            "virtualization_type": "vm",
+            "offering_mode": "vm",
         },
         "accepted_escrows": [
             {
@@ -340,7 +340,7 @@ async def test_vm_lease_registration_uses_common_compute_model(monkeypatch):
     assert registration.contract_version == "1.0"
     assert registration.capacity_reservation_id == "reservation-1"
     assert registration.deal_ref == {"escrow_uid": "escrow-1"}
-    assert registration.executor_kind == "vm"
+    assert registration.offering_mode == "vm"
     assert registration.executor_target == "tenant-1"
     assert captured["client_kwargs"]["caller_role"] == "seller"
     assert captured["client_kwargs"]["signer"] is _TEST_STOREFRONT_SIGNER

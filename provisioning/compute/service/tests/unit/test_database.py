@@ -116,7 +116,7 @@ def _create_pre_migration_tables(engine):
                 deal_ref JSON,
                 escrow_uid VARCHAR,
                 hold_expires_at VARCHAR,
-                executor_kind VARCHAR,
+                offering_mode VARCHAR,
                 executor_target VARCHAR,
                 release_job_id VARCHAR,
                 executor_ref JSON,
@@ -220,7 +220,7 @@ def test_run_migrations_applies_versioned_migrations_to_old_sqlite_schema():
         "contract_version",
         "capacity_reservation_id",
         "deal_ref",
-        "executor_kind",
+        "offering_mode",
         "action_kind",
         "idempotency_key",
     }.issubset(ansible_columns)
@@ -229,7 +229,7 @@ def test_run_migrations_applies_versioned_migrations_to_old_sqlite_schema():
     assert "vm_leases" not in inspector.get_table_names()
     assert "site_allocations" not in inspector.get_table_names()
     assert {
-        "executor_kind",
+        "offering_mode",
         "executor_target",
         "release_job_id",
         "executor_ref",
@@ -448,6 +448,7 @@ def test_run_migrations_applies_versioned_migrations_to_old_sqlite_schema():
         "20260811_001_provisioning_replay_reservations",
         "20260815_001_pool_declared_offering_modes",
         "20260901_001_relay_reachable_hosts",
+        "20260911_001_reservation_offering_mode_name",
     }
 
 
@@ -471,7 +472,7 @@ def test_run_migrations_is_idempotent():
     assert ansible_columns.count("contract_version") == 1
     assert ansible_columns.count("capacity_reservation_id") == 1
     assert ansible_columns.count("deal_ref") == 1
-    assert ansible_columns.count("executor_kind") == 1
+    assert ansible_columns.count("offering_mode") == 1
     assert ansible_columns.count("action_kind") == 1
     assert ansible_columns.count("idempotency_key") == 1
     assert host_columns.count("public_host") == 1
@@ -485,7 +486,7 @@ def test_run_migrations_is_idempotent():
     assert ansible_pool_config_columns.count("default_vm_disk_size") == 1
     assert "vm_leases" not in inspector.get_table_names()
     assert "site_allocations" not in inspector.get_table_names()
-    assert reservation_columns.count("executor_kind") == 1
+    assert reservation_columns.count("offering_mode") == 1
     assert reservation_columns.count("executor_target") == 1
     assert reservation_columns.count("release_job_id") == 1
     assert reservation_columns.count("executor_ref") == 1
@@ -507,7 +508,7 @@ def test_run_migrations_is_idempotent():
         migration_count = connection.execute(
             text("SELECT COUNT(*) FROM schema_migrations")
         ).scalar_one()
-    assert migration_count == 16
+    assert migration_count == 17
 
 
 # ---------------------------------------------------------------------------

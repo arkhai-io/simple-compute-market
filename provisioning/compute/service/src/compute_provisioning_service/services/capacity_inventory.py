@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 
 from bare_metal_provisioning_adapter.runtime import project_bare_metal_resource
 from market_resource_pools import ResourcePool
+from market_resource_pools.hints import projected_policy_tags
 from vm_provisioning_adapter.runtime import project_ansible_pool_defaults
 
 from compute_provisioning_service.db.models import AnsiblePoolConfig, Host
@@ -187,7 +188,9 @@ def load_capacity_pool_metadata(
                 "label": pool.label,
                 "enabled": bool(pool.enabled),
                 "mechanism": pool.provider,
-                "policy_tags": dict(pool.policy_tags or {}),
+                # Reconciles the renamed cardinality key across both
+                # spellings; every other tag is projected verbatim.
+                "policy_tags": projected_policy_tags(pool.policy_tags or {}),
             }
             config = ansible_configs.get(pool.id)
             if pool.provider == "ansible" and config is not None:

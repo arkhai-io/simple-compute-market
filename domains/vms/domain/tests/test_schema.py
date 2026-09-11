@@ -31,18 +31,18 @@ def test_vm_schema_models_validate_current_payload_shapes() -> None:
     message = VmMessage.model_validate(make_vm_provision_terms(
         duration_seconds=3600,
         ssh_public_key="ssh-ed25519 AAAA test",
-        compute_resource=listing.offer_resource,
+        compute_resource=listing.listing_resource,
     ))
     terms = VmTerms.model_validate({
         "duration_seconds": 3600,
         "ssh_public_key": "ssh-ed25519 AAAA test",
-        "compute_resource": listing.offer_resource,
+        "compute_resource": listing.listing_resource,
     })
     materialization = VmMaterialization.model_validate({
         "escrow_uid": "escrow-1",
         "duration_seconds": 3600,
         "ssh_public_key": "ssh-ed25519 AAAA test",
-        "compute_resource": listing.offer_resource,
+        "compute_resource": listing.listing_resource,
         "lease_start_utc": lease_start,
         "lease_end_utc": lease_end,
     })
@@ -64,7 +64,7 @@ def test_vm_schema_models_validate_current_payload_shapes() -> None:
 
 
 def test_vm_listing_requires_compute_identity() -> None:
-    with pytest.raises(ValidationError, match="offer_resource must include gpu_model"):
+    with pytest.raises(ValidationError, match="listing_resource must include gpu_model"):
         VmListing.model_validate({"gpu_count": 1})
 
 

@@ -40,7 +40,7 @@ def _listing(**offer_extras) -> dict:
         "host_disk_type": "Samsung MZTL3T8HEFK",
         "motherboard": "Supermicro H13DSG-O-CPU",
         "gpu_interconnect": "nvswitch",
-        "virtualization_type": "vm",
+        "offering_mode": "vm",
         "static_ip": True,
         "datacenter_grade": True,
         "nic_speed_gbps": 200,
@@ -52,7 +52,7 @@ def _listing(**offer_extras) -> dict:
     return {
         "listing_id": "L1",
         "storefront_url": "",
-        "offer_resource": offer,
+        "listing_resource": offer,
         "accepted_escrows": [
             {
                 "chain_name": "anvil",
@@ -98,10 +98,10 @@ class TestEqualityFilters:
         assert _match(spec, listing, gpu_interconnect="nvswitch") is True
         assert _match(spec, listing, gpu_interconnect="pcie_only") is False
 
-    def test_virtualization_type(self, spec):
-        listing = _listing(virtualization_type="bare_metal")
-        assert _match(spec, listing, virtualization_type="bare_metal") is True
-        assert _match(spec, listing, virtualization_type="vm") is False
+    def test_offering_mode(self, spec):
+        listing = _listing(offering_mode="bare_metal")
+        assert _match(spec, listing, offering_mode="bare_metal") is True
+        assert _match(spec, listing, offering_mode="vm") is False
 
     def test_datacenter_grade_bool(self, spec):
         listing_true = _listing(datacenter_grade=True)
@@ -139,7 +139,7 @@ class TestRangeFilters:
     def test_missing_numeric_field_rejects(self, spec):
         """on_missing=fail in the spec means a missing numeric axis rejects."""
         listing = _listing()
-        del listing["offer_resource"]["vcpu_count"]
+        del listing["listing_resource"]["vcpu_count"]
         assert _match(spec, listing, vcpu_count_min=8) is False
 
     def test_host_context_filters(self, spec):
@@ -377,7 +377,7 @@ class TestStrictOverride:
     def test_strict_false_loosens_gpu_model(self, spec):
         """gpu_model defaults to on_missing: fail; strict=false loosens."""
         listing = _listing()
-        del listing["offer_resource"]["gpu_model"]
+        del listing["listing_resource"]["gpu_model"]
         assert _match(spec, listing, gpu_model="H200") is False
         assert _match(
             spec, listing,

@@ -22,7 +22,7 @@ def test_hosted_fulfillment_plan_does_not_require_alkahest_token_terms():
     plan = build_vm_fulfillment_plan(
         order={
             "listing_id": "listing-hosted",
-            "offer_resource": {
+            "listing_resource": {
                 "resource_id": "hosted-resource",
                 "gpu_model": "H100",
                 "gpu_count": 1,
@@ -46,7 +46,7 @@ def test_fulfillment_plan_rejects_unknown_settlement_mechanism():
         build_vm_fulfillment_plan(
             order={
                 "listing_id": "listing-unknown",
-                "offer_resource": {
+                "listing_resource": {
                     "resource_id": "unknown-resource",
                     "gpu_model": "H100",
                     "gpu_count": 1,

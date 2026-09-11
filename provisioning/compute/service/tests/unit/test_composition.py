@@ -22,7 +22,7 @@ from compute_provisioning_service import (
 
 @dataclass
 class FakeAdapter:
-    executor_kind: str
+    offering_mode: str
 
     def validate_parameters(self, action_kind, parameters):
         return dict(parameters)
@@ -32,7 +32,7 @@ class FakeAdapter:
 
     def validate_result(self, action_kind, result):
         return ResultEnvelope(
-            executor_kind=self.executor_kind,
+            offering_mode=self.offering_mode,
             result_kind=action_kind,
             value=dict(result),
         )
@@ -40,7 +40,7 @@ class FakeAdapter:
     def validate_credentials(self, action_kind, credentials):
         return [
             CredentialEnvelope(
-                executor_kind=self.executor_kind,
+                offering_mode=self.offering_mode,
                 credential_kind="access",
                 value=dict(item),
             )
@@ -126,8 +126,8 @@ def test_composes_executor_and_provider_namespaces_independently():
         ),
     ])
 
-    assert composed.executor_registry.get("vm").executor_kind == "vm"
-    assert composed.executor_registry.get("bare_metal").executor_kind == "bare_metal"
+    assert composed.executor_registry.get("vm").offering_mode == "vm"
+    assert composed.executor_registry.get("bare_metal").offering_mode == "bare_metal"
     assert composed.provider_registry.require("ansible") is provider
     assert composed.pool_config_handlers["ansible"] is handler
     with pytest.raises(ProviderNotFoundError):
@@ -135,7 +135,7 @@ def test_composes_executor_and_provider_namespaces_independently():
 
 
 def test_duplicate_executor_identifies_both_bundles():
-    with pytest.raises(ValueError, match="duplicate executor kind 'vm'.*'first'.*'second'"):
+    with pytest.raises(ValueError, match="duplicate offering mode 'vm'.*'first'.*'second'"):
         compose_adapter_bundles(
             [
                 ExecutorAdapterBundle(

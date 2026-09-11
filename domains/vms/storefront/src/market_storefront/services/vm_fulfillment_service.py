@@ -292,7 +292,7 @@ async def _reserve_capacity_for_obligation(
     )
     if reserved is None:
         claim = dict(required_attributes or {})
-        claim["executor_kind"] = "vm"
+        claim["offering_mode"] = "vm"
         reserved = await capacity.reserve(
             binding,
             claim=claim,

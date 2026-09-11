@@ -10,7 +10,7 @@ def test_publication_source_collects_core_hooks() -> None:
         close_stale=lambda _db_path, _base_url: ["closed-1"],
         available_candidates=lambda _db_path: [{"id": "candidate-1"}],
         skip_keys=lambda candidate: {str(candidate["id"])},
-        offer_resource=lambda candidate: {"resource_id": candidate["id"]},
+        listing_resource=lambda candidate: {"resource_id": candidate["id"]},
         record_published=lambda _db_path, _candidate, _listing_id: None,
         reopen_existing=lambda *args: None,
         reopen_error_label="reopen demo listing",
@@ -20,7 +20,7 @@ def test_publication_source_collects_core_hooks() -> None:
     assert source.close_stale("db.sqlite", "http://seller") == ["closed-1"]
     assert source.available_candidates("db.sqlite") == [{"id": "candidate-1"}]
     assert source.skip_keys({"id": "candidate-1"}) == {"candidate-1"}
-    assert source.offer_resource({"id": "candidate-1"}) == {
+    assert source.listing_resource({"id": "candidate-1"}) == {
         "resource_id": "candidate-1",
     }
     assert source.pricing_resource(
@@ -36,7 +36,7 @@ def test_publication_source_can_price_from_offer_payload() -> None:
         close_stale=lambda _db_path, _base_url: [],
         available_candidates=lambda _db_path: [],
         skip_keys=lambda _candidate: set(),
-        offer_resource=lambda candidate: {"resource_id": candidate["id"]},
+        listing_resource=lambda candidate: {"resource_id": candidate["id"]},
         record_published=lambda _db_path, _candidate, _listing_id: None,
         reopen_existing=lambda *args: None,
         reopen_error_label="reopen demo listing",

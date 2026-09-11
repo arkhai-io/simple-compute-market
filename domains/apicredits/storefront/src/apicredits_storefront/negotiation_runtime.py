@@ -517,9 +517,9 @@ async def _place_quota_hold(
     if ttl <= 0 or not quantity:
         return
     try:
-        offer = coerce_resource_dict(acceptance.listing_record.get("offer_resource"))
+        offer = coerce_resource_dict(acceptance.listing_record.get("listing_resource"))
         claim: dict[str, Any] = {
-            "executor_kind": "api_credits",
+            "offering_mode": "api_credits",
             "units": int(quantity),
         }
         if offer.get("resource_id"):

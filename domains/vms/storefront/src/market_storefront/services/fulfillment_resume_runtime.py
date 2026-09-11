@@ -371,10 +371,10 @@ async def _ensure_recovery_capacity(
     if context.get("listing_id") not in (None, listing_id):
         raise RuntimeError("recovery context listing disagrees with accepted binding")
     claim = dict(context.get("required_attributes") or {})
-    claimed_mode = claim.get("executor_kind")
+    claimed_mode = claim.get("offering_mode")
     if claimed_mode not in (None, thread_binding.binding.offering_mode):
         raise RuntimeError("recovery context offering mode disagrees with binding")
-    claim["executor_kind"] = thread_binding.binding.offering_mode
+    claim["offering_mode"] = thread_binding.binding.offering_mode
     try:
         reserved = await capacity_client.reserve(
             claim=claim,

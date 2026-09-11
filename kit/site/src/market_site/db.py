@@ -125,7 +125,7 @@ class CapacityReservation(Base):
     deal_ref = Column(JSON, nullable=True)
     escrow_uid = Column(String, nullable=True, index=True)  # lifted from deal_ref
     hold_expires_at = Column(String, nullable=True)  # TTL soft hold (two-phase reserve)
-    executor_kind = Column(String, nullable=True)
+    offering_mode = Column(String, nullable=True)
     executor_target = Column(String, nullable=True)
     release_job_id = Column(String, nullable=True)
     executor_ref = Column(JSON, nullable=True)

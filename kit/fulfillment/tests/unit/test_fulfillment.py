@@ -40,7 +40,7 @@ def _record(**overrides):
         "provider": "ansible",
         "settlement_resource_id": "resource-1",
         "resource_attributes": {"vm_host": "host-1"},
-        "scheduling_requirements": {"executor_kind": "vm", "resource_kind": "vm"},
+        "scheduling_requirements": {"offering_mode": "vm", "resource_kind": "vm"},
         "prepared_create_operation": None,
         "prepared_teardown_operation": None,
         "provider_metadata": {},
@@ -821,12 +821,12 @@ def test_independent_sessions_serialize_fulfillment_acceptance_deterministically
                 capacity_reservation_id=capacity_reservation_id,
                 market="vms",
                 scheduling_requirements=SettlementRequirement(
-                    executor_kind="vm",
+                    offering_mode="vm",
                     resource_kind="vm", dimensions={"gpu_count": 1}
                 ),
                 resource=SettlementResource(
                     settlement_resource_id=resource_id,
-                    executor_kind="vm",
+                    offering_mode="vm",
                     pool_id="pool-a",
                     resource_kind="vm",
                     provider="ansible",

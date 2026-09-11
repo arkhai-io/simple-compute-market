@@ -9,9 +9,9 @@ storefront consuming it.
 That is a defect against the projection's own stated design.
 `capacity_inventory`'s docstring already says "Capacity resources are
 authoritative for availability and Physical Resource identity. Host rows supply
-only executor inventory needed to correlate the configured machine alias."
+only host inventory needed to correlate the configured machine alias."
 `capacity-resource-administration` completes the same direction: it makes `Host`
-"executor identity only — addressing, SSH credentials, Ansible alias, pool
+"connection identity only — addressing, SSH credentials, Ansible alias, pool
 membership, enabled state," retires GPU columns as capacity sources, and retires
 the host-derived capacity fallback. After that change, capacity resources are the
 single authoritative declaration of sellable capacity — and the projection loop
@@ -24,7 +24,7 @@ its own task list reasons in terms of "hosts that previously projected no
 resource-driven loop.
 
 Closing it matters beyond tidiness. A seller who declares sellable capacity with
-no executor host behind it — because delivery is arranged out of band, because
+no host behind it — because delivery is arranged out of band, because
 the operator has not configured a connection yet, or because inventory is being
 staged ahead of provisioning — currently declares into a void with no error and
 no projection entry. The declaration succeeds and nothing happens.
@@ -34,7 +34,7 @@ no projection entry. The declaration succeeds and nothing happens.
 - Invert the projection loop: iterate declared capacity resources and correlate
   host rows in, rather than iterating hosts and looking up resources. A capacity
   resource with no correlated host projects with its declared capacity,
-  attributes, and Physical Resource identity, and without executor correlation.
+  attributes, and Physical Resource identity, and without host correlation.
 - Keep host-correlated projection behavior identical for every resource that does
   have a host. This change adds entries; it must not alter existing ones.
 - Scope the capacity-resource requirement's authority to shape and quantity,
@@ -42,7 +42,7 @@ no projection entry. The declaration succeeds and nothing happens.
   wording — "a Physical Resource's sellable capacity" — does not survive a
   resource with no correlated host.
 - State normatively in `openspec/specs/site-capacity/spec.md` that the capacity
-  resource is the unit of projection and that executor correlation is optional
+  resource is the unit of projection and that host correlation is optional
   metadata on a projected entry rather than a precondition for projecting it.
 - Define what a hostless entry omits. Executor-correlated fields have no value
   rather than an empty one, matching the existing rule that an absent projection
@@ -53,7 +53,7 @@ no projection entry. The declaration succeeds and nothing happens.
 
 ### Modified Capabilities
 
-- `site-capacity`: the capacity resource is the projection unit; executor
+- `site-capacity`: the capacity resource is the projection unit; host-correlated
   correlation is optional per-entry metadata rather than the iteration key.
 
 ### New Capabilities
@@ -71,7 +71,7 @@ None.
   `unbacked-listing-publication` owns it. This change makes hostless declarations
   visible; it takes no position on what they mean commercially.
 - Do not allow a hostless resource into any execution path. Scheduling, provider
-  dispatch, and inventory rendering must continue to require executor
+  dispatch, and inventory rendering must continue to require host
   correlation, and the absence of it must fail closed there rather than
   defaulting.
 
@@ -79,7 +79,7 @@ None.
 
 - Affected code: the resource-pool projection in the provisioning service's
   capacity inventory service, and the storefront-side projection ingestion that
-  consumes per-entry executor fields.
+  consumes per-entry host-correlated fields.
 - Affected specification: `openspec/specs/site-capacity/spec.md`.
 - Affected behavior: additive. Deployments with a host for every capacity
   resource see an identical projection.
@@ -94,7 +94,7 @@ None.
   construction, is absent. That change is the one that makes a hostless
   declaration meaningful; this one makes it visible.
 - **Prerequisite for `unbacked-listing-publication`**, which needs a seller with
-  no executor inventory to be able to project at all.
+  no host inventory to be able to project at all.
 - Coordinate with `pools-9-retire-local-physical-authority`, which touches
   adjacent projection-consumer surfaces. No ordering dependency either direction.
 - `publish-multidimensional-listing-shape` consumes projected dimensions and is
@@ -111,10 +111,10 @@ None.
 
 ### Knowledge to promote
 
-- The capacity resource is the unit of projection; executor correlation is
+- The capacity resource is the unit of projection; host correlation is
   optional per-entry metadata — `openspec/specs/site-capacity/spec.md`.
-- A hostless entry omits executor-correlated fields rather than emptying them, so
+- A hostless entry omits host-correlated fields rather than emptying them, so
   absence stays distinguishable from zero downstream —
   `openspec/specs/site-capacity/spec.md`.
-- Execution paths continue to require executor correlation and fail closed
+- Execution paths continue to require host correlation and fail closed
   without it — `openspec/specs/site-capacity/spec.md`.

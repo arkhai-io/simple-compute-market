@@ -29,7 +29,7 @@ def accepted_binding() -> BareMetalAcceptedHostedBinding:
         derivation_key="listing-generation-1",
         projection_digest=DIGEST,
         site_id="site-a",
-        executor_kind="bare_metal",
+        offering_mode="bare_metal",
         resource_selection="specific",
         physical_resource_id="resource-a",
         physical_host_id="host-a",

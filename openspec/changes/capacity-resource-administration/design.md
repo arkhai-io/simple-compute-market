@@ -83,24 +83,24 @@ only the declaration surface.
 
 ## Decisions
 
-### Capacity resources are the single home for capacity; hosts are executor identity
+### Capacity resources are the single home for capacity; hosts are connection identity
 
 Two options were considered.
 
 **Rejected — extend `Host` with vCPU/RAM/disk columns.** Fewest moving parts: INI
 seeding would then cover every dimension and `_project_host`'s fallback would work
-unchanged. Rejected because `Host` is executor identity — SSH user, key material,
+unchanged. Rejected because `Host` is connection identity — SSH user, key material,
 Ansible alias, addressing — and folding sellable capacity into it conflates two
 concerns the system already separates elsewhere: the bare-metal publication view is
 built from a capacity resource's attributes, not from host columns, and
 `load_capacity_resource_inventory`'s own docstring already states that "capacity
 resources are authoritative for availability and Physical Resource identity" while
-"host rows supply only executor inventory needed to correlate the configured machine
+"host rows supply only host inventory needed to correlate the configured machine
 alias." The code has the boundary; only the data has drifted across it. An Ansible
 INI is also a poor carrier for capacity declarations, since it exists to describe how
 to reach a machine.
 
-**Accepted — capacity resources own every dimension, hosts own executor identity.**
+**Accepted — capacity resources own every dimension, hosts own connection identity.**
 This is the boundary the docstrings already claim, made true.
 
 A third shape — GPU stays on `Host`, other dimensions move to capacity resources —
@@ -273,7 +273,7 @@ Backed-to-unbacked is where this matters most, because an unbacked pool must nev
 participate in reservation behaviour and reassignment would hand it a live one.
 Unbacked-to-backed is safe by construction, since an unbacked resource holds no
 reservations, but the invariant is stated generically rather than scoped to backing:
-the same hazard exists for a backed-to-backed executor migration.
+the same hazard exists for a backed-to-backed host migration.
 
 ## Risks / Trade-offs
 

@@ -107,7 +107,7 @@ class ListingService:
 
         listing = get_market_domain_contract().codecs.listing(
             {
-                "offer_resource": {
+                "listing_resource": {
                     "service_name": service_name,
                     "description": description,
                     "openapi_url": openapi_url,
@@ -128,7 +128,7 @@ class ListingService:
             status="open",
             created_at=now_iso,
             updated_at=now_iso,
-            offer_resource=listing.offer_resource.model_dump(mode="json"),
+            listing_resource=listing.listing_resource.model_dump(mode="json"),
             accepted_escrows=listing.accepted_escrows,
             settlement_options=listing.settlement_options,
             demands=listing.demands,

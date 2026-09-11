@@ -114,8 +114,8 @@ async def _persist_bound_listing(db: SQLiteClient, order: dict) -> None:
         candidate={
             "site_id": "site-a",
             "pool_id": "pool-vm",
-            "resource_id": listing.offer_resource.resource_id,
-            "gpu_count": listing.offer_resource.gpu_count,
+            "resource_id": listing.listing_resource.resource_id,
+            "gpu_count": listing.listing_resource.gpu_count,
         },
     )
     await db.upsert_listing_with_binding(
@@ -123,7 +123,7 @@ async def _persist_bound_listing(db: SQLiteClient, order: dict) -> None:
         status="open",
         created_at="2026-08-11T00:00:00",
         updated_at="2026-08-11T00:00:00",
-        offer_resource=wire["offer_resource"],
+        listing_resource=wire["listing_resource"],
         fulfillment_resource=None,
         max_duration_seconds=listing.max_duration_seconds,
         storefront_url=listing.storefront_url,
@@ -140,13 +140,13 @@ def _compute_order(listing_id: str) -> dict:
         "listing_id": listing_id,
         "storefront_url": BASE_URL_OVERRIDE,
         "seller_principal": _SELLER_PRINCIPAL,
-        "offer_resource": {
+        "listing_resource": {
             "resource_id": f"res-{listing_id}",
             "gpu_model": "H200",
             "gpu_count": 1,
             "sla": 99.9,
             "region": "test",
-            "virtualization_type": "vm",
+            "offering_mode": "vm",
         },
         "accepted_escrows": [{
             "chain_name": "anvil",
@@ -188,14 +188,14 @@ def test_listing_validation_uses_the_exact_injected_codec(tmp_path) -> None:
 
     service._parse_offer_and_escrows(
         CreateListingRequest(
-            offer={
+            listing_resource={
                 "resource_type": "compute",
                 "resource_id": "resource-1",
                 "gpu_model": "H200",
                 "gpu_count": 1,
                 "region": "test",
                 "sla": 99.0,
-                "virtualization_type": "vm",
+                "offering_mode": "vm",
             },
             accepted_escrows=[
                 {
@@ -255,12 +255,12 @@ class TestPublishOrderRecordsPublications:
             "listing_id": "legacy-invalid",
             "storefront_url": BASE_URL_OVERRIDE,
             "seller_principal": _SELLER_PRINCIPAL,
-            "offer_resource": {
+            "listing_resource": {
                 "gpu_model": "H200",
                 "gpu_count": 1,
                 "sla": 99.9,
                 "region": "test",
-                "virtualization_type": "vm",
+                "offering_mode": "vm",
             },
             "accepted_escrows": [],
         }
@@ -282,8 +282,8 @@ class TestPublishOrderRecordsPublications:
         from domains.vms.listings.models import Listing
 
         listing = Listing.model_validate(_compute_order("mutated-listing"))
-        listing.offer_resource.resource_id = None
-        listing.offer_resource.pool_id = None
+        listing.listing_resource.resource_id = None
+        listing.listing_resource.pool_id = None
         factory = Mock()
 
         with settings_overrides(

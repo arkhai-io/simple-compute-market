@@ -90,8 +90,8 @@ class FulfillmentOrchestrator:
         return SettlementResource(
             settlement_resource_id=record.settlement_resource_id,
             pool_id=record.pool_id,
-            executor_kind=(record.scheduling_requirements or {}).get(
-                "executor_kind"
+            offering_mode=(record.scheduling_requirements or {}).get(
+                "offering_mode"
             ),
             resource_kind=(record.scheduling_requirements or {}).get(
                 "resource_kind", "unknown"
@@ -116,15 +116,15 @@ class FulfillmentOrchestrator:
         pool = tx.get_pool(record.pool_id)
         if pool is None:
             raise LookupError(f"pool {record.pool_id!r} not found")
-        executor_kind = (record.scheduling_requirements or {}).get("executor_kind")
-        if not executor_kind:
+        offering_mode = (record.scheduling_requirements or {}).get("offering_mode")
+        if not offering_mode:
             raise FulfillmentConflictError(
-                "scheduled settlement has no explicit executor_kind"
+                "scheduled settlement has no explicit offering_mode"
             )
-        if not pool_delivers_offering_mode(pool.policy_tags, executor_kind):
+        if not pool_delivers_offering_mode(pool.policy_tags, offering_mode):
             raise FulfillmentConflictError(
                 f"pool {record.pool_id!r} does not declare offering mode "
-                f"{executor_kind!r}"
+                f"{offering_mode!r}"
             )
         return pool
 

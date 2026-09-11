@@ -222,7 +222,7 @@ def _settings(ttl: float):
 
 ORDER = {
     "listing_id": "lst-1",
-    "offer_resource": {
+    "listing_resource": {
         "resource_id": "res-1", "gpu_model": "H200", "gpu_count": 2,
     },
 }
@@ -247,7 +247,7 @@ def test_claim_survives_listing_model_validation():
             "scheme": "eip191",
             "identifier": "0x2222222222222222222222222222222222222222",
         },
-        "offer_resource": {
+        "listing_resource": {
             "resource_id": "res-pin", "gpu_model": "H200", "gpu_count": 2,
             "sla": 99.0, "region": "California, US",
         },
@@ -255,7 +255,7 @@ def test_claim_survives_listing_model_validation():
     }
     pinned = compute_capacity_claim_from_order(row)
     Listing.model_validate(row)
-    assert isinstance(row["offer_resource"], dict)
+    assert isinstance(row["listing_resource"], dict)
     assert compute_capacity_claim_from_order(row) == pinned
     assert pinned["resource_id"] == "res-pin"
 
@@ -270,7 +270,7 @@ def test_claim_prefers_resource_id_over_pool_id():
 
     row = {
         "listing_id": "lst-both",
-        "offer_resource": {
+        "listing_resource": {
             "pool_id": "pool-A", "resource_id": "res-pin", "gpu_model": "H200",
             "gpu_count": 2, "sla": 99.0, "region": "California, US",
         },
@@ -295,7 +295,7 @@ def test_claim_carries_dimensions_when_listing_declares_a_shape():
 
     row = {
         "listing_id": "lst-shaped",
-        "offer_resource": {
+        "listing_resource": {
             "resource_id": "res-shaped", "gpu_model": "H200", "gpu_count": 2,
             "sla": 99.0, "region": "California, US",
             "vcpu_count": 8, "ram_gb": 64, "disk_gb": 500,
@@ -322,7 +322,7 @@ def test_claim_omits_undeclared_dimensions_for_older_listings():
 
     row = {
         "listing_id": "lst-unshaped",
-        "offer_resource": {
+        "listing_resource": {
             "resource_id": "res-unshaped", "gpu_model": "H200", "gpu_count": 1,
             "sla": 99.0, "region": "California, US",
         },
@@ -349,7 +349,7 @@ def test_claim_rejects_invalid_legacy_identity(identity):
 
     row = {
         "listing_id": "lst-invalid",
-        "offer_resource": {
+        "listing_resource": {
             "resource_id": identity,
             "gpu_model": "H200",
             "gpu_count": 1,
@@ -373,7 +373,7 @@ def test_claim_raises_when_neither_pool_id_nor_resource_id_present():
 
     row = {
         "listing_id": "lst-under-specified",
-        "offer_resource": {
+        "listing_resource": {
             "gpu_model": "H200", "gpu_count": 2,
             "sla": 99.0, "region": "California, US",
         },

@@ -38,9 +38,9 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 STOREFRONT_ROOT = REPO_ROOT / "domains" / "vms" / "storefront"
 
 #: The registry schema understood by the VM buyer domain. Discovery verbs
-#: resolve registries through `resolve_indexer_urls_for_schema(VMS_SCHEMA_ID, …)`
+#: resolve registries through `resolve_indexer_urls_for_schema(COMPUTE_SCHEMA_ID, …)`
 #: so registries declaring a different schema are skipped.
-VMS_SCHEMA_ID = "vms.compute"
+COMPUTE_SCHEMA_ID = "compute.market"
 
 
 def buyer_chains() -> dict[str, "ChainConfig"]:

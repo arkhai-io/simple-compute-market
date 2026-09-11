@@ -25,7 +25,9 @@ class CreateListingRequest(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    offer: dict[str, Any] = Field(description="Offered compute resource dict")
+    listing_resource: dict[str, Any] = Field(
+        description="The seller's published listing shape"
+    )
     accepted_escrows: list[dict[str, Any]] = Field(
         default_factory=list,
         description="Mechanism-specific Alkahest settlement choices.",
@@ -120,7 +122,7 @@ class ListingResponse(BaseModel):
     listing_id: str
     status: str
     paused: bool = False
-    offer_resource: Any = None  # dict or JSON string from SQLite
+    listing_resource: Any = None  # dict or JSON string from SQLite
     accepted_escrows: list[dict[str, Any]] | None = None
     demands: list[dict[str, Any]] | None = None
     max_duration_seconds: int | None = None

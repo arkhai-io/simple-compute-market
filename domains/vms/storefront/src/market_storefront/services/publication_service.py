@@ -36,11 +36,11 @@ class VmPublicationHooks:
     def validate_candidate(
         self, candidate: PublicationCandidate[Listing]
     ) -> None:
-        mode = candidate.payload.offer_resource.virtualization_type
+        mode = candidate.payload.listing_resource.offering_mode
         offering_mode = mode.value if hasattr(mode, "value") else str(mode or "")
         if offering_mode != candidate.binding.offering_mode:
             raise CapacityBindingError(
-                "VM offer virtualization_type does not match its capacity binding"
+                "VM offer offering_mode does not match its capacity binding"
             )
 
     async def binding_for_listing(self, listing_id: str) -> CapacityBinding | None:
@@ -204,7 +204,7 @@ def _record_listing_published_stage_event(
     listing_id: str,
     storefront_url: str,
     seller_principal: dict[str, Any],
-    offer_resource: dict[str, Any],
+    listing_resource: dict[str, Any],
     accepted_escrows: list[dict[str, Any]],
     settlement_options: list[dict[str, Any]],
     demands: list[dict[str, Any]],
@@ -216,7 +216,7 @@ def _record_listing_published_stage_event(
         order_id=listing_id,
         agent_url=storefront_url,
         seller_principal=seller_principal,
-        offer=offer_resource,
+        offer=listing_resource,
         accepted_escrows=accepted_escrows,
         settlement_options=settlement_options,
         demands=demands,

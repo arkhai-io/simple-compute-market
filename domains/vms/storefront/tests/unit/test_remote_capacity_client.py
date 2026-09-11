@@ -125,7 +125,7 @@ async def test_exact_site_availability_reflects_consumption(
     client: cc.SiteCapacityClient,
 ):
     await client.reserve(
-        claim={"executor_kind": "vm", "gpu_count": 3},
+        claim={"offering_mode": "vm", "gpu_count": 3},
         deal_ref={},
     )
     aggregate = cc.AggregateCapacityClient({"default": client})
@@ -247,7 +247,7 @@ async def test_most_available_ranks_by_legacy_gpu_count_claim_through_the_real_a
         transport=big_site.transport(),
     )
 
-    match = await built.probe(claim={"executor_kind": "vm", "gpu_count": 2})
+    match = await built.probe(claim={"offering_mode": "vm", "gpu_count": 2})
 
     assert match is not None
     assert match["resource_id"] == "big-res"
@@ -287,7 +287,7 @@ async def test_most_available_excludes_a_resource_type_mismatch_through_the_real
 
     match = await built.probe(
         claim={
-            "executor_kind": "vm",
+            "offering_mode": "vm",
             "resource_type": "compute.cpu",
             "gpu_count": 1,
         }

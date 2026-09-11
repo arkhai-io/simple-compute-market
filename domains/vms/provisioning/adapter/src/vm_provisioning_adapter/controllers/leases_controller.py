@@ -43,7 +43,7 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/leases", tags=["leases"])
 admin_router = APIRouter(prefix="/admin/leases", tags=["admin", "leases"])
-_VM_EXECUTOR_KIND = "vm"
+_VM_OFFERING_MODE = "vm"
 
 
 def _lease_view(reservation: dict[str, Any]) -> LeaseResponse:
@@ -115,7 +115,7 @@ class LeasesController:
                 ExecutorLeaseRegistration(
                     capacity_reservation_id=body.capacity_reservation_id,
                     escrow_uid=body.escrow_uid,
-                    executor_kind=_VM_EXECUTOR_KIND,
+                    offering_mode=_VM_OFFERING_MODE,
                     executor_target=body.vm_target,
                     executor_ref={"vm_host": body.vm_host},
                     lease_start_utc=body.lease_start_utc,
@@ -163,8 +163,8 @@ class LeasesController:
             updated = self._leases.update_lease(
                 lease_id,
                 ExecutorLeaseUpdate(
-                    executor_kind=(
-                        _VM_EXECUTOR_KIND if body.vm_host or body.vm_target else None
+                    offering_mode=(
+                        _VM_OFFERING_MODE if body.vm_host or body.vm_target else None
                     ),
                     executor_target=body.vm_target,
                     executor_ref={"vm_host": body.vm_host} if body.vm_host else None,
@@ -185,7 +185,7 @@ class LeasesController:
         summary="Terminate a market-managed lease",
         description=(
             "Submits the lease release operation for this provisioning service "
-            "based on the reservation's executor_kind and moves the lease to "
+            "based on the reservation's offering_mode and moves the lease to "
             "releasing. Capacity is released only after the delegated release "
             "job succeeds. Failed, cancelled, or timed-out teardown leaves the "
             "lease in release_failed."

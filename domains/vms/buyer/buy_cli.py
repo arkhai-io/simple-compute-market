@@ -586,7 +586,7 @@ def register(app: typer.Typer) -> None:
             raise typer.Exit(2)
 
         from .common import (
-            VMS_SCHEMA_ID,
+            COMPUTE_SCHEMA_ID,
             resolve_buyer_wallet,
             resolve_fresh_buyer_identity,
             resolve_discovery_timeout,
@@ -622,7 +622,7 @@ def register(app: typer.Typer) -> None:
         registry_authorities = resolve_registry_authorities(configured_reg_urls)
         deadline = resolve_discovery_timeout(override=discovery_timeout)
         reg_urls = resolve_indexer_urls_for_schema(
-            VMS_SCHEMA_ID,
+            COMPUTE_SCHEMA_ID,
             signer=signer,
             registry_authorities=registry_authorities,
             override=registry_urls,

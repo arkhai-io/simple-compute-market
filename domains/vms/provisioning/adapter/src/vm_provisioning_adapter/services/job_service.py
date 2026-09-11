@@ -138,7 +138,7 @@ class AnsibleJobService:
                 contract_version=contract.contract_version if contract else None,
                 capacity_reservation_id=contract.capacity_reservation_id if contract else None,
                 deal_ref=contract.deal_ref if contract else None,
-                executor_kind=contract.executor_kind if contract else params.executor_kind,
+                offering_mode=contract.offering_mode if contract else params.offering_mode,
                 action_kind=contract.action_kind if contract else params.executor_action,
                 idempotency_key=contract.idempotency_key if contract else None,
             )
@@ -304,7 +304,7 @@ class AnsibleJobService:
                 "status": job.status,
                 "capacity_reservation_id": job.capacity_reservation_id,
                 "deal_ref": dict(job.deal_ref or {}),
-                "executor_kind": job.executor_kind,
+                "offering_mode": job.offering_mode,
                 "action_kind": job.action_kind,
                 "idempotency_key": job.idempotency_key,
                 "result": dict(job.result or {}) if job.result is not None else None,
@@ -712,7 +712,7 @@ class AnsibleJobService:
             ),
             vm_target=params.get("vm_target"),
             vm_action=params.get("vm_action") or executor_action,
-            executor_kind=params["executor_kind"],
+            offering_mode=params["offering_mode"],
             executor_action=executor_action,
             executor_target=executor_target,
             executor_ref=params.get("executor_ref"),
@@ -754,7 +754,7 @@ class AnsibleJobService:
         if params.playbook_path:
             return params.playbook_path
         if (
-            params.executor_kind == "bare_metal"
+            params.offering_mode == "bare_metal"
             or params.executor_action in _BARE_METAL_ACTIONS
         ):
             return self._settings.resolved_bare_metal_playbook_path

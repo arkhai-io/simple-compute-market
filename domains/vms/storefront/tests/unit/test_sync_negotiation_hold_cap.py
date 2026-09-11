@@ -45,7 +45,7 @@ def _record_bound_listing(
     offer = {
         "gpu_model": "H200",
         "gpu_count": gpu_count,
-        "virtualization_type": "vm",
+        "offering_mode": "vm",
     }
     if pool_id is not None:
         offer["pool_id"] = pool_id
@@ -67,7 +67,7 @@ def _record_bound_listing(
             status="open",
             created_at="2026-08-15T00:00:00Z",
             updated_at="2026-08-15T00:00:00Z",
-            offer_resource=offer,
+            listing_resource=offer,
             fulfillment_resource=None,
             max_duration_seconds=3600,
             storefront_url="http://storefront.test",

@@ -28,7 +28,7 @@ def _source(
         close_stale=lambda _db, _url: [f"stale-{name}"],
         available_candidates=lambda _db: [candidate],
         skip_keys=lambda value: {str(value["resource_id"])},
-        offer_resource=lambda value: {"resource_id": value["resource_id"]},
+        listing_resource=lambda value: {"resource_id": value["resource_id"]},
         record_published=lambda _db, value, listing_id: value.__setitem__(
             "listing_id", listing_id
         ),
@@ -68,7 +68,7 @@ def test_publish_round_is_schema_opaque() -> None:
         db_path="db.sqlite",
         base_url="http://seller",
         build_payload=_payload,
-        publish_offer=_publish,
+        publish_listing=_publish,
     )
 
     assert failed == []
@@ -83,7 +83,7 @@ def test_publish_round_skips_covered_candidate() -> None:
         db_path="db.sqlite",
         base_url="http://seller",
         build_payload=_payload,
-        publish_offer=_publish,
+        publish_listing=_publish,
         skip_ids={"r1"},
     )
 
@@ -102,7 +102,7 @@ def test_selection_reuses_exact_prebuilt_sources_across_cycle() -> None:
         db_path="db.sqlite",
         base_url="http://seller",
         build_payload=_payload,
-        publish_offer=_publish,
+        publish_listing=_publish,
     )
 
     assert result.closed == {"vms": ["stale-vms"]}
@@ -118,7 +118,7 @@ def test_two_domains_publish_in_registry_order_and_isolate_skips() -> None:
         db_path="db.sqlite",
         base_url="http://seller",
         build_payload=_payload,
-        publish_offer=_publish,
+        publish_listing=_publish,
     ).run(skip_ids={"vm-1"}, close_stale=False, skip_open=False)
 
     assert result.skipped == [{"resource_id": "vm-1"}]
@@ -139,7 +139,7 @@ def test_empty_prebuilt_selection_has_no_new_listings() -> None:
             db_path="db.sqlite",
             base_url="http://seller",
             build_payload=_payload,
-            publish_offer=_publish,
+            publish_listing=_publish,
         )
         .run()
     )
@@ -156,7 +156,7 @@ def test_run_publication_cycle_closes_stale_and_skips_open_keys() -> None:
         db_path="db.sqlite",
         base_url="http://seller",
         build_payload=_payload,
-        publish_offer=_publish,
+        publish_listing=_publish,
     )
 
     assert result.closed == {"test": ["stale-test"]}
@@ -189,7 +189,7 @@ def test_typed_payload_keeps_settlement_options_independent() -> None:
             demands=({"demand": "compute"},),
             max_duration_seconds=60,
         ),
-        publish_offer=publish,
+        publish_listing=publish,
     )
 
     assert failed == []

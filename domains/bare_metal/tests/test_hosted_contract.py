@@ -65,7 +65,7 @@ def _facts() -> BareMetalHostedOptionFacts:
         derivation_key="site-a:resource-a",
         projection_digest="sha256:" + "2" * 64,
         site_id="site-a",
-        executor_kind="bare_metal",
+        offering_mode="bare_metal",
         resource_selection="specific",
         physical_resource_id="resource-a",
         physical_host_id="host-a",

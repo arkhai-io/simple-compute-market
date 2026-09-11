@@ -57,7 +57,7 @@ def _listing(resource_id="svc-quota", rate="100"):
     return {
         "listing_id": "L-tok",
         "status": "open",
-        "offer_resource": _offer(resource_id),
+        "listing_resource": _offer(resource_id),
         "accepted_escrows": [{
             "chain_name": "anvil",
             "escrow_address": _ESCROW,
@@ -140,7 +140,7 @@ def test_unit_price_hidden_reserve_falls_back_then_refuses():
 
 def test_strategy_is_maximize_for_token_offers():
     assert determine_strategy_from_order(_listing()) == "maximize"
-    assert determine_strategy_from_order({"offer_resource": {"gpu_model": "H200"}}) is None
+    assert determine_strategy_from_order({"listing_resource": {"gpu_model": "H200"}}) is None
 
 
 # ---------------------------------------------------------------------------
@@ -174,7 +174,7 @@ def test_reconciler_unknown_availability_is_conservative():
 def test_reconciler_ignores_non_token_listings():
     rows = [{
         "listing_id": "L-vm", "status": "open",
-        "offer_resource": {"gpu_model": "H200"},
+        "listing_resource": {"gpu_model": "H200"},
     }]
     assert stale_open_credit_listing_ids(rows, availability={}) == []
     assert listing_quota_resource_id(rows[0]) is None
@@ -269,7 +269,7 @@ def test_quota_guard_matches_by_resource_id():
 def test_quota_guard_ignores_non_token_listings():
     decision, _ = credit_quota_guard(
         _round0(_proposal()),
-        _context(listing={"offer_resource": {"gpu_model": "H200"}},
+        _context(listing={"listing_resource": {"gpu_model": "H200"}},
                  requested_quantity=3),
     )
     assert decision is None

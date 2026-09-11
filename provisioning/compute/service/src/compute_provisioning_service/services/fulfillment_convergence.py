@@ -299,15 +299,15 @@ class FulfillmentConvergenceWatchdog:
     @staticmethod
     def _settlement_resource(record) -> SettlementResource:
         requirements = dict(record.scheduling_requirements or {})
-        executor_kind = requirements.get("executor_kind")
-        if not executor_kind:
+        offering_mode = requirements.get("offering_mode")
+        if not offering_mode:
             raise ValueError(
-                "scheduled settlement has no explicit executor_kind"
+                "scheduled settlement has no explicit offering_mode"
             )
         return SettlementResource(
             settlement_resource_id=record.settlement_resource_id,
             pool_id=record.pool_id,
-            executor_kind=str(executor_kind),
+            offering_mode=str(offering_mode),
             resource_kind=str(requirements.get("resource_kind") or "compute"),
             provider=record.provider,
             attributes=dict(record.resource_attributes or {}),

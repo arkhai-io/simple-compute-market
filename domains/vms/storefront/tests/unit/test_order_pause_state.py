@@ -133,13 +133,13 @@ async def db(tmp_path) -> SQLiteClient:
         status="open",
         created_at=datetime.now().isoformat(),
         updated_at=datetime.now().isoformat(),
-        offer_resource={
+        listing_resource={
             "gpu_model": "H200",
             "gpu_count": 1,
             "sla": 99.9,
             "region": "California, US",
             "resource_id": "resource-order-001",
-            "virtualization_type": "vm",
+            "offering_mode": "vm",
         },
         accepted_escrows=[{
             "chain_name": "test",
@@ -249,7 +249,7 @@ class TestOrderPauseHelpers:
             status="open",
             created_at=now,
             updated_at=now,
-            offer_resource={},
+            listing_resource={},
             
             fulfillment_resource=None,
             max_duration_seconds=3600,
@@ -275,7 +275,7 @@ class TestOrderPauseHelpers:
             status="open",
             created_at=datetime.now().isoformat(),
             updated_at=datetime.now().isoformat(),
-            offer_resource={},
+            listing_resource={},
             
             fulfillment_resource=None,
             max_duration_seconds=3600,

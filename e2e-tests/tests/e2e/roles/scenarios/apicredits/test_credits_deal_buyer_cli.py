@@ -10,7 +10,7 @@ The topology (docker-compose.yml): a second registry speaking the
 (self-seeds one quota-backed listing pointing at the sample app), and
 the sample app gated by the Python middleware. The buyer runs the same
 `market` binary as the VM tests — its schema filter routes discovery to
-the api-credits registry while leaving the vms.compute registry alone.
+the api-credits registry while leaving the compute.market registry alone.
 
 Consuming runs against the gated sample app directly with the issued
 bearer secret, exactly as a real client of that API would.

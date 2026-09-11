@@ -1,6 +1,6 @@
 """API-credits listing resource schema.
 
-The listing's ``offer_resource`` is opaque to the registry and
+The listing's ``listing_resource`` is opaque to the registry and
 schema-typed by the domain plugin (ARCHITECTURE.md, "API-credits market
 domain — Market shape"). ``resource_id`` names the quota resource in the tokens
 service's ledger that the listing derives from — seller-internal
@@ -18,7 +18,7 @@ API_CREDITS_KIND = "api_credits.v1"
 
 
 class ApiCreditsResource(BaseModel):
-    """``offer_resource`` payload for an API-credit listing."""
+    """``listing_resource`` payload for an API-credit listing."""
 
     kind: str = Field(default=API_CREDITS_KIND, pattern="^api_credits\\.v1$")
     service_name: str
@@ -34,7 +34,7 @@ class ApiCreditsResource(BaseModel):
 
 
 def coerce_resource_dict(value: Any) -> dict[str, Any]:
-    """Best-effort dict view of an offer_resource (SQLite stores JSON text)."""
+    """Best-effort dict view of an listing_resource (SQLite stores JSON text)."""
     if isinstance(value, dict):
         return value
     if isinstance(value, str) and value.strip():

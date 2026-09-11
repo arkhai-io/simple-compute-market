@@ -63,9 +63,9 @@ async def _persist_listing(client, binding, *, status="open"):
         status=status,
         created_at="2026-08-15T00:00:00Z",
         updated_at="2026-08-15T00:00:00Z",
-        offer_resource={
+        listing_resource={
             "resource_type": "compute.gpu",
-            "virtualization_type": binding.binding.offering_mode,
+            "offering_mode": binding.binding.offering_mode,
         },
         fulfillment_resource=None,
         max_duration_seconds=3600,
@@ -110,13 +110,13 @@ async def test_public_mode_disagreement_fails_before_listing_or_binding_write(tm
     client = SQLiteClient(str(tmp_path / "storefront.db"))
     binding = _listing_binding()
 
-    with pytest.raises(StorefrontDomainBindingError, match="virtualization_type"):
+    with pytest.raises(StorefrontDomainBindingError, match="offering_mode"):
         await client.upsert_listing_with_binding(
             binding=binding,
             status="open",
             created_at="2026-08-15T00:00:00Z",
             updated_at="2026-08-15T00:00:00Z",
-            offer_resource={"virtualization_type": "bare_metal"},
+            listing_resource={"offering_mode": "bare_metal"},
             fulfillment_resource=None,
             max_duration_seconds=3600,
             storefront_url="https://seller.example",

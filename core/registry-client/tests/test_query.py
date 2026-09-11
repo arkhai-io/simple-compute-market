@@ -24,12 +24,12 @@ def _spec(*, etag: str = "spec-7") -> FilterSpecResponse:
         {
             "version": 4,
             "etag": etag,
-            "schema": {"id": "vms.compute", "version": 3},
+            "schema": {"id": "compute.market", "version": 3},
             "listing_shape": {"type": "object"},
             "filters": [
                 {
                     "name": "gpu_model",
-                    "path": "$.offer_resource.gpu_model",
+                    "path": "$.listing_resource.gpu_model",
                     "op": "in",
                     "value_type": "string",
                     "on_missing": "fail",
@@ -38,7 +38,7 @@ def _spec(*, etag: str = "spec-7") -> FilterSpecResponse:
                     "name": "ram_gb_min",
                     "query_name": "ram_gb",
                     "query_aliases": ["ram_gb_min"],
-                    "path": "$.offer_resource.ram_gb",
+                    "path": "$.listing_resource.ram_gb",
                     "op": "range",
                     "value_type": "integer",
                     "alias_kind": "lower_bound",
@@ -78,7 +78,7 @@ def test_compiles_heterogeneous_spec_to_canonical_registry_parameters() -> None:
 
     assert compiled.registry_url == "https://registry.example"
     assert compiled.etag == "spec-7"
-    assert compiled.schema_id == "vms.compute"
+    assert compiled.schema_id == "compute.market"
     assert compiled.schema_version == 3
     assert compiled.canonical_query == (
         "gpu_modelin[H200,A100] ram_gb>=64 utilization<0.75 "

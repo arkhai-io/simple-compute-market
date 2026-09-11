@@ -80,7 +80,7 @@ be wrong on the first hosted-settled unbacked listing, which is the next version
 already anticipated. What actually varies is whether an admission authority
 stands behind the listing, and that is a property, not a domain.
 
-Two domains would also publish identical `offer_resource` vocabulary into one
+Two domains would also publish identical `listing_resource` vocabulary into one
 registry schema, which the compute-family schema-identity work exists to avoid.
 
 The same reasoning makes this posture available to any domain. Nothing here is
@@ -251,7 +251,7 @@ authorizes nothing.
 `deliverable_modes` untouched and constraining a backed pool's advertisable set to
 a subset of its deliverable set. This change depends on it and consumes it: a
 listing derived from a pool may advertise only a mode that pool declares
-advertisable, backed or not, and `offer_resource.virtualization_type` continues to
+advertisable, backed or not, and `listing_resource.offering_mode` continues to
 equal the recorded offering mode for every listing.
 
 That change also owns the `capacity_backing` pool declaration itself. An earlier
@@ -443,7 +443,7 @@ anything.
 
 A first draft specified the registry's underreport-friendly convention for the
 backing filter. That was a generalization from the wrong part of the profile:
-every `offer_resource` filter in `filter-spec.yaml` is `on_missing: fail`, and the
+every `listing_resource` filter in `filter-spec.yaml` is `on_missing: fail`, and the
 file states that an unknown spec cannot be assumed to satisfy a stated
 requirement. `on_missing: pass` appears only on `accepted_escrows` and
 `settlement_options` paths, where a seller underreporting what they accept is the
@@ -462,15 +462,15 @@ Listing shape is a registry-deployment property: one deployment serves one filte
 spec, and `schema.id` is what buyer commands match on. That makes "which
 registry" look like a schema question, and it produced a wrong inference during
 design — that different compute form factors might need different registries.
-They do not: `vms.compute` already carries `bare_metal`, `vm`, and `container` in
+They do not: `compute.market` already carries `bare_metal`, `vm`, and `container` in
 one enum.
 
 The loose-listing introductions profile is separate for two specific reasons,
 neither of which is form factor: it requires option-only listings, and it leaves
-`offer_resource` open with no required `gpu_model` or `region` and no vetted
+`listing_resource` open with no required `gpu_model` or `region` and no vetted
 enum, because sellers there describe what they broker in whatever vocabulary
 fits. An unbacked compute listing carrying `gpu_model`, `region`,
-`virtualization_type`, and a rate fits the compute shape. The compute spec's
+`offering_mode`, and a rate fits the compute shape. The compute spec's
 `anyOf` already admits an options-only listing, so no structural change is needed
 to validate one.
 
@@ -519,7 +519,7 @@ would be indistinguishable from the local physical-authority tables
 purpose, reached from the other direction. A reviewer two quarters later would
 have no way to tell them apart.
 
-Note what this does *not* claim. The `listings` row and its `offer_resource`
+Note what this does *not* claim. The `listings` row and its `listing_resource`
 snapshot are storefront-owned market state today and remain so; the authority
 table already grants the storefront "listing, negotiation, deal, and seller
 policy state — market-facing state, not physical inventory." An unbacked listing

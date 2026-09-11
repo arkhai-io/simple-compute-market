@@ -86,7 +86,7 @@ class SchemaIdentity(BaseModel):
     """Stable identity of the listing schema this registry serves.
 
     ``id`` is the stable listing-schema name that buyer-domain commands
-    declare compatibility with (for example, ``"vms.compute"``). With several
+    declare compatibility with (for example, ``"compute.market"``). With several
     registries configured, a domain queries only registries whose declared id
     matches. ``version`` is the schema-contract version; buyers match on id
     alone today, and the version remains advisory until a second schema

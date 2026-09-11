@@ -20,7 +20,7 @@ from fastapi import FastAPI
 import market_storefront.container as _container
 from market_storefront.controllers.listings_controller import router as listings_router
 
-_COMPUTE_OFFER = {
+_COMPUTE_LISTING_RESOURCE = {
     "gpu_model": "RTX 4090",
     "gpu_count": 1,
     "sla": 99.0,
@@ -82,7 +82,7 @@ async def orders_client(mock_svc, tmp_path) -> AsyncIterator[httpx.AsyncClient]:
 class TestCreateOrderEndpoint:
     async def test_valid_create_returns_200(self, orders_client):
         body = {
-            "offer": _COMPUTE_OFFER,
+            "listing_resource": _COMPUTE_LISTING_RESOURCE,
             "capacity_source": {
                 "site_id": "site-test",
                 "resource_id": "resource-1",
@@ -108,7 +108,7 @@ class TestCreateOrderEndpoint:
         resp = await orders_client.post(
             "/api/v1/listings/create",
             json={
-                "offer": _COMPUTE_OFFER,
+                "listing_resource": _COMPUTE_LISTING_RESOURCE,
                 "accepted_escrows": _ACCEPTED_ESCROWS,
             },
         )
@@ -116,7 +116,7 @@ class TestCreateOrderEndpoint:
 
     async def test_missing_accepted_escrows_returns_422(self, orders_client):
         """CreateListingRequest Pydantic model requires accepted_escrows; FastAPI returns 422."""
-        resp = await orders_client.post("/api/v1/listings/create", json={"offer": _COMPUTE_OFFER})
+        resp = await orders_client.post("/api/v1/listings/create", json={"listing_resource": _COMPUTE_LISTING_RESOURCE})
         assert resp.status_code == 422
 
 

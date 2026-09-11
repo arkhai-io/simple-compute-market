@@ -25,7 +25,7 @@ _REQUIRED_COMPUTE_KEYS = (
 # claim's resource_type constraint would reject every resource that
 # exists.
 _VM_RESOURCE_TYPE = "compute.gpu"
-_VM_EXECUTOR_KIND = "vm"
+_VM_OFFERING_MODE = "vm"
 
 # _DIMENSION_COMPUTE_KEYS (gpu_count/vcpu_count/ram_gb/disk_gb) comes from
 # arkhai_vms.compute_requirements -- the same shared vocabulary the
@@ -39,7 +39,7 @@ def compute_capacity_claim_from_order(
 ) -> dict[str, Any]:
     """Extract inventory-matching attributes from a VM listing/order.
 
-    ``offer_resource`` may arrive as a JSON string, a plain dict, or a
+    ``listing_resource`` may arrive as a JSON string, a plain dict, or a
     ``ComputeResource`` model instance — ``Listing.model_validate`` mutates
     rows it validates, replacing the dict in place, and several callers (the
     negotiation accept paths) run after such validation. Silently returning
@@ -67,7 +67,7 @@ def compute_capacity_claim_from_order(
     if not order_dict:
         raise ValueError("Cannot build a capacity claim without a settlement order.")
     capacity_claim: dict[str, Any] = {
-        "executor_kind": _VM_EXECUTOR_KIND,
+        "offering_mode": _VM_OFFERING_MODE,
         "resource_type": _VM_RESOURCE_TYPE,
     }
     dimensions: dict[str, Any] = {}
@@ -92,7 +92,7 @@ def compute_capacity_claim_from_order(
         order_id = order_dict.get("listing_id") or order_dict.get("order_id")
         raise ValueError(
             f"Cannot build a capacity claim for order {order_id!r}: neither "
-            "pool_id nor resource_id is present on its offer_resource."
+            "pool_id nor resource_id is present on its listing_resource."
         )
     if dimensions:
         capacity_claim["dimensions"] = dimensions

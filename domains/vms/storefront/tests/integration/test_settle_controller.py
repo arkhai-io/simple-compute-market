@@ -82,13 +82,13 @@ async def _seed_listing(
         created_at=now,
         updated_at=now,
         paused=False,
-        offer_resource={
+        listing_resource={
             "resource_id": resource_id,
             "gpu_model": "H200",
             "gpu_count": 1,
             "sla": 99.0,
             "region": "California, US",
-            "virtualization_type": "vm",
+            "offering_mode": "vm",
         },
         accepted_escrows=[{
             "chain_name": "anvil",

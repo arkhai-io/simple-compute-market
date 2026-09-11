@@ -3,7 +3,7 @@
 - [x] 1.1 Verify `storefront-domain-parameterization` is implemented, accepted, and promoted: `build_vm_storefront_app` passes one exact validated `compute.v1` contract through `domains/vms/storefront/src/market_storefront/{server.py,startup.py,container.py,utils/sqlite_client.py,services/listing_service.py,controllers/negotiate_controller.py,utils/sync_negotiation.py,settlement_composition.py}` with no lower-layer default/getter/module lookup. Record the exact permanent `market-composition`/`storefront-publication` headings and focused evidence in `design.md`; stop before implementation if the seam is absent.
 - [x] 1.2 Verify `pool-declared-offering-modes` is implemented, accepted, and promoted with the canonical pool declaration reader, explicit requested mode, shared reservation/scheduling/provisioning predicate, withdrawn-mode behavior, legacy reservation migration, and removal of every implicit VM executor fallback. Record the exact `resource-pool-management`, `site-capacity`, `fulfillment`, and physical-provisioning interfaces/evidence in `design.md`; stop before implementation if enforcement is incomplete.
 - [ ] 1.3 Parent integration gate: merge and accept the production bare-metal contribution reported in `18083392` (entry-point group `market.storefront_contributions`, contribution `bare_metal`) plus its selected-site publication, negotiation, settlement, scheduling, begin/status/result, restart, teardown, and capacity-restoration lifecycle; render its dedicated chart from `3b46f6f8`. The isolated shell does not substitute a no-op, VM adapter, route-internal fake, or success flag.
-- [x] 1.4 Reconciled `publish-multidimensional-listing-shape` against the live canonical `offer_resource.virtualization_type`: common bindings and publication enforce equality while the existing registry builder/fixture remains the sole public-schema owner; no alternate discriminator was added.
+- [x] 1.4 Reconciled `publish-multidimensional-listing-shape` against the live canonical `listing_resource.offering_mode`: common bindings and publication enforce equality while the existing registry builder/fixture remains the sole public-schema owner; no alternate discriminator was added.
 - [x] 1.5 Inventoried listing/mapping/thread/settlement/fulfillment/result/teardown carriers and singleton/default/fan-out branches; recorded the common binding/artifact, frozen-registry, exact-site, domain-neutral lifecycle, and migration destinations in `design.md`.
 
 ## 2. Frozen registry and shared application composition
@@ -33,10 +33,10 @@
 - [x] 4.1 VM and bare-metal domain runtimes expose publication through the same immutable registration-owned capability, without runtime singleton lookup.
 - [x] 4.2 Frozen publication composition iterates configured registrations and persists candidates through the common listing-binding repository; shared runner control flow contains no VM/bare-metal branch.
 - [x] 4.3 Publication requires each source's exact declared pool mode; absent/withdrawn mode suppresses only that mode while accepted/sibling records retain their bindings.
-- [x] 4.4 VM and bare-metal publication project canonical `offer_resource.virtualization_type`; common persistence rejects public/binding disagreement and collision-safe derivation keeps same-pool modes distinct.
+- [x] 4.4 VM and bare-metal publication project canonical `listing_resource.offering_mode`; common persistence rejects public/binding disagreement and collision-safe derivation keeps same-pool modes distinct.
 - [x] 4.5 Shared binding lookup replaces domain mapping authority for selected site/pool/resource provenance; public bindings and source envelopes exclude URLs, credentials, provider configuration, SSH material, and buyer assertions.
 - [x] 4.6 Added common runner/plugin/composition plus VM/bare-metal publication tests for frozen source selection, both modes, zero-source behavior, exact binding/public mode, collision isolation, and close/reopen behavior.
-- [x] 4.7 Confirmed the existing registry fixture already owns canonical `virtualization_type`; observable generic carrier shapes were unchanged, so no alternate field or fixture fork was introduced.
+- [x] 4.7 Confirmed the existing registry fixture already owns canonical `offering_mode`; observable generic carrier shapes were unchanged, so no alternate field or fixture fork was introduced.
 
 ## 5. Record-bound negotiation and acceptance
 
@@ -56,7 +56,7 @@
 - [x] 6.4 Extended `AggregateCapacityClient` and `AggregateFulfillmentClient` with exact `site_id` routing for commit/release/truncate/schedule/begin/status/result/begin-teardown; targeted calls never route-order fallback.
 - [x] 6.5 Domain fulfillment hooks receive the selected contract's validated versioned envelope and recorded site/mode; provisioning remains the authority that preserves/rejects pool executor identity.
 - [x] 6.6 Active `domain_result` is decoded only by the accepted contract's result codec; unknown/cross-swapped results fail before protected result persistence.
-- [x] 6.7 Teardown and capacity release route by recorded site plus fulfillment/reservation identities; the provisioning authority dispatches its durable executor kind.
+- [x] 6.7 Teardown and capacity release route by recorded site plus fulfillment/reservation identities; the provisioning authority dispatches its durable offering mode.
 - [x] 6.8 Timer/restart paths resolve the recorded contract/site, block unavailable trust, preserve exact retry, and do not fallback-decode terminal history.
 - [x] 6.9 Removed storefront singleton/default and cold-cache accepted-record fan-out from the shared path; architecture tests guard domain-free core and contribution-owned construction.
 - [x] 6.10 Added deterministic core/VM coverage for exact resolution, selected-site isolation, cold restart, domain-result mismatch, retry, failure, and teardown carriers; the real dual-domain lifecycle remains the explicit parent-run gate.

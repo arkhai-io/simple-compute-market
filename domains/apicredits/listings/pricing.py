@@ -148,6 +148,6 @@ def determine_strategy_from_order(order: dict[str, Any] | None) -> str | None:
     """Sellers of prepaid credits always maximize the scalar amount."""
     if not order:
         return None
-    if resource_is_api_credits(order.get("offer_resource")):
+    if resource_is_api_credits(order.get("listing_resource")):
         return "maximize"
     return None

@@ -46,7 +46,7 @@ def test_loads_minimal_valid_spec(tmp_path: Path) -> None:
           properties:
             listing_id: {type: string}
         filters:
-          - {name: region, path: $.offer_resource.region, op: in, value_type: string, on_missing: fail}
+          - {name: region, path: $.listing_resource.region, op: in, value_type: string, on_missing: fail}
         """,
     )
     spec = load_filter_spec(path)
@@ -63,7 +63,7 @@ def test_etag_stable_across_loads(tmp_path: Path) -> None:
       properties:
         listing_id: {type: string}
     filters:
-      - {name: gpu_model, path: $.offer_resource.gpu_model, op: in, value_type: string, on_missing: fail}
+      - {name: gpu_model, path: $.listing_resource.gpu_model, op: in, value_type: string, on_missing: fail}
     """
     spec1 = load_filter_spec(_write(tmp_path, body))
     spec2 = load_filter_spec(_write(tmp_path, body))
@@ -76,15 +76,15 @@ def test_etag_changes_when_filter_added(tmp_path: Path) -> None:
     listing_shape:
       type: object
     filters:
-      - {name: gpu_model, path: $.offer_resource.gpu_model, op: in, value_type: string, on_missing: fail}
+      - {name: gpu_model, path: $.listing_resource.gpu_model, op: in, value_type: string, on_missing: fail}
     """
     two_filters = """
     version: 1
     listing_shape:
       type: object
     filters:
-      - {name: gpu_model, path: $.offer_resource.gpu_model, op: in, value_type: string, on_missing: fail}
-      - {name: region,    path: $.offer_resource.region,    op: in, value_type: string, on_missing: fail}
+      - {name: gpu_model, path: $.listing_resource.gpu_model, op: in, value_type: string, on_missing: fail}
+      - {name: region,    path: $.listing_resource.region,    op: in, value_type: string, on_missing: fail}
     """
     assert compute_etag(load_filter_spec(_write(tmp_path, one_filter))) != compute_etag(
         load_filter_spec(_write(tmp_path, two_filters))
@@ -99,8 +99,8 @@ def test_duplicate_filter_names_rejected(tmp_path: Path) -> None:
         listing_shape:
           type: object
         filters:
-          - {name: region, path: $.offer_resource.region, op: in, value_type: string, on_missing: fail}
-          - {name: region, path: $.offer_resource.region, op: in, value_type: string, on_missing: fail}
+          - {name: region, path: $.listing_resource.region, op: in, value_type: string, on_missing: fail}
+          - {name: region, path: $.listing_resource.region, op: in, value_type: string, on_missing: fail}
         """,
     )
     with pytest.raises(ValueError, match="duplicate filter name"):
@@ -117,7 +117,7 @@ def test_query_names_and_aliases_are_explicit_and_unique(tmp_path: Path) -> None
           - name: ram_gb_min
             query_name: ram_gb
             query_aliases: [ram_gb_min]
-            path: $.offer_resource.ram_gb
+            path: $.listing_resource.ram_gb
             op: range
             value_type: integer
             alias_kind: lower_bound
@@ -171,7 +171,7 @@ def test_unknown_op_rejected(tmp_path: Path) -> None:
         listing_shape:
           type: object
         filters:
-          - {name: gpu_model, path: $.offer_resource.gpu_model, op: contains, value_type: string, on_missing: fail}
+          - {name: gpu_model, path: $.listing_resource.gpu_model, op: contains, value_type: string, on_missing: fail}
         """,
     )
     with pytest.raises(ValidationError):
@@ -187,7 +187,7 @@ def test_unknown_field_in_filter_rejected(tmp_path: Path) -> None:
         listing_shape:
           type: object
         filters:
-          - {name: region, path: $.offer_resource.region, op: in, value_type: string, on_missing: fail, indexd: true}
+          - {name: region, path: $.listing_resource.region, op: in, value_type: string, on_missing: fail, indexd: true}
         """,
     )
     with pytest.raises(ValidationError):
@@ -203,7 +203,7 @@ def test_default_on_missing_is_fail(tmp_path: Path) -> None:
         listing_shape:
           type: object
         filters:
-          - {name: region, path: $.offer_resource.region, op: in, value_type: string}
+          - {name: region, path: $.listing_resource.region, op: in, value_type: string}
         """,
     )
     spec = load_filter_spec(path)
@@ -226,7 +226,7 @@ def test_repo_default_spec_loads() -> None:
     # The shipped spec declares its schema identity — buyer plugins match
     # registries to schemas on this id.
     assert spec.schema_identity is not None
-    assert spec.schema_identity.id == "vms.compute"
+    assert spec.schema_identity.id == "compute.market"
     assert spec.schema_identity.version >= 1
 
 
@@ -257,7 +257,7 @@ def test_schema_identity_parses_and_defaults_version(tmp_path: Path) -> None:
         listing_shape:
           type: object
         filters:
-          - {name: service_name, path: $.offer_resource.service_name, op: in, value_type: string}
+          - {name: service_name, path: $.listing_resource.service_name, op: in, value_type: string}
         """,
     )
     spec = load_filter_spec(path)
@@ -275,7 +275,7 @@ def test_schema_identity_is_optional(tmp_path: Path) -> None:
         listing_shape:
           type: object
         filters:
-          - {name: region, path: $.offer_resource.region, op: in, value_type: string}
+          - {name: region, path: $.listing_resource.region, op: in, value_type: string}
         """,
     )
     assert load_filter_spec(path).schema_identity is None
@@ -292,7 +292,7 @@ def test_schema_identity_rejects_unknown_keys(tmp_path: Path) -> None:
         listing_shape:
           type: object
         filters:
-          - {name: region, path: $.offer_resource.region, op: in, value_type: string}
+          - {name: region, path: $.listing_resource.region, op: in, value_type: string}
         """,
     )
     with pytest.raises(ValidationError):
@@ -316,7 +316,7 @@ def test_etag_unchanged_for_specs_without_schema_identity(tmp_path: Path) -> Non
         listing_shape:
           type: object
         filters:
-          - {name: region, path: $.offer_resource.region, op: in, value_type: string, on_missing: fail}
+          - {name: region, path: $.listing_resource.region, op: in, value_type: string, on_missing: fail}
         """,
     )
     spec = load_filter_spec(path)
@@ -338,7 +338,7 @@ def test_etag_changes_when_schema_identity_added(tmp_path: Path) -> None:
     listing_shape:
       type: object
     filters:
-      - {name: region, path: $.offer_resource.region, op: in, value_type: string}
+      - {name: region, path: $.listing_resource.region, op: in, value_type: string}
     """
     with_schema = """
     version: 1
@@ -347,7 +347,7 @@ def test_etag_changes_when_schema_identity_added(tmp_path: Path) -> None:
     listing_shape:
       type: object
     filters:
-      - {name: region, path: $.offer_resource.region, op: in, value_type: string}
+      - {name: region, path: $.listing_resource.region, op: in, value_type: string}
     """
     assert compute_etag(load_filter_spec(_write(tmp_path, without))) != compute_etag(
         load_filter_spec(_write(tmp_path, with_schema))
@@ -454,7 +454,7 @@ def test_etag_present_on_endpoint(
         listing_shape:
           type: object
         filters:
-          - {name: region, path: $.offer_resource.region, op: in, value_type: string, on_missing: fail}
+          - {name: region, path: $.listing_resource.region, op: in, value_type: string, on_missing: fail}
         """,
     )
     monkeypatch.setenv("REGISTRY_FILTER_SPEC_PATH", str(path))
@@ -495,7 +495,7 @@ def test_endpoint_serves_schema_identity(
         listing_shape:
           type: object
         filters:
-          - {name: region, path: $.offer_resource.region, op: in, value_type: string}
+          - {name: region, path: $.listing_resource.region, op: in, value_type: string}
         """,
     )
     monkeypatch.setenv("REGISTRY_FILTER_SPEC_PATH", str(path))

@@ -83,7 +83,7 @@ or `policy = "..."` is used when one escrow kind needs its own sequence.
 
 | Name | Type | Round(s) | Behavior |
 |---|---|---|---|
-| `has_matching_inventory_guard` | Guard | 0 | Rejects with `no_matching_inventory` if the seller's portfolio has no available resource matching the listing's `offer_resource`. |
+| `has_matching_inventory_guard` | Guard | 0 | Rejects with `no_matching_inventory` if the seller's portfolio has no available resource matching the listing's `listing_resource`. |
 | `escrow_shape_guard` | Guard | every | Rejects with `escrow_field_mismatch` if any seller-pinned key on `accepted_escrows[i].literal_fields` doesn't equal the buyer's value in `escrow_proposal.literal_fields`. |
 | `max_rounds_guard` | Guard | every | Exits with `max_rounds_reached` once `len(history) >= [negotiation].max_rounds` (default 5). |
 | `bisection` | Decider | every | Bisects between the seller's floor (`accepted_escrows[0]` primary rate × duration) and the peer's latest offer; accepts within ~1% convergence, counters at midpoint, exits with `price_unreasonable` when the peer's offer is below `floor / 1.5`. No ML dependencies. |
@@ -169,7 +169,7 @@ from market_policy import (
 
 @register_negotiation_middleware("region_lock")
 def region_lock(history, context):
-    if context.listing.get("offer_resource", {}).get("region") not in {"California, US"}:
+    if context.listing.get("listing_resource", {}).get("region") not in {"California, US"}:
         return (
             NegotiationDecision(action="reject", reason="region_not_supported"),
             context,

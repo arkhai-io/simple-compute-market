@@ -9,7 +9,7 @@ from domains.vms.listings.models import (
     ERC20TokenMetadata,
     GpuInterconnect,
     TokenResource,
-    VirtualizationType,
+    OfferingMode,
 )
 from market_alkahest.token import resolve_token_cached
 
@@ -22,7 +22,7 @@ _COMPUTE_SLICE_FIELDS: tuple[tuple[str, Any], ...] = (
     ("vcpu_count", int),
     ("ram_gb", int),
     ("disk_gb", int),
-    ("virtualization_type", VirtualizationType),
+    ("offering_mode", OfferingMode),
 )
 
 # Host context fields denormalized onto the wire-format ComputeResource at

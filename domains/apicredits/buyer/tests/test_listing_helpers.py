@@ -12,7 +12,7 @@ from domains.apicredits.buyer.listing_cli import (
 
 _LISTING = {
     "listing_id": "lst-1",
-    "offer_resource": {
+    "listing_resource": {
         "kind": "api_credits.v1",
         "service_name": "weather-api",
         "description": "Forecasts, 1 token per call",
@@ -33,7 +33,7 @@ _LISTING = {
 
 
 def test_offer_and_unit_price_rendering():
-    assert "weather-api" in format_offer(_LISTING["offer_resource"])
+    assert "weather-api" in format_offer(_LISTING["listing_resource"])
     assert format_unit_price(_LISTING) == "3 / token"
     # Hidden reserve (no rates) renders as unpriced, not 0.
     assert format_unit_price({"accepted_escrows": [

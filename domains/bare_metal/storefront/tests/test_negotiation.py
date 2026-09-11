@@ -17,8 +17,8 @@ def _listing(**overrides):
         "min_duration_seconds": 900,
         "max_duration_seconds": 7200,
     }
-    offer.update(overrides.pop("offer_resource", {}))
-    return {"listing_id": "listing-1", "offer_resource": offer, **overrides}
+    offer.update(overrides.pop("listing_resource", {}))
+    return {"listing_id": "listing-1", "listing_resource": offer, **overrides}
 
 
 def _message(**overrides):
@@ -79,7 +79,7 @@ async def test_policy_accepts_ssh_request_at_duration_boundaries(duration) -> No
             "bare_metal_access_method_not_listed",
         ),
         (
-            {"offer_resource": {"access_methods": ["ssh", "ipmi"]}},
+            {"listing_resource": {"access_methods": ["ssh", "ipmi"]}},
             {"access_method": "ipmi", "ssh_public_key": None},
             "bare_metal_access_method_unsupported",
         ),

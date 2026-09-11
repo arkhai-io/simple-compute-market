@@ -261,7 +261,7 @@ async def capacity_binding_for_listing(
             f"listing {listing_id!r} has no complete durable capacity binding"
         )
     listing = Listing.model_validate(row)
-    mode = listing.offer_resource.virtualization_type
+    mode = listing.listing_resource.offering_mode
     offering_mode = mode.value if hasattr(mode, "value") else str(mode or "")
     if offering_mode != durable.binding.offering_mode:
         raise RuntimeError(

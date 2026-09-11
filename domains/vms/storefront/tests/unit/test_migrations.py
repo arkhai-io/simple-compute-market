@@ -193,8 +193,8 @@ def test_restart_preserves_schema_and_all_persisted_identifiers(tmp_path) -> Non
             status="open",
             created_at=now,
             updated_at=now,
-            offer_resource={
-                "virtualization_type": "vm",
+            listing_resource={
+                "offering_mode": "vm",
                 "resource_type": "compute",
                 "resource_id": "resource-stable",
                 "gpu_model": "H200",

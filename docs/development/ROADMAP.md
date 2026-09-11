@@ -58,7 +58,7 @@ Reaching hosts and VMs that have no inbound route is not a separate goal. The pr
 
 The top of the stack does not. A buyer that names a resource shape disagreeing with the listing's own shape is rejected outright at negotiation round zero, deliberately and loudly, because seller policy has no way to price an alternative shape. Rounds after the first carry only price and escrow terms, with no field for a shape change. Reservation resizing is implemented and has no caller anywhere in the repository.
 
-Publication is where the shape is first lost. A listing's `offer_resource` carries GPU model, count, SLA, region, and pool identity only — vCPU, RAM, and disk are never published, though the projection's capacity map reaches the storefront and the listing model declares all three as optional fields. Because the registry's dimension filters fail closed on a missing field, a buyer filtering on RAM matches nothing at all today, despite the registry schema and buyer CLI both supporting it.
+Publication is where the shape is first lost. A listing's `listing_resource` carries GPU model, count, SLA, region, and pool identity only — vCPU, RAM, and disk are never published, though the projection's capacity map reaches the storefront and the listing model declares all three as optional fields. Because the registry's dimension filters fail closed on a missing field, a buyer filtering on RAM matches nothing at all today, despite the registry schema and buyer CLI both supporting it.
 
 Pricing is the binding constraint on negotiating the shape. Commercial resolution produces a single price per GPU model through a three-tier chain of storefront override, pool hint, and configured default; rates scale by duration only. Negotiation carries exactly one degree of freedom, a scalar amount moved by the concession middleware, so no seller policy can evaluate a counter-offer that changes RAM or disk — which is why a buyer naming any shape is rejected at round zero, deliberately and with the reason recorded in the guard itself. The seller's own feasibility check compares region and GPU model by equality and no quantitative dimension. Nothing consults the authoritative site until a hold is placed at terms acceptance, so an unservable shape surfaces after both parties have committed.
 
@@ -68,7 +68,7 @@ Pricing is the binding constraint on negotiating the shape. Commercial resolutio
 | No seller can price a shape other than the one advertised, and negotiation has one degree of freedom where two are needed | [`capacity-shape-pricing`](../../openspec/changes/capacity-shape-pricing/) |
 | Nothing expresses which shapes a seller will consider, or what range remains admissible for one dimension given the rest | [`capacity-shape-envelope`](../../openspec/changes/capacity-shape-envelope/) |
 | The authoritative site is not consulted until terms are already agreed, so an unservable shape fails after both parties commit | [`negotiation-capacity-feasibility-probe`](../../openspec/changes/negotiation-capacity-feasibility-probe/) |
-| Buyer-facing requirement shape is flat and ambiguous; `offering_type` is conflated with the site-inventory `resource_type` discriminator; claim vocabulary is inconsistent across the codebase | [`structured-capacity-requirements`](../../openspec/changes/structured-capacity-requirements/) |
+| Buyer-facing requirement shape is flat and ambiguous; the offering mode is conflated with the site-inventory `resource_type` discriminator | [`structured-capacity-requirements`](../../openspec/changes/structured-capacity-requirements/) |
 | No negotiation round after the first can express a shape change, and reservation resizing has no caller | [`negotiation-driven-capacity-resize`](../../openspec/changes/negotiation-driven-capacity-resize/) |
 | The accepted VM shape does not reach the provisioning request, so a GPU-reserving listing can fulfill without a GPU | [`fix-vm-fulfillment-capacity-boundary`](../../openspec/changes/fix-vm-fulfillment-capacity-boundary/) |
 | Buyer-negotiated VM connectivity terms, currently operator-configured only | [`add-buyer-vm-connectivity-terms`](../../openspec/changes/add-buyer-vm-connectivity-terms/) |
@@ -96,7 +96,7 @@ claims carry that mode through reservation, scheduling, and provider dispatch,
 and accepted records retain it when publication changes. The shared
 storefront-to-site clients pin mapped work to one trusted authority with no
 cross-site fallback. The registry catalogue can now receive the public
-`offer_resource.virtualization_type` projected from the frozen binding.
+`listing_resource.offering_mode` projected from the frozen binding.
 
 Goal 3's shared storefront boundary is therefore implemented and promoted.
 Complete product acceptance still depends on the domain producers and topology
@@ -106,7 +106,7 @@ proof below; the shell deliberately does not fake their missing behavior.
 |---|---|
 | Bare metal has no runnable buyer package or admitted registry identity | [`bare-metal-buyer-domain`](../../openspec/changes/bare-metal-buyer-domain/) |
 | The bare-metal seller contribution still owes its real selected-site fulfillment/result/teardown hook | [`market-platform-bare-metal-10-storefront-composition`](../../openspec/changes/market-platform-bare-metal-10-storefront-composition/) |
-| One-process VM/bare-metal behavior across more than one authority needs live selected-authority, cross-mode, executor, teardown, and capacity-restoration evidence | [`market-platform-compute-40-multi-domain-proof`](../../openspec/changes/market-platform-compute-40-multi-domain-proof/) |
+| One-process VM/bare-metal behavior across more than one authority needs live selected-authority, cross-mode, execution-dispatch, teardown, and capacity-restoration evidence | [`market-platform-compute-40-multi-domain-proof`](../../openspec/changes/market-platform-compute-40-multi-domain-proof/) |
 
 ---
 
@@ -196,7 +196,7 @@ is recorded as external rather than replaced with local simulation.
 A compute-dimension name leaking into every domain's capacity declaration is a real defect but too small to own a gap row here; it rides with [`capacity-resource-administration`](../../openspec/changes/capacity-resource-administration/), which already rewrites the code that causes it.
 
 ---|---|
-| Executor identity falls back implicitly to VM where durable identity is absent, which a growing set of executor kinds cannot tolerate | [`market-platform-compute-40-multi-domain-proof`](../../openspec/changes/market-platform-compute-40-multi-domain-proof/) |
+| The offering mode falls back implicitly to VM where durable identity is absent, which a growing set of offering modes cannot tolerate | [`market-platform-compute-40-multi-domain-proof`](../../openspec/changes/market-platform-compute-40-multi-domain-proof/) |
 
 ---
 
@@ -259,15 +259,15 @@ The same property serves market families with no physical supply behind them at 
 
 Settlement by introduction is a working mechanism with rateless options, a durable authenticated reveal, and delivery to each side, so the settlement half of an out-of-band deal already exists. What does not exist is a listing shape it can attach to.
 
-The durable listing binding carries a site and pool or Physical Resource provenance with no way to say which of those is an admission authority and which is merely where the listing came from. A Resource Pool declares only the modes its configured provider proves it can deliver, and an unproved declaration is narrowed to empty rather than retained — so a seller who intends no execution integration authorizes no mode and can advertise nothing, with fabricated provider configuration the only way through. A pool also has no way to say whether it can be admitted against, because today every pool can. The resource-pool projection enumerates executor host inventory, so a seller who declares sellable capacity with no host behind it declares into a void — the declaration succeeds and no projection entry appears. The compute registry schema carries no backing field, so a buyer cannot exclude supply nothing stands behind. A seller price is published today, but only inside the settlement carriers — the escrow and settlement-option rate structures — and no filter reads a rate value, so it cannot be compared on. Supply that settles by introduction carries no rate at all, because that mechanism's options are rateless by design. Rate comparison is therefore unavailable to backed and unbacked supply alike, for two different reasons.
+The durable listing binding carries a site and pool or Physical Resource provenance with no way to say which of those is an admission authority and which is merely where the listing came from. A Resource Pool declares only the modes its configured provider proves it can deliver, and an unproved declaration is narrowed to empty rather than retained — so a seller who intends no execution integration authorizes no mode and can advertise nothing, with fabricated provider configuration the only way through. A pool also has no way to say whether it can be admitted against, because today every pool can. The resource-pool projection enumerates host inventory, so a seller who declares sellable capacity with no host behind it declares into a void — the declaration succeeds and no projection entry appears. The compute registry schema carries no backing field, so a buyer cannot exclude supply nothing stands behind. A seller price is published today, but only inside the settlement carriers — the escrow and settlement-option rate structures — and no filter reads a rate value, so it cannot be compared on. Supply that settles by introduction carries no rate at all, because that mechanism's options are rateless by design. Rate comparison is therefore unavailable to backed and unbacked supply alike, for two different reasons.
 
-The hint that governs how many candidates a pool yields is named `listing_mode`, which reads as though it governs how a pool is listed generally. That ambiguity has already produced a proposal to encode backing or settlement inside it, which would couple inventory declaration to settlement mechanism.
+The hint that governs how many candidates a pool yields is named `listing_cardinality_mode`, and its scope is stated normatively, so a value describing what is offered, how a deal settles, or whether an admission authority backs the listing is out of scope for it. The earlier name read as though it governed how a pool is listed generally, and that ambiguity had already produced a proposal to encode backing or settlement inside the hint, which would have coupled inventory declaration to settlement mechanism.
 
 | Open gap | Owned by |
 |---|---|
 | Four names refer to the offering mode and `offer` refers to three different things, so this goal's new published fields would land under names about to change | [`settle-listing-vocabulary`](../../openspec/changes/settle-listing-vocabulary/) |
 | A pool can only authorize a mode its provider proves it can deliver, so a seller with no execution integration can advertise nothing, and no pool can say whether it can be admitted against at all | [`pool-declared-advertisement-and-backing`](../../openspec/changes/pool-declared-advertisement-and-backing/) |
-| A declared capacity resource with no executor host reaches no storefront, because the projection enumerates host inventory | [`project-capacity-resources-without-hosts`](../../openspec/changes/project-capacity-resources-without-hosts/) |
+| A declared capacity resource with no host reaches no storefront, because the projection enumerates host inventory | [`project-capacity-resources-without-hosts`](../../openspec/changes/project-capacity-resources-without-hosts/) |
 | An unbacked listing has no legal binding shape, listing origin is not distinguished from admission authority, and the compute registry schema carries no backing field | [`unbacked-listing-publication`](../../openspec/changes/unbacked-listing-publication/) |
 | No compute listing publishes a price, so supply cannot be compared on rate | [`publish-indicative-listing-rates`](../../openspec/changes/publish-indicative-listing-rates/) |
 

@@ -18,7 +18,7 @@ class RecordingReleaseExecutor:
 
 
 @pytest.mark.asyncio
-async def test_dispatcher_routes_by_executor_kind():
+async def test_dispatcher_routes_by_offering_mode():
     vm_executor = RecordingReleaseExecutor("vm-job")
     bare_metal_executor = RecordingReleaseExecutor("bare-metal-job")
     dispatcher = ExecutorReleaseDispatcher({
@@ -26,15 +26,15 @@ async def test_dispatcher_routes_by_executor_kind():
         "bare_metal": bare_metal_executor,
     })
 
-    result = await dispatcher.submit_release({"executor_kind": "bare_metal"})
+    result = await dispatcher.submit_release({"offering_mode": "bare_metal"})
 
     assert result == "bare-metal-job"
     assert vm_executor.reservations == []
-    assert bare_metal_executor.reservations == [{"executor_kind": "bare_metal"}]
+    assert bare_metal_executor.reservations == [{"offering_mode": "bare_metal"}]
 
 
 @pytest.mark.asyncio
-async def test_dispatcher_does_not_default_missing_executor_kind():
+async def test_dispatcher_does_not_default_missing_offering_mode():
     vm_executor = RecordingReleaseExecutor("vm-job")
     dispatcher = ExecutorReleaseDispatcher({"vm": vm_executor})
 
@@ -45,10 +45,10 @@ async def test_dispatcher_does_not_default_missing_executor_kind():
 
 
 @pytest.mark.asyncio
-async def test_dispatcher_returns_none_for_unknown_executor_kind():
+async def test_dispatcher_returns_none_for_unknown_offering_mode():
     dispatcher = ExecutorReleaseDispatcher({"vm": RecordingReleaseExecutor("vm-job")})
 
-    result = await dispatcher.submit_release({"executor_kind": "bare_metal"})
+    result = await dispatcher.submit_release({"offering_mode": "bare_metal"})
 
     assert result is None
 
@@ -63,7 +63,7 @@ class RecordingReleaseJobPort:
         return self.job
 
 
-def test_release_job_dispatcher_routes_by_executor_kind():
+def test_release_job_dispatcher_routes_by_offering_mode():
     vm_job = object()
     bare_metal_job = object()
     vm_port = RecordingReleaseJobPort(vm_job)
@@ -73,14 +73,14 @@ def test_release_job_dispatcher_routes_by_executor_kind():
         "bare_metal": bare_metal_port,
     })
 
-    result = dispatcher.get_job("job-1", executor_kind="bare_metal")
+    result = dispatcher.get_job("job-1", offering_mode="bare_metal")
 
     assert result is bare_metal_job
     assert vm_port.job_ids == []
     assert bare_metal_port.job_ids == ["job-1"]
 
 
-def test_release_job_dispatcher_does_not_default_missing_executor_kind():
+def test_release_job_dispatcher_does_not_default_missing_offering_mode():
     vm_port = RecordingReleaseJobPort(object())
     dispatcher = ReleaseJobDispatcher({"vm": vm_port})
 
@@ -89,11 +89,11 @@ def test_release_job_dispatcher_does_not_default_missing_executor_kind():
     assert vm_port.job_ids == []
 
 
-def test_release_job_dispatcher_raises_lookup_error_for_unregistered_executor_kind():
+def test_release_job_dispatcher_raises_lookup_error_for_unregistered_offering_mode():
     dispatcher = ReleaseJobDispatcher({"vm": RecordingReleaseJobPort(object())})
 
     with pytest.raises(LookupError):
-        dispatcher.get_job("job-1", executor_kind="bare_metal")
+        dispatcher.get_job("job-1", offering_mode="bare_metal")
 
 
 def test_release_job_dispatcher_raises_lookup_error_with_no_kind_and_no_default():

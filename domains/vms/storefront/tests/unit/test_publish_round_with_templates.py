@@ -60,7 +60,7 @@ def _insert_resource(
                         "gpu_model": "H100",
                         "sla": 99.0,
                         "region": "NY",
-                        "virtualization_type": "vm",
+                        "offering_mode": "vm",
                     }
                 ),
                 json.dumps(settlements) if settlements is not None else None,
@@ -89,9 +89,9 @@ def _run_round(db_path: str, command_settlements, monkeypatch):
             SettlementPublicationClause.model_validate(value) for value in values
         )
 
-    def publish_offer(
+    def publish_listing(
         agent_url,
-        offer,
+        listing_resource,
         capacity_source,
         accepted_escrows,
         demands,
@@ -104,7 +104,7 @@ def _run_round(db_path: str, command_settlements, monkeypatch):
                 status="open",
                 created_at="2026-08-15T00:00:00Z",
                 updated_at="2026-08-15T00:00:00Z",
-                offer_resource=offer,
+                listing_resource=listing_resource,
                 fulfillment_resource=None,
                 max_duration_seconds=max_duration_seconds,
                 storefront_url=agent_url,
@@ -120,7 +120,7 @@ def _run_round(db_path: str, command_settlements, monkeypatch):
             {
                 "agent_url": agent_url,
                 "capacity_source": capacity_source,
-                "offer": offer,
+                "listing_resource": listing_resource,
                 "accepted_escrows": accepted_escrows,
                 "demands": demands,
                 "max_duration_seconds": max_duration_seconds,
@@ -168,7 +168,7 @@ def _run_round(db_path: str, command_settlements, monkeypatch):
             ]
         },
     )
-    monkeypatch.setattr("market_storefront.cli_publish._publish_offer", publish_offer)
+    monkeypatch.setattr("market_storefront.cli_publish._publish_listing", publish_listing)
     monkeypatch.setattr(
         "market_storefront.utils.config.storefront_domain_registry",
         lambda: _VM_REGISTRY,

@@ -9,7 +9,7 @@ def _source(name: str) -> PublicationSource:
         close_stale=lambda _db, _url: [],
         available_candidates=lambda _db: [],
         skip_keys=lambda _candidate: set(),
-        offer_resource=lambda candidate: candidate,
+        listing_resource=lambda candidate: candidate,
         record_published=lambda *_args: None,
         reopen_existing=lambda *_args: None,
         reopen_error_label=name,

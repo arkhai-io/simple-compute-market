@@ -91,7 +91,7 @@ def test_generic_listing_list_passes_resource_query_and_prints_raw_json(monkeypa
         return [
             {
                 "listing_id": "L1",
-                "offer_resource": {"anything": 1},
+                "listing_resource": {"anything": 1},
                 "source_registry_url": "http://reg.example",
                 "source_registry_authority": "registry",
             }
@@ -120,7 +120,7 @@ def test_generic_listing_list_passes_resource_query_and_prints_raw_json(monkeypa
     assert json.loads(result.output) == [
         {
             "listing_id": "L1",
-            "offer_resource": {"anything": 1},
+            "listing_resource": {"anything": 1},
             "source_registry_url": "http://reg.example",
             "source_registry_authority": "registry",
         }

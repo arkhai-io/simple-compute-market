@@ -42,12 +42,12 @@ class BareMetalSellerRoundHook(Protocol):
     ) -> SellerRoundResult: ...
 
 
-def _offer_resource(
+def _listing_resource(
     listing: Mapping[str, Any] | BareMetalListing,
 ) -> BareMetalListing:
     if isinstance(listing, BareMetalListing):
         return listing
-    value: Any = listing.get("offer_resource", listing)
+    value: Any = listing.get("listing_resource", listing)
     if isinstance(value, str):
         value = json.loads(value)
     return BareMetalListing.model_validate(value)
@@ -57,7 +57,7 @@ def _listing_dict(
     listing: Mapping[str, Any] | BareMetalListing,
 ) -> dict[str, Any]:
     if isinstance(listing, BareMetalListing):
-        return {"offer_resource": listing.model_dump(mode="json")}
+        return {"listing_resource": listing.model_dump(mode="json")}
     return dict(listing)
 
 
@@ -91,7 +91,7 @@ class _DefaultBareMetalSellerRoundHook:
         listing_ref: str | None = None,
         strategy_label: str | None = None,
     ) -> SellerRoundResult:
-        offer = _offer_resource(listing)
+        offer = _listing_resource(listing)
         requested = BareMetalMessage.model_validate(message)
         strategy = strategy_label or "bare_metal_listed_price"
 

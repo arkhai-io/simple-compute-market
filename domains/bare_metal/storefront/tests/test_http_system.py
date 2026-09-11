@@ -109,9 +109,9 @@ async def test_listing_routes_return_exact_validated_domain_payload(tmp_path) ->
         missing = client.get("/api/v1/listings/missing")
 
     assert response.status_code == 200
-    assert response.json()["offer_resource"] == {
+    assert response.json()["listing_resource"] == {
         "kind": "bare_metal.v1",
-        "virtualization_type": "bare_metal",
+        "offering_mode": "bare_metal",
         "machine_id": "machine-1",
         "physical_host_id": "physical-host-1",
         "access_methods": ["ssh"],

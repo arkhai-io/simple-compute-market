@@ -61,23 +61,6 @@ def _format_path(err: ValidationError) -> str:
     return "".join(parts)
 
 
-def _derive_offer_resource_type(offer_resource: dict[str, Any]) -> str | None:
-    """Best-effort resource-type tag for the response body.
-
-    Cosmetic — the actual accept/reject decision is the schema's, not
-    this function's.  Kept for back-compat with registry-client's
-    ``ValidatePublishResponse.offer_resource_type``; will be dropped
-    when the client updates in a1b-4.
-    """
-    if not offer_resource:
-        return None
-    if "gpu_model" in offer_resource or "region" in offer_resource:
-        return "compute"
-    if "token" in offer_resource:
-        return "token"
-    return None
-
-
 @router.post(
     "/validate-publish",
     response_model=ValidatePublishResponse,
@@ -113,7 +96,7 @@ async def validate_publish(
     candidate: dict[str, Any] = {
         "listing_id": body.listing_id,
         "storefront_url": body.storefront_url,
-        "offer_resource": body.offer_resource,
+        "listing_resource": body.listing_resource,
         "accepted_escrows": body.accepted_escrows,
         "settlement_options": body.settlement_options,
         "demands": body.demands,
@@ -130,7 +113,6 @@ async def validate_publish(
     response_body = ValidatePublishResponse(
         valid=not errors,
         listing_id=body.listing_id,
-        offer_resource_type=_derive_offer_resource_type(body.offer_resource),
         accepted_escrows_count=len(body.accepted_escrows),
         settlement_options_count=len(body.settlement_options),
         errors=errors,

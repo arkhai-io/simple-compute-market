@@ -190,7 +190,7 @@ def _hosted_option() -> SettlementOption:
         derivation_key="site-a:resource-1",
         projection_digest="sha256:" + "cd" * 32,
         site_id="site-a",
-        executor_kind="bare_metal",
+        offering_mode="bare_metal",
         resource_selection="specific",
         physical_resource_id="resource-1",
         physical_host_id="physical-host-1",

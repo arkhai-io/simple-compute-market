@@ -3,12 +3,12 @@
 ## 1. Publish declared dimensions
 
 - [ ] 1.1 Re-verify `design.md`'s Context findings before editing: the five fields
-      `vm_offer_resource_for_listing` currently builds, `ComputeResource`'s optional
+      `vm_listing_resource_for_listing` currently builds, `ComputeResource`'s optional
       dimension fields, and the reconciler discarding all of `resource["capacity"]`
       except `gpu_count`.
 - [ ] 1.2 Carry the projection's declared capacity map through `_publishable_slices`
       and the slice dictionaries instead of reducing it to `gpu_count`.
-- [ ] 1.3 Extend `vm_offer_resource_for_listing` to emit each declared dimension the
+- [ ] 1.3 Extend `vm_listing_resource_for_listing` to emit each declared dimension the
       domain vocabulary recognizes, omitting undeclared ones. Derive the set from
       `arkhai_vms.DIMENSION_KEYS`, not a literal tuple.
 - [ ] 1.4 Confirm no provisioning default (`default_vm_ram`, `default_vm_vcpus`,
@@ -39,7 +39,7 @@
 Per `openspec/README.md#plan-closeout-requirements`.
 
 - [ ] 4.1 **Comment hygiene.** Run `make check-comment-hygiene`. Read
-      `vm_offer_resource_for_listing`'s and `_publishable_slices`' docstrings
+      `vm_listing_resource_for_listing`'s and `_publishable_slices`' docstrings
       directly; both describe a GPU-only shape.
 - [ ] 4.2 **Import placement.** Review imports this change adds or touches.
 - [ ] 4.3 **Documentation compliance.** Confirm the publish-what-is-declared rule

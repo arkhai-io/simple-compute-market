@@ -190,14 +190,14 @@ remove authority without assigning it to another principal.
   operation does not transfer that authority to another principal
 
 ### Requirement: Allocation-backed executor registration
-Market-managed VM and bare-metal leases MUST attach executor kind, target, and executor-specific reference data to an existing committed site allocation.
+Market-managed VM and bare-metal leases MUST attach the offering mode, target, and executor-specific reference data to an existing committed site allocation.
 
 #### Scenario: Bare-metal lease is registered
 - **WHEN** a caller registers a lease for a committed allocation and bare-metal machine
-- **THEN** the allocation records the `bare_metal` executor kind, machine target, and physical-host reference
+- **THEN** the allocation records the `bare_metal` offering mode, machine target, and physical-host reference
 
 ### Requirement: Executor-dispatched lifecycle
-Market-managed release MUST dispatch by executor kind; direct VM host administration endpoints MAY remain separate operator surfaces.
+Market-managed release MUST dispatch by offering mode; direct VM host administration endpoints MAY remain separate operator surfaces.
 
 #### Scenario: Bare-metal allocation is released
 - **WHEN** its lease lifecycle invokes release
@@ -232,7 +232,7 @@ Compute lease lifecycle MUST use an injected site-authority port and MUST NOT re
 - **WHEN** an authorized operator force-releases after an unrecoverable executor failure
 - **THEN** the audit state distinguishes the operator override from successful physical teardown
 
-Release submission and release-completion reads are separate, independently kind-routed seams, because what "teardown complete" means differs by executor kind: bare-metal submits one job to a shared job queue and polls that job directly; VM teardown is a durable, multi-step fulfillment aggregate (see the Fulfillment specification's "Fulfillment convergence worker") with its own dispatch and status-convergence passes, running independently of the lease watchdog's own poll cadence. Compute lease lifecycle stays kind-agnostic on both sides: a release-job port is resolved by the reservation's executor kind the same way release submission already resolves an executor delegate by kind, so adding or changing one executor's completion semantics does not touch the generic watchdog or any other kind's path. VM's specific delegation shape — the narrow fulfillment-teardown port, the durable `fulfillment_id` as release tracking identifier, and the failure-propagation contract for unexpected submission errors — is the formal subject of "VM release delegates to durable fulfillment teardown" and "Lease release and fulfillment teardown have separate retry ownership" below (`## Relationship to fulfillment`); this section states only the kind-routing rationale that applies to bare-metal too.
+Release submission and release-completion reads are separate, independently kind-routed seams, because what "teardown complete" means differs by offering mode: bare-metal submits one job to a shared job queue and polls that job directly; VM teardown is a durable, multi-step fulfillment aggregate (see the Fulfillment specification's "Fulfillment convergence worker") with its own dispatch and status-convergence passes, running independently of the lease watchdog's own poll cadence. Compute lease lifecycle stays kind-agnostic on both sides: a release-job port is resolved by the reservation's offering mode the same way release submission already resolves an executor delegate by mode, so adding or changing one mode's completion semantics does not touch the generic watchdog or any other mode's path. VM's specific delegation shape — the narrow fulfillment-teardown port, the durable `fulfillment_id` as release tracking identifier, and the failure-propagation contract for unexpected submission errors — is the formal subject of "VM release delegates to durable fulfillment teardown" and "Lease release and fulfillment teardown have separate retry ownership" below (`## Relationship to fulfillment`); this section states only the kind-routing rationale that applies to bare-metal too.
 
 #### Scenario: VM lease release begins durable fulfillment teardown
 
@@ -242,7 +242,7 @@ Release submission and release-completion reads are separate, independently kind
 #### Scenario: Executor release delegate has nothing to poll
 
 - **WHEN** an executor's release delegate reports no pollable job for a submitted release (e.g. no release mechanism configured for that kind)
-- **THEN** the lease lifecycle treats it as immediately complete, independent of whether any other executor kind has a release-job port configured
+- **THEN** the lease lifecycle treats it as immediately complete, independent of whether any other offering mode has a release-job port configured
 
 ### Requirement: Explicit early lease termination
 
@@ -313,11 +313,21 @@ Cross-domain compute orchestration, including mechanism-neutral fulfillment coor
 
 ### Requirement: Validated executor registration
 
-Service composition MUST reject duplicate executor/action kinds, duplicate fulfillment-provider identities, and incomplete adapter bundles before accepting traffic. Executor and provider registries MUST remain separate authority dimensions: registering or resolving a provider does not claim, infer, or override an executor kind. Provider fulfillment and executor dispatch remain separate paths unless composition explicitly joins them through a supported lifecycle.
+Service composition MUST reject duplicate executor registrations, duplicate fulfillment-provider identities, and incomplete adapter bundles before accepting traffic. An executor adapter MUST be selected by the `offering_mode` it serves together with its action; no surface may name that selector `executor_kind`, `offering_type`, or `virtualization_type`. Executor and provider registries MUST remain separate authority dimensions: registering or resolving a provider does not claim, infer, or override an executor's offering mode. Provider fulfillment and executor dispatch remain separate paths unless composition explicitly joins them through a supported lifecycle.
 
-#### Scenario: Two adapters claim one executor kind
+`executor` names this action-dispatch abstraction and nothing else when it is the head noun. It MUST NOT stand in for the offering mode, the machine, or the delivery handler: the mode is an offering mode, the machine is a host, and the handler is a provider. The abstraction keeps the name because it validates parameters, submits work, and validates results and credentials; only its selector moves.
 
-- **WHEN** composition registers duplicate ownership for an executor/action kind
+`executor_`-prefixed compounds naming the abstraction's own targets, references, or actions MUST retain the name, because `executor` carries its action-dispatch sense in them rather than standing in for another concept. `executor_ref` is the executor's reference, `executor_target` is the target of an executor action, and an executor action envelope carries an executor action; none of these is the mode, the machine, or the handler as a head noun. This requirement's prohibition therefore applies to the head noun and MUST NOT be read as a prohibition on the prefix.
+
+#### Scenario: An executor-prefixed compound names the abstraction's own target
+
+- **WHEN** a durable reservation or lease records the target or reference an executor action acts on
+- **THEN** those fields retain their `executor_`-prefixed names
+- **AND** the offering-mode selector on the same record does not, because its head noun is the mode
+
+#### Scenario: Two adapters claim one offering mode
+
+- **WHEN** composition registers duplicate ownership for an `offering_mode` and action pair
 - **THEN** startup fails with both registrations identified and no server begins serving
 
 #### Scenario: Two adapters claim one provider identity
@@ -423,7 +433,13 @@ configuration rather than by constructing provider payload JSON independently.
 
 ### Requirement: VM release delegates to durable fulfillment teardown
 
-For VM reservations, lease release SHALL initiate teardown through a narrow fulfillment-teardown port. The VM release adapter SHALL use the durable `fulfillment_id` as the release tracking identifier and SHALL NOT submit or poll a provider job directly. Release-status lookup SHALL be selected by `executor_kind`; VM lookup SHALL read fulfillment aggregate state while bare-metal lookup MAY read its executor job service.
+For VM reservations, lease release SHALL initiate teardown through a narrow fulfillment-teardown port. The VM release adapter SHALL use the durable `fulfillment_id` as the release tracking identifier and SHALL NOT submit or poll a provider job directly. Release-status lookup SHALL be selected by the reservation's `offering_mode`, the same value the capacity claim carries and the Resource Pool declares; VM lookup SHALL read fulfillment aggregate state while bare-metal lookup MAY read its executor job service.
+
+#### Scenario: Release status is selected by the offering mode
+
+- **WHEN** lease lifecycle resolves a release-status lookup for a reservation
+- **THEN** the lookup is selected by the reservation's recorded `offering_mode`
+- **AND** a reservation carrying the retired selector key is treated as carrying no offering mode rather than defaulting to one
 
 #### Scenario: Unexpected teardown submission failure remains diagnosable
 
@@ -482,7 +498,7 @@ surface before the host is publishable.
 
 ### Requirement: Hosted funding gates whole-host allocation
 
-For a hosted bare-metal obligation, no Capacity Reservation commit, scheduling, executor dispatch, lease, or access grant may begin before authoritative funding is ready. The fulfillment identity MUST be derived from the accepted agreement, obligation, seller-owned Physical Resource or pool selection, site, buyer, claimant, and executor kind. Replay and restart MUST converge on the same selected-site reservation and fulfillment; they MUST NOT substitute a different resource or site.
+For a hosted bare-metal obligation, no Capacity Reservation commit, scheduling, executor dispatch, lease, or access grant may begin before authoritative funding is ready. The fulfillment identity MUST be derived from the accepted agreement, obligation, seller-owned Physical Resource or pool selection, site, buyer, claimant, and offering mode. Replay and restart MUST converge on the same selected-site reservation and fulfillment; they MUST NOT substitute a different resource or site.
 
 #### Scenario: Access-ready evidence
 

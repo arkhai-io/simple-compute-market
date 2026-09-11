@@ -508,7 +508,7 @@ class TestStage03a_ValidatePublish:
         req = ValidatePublishRequest(
             listing_id=deal_state.seller_listing_id,
             storefront_url="http://bob-storefront:8001/",
-            offer_resource=OFFER_RESOURCE,
+            listing_resource=OFFER_RESOURCE,
             accepted_escrows=ACCEPTED_ESCROWS,
             max_duration_seconds=DURATION_HOURS * 3600,
         )
@@ -517,12 +517,11 @@ class TestStage03a_ValidatePublish:
             f"Registry validate-publish returned valid=False for listing "
             f"{deal_state.seller_listing_id}.\n"
             f"Errors: {result.errors}\n"
-            f"offer_resource_type={result.offer_resource_type!r} "
             f"accepted_escrows_count={result.accepted_escrows_count}"
         )
         deal_state._registry_validate_passed = True
-        log.info("[03a] Registry validate-publish: valid=%s offer=%s escrows=%d",
-                 result.valid, result.offer_resource_type, result.accepted_escrows_count)
+        log.info("[03a] Registry validate-publish: valid=%s escrows=%d",
+                 result.valid, result.accepted_escrows_count)
 
 
 class TestStage03b_ResumePublishesToRegistry:

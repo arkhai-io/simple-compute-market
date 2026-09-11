@@ -89,20 +89,20 @@ async def _seed_listing(
     *,
     valid_capacity_identity: bool = True,
 ) -> None:
-    offer_resource = {
+    listing_resource = {
         "gpu_model": "H200",
         "gpu_count": 1,
         "sla": 99.9,
         "region": "California, US",
-        "virtualization_type": "vm",
+        "offering_mode": "vm",
     }
     if valid_capacity_identity:
-        offer_resource["resource_id"] = f"res-{listing_id}"
+        listing_resource["resource_id"] = f"res-{listing_id}"
     listing_kwargs = {
         "status": status,
         "created_at": datetime.now().isoformat(),
         "updated_at": datetime.now().isoformat(),
-        "offer_resource": offer_resource,
+        "listing_resource": listing_resource,
         "accepted_escrows": [
             {
                 "chain_name": "anvil",
@@ -504,7 +504,7 @@ _OFFER = {
     "gpu_count": 1,
     "sla": 99.0,
     "region": "California, US",
-    "virtualization_type": "vm",
+    "offering_mode": "vm",
 }
 _CAPACITY_SOURCE = {
     "site_id": _HOME_SITE,
@@ -794,7 +794,7 @@ class TestCreateListing:
         """Valid request creates a listing and returns a listing_id."""
         c, db = seller_auth_full_client
         result = await c.create_listing(
-            offer=_OFFER,
+            listing_resource=_OFFER,
             capacity_source=_CAPACITY_SOURCE,
             accepted_escrows=_ACCEPTED_ESCROWS,
             paused=True,
@@ -825,7 +825,7 @@ class TestCreateListing:
         }
         with pytest.raises(StorefrontClientError) as exc_info:
             await c.create_listing(
-                offer=offer_without_identity,
+                listing_resource=offer_without_identity,
                 capacity_source=_CAPACITY_SOURCE,
                 accepted_escrows=_ACCEPTED_ESCROWS,
                 paused=True,
@@ -838,7 +838,7 @@ class TestCreateListing:
         c, _ = seller_auth_full_client
         assert "pool_id" not in _OFFER  # confirms this case is what's exercised
         result = await c.create_listing(
-            offer=_OFFER,
+            listing_resource=_OFFER,
             capacity_source=_CAPACITY_SOURCE,
             accepted_escrows=_ACCEPTED_ESCROWS,
             paused=True,
@@ -855,7 +855,7 @@ class TestCreateListing:
         c, _ = seller_auth_full_client
         with pytest.raises(StorefrontClientError) as exc_info:
             await c.create_listing(
-                offer=_OFFER,
+                listing_resource=_OFFER,
                 capacity_source={
                     **_CAPACITY_SOURCE,
                     "resource_id": "other-resource",
@@ -876,7 +876,7 @@ class TestCreateListing:
         """
         c, _ = seller_auth_full_client
         result = await c.create_listing(
-            offer=_OFFER,
+            listing_resource=_OFFER,
             capacity_source=_CAPACITY_SOURCE,
             accepted_escrows=_ACCEPTED_ESCROWS,
             paused=True,
@@ -902,7 +902,7 @@ class TestCreateListing:
         """
         c, _ = seller_auth_full_client
         result = await c.create_listing(
-            offer=_OFFER,
+            listing_resource=_OFFER,
             capacity_source=_CAPACITY_SOURCE,
             accepted_escrows=_ACCEPTED_ESCROWS,
             paused=True,
@@ -926,7 +926,7 @@ class TestCreateListing:
         c, _ = seller_auth_full_client
         # If the double-wrap bug is present this raises StorefrontClientError with '500'
         result = await c.create_listing(
-            offer=_OFFER,
+            listing_resource=_OFFER,
             capacity_source=_CAPACITY_SOURCE,
             accepted_escrows=_ACCEPTED_ESCROWS,
             paused=True,

@@ -95,13 +95,13 @@ async def _persist_accepted_negotiation(
         status="open",
         created_at=timestamp,
         updated_at=timestamp,
-        offer_resource={
+        listing_resource={
             "resource_id": f"resource-{listing_id}",
             "gpu_model": "H200",
             "gpu_count": 1,
             "sla": 99.9,
             "region": "California, US",
-            "virtualization_type": "vm",
+            "offering_mode": "vm",
         },
         fulfillment_resource=None,
         max_duration_seconds=3600,

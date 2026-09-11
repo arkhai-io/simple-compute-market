@@ -153,7 +153,7 @@ def _publish_registry_listing(
     response = client.publish_listing(
         ListingRequest(
             listing_id=listing_id,
-            offer=offer,
+            listing_resource=offer,
             accepted_escrows=accepted_escrows,
             settlement_options=settlement_options,
             demands=demands,
@@ -206,7 +206,7 @@ def run_publication_once() -> dict[str, Any]:
         return _publish_registry_listing(
             client,
             listing_id=listing_id,
-            offer=values["offer"],
+            listing_resource=values["listing_resource"],
             accepted_escrows=values["accepted_escrows"],
             settlement_options=values["settlement_options"],
             demands=values["demands"],
@@ -239,7 +239,7 @@ def run_publication_once() -> dict[str, Any]:
             )
         )
 
-    def publish_offer(
+    def publish_listing(
         offer: dict[str, Any],
         accepted_escrows: list[dict[str, Any]],
         published_demands: list[dict[str, Any]],
@@ -255,7 +255,7 @@ def run_publication_once() -> dict[str, Any]:
         _publish_registry_listing(
             client,
             listing_id=listing_id,
-            offer=offer,
+            listing_resource=offer,
             accepted_escrows=accepted_escrows,
             settlement_options=settlement_options or [],
             demands=published_demands,
@@ -263,7 +263,7 @@ def run_publication_once() -> dict[str, Any]:
             storefront_url=runtime.storefront_url,
         )
         raw_listing = dict(offer)
-        raw_listing.pop("virtualization_type", None)
+        raw_listing.pop("offering_mode", None)
         raw_listing["max_duration_seconds"] = duration
         now = datetime.now(timezone.utc).isoformat()
         asyncio.run(
@@ -295,7 +295,7 @@ def run_publication_once() -> dict[str, Any]:
             ),
             callbacks=StorefrontPublicationCommandCallbacks(
                 build_payload=build_payload,
-                publish_offer=publish_offer,
+                publish_listing=publish_listing,
             ),
         )
         return to_jsonable_python(

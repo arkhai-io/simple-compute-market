@@ -472,10 +472,10 @@ class FakeSite:
 
     def _match(self, claim: dict[str, Any]) -> dict[str, Any] | None:
         claim = claim or {}
-        executor_kind = claim.get("executor_kind")
+        offering_mode = claim.get("offering_mode")
         if (
-            not isinstance(executor_kind, str)
-            or executor_kind not in self.deliverable_modes
+            not isinstance(offering_mode, str)
+            or offering_mode not in self.deliverable_modes
         ):
             return None
         dimensions = claim.get("dimensions") or {}
@@ -498,7 +498,7 @@ class FakeSite:
                     "gpu_count",
                     "dimensions",
                     "resource_type",
-                    "executor_kind",
+                    "offering_mode",
                 )
             )
             if mismatched or self._available(resource_id) < requested:

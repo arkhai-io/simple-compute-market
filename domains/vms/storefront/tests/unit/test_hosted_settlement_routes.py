@@ -119,7 +119,7 @@ def _accepted_state(*, legacy: bool = False):
     ).model_dump(mode="json")
     listing = {
         "listing_id": "listing-1",
-        "offer_resource": {"gpu_model": "H100", "gpu_count": 1},
+        "listing_resource": {"gpu_model": "H100", "gpu_count": 1},
         "settlement_options": [option.model_dump(mode="json")],
     }
     service_terms = {}
@@ -317,14 +317,14 @@ async def test_changed_authorization_retry_fails_before_materialization(
 async def test_accepted_plan_survives_current_publication_profile_removal() -> None:
     db, _thread, listing, obligation = _accepted_state()
     listing["settlement_options"] = []
-    listing["offer_resource"] = {"gpu_model": "H200", "gpu_count": 8}
+    listing["listing_resource"] = {"gpu_model": "H200", "gpu_count": 8}
 
     recovered = await load_hosted_agreement(
         sqlite_client=db,
         negotiation_id="negotiation-1",
         expected_claimant=SELLER,
     )
-    assert recovered.order["offer_resource"] == {"gpu_model": "H100", "gpu_count": 1}
+    assert recovered.order["listing_resource"] == {"gpu_model": "H100", "gpu_count": 1}
     db.load_listing.assert_not_awaited()
 
     assert recovered.obligation == obligation

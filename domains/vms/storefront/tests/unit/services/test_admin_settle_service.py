@@ -60,7 +60,7 @@ _SELLER_WALLET = "0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC"
 _LISTING_ROW = {
     "listing_id": _LISTING_ID,
     "status": "open",
-    "offer_resource": {"gpu_model": "H200", "gpu_count": 1, "region": "California, US"},
+    "listing_resource": {"gpu_model": "H200", "gpu_count": 1, "region": "California, US"},
     "demand_resource": {"token": {"symbol": "MOCK", "contract_address": "0x01", "decimals": 0}, "amount": 5000},
 }
 

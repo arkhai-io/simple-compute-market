@@ -167,7 +167,7 @@ class TestOpaqueReservationBoundary:
         client = _client(app)
 
         reservation = await client.reserve(
-            claim={"executor_kind": "vm", "pool_id": "default", "gpu_count": 1},
+            claim={"offering_mode": "vm", "pool_id": "default", "gpu_count": 1},
             deal_ref={"escrow_uid": "escrow-1"},
         )
 
@@ -187,7 +187,7 @@ class TestOpaqueReservationBoundary:
         client = _client(app)
 
         reservation = await client.reserve(
-            claim={"executor_kind": "vm", "pool_id": "default", "gpu_count": 1},
+            claim={"offering_mode": "vm", "pool_id": "default", "gpu_count": 1},
             deal_ref={"escrow_uid": "escrow-1"},
         )
         assert reservation is not None

@@ -236,6 +236,60 @@ def test_load_capacity_pool_metadata_projects_allowlisted_pool_fields():
     }
 
 
+def test_load_capacity_pool_metadata_reconciles_the_cardinality_key():
+    """A pool stored under the deprecated cardinality key projects under
+    both spellings.
+
+    The stored document is operator-authored and projected verbatim
+    otherwise, so projection is the one place the renamed key is
+    reconciled without rewriting operator data. Covered here rather than
+    only at the hints level because the hazard is the producer failing to
+    call the reconciliation at all, which a unit test of the reconciler
+    cannot detect.
+    """
+    session = _pool_session(
+        pools=[_pool(policy_tags={"listing_mode": "specific_resource"})],
+        ansible_configs=[],
+    )
+
+    projected = load_capacity_pool_metadata(lambda: session)["gpu-pool"]
+
+    assert projected["policy_tags"]["listing_cardinality_mode"] == "specific_resource"
+    assert projected["policy_tags"]["listing_mode"] == "specific_resource"
+
+
+def test_load_capacity_pool_metadata_emits_both_cardinality_spellings():
+    """The unsafe skew direction is a new producer reaching an old
+    consumer: that consumer reads the settled key as absent, and absence
+    resolves to a structural default rather than erroring, so it would
+    silently reclassify the pool. A consumer's own alias acceptance cannot
+    prevent that -- only the producer still emitting the key it
+    understands can.
+    """
+    session = _pool_session(
+        pools=[_pool(policy_tags={"listing_cardinality_mode": "fungible"})],
+        ansible_configs=[],
+    )
+
+    projected = load_capacity_pool_metadata(lambda: session)["gpu-pool"]
+
+    assert projected["policy_tags"]["listing_mode"] == "fungible"
+    assert projected["policy_tags"]["listing_cardinality_mode"] == "fungible"
+
+
+def test_load_capacity_pool_metadata_leaves_an_untagged_pool_untagged():
+    """Absence encodes "no cardinality question applies", so projection
+    must not invent a value for a pool that declared none."""
+    session = _pool_session(
+        pools=[_pool(policy_tags={"region": "eu"})], ansible_configs=[]
+    )
+
+    projected = load_capacity_pool_metadata(lambda: session)["gpu-pool"]
+
+    assert "listing_cardinality_mode" not in projected["policy_tags"]
+    assert "listing_mode" not in projected["policy_tags"]
+
+
 def test_load_capacity_pool_metadata_nests_vm_size_defaults_under_versioned_view():
     session = _pool_session(
         pools=[_pool()],

@@ -32,7 +32,7 @@ async def test_listing_round_trips_canonical_publication_clauses(tmp_path) -> No
         status="open",
         created_at=now,
         updated_at=now,
-        offer_resource={
+        listing_resource={
             "resource_type": "compute",
             "resource_id": "resource-1",
             "gpu_model": "H200",

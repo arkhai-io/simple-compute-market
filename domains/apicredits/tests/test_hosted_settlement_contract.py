@@ -50,7 +50,7 @@ def _resource() -> dict[str, object]:
 
 def test_hosted_only_listing_accepts_options_without_escrows() -> None:
     listing = ApiCreditsListing(
-        offer_resource=_resource(),
+        listing_resource=_resource(),
         settlement_options=[_option()],
     )
     assert listing.accepted_escrows == []
@@ -61,7 +61,7 @@ def test_duplicate_settlement_identity_is_rejected() -> None:
     option = _option()
     with pytest.raises(ValidationError, match="duplicate option identities"):
         ApiCreditsListing(
-            offer_resource=_resource(),
+            listing_resource=_resource(),
             settlement_options=[option, option],
         )
 

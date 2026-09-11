@@ -156,46 +156,84 @@ class _PayloadRemote:
         pass
 
 
-class TestListingModeExplanations:
+class TestListingCardinalityModeExplanations:
     async def test_empty_when_nothing_loaded(self):
-        assert spc.listing_mode_explanations() == {}
+        assert spc.listing_cardinality_mode_explanations() == {}
 
-    async def test_no_explanation_for_a_recognized_or_absent_listing_mode(self):
+    async def test_no_explanation_for_a_recognized_or_absent_cardinality_mode(self):
         remote = _PayloadRemote([
             {"resource_pool_id": "gpu-pool-a", "resources": []},
             {
                 "resource_pool_id": "gpu-pool-b", "resources": [],
-                "pool_metadata": {"policy_tags": {"listing_mode": "specific_resource"}},
+                "pool_metadata": {"policy_tags": {"listing_cardinality_mode": "specific_resource"}},
             },
         ])
         with _patched_remotes({"site-a": remote}):
             await spc.load_site_projections(object())
-        assert spc.listing_mode_explanations() == {}
+        assert spc.listing_cardinality_mode_explanations() == {}
 
-    async def test_explanation_for_an_unrecognized_listing_mode(self):
+    async def test_explanation_for_an_unrecognized_cardinality_mode(self):
         remote = _PayloadRemote([
             {
                 "resource_pool_id": "gpu-pool",
+                "resources": [],
+                "pool_metadata": {"policy_tags": {"listing_cardinality_mode": "bogus"}},
+            },
+        ])
+        with _patched_remotes({"site-a": remote}):
+            await spc.load_site_projections(object())
+        explanations = spc.listing_cardinality_mode_explanations()
+        assert set(explanations) == {"site-a"}
+        assert "gpu-pool" in explanations["site-a"]
+        assert "bogus" in explanations["site-a"]["gpu-pool"]
+
+    async def test_deprecated_key_is_reported_without_a_fallback(self):
+        """An unupgraded site emits only the deprecated key. The pool must
+        resolve to the cardinality that key names and the operator must be
+        told to rename it -- the notice is not a fallback explanation, and
+        the pool must not be reclassified to the structural default."""
+        remote = _PayloadRemote([
+            {
+                "resource_pool_id": "legacy-pool",
+                "resources": [],
+                "pool_metadata": {
+                    "policy_tags": {"listing_mode": "specific_resource"},
+                },
+            },
+        ])
+        with _patched_remotes({"site-a": remote}):
+            await spc.load_site_projections(object())
+        explanations = spc.listing_cardinality_mode_explanations()
+        notice = explanations["site-a"]["legacy-pool"]
+        assert "listing_mode" in notice
+        assert "listing_cardinality_mode" in notice
+        assert "unrecognized" not in notice
+
+    async def test_both_notices_reported_for_a_bad_value_under_the_old_key(self):
+        remote = _PayloadRemote([
+            {
+                "resource_pool_id": "legacy-bad-pool",
                 "resources": [],
                 "pool_metadata": {"policy_tags": {"listing_mode": "bogus"}},
             },
         ])
         with _patched_remotes({"site-a": remote}):
             await spc.load_site_projections(object())
-        explanations = spc.listing_mode_explanations()
-        assert set(explanations) == {"site-a"}
-        assert "gpu-pool" in explanations["site-a"]
-        assert "bogus" in explanations["site-a"]["gpu-pool"]
+        notice = spc.listing_cardinality_mode_explanations()["site-a"][
+            "legacy-bad-pool"
+        ]
+        assert "bogus" in notice
+        assert "listing_cardinality_mode" in notice
 
     async def test_one_sites_explanations_do_not_affect_another(self):
         clean = _PayloadRemote([{"resource_pool_id": "clean-pool", "resources": []}])
         bad = _PayloadRemote([
             {
                 "resource_pool_id": "bad-pool", "resources": [],
-                "pool_metadata": {"policy_tags": {"listing_mode": "bogus"}},
+                "pool_metadata": {"policy_tags": {"listing_cardinality_mode": "bogus"}},
             },
         ])
         with _patched_remotes({"site-clean": clean, "site-bad": bad}):
             await spc.load_site_projections(object())
-        explanations = spc.listing_mode_explanations()
+        explanations = spc.listing_cardinality_mode_explanations()
         assert set(explanations) == {"site-bad"}

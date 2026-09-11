@@ -47,7 +47,7 @@ async def _release_capacity_handler(
     row = await db.load_listing(listing_id=listing_id)
     if row is None:
         raise RuntimeError("capacity recovery requires a durable listing binding")
-    binding = capacity_binding_from_offer(row.get("offer_resource") or {})
+    binding = capacity_binding_from_offer(row.get("listing_resource") or {})
     capacity = build_capacity_runtime(lambda: db)
     reservation = await capacity.release(
         binding,
@@ -193,7 +193,7 @@ async def fulfill_credit_obligation(
     return await fulfill_api_credits_obligation(
         client=client,
         escrow_uid=escrow_uid,
-        offer_resource=listing.offer_resource.model_dump(mode="json"),
+        listing_resource=listing.listing_resource.model_dump(mode="json"),
         quantity=quantity,
         key_mode=key_mode,
         key_id=key_id,

@@ -67,14 +67,14 @@ def _authorities(urls: list[str]) -> dict:
 def test_declared_id_is_read_with_buyer_signer_and_authority_pin():
     buyer = _signer(1)
     authority = _authority("registry-r", _signer(2))
-    _FakeRegistryClient.schemas["http://r:8080"] = "vms.compute"
+    _FakeRegistryClient.schemas["http://r:8080"] = "compute.market"
 
     with patch.object(registry_config, "SyncRegistryClient", _FakeRegistryClient):
         assert registry_schema_id(
             "http://r:8080/",
             signer=buyer,
             registry_authority=authority,
-        ) == "vms.compute"
+        ) == "compute.market"
 
     call = _FakeRegistryClient.calls[0]
     assert call["signer"] is buyer
@@ -104,7 +104,7 @@ def test_schema_id_cache_is_bound_to_url_and_authority():
     buyer = _signer(5)
     first = _authority("registry", _signer(6))
     second = _authority("registry", _signer(7))
-    _FakeRegistryClient.schemas["http://r:8080"] = "vms.compute"
+    _FakeRegistryClient.schemas["http://r:8080"] = "compute.market"
     with patch.object(registry_config, "SyncRegistryClient", _FakeRegistryClient):
         registry_schema_id(
             "http://r:8080",
@@ -134,7 +134,7 @@ def test_only_explicit_mismatch_drops_a_registry(capsys):
     buyer = _signer(8)
     authorities = _authorities(urls)
     _FakeRegistryClient.schemas = {
-        "http://vms:8080": "vms.compute",
+        "http://vms:8080": "compute.market",
         "http://tokens:8080": "tokens.api",
         "http://legacy:8080": None,
     }
@@ -145,7 +145,7 @@ def test_only_explicit_mismatch_drops_a_registry(capsys):
         patch.object(registry_config, "resolve_registry_api_keys", return_value={}),
     ):
         kept = resolve_indexer_urls_for_schema(
-            "vms.compute",
+            "compute.market",
             signer=buyer,
             registry_authorities=authorities,
             override=",".join(urls),
@@ -169,7 +169,7 @@ def test_api_key_is_additional_to_signed_identity():
         ),
     ):
         resolve_indexer_urls_for_schema(
-            "vms.compute",
+            "compute.market",
             signer=buyer,
             registry_authorities=authorities,
             override=",".join(urls),
@@ -186,7 +186,7 @@ def test_singleton_registry_list_is_returned_without_fetching():
     urls = ["http://only:8080"]
     with patch.object(registry_config, "SyncRegistryClient", _FakeRegistryClient):
         kept = resolve_indexer_urls_for_schema(
-            "vms.compute",
+            "compute.market",
             signer=_signer(30),
             registry_authorities=_authorities(urls),
             override=urls[0],
@@ -198,7 +198,7 @@ def test_singleton_registry_list_is_returned_without_fetching():
 def test_schema_resolution_rejects_missing_authority_pin():
     with pytest.raises(RuntimeError, match="exactly match"):
         resolve_indexer_urls_for_schema(
-            "vms.compute",
+            "compute.market",
             signer=_signer(31),
             registry_authorities={},
             override="http://one:8080,http://two:8080",

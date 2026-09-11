@@ -603,7 +603,7 @@ class AdminController:
         listing: dict[str, Any],
         thread: dict[str, Any] | None,
     ) -> bool:
-        offer = self._json_object(listing.get("offer_resource"))
+        offer = self._json_object(listing.get("listing_resource"))
         if offer.get("interruptible") is True:
             return True
 
@@ -1038,7 +1038,7 @@ class AdminController:
         except RuntimeError as exc:
             raise HTTPException(status_code=500, detail=str(exc)) from exc
         claim = dict(body.required_attributes or {})
-        claim["executor_kind"] = binding.offering_mode
+        claim["offering_mode"] = binding.offering_mode
         try:
             reserved = await self._runtime().reserve(
                 binding,

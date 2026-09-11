@@ -96,7 +96,7 @@ def _reserve_bare_metal(escrow_uid: str) -> dict:
         )
     reserved = ledger.reserve(
         claim={
-            "executor_kind": "bare_metal",
+            "offering_mode": "bare_metal",
             "physical_host_id": "host-physical-1",
             "allocation_mode": ALLOCATION_MODE_EXCLUSIVE,
         },
@@ -197,7 +197,7 @@ async def test_register_bare_metal_lease_uses_bare_metal_endpoint_and_view(
 
     ledger = _container_module.resolved_capacity_ledger_service
     reservation = ledger.get_reservation(lease["capacity_reservation_id"])
-    assert reservation["executor_kind"] == "bare_metal"
+    assert reservation["offering_mode"] == "bare_metal"
     assert reservation["executor_target"] == "bm-node-1"
     assert reservation["executor_ref"] == {
         "physical_host_id": "host-physical-1",
@@ -212,7 +212,7 @@ async def test_register_bare_metal_lease_uses_bare_metal_endpoint_and_view(
         assert job is not None
         assert job.params["vm_action"] == NODE_GRANT_ACCESS_ACTION
         assert job.params["vm_host"] == "bm-node-1"
-        assert job.params["executor_kind"] == "bare_metal"
+        assert job.params["offering_mode"] == "bare_metal"
         assert job.params["executor_action"] == NODE_GRANT_ACCESS_ACTION
         assert job.params["executor_target"] == "bm-node-1"
         assert job.params["physical_host_id"] == "host-physical-1"
@@ -270,7 +270,7 @@ async def test_generic_market_lease_terminate_dispatches_bare_metal_reclaim(
     ledger = _container_module.resolved_capacity_ledger_service
     reservation = ledger.get_reservation(lease["capacity_reservation_id"])
     assert reservation["state"] == "releasing"
-    assert reservation["executor_kind"] == "bare_metal"
+    assert reservation["offering_mode"] == "bare_metal"
     assert reservation["release_job_id"]
     assert reservation["vm_remove_job_id"] is None
 
@@ -280,7 +280,7 @@ async def test_generic_market_lease_terminate_dispatches_bare_metal_reclaim(
         assert job is not None
         assert job.params["vm_action"] == NODE_RECLAIM_ACCESS_ACTION
         assert job.params["vm_host"] == "bm-node-1"
-        assert job.params["executor_kind"] == "bare_metal"
+        assert job.params["offering_mode"] == "bare_metal"
         assert job.params["executor_action"] == NODE_RECLAIM_ACCESS_ACTION
         assert job.params["executor_target"] == "bm-node-1"
         assert job.params["bare_metal_reclaim_policy"] == "remove_lease_key"

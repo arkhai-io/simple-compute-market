@@ -1,6 +1,6 @@
 ## Why
 
-A listing's `offer_resource` is built by `vm_offer_resource_for_listing` from exactly
+A listing's `listing_resource` is built by `vm_listing_resource_for_listing` from exactly
 five fields: `pool_id`, `gpu_model`, `gpu_count`, `sla`, `region` (plus optional
 `resource_id` and interruptible markers). vCPU, RAM, and disk are never published,
 even though `ComputeResource` declares all three and the projection's per-resource
@@ -10,7 +10,7 @@ even though `ComputeResource` declares all three and the projection's per-resour
 Three layers downstream are already built for the dimensions this omission drops:
 
 - `core/registry/filter-spec.yaml` accepts `vcpu_count`, `ram_gb`, and `disk_gb` in
-  `offer_resource` and exposes `vcpu_count_min`, `ram_gb_min`, and `disk_gb_min`
+  `listing_resource` and exposes `vcpu_count_min`, `ram_gb_min`, and `disk_gb_min`
   filters.
 - Those filters carry `on_missing: fail`, with a documented rationale: an offer that
   does not state a spec cannot be assumed to satisfy a requirement.
@@ -27,7 +27,7 @@ only one that delivers value on its own.
 ## What Changes
 
 - Publish the capacity dimensions a pool's projection actually declares into each
-  listing's `offer_resource`, alongside the GPU fields already there.
+  listing's `listing_resource`, alongside the GPU fields already there.
 - Publish what is declared and omit what is not, per dimension. A dimension absent
   from the projection is absent from the listing rather than defaulted, zero-filled,
   or inferred — matching the filter vocabulary's own fail-closed reasoning. An
@@ -69,7 +69,7 @@ None.
 ## Impact
 
 - Affected code: `domains/vms/domain/src/arkhai_vms/storefront_adapter.py`
-  (`vm_offer_resource_for_listing`), `domains/vms/listings/reconciler.py`
+  (`vm_listing_resource_for_listing`), `domains/vms/listings/reconciler.py`
   (`_publishable_slices` and the slice dictionaries it builds),
   `domains/vms/storefront/src/market_storefront/cli_publish.py`'s offer construction.
 - Affected tests: publication unit tests, registry filter integration coverage, and

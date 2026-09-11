@@ -16,14 +16,14 @@ from market_storefront.services.vm_job_spec_service import (
 
 
 def _order(**offer_overrides):
-    offer_resource = {
+    listing_resource = {
         "resource_id": "res-1",
         "pool_id": "pool-1",
         "gpu_model": "H200",
         "gpu_count": 2,
         "region": "California, US",
     }
-    offer_resource.update(offer_overrides)
+    listing_resource.update(offer_overrides)
     return {
         "listing_id": "lst-1",
         "status": "open",
@@ -32,7 +32,7 @@ def _order(**offer_overrides):
             "scheme": "eip191",
             "identifier": "0x2222222222222222222222222222222222222222",
         },
-        "offer_resource": offer_resource,
+        "listing_resource": listing_resource,
         "accepted_escrows": [],
     }
 

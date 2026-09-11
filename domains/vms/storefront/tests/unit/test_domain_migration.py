@@ -35,7 +35,7 @@ def _legacy_database(
             """
             CREATE TABLE listings (
               listing_id TEXT PRIMARY KEY,
-              offer_resource TEXT
+              listing_resource TEXT
             );
             CREATE TABLE negotiation_threads (
               negotiation_id TEXT PRIMARY KEY,
@@ -60,7 +60,7 @@ def _legacy_database(
         )
         offer = {"resource_id": resource_id, "operator_secret": "never-print-me"}
         if public_mode is not None:
-            offer["virtualization_type"] = public_mode
+            offer["offering_mode"] = public_mode
         conn.execute(
             "INSERT INTO listings VALUES (?, ?)",
             ("listing-1", json.dumps(offer)),
@@ -132,10 +132,10 @@ def test_write_atomically_binds_rows_and_retires_legacy_authority(tmp_path):
         assert binding == ("site-a", "vm", "compute.v1", 1, 0, "pool-a", "host-1")
         public_offer = json.loads(
             conn.execute(
-                "SELECT offer_resource FROM listings WHERE listing_id='listing-1'"
+                "SELECT listing_resource FROM listings WHERE listing_id='listing-1'"
             ).fetchone()[0]
         )
-        assert public_offer["virtualization_type"] == "vm"
+        assert public_offer["offering_mode"] == "vm"
         thread = conn.execute(
             """
             SELECT domain_listing_id, site_id, offering_mode, domain_identity,

@@ -74,7 +74,7 @@ def _listing(option: dict) -> dict:
     return {
         "listing_id": "L-vm",
         "settlement_options": [dict(option)],
-        "offer_resource": {"resource_id": "vm-1"},
+        "listing_resource": {"resource_id": "vm-1"},
     }
 
 

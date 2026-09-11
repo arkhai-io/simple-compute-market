@@ -121,7 +121,7 @@ async def test_body_mutation_after_signing_is_rejected(
         resource="listings",
         body=original,
     )
-    mutated = {**original, "offer_resource": {"gpu_model": "H200", "region": "eu"}}
+    mutated = {**original, "listing_resource": {"gpu_model": "H200", "region": "eu"}}
     async with httpx.AsyncClient(
         base_url="http://test",
         transport=httpx.ASGITransport(app=app),

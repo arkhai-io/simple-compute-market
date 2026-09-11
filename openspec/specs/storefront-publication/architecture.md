@@ -21,7 +21,7 @@ semantics.
 Every derived listing persists one common binding containing trusted site,
 offering mode, exact domain identity/version, public source envelope, and
 collision-safe pool or Physical Resource provenance. Public
-`virtualization_type` is projected from this binding, not guessed from a
+`offering_mode` is projected from this binding, not guessed from a
 listing payload. One pool may therefore produce distinct VM and bare-metal
 listings without creating competing domain-specific mapping authorities.
 Negotiation and artifact bindings copy the frozen selection, and repository

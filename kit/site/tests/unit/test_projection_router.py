@@ -47,7 +47,7 @@ def test_public_reservation_hides_private_accounting_identity():
     client = _client()
     response = client.post(
         "/api/v1/capacity/reservations",
-        json={"claim": {"units": 1, "executor_kind": "vm"}, "deal_ref": {}},
+        json={"claim": {"units": 1, "offering_mode": "vm"}, "deal_ref": {}},
     )
     assert response.status_code == 200
     reservation = response.json()["reservation"]

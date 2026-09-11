@@ -47,7 +47,7 @@ def _reserve(escrow_uid: str, *, gpu_count: int = 1) -> dict:
         )
     reserved = ledger.reserve(
         claim={
-            "executor_kind": "vm",
+            "offering_mode": "vm",
             "gpu_count": gpu_count,
             "vm_host": "kvm1",
         },
@@ -153,7 +153,7 @@ class TestCreateLease:
         reservation = ledger.get_reservation(lease["capacity_reservation_id"])
         assert reservation["state"] == "leased"
         assert reservation["vm_target"] == lease["vm_target"]
-        assert reservation["executor_kind"] == "vm"
+        assert reservation["offering_mode"] == "vm"
         assert reservation["executor_target"] == lease["vm_target"]
         assert reservation["executor_ref"] == {"vm_host": "kvm1"}
 
@@ -291,7 +291,7 @@ class TestUpdateLease:
         lease = await _register(client, "escrow-patch-generic")
         generic_leases = ExecutorLeaseService(
             LedgerSiteAuthority(_container_module.resolved_capacity_ledger_service),
-            executor_kind="vm",
+            offering_mode="vm",
         )
         monkeypatch.setattr(
             _container_module,

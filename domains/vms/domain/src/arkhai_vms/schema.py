@@ -15,7 +15,7 @@ class VmListing(BaseModel):
     """VM-domain listing payload carried by a storefront/registry listing."""
 
     kind: Literal["compute.v1"] = VM_PROVISION_KIND
-    offer_resource: dict[str, Any] = Field(
+    listing_resource: dict[str, Any] = Field(
         description="Compute slice payload offered by the seller.",
     )
     accepted_escrows: list[dict[str, Any]] = Field(default_factory=list)
@@ -25,21 +25,21 @@ class VmListing(BaseModel):
 
     @model_validator(mode="before")
     @classmethod
-    def _accept_offer_resource_payload(cls, value: Any) -> Any:
+    def _accept_listing_resource_payload(cls, value: Any) -> Any:
         if not isinstance(value, dict):
             return value
-        if "offer_resource" in value:
+        if "listing_resource" in value:
             return value
-        return {"offer_resource": value}
+        return {"listing_resource": value}
 
     @model_validator(mode="after")
     def _validate_listing(self) -> "VmListing":
-        if not self.offer_resource:
-            raise ValueError("offer_resource must be non-empty")
-        if "gpu_model" not in self.offer_resource:
-            raise ValueError("offer_resource must include gpu_model")
-        if "gpu_count" not in self.offer_resource:
-            raise ValueError("offer_resource must include gpu_count")
+        if not self.listing_resource:
+            raise ValueError("listing_resource must be non-empty")
+        if "gpu_model" not in self.listing_resource:
+            raise ValueError("listing_resource must include gpu_model")
+        if "gpu_count" not in self.listing_resource:
+            raise ValueError("listing_resource must include gpu_count")
         return self
 
 

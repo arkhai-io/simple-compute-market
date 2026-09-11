@@ -5,7 +5,9 @@ import sqlite3
 from dataclasses import dataclass
 from typing import Any, Mapping
 
-from domains.vms.listings.listing_mode import resolve_vm_listing_mode
+from domains.vms.listings.listing_cardinality_mode import (
+    resolve_vm_listing_cardinality_mode,
+)
 from domains.vms.listings.pool_descriptors import resolve_region, resolve_sla
 from domains.vms.listings.pricing_resolution import (
     GpuPricingFields,
@@ -648,12 +650,12 @@ def _projected_pool_rows(
     candidate already goes through, not decided here. Otherwise returns
     exactly one row for a ``fungible`` pool (matching this function's
     original, aggregated shape), or one row per enabled member for a
-    ``specific_resource`` pool -- a pool's ``listing_mode`` (from its
-    projected `policy_tags`, domain-resolved by `resolve_vm_listing_mode`)
-    decides which shape applies. An explicit tag always wins; its
-    *absence* falls back to exactly the structural heuristic this
-    function used before `listing_mode` existed (`member_count == 1` ->
-    specific_resource) so an untagged pool's publication shape does not
+    ``specific_resource`` pool -- a pool's ``listing_cardinality_mode``
+    (from its projected `policy_tags`, domain-resolved by
+    `resolve_vm_listing_cardinality_mode`) decides which shape applies. An
+    explicit tag always wins; its *absence* falls back to exactly the
+    structural heuristic this function used before the tag existed
+    (`member_count == 1` -> specific_resource) so an untagged pool's publication shape does not
     change out from under an existing derived-listing mapping.
     """
     # Buyer-side listing helpers import this module without installing the
@@ -699,10 +701,11 @@ def _projected_pool_rows(
         return []
 
     structural_default = "specific_resource" if len(usages) == 1 else "fungible"
-    mode, explanation = resolve_vm_listing_mode(
+    cardinality = resolve_vm_listing_cardinality_mode(
         policy_tags,
         structural_default=structural_default,
     )
+    mode = cardinality.mode
 
     region = resolve_region(policy_tags, fallback=local_region)
     sla = resolve_sla(
@@ -743,9 +746,12 @@ def _projected_pool_rows(
         "pool_id": pool_id,
         "region": region,
         "sla": sla,
-        "listing_mode": mode,
+        "listing_cardinality_mode": mode,
         "offering_mode": "vm",
-        "listing_mode_explanation": explanation,
+        "listing_cardinality_mode_explanation": cardinality.fallback_explanation,
+        "listing_cardinality_mode_deprecated_key_notice": (
+            cardinality.deprecated_key_notice
+        ),
     }
 
     if mode == "specific_resource":
@@ -915,8 +921,9 @@ def available_compute_slices(
     resolves a real price -- a missing override is advisory-tier
     absence, not a reason to suppress the pool.
 
-    A pool's ``listing_mode`` (from its projected ``policy_tags``, only
-    available on the ``site_pool_projection`` path) decides its row shape:
+    A pool's ``listing_cardinality_mode`` (from its projected
+    ``policy_tags``, only available on the ``site_pool_projection`` path)
+    decides its row shape:
     ``fungible`` publishes one pool-keyed aggregated row; ``specific_resource``
     publishes one resource-keyed row per enabled member, however many
     members the pool has. ``site_capacity_buckets`` is the matching
@@ -1018,8 +1025,13 @@ def available_compute_slices(
                     "accepted_escrows": accepted_escrows,
                     "settlements": settlements,
                     "max_duration_seconds": row.get("max_duration_seconds"),
-                    "listing_mode": row.get("listing_mode"),
-                    "listing_mode_explanation": row.get("listing_mode_explanation"),
+                    "listing_cardinality_mode": row.get("listing_cardinality_mode"),
+                    "listing_cardinality_mode_explanation": row.get(
+                        "listing_cardinality_mode_explanation"
+                    ),
+                    "listing_cardinality_mode_deprecated_key_notice": row.get(
+                        "listing_cardinality_mode_deprecated_key_notice"
+                    ),
                 }
             )
     return out
@@ -1082,7 +1094,7 @@ def open_listing_resource_keys(
     try:
         rows = conn.execute(
             """
-            SELECT l.offer_resource, b.site_id
+            SELECT l.listing_resource, b.site_id
             FROM listings l
             JOIN storefront_listing_bindings b ON b.listing_id = l.listing_id
             WHERE l.status = 'open'
@@ -1137,7 +1149,7 @@ def stale_open_listing_ids(
     try:
         rows = conn.execute(
             """
-            SELECT l.listing_id, l.offer_resource, b.site_id
+            SELECT l.listing_id, l.listing_resource, b.site_id
             FROM listings l
             JOIN storefront_listing_bindings b ON b.listing_id = l.listing_id
             WHERE l.status = 'open'
@@ -1195,7 +1207,7 @@ def closed_available_listing_ids(
     try:
         rows = conn.execute(
             """
-            SELECT l.listing_id, l.offer_resource, b.site_id
+            SELECT l.listing_id, l.listing_resource, b.site_id
             FROM listings l
             JOIN storefront_listing_bindings b ON b.listing_id = l.listing_id
             WHERE l.status != 'open'
@@ -1244,7 +1256,7 @@ def record_derived_listing(
     # pool_id's mere presence is not signal: pool_id and resource_id are
     # always different id spaces (operator pool slug vs. physical resource
     # id), so `pool_id != resource_id` is true whenever both are supplied,
-    # regardless of listing_mode. This must key on `resource_id is None`,
+    # regardless of listing cardinality. This must key on `resource_id is None`,
     # matching `available_compute_slices`' own `is_fungible_pool` meaning
     # exactly, or multiple specific_resource listings from the same pool
     # collide onto one derivation_key and silently overwrite each other.
@@ -1357,7 +1369,7 @@ def reopen_local_derived_listing(
     listing_id: str,
     site_id: str,
     gpu_count: int,
-    offer_resource: dict[str, Any],
+    listing_resource: dict[str, Any],
     accepted_escrows: list[dict[str, Any]],
     demands: list[dict[str, Any]],
     max_duration_seconds: int | None,
@@ -1380,7 +1392,7 @@ def reopen_local_derived_listing(
         if "updated_at" in listing_cols:
             updates.append(f"updated_at = {now}")
         column_values = {
-            "offer_resource": json.dumps(offer_resource),
+            "listing_resource": json.dumps(listing_resource),
             "accepted_escrows": json.dumps(accepted_escrows),
             "demands": json.dumps(demands),
             "max_duration_seconds": max_duration_seconds,
@@ -1459,7 +1471,7 @@ def mark_derived_listings_closed(
         placeholders = ", ".join("?" for _ in listing_ids)
         rows = conn.execute(
             f"""
-            SELECT l.listing_id, l.offer_resource, d.site_id
+            SELECT l.listing_id, l.listing_resource, d.site_id
             FROM listings l
             LEFT JOIN derived_compute_listings d ON d.listing_id = l.listing_id
             WHERE l.listing_id IN ({placeholders})

@@ -3,7 +3,9 @@
 Validation is now schema-driven: the ``listing_shape`` in filter-spec.yaml
 defines what a publishable listing looks like.  These tests pin the
 behavior at the boundary — happy path, individual structural failures,
-and the cosmetic offer_resource_type tag the registry-client still reads.
+and that no derived resource-type tag is reported: the accept/reject decision
+is the listing shape's, and a cosmetic tag named for the shape key was dropped
+rather than renamed alongside it.
 """
 
 from __future__ import annotations
@@ -72,7 +74,7 @@ def _valid_payload(**overrides: object) -> dict:
     base: dict = {
         "listing_id": "test-listing-1",
         "storefront_url": "http://seller.example/",
-        "offer_resource": {"gpu_model": "A100", "region": "us-west"},
+        "listing_resource": {"gpu_model": "A100", "region": "us-west"},
         "accepted_escrows": [
             {
                 "chain_name": "anvil",
@@ -96,7 +98,8 @@ async def test_valid_listing_passes() -> None:
     assert body["errors"] == []
     assert body["listing_id"] == "test-listing-1"
     assert body["accepted_escrows_count"] == 1
-    assert body["offer_resource_type"] == "compute"
+    assert "listing_resource_type" not in body
+    assert "listing_resource_type" not in body
 
 
 @pytest.mark.asyncio
@@ -124,15 +127,15 @@ async def test_hosted_settlement_option_passes_without_alkahest_choice() -> None
 
 
 @pytest.mark.asyncio
-async def test_missing_offer_resource_rejected() -> None:
+async def test_missing_listing_resource_rejected() -> None:
     payload = _valid_payload()
-    del payload["offer_resource"]["gpu_model"]
-    del payload["offer_resource"]["region"]
+    del payload["listing_resource"]["gpu_model"]
+    del payload["listing_resource"]["region"]
     async with _client() as c:
         resp = await c.post("/api/v1/listings/validate-publish", json=payload)
     body = resp.json()
     assert body["valid"] is False
-    # Schema requires gpu_model AND region on offer_resource.
+    # Schema requires gpu_model AND region on listing_resource.
     joined = " ".join(body["errors"])
     assert "gpu_model" in joined
     assert "region" in joined
@@ -178,7 +181,7 @@ async def test_blank_listing_id_rejected() -> None:
 @pytest.mark.asyncio
 async def test_invalid_gpu_interconnect_enum_rejected() -> None:
     payload = _valid_payload()
-    payload["offer_resource"]["gpu_interconnect"] = "not-a-real-mode"
+    payload["listing_resource"]["gpu_interconnect"] = "not-a-real-mode"
     async with _client() as c:
         resp = await c.post("/api/v1/listings/validate-publish", json=payload)
     body = resp.json()

@@ -37,10 +37,12 @@ class HealthResponse(BaseModel):
     chain_id: int | None = None
     resource_count: int | None = None
     site_projections: dict[str, dict[str, ProjectionFamilyStatus]] | None = None
-    # Per-site, per-pool operator-visible reason a projected `listing_mode`
-    # fell back to a domain's structural default (unrecognized raw value).
-    # A pool's absence means no fallback is owed, not that data is missing.
-    listing_mode_explanations: dict[str, dict[str, str]] | None = None
+    # Per-site, per-pool operator-visible notice about a projected
+    # `listing_cardinality_mode`: either its supplied value was unrecognized
+    # and a domain's structural default was substituted, or its value was
+    # honored but arrived under the deprecated ingestion key. A pool's
+    # absence means nothing is owed, not that data is missing.
+    listing_cardinality_mode_explanations: dict[str, dict[str, str]] | None = None
     storefront_domains: tuple[dict[str, str], ...] | None = None
 
 

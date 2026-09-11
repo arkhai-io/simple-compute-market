@@ -226,7 +226,7 @@ async def _seed_demo_listing() -> None:
         # Idempotent: skip if a listing already derives from this resource.
         existing = await db.list_listings(status="open", limit=500)
         for row in existing or []:
-            offer = row.get("offer_resource") or {}
+            offer = row.get("listing_resource") or {}
             if isinstance(offer, str):
                 import json as _json
 

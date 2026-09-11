@@ -51,7 +51,7 @@ def _summary(listing_id: str, **overrides: Any) -> ListingSummary:
         publisher_id=1,
         publisher_principals=TrustedIdentitySet(identities=(_SIGNER.identity,)),
         storefront_url="http://seller:8001",
-        offer={},
+        listing_resource={},
         accepted_escrows=[],
         max_duration_seconds=3600,
         created_at=None,
@@ -342,7 +342,7 @@ class TestPublishListing:
             result = await rc.publish_listing(
                 listing=ListingRequest(
                     listing_id="x",
-                    offer={},
+                    listing_resource={},
                     accepted_escrows=[],
                     max_duration_seconds=None,
                 ),
@@ -362,7 +362,7 @@ class TestPublishListing:
                 await rc.publish_listing(
                     listing=ListingRequest(
                         listing_id="x",
-                        offer={},
+                        listing_resource={},
                         accepted_escrows=[],
                         max_duration_seconds=None,
                     ),
@@ -389,11 +389,11 @@ class TestPublishListingPerRegistry:
         async with _client(["http://r1", "http://r2"]) as rc:
             payloads = {
                 "http://r1": ListingRequest(
-                    listing_id="x", offer={"variant": "r1"}, accepted_escrows=[],
+                    listing_id="x", listing_resource={"variant": "r1"}, accepted_escrows=[],
                     max_duration_seconds=None,
                 ),
                 "http://r2": ListingRequest(
-                    listing_id="x", offer={"variant": "r2"}, accepted_escrows=[],
+                    listing_id="x", listing_resource={"variant": "r2"}, accepted_escrows=[],
                     max_duration_seconds=None,
                 ),
             }
@@ -406,9 +406,9 @@ class TestPublishListingPerRegistry:
         assert [r["registry_assigned_id"] for r in results] == ["r1-id", "r2-id"]
         # The per-registry payload is preserved on the result so the
         # caller can persist it without re-deriving. ListingRequest's
-        # to_dict serialises offer→offer_resource (the registry-wire key).
-        assert results[0]["payload"]["offer_resource"] == {"variant": "r1"}
-        assert results[1]["payload"]["offer_resource"] == {"variant": "r2"}
+        # to_dict serialises offer→listing_resource (the registry-wire key).
+        assert results[0]["payload"]["listing_resource"] == {"variant": "r1"}
+        assert results[1]["payload"]["listing_resource"] == {"variant": "r2"}
 
     @pytest.mark.asyncio
     async def test_failures_are_reported_not_swallowed(self):
@@ -422,7 +422,7 @@ class TestPublishListingPerRegistry:
         async with _client(["http://r1", "http://r2"]) as rc:
             payloads = {
                 url: ListingRequest(
-                    listing_id="x", offer={}, accepted_escrows=[], max_duration_seconds=None,
+                    listing_id="x", listing_resource={}, accepted_escrows=[], max_duration_seconds=None,
                 )
                 for url in ("http://r1", "http://r2")
             }
@@ -445,10 +445,10 @@ class TestPublishListingPerRegistry:
         async with _client(["http://r1"]) as rc:
             payloads = {
                 "http://r1": ListingRequest(
-                    listing_id="x", offer={}, accepted_escrows=[], max_duration_seconds=None,
+                    listing_id="x", listing_resource={}, accepted_escrows=[], max_duration_seconds=None,
                 ),
                 "http://stranger": ListingRequest(
-                    listing_id="x", offer={}, accepted_escrows=[], max_duration_seconds=None,
+                    listing_id="x", listing_resource={}, accepted_escrows=[], max_duration_seconds=None,
                 ),
             }
             results = await rc.publish_listing_per_registry(
@@ -521,7 +521,7 @@ class TestUniformWrites:
             result = await rc.publish_listing(
                 listing=ListingRequest(
                     listing_id="x",
-                    offer={},
+                    listing_resource={},
                     accepted_escrows=[],
                     max_duration_seconds=None,
                 ),
@@ -536,7 +536,7 @@ class TestLegacyAuthenticationArgumentsRejected:
 
         listing = ListingRequest(
             listing_id="x",
-            offer={},
+            listing_resource={},
             accepted_escrows=[],
             max_duration_seconds=None,
         )

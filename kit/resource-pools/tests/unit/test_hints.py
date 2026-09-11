@@ -4,7 +4,8 @@ import pytest
 
 from market_resource_pools.hints import (
     DELIVERABLE_MODES_POLICY_TAG,
-    LISTING_MODE_POLICY_TAG,
+    DEPRECATED_LISTING_MODE_POLICY_TAG,
+    LISTING_CARDINALITY_MODE_POLICY_TAG,
     MAX_RESERVATION_HOLD_SECONDS_POLICY_TAG,
     PRICING_POLICY_TAG,
     REGION_POLICY_TAG,
@@ -13,7 +14,8 @@ from market_resource_pools.hints import (
     declared_deliverable_modes,
     max_reservation_hold_seconds,
     pool_delivers_offering_mode,
-    raw_listing_mode,
+    listing_cardinality_mode_source,
+    raw_listing_cardinality_mode,
     raw_pricing,
     raw_region,
     sla_value,
@@ -59,18 +61,66 @@ class TestDeclaredDeliverableModes:
         assert validate_deliverable_modes(tags)
 
 
-class TestRawListingMode:
+class TestRawListingCardinalityMode:
     def test_absent_returns_none(self):
-        assert raw_listing_mode({}) is None
+        assert raw_listing_cardinality_mode({}) is None
 
     def test_present_returned_unvalidated(self):
         """This package doesn't know which values a domain accepts --
         anything present is returned as-is, including nonsense, for the
         domain's own resolver to interpret."""
-        assert raw_listing_mode({LISTING_MODE_POLICY_TAG: "not_a_real_mode"}) == (
-            "not_a_real_mode"
-        )
-        assert raw_listing_mode({LISTING_MODE_POLICY_TAG: "fungible"}) == "fungible"
+        assert raw_listing_cardinality_mode(
+            {LISTING_CARDINALITY_MODE_POLICY_TAG: "not_a_real_mode"}
+        ) == "not_a_real_mode"
+        assert raw_listing_cardinality_mode(
+            {LISTING_CARDINALITY_MODE_POLICY_TAG: "fungible"}
+        ) == "fungible"
+
+    def test_deprecated_key_is_read_when_settled_key_absent(self):
+        """The concession that keeps an unupgraded producer's declaration
+        from being read as absence, which would resolve to a structural
+        default rather than erroring."""
+        assert raw_listing_cardinality_mode(
+            {DEPRECATED_LISTING_MODE_POLICY_TAG: "specific_resource"}
+        ) == "specific_resource"
+
+    def test_settled_key_wins_when_both_present(self):
+        assert raw_listing_cardinality_mode({
+            LISTING_CARDINALITY_MODE_POLICY_TAG: "fungible",
+            DEPRECATED_LISTING_MODE_POLICY_TAG: "specific_resource",
+        }) == "fungible"
+
+    def test_falsy_settled_value_still_wins_over_deprecated(self):
+        """Presence, not truthiness, decides precedence -- an empty
+        declared value is a value the domain resolver must see and reject,
+        not a reason to fall back to the other spelling."""
+        assert raw_listing_cardinality_mode({
+            LISTING_CARDINALITY_MODE_POLICY_TAG: "",
+            DEPRECATED_LISTING_MODE_POLICY_TAG: "fungible",
+        }) == ""
+
+
+class TestListingCardinalityModeSource:
+    def test_none_when_neither_key_present(self):
+        assert listing_cardinality_mode_source({}) is None
+
+    def test_names_the_settled_key(self):
+        assert listing_cardinality_mode_source(
+            {LISTING_CARDINALITY_MODE_POLICY_TAG: "fungible"}
+        ) == LISTING_CARDINALITY_MODE_POLICY_TAG
+
+    def test_names_the_deprecated_key(self):
+        assert listing_cardinality_mode_source(
+            {DEPRECATED_LISTING_MODE_POLICY_TAG: "fungible"}
+        ) == DEPRECATED_LISTING_MODE_POLICY_TAG
+
+    def test_names_the_settled_key_when_both_present(self):
+        """Must agree with raw_listing_cardinality_mode's precedence, or a
+        consumer would report a deprecation an operator cannot act on."""
+        assert listing_cardinality_mode_source({
+            LISTING_CARDINALITY_MODE_POLICY_TAG: "fungible",
+            DEPRECATED_LISTING_MODE_POLICY_TAG: "specific_resource",
+        }) == LISTING_CARDINALITY_MODE_POLICY_TAG
 
 
 class TestMaxReservationHoldSeconds:
@@ -172,7 +222,7 @@ class TestValidateHoldPreference:
 
     def test_other_keys_do_not_affect_validity(self):
         assert validate_hold_preference(
-            {LISTING_MODE_POLICY_TAG: "whatever-a-domain-wants"},
+            {LISTING_CARDINALITY_MODE_POLICY_TAG: "whatever-a-domain-wants"},
         ) == []
 
 
@@ -240,5 +290,5 @@ class TestValidateSlaPreference:
 
     def test_other_keys_do_not_affect_validity(self):
         assert validate_sla_preference(
-            {LISTING_MODE_POLICY_TAG: "whatever-a-domain-wants"},
+            {LISTING_CARDINALITY_MODE_POLICY_TAG: "whatever-a-domain-wants"},
         ) == []

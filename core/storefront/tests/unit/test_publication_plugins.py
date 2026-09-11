@@ -30,7 +30,7 @@ def _source(name: str) -> PublicationSource:
         close_stale=lambda _db, _url: [],
         available_candidates=lambda _db: [],
         skip_keys=lambda _candidate: set(),
-        offer_resource=lambda candidate: dict(candidate),
+        listing_resource=lambda candidate: dict(candidate),
         record_published=lambda _db, _candidate, _listing_id: None,
         reopen_existing=lambda *_args: None,
         reopen_error_label=f"reopen {name}",

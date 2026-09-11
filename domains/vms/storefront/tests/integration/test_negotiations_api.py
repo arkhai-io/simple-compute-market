@@ -106,13 +106,13 @@ async def _seed_order(db: SQLiteClient, order_id: str) -> None:
         status="open",
         created_at=datetime.now().isoformat(),
         updated_at=datetime.now().isoformat(),
-        offer_resource={
+        listing_resource={
             "resource_id": f"res-{order_id}",
             "gpu_model": "H200",
             "gpu_count": 1,
             "sla": 99.9,
             "region": "California, US",
-            "virtualization_type": "vm",
+            "offering_mode": "vm",
         },
         accepted_escrows=[{
             "chain_name": "anvil",

@@ -239,7 +239,7 @@ Per `openspec/README.md#plan-closeout-requirements`.
 | A capacity resource does not move pools under live capacity obligations | `openspec/specs/site-capacity/spec.md` |
 | Capacity definitions reconcile on a document digest, not on process start | `openspec/specs/physical-provisioning/spec.md` |
 | Projected attributes must not contradict projected capacity | `openspec/specs/site-capacity/spec.md` — "Projected inventory is internally consistent" |
-| Host inventory is executor identity, not capacity authority | `openspec/specs/physical-provisioning/spec.md` — "Host inventory is executor identity"; `docs/development/ARCHITECTURE.md` authority-boundaries table |
+| Host inventory is connection identity, not capacity authority | `openspec/specs/physical-provisioning/spec.md` — "Host inventory is connection identity"; `docs/development/ARCHITECTURE.md` authority-boundaries table |
 | Legacy host capacity is derived into declarations rather than retained as a fallback tier | `openspec/specs/physical-provisioning/spec.md` — "Legacy host capacity is derived into declarations" |
 | Capacity definitions import is digest-gated, after pool definitions | `openspec/specs/physical-provisioning/spec.md` — "Capacity definitions import at startup" |
-| Why capacity declaration is separate from executor inventory, and why splitting dimensions across both was rejected | `openspec/specs/site-capacity/architecture.md` |
+| Why capacity declaration is separate from host inventory, and why splitting dimensions across both was rejected | `openspec/specs/site-capacity/architecture.md` |

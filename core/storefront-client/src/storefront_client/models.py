@@ -169,14 +169,15 @@ class HealthResponse:
     chain_id: int | None = None  # EVM chain ID; present on /api/v1/system/status
     resource_count: int | None = None  # registered compute resources; present on /api/v1/system/status
     site_projections: dict[str, Any] | None = None  # per-site/family projection load state; present on /api/v1/system/status
-    listing_mode_explanations: dict[str, Any] | None = None  # per-site/pool listing_mode fallback reasons; present on /api/v1/system/status
+    listing_cardinality_mode_explanations: dict[str, Any] | None = None  # per-site/pool cardinality-hint notices; present on /api/v1/system/status
     extra: dict[str, Any] = field(default_factory=dict)
 
     @classmethod
     def from_dict(cls, d: dict) -> "HealthResponse":
         known = {
             "status", "checks", "paused", "agent_id", "chain_id",
-            "resource_count", "site_projections", "listing_mode_explanations",
+            "resource_count", "site_projections",
+            "listing_cardinality_mode_explanations",
         }
         raw_chain_id = d.get("chain_id")
         raw_resource_count = d.get("resource_count")
@@ -188,7 +189,9 @@ class HealthResponse:
             chain_id=int(raw_chain_id) if raw_chain_id is not None else None,
             resource_count=int(raw_resource_count) if raw_resource_count is not None else None,
             site_projections=d.get("site_projections"),
-            listing_mode_explanations=d.get("listing_mode_explanations"),
+            listing_cardinality_mode_explanations=d.get(
+                "listing_cardinality_mode_explanations"
+            ),
             extra={k: v for k, v in d.items() if k not in known},
         )
 
@@ -211,7 +214,7 @@ class ListingSummary:
     escrow_uid: str | None = None
     created_at: str = ""
     updated_at: str = ""
-    offer_resource: dict[str, Any] = field(default_factory=dict)
+    listing_resource: dict[str, Any] = field(default_factory=dict)
     demand_resource: dict[str, Any] = field(default_factory=dict)
     extra: dict[str, Any] = field(default_factory=dict)
 
@@ -232,7 +235,7 @@ class ListingSummary:
         known = {
             "listing_id", "status", "paused", "max_duration_seconds", "seller",
             "buyer", "escrow_uid", "created_at", "updated_at",
-            "offer_resource", "demand_resource",
+            "listing_resource", "demand_resource",
         }
         max_dur = d.get("max_duration_seconds")
         return cls(
@@ -245,7 +248,7 @@ class ListingSummary:
             escrow_uid=d.get("escrow_uid"),
             created_at=d.get("created_at", ""),
             updated_at=d.get("updated_at", ""),
-            offer_resource=_parse_resource(d.get("offer_resource")),
+            listing_resource=_parse_resource(d.get("listing_resource")),
             demand_resource=_parse_resource(d.get("demand_resource")),
             extra={k: v for k, v in d.items() if k not in known},
         )

@@ -219,7 +219,7 @@ def has_matching_inventory_guard(
     context: NegotiationContext,
 ) -> NegotiationStep:
     """Veto when no available VM inventory resource matches the listing."""
-    offer = _coerce_resource_dict(context.listing.get("offer_resource"))
+    offer = _coerce_resource_dict(context.listing.get("listing_resource"))
     if "gpu_model" not in offer:
         return None, context
 

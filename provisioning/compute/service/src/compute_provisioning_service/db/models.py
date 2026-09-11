@@ -135,7 +135,7 @@ class AnsibleJob(Base):
     contract_version = Column(String, nullable=True)
     capacity_reservation_id = Column(String, nullable=True, index=True)
     deal_ref = Column(JSON, nullable=True)
-    executor_kind = Column(String, nullable=True)
+    offering_mode = Column(String, nullable=True)
     action_kind = Column(String, nullable=True)
     idempotency_key = Column(String, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)

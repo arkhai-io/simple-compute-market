@@ -42,7 +42,7 @@ def _repository(**values):
 def test_vm_listing_request_rejects_removed_scalar_hosted_config() -> None:
     with pytest.raises(ValidationError, match="settlement_config"):
         VmCreateListingRequest(
-            offer={"virtualization_type": "vm"},
+            listing_resource={"offering_mode": "vm"},
             settlement_config={
                 "account_ref": "acct-seller",
                 "currency": "usd",
@@ -54,14 +54,14 @@ def test_vm_listing_request_rejects_removed_scalar_hosted_config() -> None:
 
 def test_clause_only_listing_request_is_a_valid_publication_input() -> None:
     request = VmCreateListingRequest(
-        offer={
+        listing_resource={
             "resource_type": "compute",
             "resource_id": "resource-1",
             "gpu_model": "H200",
             "gpu_count": 1,
             "region": "California, US",
             "sla": 99.0,
-            "virtualization_type": "vm",
+            "offering_mode": "vm",
         },
         capacity_source=_CAPACITY_SOURCE,
         settlements=[
@@ -143,14 +143,14 @@ async def test_clause_only_create_persists_canonical_clause_before_publication(
         AsyncMock(return_value={"status": "published"}),
     )
     request = VmCreateListingRequest(
-        offer={
+        listing_resource={
             "resource_type": "compute",
             "resource_id": "resource-1",
             "gpu_model": "H200",
             "gpu_count": 1,
             "region": "California, US",
             "sla": 99.0,
-            "virtualization_type": "vm",
+            "offering_mode": "vm",
         },
         capacity_source=_CAPACITY_SOURCE,
         settlements=[clause],
@@ -184,7 +184,7 @@ async def test_direct_settlement_options_are_rejected() -> None:
         settlement_composition_provider=lambda: object(),
     )
     request = VmCreateListingRequest(
-        offer={"virtualization_type": "vm"},
+        listing_resource={"offering_mode": "vm"},
         capacity_source=_CAPACITY_SOURCE,
         settlement_options=[
             {
@@ -240,7 +240,7 @@ async def test_registration_composition_receives_ordered_hosted_clauses() -> Non
         )
     ]
     request = VmCreateListingRequest(
-        offer={"virtualization_type": "vm"},
+        listing_resource={"offering_mode": "vm"},
         capacity_source=_CAPACITY_SOURCE,
         settlements=clauses,
     )

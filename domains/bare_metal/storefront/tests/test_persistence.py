@@ -150,9 +150,9 @@ async def test_all_domain_payloads_round_trip_after_restart(tmp_path) -> None:
     restarted = SQLiteClient(str(path))
     persisted = await restarted.load_listing(listing_id="listing-1")
     assert persisted is not None
-    raw_offer = persisted["offer_resource"]
+    raw_offer = persisted["listing_resource"]
     offer = json.loads(raw_offer) if isinstance(raw_offer, str) else raw_offer
-    assert offer["virtualization_type"] == "bare_metal"
+    assert offer["offering_mode"] == "bare_metal"
 
 
     assert (

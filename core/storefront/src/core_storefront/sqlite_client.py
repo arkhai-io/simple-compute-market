@@ -549,7 +549,7 @@ class SQLiteClient:
                   status TEXT NOT NULL,
                   created_at TEXT NOT NULL,
                   updated_at TEXT NOT NULL,
-                  offer_resource TEXT NOT NULL,
+                  listing_resource TEXT NOT NULL,
                   fulfillment_resource TEXT,
                   max_duration_seconds INTEGER,
                   seller TEXT NOT NULL,
@@ -1139,7 +1139,7 @@ class SQLiteClient:
         status: str,
         created_at: str,
         updated_at: str,
-        offer_resource: Any,
+        listing_resource: Any,
         fulfillment_resource: Any | None,
         max_duration_seconds: int | None,
         storefront_url: str,
@@ -1159,7 +1159,7 @@ class SQLiteClient:
               status,
               created_at,
               updated_at,
-              offer_resource,
+              listing_resource,
               fulfillment_resource,
               max_duration_seconds,
               storefront_url,
@@ -1176,7 +1176,7 @@ class SQLiteClient:
             ON CONFLICT(listing_id) DO UPDATE SET
               status=excluded.status,
               updated_at=excluded.updated_at,
-              offer_resource=excluded.offer_resource,
+              listing_resource=excluded.listing_resource,
               fulfillment_resource=excluded.fulfillment_resource,
               max_duration_seconds=excluded.max_duration_seconds,
               storefront_url=excluded.storefront_url,
@@ -1194,7 +1194,7 @@ class SQLiteClient:
                 status,
                 created_at,
                 updated_at,
-                self._serialize_resource(offer_resource),
+                self._serialize_resource(listing_resource),
                 self._serialize_resource(fulfillment_resource),
                 max_duration_seconds,
                 storefront_url,
@@ -1216,7 +1216,7 @@ class SQLiteClient:
         status: str,
         created_at: str,
         updated_at: str,
-        offer_resource: Any,
+        listing_resource: Any,
         fulfillment_resource: Any | None,
         max_duration_seconds: int | None,
         storefront_url: str,
@@ -1236,7 +1236,7 @@ class SQLiteClient:
                     status=status,
                     created_at=created_at,
                     updated_at=updated_at,
-                    offer_resource=offer_resource,
+                    listing_resource=listing_resource,
                     fulfillment_resource=fulfillment_resource,
                     max_duration_seconds=max_duration_seconds,
                     storefront_url=storefront_url,
@@ -1258,7 +1258,7 @@ class SQLiteClient:
         status: str,
         created_at: str,
         updated_at: str,
-        offer_resource: Any,
+        listing_resource: Any,
         fulfillment_resource: Any | None,
         max_duration_seconds: int | None,
         storefront_url: str,
@@ -1272,13 +1272,13 @@ class SQLiteClient:
     ) -> None:
         """Persist a mutable listing projection and immutable binding atomically."""
 
-        normalized_offer = self._normalize_resource(offer_resource)
+        normalized_offer = self._normalize_resource(listing_resource)
         if normalized_offer is None:
-            raise ValueError("offer_resource must be a mapping")
-        public_mode = normalized_offer.get("virtualization_type")
+            raise ValueError("listing_resource must be a mapping")
+        public_mode = normalized_offer.get("offering_mode")
         if public_mode != binding.binding.offering_mode:
             raise StorefrontDomainBindingError(
-                "offer_resource.virtualization_type must equal the durable "
+                "listing_resource.offering_mode must equal the durable "
                 f"offering mode {binding.binding.offering_mode!r}"
             )
 
@@ -1292,7 +1292,7 @@ class SQLiteClient:
                     status=status,
                     created_at=created_at,
                     updated_at=updated_at,
-                    offer_resource=offer_resource,
+                    listing_resource=listing_resource,
                     fulfillment_resource=fulfillment_resource,
                     max_duration_seconds=max_duration_seconds,
                     storefront_url=storefront_url,
@@ -1379,7 +1379,7 @@ class SQLiteClient:
             try:
                 conn.execute("BEGIN IMMEDIATE")
                 row = conn.execute(
-                    "SELECT offer_resource FROM listings WHERE listing_id=?",
+                    "SELECT listing_resource FROM listings WHERE listing_id=?",
                     (binding.listing_id,),
                 ).fetchone()
                 if row is None:
@@ -1389,11 +1389,11 @@ class SQLiteClient:
                 offer = self._normalize_resource(row[0])
                 if (
                     not isinstance(offer, dict)
-                    or offer.get("virtualization_type")
+                    or offer.get("offering_mode")
                     != binding.binding.offering_mode
                 ):
                     raise StorefrontDomainBindingError(
-                        "persisted offer_resource mode disagrees with binding"
+                        "persisted listing_resource mode disagrees with binding"
                     )
                 values = binding.as_record()
                 conn.execute(
@@ -1449,7 +1449,7 @@ class SQLiteClient:
         listing_id: str,
         status: str | None = None,
         updated_at: str | None = None,
-        offer_resource: Any | None = None,
+        listing_resource: Any | None = None,
         fulfillment_resource: Any | None = None,
         max_duration_seconds: int | None = None,
         storefront_url: str | None = None,
@@ -1471,7 +1471,7 @@ class SQLiteClient:
 
             add("status", status)
             add("updated_at", updated_at or datetime.now().isoformat())
-            add("offer_resource", offer_resource, serialize=True)
+            add("listing_resource", listing_resource, serialize=True)
             add("fulfillment_resource", fulfillment_resource, serialize=True)
             add("max_duration_seconds", max_duration_seconds)
             add("storefront_url", storefront_url)
@@ -1510,7 +1510,7 @@ class SQLiteClient:
                 cur.execute(
                     """
                     SELECT listing_id, status, created_at, updated_at,
-                           offer_resource, fulfillment_resource,
+                           listing_resource, fulfillment_resource,
                            max_duration_seconds, storefront_url,
                            seller_scheme, seller_identifier, oracle_address,
                            COALESCE(paused, 0) AS paused,
@@ -1530,7 +1530,7 @@ class SQLiteClient:
                     "status",
                     "created_at",
                     "updated_at",
-                    "offer_resource",
+                    "listing_resource",
                     "fulfillment_resource",
                     "max_duration_seconds",
                     "storefront_url",
@@ -4115,7 +4115,7 @@ class SQLiteClient:
                 cur.execute(
                     f"""
                     SELECT listing_id, status, created_at, updated_at,
-                           offer_resource, fulfillment_resource,
+                           listing_resource, fulfillment_resource,
                            max_duration_seconds, storefront_url,
                            seller_scheme, seller_identifier, oracle_address,
                            COALESCE(paused, 0) AS paused,
@@ -4134,7 +4134,7 @@ class SQLiteClient:
                     "status",
                     "created_at",
                     "updated_at",
-                    "offer_resource",
+                    "listing_resource",
                     "fulfillment_resource",
                     "max_duration_seconds",
                     "storefront_url",

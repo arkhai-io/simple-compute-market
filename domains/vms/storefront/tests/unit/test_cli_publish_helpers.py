@@ -100,7 +100,7 @@ def _init_db(path: str) -> None:
             CREATE TABLE listings (
                 listing_id TEXT PRIMARY KEY,
                 status TEXT NOT NULL,
-                offer_resource TEXT,
+                listing_resource TEXT,
                 demand_resource TEXT,
                 created_at TEXT DEFAULT CURRENT_TIMESTAMP,
                 updated_at TEXT DEFAULT CURRENT_TIMESTAMP
@@ -224,7 +224,7 @@ def _insert_order(
     try:
         conn.execute("PRAGMA foreign_keys = ON")
         conn.execute(
-            "INSERT INTO listings (listing_id, status, offer_resource) VALUES (?, ?, ?)",
+            "INSERT INTO listings (listing_id, status, listing_resource) VALUES (?, ?, ?)",
             (order_id, status, json.dumps(offer)),
         )
         conn.execute(

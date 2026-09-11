@@ -453,7 +453,7 @@ class KeysService:
                 return str(committed["capacity_reservation_id"])
 
         claim: dict[str, Any] = {
-            "executor_kind": "api_credits",
+            "offering_mode": "api_credits",
             "resource_id": resource_id,
             "units": int(quantity),
         }

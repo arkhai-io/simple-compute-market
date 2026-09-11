@@ -37,7 +37,7 @@ def _leased_vm_reservation() -> dict:
         attributes={"vm_host": "kvm1"},
     )
     reserved = ledger.reserve(
-        claim={"executor_kind": "vm"},
+        claim={"offering_mode": "vm"},
         deal_ref={"escrow_uid": "escrow-contract", "listing_id": "listing-1"},
         lease_duration_seconds=3600,
     )
@@ -61,7 +61,7 @@ def _leased_bare_metal_reservation() -> dict:
     )
     reserved = ledger.reserve(
         claim={
-            "executor_kind": "bare_metal",
+            "offering_mode": "bare_metal",
             "physical_host_id": "physical-contract-1",
             "allocation_mode": ALLOCATION_MODE_EXCLUSIVE,
         },
@@ -76,7 +76,7 @@ def _leased_bare_metal_reservation() -> dict:
     )
     return app.container.site_authority().update_reservation_fields(
         capacity_reservation_id=committed["capacity_reservation_id"],
-        executor_kind="bare_metal",
+        offering_mode="bare_metal",
         executor_target="bm-contract-1",
         executor_ref={"physical_host_id": "physical-contract-1"},
     )
@@ -88,7 +88,7 @@ def _vm_action(reservation: dict, **overrides) -> ExecutorActionEnvelope:
     values = {
         "capacity_reservation_id": reservation["capacity_reservation_id"],
         "deal_ref": reservation["deal_ref"],
-        "executor_kind": "vm",
+        "offering_mode": "vm",
         "action_kind": "create",
         "idempotency_key": "create-contract-vm",
         "parameters": {"vm_target": "tenant-contract", "ssh_pubkey": "ssh-ed25519 test"},
@@ -118,7 +118,7 @@ async def test_contract_submission_is_idempotent_and_correlated(client_and_queue
     assert duplicate.job_id == first.job_id
     assert job.capacity_reservation_id == reservation["capacity_reservation_id"]
     assert job.deal_ref["escrow_uid"] == "escrow-contract"
-    assert job.executor_kind == "vm"
+    assert job.offering_mode == "vm"
     assert job.action_kind == "create"
     assert job.result is not None and job.result.result_kind == "vm_create"
     assert {credential.credential_kind for credential in credentials} == {"root", "tenant"}
@@ -138,7 +138,7 @@ async def test_bare_metal_uses_same_executor_neutral_client(client_and_queue):
     action = ExecutorActionEnvelope(
         capacity_reservation_id=reservation["capacity_reservation_id"],
         deal_ref=reservation["deal_ref"],
-        executor_kind="bare_metal",
+        offering_mode="bare_metal",
         action_kind=NODE_GRANT_ACCESS_ACTION,
         idempotency_key="grant-contract-bare-metal",
         parameters={"access_ref": {"ssh_user": "tenant"}},
@@ -151,7 +151,7 @@ async def test_bare_metal_uses_same_executor_neutral_client(client_and_queue):
         )
 
     assert job.capacity_reservation_id == reservation["capacity_reservation_id"]
-    assert job.executor_kind == "bare_metal"
+    assert job.offering_mode == "bare_metal"
     assert job.action_kind == NODE_GRANT_ACCESS_ACTION
     assert job.result is not None
     assert job.result.result_kind == "bare_metal_access"
@@ -162,7 +162,7 @@ async def test_executor_mismatch_fails_before_job_submission(client_and_queue):
     reservation = _leased_vm_reservation()
     async with _compute_provisioning_client("http://test", transport=ASGITransport(app=app)) as client:
         with pytest.raises(ComputeProvisioningError) as exc_info:
-            await client.submit_action(_vm_action(reservation, executor_kind="bare_metal"))
+            await client.submit_action(_vm_action(reservation, offering_mode="bare_metal"))
     assert exc_info.value.status_code == 409
     assert "reservation executor is 'vm'" in str(exc_info.value)
 
@@ -258,14 +258,14 @@ async def test_contract_lease_view_serializes_every_reachable_reservation_state(
     for raw_state, want in expected.items():
         view = _lease_view({
             "capacity_reservation_id": "reservation-1",
-            "executor_kind": "vm",
+            "offering_mode": "vm",
             "state": raw_state,
             "lease_end_utc": "2099-01-01T00:00:00Z",
         })
         assert view.status == want, f"{raw_state!r} should map to {want!r}"
         vm_view = _vm_lease_view({
             "capacity_reservation_id": "reservation-1",
-            "executor_kind": "vm",
+            "offering_mode": "vm",
             "resource_id": "resource-1",
             "state": raw_state,
             "lease_end_utc": "2099-01-01T00:00:00Z",
@@ -394,7 +394,7 @@ async def test_contract_register_lease_never_sends_executor_ref_and_it_self_heal
         registration = LeaseRegistration(
             capacity_reservation_id=reservation["capacity_reservation_id"],
             deal_ref={"escrow_uid": "escrow-contract"},
-            executor_kind="vm",
+            offering_mode="vm",
             executor_target="tenant-self-heal",
             lease_end_utc=datetime.now(timezone.utc) + timedelta(hours=1),
         )

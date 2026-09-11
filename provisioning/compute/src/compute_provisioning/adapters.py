@@ -18,7 +18,7 @@ class ExecutorMismatchError(ValueError):
 
 
 class ExecutorAdapter(Protocol):
-    executor_kind: str
+    offering_mode: str
 
     def validate_parameters(self, action_kind: str, parameters: Mapping[str, Any]) -> Any:
         """Validate opaque command parameters and return the adapter-owned value."""
@@ -41,7 +41,7 @@ class ExecutorAdapter(Protocol):
 class FunctionalExecutorAdapter:
     """Small adapter implementation assembled from domain-owned callables."""
 
-    executor_kind: str
+    offering_mode: str
     parameter_validators: Mapping[str, Callable[[Mapping[str, Any]], Any]]
     submit_action: Callable[[ExecutorActionEnvelope, Any], Awaitable[str]]
     result_validators: Mapping[str, Callable[[Mapping[str, Any]], ResultEnvelope]]
@@ -54,7 +54,7 @@ class FunctionalExecutorAdapter:
             validator = self.parameter_validators[action_kind]
         except KeyError as exc:
             raise UnsupportedExecutorActionError(
-                f"executor {self.executor_kind!r} does not support action {action_kind!r}"
+                f"executor {self.offering_mode!r} does not support action {action_kind!r}"
             ) from exc
         return validator(parameters)
 
@@ -68,7 +68,7 @@ class FunctionalExecutorAdapter:
             return self.result_validators[action_kind](result)
         except KeyError as exc:
             raise UnsupportedExecutorActionError(
-                f"executor {self.executor_kind!r} has no result codec for {action_kind!r}"
+                f"executor {self.offering_mode!r} has no result codec for {action_kind!r}"
             ) from exc
 
     def validate_credentials(
@@ -87,14 +87,14 @@ class ExecutorAdapterRegistry:
             self.register(adapter)
 
     def register(self, adapter: ExecutorAdapter) -> None:
-        if adapter.executor_kind in self._adapters:
-            raise ValueError(f"duplicate executor adapter: {adapter.executor_kind}")
-        self._adapters[adapter.executor_kind] = adapter
+        if adapter.offering_mode in self._adapters:
+            raise ValueError(f"duplicate executor adapter: {adapter.offering_mode}")
+        self._adapters[adapter.offering_mode] = adapter
 
-    def get(self, executor_kind: str) -> ExecutorAdapter:
+    def get(self, offering_mode: str) -> ExecutorAdapter:
         try:
-            return self._adapters[executor_kind]
+            return self._adapters[offering_mode]
         except KeyError as exc:
             raise UnsupportedExecutorActionError(
-                f"unsupported executor kind: {executor_kind!r}"
+                f"unsupported offering mode: {offering_mode!r}"
             ) from exc

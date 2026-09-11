@@ -61,7 +61,7 @@ class TestSystemStats:
         db_session.add(Listing(
             listing_id="stats-closed-1",
             publisher_id=maker_publisher.publisher_id,
-            offer_resource={"gpu_model": "A100"},
+            listing_resource={"gpu_model": "A100"},
             accepted_escrows=[{"chain_name": "anvil", "escrow_address": "0x" + "11" * 20, "literal_fields": {"token": "USDC"}}],
             max_duration_seconds=3600,
             status=OrderStatusEnum.closed,

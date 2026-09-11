@@ -637,7 +637,7 @@ def _apply_legacy_vm_lease_backfill(connection) -> None:
         SELECT vl.id AS lease_id, vl.allocation_id, vl.escrow_uid,
                vl.vm_host, vl.vm_target, vl.status, vl.create_job_id,
                vl.vm_remove_job_id, cr.capacity_reservation_id,
-               cr.executor_kind, cr.executor_target, h.pool_id, rp.provider,
+               cr.offering_mode, cr.executor_target, h.pool_id, rp.provider,
                apc.playbook_path, apc.inventory_group, apc.extra_vars
         FROM vm_leases vl
         LEFT JOIN capacity_reservations cr
@@ -660,17 +660,17 @@ def _apply_legacy_vm_lease_backfill(connection) -> None:
         if reservation_id in seen_reservations:
             raise SchemaDriftError(f"duplicate legacy VM leases for reservation {reservation_id}")
         seen_reservations.add(reservation_id)
-        existing_executor_kind = row["executor_kind"]
-        if existing_executor_kind is not None and (
-            not isinstance(existing_executor_kind, str)
+        existing_offering_mode = row["offering_mode"]
+        if existing_offering_mode is not None and (
+            not isinstance(existing_offering_mode, str)
             or (
-                existing_executor_kind.strip()
-                and existing_executor_kind.strip() != "vm"
+                existing_offering_mode.strip()
+                and existing_offering_mode.strip() != "vm"
             )
         ):
             raise SchemaDriftError(
                 f"legacy VM lease {row['lease_id']} conflicts with reservation "
-                f"executor identity {existing_executor_kind!r}"
+                f"offering mode {existing_offering_mode!r}"
             )
 
 
@@ -714,7 +714,7 @@ def _apply_legacy_vm_lease_backfill(connection) -> None:
             "FROM settlement_records WHERE capacity_reservation_id=:id"
         ), {"id": draft.capacity_reservation_id}).mappings().one_or_none()
         requirements = {
-            "executor_kind": draft.executor_kind,
+            "offering_mode": draft.offering_mode,
             "resource_kind": "vm",
         }
         if existing:
@@ -726,12 +726,12 @@ def _apply_legacy_vm_lease_backfill(connection) -> None:
                     f"settlement aggregate for reservation "
                     f"{draft.capacity_reservation_id} has invalid scheduling requirements"
                 )
-            persisted_executor_kind = persisted_requirements.get("executor_kind")
-            if persisted_executor_kind is not None and (
-                not isinstance(persisted_executor_kind, str)
+            persisted_offering_mode = persisted_requirements.get("offering_mode")
+            if persisted_offering_mode is not None and (
+                not isinstance(persisted_offering_mode, str)
                 or (
-                    persisted_executor_kind.strip()
-                    and persisted_executor_kind.strip() != draft.executor_kind
+                    persisted_offering_mode.strip()
+                    and persisted_offering_mode.strip() != draft.offering_mode
                 )
             ):
                 raise SchemaDriftError(
@@ -745,18 +745,18 @@ def _apply_legacy_vm_lease_backfill(connection) -> None:
                     f"conflicting settlement aggregate for reservation {draft.capacity_reservation_id}"
                 )
             requirements.update(persisted_requirements)
-            requirements["executor_kind"] = draft.executor_kind
+            requirements["offering_mode"] = draft.offering_mode
 
         # A successfully compiled candidate is bounded evidence from the
         # historical VM-lease table. Persist that exact identity on both
         # records; never infer it later from a selected pool or resource.
         connection.execute(
             text(
-                "UPDATE capacity_reservations SET executor_kind=:executor_kind "
+                "UPDATE capacity_reservations SET offering_mode=:offering_mode "
                 "WHERE capacity_reservation_id=:reservation_id"
             ),
             {
-                "executor_kind": draft.executor_kind,
+                "offering_mode": draft.offering_mode,
                 "reservation_id": draft.capacity_reservation_id,
             },
         )
@@ -844,7 +844,7 @@ def _migrate_rename_site_allocations_to_capacity_reservations(engine: Engine) ->
 
 
 def _migrate_site_allocations_executor_fields(engine: Engine) -> None:
-    _add_column_if_missing(engine, "site_allocations", "executor_kind", "VARCHAR")
+    _add_column_if_missing(engine, "site_allocations", "offering_mode", "VARCHAR")
     _add_column_if_missing(engine, "site_allocations", "executor_target", "VARCHAR")
     _add_column_if_missing(engine, "site_allocations", "release_job_id", "VARCHAR")
     _add_column_if_missing(engine, "site_allocations", "executor_ref", "JSON")
@@ -866,7 +866,7 @@ def _migrate_ansible_jobs_contract_fields(engine: Engine) -> None:
         ("contract_version", "VARCHAR"),
         (reservation_column, "VARCHAR"),
         ("deal_ref", "JSON"),
-        ("executor_kind", "VARCHAR"),
+        ("offering_mode", "VARCHAR"),
         ("action_kind", "VARCHAR"),
         ("idempotency_key", "VARCHAR"),
     ):
@@ -1353,7 +1353,7 @@ def _legacy_executor_evidence(
     )
     job_params = _json_mapping(params, label="ansible job params")
 
-    recorded = requirements.get("executor_kind") or job_params.get("executor_kind")
+    recorded = requirements.get("offering_mode") or job_params.get("offering_mode")
     if isinstance(recorded, str) and recorded.strip():
         evidence.add(recorded.strip())
     market = deal.get("market")
@@ -1438,7 +1438,7 @@ def _migrate_executor_identities_and_pool_modes(engine: Engine) -> None:
             job_rows = list(
                 connection.execute(
                     text(
-                        "SELECT id, status, params, executor_kind, "
+                        "SELECT id, status, params, offering_mode, "
                         "capacity_reservation_id, error FROM ansible_jobs"
                     )
                 ).mappings()
@@ -1447,7 +1447,7 @@ def _migrate_executor_identities_and_pool_modes(engine: Engine) -> None:
                 reservation_id = job["capacity_reservation_id"]
                 if reservation_id is None:
                     continue
-                existing_kind = job["executor_kind"]
+                existing_kind = job["offering_mode"]
                 evidence = (
                     {existing_kind.strip()}
                     if isinstance(existing_kind, str) and existing_kind.strip()
@@ -1472,7 +1472,7 @@ def _migrate_executor_identities_and_pool_modes(engine: Engine) -> None:
             rows = list(
                 connection.execute(
                     text(
-                        "SELECT cr.capacity_reservation_id, cr.executor_kind, "
+                        "SELECT cr.capacity_reservation_id, cr.offering_mode, "
                         "cr.executor_ref, cr.deal_ref, cr.state, "
                         "cr.failure_reason, cb.attributes AS backing_attributes, "
                         f"{settlement_column} AS scheduling_requirements "
@@ -1514,7 +1514,7 @@ def _migrate_executor_identities_and_pool_modes(engine: Engine) -> None:
 
             for reservation_id, group in grouped.items():
                 row = group["row"]
-                existing_kind = row["executor_kind"]
+                existing_kind = row["offering_mode"]
                 existing_kind = (
                     existing_kind.strip()
                     if isinstance(existing_kind, str) and existing_kind.strip()
@@ -1525,7 +1525,7 @@ def _migrate_executor_identities_and_pool_modes(engine: Engine) -> None:
                     deal_ref=row["deal_ref"],
                 )
                 for requirements in group["requirements"]:
-                    recorded = requirements.get("executor_kind")
+                    recorded = requirements.get("offering_mode")
                     if isinstance(recorded, str) and recorded.strip():
                         evidence.add(recorded.strip())
                 evidence.update(
@@ -1536,24 +1536,24 @@ def _migrate_executor_identities_and_pool_modes(engine: Engine) -> None:
                 else:
                     evidence.add(existing_kind)
 
-                executor_kind = next(iter(evidence)) if len(evidence) == 1 else None
-                if executor_kind is not None:
+                offering_mode = next(iter(evidence)) if len(evidence) == 1 else None
+                if offering_mode is not None:
                     if existing_kind is None:
                         connection.execute(
                             text(
                                 "UPDATE capacity_reservations "
-                                "SET executor_kind=:executor_kind "
+                                "SET offering_mode=:offering_mode "
                                 "WHERE capacity_reservation_id=:reservation_id"
                             ),
                             {
-                                "executor_kind": executor_kind,
+                                "offering_mode": offering_mode,
                                 "reservation_id": reservation_id,
                             },
                         )
                     for requirements in group["requirements"]:
-                        if requirements.get("executor_kind") == executor_kind:
+                        if requirements.get("offering_mode") == offering_mode:
                             continue
-                        requirements["executor_kind"] = executor_kind
+                        requirements["offering_mode"] = offering_mode
                         connection.execute(
                             text(
                                 "UPDATE settlement_records "
@@ -1567,7 +1567,7 @@ def _migrate_executor_identities_and_pool_modes(engine: Engine) -> None:
                                 "reservation_id": reservation_id,
                             },
                         )
-                    reservation_kinds[reservation_id] = executor_kind
+                    reservation_kinds[reservation_id] = offering_mode
                     continue
 
                 state = (
@@ -1578,9 +1578,9 @@ def _migrate_executor_identities_and_pool_modes(engine: Engine) -> None:
                 detail = (
                     "conflicting evidence: " + ", ".join(sorted(evidence))
                     if evidence
-                    else "no durable executor evidence"
+                    else "no durable offering-mode evidence"
                 )
-                message = f"Legacy executor identity is quarantined: {detail}"
+                message = f"Legacy offering-mode identity is quarantined: {detail}"
                 connection.execute(
                     text(
                         "UPDATE capacity_reservations SET state=:state, "
@@ -1638,7 +1638,7 @@ def _migrate_executor_identities_and_pool_modes(engine: Engine) -> None:
             params = _json_mapping(
                 job["params"], label=f"ansible job {job['id']!r} params"
             )
-            existing_kind = job["executor_kind"]
+            existing_kind = job["offering_mode"]
             existing_kind = (
                 existing_kind.strip()
                 if isinstance(existing_kind, str) and existing_kind.strip()
@@ -1662,20 +1662,20 @@ def _migrate_executor_identities_and_pool_modes(engine: Engine) -> None:
             )
             if linked_kind is not None:
                 evidence.add(linked_kind)
-            executor_kind = (
+            offering_mode = (
                 next(iter(evidence))
                 if len(evidence) == 1 and not linked_quarantined
                 else None
             )
-            if executor_kind is not None:
-                params["executor_kind"] = executor_kind
+            if offering_mode is not None:
+                params["offering_mode"] = offering_mode
                 connection.execute(
                     text(
-                        "UPDATE ansible_jobs SET executor_kind=:executor_kind, "
+                        "UPDATE ansible_jobs SET offering_mode=:offering_mode, "
                         "params=:params WHERE id=:job_id"
                     ),
                     {
-                        "executor_kind": executor_kind,
+                        "offering_mode": offering_mode,
                         "params": json.dumps(params, sort_keys=True),
                         "job_id": job["id"],
                     },
@@ -1688,7 +1688,7 @@ def _migrate_executor_identities_and_pool_modes(engine: Engine) -> None:
                 else (
                     "conflicting evidence: " + ", ".join(sorted(evidence))
                     if evidence
-                    else "no durable executor evidence"
+                    else "no durable offering-mode evidence"
                 )
             )
             status_value = (
@@ -1704,7 +1704,7 @@ def _migrate_executor_identities_and_pool_modes(engine: Engine) -> None:
                 {
                     "status": status_value,
                     "error": (
-                        "Legacy executor identity is quarantined: "
+                        "Legacy offering-mode identity is quarantined: "
                         f"{detail}"
                         if job["status"] in _ACTIVE_JOB_STATES or not job["error"]
                         else job["error"]
@@ -1717,6 +1717,103 @@ def _migrate_executor_identities_and_pool_modes(engine: Engine) -> None:
                 job["id"],
                 detail,
             )
+
+
+def _migrate_reservation_offering_mode_name(engine: Engine) -> None:
+    """Move the reservation's offering mode onto its settled column name and
+    the same value onto its settled key inside persisted scheduling
+    requirements.
+
+    Both halves run in one migration because they describe one value. The
+    column carries a reservation's requested offering mode; the JSON payload
+    carries the same mode inside ``settlement_records.scheduling_requirements``,
+    which ``SettlementRepository`` compares structurally against a freshly
+    serialized requirement to decide whether a settlement request is a retry
+    of one it already has. A payload left under the retired key would not
+    compare equal to a newly serialized one, so a settlement retried across
+    this upgrade would stop recognizing its own request and submit a second
+    time.
+
+    Expand/contract rather than a rename statement: add, copy, then rebuild
+    without the old column, so an interrupted run leaves a readable table
+    either way.
+    """
+    if _table_exists(engine, "capacity_reservations") and _column_exists(
+        engine, "capacity_reservations", "executor_kind"
+    ):
+        _add_column_if_missing(
+            engine, "capacity_reservations", "offering_mode", "VARCHAR"
+        )
+        with engine.begin() as connection:
+            connection.execute(
+                text(
+                    "UPDATE capacity_reservations SET offering_mode=executor_kind "
+                    "WHERE offering_mode IS NULL AND executor_kind IS NOT NULL"
+                )
+            )
+        _drop_columns_via_table_rebuild(
+            engine, "capacity_reservations", ["executor_kind"]
+        )
+
+    if not _table_exists(engine, "settlement_records"):
+        return
+
+    with engine.begin() as connection:
+        rows = connection.execute(
+            text(
+                "SELECT capacity_reservation_id, scheduling_requirements "
+                "FROM settlement_records"
+            )
+        ).mappings().all()
+        for row in rows:
+            raw = row["scheduling_requirements"]
+            if raw is None:
+                continue
+            requirements = json.loads(raw) if isinstance(raw, str) else dict(raw)
+            if not isinstance(requirements, dict):
+                continue
+            if "executor_kind" not in requirements:
+                continue
+            # A payload already carrying the settled key is left alone rather
+            # than overwritten: the settled value is the one a live caller
+            # serialized, and the retired key is the stale copy.
+            requirements.setdefault("offering_mode", requirements["executor_kind"])
+            del requirements["executor_kind"]
+            connection.execute(
+                text(
+                    "UPDATE settlement_records SET scheduling_requirements=:payload "
+                    "WHERE capacity_reservation_id=:reservation_id"
+                ),
+                {
+                    "payload": json.dumps(requirements, sort_keys=True,
+                                          separators=(",", ":")),
+                    "reservation_id": row["capacity_reservation_id"],
+                },
+            )
+
+
+def count_rows_carrying_retired_offering_mode_key(engine: Engine) -> int:
+    """Rows whose persisted scheduling requirements still name the retired key.
+
+    A cutover gate rather than a migration step. The payload is JSON, so a row
+    the backfill missed is not a type error and would surface only at a
+    settlement retry or a listing read — late, and as a duplicate submission
+    rather than as a failure. Counting is therefore the check, not sampling.
+    """
+    if not _table_exists(engine, "settlement_records"):
+        return 0
+    with engine.begin() as connection:
+        rows = connection.execute(
+            text("SELECT scheduling_requirements FROM settlement_records")
+        ).scalars().all()
+    stale = 0
+    for raw in rows:
+        if raw is None:
+            continue
+        requirements = json.loads(raw) if isinstance(raw, str) else raw
+        if isinstance(requirements, dict) and "executor_kind" in requirements:
+            stale += 1
+    return stale
 
 
 MIGRATIONS: tuple[Migration, ...] = (
@@ -1771,5 +1868,9 @@ MIGRATIONS: tuple[Migration, ...] = (
     Migration(
         "20260901_001_relay_reachable_hosts",
         _migrate_relay_reachable_hosts,
+    ),
+    Migration(
+        "20260911_001_reservation_offering_mode_name",
+        _migrate_reservation_offering_mode_name,
     ),
 )

@@ -31,7 +31,7 @@ class ApiCreditPublicationHooks:
         self._db = db
 
     def validate_candidate(self, candidate: PublicationCandidate[dict[str, Any]]) -> None:
-        offer = candidate.payload.get("offer_resource") or {}
+        offer = candidate.payload.get("listing_resource") or {}
         if isinstance(offer, str):
             import json
             offer = json.loads(offer)
@@ -43,7 +43,7 @@ class ApiCreditPublicationHooks:
         if row is None:
             return None
         try:
-            return capacity_binding_from_offer(row.get("offer_resource") or {})
+            return capacity_binding_from_offer(row.get("listing_resource") or {})
         except (ValueError, TypeError):
             return None
 

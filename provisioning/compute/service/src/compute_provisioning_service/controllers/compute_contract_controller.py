@@ -40,15 +40,15 @@ def _lease_view(reservation: dict[str, Any]) -> LeaseView:
 
     raw_state = str(reservation.get("state"))
     executor_ref = dict(reservation.get("executor_ref") or {})
-    executor_kind = reservation.get("executor_kind")
-    if not executor_kind:
+    offering_mode = reservation.get("offering_mode")
+    if not offering_mode:
         raise ExecutorMismatchError(
             "reservation has no explicit executor identity"
         )
     return LeaseView(
         capacity_reservation_id=str(reservation["capacity_reservation_id"]),
         deal_ref=dict(reservation.get("deal_ref") or {"escrow_uid": reservation.get("escrow_uid")}),
-        executor_kind=str(executor_kind),
+        offering_mode=str(offering_mode),
         executor_target=str(
             reservation.get("executor_target")
             or reservation.get("vm_target")
@@ -131,7 +131,7 @@ class ComputeContractController:
                 ExecutorLeaseRegistration(
                     capacity_reservation_id=body.capacity_reservation_id,
                     escrow_uid=str(body.deal_ref.get("escrow_uid") or "") or None,
-                    executor_kind=body.executor_kind,
+                    offering_mode=body.offering_mode,
                     executor_target=body.executor_target,
                     lease_start_utc=body.lease_start_utc,
                     lease_end_utc=body.lease_end_utc,

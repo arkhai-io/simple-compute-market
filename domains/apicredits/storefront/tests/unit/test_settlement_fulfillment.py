@@ -262,7 +262,7 @@ async def test_fulfillment_issues_and_returns_credentials_once(monkeypatch):
     result = await fulfill_api_credits_obligation(
         client=None,  # simulated on-chain fulfillment
         escrow_uid="0xescrow1",
-        offer_resource=_OFFER,
+        listing_resource=_OFFER,
         quantity=3,
         buyer_principal=_BUYER_PRINCIPAL,
         listing_id="L-tok",
@@ -304,7 +304,7 @@ async def test_fulfillment_refusal_applies_failure_policy(monkeypatch):
     result = await fulfill_api_credits_obligation(
         client=None,
         escrow_uid="0xescrow2",
-        offer_resource=_OFFER,
+        listing_resource=_OFFER,
         quantity=3,
         buyer_principal=_BUYER_PRINCIPAL,
         service_url="http://tokens:8082",
@@ -341,7 +341,7 @@ async def test_chain_failure_after_issuance_rolls_back(monkeypatch):
     result = await fulfill_api_credits_obligation(
         client=object(),
         escrow_uid="0xescrow3",
-        offer_resource=_OFFER,
+        listing_resource=_OFFER,
         quantity=3,
         buyer_principal=_BUYER_PRINCIPAL,
         key_mode="new",
@@ -375,15 +375,15 @@ async def test_fulfillment_service_normalizes_order_through_domain_runtime(
     result = await fulfillment_service.fulfill_credit_obligation(
         client=None,
         escrow_uid="0xescrow-runtime",
-        order={"offer_resource": dict(_OFFER)},
+        order={"listing_resource": dict(_OFFER)},
         quantity=3,
         buyer_principal=_BUYER_PRINCIPAL,
     )
 
     assert result["status"] == "fulfilled"
-    assert captured["offer_resource"]["kind"] == "api_credits.v1"
-    assert captured["offer_resource"]["service_name"] == _OFFER["service_name"]
-    assert captured["offer_resource"]["resource_id"] == _OFFER["resource_id"]
+    assert captured["listing_resource"]["kind"] == "api_credits.v1"
+    assert captured["listing_resource"]["service_name"] == _OFFER["service_name"]
+    assert captured["listing_resource"]["resource_id"] == _OFFER["resource_id"]
 
 
 async def test_fulfillment_service_rejects_invalid_domain_listing(monkeypatch):
@@ -403,7 +403,7 @@ async def test_fulfillment_service_rejects_invalid_domain_listing(monkeypatch):
             client=None,
             escrow_uid="0xescrow-invalid",
             order={
-                "offer_resource": {
+                "listing_resource": {
                     "kind": "api_credits.v1",
                     "service_name": " ",
                     "resource_id": "svc-quota",
@@ -548,7 +548,7 @@ async def settled_db(tmp_path, monkeypatch):
         status="open",
         created_at=datetime.now().isoformat(),
         updated_at=datetime.now().isoformat(),
-        offer_resource=dict(_OFFER),
+        listing_resource=dict(_OFFER),
         accepted_escrows=[
             {
                 "chain_name": "anvil",

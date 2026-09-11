@@ -31,7 +31,7 @@ def format_resource(resource: dict) -> str:
             "vcpu_count",
             "ram_gb",
             "disk_gb",
-            "virtualization_type",
+            "offering_mode",
             "cpu_type",
             "host_cpu_cores",
             "host_ram_gb",

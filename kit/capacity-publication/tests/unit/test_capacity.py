@@ -65,7 +65,7 @@ async def test_bound_effects_never_fan_out_or_use_reservation_cache(runtime):
     composed, remotes, _ = runtime
     binding = CapacityBinding("site-b", "vm", "pool-1")
 
-    reserved = await composed.reserve(binding, claim={"executor_kind": "vm"})
+    reserved = await composed.reserve(binding, claim={"offering_mode": "vm"})
     await composed.commit(
         binding,
         resource_id="gpu-1",
@@ -92,7 +92,7 @@ async def test_unknown_recorded_site_fails_closed(runtime):
     with pytest.raises(CapacityBindingError, match="unconfigured site"):
         await composed.reserve(
             CapacityBinding("removed-site", "vm", "pool-1"),
-            claim={"executor_kind": "vm"},
+            claim={"offering_mode": "vm"},
         )
 
     assert all(remote.reserve.await_count == 0 for remote in remotes.values())

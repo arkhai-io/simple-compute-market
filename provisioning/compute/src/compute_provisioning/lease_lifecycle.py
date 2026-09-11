@@ -167,7 +167,7 @@ class LeaseLifecycleService:
         attached = self._site_authority.attach_lease_reservation(
             capacity_reservation_id=body.capacity_reservation_id,
             escrow_uid=body.escrow_uid,
-            executor_kind=body.executor_kind,
+            offering_mode=body.offering_mode,
             executor_target=body.executor_target,
             executor_ref=body.executor_ref,
             lease_start_utc=_datetime_value(body.lease_start_utc),
@@ -177,7 +177,7 @@ class LeaseLifecycleService:
         if attached is None and not body.capacity_reservation_id:
             attached = self._site_authority.attach_lease_reservation(
                 escrow_uid=body.escrow_uid,
-                executor_kind=body.executor_kind,
+                offering_mode=body.offering_mode,
                 executor_target=body.executor_target,
                 executor_ref=body.executor_ref,
                 lease_start_utc=_datetime_value(body.lease_start_utc),
@@ -194,7 +194,7 @@ class LeaseLifecycleService:
     def update_lease(self, lease_id: str, body: Any) -> dict[str, Any]:
         updated = self._site_authority.update_reservation_fields(
             lease_id,
-            executor_kind=body.executor_kind,
+            offering_mode=body.offering_mode,
             executor_target=body.executor_target,
             executor_ref=body.executor_ref,
             lease_start_utc=_datetime_value(body.lease_start_utc),
@@ -392,9 +392,9 @@ class LeaseLifecycleService:
         job_id = reservation.get("release_job_id") or reservation.get("vm_remove_job_id")
         # "direct-release" means the executor's submit_release reported
         # nothing to poll -- e.g. no release delegate configured for that
-        # executor kind. This is independent of whether release_jobs is
+        # offering mode. This is independent of whether release_jobs is
         # configured at all: a kind-routed dispatcher may hold a real port
-        # for one executor kind while another kind still submits this
+        # for one offering mode while another kind still submits this
         # sentinel, and grace-period bookkeeping must not apply to a
         # release that was never dispatched as a pollable job.
         if job_id == "direct-release":
@@ -405,7 +405,7 @@ class LeaseLifecycleService:
         if job_id and self._release_jobs is not None:
             try:
                 job = self._release_jobs.get_job(
-                    job_id, executor_kind=reservation.get("executor_kind")
+                    job_id, offering_mode=reservation.get("offering_mode")
                 )
                 if job.status == "succeeded":
                     if not await self._finish_release(reservation):

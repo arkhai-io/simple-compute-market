@@ -7,7 +7,7 @@ pytest.importorskip("core_storefront.publication_sources")
 from arkhai_vms.storefront_adapter import (  # noqa: E402
     vm_candidate_skip_keys,
     vm_listing_resource_key,
-    vm_offer_resource_for_listing,
+    vm_listing_resource_for_listing,
     vm_publication_adapter,
 )
 
@@ -51,7 +51,7 @@ def test_vm_publication_adapter_fills_core_publication_source_slots() -> None:
     def available_candidates(db_path: str) -> list[dict]:
         return [{"resource_id": db_path, "gpu_count": 1}]
 
-    def offer_resource(candidate: dict) -> dict:
+    def listing_resource(candidate: dict) -> dict:
         return dict(candidate)
 
     def record_published(
@@ -70,7 +70,7 @@ def test_vm_publication_adapter_fills_core_publication_source_slots() -> None:
         open_keys=open_keys,
         close_stale=close_stale,
         available_candidates=available_candidates,
-        offer_resource=offer_resource,
+        listing_resource=listing_resource,
         record_published=record_published,
         reopen_existing=reopen_existing,
     )
@@ -85,7 +85,7 @@ def test_vm_publication_adapter_fills_core_publication_source_slots() -> None:
     assert adapter.available_candidates("host-a") == [
         {"resource_id": "host-a", "gpu_count": 1},
     ]
-    assert adapter.offer_resource({"gpu_count": 1}) == {"gpu_count": 1}
+    assert adapter.listing_resource({"gpu_count": 1}) == {"gpu_count": 1}
     assert adapter.pricing_resource(
         {"min_price": "1"},
         {"gpu_count": 1},
@@ -98,8 +98,8 @@ def test_vm_publication_adapter_fills_core_publication_source_slots() -> None:
     assert vm_listing_resource_key("host-a", 2) == "host-a:gpus:2"
 
 
-def test_vm_offer_resource_for_listing_builds_domain_payload() -> None:
-    offer = vm_offer_resource_for_listing({
+def test_vm_listing_resource_for_listing_builds_domain_payload() -> None:
+    offer = vm_listing_resource_for_listing({
         "offering_mode": "vm",
         "pool_id": "pool-a",
         "resource_id": "host-a",
@@ -110,7 +110,7 @@ def test_vm_offer_resource_for_listing_builds_domain_payload() -> None:
     })
 
     assert offer == {
-        "virtualization_type": "vm",
+        "offering_mode": "vm",
         "pool_id": "pool-a",
         "resource_id": "host-a",
         "gpu_model": "H200",
@@ -120,8 +120,8 @@ def test_vm_offer_resource_for_listing_builds_domain_payload() -> None:
     }
 
 
-def test_vm_offer_resource_for_listing_marks_interruptible() -> None:
-    offer = vm_offer_resource_for_listing(
+def test_vm_listing_resource_for_listing_marks_interruptible() -> None:
+    offer = vm_listing_resource_for_listing(
         {
             "offering_mode": "vm",
             "pool_id": "pool-a",

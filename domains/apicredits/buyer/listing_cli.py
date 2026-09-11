@@ -42,7 +42,7 @@ def short_ts(value: Any) -> str:
 
 
 def format_offer(resource: Any) -> str:
-    """One-line summary of an api_credits.v1 offer_resource."""
+    """One-line summary of an api_credits.v1 listing_resource."""
     offer = coerce_resource_dict(resource)
     if not offer:
         return "-"
@@ -177,7 +177,7 @@ def listing_list(
     table.add_column("Created", justify="right")
 
     for row in items:
-        offer = coerce_resource_dict(row.get("offer_resource", {}))
+        offer = coerce_resource_dict(row.get("listing_resource", {}))
         table.add_row(
             str(row.get("listing_id", "-")),
             format_offer(offer),
@@ -264,7 +264,7 @@ def listing_show(
         )
         raise typer.Exit(code=1)
 
-    offer = coerce_resource_dict(found.get("offer_resource", {}))
+    offer = coerce_resource_dict(found.get("listing_resource", {}))
     console = Console()
     table = Table.grid(padding=(0, 2))
     table.add_column(style="bold", no_wrap=True)

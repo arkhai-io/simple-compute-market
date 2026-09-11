@@ -59,7 +59,7 @@ def vm_candidate_skip_keys(candidate: dict[str, Any]) -> set[str]:
     return keys
 
 
-def vm_offer_resource_for_listing(
+def vm_listing_resource_for_listing(
     candidate: dict[str, Any],
     *,
     interruptible: bool = False,
@@ -71,7 +71,7 @@ def vm_offer_resource_for_listing(
         "gpu_count": candidate["gpu_count"],
         "sla": candidate["sla"],
         "region": candidate["region"],
-        "virtualization_type": candidate["offering_mode"],
+        "offering_mode": candidate["offering_mode"],
     }
     if candidate.get("resource_id"):
         offer["resource_id"] = candidate["resource_id"]
@@ -86,7 +86,7 @@ def vm_publication_adapter(
     open_keys: OpenKeysCallback,
     close_stale: CloseStaleCallback,
     available_candidates: CandidateCallback,
-    offer_resource: OfferResourceCallback,
+    listing_resource: OfferResourceCallback,
     record_published: RecordPublishedCallback,
     reopen_existing: ReopenExistingCallback,
 ) -> PublicationSource:
@@ -97,7 +97,7 @@ def vm_publication_adapter(
         close_stale=close_stale,
         available_candidates=available_candidates,
         skip_keys=vm_candidate_skip_keys,
-        offer_resource=offer_resource,
+        listing_resource=listing_resource,
         record_published=record_published,
         reopen_existing=reopen_existing,
         reopen_error_label="reopen derived listing",

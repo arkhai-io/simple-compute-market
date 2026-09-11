@@ -459,3 +459,60 @@ provisioning service, and buyer clients. Rollback is limited to the boundary bef
 step 8; after migrated state has taken effects, recovery is rolling forward rather
 than restoring stale state, which is the same constraint the identity-contract
 pattern already carries.
+
+## Defects found during implementation
+
+Recorded because each was found by a different check, and the pattern in which
+check caught which defect is the useful part.
+
+### A migration written against a column that does not exist
+
+The reservation migration was first written against
+`settlement_records.settlement_record_id`; the real primary key is
+`capacity_reservation_id`. The new test's fixture hand-wrote the table's DDL and
+encoded the same wrong assumption, so the targeted test passed while the full
+service suite went to 55 failures and 83 collection errors.
+
+The fixture now builds the table from `SettlementRecord.__table__`, which
+immediately surfaced a second latent problem: several columns on that table
+default Python-side, so raw-SQL inserts bypass those defaults. The test now writes
+through the ORM path production uses.
+
+**Lesson.** A migration test that hand-writes the schema it migrates can only
+confirm the author's model of the schema, never the schema.
+`test_vm_host_executor_ref_migration.py` has the same hand-written-DDL shape and is
+worth revisiting on the same grounds. Caught by running the broad suite; the narrow
+test was green throughout.
+
+### A rename sweep that inverted three prohibitions
+
+The `virtualization_type` to `offering_mode` rename rewrote the *prohibition lists*
+in `site-capacity`, `physical-provisioning`, and `compute-provisioning-contract`, so
+each read "no surface may name it `executor_kind`, `offering_type`, or
+`offering_mode`" — forbidding the settled name the same sentence mandates.
+
+**Lesson.** A mechanical rename applied to a document stating what a name must *not*
+be will invert it, and no test covers specification prose. Caught by task 10.3's
+direct re-read, which is the argument for that step existing rather than being
+delegated to a reviewer.
+
+### A cutover gate that passed on an unmigrated database
+
+`count_listings_carrying_retired_offering_mode_key` read only the settled column, so
+a database that had not been migrated at all reported no stale rows — the exact
+state the gate exists to catch. It now reads whichever shape column is present.
+
+**Lesson.** A gate that inspects the post-state cannot detect the pre-state. Caught
+by writing the test that asserts the pre-migration count is non-zero.
+
+### A keyword rename that grep could not follow
+
+Every `offer=` keyword argument rewritten cascaded into a parameter or stub
+definition that grep did not reveal — `_reopen_derived_listing_if_present`,
+`listing_request_factory`, `_publish_listing`, and four test stubs — because a
+keyword argument and the parameter it binds are spelled identically but live in
+different files.
+
+**Lesson.** For a keyword-argument rename the test suite is the index, not grep.
+Each site was found by a failing test.
+

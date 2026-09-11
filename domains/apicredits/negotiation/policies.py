@@ -206,7 +206,7 @@ def credit_quota_guard(
     context: NegotiationContext,
 ) -> NegotiationStep:
     """Veto when the quota snapshot can't cover the requested quantity."""
-    offer = coerce_resource_dict(context.listing.get("offer_resource"))
+    offer = coerce_resource_dict(context.listing.get("listing_resource"))
     if offer.get("kind") != "api_credits.v1":
         return None, context
 

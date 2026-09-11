@@ -27,7 +27,7 @@ class ApiCreditsListing(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     kind: Literal["api_credits.v1"] = API_CREDITS_SCHEMA_KIND
-    offer_resource: ApiCreditsResource = Field(
+    listing_resource: ApiCreditsResource = Field(
         description="Quota-backed API service offered by the seller.",
     )
     accepted_escrows: list[dict[str, Any]] = Field(default_factory=list)
@@ -36,7 +36,7 @@ class ApiCreditsListing(BaseModel):
 
     @model_validator(mode="before")
     @classmethod
-    def _accept_offer_resource_payload(cls, value: Any) -> Any:
+    def _accept_listing_resource_payload(cls, value: Any) -> Any:
         # Domain models can cross a source/wheel import boundary in the
         # storefront image. Structurally identical Pydantic classes loaded
         # from those two locations do not pass isinstance validation, so
@@ -45,27 +45,27 @@ class ApiCreditsListing(BaseModel):
             value = value.model_dump(mode="json")
         if not isinstance(value, dict):
             return value
-        if "offer_resource" in value:
-            offer_resource = value["offer_resource"]
-            if isinstance(offer_resource, BaseModel):
-                offer_resource = offer_resource.model_dump(mode="json")
-            elif isinstance(offer_resource, str):
+        if "listing_resource" in value:
+            listing_resource = value["listing_resource"]
+            if isinstance(listing_resource, BaseModel):
+                listing_resource = listing_resource.model_dump(mode="json")
+            elif isinstance(listing_resource, str):
                 try:
-                    offer_resource = json.loads(offer_resource)
+                    listing_resource = json.loads(listing_resource)
                 except (TypeError, ValueError):
                     return value
-            return {**value, "offer_resource": offer_resource}
-        return {"offer_resource": value}
+            return {**value, "listing_resource": listing_resource}
+        return {"listing_resource": value}
 
     @model_validator(mode="after")
     def _validate_listing(self) -> "ApiCreditsListing":
-        if not self.offer_resource.service_name.strip():
-            raise ValueError("offer_resource.service_name must be non-empty")
+        if not self.listing_resource.service_name.strip():
+            raise ValueError("listing_resource.service_name must be non-empty")
         if (
-            self.offer_resource.resource_id is not None
-            and not self.offer_resource.resource_id.strip()
+            self.listing_resource.resource_id is not None
+            and not self.listing_resource.resource_id.strip()
         ):
-            raise ValueError("offer_resource.resource_id must be non-empty")
+            raise ValueError("listing_resource.resource_id must be non-empty")
         option_ids = [option.option_id for option in self.settlement_options]
         if len(option_ids) != len(set(option_ids)):
             raise ValueError("settlement_options contains duplicate option identities")
@@ -122,7 +122,7 @@ class ApiCreditsMaterialization(BaseModel):
     quantity: int = Field(ge=1)
     key_mode: Literal["new", "existing"] = "new"
     key_id: str | None = None
-    offer_resource: ApiCreditsResource | None = None
+    listing_resource: ApiCreditsResource | None = None
     settlement_ref: dict[str, Any] | None = None
     obligation_ref: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
     fulfillment_id: str | None = Field(default=None, min_length=1)

@@ -341,7 +341,7 @@ async def load_api_credit_hosted_agreement(
         raise ValueError("hosted obligation does not match its trusted rebuild")
     if thread.get("agreed_price") != rebuilt.amount:
         raise ValueError("hosted amount does not match exact quantity pricing")
-    resource = _mapping(order.get("offer_resource"))
+    resource = _mapping(order.get("listing_resource"))
     service = str(resource.get("service_name") or "")
     resource_id = str(resource.get("resource_id") or "")
     if not service or not resource_id:

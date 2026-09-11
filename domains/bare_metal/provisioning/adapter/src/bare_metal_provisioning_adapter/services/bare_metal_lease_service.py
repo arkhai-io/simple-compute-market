@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 from arkhai_bare_metal import (
-    BARE_METAL_EXECUTOR_KIND,
+    BARE_METAL_OFFERING_MODE,
     BareMetalLeaseCreate,
     PHYSICAL_HOST_ID_REF_KEY,
     bare_metal_executor_ref,
@@ -23,7 +23,7 @@ class BareMetalLeaseService:
     def __init__(self, site_authority: SiteAuthorityPort) -> None:
         self._leases = ExecutorLeaseService(
             site_authority,
-            executor_kind=BARE_METAL_EXECUTOR_KIND,
+            offering_mode=BARE_METAL_OFFERING_MODE,
             not_found_label="Bare-metal lease",
         )
 
@@ -41,7 +41,7 @@ class BareMetalLeaseService:
             ExecutorLeaseRegistration(
                 capacity_reservation_id=body.capacity_reservation_id,
                 escrow_uid=body.escrow_uid,
-                executor_kind=BARE_METAL_EXECUTOR_KIND,
+                offering_mode=BARE_METAL_OFFERING_MODE,
                 executor_target=body.machine_id,
                 executor_ref=bare_metal_executor_ref(
                     body.physical_host_id,

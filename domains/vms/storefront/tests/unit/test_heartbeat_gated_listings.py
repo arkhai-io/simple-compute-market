@@ -163,8 +163,8 @@ def test_interruptible_and_oracle_gated_are_mutually_exclusive():
             _demands_for_chains(CHAINS, {"base_sepolia"}, WALLET)
 
 
-def test_interruptible_offer_resource_is_marked():
-    from market_storefront.cli_publish import _offer_resource_for_listing
+def test_interruptible_listing_resource_is_marked():
+    from market_storefront.cli_publish import _listing_resource_for_listing
 
     resource = {
         "offering_mode": "vm",
@@ -179,7 +179,7 @@ def test_interruptible_offer_resource_is_marked():
         "market_storefront.utils.config.settings",
         _settings(interruptible=True),
     ):
-        offer = _offer_resource_for_listing(resource)
+        offer = _listing_resource_for_listing(resource)
     assert offer["interruptible"] is True
     assert offer["settlement_model"] == "splitter_refund"
 

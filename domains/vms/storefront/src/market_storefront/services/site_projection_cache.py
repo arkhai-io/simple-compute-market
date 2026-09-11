@@ -83,21 +83,29 @@ def _view_summary(view: ProjectionCacheView[list[dict[str, Any]]]) -> dict[str, 
     }
 
 
-def listing_mode_explanations() -> dict[str, dict[str, str]]:
-    """Per-site, per-pool operator-visible explanation for any pool whose
-    projected `listing_mode` fell back to the VM domain's structural
-    default because the raw tag was present but unrecognized.
+def listing_cardinality_mode_explanations() -> dict[str, dict[str, str]]:
+    """Per-site, per-pool operator-visible notice for any pool whose
+    projected `listing_cardinality_mode` needs one.
 
-    A pool's absence from this mapping means no explanation is owed --
-    either the tag is absent (ordinary default, nothing to explain) or it
-    resolved to a recognized value -- not that its site hasn't loaded;
+    Two distinct notices share this mapping, and a pool earns an entry for
+    either: its supplied value was unrecognized and the VM domain's
+    structural default was substituted, or its value was honored but
+    arrived under the deprecated ingestion key. Both are things an operator
+    must act on, and both name what to change; a pool carrying both
+    conditions reports them together.
+
+    A pool's absence from this mapping means nothing is owed -- the tag is
+    absent under either spelling (ordinary default, nothing to explain) and
+    it resolved to a recognized value -- not that its site hasn't loaded;
     a site whose resource-pool projection hasn't loaded yet simply
     contributes no pools to walk, the same as it contributing none to
     `projection_caches()` more generally. Cheap and independent of full
     publication candidate generation: this only needs each pool's
     projected `policy_tags`, not pricing or availability.
     """
-    from domains.vms.listings.listing_mode import resolve_vm_listing_mode
+    from domains.vms.listings.listing_cardinality_mode import (
+        resolve_vm_listing_cardinality_mode,
+    )
 
     result: dict[str, dict[str, str]] = {}
     for site, caches in projection_caches().items():
@@ -112,10 +120,10 @@ def listing_mode_explanations() -> dict[str, dict[str, str]]:
             policy_tags = (pool.get("pool_metadata") or {}).get("policy_tags") or {}
             # Same structural-default rule `_projected_pool_rows` uses
             # (member_count == 1 -> specific_resource, backward
-            # compatibility for an untagged pool) -- an explanation is
-            # only owed when the raw tag was present but unrecognized,
-            # so the actual default value only matters for the message
-            # text, not for whether one is produced.
+            # compatibility for an untagged pool). The default value only
+            # affects a fallback message's text, not whether a notice is
+            # produced, so it does not need to agree with what publication
+            # would compute from live availability.
             enabled_member_count = sum(
                 1
                 for resource in pool.get("resources") or []
@@ -124,12 +132,20 @@ def listing_mode_explanations() -> dict[str, dict[str, str]]:
             structural_default = (
                 "specific_resource" if enabled_member_count == 1 else "fungible"
             )
-            _, explanation = resolve_vm_listing_mode(
+            cardinality = resolve_vm_listing_cardinality_mode(
                 policy_tags,
                 structural_default=structural_default,
             )
-            if explanation:
-                site_explanations[pool_id] = explanation
+            notices = [
+                notice
+                for notice in (
+                    cardinality.fallback_explanation,
+                    cardinality.deprecated_key_notice,
+                )
+                if notice
+            ]
+            if notices:
+                site_explanations[pool_id] = "; ".join(notices)
         if site_explanations:
             result[site] = site_explanations
     return result

@@ -76,7 +76,7 @@ async def publish_listing(
                 detail="Listing is owned by another publisher",
             )
         update_fields = {
-            "offer_resource": body.get("offer_resource"),
+            "listing_resource": body.get("listing_resource"),
             "accepted_escrows": body.get("accepted_escrows"),
             "settlement_options": body.get("settlement_options"),
             "demands": body.get("demands"),
@@ -94,7 +94,7 @@ async def publish_listing(
         listing = Listing(
             listing_id=listing_id,
             publisher_id=publisher.publisher_id,
-            offer_resource=body.get("offer_resource", {}),
+            listing_resource=body.get("listing_resource", {}),
             accepted_escrows=body.get("accepted_escrows", []),
             settlement_options=body.get("settlement_options", []),
             demands=body.get("demands", []),

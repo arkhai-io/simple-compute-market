@@ -1,4 +1,4 @@
-# Tasks — project capacity resources that have no executor host
+# Tasks — project capacity resources that have no host
 
 Depends on `capacity-resource-administration` having landed. Do not begin
 Section 2 before it has.
@@ -12,7 +12,7 @@ Section 2 before it has.
       reproducible, and `docs/development/TESTING.md` is explicit that a
       development run is good for reproducing a failure rather than for owning a
       guarantee. A deployment diff remains useful supplementary evidence.
-- [ ] 1.2 Enumerate every consumer of per-entry executor-correlated fields,
+- [ ] 1.2 Enumerate every consumer of per-entry host-correlated fields,
       storefront-side included. A field this change may omit is a field some
       consumer currently assumes present.
 
@@ -27,7 +27,7 @@ Section 2 before it has.
 - [ ] 2.3 Keep the duplicate-identity guard: several capacity resources mapping to
       one host identity must still be an error rather than a last-write-wins
       merge.
-- [ ] 2.4 Omit executor-correlated fields on an uncorrelated entry rather than
+- [ ] 2.4 Omit host-correlated fields on an uncorrelated entry rather than
       emitting empty values, so absence stays distinguishable from a correlated
       host whose identifier failed to populate.
 
@@ -37,11 +37,11 @@ Section 2 before it has.
       resource before any effect. Assert through the real app with the provider
       boundary mocked and verified *never invoked* — this is an
       effect-prevention claim, and a unit test over a transform cannot make it.
-- [ ] 3.2 Confirm rendered executor inventory excludes uncorrelated resources
+- [ ] 3.2 Confirm rendered host inventory excludes uncorrelated resources
       entirely. A blank address in a rendered inventory is a worse failure than an
       omitted entry.
 - [ ] 3.3 **Integration.** Storefront-side ingestion accepts an entry with
-      executor fields absent, read through the canonical site client against the
+      host-correlated fields absent, read through the canonical site client against the
       real provisioning app, and its reconciler continues to distinguish absent
       from zero.
 
@@ -52,7 +52,7 @@ Section 2 before it has.
       without, duplicate identity conflict, omit-versus-empty.
 - [ ] 4.3 **Integration.** A hostless capacity resource appears through the real
       provisioning capacity API read via `SiteCapacityClient`, carrying its
-      declared capacity and attributes with executor fields omitted.
+      declared capacity and attributes with host-correlated fields omitted.
 - [ ] 4.4 Run the end-to-end scenarios that depend on projected capacity shape.
 - [ ] 4.5 **Smoke.** Confirm the deployed route is wired. Do not make smoke
       coverage carry any of the semantics above.
@@ -60,7 +60,7 @@ Section 2 before it has.
 ## 5. Specification
 
 - [ ] 5.1 State in `openspec/specs/site-capacity/spec.md` that the capacity
-      resource is the unit of projection and executor correlation is optional
+      resource is the unit of projection and host correlation is optional
       per-entry metadata rather than a precondition for projecting.
 - [ ] 5.4 Confirm `capacity-resource-administration`'s "Operator-administered
       capacity declarations" requirement still carries the shape-versus-admission
@@ -70,11 +70,11 @@ Section 2 before it has.
       it. "A Physical Resource's sellable capacity"
       does not survive a resource with no host, so this wording has to change for
       this change's own sake regardless of what consumes it downstream.
-- [ ] 5.2 Add a scenario for a declared resource with no executor host: it
-      projects with declared capacity and omitted executor fields.
+- [ ] 5.2 Add a scenario for a declared resource with no host: it
+      projects with declared capacity and omitted host-correlated fields.
 - [ ] 5.3 Add a scenario for the fail-closed execution boundary: an uncorrelated
       resource is refused at placement rather than dispatched with an absent
-      executor identity.
+      host connection identity.
 
 ## 6. Closeout
 
@@ -107,6 +107,6 @@ Section 2 before it has.
 
 | Accepted decision | Permanent location |
 |---|---|
-| The capacity resource is the unit of projection; executor correlation is optional metadata | `openspec/specs/site-capacity/spec.md` |
-| A hostless entry omits executor fields rather than emptying them | `openspec/specs/site-capacity/spec.md` |
-| Execution paths require executor correlation and fail closed without it | `openspec/specs/site-capacity/spec.md` |
+| The capacity resource is the unit of projection; host correlation is optional metadata | `openspec/specs/site-capacity/spec.md` |
+| A hostless entry omits host-correlated fields rather than emptying them | `openspec/specs/site-capacity/spec.md` |
+| Execution paths require host correlation and fail closed without it | `openspec/specs/site-capacity/spec.md` |

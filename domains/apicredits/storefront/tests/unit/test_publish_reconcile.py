@@ -92,7 +92,7 @@ async def _insert_listing(db, listing_id: str, resource_id: str, status: str):
         status=status,
         created_at=datetime.now().isoformat(),
         updated_at=datetime.now().isoformat(),
-        offer_resource={
+        listing_resource={
             "kind": "api_credits.v1",
             "service_name": "Acme",
             "resource_id": resource_id,
@@ -153,7 +153,7 @@ async def test_publish_from_quota_requires_registered_sellable_resource(
     # Registry discovery is disabled in tests; the local row is the artifact.
     row = await db.load_listing(listing_id=result["listing_id"])
     assert row["status"] == "open"
-    offer = row["offer_resource"]
+    offer = row["listing_resource"]
     offer = json.loads(offer) if isinstance(offer, str) else offer
     assert offer["resource_id"] == "svc-quota"
     assert offer["capacity_site_id"] == "tokens"

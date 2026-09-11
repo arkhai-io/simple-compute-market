@@ -99,7 +99,7 @@ def db_path(tmp_path) -> str:
             CREATE TABLE listings (
               listing_id TEXT PRIMARY KEY,
               status TEXT NOT NULL,
-              offer_resource TEXT,
+              listing_resource TEXT,
               accepted_escrows TEXT,
               demands TEXT,
               max_duration_seconds INTEGER,
@@ -285,7 +285,7 @@ def _seed_listing(
     gpu_count: int = 2,
     site_id: str | None = None,
 ):
-    offer = {"virtualization_type": "vm", "gpu_count": gpu_count}
+    offer = {"offering_mode": "vm", "gpu_count": gpu_count}
     if pool_id:
         offer["pool_id"] = pool_id
     if resource_id:
@@ -293,7 +293,7 @@ def _seed_listing(
     conn = sqlite3.connect(db_path)
     try:
         conn.execute(
-            "INSERT INTO listings(listing_id, status, offer_resource) VALUES (?, ?, ?)",
+            "INSERT INTO listings(listing_id, status, listing_resource) VALUES (?, ?, ?)",
             (listing_id, status, json.dumps(offer)),
         )
         conn.commit()
@@ -907,7 +907,7 @@ class TestReopenLocalDerivedListing:
             listing_id="listing-1",
             site_id="site-a",
             gpu_count=2,
-            offer_resource={"pool_id": "gpu-pool", "gpu_count": 2},
+            listing_resource={"pool_id": "gpu-pool", "gpu_count": 2},
             accepted_escrows=[],
             demands=[],
             max_duration_seconds=3600,
@@ -1546,7 +1546,7 @@ class TestProjectedPoolRows:
             # see test_single_member_pool_defaults_to_specific_resource_without_a_tag
             # below) -- an explicit fungible tag is what this test
             # actually wants to exercise.
-            "pool_metadata": {"policy_tags": {"listing_mode": "fungible"}},
+            "pool_metadata": {"policy_tags": {"listing_cardinality_mode": "fungible"}},
         },
         site_id="site-a", home_site="site-a",
         local_pricing={"gpu-pool": self._pricing_row()},
@@ -1557,14 +1557,14 @@ class TestProjectedPoolRows:
         assert row["site_id"] == "site-a"
         assert row["total_gpu_count"] == 4
         assert row["min_price"] == "10"
-        assert row["listing_mode"] == "fungible"
-        assert row["listing_mode_explanation"] is None
+        assert row["listing_cardinality_mode"] == "fungible"
+        assert row["listing_cardinality_mode_explanation"] is None
         assert row["single_resource_id"] is None
 
     def test_single_member_pool_defaults_to_specific_resource_without_a_tag(self):
         """Backward compatibility: `available_compute_slices` always
         treated a single-member pool as specific-resource before
-        `listing_mode` existed (`member_count == 1` heuristic). An
+        the cardinality tag existed (`member_count == 1` heuristic). An
         untagged pool with exactly one member must keep resolving that
         way, or an existing derived-listing mapping keyed on that
         resource's identity would silently break the moment a
@@ -1584,7 +1584,7 @@ class TestProjectedPoolRows:
         local_pricing={"gpu-pool": self._pricing_row()},
         member_availability=None, capacity_buckets=None,)
         assert len(rows) == 1
-        assert rows[0]["listing_mode"] == "specific_resource"
+        assert rows[0]["listing_cardinality_mode"] == "specific_resource"
         assert rows[0]["single_resource_id"] == "res-1"
 
     def test_multi_member_pool_defaults_to_fungible_without_a_tag(self):
@@ -1607,7 +1607,7 @@ class TestProjectedPoolRows:
         local_pricing={"gpu-pool": self._pricing_row()},
         member_availability=None, capacity_buckets=None,)
         assert len(rows) == 1
-        assert rows[0]["listing_mode"] == "fungible"
+        assert rows[0]["listing_cardinality_mode"] == "fungible"
         assert rows[0]["single_resource_id"] is None
 
     def test_disabled_resources_are_excluded(self):
@@ -1846,7 +1846,7 @@ class TestProjectedPoolRows:
             ],
             "pool_metadata": {
                 "policy_tags": {
-                    "listing_mode": "specific_resource",
+                    "listing_cardinality_mode": "specific_resource",
                     "pricing": {
                         "gpu": {
                             "H100": {"min_price": "5.00"},
@@ -1863,9 +1863,9 @@ class TestProjectedPoolRows:
         assert by_resource["res-1"]["min_price"] == "5.00"
         assert by_resource["res-2"]["min_price"] == "3.00"
 
-    # -- listing_mode resolution --------------------------------------
+    # -- listing_cardinality_mode resolution --------------------------------------
 
-    def test_unrecognized_listing_mode_falls_back_with_explanation(self):
+    def test_unrecognized_cardinality_mode_falls_back_with_explanation(self):
         """One member -> structural default is specific_resource (see
         test_single_member_pool_defaults_to_specific_resource_without_a_tag)
         -- an unrecognized explicit value falls back to *that* default,
@@ -1879,32 +1879,32 @@ class TestProjectedPoolRows:
                     "enabled": True,
                 },
             ],
-            "pool_metadata": {"policy_tags": {"listing_mode": "bogus"}},
+            "pool_metadata": {"policy_tags": {"listing_cardinality_mode": "bogus"}},
         },
         site_id="site-a", home_site="site-a",
         local_pricing={"gpu-pool": self._pricing_row()},
         member_availability=None, capacity_buckets=None,)
         assert len(rows) == 1
-        assert rows[0]["listing_mode"] == "specific_resource"
-        assert rows[0]["listing_mode_explanation"] is not None
-        assert "bogus" in rows[0]["listing_mode_explanation"]
+        assert rows[0]["listing_cardinality_mode"] == "specific_resource"
+        assert rows[0]["listing_cardinality_mode_explanation"] is not None
+        assert "bogus" in rows[0]["listing_cardinality_mode_explanation"]
 
-    def test_unrecognized_listing_mode_falls_back_to_fungible_for_multi_member(self):
+    def test_unrecognized_cardinality_mode_falls_back_to_fungible_for_multi_member(self):
         rows = _project_vm_pool_rows({
             "resource_pool_id": "gpu-pool",
             "resources": [
                 {"physical_resource_id": "res-1", "capacity": {"gpu_count": 4}, "enabled": True},
                 {"physical_resource_id": "res-2", "capacity": {"gpu_count": 4}, "enabled": True},
             ],
-            "pool_metadata": {"policy_tags": {"listing_mode": "bogus"}},
+            "pool_metadata": {"policy_tags": {"listing_cardinality_mode": "bogus"}},
         },
         site_id="site-a", home_site="site-a",
         local_pricing={"gpu-pool": self._pricing_row()},
         member_availability=None, capacity_buckets=None,)
         assert len(rows) == 1
-        assert rows[0]["listing_mode"] == "fungible"
-        assert rows[0]["listing_mode_explanation"] is not None
-        assert "bogus" in rows[0]["listing_mode_explanation"]
+        assert rows[0]["listing_cardinality_mode"] == "fungible"
+        assert rows[0]["listing_cardinality_mode_explanation"] is not None
+        assert "bogus" in rows[0]["listing_cardinality_mode_explanation"]
 
     # -- specific_resource, including multi-member ----------------------
 
@@ -1920,7 +1920,7 @@ class TestProjectedPoolRows:
                 },
             ],
             "pool_metadata": {
-                "policy_tags": {"listing_mode": "specific_resource"},
+                "policy_tags": {"listing_cardinality_mode": "specific_resource"},
             },
         },
         site_id="site-a", home_site="site-a",
@@ -1928,7 +1928,7 @@ class TestProjectedPoolRows:
         member_availability=None, capacity_buckets=None,)
         assert len(rows) == 1
         assert rows[0]["single_resource_id"] == "res-1"
-        assert rows[0]["listing_mode"] == "specific_resource"
+        assert rows[0]["listing_cardinality_mode"] == "specific_resource"
 
     def test_specific_resource_multi_member_yields_one_row_per_member(self):
         """A multi-member pool declared specific_resource must publish
@@ -1960,7 +1960,7 @@ class TestProjectedPoolRows:
                 },
             ],
             "pool_metadata": {
-                "policy_tags": {"listing_mode": "specific_resource"},
+                "policy_tags": {"listing_cardinality_mode": "specific_resource"},
             },
         },
         site_id="site-a", home_site="site-a",
@@ -1992,7 +1992,7 @@ class TestProjectedPoolRows:
                 },
             ],
             "pool_metadata": {
-                "policy_tags": {"listing_mode": "specific_resource"},
+                "policy_tags": {"listing_cardinality_mode": "specific_resource"},
             },
         },
         site_id="site-a", home_site="site-a",
@@ -2066,7 +2066,7 @@ class TestProjectedPoolRows:
                     "enabled": True,
                 },
             ],
-            "pool_metadata": {"policy_tags": {"listing_mode": "fungible"}},
+            "pool_metadata": {"policy_tags": {"listing_cardinality_mode": "fungible"}},
         },
         site_id="site-a", home_site="site-a",
         local_pricing={"gpu-pool": self._pricing_row()},
@@ -2095,7 +2095,7 @@ class TestProjectedPoolRows:
                     "enabled": True,
                 },
             ],
-            "pool_metadata": {"policy_tags": {"listing_mode": "fungible"}},
+            "pool_metadata": {"policy_tags": {"listing_cardinality_mode": "fungible"}},
         },
         site_id="site-a", home_site="site-a",
         local_pricing={"gpu-pool": self._pricing_row()},
@@ -2117,7 +2117,7 @@ class TestProjectedPoolRows:
                     "enabled": True,
                 },
             ],
-            "pool_metadata": {"policy_tags": {"listing_mode": "fungible"}},
+            "pool_metadata": {"policy_tags": {"listing_cardinality_mode": "fungible"}},
         },
         site_id="site-a", home_site="site-a",
         local_pricing={"gpu-pool": self._pricing_row()},
@@ -2139,7 +2139,7 @@ class TestProjectedPoolRows:
                     "enabled": True,
                 },
             ],
-            "pool_metadata": {"policy_tags": {"listing_mode": "fungible"}},
+            "pool_metadata": {"policy_tags": {"listing_cardinality_mode": "fungible"}},
         },
         site_id="site-a", home_site="site-a",
         local_pricing={"gpu-pool": self._pricing_row()},
@@ -2160,7 +2160,7 @@ class TestProjectedPoolRows:
                     "enabled": True,
                 },
             ],
-            "pool_metadata": {"policy_tags": {"listing_mode": "fungible"}},
+            "pool_metadata": {"policy_tags": {"listing_cardinality_mode": "fungible"}},
         },
         site_id="site-a", home_site="site-a",
         local_pricing={"gpu-pool": self._pricing_row()},

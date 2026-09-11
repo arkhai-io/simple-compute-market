@@ -134,7 +134,7 @@ class BareMetalHostedOptionFacts(BaseModel):
     derivation_key: str = Field(min_length=1)
     projection_digest: str
     site_id: str = Field(min_length=1)
-    executor_kind: str = Field(min_length=1)
+    offering_mode: str = Field(min_length=1)
     resource_selection: ResourceSelection
     physical_resource_id: str | None = None
     physical_host_id: str | None = None

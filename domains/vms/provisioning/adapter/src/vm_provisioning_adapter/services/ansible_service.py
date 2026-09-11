@@ -421,7 +421,7 @@ class AnsibleService:
         lines = [
             f"vm_host: {params.vm_host}",
             f"vm_action: {params.vm_action}",
-            f"executor_kind: {params.executor_kind}",
+            f"offering_mode: {params.offering_mode}",
             f"executor_action: {params.executor_action}",
             f"executor_target: {params.executor_target}",
         ]

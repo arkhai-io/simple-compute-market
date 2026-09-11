@@ -26,7 +26,7 @@ from market_identity import Identity
 #
 # Marketplace-layer types (defined here)
 # ├── Listing                       A published marketplace listing
-# │   ├── offer_resource: ComputeResource | TokenResource
+# │   ├── listing_resource: ComputeResource | TokenResource
 # │   └── accepted_escrows: list[AcceptedEscrow] | None
 # ├── Host                          Physical host metadata (capacity, hardware)
 # └── ComputeResourcePortfolio      Collection of ComputeResource slices
@@ -38,7 +38,7 @@ from market_identity import Identity
 # ├── Region            Advisory string-enum. Field types are plain `str`;
 # │                       region vocabularies are indexer-local.
 # ├── GpuInterconnect   nvlink | nvswitch | pcie_only | infiniband
-# └── VirtualizationType bare_metal | vm | container
+# └── OfferingMode       bare_metal | vm | container
 # =============================================================================
 
 
@@ -69,13 +69,20 @@ class GpuInterconnect(str, Enum):
     INFINIBAND = "infiniband"
 
 
-class VirtualizationType(str, Enum):
-    """How the host exposes the resource to the buyer.
+class OfferingMode(str, Enum):
+    """What the seller is offering: how the resource is exposed to the buyer.
 
-    Per-slice (resource-level) — the seller picks the deployment mode for
-    each listing. Two listings on the same host can differ (e.g., one as a
+    Per-slice (resource-level) — the seller picks the mode for each
+    listing. Two listings on the same host can differ (e.g., one as a
     GPU-passthrough VM, another as a Docker container) provided the host's
     deployment configuration supports both.
+
+    This is the same value the capacity claim carries, the Resource Pool
+    declares deliverable, and the durable listing binding records; the
+    published listing's field MUST equal the recorded mode. `bare_metal` is
+    a member because the axis is what is offered, not which virtualization
+    technology is in use -- bare metal is the absence of one.
+    See openspec/specs/storefront-publication/spec.md.
     """
 
     BARE_METAL = "bare_metal"
@@ -366,7 +373,7 @@ class ComputeResource(ComputeDomainResource):
     disk_gb: int | None = Field(
         default=None, description="Disk allocated to this slice in GB"
     )
-    virtualization_type: VirtualizationType | None = Field(
+    offering_mode: OfferingMode | None = Field(
         default=None,
         description="How this slice is exposed: bare_metal | vm | container",
     )
@@ -461,7 +468,7 @@ class ComputeResourcePortfolio(BaseModel):
             "host_disk_type",
             "motherboard",
             "gpu_interconnect",
-            "virtualization_type",
+            "offering_mode",
             "static_ip",
             "datacenter_grade",
         )
@@ -540,7 +547,7 @@ class Listing(BaseModel):
         default="",
         description="The card URL of the agent that took the listing",
     )
-    offer_resource: Union[ComputeResource, TokenResource] = Field(
+    listing_resource: Union[ComputeResource, TokenResource] = Field(
         description="The resource being offered, which may be a token or compute resource."
     )
     accepted_escrows: list[AcceptedEscrow] | None = Field(
@@ -591,21 +598,21 @@ class Listing(BaseModel):
         malformed identifiers are rejected. Listings may carry both IDs, with
         ``resource_id`` taking precedence later when a capacity claim is built.
         """
-        if not isinstance(self.offer_resource, ComputeResource):
+        if not isinstance(self.listing_resource, ComputeResource):
             return self
 
-        self.offer_resource.pool_id = self.normalize_capacity_identifier(
-            self.offer_resource.pool_id, field_name="pool_id"
+        self.listing_resource.pool_id = self.normalize_capacity_identifier(
+            self.listing_resource.pool_id, field_name="pool_id"
         )
-        self.offer_resource.resource_id = self.normalize_capacity_identifier(
-            self.offer_resource.resource_id, field_name="resource_id"
+        self.listing_resource.resource_id = self.normalize_capacity_identifier(
+            self.listing_resource.resource_id, field_name="resource_id"
         )
         if (
-            self.offer_resource.pool_id is None
-            and self.offer_resource.resource_id is None
+            self.listing_resource.pool_id is None
+            and self.listing_resource.resource_id is None
         ):
             raise ValueError(
-                "Compute listing offer_resource must provide either pool_id "
+                "Compute listing listing_resource must provide either pool_id "
                 "or resource_id."
             )
         return self
@@ -635,9 +642,9 @@ class Listing(BaseModel):
             return data
         data = dict(data)
 
-        if "offer_resource" in data:
-            data["offer_resource"] = ComputeDomainResource.parse_from_dict(
-                data["offer_resource"]
+        if "listing_resource" in data:
+            data["listing_resource"] = ComputeDomainResource.parse_from_dict(
+                data["listing_resource"]
             )
 
         return data

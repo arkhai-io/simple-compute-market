@@ -265,20 +265,20 @@ def _migrate_common_domain_bindings(conn: sqlite3.Connection) -> None:
         """
         SELECT d.listing_id, d.site_id, d.physical_resource_id,
                d.machine_id, d.physical_host_id, d.derivation_key,
-               d.last_reconciled_at, l.offer_resource
+               d.last_reconciled_at, l.listing_resource
         FROM derived_bare_metal_listings d
         JOIN listings l ON l.listing_id=d.listing_id
         WHERE d.site_id IS NOT NULL AND d.physical_resource_id IS NOT NULL
         """
     ).fetchall()
     for row in rows:
-        offer_resource = json.loads(str(row[7]))
-        offer_resource["virtualization_type"] = "bare_metal"
+        listing_resource = json.loads(str(row[7]))
+        listing_resource["offering_mode"] = "bare_metal"
         conn.execute(
-            "UPDATE listings SET offer_resource=? WHERE listing_id=?",
+            "UPDATE listings SET listing_resource=? WHERE listing_id=?",
             (
                 json.dumps(
-                    offer_resource,
+                    listing_resource,
                     sort_keys=True,
                     separators=(",", ":"),
                 ),

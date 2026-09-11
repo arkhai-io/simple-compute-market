@@ -86,7 +86,7 @@ def lease_state_for_reservation_state(state: str) -> LeaseState:
 class ExecutorActionEnvelope(VersionedContractModel):
     capacity_reservation_id: str = Field(min_length=1)
     deal_ref: dict[str, Any]
-    executor_kind: str = Field(min_length=1)
+    offering_mode: str = Field(min_length=1)
     action_kind: str = Field(min_length=1)
     idempotency_key: str = Field(min_length=1)
     parameters: dict[str, Any]
@@ -98,7 +98,7 @@ class JobAccepted(VersionedContractModel):
     status: JobState = JobState.QUEUED
     capacity_reservation_id: str
     deal_ref: dict[str, Any]
-    executor_kind: str
+    offering_mode: str
     action_kind: str
     idempotency_key: str
 
@@ -116,13 +116,13 @@ class LogsReference(BaseModel):
 
 
 class CredentialEnvelope(BaseModel):
-    executor_kind: str
+    offering_mode: str
     credential_kind: str
     value: dict[str, Any]
 
 
 class ResultEnvelope(BaseModel):
-    executor_kind: str
+    offering_mode: str
     result_kind: str
     value: dict[str, Any]
 
@@ -132,7 +132,7 @@ class ProvisioningJob(VersionedContractModel):
     status: JobState
     capacity_reservation_id: str
     deal_ref: dict[str, Any]
-    executor_kind: str
+    offering_mode: str
     action_kind: str
     idempotency_key: str
     result: ResultEnvelope | None = None
@@ -148,7 +148,7 @@ class ProvisioningJob(VersionedContractModel):
 class LeaseRegistration(VersionedContractModel):
     capacity_reservation_id: str
     deal_ref: dict[str, Any]
-    executor_kind: str
+    offering_mode: str
     executor_target: str
     lease_start_utc: datetime | None = None
     lease_end_utc: datetime
@@ -181,7 +181,7 @@ class LifecycleEvent(VersionedContractModel):
     event_id: str = Field(min_length=1)
     capacity_reservation_id: str = Field(min_length=1)
     deal_ref: dict[str, Any]
-    executor_kind: str = Field(min_length=1)
+    offering_mode: str = Field(min_length=1)
     event_kind: str = Field(min_length=1)
     payload: dict[str, Any]
     occurred_at: datetime

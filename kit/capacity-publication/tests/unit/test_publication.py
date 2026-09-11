@@ -35,8 +35,8 @@ class Hooks:
         self.validated = []
 
     def validate_candidate(self, candidate):
-        offer = candidate.payload["offer_resource"]
-        if offer["virtualization_type"] != candidate.binding.offering_mode:
+        offer = candidate.payload["listing_resource"]
+        if offer["offering_mode"] != candidate.binding.offering_mode:
             raise CapacityBindingError("advertised offering mode differs from binding")
         self.validated.append(candidate.listing_id)
 
@@ -65,7 +65,7 @@ def candidate(listing_id="listing-1", binding=None):
         payload={
             "listing_id": listing_id,
             "seller_principal": {"scheme": "ed25519", "identifier": "seller"},
-            "offer_resource": {"virtualization_type": "vm"},
+            "listing_resource": {"offering_mode": "vm"},
             "accepted_escrows": [],
             "settlement_options": [],
             "demands": [],

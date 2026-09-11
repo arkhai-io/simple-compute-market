@@ -54,7 +54,7 @@ def _resource_from_record(record: Any) -> SettlementResource:
     return SettlementResource(
         settlement_resource_id=record.settlement_resource_id,
         pool_id=record.pool_id,
-        executor_kind=record.scheduling_requirements.get("executor_kind"),
+        offering_mode=record.scheduling_requirements.get("offering_mode"),
         resource_kind=record.scheduling_requirements.get("resource_kind"),
         provider=record.provider,
         attributes=dict(record.resource_attributes or {}),
@@ -103,11 +103,11 @@ class PhysicalSettlementScheduler:
             if existing is not None:
                 pool = enabled_pools.get(existing.pool_id)
                 if pool is None or not pool_delivers_offering_mode(
-                    pool.policy_tags, requirement.executor_kind
+                    pool.policy_tags, requirement.offering_mode
                 ):
                     raise NoEligibleSettlementResourceError(
                         f"pool {existing.pool_id!r} does not declare offering mode "
-                        f"{requirement.executor_kind!r}"
+                        f"{requirement.offering_mode!r}"
                     )
                 record = tx.schedule_assignment(
                     capacity_reservation_id=request.capacity_reservation_id,
@@ -147,7 +147,7 @@ class PhysicalSettlementScheduler:
             resource = SettlementResource(
                 settlement_resource_id=selected.resource_id,
                 pool_id=selected.pool_id,
-                executor_kind=requirement.executor_kind,
+                offering_mode=requirement.offering_mode,
                 resource_kind=selected.resource_kind,
                 provider=selected.provider,
                 attributes=selected.attributes,
@@ -188,10 +188,10 @@ class PhysicalSettlementScheduler:
         self, reservation: dict[str, Any], request: PhysicalSettlementRequest
     ) -> SettlementRequirement:
         deal_ref = reservation.get("deal_ref") or {}
-        executor_kind = reservation.get("executor_kind")
-        if not executor_kind:
+        offering_mode = reservation.get("offering_mode")
+        if not offering_mode:
             raise MissingExecutorKindError(
-                "capacity reservation has no explicit executor_kind"
+                "capacity reservation has no explicit offering_mode"
             )
         resource_kind = (
             deal_ref.get("resource_kind")
@@ -239,7 +239,7 @@ class PhysicalSettlementScheduler:
             dimensions = reservation_dimensions
         return SettlementRequirement(
             resource_kind=resource_kind,
-            executor_kind=executor_kind,
+            offering_mode=offering_mode,
             dimensions=dimensions,
             attributes=attributes,
         )
@@ -259,7 +259,7 @@ class PhysicalSettlementScheduler:
             if pool is None:
                 continue
             if not pool_delivers_offering_mode(
-                pool.policy_tags, requirement.executor_kind
+                pool.policy_tags, requirement.offering_mode
             ):
                 continue
             if not resource_satisfies_requirement(

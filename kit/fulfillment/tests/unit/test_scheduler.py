@@ -97,7 +97,7 @@ def _resource(ledger, resource_id: str, pool_id: str, *, units: int = 4, enabled
 
 def _reserve(ledger, agreement="agreement-1", **deal):
     ref = {"agreement_id": agreement, "market": "vms", **deal}
-    result = ledger.reserve(claim={"executor_kind": "vm", **{"gpu_count": 1}}, deal_ref=ref)
+    result = ledger.reserve(claim={"offering_mode": "vm", **{"gpu_count": 1}}, deal_ref=ref)
     assert result is not None
     return result["capacity_reservation_id"]
 
@@ -120,7 +120,7 @@ def test_expired_reservation_is_rejected(services):
     pools, ledger, scheduler = services
     _pool(pools, "pool-a")
     _resource(ledger, "r1", "pool-a")
-    result = ledger.reserve(claim={"executor_kind": "vm", **{"gpu_count": 1}}, deal_ref={"agreement_id": "agreement-1", "market": "vms"},
+    result = ledger.reserve(claim={"offering_mode": "vm", **{"gpu_count": 1}}, deal_ref={"agreement_id": "agreement-1", "market": "vms"},
     ttl_seconds=-1,)
     with pytest.raises((CapacityReservationExpiredError, SettlementRequestMismatchError)):
         scheduler.schedule_resource(_request(result["capacity_reservation_id"]))
@@ -256,7 +256,7 @@ def _resource_with_capacity(ledger, resource_id: str, pool_id: str, *, capacity:
 
 def _reserve_with_dimensions(ledger, dimensions: dict, agreement="agreement-1", **deal):
     ref = {"agreement_id": agreement, "market": "vms", "requirements": {"dimensions": dimensions}, **deal}
-    result = ledger.reserve(claim={"executor_kind": "vm", **{"dimensions": dimensions}}, deal_ref=ref)
+    result = ledger.reserve(claim={"offering_mode": "vm", **{"dimensions": dimensions}}, deal_ref=ref)
     assert result is not None
     return result["capacity_reservation_id"]
 
@@ -326,7 +326,7 @@ def test_scheduler_credit_back_covers_full_capacity_legacy_reservation(services)
     pools, ledger, scheduler = services
     _pool(pools, "pool-a")
     _resource(ledger, "r1", "pool-a", units=4)
-    result = ledger.reserve(claim={"executor_kind": "vm", **{"gpu_count": 4}}, deal_ref={
+    result = ledger.reserve(claim={"offering_mode": "vm", **{"gpu_count": 4}}, deal_ref={
         "agreement_id": "agreement-1", "market": "vms",
     })
     assert result is not None
@@ -345,7 +345,7 @@ def _reserve_multi(ledger, dimensions: dict, agreement="agreement-1"):
     the reservation declares) doesn't itself reject a deliberately
     *different*, narrower schedule-time request before the exceeds-check
     below ever runs."""
-    result = ledger.reserve(claim={"executor_kind": "vm", **{"dimensions": dimensions}}, deal_ref={"agreement_id": agreement, "market": "vms"},)
+    result = ledger.reserve(claim={"offering_mode": "vm", **{"dimensions": dimensions}}, deal_ref={"agreement_id": agreement, "market": "vms"},)
     assert result is not None
     return result["capacity_reservation_id"]
 
@@ -543,7 +543,7 @@ def test_cursor_is_isolated_per_resource_kind(services):
     )
 
     def _reserve_kind(resource_type: str, agreement: str) -> str:
-        result = ledger.reserve(claim={"executor_kind": "vm", **{"resource_type": resource_type, "gpu_count": 1}}, deal_ref={"agreement_id": agreement, "market": "vms"},)
+        result = ledger.reserve(claim={"offering_mode": "vm", **{"resource_type": resource_type, "gpu_count": 1}}, deal_ref={"agreement_id": agreement, "market": "vms"},)
         assert result is not None
         return result["capacity_reservation_id"]
 

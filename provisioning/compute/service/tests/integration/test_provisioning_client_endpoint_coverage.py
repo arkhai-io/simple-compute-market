@@ -107,7 +107,7 @@ class TestCapacityClientEndpointCoverage:
         )
         reserved = ledger.reserve(
             claim={
-                "executor_kind": "vm",
+                "offering_mode": "vm",
                 "gpu_count": 1,
                 "vm_host": HOST,
             },
@@ -149,7 +149,7 @@ class TestLeaseClientEndpointCoverage:
             )
         reserved = ledger.reserve(
             claim={
-                "executor_kind": "vm",
+                "offering_mode": "vm",
                 "gpu_count": 1,
                 "vm_host": HOST,
             },
