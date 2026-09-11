@@ -44,7 +44,10 @@ jobs:
         run: make -C e2e-tests test-e2e
       - name: Collect compose logs
         if: always()
-        run: docker compose logs --no-color > compose-logs.txt 2>&1 || true
+        # Same interpolation constraint as the teardown below.
+        run: |
+          make -s --no-print-directory e2e-dev-identities-env > .e2e-identities.env || true
+          docker compose --env-file .e2e-identities.env logs --no-color > compose-logs.txt 2>&1 || true
       - name: Upload artifacts
         if: always()
         uses: actions/upload-artifact@v4
@@ -54,4 +57,11 @@ jobs:
           if-no-files-found: ignore
       - name: Tear down stack
         if: always()
-        run: docker compose down -v --remove-orphans || true
+        # `|| true` already keeps a cleanup failure from failing the job, but
+        # without --env-file this down cannot even read the config: every
+        # signer and token mount is a required-variable guard. The env file is
+        # written by `make -C e2e-tests test-e2e`; regenerate it here so
+        # cleanup works even when the run failed before that point.
+        run: |
+          make -s --no-print-directory e2e-dev-identities-env > .e2e-identities.env || true
+          docker compose --env-file .e2e-identities.env down -v --remove-orphans || true
