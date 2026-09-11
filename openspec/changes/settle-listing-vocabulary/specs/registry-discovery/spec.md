@@ -18,7 +18,11 @@ specification version and the schema version together.
 
 A registry's published listing shape MUST be named `listing_resource`, and the
 offering-mode field within it MUST be named `offering_mode`. A registry MUST NOT
-accept a second spelling of either, and `offer` MUST NOT name a published shape.
+accept a second spelling of either, and `offer` MUST NOT name a published shape —
+including as a client-side attribute or request field holding that shape, since a
+second spelling in a client is the same collision as a second spelling on the wire.
+A registry's own responses MUST NOT report a derived tag named for the retired shape
+key.
 
 Renaming a required field of the listing shape and its filter is
 backwards-incompatible and MUST bump the specification version.
@@ -27,6 +31,11 @@ backwards-incompatible and MUST bump the specification version.
 
 - **WHEN** a publisher submits a listing carrying its shape under `offer_resource` or `offer`
 - **THEN** the submission is rejected rather than accepted under a second spelling
+
+#### Scenario: A validation response reports the shape it checked
+
+- **WHEN** a publisher dry-runs a listing against the registry's listing shape
+- **THEN** the response reports validity and the listing identity without a resource-type tag naming the retired shape key
 
 #### Scenario: A buyer filters on the offering mode
 
