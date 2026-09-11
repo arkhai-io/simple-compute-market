@@ -7,8 +7,8 @@ requires-python = ">=3.12,<3.14"
 dependencies = [
     "arkhai-core>=0.2.0",
     "arkhai-apicredits-domain>=0.1.0",
-    "arkhai-core-registry-client>=0.11.0",
-    "arkhai-core-storefront>=0.3.0",
+    "arkhai-core-registry-client>=0.12.0",
+    "arkhai-core-storefront>=0.4.0",
     "arkhai-kit-capacity-publication==0.1.0",
     "arkhai-kit-alkahest",
     "arkhai-kit-config",

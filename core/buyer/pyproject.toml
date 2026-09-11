@@ -26,7 +26,7 @@ dependencies = [
   # Canonical principals, signer injection, and v2 request/response proofs.
   "arkhai-kit-identity==0.3.0",
   # Signed registry discovery with pinned authority responses.
-  "arkhai-core-registry-client==0.11.0",
+  "arkhai-core-registry-client==0.12.0",
 ]
 
 [project.scripts]

@@ -159,7 +159,7 @@ requires-dist = [
     { name = "arkhai-bare-metal", specifier = ">=0.2.0" },
     { name = "arkhai-compute-provisioning", specifier = ">=0.6.0" },
     { name = "arkhai-core", specifier = ">=0.2.0" },
-    { name = "arkhai-core-storefront", specifier = ">=0.3.0" },
+    { name = "arkhai-core-storefront", specifier = ">=0.4.0" },
     { name = "arkhai-hosted-settlement-client", specifier = "==0.4.2" },
     { name = "arkhai-kit-alkahest" },
     { name = "arkhai-kit-contact-exchange", specifier = "==0.1.2" },
@@ -210,7 +210,7 @@ wheels = [
 
 [[package]]
 name = "arkhai-core-registry-client"
-version = "0.11.0"
+version = "0.12.0"
 source = { registry = "../../../.dist" }
 dependencies = [
     { name = "arkhai-core" },
@@ -218,12 +218,12 @@ dependencies = [
     { name = "httpx" },
 ]
 wheels = [
-    { path = "arkhai_core_registry_client-0.11.0-py3-none-any.whl" },
+    { path = "arkhai_core_registry_client-0.12.0-py3-none-any.whl" },
 ]
 
 [[package]]
 name = "arkhai-core-storefront"
-version = "0.3.0"
+version = "0.4.0"
 source = { registry = "../../../.dist" }
 dependencies = [
     { name = "arkhai-core" },
@@ -235,7 +235,7 @@ dependencies = [
     { name = "pydantic" },
 ]
 wheels = [
-    { path = "arkhai_core_storefront-0.3.0-py3-none-any.whl" },
+    { path = "arkhai_core_storefront-0.4.0-py3-none-any.whl" },
 ]
 
 [[package]]

@@ -178,14 +178,14 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "arkhai-core", specifier = ">=0.2.0" },
-    { name = "arkhai-core-storefront", marker = "extra == 'storefront'", specifier = ">=0.3.0" },
+    { name = "arkhai-core-storefront", marker = "extra == 'storefront'", specifier = ">=0.4.0" },
     { name = "pydantic", specifier = ">=2.7" },
 ]
 provides-extras = ["storefront"]
 
 [package.metadata.requires-dev]
 dev = [
-    { name = "arkhai-core-storefront", specifier = ">=0.3.0" },
+    { name = "arkhai-core-storefront", specifier = ">=0.4.0" },
     { name = "pytest", specifier = ">=8.0" },
 ]
 
@@ -202,22 +202,21 @@ wheels = [
 
 [[package]]
 name = "arkhai-core-registry-client"
-version = "0.11.0"
-source = { registry = "https://pypi.org/simple" }
+version = "0.12.0"
+source = { registry = "../../.dist" }
 dependencies = [
     { name = "arkhai-core" },
     { name = "arkhai-kit-identity" },
     { name = "httpx" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/5d/ab/a183897f1ca4865adf31bf0fe735865c1f54b8c2a141f585f7552e75c9ad/arkhai_core_registry_client-0.11.0.tar.gz", hash = "sha256:e353cfbf14d80f3aac33394bcdb7c9cefea01c08b2924409e285ab62e044ea6b", size = 84372, upload-time = "2026-08-15T18:15:17.871Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/10/d2/8481e83e9de169366f965c9d1994a301fc03287063f97cc1c8571bf4137a/arkhai_core_registry_client-0.11.0-py3-none-any.whl", hash = "sha256:03cc3fe26a300965e3624ddeaf09ad05fe9bd63c08e047e360e3910dc5f7df55", size = 14053, upload-time = "2026-08-15T18:15:16.912Z" },
+    { path = "arkhai_core_registry_client-0.12.0-py3-none-any.whl" },
 ]
 
 [[package]]
 name = "arkhai-core-storefront"
-version = "0.3.0"
-source = { registry = "https://pypi.org/simple" }
+version = "0.4.0"
+source = { registry = "../../.dist" }
 dependencies = [
     { name = "arkhai-core" },
     { name = "arkhai-core-registry-client" },
@@ -227,9 +226,8 @@ dependencies = [
     { name = "httpx" },
     { name = "pydantic" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/1f/63/ab13b7346b64e36a3830eff333c80aa45b4da5694569e3297a4e1bb7d6e0/arkhai_core_storefront-0.3.0.tar.gz", hash = "sha256:5d4dcc4d54e485badfbe1c6ab9e75235fd940b2790ed8b06e84e3fc4628f5665", size = 183811, upload-time = "2026-08-15T18:15:14.7Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/95/e6/9435338b83ef25b5ac94bf03db4535d70e9aabe17f54c39b90a4fd9c3021/arkhai_core_storefront-0.3.0-py3-none-any.whl", hash = "sha256:e837102e69a0ebd3350352cb4810e6997568b1d1f0a6e2f49e6f271e2fd6178e", size = 114009, upload-time = "2026-08-15T18:15:13.474Z" },
+    { path = "arkhai_core_storefront-0.4.0-py3-none-any.whl" },
 ]
 
 [[package]]
@@ -261,7 +259,7 @@ wheels = [
 [[package]]
 name = "arkhai-kit-identity"
 version = "0.3.0"
-source = { registry = "https://pypi.org/simple" }
+source = { registry = "../../.dist" }
 dependencies = [
     { name = "cryptography" },
     { name = "eth-account" },
@@ -269,22 +267,21 @@ dependencies = [
     { name = "pydantic" },
     { name = "rfc8785" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/22/6c/ddd7fed8d0390e4e837cc2f32748a724d5139d1dffa53f69e75d27b0c37e/arkhai_kit_identity-0.3.0.tar.gz", hash = "sha256:e6ef92c3c9d1bc1590b26305f391eb30b5c154f35f164c6e8d80f8d40feaa4d8", size = 93024, upload-time = "2026-08-15T18:14:50.534Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/32/a0/37a82e5e807aa6c13a398680cfdd1cefeb17d8f5b2a16bf5e00570163ece/arkhai_kit_identity-0.3.0-py3-none-any.whl", hash = "sha256:ba395cc11e544c1d6c80069b9acac479ac75af2bd277d81af3a891cdc73af0df", size = 24206, upload-time = "2026-08-15T18:14:49.453Z" },
+    { path = "arkhai_kit_identity-0.3.0-py3-none-any.whl" },
 ]
 
 [[package]]
 name = "arkhai-kit-policy"
 version = "0.1.1"
-source = { registry = "https://pypi.org/simple" }
+source = { registry = "../../.dist" }
 dependencies = [
+    { name = "arkhai-kit-identity" },
     { name = "pydantic" },
     { name = "typer" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/2e/5d/ff9cbc40c8a58bd0b6844006b23906ea7013d8c17e5aba133edfda688eb0/arkhai_kit_policy-0.1.1.tar.gz", hash = "sha256:4bbcb088d8e9c195ca53a8f2a5270ff96ea18d9bd71dbb6a47fa747844ca5484", size = 134254, upload-time = "2026-06-16T05:42:58.239Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/25/ec/cbb54706abc1cba3b175462689d3ed9960ae0b62a25771273998f2420823/arkhai_kit_policy-0.1.1-py3-none-any.whl", hash = "sha256:7b4a9ab5b5ee6392e8c495dcb6b4b0a04db0fe33d9de857e0dd9cbacd3a7c27c", size = 24374, upload-time = "2026-06-16T05:42:57.137Z" },
+    { path = "arkhai_kit_policy-0.1.1-py3-none-any.whl" },
 ]
 
 [[package]]

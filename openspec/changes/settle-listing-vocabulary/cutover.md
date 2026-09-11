@@ -84,6 +84,21 @@ revision-framework hygiene rather than an invitation: running it after buyers ha
 queried the renamed schema identity puts the registry back on an identity no
 shipped buyer claims compatibility with.
 
+## Internal package resolution
+
+The three client bumps are only resolvable if every consumer resolves internal
+wheels from `.dist` rather than a published index. Two library distributions —
+`domains/vms/domain` and `domains/bare_metal` — were locked against
+`https://pypi.org/simple`, so their locks pinned whatever version was published
+and could not satisfy a constraint on a version built in this tree but not yet
+released. Both now declare `[tool.uv] find-links` and their locks record the
+local registry.
+
+Four exact pins (`==`) and seven floors (`>=`) on the bumped distributions were
+also raised. The floors mattered on their own terms: `>=0.11.0` on
+`arkhai-core-registry-client` would have permitted a client with no
+`listing_resource` at all.
+
 ## Related persistence work
 
 [`migrate-registry-to-postgres`](../migrate-registry-to-postgres/) rewrites registry
