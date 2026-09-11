@@ -175,16 +175,23 @@ test-ci:
 E2E_IDENTITY_ENV ?= $(CURDIR)/../.e2e-identities.env
 
 test-e2e:
-	cd .. && docker compose down -v --remove-orphans
-	cd .. && $(MAKE) build-dev
-	@# Every signer, wallet, and buyer-path mount in the compose files is
-	@# guarded with a required-variable form, so the stack will not start until
-	@# all of them are set. They come from committed development values, which
-	@# is what lets this run without repository secrets -- see
-	@# dev-env/identities/README.md. The values go through
-	@# `docker compose --env-file` rather than an eval of captured make output:
-	@# a recursive make implies -w and would print "Entering directory" into the
-	@# capture, and compose reading the file itself has nothing to quote wrong.
+	@# Every signer, wallet, buyer-path, and bearer-token value in the compose
+	@# files is guarded with a required-variable form, so *any* compose
+	@# subcommand that reads the config -- down as much as up -- refuses to run
+	@# until all of them are set. They come from committed development values,
+	@# which is what lets this run without repository secrets; see
+	@# dev-env/identities/README.md.
+	@#
+	@# The env file is generated first and passed to every compose invocation
+	@# below. Passing it only to `up` left `down` able to fail on the same
+	@# interpolation, for a reason that has nothing to do with the run.
+	@#
+	@# The values reach compose through --env-file rather than an eval of
+	@# captured make output: a recursive make implies -w and would print
+	@# "Entering directory" into the capture, and compose reading the file
+	@# itself has nothing to quote wrong.
 	cd .. && $(MAKE) -s --no-print-directory e2e-dev-identities-env > "$(E2E_IDENTITY_ENV)"
+	cd .. && docker compose --env-file "$(E2E_IDENTITY_ENV)" down -v --remove-orphans
+	cd .. && $(MAKE) build-dev
 	cd .. && docker compose --env-file "$(E2E_IDENTITY_ENV)" up -d --wait
 	$(MAKE) test-buyer-machine BUYER_MODULE="$(E2E_MODULE)"

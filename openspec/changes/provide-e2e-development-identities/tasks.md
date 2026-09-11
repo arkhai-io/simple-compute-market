@@ -72,6 +72,12 @@
         expanded by make before the shell saw it, which is why the CI log shows
         "`` guarded". Recipe comments now avoid `$` and are `@`-prefixed so they
         are not echoed.
+- [x] 4.6 Pass `--env-file` to **every** compose invocation, not only `up`.
+      `down` and `logs` interpolate the same config, so the guards block them
+      too. The env file is now generated as the recipe's first action, and the
+      workflow's `always()` teardown and log-collection steps regenerate it
+      before their own compose calls — which is also why the first two runs
+      produced a 148-byte log artefact instead of container logs.
 - [x] 4.5 Gitignore the generated artefacts — `.e2e-buyer/` and
       `.e2e-identities.env` — and say in `.gitignore` that the values they point
       at are tracked, so a reader does not conclude the identities are secret.

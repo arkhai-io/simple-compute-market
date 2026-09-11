@@ -157,6 +157,21 @@ registries demand a key is public and declared in the profile, the key itself
 is not. For the buyer there is no overlay: its config file is the only one the
 container mounts, so the development token sits in it and says so.
 
+### Every compose invocation gets the env file, not just `up`
+
+`docker compose down` and `docker compose logs` read and interpolate the same
+config as `up`, so a required-variable guard blocks them too. The first wiring
+passed `--env-file` only to `up`, leaving `down` — the recipe's own first line,
+and the workflow's teardown and log-collection steps — able to fail on an
+interpolation that has nothing to do with the run being cleaned up.
+
+So the env file is generated as the recipe's first action and passed to every
+compose call, and the workflow's `always()` steps regenerate it before their
+own `down` and `logs`. That last part matters for debugging rather than
+correctness: the log-collection step was producing a 148-byte artefact because
+it could not read the config, which is why the first two failures had to be
+diagnosed from the job log alone.
+
 ### The generated artefacts are ignored, the fixtures are tracked
 
 `make e2e-dev-identities-env` creates `.e2e-buyer/{profile,state}` — compose
