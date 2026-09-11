@@ -57,7 +57,7 @@ HOSTED_STRIPE_TEST_AUTHORITY_ENVIRONMENT ?=
 HOSTED_STRIPE_TEST_AUTHORITY_ENV_FILE ?=
 HOSTED_STRIPE_TEST_EVIDENCE ?= $(DIST_DIR)/hosted-stripe-test-evidence.json
 
-.PHONY: check-hosted-client-pin fix-hosted-client-pin review-wheelhouse review-wheelhouse-scope build build-dev build-seller build-apicredits-service build-apicredits-storefront build-apicredits-sample-app test test-core test-provisioning test-provisioning-iac test-registry test-storefront test-vms-buyer test-apicredits test-apicredits-middleware test-kits dist dist-release dist-ci dist-ci-kits dist-storefront-client dist-policy dist-compute-provisioning dist-compute-provisioning-service dist-kits verify-hosted-release dist-registry-client dist-registry dist-identity dist-core dist-arkhai-core-buyer dist-arkhai-core-storefront dist-bare-metal-storefront dist-alkahest dist-config dist-clean init init-prerequisites init-submodules init-zero-tier init-buyer init-storefront init-arkhai-core-registry push-runtime-artifacts push-images push-dev-image
+.PHONY: e2e-dev-identities check-hosted-client-pin fix-hosted-client-pin review-wheelhouse review-wheelhouse-scope build build-dev build-seller build-apicredits-service build-apicredits-storefront build-apicredits-sample-app test test-core test-provisioning test-provisioning-iac test-registry test-storefront test-vms-buyer test-apicredits test-apicredits-middleware test-kits dist dist-release dist-ci dist-ci-kits dist-storefront-client dist-policy dist-compute-provisioning dist-compute-provisioning-service dist-kits verify-hosted-release dist-registry-client dist-registry dist-identity dist-core dist-arkhai-core-buyer dist-arkhai-core-storefront dist-bare-metal-storefront dist-alkahest dist-config dist-clean init init-prerequisites init-submodules init-zero-tier init-buyer init-storefront init-arkhai-core-registry push-runtime-artifacts push-images push-dev-image
 .PHONY: build-hosted-producer
 .PHONY: test-release-tooling test-deployment-packaging prepare-hosted-compose prepare-hosted-compose-local hosted-preflight hosted-preflight-local hosted-stripe-test-local hosted-compose-up hosted-compose-restart hosted-compose-clean hosted-stripe-test hosted-stripe-test-stop
 .PHONY: dist-arkhai-core-registry
@@ -428,6 +428,41 @@ test-kits:
 build: init-prerequisites dist build-buyer
 	$(MAKE) -j4 build-registry build-storefront build-bare-metal-storefront build-provisioning
 	$(MAKE) -j3 build-apicredits-service build-apicredits-storefront build-apicredits-sample-app
+
+# ---------------------------------------------------------------------------
+# e2e-dev-identities — export the compose stack's signer, wallet, and buyer
+# paths from the committed development values in dev-env/identities.
+#
+# `docker-compose.yml`, `compose.vms.yml`, and `domains/apicredits/compose.yml`
+# guard every one of these mounts with `${VAR:?...}`, so `docker compose up`
+# refuses to start until all fifteen are set. Exporting them from committed
+# fixtures is what lets a contributor, a fork, or a CI job holding no
+# repository secrets run the stack. Every value is a well-known deterministic
+# development value; see dev-env/identities/README.md.
+#
+# Include this from a shell with `eval "$(make -s e2e-dev-identities)"`, or let
+# `make -C e2e-tests test-e2e` pick it up, which it does.
+# ---------------------------------------------------------------------------
+E2E_IDENTITY_DIR := $(CURDIR)/dev-env/identities
+E2E_BUYER_RUNTIME_DIR ?= $(CURDIR)/.e2e-buyer
+
+e2e-dev-identities: ## Print shell exports pointing compose at committed development identities
+	@mkdir -p "$(E2E_BUYER_RUNTIME_DIR)/profile" "$(E2E_BUYER_RUNTIME_DIR)/state"
+	@echo 'export VMS_REGISTRY_IDENTITY_CREDENTIAL_FILE="$(E2E_IDENTITY_DIR)/registry-a.eip191"'
+	@echo 'export VMS_REGISTRY_B_IDENTITY_CREDENTIAL_FILE="$(E2E_IDENTITY_DIR)/registry-b.eip191"'
+	@echo 'export VMS_PROVISIONING_IDENTITY_ENV_FILE="$(E2E_IDENTITY_DIR)/provisioning.identity.env"'
+	@echo 'export VMS_BOB_IDENTITY_ENV_FILE="$(E2E_IDENTITY_DIR)/bob.identity.env"'
+	@echo 'export VMS_ALICE_IDENTITY_ENV_FILE="$(E2E_IDENTITY_DIR)/alice.identity.env"'
+	@echo 'export VMS_BOB_EVM_WALLET_ENV_FILE="$(CURDIR)/domains/vms/storefront/.env.bob.docker"'
+	@echo 'export VMS_ALICE_EVM_WALLET_ENV_FILE="$(CURDIR)/domains/vms/storefront/.env.alice.docker"'
+	@echo 'export VMS_BUYER_CONFIG_PATH="$(E2E_IDENTITY_DIR)/buyer.config.toml"'
+	@echo 'export VMS_BUYER_CREDENTIAL_FILE="$(E2E_IDENTITY_DIR)/buyer.eip191"'
+	@echo 'export VMS_BUYER_PROFILE_DIR="$(E2E_BUYER_RUNTIME_DIR)/profile"'
+	@echo 'export VMS_BUYER_STATE_DIR="$(E2E_BUYER_RUNTIME_DIR)/state"'
+	@echo 'export APICREDITS_REGISTRY_IDENTITY_CREDENTIAL_FILE="$(E2E_IDENTITY_DIR)/api-credits-registry.ed25519"'
+	@echo 'export APICREDITS_IDENTITY_ENV_FILE="$(E2E_IDENTITY_DIR)/api-credits.identity.env"'
+	@echo 'export APICREDITS_EVM_WALLET_ENV_FILE="$(E2E_IDENTITY_DIR)/api-credits.wallet.env"'
+	@echo 'export APICREDITS_ADMIN_KEY_FILE="$(E2E_IDENTITY_DIR)/api-credits-admin-key"'
 
 build-dev: build build-dev-env build-test-image
 

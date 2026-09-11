@@ -173,5 +173,9 @@ test-ci:
 test-e2e:
 	cd .. && docker compose down -v --remove-orphans
 	cd .. && $(MAKE) build-dev
-	cd .. && docker compose up -d --wait
+	# Every signer, wallet, and buyer-path mount in the compose files is
+	# `${VAR:?...}` guarded, so the stack will not start until all of them are
+	# set. They come from committed development values, which is what lets this
+	# run without repository secrets -- see dev-env/identities/README.md.
+	cd .. && eval "$$($(MAKE) -s e2e-dev-identities)" && docker compose up -d --wait
 	$(MAKE) test-buyer-machine BUYER_MODULE="$(E2E_MODULE)"

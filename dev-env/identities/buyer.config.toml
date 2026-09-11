@@ -1,0 +1,38 @@
+# Public buyer configuration for the local compose stack.
+#
+# Well-known deterministic development values. Nothing here is secret; the
+# buyer's signing credential is supplied separately through
+# VMS_BUYER_CREDENTIAL_FILE and never appears in this file. MUST NOT be used
+# against a public network. See README.md in this directory.
+#
+# The registry authority principals below are the Anvil accounts the default
+# stack's registries run as, pinned in compose.vms.yml. They are eip191 rather
+# than ed25519 because the default stack signs with Anvil keys; the fiat stack
+# in e2e-tests/config/hosted-buyer.toml pins ed25519 identities instead, which
+# is why that file cannot be reused here.
+
+[BuyerProfile]
+store_path = "/var/lib/arkhai-buyer/arkhai/buyer/profiles.json"
+
+[provisioning]
+ssh_public_key = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIDemoPublicKeyForComputeAccess buyer@example.com"
+
+[registry]
+urls = ["http://registry:8080", "http://registry-b:8080"]
+
+[registry.authorities."http://registry:8080"]
+authority = "registry-a"
+principals = [{ scheme = "eip191", identifier = "0x90f79bf6eb2c4f870365e785982e1f101e93b906" }]
+
+[registry.authorities."http://registry-b:8080"]
+authority = "registry-b"
+principals = [{ scheme = "eip191", identifier = "0x15d34aaf54267db7d7c367839aaf71a00a2c6a65" }]
+
+# Which registries demand a bearer key is public and belongs here; the key
+# itself is not. An empty value is the declaration.
+[registry.auth]
+"http://registry-b:8080" = ""
+
+[Chains.anvil]
+rpc_url = "ws://anvil:8545"
+chain_id = 31337

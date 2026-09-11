@@ -42,7 +42,7 @@ discovery_timeout = 5.0
 [registry.authorities."http://api-credits-registry:8080"]
 authority = "api-credits-registry"
 identities = [
-  { scheme = "ed25519", identifier = "skkdlQKuKGMKK6yy4MdFEP_N0yjDNP8-E5PnWy0x59w" },
+  { scheme = "ed25519", identifier = "_NUDENxVX6u4cMd0xzoYyQAt10QDI47bfnYnu2lTVho" },
 ]
 
 [credits]
