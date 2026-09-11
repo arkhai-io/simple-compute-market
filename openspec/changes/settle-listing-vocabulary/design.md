@@ -404,6 +404,9 @@ window that does not exist yet.
 - **Does the `listing_mode` ingestion alias have a removal date?** Deliberately
   deferred, as before: there is no fleet-wide deployment signal to gate removal on,
   since sellers self-host. Recorded here rather than prescribed in `tasks.md`.
+- **Does `structured-capacity-requirements` need any of its `offering_type` item
+  after this?** Expected not — the concept exists and this change collapses it — but
+  that change's owner should confirm rather than have it deleted from outside.
 
 ### Closed during design review
 
@@ -423,9 +426,6 @@ it.
   with a `compute-provisioning-contract` delta that was missing from the
   affected-capability inventory.
 - **Is `offer_resource_type` renamed?** Dropped.
-- **Does `structured-capacity-requirements` need any of its `offering_type` item
-  after this?** Expected not — the concept exists and this change collapses it — but
-  that change's owner should confirm rather than have it deleted from outside.
 
 ## Migration Plan
 
