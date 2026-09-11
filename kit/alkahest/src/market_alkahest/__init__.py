@@ -2,11 +2,15 @@
 
 # Register claims-side arbiter codecs alongside the defaults.
 from . import claims as _claims  # noqa: F401
-from .claim_hooks import AlkahestConditionalEscrowClient
+from .claim_hooks import (
+    AlkahestConditionalEscrowClient,
+    web3_collection_receipt_reader,
+)
 from .escrow_verification import (
     EscrowVerificationError,
     verify_escrow_for_settlement,
 )
+from .fulfillment import AlkahestStringFulfillmentPublisher
 from .plans import (
     AcceptedAlkahestObligation,
     decode_accepted_alkahest_obligation,
@@ -24,10 +28,12 @@ __all__ = [
     "ALKAHEST_MECHANISM_ID",
     "AcceptedAlkahestObligation",
     "AlkahestConditionalEscrowClient",
+    "AlkahestStringFulfillmentPublisher",
     "AlkahestSettlementConfig",
     "EscrowVerificationError",
     "create_alkahest_registration",
     "decode_accepted_alkahest_obligation",
     "validate_accepted_alkahest_obligation",
     "verify_escrow_for_settlement",
+    "web3_collection_receipt_reader",
 ]

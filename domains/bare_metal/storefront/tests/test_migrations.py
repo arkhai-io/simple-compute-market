@@ -20,6 +20,7 @@ BARE_METAL_MIGRATION_IDS = (
     "bare-metal-storefront-0006-common-domain-bindings",
     "bare-metal-storefront-0007-selected-site-immutability",
     "bare-metal-storefront-0008-hosted-physical-lifecycle",
+    "bare-metal-storefront-0009-alkahest-evidence-lifecycle",
 )
 MIGRATION_IDS = (*SETTLEMENT_MIGRATION_IDS, *BARE_METAL_MIGRATION_IDS)
 
@@ -76,6 +77,7 @@ async def test_bare_metal_migration_upgrades_existing_core_database(tmp_path) ->
     assert "storefront_domain_artifacts" in tables
     assert {"settlement_obligations", "settlement_operations"} <= tables
     assert "bare_metal_hosted_lifecycle" in tables
+    assert "bare_metal_alkahest_evidence" in tables
     assert applied == [(migration_id,) for migration_id in sorted(MIGRATION_IDS)]
     assert {
         "site_id",

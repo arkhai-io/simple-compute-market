@@ -11,11 +11,12 @@ from market_alkahest.plans import (
     AcceptedAlkahestObligation,
     decode_accepted_alkahest_obligation,
 )
-from market_settlement_runtime import SettlementRuntime
+from market_settlement_runtime import SettlementRuntime, SettlementServicingRepository
 from market_identity import Identity
 
-from arkhai_bare_metal import BareMetalTerms
+from arkhai_bare_metal import BareMetalTerms, bare_metal_digest
 
+from .alkahest_lifecycle import project_alkahest_terminal_state
 from .models import (
     BareMetalSettleRequest,
     BareMetalSettleResponse,
@@ -234,6 +235,7 @@ class BareMetalSettlementService:
     build_plan: PlanBuilder
     verify_escrow: VerifyEscrow
     settlement_runtime: SettlementRuntime
+    settlement_repository: SettlementServicingRepository
 
     @staticmethod
     def _response(
@@ -266,6 +268,29 @@ class BareMetalSettlementService:
         if Identity.model_validate(thread.get("buyer_principal")) != buyer_principal:
             raise SettlementRequestError("negotiation buyer mismatch", status_code=403)
         return thread
+
+    async def _bind_alkahest_evidence_authority(
+        self,
+        *,
+        accepted: _AcceptedAlkahestSettlement | None,
+        accepted_plan: Any,
+        obligation_ref: str,
+        negotiation_id: str,
+        escrow_uid: str,
+    ) -> None:
+        if accepted is None:
+            return
+        await self.db.ensure_bare_metal_alkahest_evidence_binding(
+            obligation_ref=obligation_ref,
+            agreement_ref=negotiation_id,
+            escrow_uid=escrow_uid,
+            accepted_plan_digest=bare_metal_digest(accepted_plan),
+            seller_recipient=self.seller_wallet,
+        )
+        await self.settlement_runtime.enqueue_fulfillment(
+            obligation_ref,
+            local_principal=Identity.model_validate(accepted.plan.seller_principal),
+        )
 
     async def verify(
         self,
@@ -393,6 +418,13 @@ class BareMetalSettlementService:
                 and record.materialization_state == "materialized"
             ]
             if len(adopted) == 1:
+                await self._bind_alkahest_evidence_authority(
+                    accepted=accepted,
+                    accepted_plan=thread.get("settlement_plan"),
+                    obligation_ref=adopted[0].obligation_ref,
+                    negotiation_id=request.negotiation_id,
+                    escrow_uid=escrow_uid,
+                )
                 return self._response(
                     escrow_uid=escrow_uid,
                     negotiation_id=request.negotiation_id,
@@ -503,6 +535,13 @@ class BareMetalSettlementService:
                     or raced.get("status") != "settlement_verified"
                 ):
                     raise SettlementRequestError("conflicting escrow settlement")
+        await self._bind_alkahest_evidence_authority(
+            accepted=accepted,
+            accepted_plan=thread.get("settlement_plan"),
+            obligation_ref=records[matched_index].obligation_ref,
+            negotiation_id=request.negotiation_id,
+            escrow_uid=escrow_uid,
+        )
         return self._response(
             escrow_uid=escrow_uid,
             negotiation_id=request.negotiation_id,
@@ -538,10 +577,25 @@ class BareMetalSettlementService:
             if obligation.mechanism_ref == escrow_uid
             and obligation.materialization_state == "materialized"
         ]
-        if len(adopted) != 1 or adopted[0].fulfillment_ref is not None:
+        if len(adopted) != 1:
             raise SettlementRequestError(
                 "verified settlement lifecycle is inconsistent"
             )
+        evidence = await self.db.load_bare_metal_alkahest_evidence(
+            obligation_ref=adopted[0].obligation_ref,
+        )
+        terminal = await project_alkahest_terminal_state(
+            adopted[0],
+            self.settlement_repository,
+            evidence_terminal=(
+                str(evidence.get("terminal_state")) if evidence else None
+            ),
+            fallback=(
+                str(adopted[0].mechanism_status)
+                if adopted[0].fulfillment_ref is not None
+                else str(escrow["status"])
+            ),
+        )
         return BareMetalSettleStatusResponse(
             escrow_uid=escrow_uid,
             negotiation_id=str(escrow["negotiation_id"]),
@@ -552,6 +606,6 @@ class BareMetalSettlementService:
                     buyer_principal=buyer_principal,
                 ))["seller_principal"],
             ),
-            status=str(escrow["status"]),
+            status=terminal,
             obligation_ref=adopted[0].obligation_ref,
         )

@@ -51,6 +51,11 @@ weakening domain-owned physical validation.
 - Make the three affected installed-wheel qualification targets lock-stable
   while retaining explicit same-version artifact reinstall, and place offline
   production-scenario orchestration under the integration test level.
+- Complete exact-selection bare-metal Alkahest settlement through the shared
+  servicing runtime: authoritative access-ready state produces one durably
+  bound StringObligation attestation, exact readback precedes collection, and
+  the existing escrow codec records seller collection or an ambiguous terminal
+  outcome without repeating either chain effect.
 
 ## Scope limits
 
@@ -104,6 +109,9 @@ capacity in this change is reserved for them.
   canonical publisher-owned advertised record before local mutation. Shared
   lifecycle sequencing moves into the capacity-publication module through
   domain persistence delegates.
+- `settlement-servicing`: exact bare-metal Alkahest obligations bind immutable
+  physical evidence to one seller-recipient fulfillment attestation before the
+  shared runtime invokes the existing collection codec.
 
 ## Permanent documentation impact
 
@@ -147,6 +155,15 @@ scaffolding, and are owed a permanent home once reviewed:
    `docs/development/TESTING.md`; the distinction between offline qualification
    and actual-host evidence belongs in
    `docs/development/DEPLOYMENT_AND_CONFIG.md`.
+8. **Seller collection.** Bare-metal Alkahest servicing binds the accepted plan,
+   exact escrow and authoritative access-ready result to a durable evidence
+   intent, explicitly enqueues shared fulfillment, atomically claims and
+   confirms the seller-recipient attestation, and verifies the exact successful
+   seller token transfer before collected success. Publication and collection
+   uncertainty remain durable reclaim fences. Destination:
+   `openspec/specs/settlement-servicing/spec.md`,
+   `openspec/specs/settlement-servicing/architecture.md`, and
+   `openspec/specs/physical-provisioning/spec.md`.
 
 Deliberately **not** promoted: anything about hostile-tenant isolation,
 destructive reclaim policies, or a demonstrated live run. An earlier revision

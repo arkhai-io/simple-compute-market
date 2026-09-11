@@ -348,7 +348,11 @@ def alkahest_client_factory(
     chains = resources.get("chains")
     chain_config_paths: dict[str, str | None] = {}
     if isinstance(chains, Mapping):
-        chain_config_paths = dict.fromkeys(chains, config.address_config_path)
+        chain_config_paths = {
+            str(name): _resource_value(value, "alkahest_address_config_path")
+            or config.address_config_path
+            for name, value in chains.items()
+        }
     return AlkahestConditionalEscrowClient(
         get_client=get_client,
         chain_config_paths=chain_config_paths,
@@ -356,6 +360,8 @@ def alkahest_client_factory(
         arbitration_probe_timeout=float(
             resources.get("arbitration_probe_timeout", 5.0)
         ),
+        collection_receipt_reader=resources.get("collection_receipt_reader"),
+        collection_recipient=resources.get("collection_recipient"),
     )
 
 

@@ -459,6 +459,76 @@ class BareMetalFulfillmentService:
             "expires_at": result.lease_expires_at,
         }
 
+    async def lease_ready_evidence_inputs(
+        self,
+        *,
+        negotiation_id: str,
+        buyer_principal: Identity,
+    ) -> dict[str, Any]:
+        """Return authoritative, buyer-usable delivery inputs for publication."""
+        lifecycle = await self.status(
+            negotiation_id=negotiation_id,
+            buyer_principal=buyer_principal,
+        )
+        if lifecycle["state"] != "active":
+            return {"lifecycle": lifecycle}
+        reservation_id = str(lifecycle.get("capacity_reservation_id") or "")
+        fulfillment_id = str(lifecycle.get("fulfillment_id") or "")
+        if not reservation_id or not fulfillment_id:
+            raise BareMetalFulfillmentError(
+                "active bare-metal delivery omits its durable identity"
+            )
+        result = await self._active_access_result(
+            capacity_reservation_id=reservation_id,
+            fulfillment_id=fulfillment_id,
+        )
+        if (
+            result.action != "node_grant_access"
+            or result.status != "success"
+            or not result.ssh_user
+            or not result.host
+            or result.port is None
+        ):
+            raise BareMetalFulfillmentError(
+                "bare-metal fulfillment has no buyer-ready SSH access"
+            )
+        materialization = await self.db.load_bare_metal_materialization(
+            negotiation_id=negotiation_id
+        )
+        receipt = await self.db.load_bare_metal_receipt(
+            negotiation_id=negotiation_id
+        )
+        if materialization is None or receipt is None:
+            raise BareMetalFulfillmentError(
+                "authoritative bare-metal delivery evidence is incomplete"
+            )
+        now = datetime.now(timezone.utc)
+        if (
+            materialization.lease_start_utc is None
+            or receipt.lease_start_utc != materialization.lease_start_utc
+            or receipt.lease_end_utc != materialization.lease_end_utc
+            or result.lease_expires_at != materialization.lease_end_utc
+            or result.lease_expires_at is None
+            or result.lease_expires_at <= now
+            or result.escrow_uid != materialization.escrow_uid
+            or receipt.escrow_uid != materialization.escrow_uid
+            or receipt.status != "ready"
+            or receipt.access_ref != {"fulfillment_id": fulfillment_id}
+            or result.machine_id != materialization.machine_id
+            or result.physical_host_id != materialization.physical_host_id
+            or receipt.machine_id != materialization.machine_id
+            or receipt.physical_host_id != materialization.physical_host_id
+        ):
+            raise BareMetalFulfillmentError(
+                "authoritative bare-metal delivery identities or lease disagree"
+            )
+        return {
+            "lifecycle": lifecycle,
+            "materialization": materialization,
+            "receipt": receipt,
+            "result": result,
+        }
+
     async def teardown(
         self,
         *,

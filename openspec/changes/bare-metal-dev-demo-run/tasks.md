@@ -221,7 +221,7 @@ buyer's; the scenario evidences only what the granted session reports.
       negotiation with a mocked verifier, one parametrized case per accepted-record
       mismatch, plus a real-verifier expiry regression with only codec and chain
       read substituted.
-      `domains/bare_metal/storefront/tests/test_settlement_canonical_selection.py`,
+      `domains/bare_metal/storefront/tests/integration/test_settlement_canonical_selection.py`,
       `kit/alkahest/tests/unit/test_escrow_verification_expected_terms.py`.
 - [x] 7.5 Promotion: settlement verification authority, accepted-record
       consistency and the accepted-expiry boundary in
@@ -465,3 +465,57 @@ isolation, destructive reclaim policies, and end-to-end demonstration evidence.
       and cleanup evidence.
 - [ ] 12.4 Keep vLLM, model-cache lifecycle, GPU allocation/qualification, and
       GPU-specific host configuration deferred to a separately proposed change.
+
+## 13. Integrated bare-metal seller collection
+
+- [x] 13.1 Add a shared Alkahest StringObligation publisher with separate
+      submit/readback operations and exact UID, refUID, seller-recipient,
+      revocation, and evidence validation.
+- [x] 13.2 Persist one immutable exact-selection evidence binding and canonical
+      evidence intent; compose the Alkahest lifecycle over the existing
+      bare-metal physical service and shared settlement worker without changing
+      hosted or legacy proposal behavior.
+- [x] 13.3 Fail closed on changed accepted plans, wrong physical results,
+      ambiguous publication, receipt-persistence failure, and readback
+      uncertainty; use an atomic evidence-intent claim, retain the shared
+      fulfillment operation as a reclaim fence, and never blindly publish
+      again.
+- [x] 13.4 Validate the configured seller wallet against the chain-client key,
+      then require exact successful transaction and ERC-20 seller-transfer
+      readback after codec collection. Preserve unknown acknowledgements for
+      explicit reconciliation without a second chain write.
+- [ ] 13.5 Rebuild changed internal wheels and run the owning bare-metal,
+      Alkahest, settlement-runtime, hosted compatibility, buyer/E2E and installed
+      qualification suites. The reviewed fourth-generation rebuild and installed
+      runs passed settlement-runtime (97), hosted compatibility (189), bare-metal
+      storefront (215), and Alkahest (220). The buyer locked reinstall and suite
+      passed 76 tests without changing its lockfile, and the offline E2E closeout
+      passed 38 tests. Retain this item until the changed dependency closure is
+      rebuilt and qualified from the exact committed generation; these precommit
+      installed and offline results do not qualify a committed artifact or image.
+- [x] 13.6 Promote the implemented offline behavior and recipient-only trust
+      limitation to settlement servicing, physical provisioning, repository
+      architecture, and an exact active delta. Live StringObligation contract
+      code/hash and seller token-transfer evidence remain a separate gate.
+- [x] 13.7 Enqueue exact accepted Alkahest fulfillment through the shared
+      claimant-owned operation journal after durable evidence authority; keep
+      legacy/unconfigured rows excluded and preserve lease/backoff selection.
+- [x] 13.7a Persist the shared reclaim fence before external fulfillment
+      publication, preserve it through lease expiry/retry/physical deferral,
+      scope no-resubmit collection recovery to readback-required mechanisms,
+      and retain hosted stable-request retries.
+- [x] 13.8 Close out the corrected seller-collection section: run comment and
+      import hygiene; reconcile permanent specifications and architecture;
+      compress the active narrative; update roadmap and campaign-index state;
+      record promotion destinations; and complete source, installed-wheel,
+      broader compatibility, and strict OpenSpec checks without claiming live
+      qualification. Earlier independent review rounds found blockers that were
+      corrected; the final bounded Spec and Standards reviews each reported no
+      remaining findings. Two generated lockfile deltas were excluded after exact
+      comparison. Parent-installed settlement-runtime, hosted, bare-metal
+      storefront, and Alkahest suites passed 97, 189, 215, and 220 tests. The
+      buyer locked reinstall and suite passed 76 tests with no lockfile change,
+      the offline E2E closeout passed 38 tests, and pinned OpenSpec 1.13.0 strict
+      validation and comment hygiene passed. This closeout does not satisfy the
+      committed-generation requirement in 13.5 or any actual-host, contract,
+      funding, collection-transfer, cleanup, or financial gate.

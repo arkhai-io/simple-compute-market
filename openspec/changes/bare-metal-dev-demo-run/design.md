@@ -542,10 +542,99 @@ archival provenance.
 | Optional-status omission, exact-target preflight/readback, immutable intent recovery, safe partial results, and local commit ordering | `openspec/specs/storefront-publication/spec.md` | Promoted for publication milestone review |
 | Core transport, kit lifecycle, and explicit domain-adapter ownership | `openspec/specs/storefront-publication/architecture.md` | Promoted for publication milestone review |
 | Repository-wide capacity-publication ownership | `docs/development/ARCHITECTURE.md` | Updated for publication milestone review |
-| Roadmap currency | `docs/development/ROADMAP.md` | No edit: the roadmap already names the kit publication runtime and all three composed consumers; this submilestone does not complete its goal |
+| Roadmap currency | `docs/development/ROADMAP.md` | Updated the current physical-authority state with the authoritative buyer-ready access gate; the remaining live campaign does not complete the goal |
 | Campaign index currency | `openspec/changes/README.md` | Updated for offline closeout review; strict validation/review and separately gated live work remain explicit |
 | Accepted Alkahest decoding, whole-payload re-materialization, and retained domain physical authority | `openspec/specs/settlement-configuration/spec.md`; `openspec/specs/settlement-configuration/architecture.md`; existing `openspec/specs/negotiation-protocol/spec.md` physical-authority requirement | Promoted for settlement milestone review |
 | Lock-stable same-version wheel refresh for the three affected targets | `docs/development/ARCHITECTURE.md` | Promoted for offline qualification review; explicitly not repository-wide |
 | Offline production-scenario orchestration test placement | `docs/development/TESTING.md` | Promoted for offline qualification review |
 | Offline qualification versus actual-host evidence | `docs/development/DEPLOYMENT_AND_CONFIG.md` | Promoted for offline qualification review |
 | Active delta provenance for the five modified capabilities | `openspec/changes/bare-metal-dev-demo-run/specs/` | Reconstructed exactly from already-promoted normative blocks; scoped OpenSpec 1.13.0 strict validation passes |
+| Bare-metal Alkahest access evidence, atomic seller-recipient attestation, exact seller-transfer readback, and shared scheduling/reclaim fencing | `openspec/specs/settlement-servicing/spec.md`; `openspec/specs/settlement-servicing/architecture.md`; `openspec/specs/physical-provisioning/spec.md`; `docs/development/ARCHITECTURE.md`; `docs/development/ROADMAP.md` | Promoted after the final bounded Spec and Standards reviews each reported no remaining findings; committed-artifact and live qualification remain gated |
+
+The final offline seller-collection implementation generation passed parent-installed
+settlement-runtime, hosted compatibility, bare-metal storefront, and Alkahest
+suites with 97, 189, 215, and 220 tests respectively. Earlier independent review
+rounds found blockers that were corrected; the final bounded Spec and Standards
+reviews each reported no remaining findings. The buyer locked reinstall and suite
+passed 76 tests without a lockfile change, the offline E2E closeout passed 38
+tests, and pinned OpenSpec 1.13.0 strict validation and comment hygiene passed.
+These are precommit installed and offline results, not qualification of an exact
+committed artifact or image, so task 13.5 remains open. Selected contract code
+and identity, committed images, actual-host access, funding, seller transfer,
+teardown, and financial closeout remain live gates.
+
+## Seller collection from authoritative bare-metal delivery
+
+An exact-selection Alkahest settlement persists a narrow evidence binding next
+to the shared obligation: agreement, obligation, escrow, accepted-plan digest,
+and seller payout address. It does not persist another accepted plan or decode
+payment fields outside the Alkahest codec. The existing physical service remains
+the authority for selected-site reservation, provisioning status, redacted
+result, and receipt. Only its active access result can construct the public
+lease-ready evidence document.
+
+The mechanism kit supplies one StringObligation publisher with separate submit
+and exact readback operations. Before submission, the domain persists the
+canonical evidence bytes, fences reclaim in the shared fulfillment operation,
+and then claims the submission intent. The shared fence survives worker-lease
+expiry, retry, and a later non-active physical projection. A returned UID is
+persisted before readback; interrupted readback retries that same UID. A crash or
+persistence failure after a possibly successful write but before the UID is
+durable leaves `submission_unknown`/`submitting` and forbids blind resubmission,
+because the pinned SDK exposes no supported query by refUID. No scheduler or
+second journal is added.
+
+Readback requires the exact UID, escrow refUID, configured seller recipient,
+unrevoked attestation, and canonical evidence bytes. The chain-effect signing
+key must derive the configured seller wallet before any chain client is
+composed; it is distinct from the marketplace message signer.
+The RecipientArbiter authorizes collection solely because the fulfillment
+attestation recipient is that seller. It does not validate physical terms; the
+accepted-plan digest and authoritative result are durable audit evidence, while
+the reviewed trust choice remains recipient-only.
+
+After evidence confirmation the shared fulfillment reference is bound and the
+existing settlement worker performs condition evaluation and ERC-20 collection
+through the existing Alkahest codec. Its operation receipt and uncertain-
+acknowledgement state remain authoritative. Only a mechanism outcome that
+returns an effect identity but cannot read it back is parked for explicit
+reconciliation. Hosted authority failures retain their existing idempotent
+retry with the same operation request ID. An Alkahest collect acknowledgement
+failure retains its transaction identity for explicit receipt reconciliation
+and never causes an automatic second payment; escrow status alone is not
+treated as proof of collection because revocation cannot distinguish collection
+from reclaim.
+Expiry, reclaim, already-collected, and manual-required states remain mutually
+exclusive under the shared runtime. Status derives collection uncertainty and
+manual-required receipt rejection from the shared operation even if a domain-
+terminal projection is unavailable. Hosted
+callbacks and legacy proposal-based Alkahest settlements retain their existing
+behavior.
+
+Exact settlement now creates the shared `fulfill` operation only after its
+evidence authority is durable. That operation is the explicit scheduling signal
+and claimant-authorization boundary; historical obligations remain absent from
+due-work selection. Publication changes `intent_recorded` to `submitting` with
+a database compare-and-set bound to evidence digest and worker. Only the winner
+may call StringObligation. The shared operation is fenced before the
+attestation call can begin. Ambiguity retains that fence through lease release,
+retry, physical deferral, and expiry. Authoritative absence may explicitly reset
+the identical intent and fence; elapsed time cannot.
+Fence acquisition and reclaim reservation use the same SQLite write
+serialization. An expired or replaced fulfillment lease, or a reclaim already
+in progress or complete, rejects the fence before domain submission ownership
+or publisher I/O.
+
+Physical evidence now comes through a production physical-service projection
+that reads active access at its external boundary before redaction. It requires
+nonempty SSH user, host, and port plus exact escrow, machine, Physical Host,
+reservation, fulfillment, receipt, lease start, and unexpired lease end. Public
+evidence continues to exclude coordinates and credentials.
+
+Bare-metal composition opts into Alkahest collection readback without changing
+hosted consumers. The adapter treats the SDK response as a transaction identity,
+reads the transaction and receipt, and verifies successful status, exact escrow
+target and escrow/fulfillment arguments, and one exact token Transfer to the
+configured seller for the accepted amount. Readback failure persists the safe
+transaction identity and becomes operator-reconcilable; it never authorizes a
+second collection call.

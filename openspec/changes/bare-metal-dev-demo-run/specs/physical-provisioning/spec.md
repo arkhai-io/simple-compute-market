@@ -49,3 +49,24 @@ otherwise.
 
 - **WHEN** no tenant-facing endpoint is recorded
 - **THEN** the access result reports the provisioner's endpoint unchanged
+
+### Requirement: On-chain seller collection uses authoritative whole-host evidence
+
+For an exactly selected Alkahest rental, only an active selected-site access
+result with nonempty buyer-usable SSH host, port, and user and its matching
+persisted receipt MAY become fulfillment evidence. The result, receipt, and
+accepted materialization MUST name the same escrow, machine, Physical Host,
+lease start, and unexpired lease end before access coordinates are redacted. The
+public evidence MUST bind the accepted plan and obligation identities, exact
+escrow and seller recipient, site, Physical Resource, reservation, scheduled
+resource, provisioning fulfillment, access grant, and lease timing without
+publishing host coordinates, credentials, provider detail, or private result
+data. A pending, failed, mismatched, incomplete, or stale physical result MUST
+prevent evidence publication and collection.
+
+#### Scenario: Physical result disagrees with the accepted rental
+
+- **WHEN** the result or receipt changes the machine, Physical Host, escrow,
+  access state, lease timing, buyer endpoint, or any durable selected-site identity
+- **THEN** the storefront publishes no fulfillment attestation and the shared
+  runtime performs no collection

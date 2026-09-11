@@ -259,6 +259,73 @@ def _add_hosted_physical_lifecycle(conn: sqlite3.Connection) -> None:
     )
 
 
+def _add_alkahest_evidence_lifecycle(conn: sqlite3.Connection) -> None:
+    conn.execute(
+        """
+        CREATE TABLE bare_metal_alkahest_evidence (
+          obligation_ref TEXT PRIMARY KEY,
+          agreement_ref TEXT NOT NULL,
+          escrow_uid TEXT NOT NULL UNIQUE,
+          accepted_plan_digest TEXT NOT NULL,
+          seller_recipient TEXT NOT NULL,
+          evidence_json TEXT,
+          evidence_digest TEXT,
+          publication_state TEXT NOT NULL DEFAULT 'pending',
+          publication_owner TEXT,
+          fulfillment_uid TEXT UNIQUE,
+          terminal_state TEXT NOT NULL DEFAULT 'pending',
+          failure_reason TEXT,
+          created_at TEXT NOT NULL
+            DEFAULT (STRFTIME('%Y-%m-%dT%H:%M:%fZ', 'now')),
+          updated_at TEXT NOT NULL
+            DEFAULT (STRFTIME('%Y-%m-%dT%H:%M:%fZ', 'now')),
+          CHECK (LENGTH(TRIM(obligation_ref)) > 0),
+          CHECK (LENGTH(TRIM(agreement_ref)) > 0),
+          CHECK (LENGTH(TRIM(escrow_uid)) > 0),
+          CHECK (accepted_plan_digest GLOB 'sha256:[0-9a-f]*'),
+          CHECK (seller_recipient GLOB '0x[0-9a-fA-F]*'),
+          CHECK (publication_owner IS NULL OR LENGTH(TRIM(publication_owner)) > 0),
+          CHECK (
+            (evidence_json IS NULL AND evidence_digest IS NULL)
+            OR (evidence_json IS NOT NULL AND evidence_digest IS NOT NULL)
+          )
+        )
+        """
+    )
+    conn.execute(
+        "CREATE INDEX idx_bare_metal_alkahest_publication_state "
+        "ON bare_metal_alkahest_evidence(publication_state, terminal_state)"
+    )
+    conn.execute(
+        """
+        CREATE TRIGGER bare_metal_alkahest_evidence_identity_immutable
+        BEFORE UPDATE OF
+          obligation_ref, agreement_ref, escrow_uid,
+          accepted_plan_digest, seller_recipient,
+          evidence_json, evidence_digest
+        ON bare_metal_alkahest_evidence
+        WHEN NOT (
+          OLD.obligation_ref IS NEW.obligation_ref
+          AND OLD.agreement_ref IS NEW.agreement_ref
+          AND OLD.escrow_uid IS NEW.escrow_uid
+          AND OLD.accepted_plan_digest IS NEW.accepted_plan_digest
+          AND OLD.seller_recipient IS NEW.seller_recipient
+          AND (OLD.evidence_json IS NULL OR OLD.evidence_json IS NEW.evidence_json)
+            AND (
+              OLD.evidence_digest IS NULL
+              OR OLD.evidence_digest IS NEW.evidence_digest
+            )
+        )
+        BEGIN
+          SELECT RAISE(
+            ABORT,
+            'bare-metal Alkahest evidence identity is immutable'
+          );
+        END
+        """
+    )
+
+
 def _migrate_common_domain_bindings(conn: sqlite3.Connection) -> None:
     """Move historical bare-metal rows under common immutable ownership."""
     rows = conn.execute(
@@ -428,5 +495,9 @@ BARE_METAL_STOREFRONT_MIGRATIONS = (
     Migration(
         id="bare-metal-storefront-0008-hosted-physical-lifecycle",
         apply=_add_hosted_physical_lifecycle,
+    ),
+    Migration(
+        id="bare-metal-storefront-0009-alkahest-evidence-lifecycle",
+        apply=_add_alkahest_evidence_lifecycle,
     ),
 )

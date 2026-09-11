@@ -1,10 +1,13 @@
 """Bare-metal market domain schema."""
 
 from .evidence import (
+    BARE_METAL_ALKAHEST_LEASE_READY_EVIDENCE_KIND,
     BARE_METAL_LEASE_READY_EVIDENCE_KIND,
     BARE_METAL_LEASE_READY_RESULT_KIND,
+    BareMetalAlkahestLeaseReadyEvidence,
     BareMetalLeaseReadyEvidence,
     BareMetalLeaseReadyResult,
+    build_bare_metal_alkahest_lease_ready_evidence,
     build_bare_metal_lease_ready_evidence,
     derive_bare_metal_fulfillment_identity,
 )
@@ -91,6 +94,7 @@ from .storefront_publication import (
 )
 
 __all__ = [
+    "BARE_METAL_ALKAHEST_LEASE_READY_EVIDENCE_KIND",
     "BARE_METAL_ACCEPTED_BINDING_KIND",
     "BARE_METAL_LEASE_READY_EVIDENCE_KIND",
     "BARE_METAL_LEASE_READY_RESULT_KIND",
@@ -110,6 +114,7 @@ __all__ = [
     "SSH_ACCESS_METHOD",
     "BareMetalAcceptedHostedBinding",
     "BareMetalAccessResult",
+    "BareMetalAlkahestLeaseReadyEvidence",
     "BareMetalLeaseReadyEvidence",
     "BareMetalLeaseReadyResult",
     "BareMetalLeaseCreate",
@@ -135,6 +140,7 @@ __all__ = [
     "bare_metal_listing_candidates",
     "bare_metal_executor_ref",
     "bind_bare_metal_hosted_option",
+    "build_bare_metal_alkahest_lease_ready_evidence",
     "build_bare_metal_lease_ready_evidence",
     "build_ready_bare_metal_hosted_options",
     "close_stale_bare_metal_listings",

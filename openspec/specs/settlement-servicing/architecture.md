@@ -130,6 +130,54 @@ The bare-metal callback reconstructs one immutable accepted binding before hoste
 
 Reclaim consults the same journal and physical lifecycle. Successful access evidence, reserved or unknown collection, and any uncertain physical authority block a contradictory reclaim. A pre-collection return blocks collection and converges financial recovery with independent teardown; a post-collection loss records operator-required state. Lease teardown never becomes a second financial operation.
 
+## Bare-metal Alkahest seller collection
+
+The on-chain lane reuses the same settlement worker and Alkahest collection
+codec. Its domain callback does not interpret the accepted payment payload: the
+Alkahest accepted-term codec and settlement verification have already pinned
+the chain, escrow, token, amount, expiry, arbiter, demand, and payout. The
+callback binds those immutable identities to the existing bare-metal physical
+result and receipt. Exact settlement creates the shared fulfillment operation;
+that explicit enqueue is the durable scheduling boundary and leaves legacy
+obligations outside automated servicing.
+
+StringObligation submission and readback are separate because the SDK does not
+provide a supported search by refUID. The domain stores canonical evidence and
+atomically claims submission immediately before the chain write, records a
+returned UID, then confirms the exact attestation before completing the shared
+fulfillment operation. A known UID can recover from readback or local completion failure; a
+write with no durable UID is manual-required and never retried blindly. The
+shared operation journal is fenced before external submission and remains a
+reclaim fence while publication is ambiguous, through retry, physical deferral,
+and worker-lease expiry. An explicit authoritative-absence recovery
+can reset the same immutable intent; timeouts cannot.
+Fence acquisition is serialized with reclaim reservation and requires the
+caller's current, unexpired fulfillment lease. A replaced owner or a reclaim
+already in progress or complete therefore fails before domain publication
+ownership or external submission.
+
+For this lane, the Alkahest adapter treats the SDK's returned transaction hash
+as an acknowledgement awaiting readback, not proof of payment. It reads the
+transaction and receipt and matches successful status, escrow target, exact
+escrow/fulfillment arguments, token, seller recipient, and amount before the
+shared collection operation succeeds. An unavailable receipt preserves the
+transaction identity and becomes operator-reconcilable without a second write.
+This no-resubmit rule is scoped to mechanisms that returned an effect identity
+requiring readback; hosted retryable collection failures continue using their
+stable authority request ID. Invalid collection receipts project
+`manual_required` even when the domain terminal mirror is unavailable.
+The shared operation journal continues to own condition checks, collection
+ambiguity, and collect-versus-reclaim exclusion.
+Operator-facing settlement status reads collection ambiguity from that shared
+operation record, so a failed domain-terminal projection cannot erase an
+uncertain chain acknowledgement.
+
+RecipientArbiter is intentionally a recipient trust policy. It establishes that
+the fulfillment attestation is payable to the configured seller, not that an
+on-chain contract interpreted the attached bare-metal evidence. Physical facts
+remain protected by the selected-site authority, immutable plan digest, and
+credential-free result/receipt comparison.
+
 ## API-credit hosted servicing
 
 The shared worker remains the only driver of materialize/status/check/collect

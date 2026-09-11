@@ -6,9 +6,14 @@ from typing import Any
 
 import pytest
 
-from market_alkahest import AlkahestConditionalEscrowClient
+from market_alkahest import AlkahestConditionalEscrowClient, alkahest, claims
 from market_alkahest.claims import AllArbiterCodec, TrustedOracleArbiterCodec
+from market_settlement_runtime import (
+    SettlementEffectReadbackUnknown,
+    SettlementManualRequired,
+)
 from market_settlement_runtime.ports import ConditionalEscrowClient
+from web3 import Web3
 
 TRUSTED = "0x" + "11" * 20
 RECIPIENT = "0x" + "22" * 20
@@ -43,7 +48,7 @@ class FakeClient:
 
 
 def _obligation(*, arbiter: str | None = TRUSTED, demand: bytes | None = None):
-    obligation_data: dict[str, Any] = {}
+    obligation_data: dict[str, Any] = {"token": "0x" + "99" * 20, "amount": 100}
     if arbiter is not None:
         obligation_data["arbiter"] = arbiter
         obligation_data["demand"] = "0x" + (demand or _trusted_demand()).hex()
@@ -76,8 +81,6 @@ def _client(client: FakeClient, *, clock=lambda: 1_900_000_000):
 
 
 def _install_arbiters(monkeypatch) -> None:
-    from market_alkahest import alkahest
-
     kinds = {
         TRUSTED.lower(): "trusted_oracle_arbiter",
         RECIPIENT.lower(): "recipient_arbiter",
@@ -222,8 +225,6 @@ async def test_status_transport_error_is_pending_with_durable_request_marker(
 
 @pytest.mark.asyncio
 async def test_authoritative_status_reads_pre_materialized_escrow(monkeypatch) -> None:
-    from market_alkahest import alkahest
-
     seen: list[str] = []
 
     async def read(client, uid, **kwargs):
@@ -255,8 +256,6 @@ async def test_authoritative_status_reads_pre_materialized_escrow(monkeypatch) -
 async def test_authoritative_status_normalizes_expired_and_ambiguous_revocation(
     monkeypatch,
 ) -> None:
-    from market_alkahest import alkahest
-
     attestation = SimpleNamespace(
         uid=ESCROW_UID,
         revocation_time=0,
@@ -291,8 +290,6 @@ async def test_authoritative_status_normalizes_expired_and_ambiguous_revocation(
 async def test_materialize_collect_and_reclaim_keep_codec_calls_and_operation_refs(
     monkeypatch,
 ) -> None:
-    from market_alkahest import alkahest, claims
-
     calls: list[tuple[Any, ...]] = []
 
     class Codec:
@@ -352,8 +349,6 @@ async def test_materialize_collect_and_reclaim_keep_codec_calls_and_operation_re
 async def test_provider_effect_error_is_left_for_shared_retry_policy(
     monkeypatch,
 ) -> None:
-    from market_alkahest import claims
-
     async def collect(client, uid, fulfillment, **kwargs):
         raise ConnectionError("provider acknowledgement unknown")
 
@@ -367,3 +362,175 @@ async def test_provider_effect_error_is_left_for_shared_retry_policy(
             operation_ref="collect-error",
             mechanism_state={},
         )
+
+
+def _collection_chain_result(*, token=None, recipient=None, amount=100, status=1):
+    token = token or _obligation()["params"]["obligation_data"]["token"]
+    recipient = recipient or RECIPIENT
+    selector = Web3.keccak(text="collect(bytes32,bytes32)")[:4].hex()
+    transfer = "0x" + Web3.keccak(text="Transfer(address,address,uint256)").hex()
+    escrow_contract = _obligation()["params"]["escrow_contract"]
+    return (
+        {
+            "status": status,
+            "transactionHash": "0xcollect",
+            "logs": [
+                {
+                    "address": token,
+                    "topics": [
+                        transfer,
+                        "0x" + "00" * 12 + escrow_contract[2:],
+                        "0x" + "00" * 12 + recipient[2:],
+                    ],
+                    "data": hex(amount),
+                }
+            ],
+        },
+        {
+            "to": escrow_contract,
+            "input": "0x" + selector + ESCROW_UID[2:] + FULFILLMENT_UID[2:],
+        },
+    )
+
+
+@pytest.mark.asyncio
+async def test_exact_collection_receipt_is_required_when_configured(monkeypatch) -> None:
+    async def collect(*_args, **_kwargs):
+        return SimpleNamespace(kind="erc20_default"), {"transaction_hash": "0xcollect"}
+
+    monkeypatch.setattr(claims, "collect_escrow_with_codec", collect)
+    reads = []
+
+    async def read(chain, transaction_hash):
+        reads.append((chain, transaction_hash))
+        return _collection_chain_result()
+
+    adapter = AlkahestConditionalEscrowClient(
+        get_client=lambda _chain: FakeClient(),
+        default_chain="test",
+        collection_receipt_reader=read,
+        collection_recipient=RECIPIENT,
+    )
+    result = await adapter.collect(
+        _obligation(),
+        mechanism_ref=ESCROW_UID,
+        fulfillment_ref=FULFILLMENT_UID,
+        operation_ref="collect-exact",
+        mechanism_state={},
+    )
+
+    assert result.receipt["receipt"] == "0xcollect"
+    assert reads == [("test", "0xcollect")]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("change", "message"),
+    [
+        ({"status": 0}, "did not succeed"),
+        ({"token": "0x" + "aa" * 20}, "exact seller token transfer"),
+        ({"recipient": "0x" + "99" * 20}, "exact seller token transfer"),
+        ({"amount": 101}, "exact seller token transfer"),
+    ],
+)
+async def test_wrong_collection_receipt_fails_before_success(
+    monkeypatch, change, message
+) -> None:
+    async def collect(*_args, **_kwargs):
+        return SimpleNamespace(kind="erc20_default"), {"transaction_hash": "0xcollect"}
+
+    monkeypatch.setattr(claims, "collect_escrow_with_codec", collect)
+
+    async def read(_chain, _transaction_hash):
+        return _collection_chain_result(**change)
+
+    adapter = AlkahestConditionalEscrowClient(
+        get_client=lambda _chain: FakeClient(),
+        default_chain="test",
+        collection_receipt_reader=read,
+        collection_recipient=RECIPIENT,
+    )
+    with pytest.raises(SettlementManualRequired) as caught:
+        await adapter.collect(
+            _obligation(),
+            mechanism_ref=ESCROW_UID,
+            fulfillment_ref=FULFILLMENT_UID,
+            operation_ref="collect-invalid",
+            mechanism_state={},
+        )
+    assert caught.value.code == "collection_receipt_invalid"
+    assert message in str(caught.value.__cause__)
+
+
+@pytest.mark.asyncio
+async def test_collection_readback_failure_preserves_safe_transaction_identity(
+    monkeypatch,
+) -> None:
+    async def collect(*_args, **_kwargs):
+        return SimpleNamespace(kind="erc20_default"), "0xcollect"
+
+    async def read(_chain, _transaction_hash):
+        raise ConnectionError("receipt unavailable")
+
+    monkeypatch.setattr(claims, "collect_escrow_with_codec", collect)
+    adapter = AlkahestConditionalEscrowClient(
+        get_client=lambda _chain: FakeClient(),
+        default_chain="test",
+        collection_receipt_reader=read,
+        collection_recipient=RECIPIENT,
+    )
+
+    with pytest.raises(SettlementEffectReadbackUnknown) as caught:
+        await adapter.collect(
+            _obligation(),
+            mechanism_ref=ESCROW_UID,
+            fulfillment_ref=FULFILLMENT_UID,
+            operation_ref="collect-unknown",
+            mechanism_state={},
+        )
+    assert caught.value.receipt["receipt"] == "0xcollect"
+    assert (
+        caught.value.mechanism_state["alkahest"]["collection_transaction_hash"]
+        == "0xcollect"
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("wrong_field", ["escrow", "fulfillment", "contract"])
+async def test_collection_call_must_name_exact_accepted_identities(
+    monkeypatch, wrong_field
+) -> None:
+    async def collect(*_args, **_kwargs):
+        return SimpleNamespace(kind="erc20_default"), "0xcollect"
+
+    async def read(_chain, _transaction_hash):
+        receipt, transaction = _collection_chain_result()
+        if wrong_field == "contract":
+            transaction["to"] = "0x" + "aa" * 20
+        else:
+            marker = ("aa" if wrong_field == "escrow" else "bb") * 32
+            offset = 10 if wrong_field == "escrow" else 74
+            transaction["input"] = (
+                transaction["input"][:offset]
+                + marker
+                + transaction["input"][offset + 64 :]
+            )
+        return receipt, transaction
+
+    monkeypatch.setattr(claims, "collect_escrow_with_codec", collect)
+    adapter = AlkahestConditionalEscrowClient(
+        get_client=lambda _chain: FakeClient(),
+        default_chain="test",
+        collection_receipt_reader=read,
+        collection_recipient=RECIPIENT,
+    )
+    with pytest.raises(SettlementManualRequired) as caught:
+        await adapter.collect(
+            _obligation(),
+            mechanism_ref=ESCROW_UID,
+            fulfillment_ref=FULFILLMENT_UID,
+            operation_ref="collect-wrong-identity",
+            mechanism_state={},
+        )
+    assert caught.value.code == "collection_receipt_invalid"
+    assert "another" in str(caught.value.__cause__)

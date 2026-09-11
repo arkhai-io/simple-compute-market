@@ -1026,6 +1026,68 @@ class SettlementSQLiteRepository:
 
         return await asyncio.to_thread(run)
 
+    async def mark_settlement_operation_uncertain(
+        self,
+        *,
+        obligation_ref: str,
+        operation: str,
+        lease_owner: str,
+        now_unix: float,
+    ) -> bool:
+        """Fence a leased effect before control enters its external authority."""
+
+        def run() -> bool:
+            conn = self._connect()
+            try:
+                conn.execute("BEGIN IMMEDIATE")
+                changed = conn.execute(
+                    "UPDATE settlement_operations SET "
+                    "uncertain_acknowledgement=1, updated_at=? "
+                    "WHERE obligation_ref=? AND operation=? "
+                    "AND state='in_progress' AND lease_owner=? "
+                    "AND lease_until_unix>=? AND EXISTS ("
+                    "SELECT 1 FROM settlement_obligations obligation "
+                    "WHERE obligation.obligation_ref=? "
+                    "AND obligation.reclaim_state NOT IN ('in_progress','succeeded'))",
+                    (
+                        self._now(),
+                        obligation_ref,
+                        operation,
+                        lease_owner,
+                        now_unix,
+                        obligation_ref,
+                    ),
+                ).rowcount
+                conn.commit()
+                return changed == 1
+            except Exception:
+                conn.rollback()
+                raise
+            finally:
+                conn.close()
+
+        return await asyncio.to_thread(run)
+
+    async def resolve_settlement_operation_uncertainty(
+        self, *, obligation_ref: str, operation: str
+    ) -> bool:
+        def run() -> bool:
+            conn = self._connect()
+            try:
+                changed = conn.execute(
+                    "UPDATE settlement_operations SET "
+                    "uncertain_acknowledgement=0, last_error=NULL, updated_at=? "
+                    "WHERE obligation_ref=? AND operation=? AND state='pending' "
+                    "AND uncertain_acknowledgement=1 AND lease_owner IS NULL",
+                    (self._now(), obligation_ref, operation),
+                ).rowcount
+                conn.commit()
+                return changed == 1
+            finally:
+                conn.close()
+
+        return await asyncio.to_thread(run)
+
     async def reserve_settlement_operation(
         self,
         *,
@@ -1083,6 +1145,12 @@ class SettlementSQLiteRepository:
                         "LIMIT 1",
                         (obligation_ref, now_unix),
                     ).fetchone()
+                    uncertain_fulfillment = conn.execute(
+                        "SELECT 1 FROM settlement_operations "
+                        "WHERE obligation_ref=? AND operation='fulfill' "
+                        "AND uncertain_acknowledgement=1 LIMIT 1",
+                        (obligation_ref,),
+                    ).fetchone()
                     cleanup_complete = conn.execute(
                         "SELECT 1 FROM settlement_operations "
                         "WHERE obligation_ref=? AND operation='cleanup' "
@@ -1101,6 +1169,7 @@ class SettlementSQLiteRepository:
                         or condition_state == "ready"
                         and not returned_cleanup_complete
                         or active_conflict is not None
+                        or uncertain_fulfillment is not None
                     ):
                         conn.rollback()
                         return None
@@ -1445,10 +1514,18 @@ class SettlementSQLiteRepository:
                          AND o.collection_state!='succeeded'
                          THEN 'cleanup'
                        WHEN o.collection_state='succeeded' THEN 'status'
+                       WHEN o.fulfillment_ref IS NULL THEN 'fulfill'
                        WHEN o.condition_state='ready' THEN 'collect'
                        WHEN o.mechanism_status='ready' THEN 'check'
                        ELSE 'status' END
-                    WHERE o.fulfillment_ref IS NOT NULL
+                    WHERE (
+                        o.fulfillment_ref IS NOT NULL
+                        OR EXISTS (
+                          SELECT 1 FROM settlement_operations queued_fulfill
+                          WHERE queued_fulfill.obligation_ref=o.obligation_ref
+                            AND queued_fulfill.operation='fulfill'
+                        )
+                      )
                       AND (
                         o.collection_state NOT IN ('succeeded','manual_required')
                         OR (

@@ -7,6 +7,7 @@ from market_core.schemas import RateValue, SettlementOption, derive_settlement_o
 from pydantic import ValidationError
 
 from arkhai_bare_metal import (
+    BareMetalAlkahestLeaseReadyEvidence,
     BareMetalAcceptedHostedBinding,
     BareMetalHostedOptionFacts,
     BareMetalLeaseReadyEvidence,
@@ -15,6 +16,7 @@ from arkhai_bare_metal import (
     bare_metal_digest,
     bind_bare_metal_hosted_option,
     build_bare_metal_lease_ready_evidence,
+    build_bare_metal_alkahest_lease_ready_evidence,
     derive_bare_metal_fulfillment_identity,
 )
 
@@ -160,3 +162,47 @@ def test_changed_result_digest_and_unknown_evidence_fields_fail_closed() -> None
     payload["action_url"] = "https://provider.invalid/action"
     with pytest.raises(ValidationError):
         BareMetalLeaseReadyEvidence.model_validate(payload)
+
+
+def test_alkahest_evidence_binds_accepted_plan_escrow_and_physical_result() -> None:
+    result = lease_ready_result()
+    evidence = build_bare_metal_alkahest_lease_ready_evidence(
+        agreement_ref="agreement-a",
+        obligation_ref="a" * 64,
+        obligation_hash="b" * 64,
+        accepted_plan_digest=DIGEST,
+        escrow_uid="0x" + "3" * 64,
+        buyer_principal=BUYER,
+        seller_principal=SELLER,
+        seller_recipient="0x" + "4" * 40,
+        result=result,
+    )
+
+    assert evidence.condition_semantics == "recipient-only.v1"
+    assert evidence.result_digest == result.result_digest
+    assert evidence.evidence_digest == bare_metal_digest(evidence)
+    assert BareMetalAlkahestLeaseReadyEvidence.model_validate_json(
+        evidence.canonical_json()
+    ) == evidence
+
+
+def test_alkahest_evidence_rejects_changed_result_and_non_address_recipient() -> None:
+    evidence = build_bare_metal_alkahest_lease_ready_evidence(
+        agreement_ref="agreement-a",
+        obligation_ref="a" * 64,
+        obligation_hash="b" * 64,
+        accepted_plan_digest=DIGEST,
+        escrow_uid="0x" + "3" * 64,
+        buyer_principal=BUYER,
+        seller_principal=SELLER,
+        seller_recipient="0x" + "4" * 40,
+        result=lease_ready_result(),
+    )
+    with pytest.raises(ValidationError, match="result digest"):
+        BareMetalAlkahestLeaseReadyEvidence.model_validate(
+            {**evidence.model_dump(), "result_digest": "sha256:" + "f" * 64}
+        )
+    with pytest.raises(ValidationError, match="seller recipient"):
+        BareMetalAlkahestLeaseReadyEvidence.model_validate(
+            {**evidence.model_dump(), "seller_recipient": "seller"}
+        )

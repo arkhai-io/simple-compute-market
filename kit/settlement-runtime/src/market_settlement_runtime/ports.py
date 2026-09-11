@@ -90,6 +90,23 @@ class SettlementRuntimeRepository(Protocol):
     async def bind_settlement_fulfillment(
         self, *, obligation_ref: str, fulfillment_ref: str
     ) -> dict[str, Any]: ...
+    async def upsert_settlement_operation(
+        self, operation: dict[str, Any]
+    ) -> dict[str, Any]: ...
+    async def load_settlement_operation(
+        self, obligation_ref: str, operation: str
+    ) -> dict[str, Any] | None: ...
+    async def mark_settlement_operation_uncertain(
+        self,
+        *,
+        obligation_ref: str,
+        operation: str,
+        lease_owner: str,
+        now_unix: float,
+    ) -> bool: ...
+    async def resolve_settlement_operation_uncertainty(
+        self, *, obligation_ref: str, operation: str
+    ) -> bool: ...
     async def reserve_settlement_operation(
         self,
         *,

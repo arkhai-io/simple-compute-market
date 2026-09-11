@@ -1,3 +1,5 @@
+"""Unit coverage for the bare-metal physical-service adapter."""
+
 from __future__ import annotations
 
 from types import SimpleNamespace
@@ -122,6 +124,9 @@ class FakeDb:
     async def save_bare_metal_receipt(self, *, negotiation_id, receipt):
         self.receipt = receipt
 
+    async def load_bare_metal_receipt(self, *, negotiation_id):
+        return self.receipt
+
     async def save_bare_metal_result(self, *, negotiation_id, result):
         self.result = result
 
@@ -165,6 +170,7 @@ class FakeFulfillment:
         self.begins = []
         self.teardowns = []
         self.begin_failures = begin_failures
+        self.result_overrides = {}
 
     async def schedule_resource(self, request):
         self.schedules.append(request)
@@ -221,6 +227,7 @@ class FakeFulfillment:
                         "ssh_user": "tenant-a",
                         "status": "success",
                         "details": {"private_key": "must-not-cross-storefront"},
+                        **self.result_overrides,
                     },
                 },
             },
@@ -378,3 +385,51 @@ async def test_reservation_conflicting_site_fails_before_scheduling() -> None:
 
     assert fulfillment.schedules == []
     assert fulfillment.begins == []
+
+
+@pytest.mark.asyncio
+async def test_lease_ready_inputs_require_current_buyer_usable_access() -> None:
+    db = FakeDb()
+    fulfillment = FakeFulfillment()
+    service = BareMetalFulfillmentService(
+        db=db,
+        capacity_client=FakeCapacity(),
+        fulfillment_client=fulfillment,
+    )
+    await service.begin(
+        negotiation_id="neg-a",
+        escrow_uid="escrow-a",
+        buyer_principal=BUYER,
+    )
+    fulfillment.result_overrides = {
+        "host": "buyer.example.test",
+        "port": 22,
+        "escrow_uid": "escrow-a",
+        "access_grant_ref": "grant-a",
+        "lease_expires_at": db.materialization.lease_end_utc.isoformat(),
+        "timestamp": db.materialization.lease_start_utc.isoformat(),
+    }
+
+    ready = await service.lease_ready_evidence_inputs(
+        negotiation_id="neg-a",
+        buyer_principal=BUYER,
+    )
+    assert ready["result"].host == "buyer.example.test"
+    assert ready["receipt"].lease_end_utc == ready["materialization"].lease_end_utc
+
+    for update in (
+        {"host": None, "port": None},
+        {"status": "failed"},
+        {"lease_expires_at": "2020-01-01T00:00:00+00:00"},
+        {"escrow_uid": "another-escrow"},
+    ):
+        fulfillment.result_overrides.update(update)
+        with pytest.raises(BareMetalFulfillmentError):
+            await service.lease_ready_evidence_inputs(
+                negotiation_id="neg-a",
+                buyer_principal=BUYER,
+            )
+        fulfillment.result_overrides = {
+            **ready["result"].model_dump(mode="json", exclude_none=True),
+            "details": None,
+        }

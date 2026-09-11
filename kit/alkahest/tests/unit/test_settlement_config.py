@@ -154,6 +154,31 @@ def test_alkahest_registration_has_exact_contract_and_factory() -> None:
     assert type(client) is AlkahestConditionalEscrowClient
 
 
+def test_alkahest_factory_uses_per_chain_address_path_with_global_fallback() -> None:
+    registration = create_alkahest_registration()
+    client = registration.client_factory(
+        AlkahestSettlementConfig(
+            enabled=True,
+            address_config_path="/config/global.json",
+        ),
+        {
+            "clients": {"chain-a": object(), "chain-b": object()},
+            "chains": {
+                "chain-a": {
+                    "alkahest_address_config_path": "/config/chain-a.json"
+                },
+                "chain-b": SimpleNamespace(alkahest_address_config_path=None),
+            },
+        },
+        "seller",
+    )
+
+    assert client._config_paths == {
+        "chain-a": "/config/chain-a.json",
+        "chain-b": "/config/global.json",
+    }
+
+
 @pytest.mark.asyncio
 async def test_alkahest_option_builder_emits_canonical_buyer_choice() -> None:
     config = AlkahestSettlementConfig(enabled=True)
