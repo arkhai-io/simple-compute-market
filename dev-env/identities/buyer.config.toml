@@ -28,10 +28,13 @@ principals = [{ scheme = "eip191", identifier = "0x90f79bf6eb2c4f870365e785982e1
 authority = "registry-b"
 principals = [{ scheme = "eip191", identifier = "0x15d34aaf54267db7d7c367839aaf71a00a2c6a65" }]
 
-# Which registries demand a bearer key is public and belongs here; the key
-# itself is not. An empty value is the declaration.
+# registry-b gates read access behind a bearer token, so discovery needs the
+# key rather than only the declaration that one is required. It must be
+# byte-equal to the REGISTRY_BOOTSTRAP_API_KEY registry-b is seeded with; the
+# e2e identity target supplies both from the same constant. A development
+# value, not a secret — see README.md in this directory.
 [registry.auth]
-"http://registry-b:8080" = ""
+"http://registry-b:8080" = "development-registry-bootstrap-key"
 
 [Chains.anvil]
 rpc_url = "ws://anvil:8545"

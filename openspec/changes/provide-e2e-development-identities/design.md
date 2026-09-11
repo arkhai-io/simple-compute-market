@@ -117,6 +117,46 @@ The target keeps two forms because they have different consumers:
 `e2e-dev-identities` wraps it as `export` lines for a human to eval. The second
 is derived from the first so the two cannot drift.
 
+### The variable set is enumerated from the include closure, not from the files I knew about
+
+The second CI run failed on `VMS_REGISTRY_ADMIN_API_KEY`, a variable the first
+enumeration never saw. The cause was a bad assumption rather than a bad regex:
+the survey scanned `docker-compose.yml` and the two files it includes, and
+stopped. `compose.vms.yml` has its own `include:` — `compose.dev.yml` and
+`domains/vms/compose.yml` — so the real closure is five files, not three, and
+three required variables live in the level I did not look at.
+
+The count is 18 required variables over 20 guard occurrences, and it is now
+derived by resolving `include:` transitively the way compose does, rather than
+by listing files. That is the difference between checking a set and checking
+the set.
+
+The three missed variables are also a different shape from the first fifteen.
+Two are bearer tokens rather than paths, so "the path exists" was never going
+to catch them; the verification now checks path existence only for variables
+whose name marks them as a path, and presence for the rest.
+
+### registry-b's bearer token has to agree in three places
+
+`domains/vms/compose.yml` starts `registry-b` with both
+`REGISTRY_REQUIRE_READ_API_KEY` and `REGISTRY_REQUIRE_WRITE_API_KEY` true, and
+seeds it with `REGISTRY_BOOTSTRAP_API_KEY` so a fresh `compose up` needs no
+out-of-band mint. `storefront.bob.toml` fans publishes and heartbeats to both
+registries, and the buyer discovers from both. So the same token must appear as
+the registry's seed, in the storefront's secret overlay, and in the buyer's
+config.
+
+All three come from one `Makefile` constant, because three hand-maintained
+copies of a token that must be byte-equal is a latent failure: a mismatch
+surfaces as a `401` during discovery or publication, several steps after the
+thing that is actually wrong.
+
+The storefront's copy lives in a secret overlay rather than in
+`storefront.bob.toml`, matching the split that file already documents — which
+registries demand a key is public and declared in the profile, the key itself
+is not. For the buyer there is no overlay: its config file is the only one the
+container mounts, so the development token sits in it and says so.
+
 ### The generated artefacts are ignored, the fixtures are tracked
 
 `make e2e-dev-identities-env` creates `.e2e-buyer/{profile,state}` — compose

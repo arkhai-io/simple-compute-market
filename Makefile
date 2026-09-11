@@ -452,6 +452,11 @@ build: init-prerequisites dist build-buyer
 # ---------------------------------------------------------------------------
 E2E_IDENTITY_DIR := $(CURDIR)/dev-env/identities
 E2E_BUYER_RUNTIME_DIR ?= $(CURDIR)/.e2e-buyer
+# Development bearer tokens for registry-b, which gates read and write.
+# Not secret; the same values are committed in the storefront secret
+# overlay and the buyer config, and all three must agree.
+E2E_REGISTRY_ADMIN_KEY ?= development-registry-admin-key
+E2E_REGISTRY_BOOTSTRAP_KEY ?= development-registry-bootstrap-key
 
 e2e-dev-identities: ## Print shell exports pointing compose at committed development identities
 	@$(MAKE) -s --no-print-directory e2e-dev-identities-env \
@@ -474,6 +479,13 @@ e2e-dev-identities-env: ## Print VAR=value lines for `docker compose --env-file`
 	@echo 'APICREDITS_IDENTITY_ENV_FILE=$(E2E_IDENTITY_DIR)/api-credits.identity.env'
 	@echo 'APICREDITS_EVM_WALLET_ENV_FILE=$(E2E_IDENTITY_DIR)/api-credits.wallet.env'
 	@echo 'APICREDITS_ADMIN_KEY_FILE=$(E2E_IDENTITY_DIR)/api-credits-admin-key'
+	@echo 'VMS_BOB_STOREFRONT_SECRETS_FILE=$(E2E_IDENTITY_DIR)/bob.storefront.secrets.toml'
+	@# registry-b gates read and write behind bearer tokens. The bootstrap
+	@# value must stay byte-equal to the [registry.auth] entries in
+	@# bob.storefront.secrets.toml and buyer.config.toml, so all three come
+	@# from this one constant.
+	@echo 'VMS_REGISTRY_ADMIN_API_KEY=$(E2E_REGISTRY_ADMIN_KEY)'
+	@echo 'VMS_REGISTRY_BOOTSTRAP_API_KEY=$(E2E_REGISTRY_BOOTSTRAP_KEY)'
 
 build-dev: build build-dev-env build-test-image
 

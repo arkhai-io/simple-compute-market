@@ -27,6 +27,23 @@ So the rule for this directory is: if a file is consumed as a single opaque
 value, it holds only that value and its provenance is documented here; if it
 is consumed as shell-format key/value pairs, it carries the statement inline.
 
+## What this directory has to satisfy
+
+`docker compose up` resolves `include:` transitively, so the required variables
+come from five files, not from the root `docker-compose.yml` alone:
+`docker-compose.yml`, `compose.vms.yml`, `compose.dev.yml`,
+`domains/vms/compose.yml`, and `domains/apicredits/compose.yml`. Eighteen
+variables over twenty guard occurrences. `make e2e-dev-identities-env` supplies
+all of them.
+
+Not all are paths. `VMS_REGISTRY_ADMIN_API_KEY` and
+`VMS_REGISTRY_BOOTSTRAP_API_KEY` are bearer tokens for `registry-b`, which runs
+with read and write gates both on. The bootstrap token must be byte-equal in
+three places — the registry's seed, `bob.storefront.secrets.toml`, and
+`buyer.config.toml` — so all three derive from one `Makefile` constant. A
+mismatch shows up as a `401` during discovery or publication, well away from
+its cause.
+
 ## Where each value comes from
 
 `*.eip191` credentials are the standard Anvil development accounts from the
@@ -46,6 +63,9 @@ interchangeable:
 | `bob.env` | 2 (`0x3c44cddd…`) | `storefront.bob.toml` |
 | `alice.env` | 4 (`0x15d34aaf…`) | `storefront.alice.toml` |
 | `buyer.eip191` | 1 (`0x70997970…`) | not pinned; the buyer declares its own profile |
+
+`bob.storefront.secrets.toml` and `buyer.config.toml` are configuration rather
+than identity, and both carry their own explanation inline.
 
 `api-credits-registry.ed25519` is the one value that had to be generated. The
 identity previously pinned in the compose files had no committed private half

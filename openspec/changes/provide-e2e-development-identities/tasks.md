@@ -2,9 +2,14 @@
 
 ## 1. Survey
 
-- [x] 1.1 Enumerate every `${VAR:?...}` guard across `docker-compose.yml` and
-      the compose files it includes, not just the one the failure reported.
-      Fifteen distinct variables over seventeen guard occurrences.
+- [x] 1.1 Enumerate every `${VAR:?...}` guard across the **transitive**
+      `include:` closure of `docker-compose.yml`, resolved the way compose
+      resolves it rather than by listing the files I knew about. Five compose
+      files, eighteen distinct variables, twenty guard occurrences.
+      - **Correction:** the first pass scanned three files and reported fifteen
+        variables. `compose.vms.yml` has its own `include:`, so three required
+        variables sat one level deeper and the second CI run failed on one of
+        them. See `design.md`.
 - [x] 1.2 For each guarded mount, establish what the consumer actually reads: a
       single opaque credential, shell-format key/value pairs, a bearer string,
       or a path that must exist and be writable.
@@ -77,6 +82,13 @@
       evaluated the way compose evaluates it. 17 of 17, resolved from the env
       file alone rather than from the ambient environment — which is what
       compose does with `--env-file`.
+- [x] 5.6 Supply the three variables the deeper include level requires:
+      `VMS_BOB_STOREFRONT_SECRETS_FILE` as a secret overlay carrying
+      registry-b's bearer token, and `VMS_REGISTRY_ADMIN_API_KEY` /
+      `VMS_REGISTRY_BOOTSTRAP_API_KEY` as development tokens. The bootstrap
+      value is asserted byte-equal across the registry seed, the storefront
+      overlay, and the buyer config, since a mismatch would surface as a `401`
+      several steps from its cause.
 - [x] 5.5 Reproduce the CI failure locally before fixing it, and confirm the fix
       against the same shape: a nested make invoking the target through
       `$(MAKE)`, which is what implies `-w`. The generated env file contains 15
