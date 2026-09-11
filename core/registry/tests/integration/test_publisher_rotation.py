@@ -51,7 +51,7 @@ def _listing(listing_id: str) -> ListingRequest:
     return ListingRequest(
         listing_id=listing_id,
         storefront_url="http://seller.example/",
-        offer={"gpu_model": "A100", "region": "us"},
+        listing_resource={"gpu_model": "A100", "region": "us"},
         accepted_escrows=[],
     )
 

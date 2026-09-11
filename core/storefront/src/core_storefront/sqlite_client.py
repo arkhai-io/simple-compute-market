@@ -1019,7 +1019,7 @@ class SQLiteClient:
         try:
             # Strip None-valued fields so that a buyer's sparse demand
             # (resource_id=None, vm_host=None) can match a seller's enriched
-            # offer that has those fields populated.  Every non-null field in
+            # listing_resource that has those fields populated.  Every non-null field in
             # `a` must be present and equal in `b`; extra fields in `b` are
             # ignored.
             a_clean = {k: v for k, v in a_dict.items() if v is not None}
@@ -1272,10 +1272,10 @@ class SQLiteClient:
     ) -> None:
         """Persist a mutable listing projection and immutable binding atomically."""
 
-        normalized_offer = self._normalize_resource(listing_resource)
-        if normalized_offer is None:
+        normalized_listing_resource = self._normalize_resource(listing_resource)
+        if normalized_listing_resource is None:
             raise ValueError("listing_resource must be a mapping")
-        public_mode = normalized_offer.get("offering_mode")
+        public_mode = normalized_listing_resource.get("offering_mode")
         if public_mode != binding.binding.offering_mode:
             raise StorefrontDomainBindingError(
                 "listing_resource.offering_mode must equal the durable "
@@ -1386,10 +1386,10 @@ class SQLiteClient:
                     raise KeyError(
                         f"unknown listing {binding.listing_id!r}"
                     )
-                offer = self._normalize_resource(row[0])
+                listing_resource = self._normalize_resource(row[0])
                 if (
-                    not isinstance(offer, dict)
-                    or offer.get("offering_mode")
+                    not isinstance(listing_resource, dict)
+                    or listing_resource.get("offering_mode")
                     != binding.binding.offering_mode
                 ):
                     raise StorefrontDomainBindingError(
@@ -2424,7 +2424,7 @@ class SQLiteClient:
         seller_principal: Identity | None = None,
         matched_offer_id: str | None = None,
     ) -> None:
-        """Bind exact negotiation parties and the selected offer."""
+        """Bind exact negotiation parties and the selected listing_resource."""
 
         def _save() -> None:
             updates: list[str] = []

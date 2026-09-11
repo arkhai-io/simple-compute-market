@@ -16,10 +16,10 @@ from registry_client.models import (
 from src.main import app
 
 
-def _listing_request(listing_id: str | None = None, **offer_extras) -> ListingRequest:
+def _listing_request(listing_id: str | None = None, **listing_resource_extras) -> ListingRequest:
     kwargs = {} if listing_id is None else {"listing_id": listing_id}
     return ListingRequest(
-        offer={"gpu_model": "A100", "region": "us-west", **offer_extras},
+        listing_resource={"gpu_model": "A100", "region": "us-west", **listing_resource_extras},
         accepted_escrows=[
             {
                 "chain_name": "anvil",
@@ -101,7 +101,7 @@ class TestPublishOrder:
         }
         request = ListingRequest(
             listing_id="pub-hosted",
-            offer={"gpu_model": "A100", "region": "us-west"},
+            listing_resource={"gpu_model": "A100", "region": "us-west"},
             accepted_escrows=[],
             settlement_options=[option],
             storefront_url="http://localhost:8001/",

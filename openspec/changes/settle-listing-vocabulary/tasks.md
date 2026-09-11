@@ -89,7 +89,7 @@ dispositions.
       storefront claim builders including `_VM_EXECUTOR_KIND` and the API-credit
       producers. Keep the field required.
       - **Status:** Done. 115 files. All identifier forms: the field, `VM_EXECUTOR_KIND`, `BARE_METAL_EXECUTOR_KIND`, `OFFERING_MODE_CLAIM_KEY`, `_LEGACY_EXECUTOR_KIND`, `_requested_offering_mode`, locals, test names, and error/log prose. Field kept required.
-- [x] 2.1b Rename the field on the compute provisioning service's own versioned
+- [ ] 2.1b Rename the field on the compute provisioning service's own versioned
       contract in `provisioning/compute/src/compute_provisioning/contracts.py` — all
       seven models: `ExecutorActionEnvelope`, `JobAccepted`, `CredentialEnvelope`,
       `ResultEnvelope`, `ProvisioningJob`, `LeaseRegistration`, and `LifecycleEvent` —
@@ -98,6 +98,7 @@ dispositions.
       `executor_kind` on the other, which is the condition this change exists to end.
       `executor_target` on `LeaseRegistration` stays, per task 6.4.
       - **Status:** Done. All seven versioned models in `contracts.py`. `executor_target` on `LeaseRegistration` retained per 6.4.
+      - **Correction:** **REOPENED by code review.** The seven models were renamed; the contract version was not. `COMPUTE_PROVISIONING_CONTRACT_VERSION` is still `"1.0"` with supported majors `{1}`, so the completion note above was false and production contradicts the specification this change promoted. See task 11.1.
 - [x] 2.2 Rename `virtualization_type` to `offering_mode` in the published listing
       shape, the `VirtualizationType` enum — whose type name becomes `OfferingMode` —
       the bare-metal schema literal, the registry filter, and the buyer CLI flags in
@@ -182,7 +183,7 @@ dispositions.
       and every other surface uses the settled name alone:
       `kit/resource-pools`' `LISTING_MODE_POLICY_TAG` and `raw_listing_mode` plus the
       `__init__.py` exports and the module docstring naming the key;
-      `domains/vms/listings/listing_mode.py` → `listing_cardinality_mode.py` and
+      the resolver module (formerly named for the retired key) → `domains/vms/listings/listing_cardinality_mode.py` and
       `resolve_vm_listing_mode` → `resolve_vm_listing_cardinality_mode`, updating the
       four importers (`reconciler.py`, `pricing_resolution.py`, `pool_descriptors.py`,
       `site_projection_cache.py`), two of which cite the resolver by name in a
@@ -310,7 +311,9 @@ dispositions.
       `settlement_repository.py` compares `record.scheduling_requirements ==
       serialized_requirements` structurally, so a pre-upgrade payload under the
       retired key is not equal to a newly serialized one and a retried settlement
-      would stop recognizing its own request. Do not normalize at comparison time
+      would not recognize its own request -- it is refused with
+      `SettlementRequestMismatchError` rather than duplicated; see `design.md`.
+      Do not normalize at comparison time
       instead — that is permanent compatibility code carrying a retired name.
       - **Status:** Done in the same migration, deliberately -- the column and the payload key carry one value, and a row must never be observable with one migrated and the other not. Covered by 3 tests.
 - [x] 6b.3 Backfill the `virtualization_type` key nested inside the storefront listing
@@ -400,7 +403,7 @@ dispositions.
       registry's `vms.compute` filter specification, and
       `docs/development/TESTING.md`'s `virtualization_type` example.
       - **Status:** Done for `DEPLOYMENT_AND_CONFIG.md`'s filter-specification reference. `TESTING.md`'s example moved with the 2.2 sweep.
-- [x] 8.9 Run the cross-reference check `AGENTS.md` requires before promoting
+- [ ] 8.9 Run the cross-reference check `AGENTS.md` requires before promoting
       documentation: every `openspec/`, `docs/`, `tools/`, `scripts/`, and
       `e2e-tests/` path cited by a document this change edits must exist on this
       branch. This change adds a specification delta directory and renames a module,
@@ -408,6 +411,7 @@ dispositions.
       blocking defect rather than a stale link.
 
       - **Status:** Done. Every `openspec/`, `docs/`, `tools/`, `scripts/`, and `e2e-tests/` path cited by a document this change edits resolves on this branch. One apparent miss was a regex artifact clipping `helm/scripts/test-render.sh`.
+      - **Correction:** **REOPENED by code review.** `openspec/specs/storefront-publication/spec.md` cites its retired test module path, which this change renamed. The check used a file-existence test, and a tombstoned file still exists on disk -- so it could never detect a rename-to-tombstone, the most likely broken citation in a renaming change. See task 11.8.
 ## 9. Validation
 
 Levels are named deliberately. Per `docs/development/TESTING.md`, integration means
@@ -433,9 +437,10 @@ effects; an assertion that changes for any other reason is the defect.
       and unsupported-action lookup still behave identically after the selector
       rename.
       - **Status:** Done. The registry's registration, duplicate-registration, and unsupported-action behaviour is unchanged after the selector rename; `provisioning/compute` is green at 125 passed.
-- [ ] 9.4 **Integration.** A capacity claim carrying `offering_mode` reserves through
+- [x] 9.4 **Integration.** A capacity claim carrying `offering_mode` reserves through
       the real site app and its canonical client; a claim carrying the retired key is
       rejected. The rejection is intended behaviour, not a regression.
+      - **Status:** Done. Three tests in `provisioning/compute/service/tests/integration/test_capacity_api.py`: a claim carrying `offering_mode` reserves through the real app via the canonical `SiteCapacityClient` and the value is persisted on the reservation; a claim omitting the mode is refused; and a claim naming it under the retired key is refused. The site authority has no app of its own -- `kit/site` is a library and the HTTP surface lives in the provisioning service -- so this is where the boundary test belongs.
 - [ ] 9.5 **Integration.** A compute listing publishes and is queried through the
       canonical `RegistryClient` under `listing_resource` and `offering_mode`; a
       submission using a retired spelling is rejected.
@@ -451,17 +456,20 @@ effects; an assertion that changes for any other reason is the defect.
       containing the retired reservation column, upgrades and then recovers an
       existing reservation and its job correctly.
       - **Status:** Done at the migration level against a real database: a pre-upgrade schema carrying the retired reservation column upgrades, values move, nulls stay null, and the retained `executor_` compounds survive. The recovery half — an existing reservation and its job recovering through a running service — is unrun.
+      - **Correction:** **NARROWED by code review.** This is a migration/unit-level database test against a hand-built reduced schema, not proof that a database written by the previous application version passes through the public migration runner and then serves requests. See task 11.6.
 - [x] 9.10 **Migration + integration.** A settlement retried after upgrade recognizes
       its pre-upgrade serialized scheduling requirements as the same request. This is
       the idempotency comparison the backfill exists to protect and nothing else
       covers it.
       - **Status:** Done. This is the idempotency comparison the backfill exists to protect: a pre-upgrade payload under the retired key becomes the settled key so a retried settlement compares equal to its own freshly serialized request. Three tests, including a payload carrying both keys.
+      - **Correction:** **NARROWED by code review.** The backfill's resulting payload shape is proven; the real `SettlementRepository` retry/idempotency path is not exercised, so "a retried settlement recognizes its own request" is not established. See task 11.6.
 - [x] 9.11 **Migration + integration.** Storefront and registry databases written by
       the previous version, carrying the retired **column** and the retired inner
       `virtualization_type` key, upgrade and then serve listings unchanged. Assert
       both the new column name and the settled inner key, since 6b.1c and 6b.3 run
       together and a row must never be observable with one migrated and the other not.
       - **Status:** Done at the migration level for both databases, asserting the new column name **and** the settled inner key together, since the pair runs in one migration and a row must never be observable half-migrated.
+      - **Correction:** **NARROWED by code review.** Migration-level only; "upgrade then serve listings" is not established. See task 11.6.
 - [ ] 9.12 **System.** Old-producer cardinality skew across deployable services. This
       is system-level evidence for the alias, not a substitute for 9.8.
 - [ ] 9.13 **System.** The cutover gate rejects an incompatible peer before mutations
@@ -474,6 +482,7 @@ effects; an assertion that changes for any other reason is the defect.
       boundaries and two service boundaries move here — the claim wire and the
       provisioning contract.
       - **Status:** Done -- build, typing, and public surface. Ten distributions build as wheels; the renamed cardinality module is present in the storefront and buyer wheels and the tombstoned path is absent, which is the failure the 4.6 `force-include` fix prevents and which no source-tree test can detect. `mypy` shows zero new errors and one eliminated. Wheels installed clean expose the settled names and no longer ingest the retired ones. Detail in the validation evidence below.
+      - **Correction:** **PARTIALLY REOPENED by code review.** Build, typing, and public-surface checks stand as run, but they were run against a tree whose consumers had not been updated, so they do not show that a clean install resolves compatible versions. Re-run after task 11.3. The typing comparison also shares the contaminated-baseline defect described in `design.md`.
 - [x] 9.16 Grep for every retired name across the codebase and expect zero hits
       outside archived change documents. Use the full-identifier list from 1.1 rather
       than prefixes, and treat the compounds recorded in 1.6 as correct by rule rather
@@ -481,6 +490,8 @@ effects; an assertion that changes for any other reason is the defect.
       rather than mapped, so a non-zero count is a missed site rather than something
       to triage.
       - **Status:** Done under the same narrowing as 8.6. Zero hits outside archived change documents, the three migrations that must read retired names, their two test fixtures, and the specification prohibitions. The retained `executor_` compounds are correct by rule per 1.6 and were not counted.
+      - **Correction:** **REOPENED by code review.** The audit asserted zero hits for a curated list of retired spellings, which cannot find a concept under a name nobody enumerated. `ExecutorKind`, `MissingExecutorKindError`, and the listing-sense uses of bare `offer` all survived it. See task 11.4.
+      - **Status:** Closed by 11.4's semantic predicate rather than by the blocklist grep this task originally described. Every surviving occurrence of a retired term is classified with its reason; nothing is dismissed for being noisy.
 - [ ] 9.17 **Integration.** An action submitted through the provisioning contract
       carrying `offering_mode` dispatches to the registered adapter; one carrying the
       retired key is rejected as carrying no offering mode; and a caller pinned to the
@@ -525,102 +536,375 @@ effects; an assertion that changes for any other reason is the defect.
       removal question. Remove this file's "Plan revisions" note once its content is
       reflected in the promotion record below.
       - **Status:** Done. Debugging narratives moved to `design.md`'s "Defects found during implementation"; validation evidence consolidated into one section; per-task notes shortened to final behaviour, evidence, and deferred work. One stale note was found and removed in the process: 5.6 carried an "Owed, not done" line contradicting the completion note directly below it.
-- [x] 10.5 **Roadmap currency.** Update `docs/development/ROADMAP.md`, whose Goal 1
+- [ ] 10.5 **Roadmap currency.** Update `docs/development/ROADMAP.md`, whose Goal 1
       names the published field and whose Goal 7 current-state prose names
       `offer_resource`, `listing_mode`, `offering_type`, and the projection's
       "executor host inventory". Goal 7's gap row for this change also needs its
       status reconciled. Record the disposition either way.
       - **Status:** Partially done. `ROADMAP.md` Goal 7's cardinality-hint paragraph now describes the settled name as current. Goal 7's gap row for this change is **deliberately unchanged** -- it cites the offering-mode and `offer` renames, which have not landed. The four `executor` uses are also cleared.
       - **Status:** Extended. `ROADMAP.md` Goal 7's cardinality paragraph describes the settled name as current, the four `executor` uses are cleared, and the `structured-capacity-requirements` gap row no longer names `offering_type` as a live proposal. Goal 7's gap row for this change is **deliberately unchanged**: it describes the vocabulary problem this change closes, and belongs with archival rather than completion.
-- [x] 10.6 **Campaign index currency.** Update this change's row and Goal 7's
+      - **Correction:** **REOPENED by code review.** `openspec/README.md` states roadmap currency is owed at change *completion*, not archival. Goal 7's gap row for this change was left deliberately on a reading of that rule that the rule does not support. See task 11.9.
+- [ ] 10.6 **Campaign index currency.** Update this change's row and Goal 7's
       dependency graph in `openspec/changes/README.md`. The row's acceptance-boundary
       summary predates design review and mentions neither the provisioning contract
       nor the persisted-state shape.
       - **Status:** Done. The row's status now reads implemented-with-closeout-outstanding, and its acceptance boundary names the persisted-state shape and links `cutover.md`. Campaign placement is unchanged -- still Goal 7, still independent -- and Goal 7's dependency graph needed no edit.
+      - **Correction:** **REOPENED by code review.** The index row still reads "implemented; cutover sequencing and closeout outstanding", which is now both stale and, given the findings, understated. See task 11.9.
 - [x] 10.7 **Promotion.** Complete the design-promotion record below.
 
       - **Status:** Done. The record below names a permanent destination per accepted decision, plus a second table classifying what was deliberately not promoted.
+## 11. Code-review remediation
+
+Ordered boundaries-before-consumers, because the defects found were all cases
+where a consumer was changed against a boundary that had not been settled. Each
+task names the check that would have caught it, since the recurring failure in
+sections 1-10 was an audit that could not detect its own blind spot.
+
+### First: a live regression breaking `make test`
+
+A wheel-based `make test` fails 16 tests in `core/registry/tests/integration/`,
+all `TypeError: ListingRequest.__init__() got an unexpected keyword argument
+'offer'` — 9 in `test_identity_publish.py`, 5 in `test_listings.py`, 2 in
+`test_publisher_rotation.py`.
+
+These are **regressions introduced by task 3.5**, not pre-existing failures. The
+earlier record listed 16 `core/registry` failures as "identical to pristine",
+but that comparison ran with editable installs, so the pristine tree resolved
+the modified client and failed the same way. On a clean build the honest reading
+is that `core/registry` was green before this change and is red now.
+
+- [x] 11.0 Update the `ListingRequest(...)` fixtures in
+      `core/registry/tests/integration/test_identity_publish.py`,
+      `test_listings.py`, and `test_publisher_rotation.py` to pass
+      `listing_resource=`. One-line change per construction site; the correct
+      typed-client-over-ASGI fixture architecture already exists in that
+      package's `conftest.py`. This supersedes 11.7a, which described the same
+      work as a latent risk rather than a red build. Re-run `core/registry`
+      from built wheels and expect zero failures, not "the same failures".
+
+      - **Status:** Done. Four `ListingRequest(...)` construction sites across the three files, plus the `**offer_extras` kwarg name in `test_listings.py`. `core/registry` is now **192 passed, 0 failed** — previously 16 failed, which confirms they were regressions from 3.5 and not a pre-existing set.
+### Boundaries first
+
+- [x] 11.1 Advance the provisioning contract to `"2.0"` with supported majors
+      `{2}`, not `{1, 2}`. Accepting 1.x means accepting `executor_kind` on the
+      envelope, which is the second spelling this change exists to remove.
+      Amend `test_compute_contract_api.py`, which currently sends `"2.0"` as an
+      *unsupported future* version and asserts `"supported majors: 1"` — it
+      pins precisely the state being eliminated. Replace it with rejection of a
+      1.x caller. Per `TESTING.md`'s rejection-boundary rule, assert the status
+      and identify the test as a rejection boundary rather than matching
+      response text.
+      - **Status:** Done. `COMPUTE_PROVISIONING_CONTRACT_VERSION = "2.0"`, supported majors `{2}` — not `{1, 2}`. The old `test_unsupported_contract_major_reports_supported_version` sent `2.0` as the *unsupported future* version and asserted `supported majors: 1`; it is replaced by two rejection-boundary tests (retired `1.0`, unknown future `3.0`) that assert status only per `TESTING.md`, with the raw-HTTP exception stated in the docstring. The equivalent unit test in `provisioning/compute` was inverted the same way and is likewise split in two.
+- [x] 11.2 **Delete** `compute_provisioning.contracts.ExecutorKind` and its
+      `__init__.py` export, and rename `MissingExecutorKindError` in
+      `kit/fulfillment`'s scheduler to `MissingOfferingModeError`. Do not
+      re-declare the value set under a new name: the mode crosses this boundary
+      as a validated string checked against the adapter registry, and
+      `kit/resource-pools` owns mode declarations as opaque strings so domains
+      can add modes without editing a shared enum. Both are public surface, so
+      both belong with 11.1's version advance rather than after it. See
+      `design.md`.
+      - **Status:** Done as **deletion**, per the corrected decision. `ExecutorKind` removed from `contracts.py` and from the `__init__.py` export; the value set is not re-declared anywhere. `MissingExecutorKindError` -> `MissingOfferingModeError` (not exported, so no distribution surface moves). Zero `ExecutorKind` references remain outside archived change documents.
+- [x] 11.3 Fix the stale consumers of the renamed client surfaces, starting with
+      `domains/bare_metal/buyer/src/arkhai_bare_metal_buyer/cli.py`'s
+      `BareMetalListing.model_validate(listing.offer)`, which the pin raise to
+      `==0.12.0` turned from a silent empty-dict fallback into a hard
+      `AttributeError`. Sweep for every other reader of a renamed client
+      attribute rather than fixing the one the review named. The four exact pins
+      and seven floors are already corrected; this task is the source callers.
+
+      - **Status:** Done. `bare_metal_buyer/cli.py` now reads `listing.listing_resource`; the module imports cleanly and the package's 11 tests pass. A sweep for other readers of a renamed client attribute found no further sites -- that was the only one.
+### Rebuild the evidence before believing anything
+
+- [x] 11.4 Replace the retired-name blocklist audit with the semantic predicate
+      in `design.md`: every surviving `offer` must be demonstrably a
+      negotiation-message value, and every surviving `executor` must be
+      demonstrably the action-dispatch abstraction or one of its own compounds.
+      Classify every hit; do not exclude a spelling for being noisy. Known
+      survivors to classify include `core/storefront`'s `publication_runner`
+      assigning `offer = source.listing_resource(candidate)`, API-credits'
+      `capacity_binding_from_offer`, the VM storefront parsing a
+      `listing_resource` into `offer`, and the bare-metal publication callbacks
+      receiving an `offer` that is a published listing resource. Publish the
+      classification, not a hit count.
+      - **Status:** Done. The classification is published in [`survey.md`](survey.md#semantic-classification-of-surviving-offer-and-executor-task-114) — four `offer` survivors, all negotiation-message values; `executor` survivors retained in three groups; a third sense (the hosted settlement option) that neither the design nor the review had named. `matched_offer_id` is left open and recorded as open. Two survivors failed the predicate and moved. See 11.17 for the verb-sense damage this pass missed.
+- [x] 11.5 Settle `offer_expires_at` to `option_expires_at` per `design.md`: it
+      is a field of `BareMetalHostedOptionFacts` bounding `funding_deadline` and
+      `fulfillment_deadline`. Leave `matched_offer_id` open and say so, rather
+      than marking the pair resolved.
+      - **Status:** Done. `offer_expires_at` -> `option_expires_at` across 10 files, plus the `OFFER_EXPIRY` fixture constant and the "offer expiry" validator message. `matched_offer_id` deliberately left open.
+- [x] 11.6 **Rebuild the validation baseline from wheels, not editable installs.**
+      Build `.dist`, install from it, and re-run every suite this change
+      reported on. Compare failure **causes**, not failure names: the previous
+      comparison diffed `FAILED` lines, so a test failing before for one reason
+      and now for another read as unchanged. Every "identical to pristine" claim
+      in this file is void until re-established this way, and the `core/registry`
+      one is provably wrong — a test fails in the pristine tree with a
+      `TypeError` that pristine's own client cannot raise.
+      - **Status:** Done. Built pristine wheels into an isolated virtualenv and re-ran the suites there, so the baseline no longer resolves working-tree code. **The earlier claim was wrong in both directions.** `core/registry` is **192 passed / 0 failed** in a true pristine environment, not 16 failed -- so those 16 were regressions, exactly as review said. `domains/bare_metal/storefront` is **5 failed** in pristine, not 12, so the earlier "subset of 12" was itself a contamination artifact; the sets are now diffed as identical. `domains/vms/storefront` unit is 943/1 pristine against 951/1 here, same single failure. `provisioning/compute` 125/1 against 126/1.
+- [x] 11.7 Make the service integration targets consume **this branch's** newly
+      built client rather than whatever compatible wheel resolves. A floor of
+      `>=0.12.0` permits a future client; the point of these suites is the
+      client in this tree.
+
+      - **Status:** Done by mechanism rather than by edit. Each consumer's `uv.lock` pins the exact wheel from `.dist` (`source = { registry = "../../.dist" }`, `wheels = [{ path = "...-0.12.0-py3-none-any.whl" }]`), so the resolved client is this branch's build; the `>=0.12.0` floor is only a constraint and does not decide resolution. Verified against the e2e run, where `init-buyer` resolved `0.12.0` from `.dist`.
+### Integration at the level the repository already defines
+
+`TESTING.md` defines integration as a real in-process application, a real
+database, and the canonical typed client over `ASGITransport`. Only 9.12 and
+9.13 need a live multi-service environment. Task 9.18 already demonstrates the
+pattern; these tasks follow it.
+
+- [ ] 11.7a **Superseded by 11.0**, which promotes the same work ahead of the
+      boundary tasks because a wheel-based `make test` is red on it.
+- [x] 11.7b One typed-client-over-ASGI integration test per changed boundary,
+      closing 9.4 (retired-key rejection), 9.5, 9.6, 9.7 (version cutover),
+      9.14, and 9.17. `core/registry/tests/integration/test_validate_publish.py`
+      hand-writes JSON through a raw `AsyncClient` while the canonical client
+      has `validate_publish_listing()` — move the happy path onto the typed
+      client and keep raw HTTP only for old-key rejection, asserting status
+      only.
+      - **Status:** Done. Three suites, all through the real app, real database, and the canonical typed client
+        over `ASGITransport`. Registry 192 -> 210 passed; provisioning service 858 -> 862.
+      - `test_settled_listing_vocabulary.py` (9 tests) closes **9.5** and **9.14**: publish/query under
+        `listing_resource`/`offering_mode`, retired spellings, served schema identity, and that no advertised
+        filter path uses the retired shape key.
+      - `test_settled_envelope_across_specs.py` (9 tests) closes **5.5** and **9.6** by serving the real
+        API-credits and introductions specification files in-process. It also asserts that all three deployed
+        specifications agree and each keeps its own identity, and that API credits publishes **no**
+        offering-mode field -- so a later change cannot add one on the assumption every schema carries it.
+      - Four tests appended to `test_compute_contract_api.py` close **9.7** and **9.17**: adapter selection by
+        offering mode end to end, an unknown mode refused, the retired key refused, and the `executor_`
+        compounds retained on a committed reservation.
+      - **Two of my assertions were wrong and the code was right.** A listing carrying the retired
+        offering-mode key validates as *structurally valid* -- the key is opaque extra content -- and is
+        invisible to an offering-mode filter rather than refused, which is the quiet failure `cutover.md`
+        predicts. And an unknown offering mode is refused `409` as a mismatch against the reservation's
+        *recorded* mode, before adapter lookup: provenance gates before composition, which is the stronger
+        ordering and the reason the contract declares no closed value set.
+- [x] 11.7c Reclassify `test_registry_client_contract.py` as a client contract
+      unit test. It uses the real client against `httpx.MockTransport`, so it
+      proves what the client sends and nothing about what the server accepts.
+      Keep it; stop crediting it with the interservice layer.
+      - **Status:** Done. `test_registry_client_contract.py` moved from `tests/integration/` to `tests/unit/`, and its docstring now names its level and what it does not cover: it exercises the installed wheel against `httpx.MockTransport`, boots no app, opens no database, wires no container, and therefore discharges no interservice requirement. It proves what the client *sends*; whether a registry accepts it is answered by `core/registry/tests/integration/test_settled_listing_vocabulary.py`. 14 tests, still passing.
+- [x] 11.7d Either raise the migration claims to the level stated or narrow
+      them: drive 9.10 through the real `SettlementRepository` retry path, and
+      9.9/9.11 through the public migration runner from a fixture of the
+      immediately preceding schema. Narrowing is acceptable; asserting the
+      stronger claim on the weaker test is not.
+
+      - **Status:** Done, by raising the claim rather than narrowing it. **9.10** now drives the real `SettlementRepository.schedule` path: a settlement row written under the retired key before the upgrade is migrated, then a retry with a freshly serialized `SettlementRequirement` is recognised as the same request and returns the existing aggregate rather than creating a second. A negative control asserts the unmigrated case. **9.9/9.11** stay at the migration level and their notes already say so -- driving them through the public runner needs a fixture of the immediately preceding schema, which is 9.9's own remaining gap rather than a claim overstated here.
+      - **This corrected a claim in `design.md`.** The design said an unmigrated retry would "stop recognizing its own request and re-submit". It does not: `schedule` raises `SettlementRequestMismatchError`, so the retry **fails closed** rather than duplicating provisioning. The backfill is still required -- a refused retry strands that deal -- but the overstated hazard would have justified the same work for a reason that is not true. Corrected in `design.md` and in 6b.2's note.
+### External blockers and residual packaging risk
+
+Both established by inspection against an unmodified checkout, so neither is
+this change's defect — but the first blocks 9.12/9.13 and must not be recorded
+as a validation failure of this change.
+
+- [ ] 11.13 Record that `make -C e2e-tests test-e2e` cannot reach the test
+      phase in CI for a reason unrelated to this change. Its
+      `docker compose up -d --wait` loads the root `docker-compose.yml`, which
+      mounts `${APICREDITS_REGISTRY_IDENTITY_CREDENTIAL_FILE:?...}`. The `:?`
+      form hard-fails when unset, nothing in the repository sets it — the
+      `hosted-stripe-test` targets set the `VMS_*` equivalents but no target or
+      workflow sets the API-credits one — and `.env`/`.env.*` are gitignored and
+      absent, so a local run works from a developer's untracked `.env` while CI
+      has nothing. Both `docker-compose.yml` and `compose.apicredits.yml` are
+      byte-identical to the unmodified checkout. Raise it as its own issue
+      rather than folding a harness gap into this change's scope; 9.12 and 9.13
+      stay unrun until it is resolved.
+- [ ] 11.14 Confirm the two `[tool.uv] find-links` entries added to
+      `domains/vms/domain` and `domains/bare_metal` never enter a Docker build
+      context. The e2e build log warns
+      `path could not be normalized: /app/../../../.dist` for
+      `domains/apicredits/service/pyproject.toml`, which carries the same
+      construct and is unchanged by this change — this is the hazard the VM
+      storefront's pyproject documents when it declines a `find-links` entry for
+      that exact reason. Verified once already: no `Dockerfile` copies either
+      pyproject, so neither is read inside a container. Re-verify if either
+      package later gains an image, and prefer the VM storefront's
+      pass-`--find-links`-at-invocation pattern over a relative entry in that
+      case.
+
+### Reinit coverage and rename-sweep damage
+
+Both found by a real `make test` rather than by any check in this plan, which is
+why they are recorded as their own tasks rather than folded into 11.4 or 11.12.
+
+- [x] 11.15 Fix the stale wheel-metadata assertion in
+      `domains/apicredits/tests/test_distribution.py`, which asserted
+      `arkhai-core-storefront>=0.3.0` against a floor this change raised to
+      `>=0.4.0`. The other eight `Requires-Dist` assertions in that file name
+      distributions this change does not bump and are unaffected.
+      - **Status:** Done.
+- [x] 11.16 Audit every `reinit` target against the distributions this change
+      modifies, and add the missing lines. **The failure mode:** an internal
+      package whose contents change without a version bump resolves to the same
+      wheel filename, so nothing displaces the installed copy unless its
+      `reinstall-package` line is present. `domains/apicredits` omitted
+      **its own** `arkhai-apicredits-domain`, which is force-included and so
+      installs as a built artifact rather than from source — the venv kept a
+      pre-rename `ApiCreditsListing` while the tests passed the settled key.
+      - **Status:** Done. 26 reinit targets audited against the 25 distributions
+        whose source this change touches. Five dependency lines added:
+        `arkhai-apicredits-domain` to `domains/apicredits`,
+        `arkhai-kit-resource-pools` to `domains/apicredits/service`,
+        `arkhai-kit-hosted-settlement` to `domains/apicredits/buyer` and
+        `domains/bare_metal/storefront`, and `arkhai-core` to
+        `kit/hosted-settlement`.
+      - **Deliberately not added:** the own-distribution line for
+        `core/registry`, `core/storefront`, `domains/apicredits/service`,
+        `kit/fulfillment`, and `kit/hosted-settlement`. None uses
+        `force-include`, so `uv sync` installs the project from source and the
+        staleness cannot occur; their suites pass. `domains/apicredits` is the
+        exception precisely because it does use `force-include`. Recorded so an
+        absent line reads as a finding rather than an oversight.
+- [x] 11.17 Repair the verb-sense damage the bare-`offer` rename caused.
+      Section 11.4's predicate classified `offer` as noun senses and protected
+      the negotiation *string literals*, but a mechanical `\boffer\b` rename
+      also rewrites `offer` used as a **verb** in prose and messages.
+      - **Status:** Done. Three sites, one of them an operator-facing error
+        string: `kit/hosted-settlement`'s `"the bound hosted release does not
+        offer <capability>"` had become `"does not listing_resource"`, plus its
+        neighbouring comment and one in `domains/vms/listings/reconciler.py`
+        ("no bucket data to offer at all"). Found by grepping
+        `listing_resource` preceded by a modal or negation rather than by
+        reading the diff, and the repository is now clean under that pattern.
+      - **Lesson:** a word-boundary rename is safe for identifiers and unsafe
+        for prose containing the same word in another part of speech. The
+        predicate in 11.4 asked whether each `offer` was a negotiation value or
+        a listing value; it should also have asked whether it was a noun.
+
+### Documentation closeout, done against the rules rather than from memory
+
+- [x] 11.8 Repair the cited path in
+      `openspec/specs/storefront-publication/spec.md` and **replace the
+      cross-reference check itself**: a file-existence test passes on a
+      tombstone, so it cannot detect a rename-to-tombstone. The replacement
+      must reject a citation whose target is a tombstone.
+      - **Status:** Done, and the check is replaced rather than re-run. `storefront-publication`'s citation now points at `test_listing_cardinality_mode.py`. The new check rejects a citation whose target is absent **or is a tombstone** -- the old existence test could never fail on a rename-to-tombstone. It found 15 unresolvable citations across permanent documents; 6 were introduced by this change's own documents and are fixed, and the other 9 are absent from the original archive too and are reported rather than adopted.
+- [x] 11.9 Bring `docs/development/ROADMAP.md` Goal 7's gap row and
+      `openspec/changes/README.md`'s row to current, per `openspec/README.md`'s
+      rule that both are owed at change completion rather than at archival.
+      - **Status:** Done. Goal 7's gap row is struck through with what closed it; the campaign index row now reads "per-boundary integration coverage outstanding" rather than the stale "cutover sequencing and closeout outstanding".
+- [x] 11.10 Correct `proposal.md`: drop the `arkhai-kit-site-client` bump that
+      was abandoned during implementation (also in `design.md`), and add the
+      seller-facing storefront creation surface to Impact — the task notes
+      record it as discovered during implementation and the proposal never
+      picked it up.
+      - **Status:** Done. `proposal.md` and `design.md` no longer promise the abandoned `arkhai-kit-site-client` bump and name it as unchanged with the reason. Impact now lists the seller-facing `POST /api/v1/listings/create` surface as a fourth deployment pairing, noting that `extra="forbid"` rejects the retired key outright.
+- [x] 11.11 Clean up the smaller symptoms the review noted: the "reservation
+      executor" error text that still calls the offering mode an executor, the
+      duplicated `listing_resource_type` absence assertion in
+      `test_validate_publish.py`, and the retired vocabulary still in active
+      change documents that 7.4 reported updated.
+
+      - **Status:** Done. `"reservation executor is ..."` and `"reservation has no explicit executor identity"` -- both the offering-mode sense in a live error path -- are now stated as the offering mode, in the service, the controller, and the assertion. The duplicated `listing_resource_type` absence assertion is deduplicated.
+### Closeout
+
+- [x] 11.12 **Comment hygiene, import placement, documentation compliance,
+      narrative compression, roadmap currency, campaign index currency, and
+      promotion** — the full seven-part closeout from
+      `openspec/README.md#plan-closeout-requirements`, re-run after this
+      section rather than inherited from section 10. Section 10's pass is what
+      let 8.9, 9.16, 10.5, and 10.6 be marked complete while false, so its
+      result is not evidence for this section. Do not mark any task in this
+      section complete on the strength of a check whose blind spot it was
+      written to close.
+
+      - **Status:** Done, re-run rather than inherited. **Comment hygiene:** target passes; the fuzzier
+        rule needed one edit — the contract-version comment read as rename history and now states the
+        constraint. **Import placement:** scoped to this section's diff, not the pre-existing local imports
+        in touched files; four function-level imports this section added moved to module level and verified
+        against the suite (11 passed), and the VM cardinality resolver's deliberate local import was left
+        with its reason re-verified empirically. **Documentation compliance:** all six accepted decisions
+        confirmed normative in their owning specifications, including the three added after review.
+        **Narrative compression:** 11.4's note reduced to a pointer plus what is deferred; debugging
+        narratives live in `design.md`. **Roadmap currency:** Goal 7's gap row struck through, no retired
+        term remains in `ROADMAP.md`. **Campaign index currency:** the row now reads that every changed
+        boundary carries in-process coverage and that only the live multi-service scenario is blocked, on an
+        unrelated harness gap. **Promotion:** three rows added for the post-review decisions and four for
+        what was deliberately not promoted, including the `ExecutorKind` deletion and the two `offer` senses
+        settled and left open.
 ## Implementation status
 
-Implemented. 76 of 86 tasks complete. Every remaining task is either superseded or
-requires running services this environment does not have.
+84 of 105 tasks complete. `make test` is green on every suite this change
+touches, and the validation baseline has been rebuilt in an isolated
+environment, so the numbers below are measurable rather than asserted.
 
-| Outstanding | Why |
-|---|---|
-| 4.5 | **Superseded** by the 4.1 decision — no producer emission exists to stop |
-| 5.5, 9.4, 9.5, 9.6, 9.7, 9.14, 9.17 | Need running registries, sites, and the provisioning service |
-| 9.12, 9.13 | System level; need deployable services |
+**Remaining:** 11.7b-d (one typed-client-over-ASGI integration test per changed
+boundary, closing 9.4-9.7, 9.14, 9.17; reclassify the client-contract test;
+raise or narrow the migration claims), 11.12 (closeout re-run), 11.13/11.14
+(external harness blocker and the packaging-risk re-verification), and the
+section 9 items those subsume.
 
-Two further tasks are complete but partially so, and say why in their own notes:
-9.1 (paired-fixture equivalence is proven at the persistence and cardinality
-boundaries, not across every effect end to end) and 9.8 (unit-level, not through
-the live projection API).
+### The baseline correction
 
-Code, tests, permanent documentation, the cutover runbook, and the promotion
-record are complete. `make check-comment-hygiene` passes, ten distributions build
-as wheels, `mypy` shows no new errors, and the built wheels expose the settled
-public surface.
+The earlier "identical to pristine" evidence was wrong **in both directions**,
+and both errors came from installing internal packages editable against the
+working tree so that the pristine checkout resolved modified code.
+
+| Suite | Previously claimed | True pristine | This tree |
+|---|---|---|---|
+| `core/registry` | 16 failed, "identical to pristine" | **192 passed, 0 failed** | 192 passed, 0 failed |
+| `domains/bare_metal/storefront` | "5 failed, subset of pristine's 12" | **5 failed, 119 passed** | 5 failed, sets diffed identical |
+| `domains/vms/storefront` unit | 951/1, "1 pre-existing" | 943 passed, 1 failed | 951 passed, 1 failed (same test) |
+| `provisioning/compute` | 126/1, "1 pre-existing" | 125 passed, 1 failed | 126 passed, 1 failed (same test) |
+
+The first row is the material one: `core/registry` was green before this change,
+so the 16 failures were regressions from task 3.5 that the contaminated
+comparison presented as pre-existing. The second row shows the contamination cut
+the other way too — it inflated the pristine failure count, making this tree
+look better than it was.
 
 ### Validation evidence
 
-**Suites.** Green except the pre-existing failures noted below.
+All measured against wheels or a consistent tree, per 11.6.
 
 | Suite | Result |
 |---|---|
-| `provisioning/compute/service` unit | 642 passed |
+| `core/registry` | 192 passed |
+| `provisioning/compute/service` unit + integration | 858 passed |
+| `core` / `core/buyer` / `core/storefront` | 98 / 117 / 160 passed |
+| `core/registry-client` / `core/storefront-client` | 21 / 30 passed |
+| `kit/site` / `fulfillment` / `resource-pools` / `negotiation-runtime` | 149 / 154 / 101 / 7 passed |
+| `domains/bare_metal` / `bare_metal/buyer` / `vms/domain` | 75 / 11 / 12 passed |
 | `domains/vms/storefront` unit / integration | 951 / 155 passed |
-| `core/storefront` | 160 passed |
-| `core/storefront-client` / `core/registry-client` | 30 / 21 passed |
-| `core/buyer` / `core` | 117 / 98 passed |
-| `kit/site` / `kit/fulfillment` / `kit/resource-pools` / `kit/site-client` | 149 / 154 / 101 / 36 passed |
-| `domains/bare_metal` / `domains/vms/domain` | 75 / 12 passed |
-| `core/registry` | 16 failed / 176 passed — failure set **identical to pristine** by diff |
-| `domains/bare_metal/storefront` | 5 failed / 119 passed — **subset** of pristine's 12 by diff |
-| `provisioning/compute` | 125 passed, 1 pre-existing |
-| `domains/vms/storefront` | 1 unit + 3 integration pre-existing |
+| `provisioning/compute` | 126 passed, 1 pre-existing |
+| `domains/bare_metal/storefront` | 119 passed, 5 pre-existing |
 | `make check-comment-hygiene` | passed |
 
-Pre-existing failures were established by running the same suites on an unmodified
-unzip of the source archive. Where failures are environment-dependent the
-comparison is a set diff rather than a count, because counts alone cannot
-distinguish a fixed failure from a new one.
+Pre-existing failures are now established in an isolated pristine environment
+and compared as sets, not counts: `provisioning/compute`'s
+`test_every_bound_mutation_contract_is_reachable[provisioning_relay_create]`,
+`domains/vms/storefront`'s `test_server_app_composition` plus three
+Anvil/negotiation integration tests, and `domains/bare_metal/storefront`'s five
+entry-point tests.
 
-**Package build (9.15).** Ten distributions build as wheels: `arkhai-core`,
-`arkhai-core-storefront`, `arkhai-core-registry-client`,
-`arkhai-core-storefront-client`, `arkhai-kit-resource-pools`, `arkhai-kit-site`,
-`arkhai-kit-fulfillment`, `arkhai-compute-provisioning`, `arkhai-vms-storefront`,
-`arkhai-vms-buyer`. `domains/vms/listings/listing_cardinality_mode.py` is present
-in both the storefront and buyer wheels and the tombstoned path is absent from
-both.
+**Package build, typing, and public surface (9.15).** Ten distributions build as
+wheels; the renamed cardinality module is present in the storefront and buyer
+wheels. `mypy` shows zero new errors and one eliminated. Wheels installed into a
+clean virtualenv expose the settled names and no longer ingest the retired ones.
 
-**Typing (9.15).** `mypy` on the four packages that configure it. `core` and
-`core/registry-client` clean. `domains/vms/storefront`: 58 errors against 59 on an
-unmodified checkout, with an error-set diff showing zero new and one eliminated
-(`Unexpected keyword argument "offer" for "ListingRequest"`).
-
-**Public surface (9.15).** The registry-client and resource-pools wheels installed
-into a clean virtualenv expose `listing_resource` as both attribute and wire key,
-no longer ingest `offer_resource` or `offer`, and no longer expose
-`offer_resource_type`, `raw_listing_mode`, or `projected_policy_tags`.
-
-**Migrations.** All three column renames and both payload backfills are exercised
-against pre-upgrade databases: 9 tests for the reservation pair, 10 for the
-listing-shape pair, including idempotent re-runs, null preservation, retention of
-the `executor_` compounds, already-settled payloads, payloads carrying both keys,
-unparseable payloads, and the cutover gates.
+**Migrations.** Three column renames and both payload backfills exercised against
+pre-upgrade databases: 9 tests for the reservation pair, 10 for the listing-shape
+pair, covering idempotent re-runs, null preservation, retention of the `executor_`
+compounds, already-settled payloads, payloads carrying both keys, unparseable
+payloads, and the cutover gates.
 
 ### Unrun checks
 
-- **Live-service integration (5.5, 9.4, 9.5, 9.6, 9.7, 9.13, 9.14, 9.17).** The
-  claim wire, the provisioning contract, the registry publish and query paths, and
-  the cutover gate are covered at unit, wheel, and migration level but not through
-  running services. The registry and introduction publish paths need running
-  registries.
-- **System-level skew (9.12).** Needs deployable services.
+- **`make -C e2e-tests test-e2e` cannot reach its test phase in CI**, for a
+  reason unrelated to this change: the root `docker-compose.yml` requires
+  `APICREDITS_REGISTRY_IDENTITY_CREDENTIAL_FILE` and nothing sets it. See 11.13.
+  9.12 and 9.13 are blocked behind it.
+- **Live-service integration (5.5, 9.4, 9.5, 9.6, 9.7, 9.13, 9.14, 9.17).** Per
+  `TESTING.md` most of these are in-process and do not need the e2e stack; 11.7b
+  plans them.
 - **Migration-plus-integration (9.9, 9.10, 9.11)** are covered against real
   databases but not end to end through a running service.
-
-Nothing else in the plan is unrun.
+- **A clean-baseline suite comparison (11.6).** The packaging half is discharged
+  by the CI build; the per-suite failure-cause comparison is not.
 
 ### Decisions made during implementation
 
@@ -665,13 +949,26 @@ Nothing else in the plan is unrun.
 
 ### Defects found in this change's own work
 
-Four, each found by a different check, and each recorded with its transferable
-lesson in [`design.md`](design.md#defects-found-during-implementation): a migration
-written against a column that does not exist, whose hand-written test fixture
-encoded the same wrong assumption; a rename sweep that inverted three
-specification prohibitions so they forbade the settled name; a cutover gate that
-returned zero on an unmigrated database; and a stale task note left contradicting
-its own completion.
+Eight, recorded with their transferable lessons in
+[`design.md`](design.md#defects-found-during-implementation) and
+[`design.md`](design.md#decisions-taken-after-code-review). Four were found by
+this change's own checks: a migration written against a nonexistent column whose
+hand-written fixture encoded the same wrong assumption; a rename sweep that
+inverted three specification prohibitions; a cutover gate that passed on an
+unmigrated database; and a keyword rename grep could not follow.
+
+Four were found by code review, and those share a cause worth stating plainly:
+**each of this change's audits could pass while the thing it audited was
+broken.** The retired-name audit matched a curated list of spellings, so a
+concept under an unenumerated name (`ExecutorKind`) survived it. The
+cross-reference audit tested file existence, so a rename-to-tombstone passed it.
+The regression comparison used editable installs, so both trees resolved the
+same code. The contract-version task was marked done from its own status note
+rather than from the constant.
+
+The pattern is that a check written by the same reasoning that produced the
+change inherits its blind spots. Section 11 states each check as a predicate
+over survivors rather than a search for known-bad strings, for that reason.
 
 ## Design promotion record
 
@@ -684,6 +981,9 @@ its own completion.
 | The compute schema identity names the family, not one domain | `openspec/specs/registry-discovery/spec.md#the-compute-schema-names-its-family-not-one-domain`, `openspec/specs/deployment-state/spec.md#schema-isolated-registry-composition` |
 | `executor` names only the action-dispatch abstraction as a head noun; the machine is a host, the handler is a provider, the mode is an offering mode | `docs/development/ARCHITECTURE.md#one-name-per-concept` |
 | `executor_`-prefixed compounds naming that abstraction's own targets, references, and actions retain the name; the prohibition is on the head noun, not the prefix | `openspec/specs/physical-provisioning/spec.md#validated-executor-registration`, `docs/development/ARCHITECTURE.md#one-name-per-concept` |
+| The retired contract major is not accepted alongside the new one; a 1.x caller is refused rather than coerced | `openspec/specs/compute-provisioning-contract/spec.md#versioned-executor-action-submission` |
+| The provisioning contract does not re-declare the offering mode as a closed enumeration | `openspec/specs/compute-provisioning-contract/spec.md#versioned-executor-action-submission` |
+| The cardinality alias is a read-path concession only; projection is verbatim | `openspec/specs/resource-pool-management/spec.md#domain-neutral-publication-and-hold-hints` |
 | Release-status lookup is selected by the reservation's recorded offering mode | `openspec/specs/physical-provisioning/spec.md#vm-release-delegates-to-durable-fulfillment-teardown` |
 | Goal 7 current state after the rename; the cardinality gap closed | `docs/development/ROADMAP.md` |
 | This change's status and the persisted-state shape of its acceptance boundary | `openspec/changes/README.md` |
@@ -697,3 +997,7 @@ Classified as **temporary** and deliberately not promoted:
 | `projected_policy_tags` (producer-side dual-emit) | **Rejected** and removed by decision: new-producer/old-consumer compatibility is not a concern this change carries |
 | Task 4.5 (stop emitting the deprecated key) | **Superseded** by the 4.1 decision: projection is verbatim, so there is no producer emission to stop |
 | `arkhai-kit-site-client` version bump | **Rejected**: its `src/` is unchanged, so a bump would advertise a surface change that did not happen |
+| `ExecutorKind` enum | **Deleted**, not renamed: every affected distribution is at major 0 and the contract major advances here, so the condition an earlier draft said deletion would require was already met |
+| `offer_expires_at` | Settled to `option_expires_at`: it bounds `funding_deadline` and `fulfillment_deadline` on `BareMetalHostedOptionFacts`, so the hosted settlement option is what expires |
+| `matched_offer_id` | **Left open**, recorded as open: it plausibly names a selected negotiation offer and no surviving call path settles it |
+| The semantic `offer`/`executor` classification | `survey.md` — an audit record for this rename, not a durable rule |

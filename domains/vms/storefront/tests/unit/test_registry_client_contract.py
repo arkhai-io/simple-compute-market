@@ -1,4 +1,12 @@
-"""Contract tests — RegistryClient ↔ registry-service API.
+"""Client-contract tests — what `RegistryClient` sends.
+
+**Test level: unit.** This file exercises the installed ``registry_client``
+wheel against ``httpx.MockTransport``. It boots no application, opens no
+database, and wires no container, so by `docs/development/TESTING.md`'s
+definition it is not an integration test and does not discharge any
+interservice requirement. It proves what the client *sends*; whether a
+registry *accepts* it is answered by
+``core/registry/tests/integration/test_settled_listing_vocabulary.py``.
 
 These tests verify that the ``registry_client`` wheel installed in the
 storefront's venv is compatible with the registry-service it will talk to at
@@ -279,11 +287,11 @@ class TestListingRequestConstructor:
         assert req.to_dict()["listing_id"] == "specific-id"
 
     def test_to_dict_emits_listing_resource_key(self):
-        """to_dict() must use 'listing_resource' not 'offer' as the wire key."""
+        """to_dict() must use 'listing_resource' not 'listing_resource' as the wire key."""
         req = ListingRequest(listing_resource={"gpu_model": "H200"}, accepted_escrows=[])
         d = req.to_dict()
         assert "listing_resource" in d, (
-            "to_dict() must emit 'listing_resource', not 'offer'. "
+            "to_dict() must emit 'listing_resource', not 'listing_resource'. "
             "The registry listing_routes.py reads body.get('listing_resource')."
         )
 
@@ -358,16 +366,16 @@ class TestPublishListingWireFormat:
         assert transport.last_request_body.get("listing_id") == listing_id
 
     async def test_body_contains_listing_resource(self, capturing_client):
-        """Request body must include listing_resource with the offer dict."""
+        """Request body must include listing_resource with the listing_resource dict."""
         client, transport = capturing_client
-        offer = {"gpu_model": "RTX4090", "gpu_count": 2, "sla": 95.0, "region": "NY"}
-        req = ListingRequest(listing_id=uuid.uuid4().hex, listing_resource=offer, accepted_escrows=[{"chain_name": "anvil", "escrow_address": "0x" + "11" * 20}])
+        listing_resource = {"gpu_model": "RTX4090", "gpu_count": 2, "sla": 95.0, "region": "NY"}
+        req = ListingRequest(listing_id=uuid.uuid4().hex, listing_resource=listing_resource, accepted_escrows=[{"chain_name": "anvil", "escrow_address": "0x" + "11" * 20}])
         await client.publish_listing(req)
         body = transport.last_request_body
         assert "listing_resource" in body, (
             f"'listing_resource' absent from request body. Keys present: {list(body)}"
         )
-        assert body["listing_resource"] == offer
+        assert body["listing_resource"] == listing_resource
 
     async def test_body_contains_accepted_escrows(self, capturing_client):
         """Request body must include accepted_escrows with the entries list."""

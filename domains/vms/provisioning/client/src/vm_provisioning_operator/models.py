@@ -1,7 +1,7 @@
 """Typed request and response models for the Arkhai provisioning service REST API.
 
 These models are the direct VM operator HTTP contract. They intentionally live
-outside the executor-neutral ``compute_provisioning`` caller contract.
+outside the offering-mode-neutral ``compute_provisioning`` caller contract.
 
 Internal server-only types (``AnsibleJobParams``, ``AnsibleRunResult``,
 ``build_simple_params``, ``EvaluateJobRequest``, ``EvaluateJobResponse``) remain

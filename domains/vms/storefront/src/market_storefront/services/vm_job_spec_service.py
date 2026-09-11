@@ -61,7 +61,7 @@ def compute_capacity_claim_from_order(
     match on shape attributes (region/gpu_model/gpu_count) alone, which is
     exactly the "grabs whatever resource is first in line" bug class this
     function exists to prevent. Listing creation is expected to already
-    reject this shape (``ListingService._parse_offer_and_escrows``); this is
+    reject this shape (``ListingService._parse_listing_resource_and_escrows``); this is
     a backstop for any listing that reaches claim-building anyway.
     """
     if not order_dict:

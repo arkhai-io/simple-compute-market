@@ -1433,7 +1433,7 @@ class StorefrontClient(_StorefrontClientBase):
 
         ``proposal`` is the full EscrowProposal-shaped dict for ``counter``;
         omitted for ``accept`` / ``exit``. ``fields["amount"]`` carries the
-        buyer's absolute new offer in base units.
+        buyer's absolute new listing_resource in base units.
         """
         body: dict[str, Any] = {
             "action": action,
@@ -2677,7 +2677,7 @@ class SyncStorefrontClient(_StorefrontClientBase):
 
         ``proposal`` is the full EscrowProposal-shaped dict for ``counter``;
         omitted for ``accept`` / ``exit``. ``fields["amount"]`` carries the
-        buyer's absolute new offer in base units.
+        buyer's absolute new listing_resource in base units.
         """
         body: dict[str, Any] = {
             "action": action,

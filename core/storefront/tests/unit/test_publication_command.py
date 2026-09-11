@@ -56,9 +56,9 @@ def test_run_storefront_publication_command_uses_config_flags() -> None:
     skip_open=False,)
     callbacks = StorefrontPublicationCommandCallbacks(
         build_payload=lambda *_args: ([{}], [], None),
-        publish_listing=lambda offer, *_args: {
+        publish_listing=lambda listing_resource, *_args: {
             "status": "published",
-            "listing_id": offer["resource_id"],
+            "listing_id": listing_resource["resource_id"],
         },
     )
 

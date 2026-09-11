@@ -285,16 +285,16 @@ def _seed_listing(
     gpu_count: int = 2,
     site_id: str | None = None,
 ):
-    offer = {"offering_mode": "vm", "gpu_count": gpu_count}
+    listing_resource = {"offering_mode": "vm", "gpu_count": gpu_count}
     if pool_id:
-        offer["pool_id"] = pool_id
+        listing_resource["pool_id"] = pool_id
     if resource_id:
-        offer["resource_id"] = resource_id
+        listing_resource["resource_id"] = resource_id
     conn = sqlite3.connect(db_path)
     try:
         conn.execute(
             "INSERT INTO listings(listing_id, status, listing_resource) VALUES (?, ?, ?)",
-            (listing_id, status, json.dumps(offer)),
+            (listing_id, status, json.dumps(listing_resource)),
         )
         conn.commit()
     finally:

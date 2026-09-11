@@ -3,7 +3,7 @@
 A credit listing derives from a quota resource in the credits service's
 ledger (ARCHITECTURE.md, "API-credits market domain — Market shape"): ``publish_from_quota``
 reads the resource's availability, writes the local listing row with an
-``api_credits.v1`` offer naming that resource, and fans out to the
+``api_credits.v1`` listing_resource naming that resource, and fans out to the
 registries. Closing goes through the shared publication path.
 """
 

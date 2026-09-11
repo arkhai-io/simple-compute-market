@@ -24,7 +24,8 @@ reinit: ## Upgrade and reinstall changed internal wheel dependencies
 		--upgrade-package arkhai-kit-policy     --reinstall-package arkhai-kit-policy \
 		--upgrade-package arkhai-kit-site-client --reinstall-package arkhai-kit-site-client \
 		--upgrade-package arkhai-kit-settlement-runtime --reinstall-package arkhai-kit-settlement-runtime \
-		--upgrade-package arkhai-kit-storefront --reinstall-package arkhai-kit-storefront
+		--upgrade-package arkhai-kit-storefront --reinstall-package arkhai-kit-storefront \
+		--upgrade-package arkhai-kit-hosted-settlement --reinstall-package arkhai-kit-hosted-settlement
 
 test: reinit ## Run the storefront package tests
 	uv run --find-links $(DIST_DIR) pytest tests -q

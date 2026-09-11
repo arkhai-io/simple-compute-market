@@ -111,6 +111,75 @@ async def capacity(client_and_queue) -> CapacityApi:
 
 
 @pytest.mark.asyncio
+async def test_the_claim_names_the_offering_mode_through_the_canonical_client(
+    client_and_queue, capacity: CapacityApi
+):
+    """Closes the positive half of 9.4 explicitly.
+
+    The surrounding suite already reserves with `offering_mode` throughout, but
+    it does so through the raw helper. This asserts the same value crosses the
+    real app through `SiteCapacityClient` — the client every storefront uses —
+    and is persisted on the reservation rather than re-derived.
+    """
+    await capacity.register(
+        "site-claim-1",
+        total_units=4,
+        attributes={"vm_host": "kvm1", "gpu_model": "H200"},
+    )
+
+    client = _site_capacity_client(
+        "http://test", transport=ASGITransport(app=app)
+    )
+    reservation = await client.reserve(
+        claim={"offering_mode": "vm", "gpu_count": 1, "vm_host": "kvm1"},
+        deal_ref={"escrow_uid": "escrow-claim-1"},
+    )
+
+    assert reservation is not None
+    assert reservation["offering_mode"] == "vm"
+    assert "executor_kind" not in reservation
+
+
+@pytest.mark.asyncio
+async def test_a_claim_omitting_the_offering_mode_is_refused(capacity: CapacityApi):
+    """The field is required, so its absence is refused before any resource is
+    matched — never inferred from `vm_host` or a default."""
+    await capacity.register(
+        "site-claim-2", total_units=4, attributes={"vm_host": "kvm1"}
+    )
+
+    resp = await capacity._client.post(
+        "/api/v1/capacity/reservations",
+        json={"claim": {"gpu_count": 1, "vm_host": "kvm1"}, "deal_ref": {}},
+    )
+
+    assert resp.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_a_claim_naming_the_mode_under_the_retired_key_is_refused(
+    capacity: CapacityApi,
+):
+    """Rejection boundary. The retired key is not the required one, so the
+    claim carries no offering mode and is refused rather than being honoured
+    under a second spelling. Raw HTTP and status only: the typed client will
+    not construct the retired key."""
+    await capacity.register(
+        "site-claim-3", total_units=4, attributes={"vm_host": "kvm1"}
+    )
+
+    resp = await capacity._client.post(
+        "/api/v1/capacity/reservations",
+        json={
+            "claim": {"executor_kind": "vm", "gpu_count": 1, "vm_host": "kvm1"},
+            "deal_ref": {},
+        },
+    )
+
+    assert resp.status_code == 422
+
+
+@pytest.mark.asyncio
 async def test_reserve_commit_release_lifecycle(capacity: CapacityApi):
     await capacity.register(
         "compute-kvm1-001",

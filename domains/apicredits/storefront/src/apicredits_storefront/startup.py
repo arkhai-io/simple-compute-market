@@ -226,15 +226,15 @@ async def _seed_demo_listing() -> None:
         # Idempotent: skip if a listing already derives from this resource.
         existing = await db.list_listings(status="open", limit=500)
         for row in existing or []:
-            offer = row.get("listing_resource") or {}
-            if isinstance(offer, str):
+            listing_resource = row.get("listing_resource") or {}
+            if isinstance(listing_resource, str):
                 import json as _json
 
                 try:
-                    offer = _json.loads(offer)
+                    listing_resource = _json.loads(listing_resource)
                 except (ValueError, TypeError):
-                    offer = {}
-            if isinstance(offer, dict) and offer.get("resource_id") == resource_id:
+                    listing_resource = {}
+            if isinstance(listing_resource, dict) and listing_resource.get("resource_id") == resource_id:
                 logger.info(
                     "[STARTUP] Demo listing for resource %s already present; "
                     "skipping seed",

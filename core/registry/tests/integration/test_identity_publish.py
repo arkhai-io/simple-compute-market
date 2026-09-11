@@ -52,7 +52,7 @@ def _listing(listing_id: str, *, region: str = "us") -> ListingRequest:
     return ListingRequest(
         listing_id=listing_id,
         storefront_url="http://seller.example/",
-        offer={"gpu_model": "H200", "region": region},
+        listing_resource={"gpu_model": "H200", "region": region},
         accepted_escrows=[],
         settlement_options=[
             {

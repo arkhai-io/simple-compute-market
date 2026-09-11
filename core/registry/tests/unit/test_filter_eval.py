@@ -25,7 +25,7 @@ def spec():
 
 def _listing(**offer_extras) -> dict:
     """Stock compute listing as the registry returns it from order_to_dict."""
-    offer = {
+    listing_resource = {
         "gpu_model": "H200",
         "region": "California, US",
         "gpu_count": 4,
@@ -52,7 +52,7 @@ def _listing(**offer_extras) -> dict:
     return {
         "listing_id": "L1",
         "storefront_url": "",
-        "listing_resource": offer,
+        "listing_resource": listing_resource,
         "accepted_escrows": [
             {
                 "chain_name": "anvil",

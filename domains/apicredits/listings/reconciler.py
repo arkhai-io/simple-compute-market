@@ -27,15 +27,15 @@ AvailabilityView = Mapping[tuple[str, str], int]
 
 def listing_quota_resource_id(listing_row: Mapping[str, Any]) -> str | None:
     """The quota resource a credit listing derives from, if it names one."""
-    offer = coerce_resource_dict(listing_row.get("listing_resource"))
-    if offer.get("kind") != "api_credits.v1":
+    listing_resource = coerce_resource_dict(listing_row.get("listing_resource"))
+    if listing_resource.get("kind") != "api_credits.v1":
         return None
-    resource_id = offer.get("resource_id")
+    resource_id = listing_resource.get("resource_id")
     return str(resource_id) if resource_id else None
 
 def listing_capacity_site_id(listing_row: Mapping[str, Any]) -> str | None:
-    offer = coerce_resource_dict(listing_row.get("listing_resource"))
-    site_id = offer.get("capacity_site_id")
+    listing_resource = coerce_resource_dict(listing_row.get("listing_resource"))
+    site_id = listing_resource.get("capacity_site_id")
     return str(site_id) if site_id else None
 
 

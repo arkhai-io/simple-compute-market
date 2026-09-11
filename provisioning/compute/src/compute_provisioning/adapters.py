@@ -79,7 +79,11 @@ class FunctionalExecutorAdapter:
 
 
 class ExecutorAdapterRegistry:
-    """Select adapters strictly by declared executor identity."""
+    """Select adapters strictly by declared offering mode.
+
+    The adapter is chosen by the mode it serves, not by an identity of its
+    own; `executor` here names the dispatch abstraction, never the mode.
+    """
 
     def __init__(self, adapters: list[ExecutorAdapter] | tuple[ExecutorAdapter, ...] = ()) -> None:
         self._adapters: dict[str, ExecutorAdapter] = {}

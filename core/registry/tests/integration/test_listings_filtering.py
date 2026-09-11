@@ -41,7 +41,7 @@ def _raw_client(db_session):
 
 
 def _make_listing(db_session, publisher, listing_id: str, **offer_extras) -> Listing:
-    offer = {
+    listing_resource = {
         "gpu_model": "A100",
         "region": "us-west",
         "gpu_count": 4,
@@ -51,7 +51,7 @@ def _make_listing(db_session, publisher, listing_id: str, **offer_extras) -> Lis
     row = Listing(
         listing_id=listing_id,
         publisher_id=publisher.publisher_id,
-        listing_resource=offer,
+        listing_resource=listing_resource,
         accepted_escrows=[
             {
                 "chain_name": "anvil",
@@ -99,7 +99,7 @@ async def test_filters_match_double_encoded_listing_resource(
     ``market buy --resource gpu_model=A100`` matched no seller.
     """
     row = Listing(
-        listing_id="stringified-offer",
+        listing_id="stringified-listing_resource",
         publisher_id=maker_publisher.publisher_id,
         listing_resource=json.dumps({"gpu_model": "A100", "region": "us-west"}),
         accepted_escrows=json.dumps(
@@ -121,10 +121,10 @@ async def test_filters_match_double_encoded_listing_resource(
         resp = await c.get("/listings", params={"gpu_model": "A100"})
     assert resp.status_code == 200
     items = {item["listing_id"]: item for item in resp.json()["items"]}
-    assert "stringified-offer" in items, (
+    assert "stringified-listing_resource" in items, (
         "double-encoded listing_resource should still match the gpu_model filter"
     )
-    assert isinstance(items["stringified-offer"]["listing_resource"], dict), (
+    assert isinstance(items["stringified-listing_resource"]["listing_resource"], dict), (
         "listing_resource should be decoded to an object on the wire"
     )
 

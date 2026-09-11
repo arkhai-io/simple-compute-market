@@ -10,7 +10,9 @@ Define the offering-mode-neutral, versioned caller contract for compute action s
 
 A compute provisioner MUST accept a versioned action envelope containing allocation ID, deal reference, offering mode, action kind, idempotency key, and executor-owned parameters, and MUST validate the parameters through the selected adapter before execution. The adapter MUST be selected by the envelope's `offering_mode` together with its action kind, and no model in this contract may name that value `executor_kind`, `offering_type`, or `virtualization_type` — it is the same value the capacity claim carries, the Resource Pool declares deliverable, and the published listing exposes.
 
-Renaming a required field across this contract's models is backwards-incompatible and MUST advance the contract version, so a caller pinned to the previous version is rejected with actionable version information rather than coerced.
+Renaming a required field across this contract's models is backwards-incompatible and MUST advance the contract major, and the retired major MUST NOT remain accepted — honouring it would mean honouring the retired spelling of the selector. A caller pinned to any unsupported major is rejected with actionable version information rather than coerced.
+
+This contract MUST NOT re-declare the offering mode's value set as a closed enumeration. The mode crosses this boundary as a validated string resolved against the adapter registry, and the authority that owns mode declarations treats them as opaque strings so a domain may add a mode without editing a shared type.
 
 The contract's `executor_`-prefixed compounds naming the abstraction's own targets, references, and actions retain their names, since `executor` carries its action-dispatch sense in them. Only the selector moves.
 
@@ -28,6 +30,11 @@ The contract's `executor_`-prefixed compounds naming the abstraction's own targe
 
 - **WHEN** no registered adapter supports the requested offering-mode and action pair
 - **THEN** the provisioner rejects the action before infrastructure work and preserves the allocation for operator-visible recovery
+
+#### Scenario: A caller pins the retired contract major
+
+- **WHEN** a caller submits an action under the contract major that preceded the selector rename
+- **THEN** the action is refused with the supported major identified, and no infrastructure work begins
 
 #### Scenario: An action envelope names the mode under a retired key
 

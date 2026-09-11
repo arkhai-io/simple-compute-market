@@ -247,7 +247,7 @@ class BareMetalNegotiationService:
         decision = result.decision
         if decision.action in {"reject", "exit"}:
             raise NegotiationRequestError(
-                decision.reason or "offer unfulfillable",
+                decision.reason or "listing_resource unfulfillable",
                 status_code=409,
             )
 

@@ -42,15 +42,15 @@ def _record_bound_listing(
     resource_id: str | None,
     gpu_count: int,
 ) -> None:
-    offer = {
+    listing_resource = {
         "gpu_model": "H200",
         "gpu_count": gpu_count,
         "offering_mode": "vm",
     }
     if pool_id is not None:
-        offer["pool_id"] = pool_id
+        listing_resource["pool_id"] = pool_id
     if resource_id is not None:
-        offer["resource_id"] = resource_id
+        listing_resource["resource_id"] = resource_id
     binding = prepare_vm_listing_binding(
         listing_id=listing_id,
         candidate={
@@ -67,7 +67,7 @@ def _record_bound_listing(
             status="open",
             created_at="2026-08-15T00:00:00Z",
             updated_at="2026-08-15T00:00:00Z",
-            listing_resource=offer,
+            listing_resource=listing_resource,
             fulfillment_resource=None,
             max_duration_seconds=3600,
             storefront_url="http://storefront.test",

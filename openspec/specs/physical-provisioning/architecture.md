@@ -14,7 +14,7 @@ compute service composition
     └── VM, bare-metal, or future adapter bundles
 ```
 
-The executor-neutral composition root lets generic services dispatch by recorded executor or provider identity without importing a concrete domain implementation.
+The offering-mode-neutral composition root lets generic services dispatch by recorded executor or provider identity without importing a concrete domain implementation.
 
 ## Registration boundary
 

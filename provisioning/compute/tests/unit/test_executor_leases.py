@@ -67,7 +67,7 @@ class FakeSiteResources:
         return reservation
 
 
-def test_compute_lease_metadata_is_executor_neutral():
+def test_compute_lease_metadata_is_offering_mode_neutral():
     registration_fields = {field.name for field in fields(ExecutorLeaseRegistration)}
     update_fields = {field.name for field in fields(ExecutorLeaseUpdate)}
 

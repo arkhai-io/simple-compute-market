@@ -140,7 +140,7 @@ class BareMetalHostedOptionFacts(BaseModel):
     physical_host_id: str | None = None
     pool_id: str | None = None
     access_method: Literal["ssh"] = "ssh"
-    offer_expires_at: datetime
+    option_expires_at: datetime
     funding_deadline: datetime
     fulfillment_deadline: datetime
 
@@ -162,8 +162,8 @@ class BareMetalHostedOptionFacts(BaseModel):
             raise ValueError(
                 "fungible option must not publish its assigned Physical Resource"
             )
-        if self.funding_deadline > self.offer_expires_at:
-            raise ValueError("funding deadline must not exceed offer expiry")
+        if self.funding_deadline > self.option_expires_at:
+            raise ValueError("funding deadline must not exceed option expiry")
         if self.funding_deadline > self.fulfillment_deadline:
             raise ValueError("funding deadline must not exceed fulfillment deadline")
         return self
@@ -288,7 +288,7 @@ class BareMetalAcceptedHostedBinding(BaseModel):
             raise ValueError("billable hold reference and expiry must appear together")
         facts = self.option.facts
         bounds = [
-            facts.offer_expires_at,
+            facts.option_expires_at,
             facts.funding_deadline,
             facts.fulfillment_deadline,
             self.authorization_expires_at,
@@ -502,7 +502,7 @@ def derive_accepted_hosted_binding(
     if claimant_principal != option.claimant_principal:
         raise ValueError("accepted claimant cannot rewrite the advertised claimant")
     bounds = [
-        option.facts.offer_expires_at,
+        option.facts.option_expires_at,
         option.facts.funding_deadline,
         option.facts.fulfillment_deadline,
         authorization_expires_at,

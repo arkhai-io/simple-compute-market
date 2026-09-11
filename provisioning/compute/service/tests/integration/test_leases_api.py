@@ -283,7 +283,7 @@ class TestUpdateLease:
     async def test_patch_through_generic_executor_lease_service(
         self, client_and_queue, monkeypatch,
     ):
-        """The VM controller can update through the executor-neutral service."""
+        """The VM controller can update through the offering-mode-neutral service."""
         from compute_provisioning.executor_leases import ExecutorLeaseService
         from market_site.authority import LedgerSiteAuthority
 

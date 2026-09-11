@@ -97,7 +97,7 @@ class TestCreateOrderEndpoint:
         assert data["status"] in ("created", "no_action")
 
     async def test_missing_offer_returns_422(self, orders_client):
-        """CreateListingRequest Pydantic model requires offer; FastAPI returns 422."""
+        """CreateListingRequest Pydantic model requires listing_resource; FastAPI returns 422."""
         resp = await orders_client.post(
             "/api/v1/listings/create",
             json={"accepted_escrows": _ACCEPTED_ESCROWS},

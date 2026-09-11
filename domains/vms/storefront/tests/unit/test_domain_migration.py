@@ -58,12 +58,12 @@ def _legacy_database(
             );
             """
         )
-        offer = {"resource_id": resource_id, "operator_secret": "never-print-me"}
+        listing_resource = {"resource_id": resource_id, "operator_secret": "never-print-me"}
         if public_mode is not None:
-            offer["offering_mode"] = public_mode
+            listing_resource["offering_mode"] = public_mode
         conn.execute(
             "INSERT INTO listings VALUES (?, ?)",
-            ("listing-1", json.dumps(offer)),
+            ("listing-1", json.dumps(listing_resource)),
         )
         conn.execute(
             "INSERT INTO derived_compute_listings VALUES (?, ?, ?, ?, ?, ?, ?, ?)",

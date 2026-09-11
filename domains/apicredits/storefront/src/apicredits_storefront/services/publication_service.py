@@ -17,7 +17,7 @@ from market_capacity_publication import (
 )
 from registry_client import ListingRequest, UpdateListingRequest
 
-from apicredits_storefront.services.capacity_client import capacity_binding_from_offer
+from apicredits_storefront.services.capacity_client import capacity_binding_from_listing_resource
 from apicredits_storefront.utils.config import (
     BASE_URL_OVERRIDE,
     resolve_registry_authorities,
@@ -31,19 +31,19 @@ class ApiCreditPublicationHooks:
         self._db = db
 
     def validate_candidate(self, candidate: PublicationCandidate[dict[str, Any]]) -> None:
-        offer = candidate.payload.get("listing_resource") or {}
-        if isinstance(offer, str):
+        listing_resource = candidate.payload.get("listing_resource") or {}
+        if isinstance(listing_resource, str):
             import json
-            offer = json.loads(offer)
-        if offer.get("offering_mode") != candidate.binding.offering_mode:
-            raise CapacityBindingError("API-credit offer mode differs from binding")
+            listing_resource = json.loads(listing_resource)
+        if listing_resource.get("offering_mode") != candidate.binding.offering_mode:
+            raise CapacityBindingError("API-credit listing_resource mode differs from binding")
 
     async def binding_for_listing(self, listing_id: str) -> CapacityBinding | None:
         row = await self._db.load_listing(listing_id=listing_id)
         if row is None:
             return None
         try:
-            return capacity_binding_from_offer(row.get("listing_resource") or {})
+            return capacity_binding_from_listing_resource(row.get("listing_resource") or {})
         except (ValueError, TypeError):
             return None
 

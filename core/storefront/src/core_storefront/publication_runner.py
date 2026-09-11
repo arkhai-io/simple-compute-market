@@ -328,8 +328,8 @@ def publish_round(
                 skipped.append(candidate)
                 continue
 
-            offer = source.listing_resource(candidate)
-            payload = build_payload(source, candidate, offer)
+            listing_resource = source.listing_resource(candidate)
+            payload = build_payload(source, candidate, listing_resource)
             if isinstance(payload, str):
                 failed.append((candidate, payload))
                 continue
@@ -351,7 +351,7 @@ def publish_round(
                         db_path,
                         base_url,
                         candidate,
-                        offer,
+                        listing_resource,
                         accepted_escrows,
                         demands,
                         max_duration_seconds,
@@ -363,7 +363,7 @@ def publish_round(
                         db_path,
                         base_url,
                         candidate,
-                        offer,
+                        listing_resource,
                         accepted_escrows,
                         demands,
                         max_duration_seconds,
@@ -396,7 +396,7 @@ def publish_round(
             try:
                 if extended_payload:
                     response = publish_listing(
-                        offer,
+                        listing_resource,
                         accepted_escrows,
                         demands,
                         max_duration_seconds,
@@ -405,7 +405,7 @@ def publish_round(
                     )
                 else:
                     response = publish_listing(
-                        offer,
+                        listing_resource,
                         accepted_escrows,
                         demands,
                         max_duration_seconds,

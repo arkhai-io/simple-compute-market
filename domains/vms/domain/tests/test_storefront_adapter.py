@@ -99,7 +99,7 @@ def test_vm_publication_adapter_fills_core_publication_source_slots() -> None:
 
 
 def test_vm_listing_resource_for_listing_builds_domain_payload() -> None:
-    offer = vm_listing_resource_for_listing({
+    listing_resource = vm_listing_resource_for_listing({
         "offering_mode": "vm",
         "pool_id": "pool-a",
         "resource_id": "host-a",
@@ -109,7 +109,7 @@ def test_vm_listing_resource_for_listing_builds_domain_payload() -> None:
         "region": "California, US",
     })
 
-    assert offer == {
+    assert listing_resource == {
         "offering_mode": "vm",
         "pool_id": "pool-a",
         "resource_id": "host-a",
@@ -121,7 +121,7 @@ def test_vm_listing_resource_for_listing_builds_domain_payload() -> None:
 
 
 def test_vm_listing_resource_for_listing_marks_interruptible() -> None:
-    offer = vm_listing_resource_for_listing(
+    listing_resource = vm_listing_resource_for_listing(
         {
             "offering_mode": "vm",
             "pool_id": "pool-a",
@@ -133,5 +133,5 @@ def test_vm_listing_resource_for_listing_marks_interruptible() -> None:
         interruptible=True,
     )
 
-    assert offer["interruptible"] is True
-    assert offer["settlement_model"] == "splitter_refund"
+    assert listing_resource["interruptible"] is True
+    assert listing_resource["settlement_model"] == "splitter_refund"

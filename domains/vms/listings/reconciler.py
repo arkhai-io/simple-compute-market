@@ -1219,14 +1219,14 @@ def closed_available_listing_ids(
     available: list[tuple[int, str]] = []
     for listing_id, raw, site_id in rows:
         try:
-            offer = json.loads(raw)
+            listing_resource = json.loads(raw)
         except (TypeError, json.JSONDecodeError):
             continue
-        if not isinstance(offer, dict):
+        if not isinstance(listing_resource, dict):
             continue
-        pool_id = offer.get("pool_id")
-        resource_id = offer.get("resource_id")
-        gpu_count = int(offer.get("gpu_count") or 1)
+        pool_id = listing_resource.get("pool_id")
+        resource_id = listing_resource.get("resource_id")
+        gpu_count = int(listing_resource.get("gpu_count") or 1)
         key = (
             listing_pool_key(str(site_id), str(pool_id), gpu_count)
             if pool_id and resource_id is None
@@ -1478,8 +1478,8 @@ def mark_derived_listings_closed(
             """,
             tuple(listing_ids),
         ).fetchall()
-        for listing_id, raw_offer, mapped_site_id in rows:
-            if not raw_offer:
+        for listing_id, raw_listing_resource, mapped_site_id in rows:
+            if not raw_listing_resource:
                 continue
             if mapped_site_id:
                 site_id = str(mapped_site_id)
@@ -1488,16 +1488,16 @@ def mark_derived_listings_closed(
             else:
                 continue
             try:
-                offer = json.loads(raw_offer)
+                listing_resource = json.loads(raw_listing_resource)
             except json.JSONDecodeError:
                 continue
-            if not isinstance(offer, dict):
+            if not isinstance(listing_resource, dict):
                 continue
-            pool_id = offer.get("pool_id")
-            resource_id = offer.get("resource_id")
+            pool_id = listing_resource.get("pool_id")
+            resource_id = listing_resource.get("resource_id")
             if not pool_id and not resource_id:
                 continue
-            gpu_count = int(offer.get("gpu_count") or 1)
+            gpu_count = int(listing_resource.get("gpu_count") or 1)
             key = (
                 listing_pool_key(site_id, str(pool_id), gpu_count)
                 if pool_id and (resource_id is None or str(pool_id) != str(resource_id))

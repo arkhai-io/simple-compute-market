@@ -174,10 +174,12 @@ and `design.md` — so "no behaviour change" is not its validation oracle.
   keeps its own identity and does not publish an offering-mode field.
 - Affected deployment: a storefront and its sites must deploy together for the claim
   wire, a storefront and its compute provisioning service together for the
-  provisioning contract, and buyer clients must move with the registries they query.
-  All three are true of every known deployment today. The three client distributions
+  provisioning contract, a storefront and its seller tooling together for the
+  listing-creation API — `POST /api/v1/listings/create` forbids unknown fields, so
+  the retired `offer` key is now rejected outright — and buyer clients must move with the registries they query.
+  All four are true of every known deployment today. The distributions whose public surface moves
   — `arkhai-core-registry-client`, `arkhai-core-storefront-client`, and
-  `arkhai-kit-site-client` — take a minor version bump, since a pre-rename client
+  `arkhai-core-storefront` — take a minor version bump, since a pre-rename client
   must not resolve against a post-rename service.
 - Affected persisted state: three column renames across three databases, two payload
   backfills, and three filter-specification version bumps.

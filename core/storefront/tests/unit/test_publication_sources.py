@@ -40,7 +40,7 @@ def test_publication_source_can_price_from_offer_payload() -> None:
         record_published=lambda _db_path, _candidate, _listing_id: None,
         reopen_existing=lambda *args: None,
         reopen_error_label="reopen demo listing",
-        pricing_resource=lambda _candidate, offer: offer,
+        pricing_resource=lambda _candidate, listing_resource: listing_resource,
     )
 
     assert source.pricing_resource(

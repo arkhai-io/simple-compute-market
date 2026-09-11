@@ -95,7 +95,7 @@ def test_registry_republication_replaces_the_complete_listing_payload():
     result = publication_cli._publish_registry_listing(
         Client(),
         listing_id="listing-1",
-        offer={"kind": "bare_metal.v1"},
+        listing_resource={"kind": "bare_metal.v1"},
         accepted_escrows=[],
         settlement_options=[{"option_id": "hosted-1"}],
         demands=[],
@@ -146,8 +146,8 @@ def test_core_runner_publishes_exact_opaque_bare_metal_payload(tmp_path):
                 [],
                 7200,
             ),
-            publish_listing=lambda offer, accepted, demands, maximum: (
-                offers.append((offer, accepted, demands, maximum))
+            publish_listing=lambda listing_resource, accepted, demands, maximum: (
+                offers.append((listing_resource, accepted, demands, maximum))
                 or {"listing_id": "listing-1", "status": "published"}
             ),
         ),
@@ -226,7 +226,7 @@ def test_one_shot_publication_builds_registry_from_runtime_domain(monkeypatch):
         "BARE_METAL_STOREFRONT_PUBLICATION_CLAUSES": "[]",
         "BARE_METAL_STOREFRONT_FUNDING_DEADLINES": "{}",
         "BARE_METAL_STOREFRONT_DEMANDS": "[]",
-        "BARE_METAL_STOREFRONT_OFFER_EXPIRES_AT": "2026-08-17T04:00:00Z",
+        "BARE_METAL_STOREFRONT_OPTION_EXPIRES_AT": "2026-08-17T04:00:00Z",
         "BARE_METAL_STOREFRONT_FULFILLMENT_DEADLINE": "2026-08-17T03:30:00Z",
         "BARE_METAL_STOREFRONT_MAX_DURATION_SECONDS": "3600",
     }.items():

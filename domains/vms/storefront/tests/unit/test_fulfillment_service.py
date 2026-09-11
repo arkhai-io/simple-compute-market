@@ -5,6 +5,10 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+
+from compute_provisioning.contracts import (
+    COMPUTE_PROVISIONING_CONTRACT_VERSION,
+)
 from market_identity import Ed25519Signer
 
 from market_fulfillment import VersionedEnvelope
@@ -337,7 +341,10 @@ async def test_vm_lease_registration_uses_common_compute_model(monkeypatch):
     )
 
     registration = captured["registration"]
-    assert registration.contract_version == "1.0"
+    assert (
+            registration.contract_version
+            == COMPUTE_PROVISIONING_CONTRACT_VERSION
+        )
     assert registration.capacity_reservation_id == "reservation-1"
     assert registration.deal_ref == {"escrow_uid": "escrow-1"}
     assert registration.offering_mode == "vm"

@@ -224,7 +224,7 @@ def listing_list(
     table.add_column("Created", justify="right")
 
     for row in items:
-        offer_display = format_resource(row.get("listing_resource", {}))
+        listing_display = format_resource(row.get("listing_resource", {}))
         accepted_display = format_accepted_escrows(row.get("accepted_escrows", []))
         demands_display = format_demands(row.get("demands", []))
         selected = row["_selected_settlement"].option
@@ -232,7 +232,7 @@ def listing_list(
             str(row.get("listing_id", "-")),
             str(row.get("publisher_id", "-")),
             shorten(str(row.get("storefront_url", "-")), 40),
-            offer_display if "\n" in offer_display else shorten(offer_display, 120),
+            listing_display if "\n" in listing_display else shorten(listing_display, 120),
             accepted_display
             if "\n" in accepted_display
             else shorten(accepted_display, 120),

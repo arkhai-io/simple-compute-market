@@ -442,7 +442,7 @@ class TestStage03c_BobPublishes:
 
         resp = storefront_admin_client.create_listing(
             agent_wallet_address=seller_wallet,
-            offer=BOB_OFFER,
+            listing_resource=BOB_OFFER,
             accepted_escrows=ACCEPTED_ESCROWS,
             max_duration_seconds=DURATION_HOURS * 3600,
             paused=True,
@@ -470,7 +470,7 @@ class TestStage03d_AlicePublishes:
 
         resp = alice_admin_client.create_listing(
             agent_wallet_address=alice_wallet,
-            offer=ALICE_OFFER,
+            listing_resource=ALICE_OFFER,
             accepted_escrows=ACCEPTED_ESCROWS,
             max_duration_seconds=DURATION_HOURS * 3600,
             paused=True,

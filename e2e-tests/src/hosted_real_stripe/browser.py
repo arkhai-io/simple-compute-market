@@ -431,7 +431,7 @@ def _fill_required(
 
 
 def _offered_inputs(page: Any) -> str:
-    """Name the input fields the page did offer, for a development run only.
+    """Name the input fields the page did listing_resource, for a development run only.
 
     A missing field says only that the page is not what the automation
     expected. Which fields it does present is the diagnosis. Field names are

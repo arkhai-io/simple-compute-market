@@ -327,7 +327,7 @@ class ListingService:
             raise ValueError(str(exc)) from exc
         return accepted, options
 
-    def _parse_offer_and_escrows(
+    def _parse_listing_resource_and_escrows(
         self, request: VmCreateListingRequest
     ) -> tuple[
         Any,
@@ -338,21 +338,21 @@ class ListingService:
         from domains.vms.listings.models import ComputeResource
 
         try:
-            normalized_offer = self._normalize_token_resource(request.listing_resource)
-            offering_mode = normalized_offer.get("offering_mode")
+            normalized_listing_resource = self._normalize_token_resource(request.listing_resource)
+            offering_mode = normalized_listing_resource.get("offering_mode")
             if offering_mode != self._binding.offering_mode:
                 raise ValueError(
                     "listing_resource.offering_mode must match the "
                     f"selected offering mode {self._binding.offering_mode!r}"
                 )
-            self._domain.codecs.listing(normalized_offer)
-            listing_resource = parse_resource_from_dict(normalized_offer)
+            self._domain.codecs.listing(normalized_listing_resource)
+            listing_resource = parse_resource_from_dict(normalized_listing_resource)
         except Exception as exc:
-            raise ValueError(f"Invalid offer resource: {exc}") from exc
+            raise ValueError(f"Invalid listing_resource resource: {exc}") from exc
         if not isinstance(listing_resource, ComputeResource):
             raise ValueError(
-                "Listing offer must be a compute resource (the buyer-as-maker "
-                "token-offer shape was removed with the demand_resource cutover)."
+                "Listing listing_resource must be a compute resource (the buyer-as-maker "
+                "token-listing_resource shape was removed with the demand_resource cutover)."
             )
         if not request.accepted_escrows and not getattr(request, "settlements", ()):
             raise ValueError("at least one settlement input is required")
@@ -390,8 +390,8 @@ class ListingService:
             request,
             composition=composition,
         )
-        offer, _accepted_inputs, _settlement_inputs, demands = (
-            self._parse_offer_and_escrows(request)
+        listing_resource, _accepted_inputs, _settlement_inputs, demands = (
+            self._parse_listing_resource_and_escrows(request)
         )
         accepted_escrows, settlement_options = await self._derive_settlement_artifacts(
             request,
@@ -403,7 +403,7 @@ class ListingService:
             listing_id=str(uuid.uuid4()),
             storefront_url=BASE_URL_OVERRIDE,
             seller_principal=self._marketplace_signer.identity,
-            listing_resource=offer,
+            listing_resource=listing_resource,
             accepted_escrows=accepted_escrows,
             settlement_options=settlement_options,
             demands=demands,
@@ -415,12 +415,12 @@ class ListingService:
 
         capacity_source = request.capacity_source.model_dump(mode="json")
         if (
-            capacity_source["pool_id"] != offer.pool_id
-            or capacity_source["resource_id"] != offer.resource_id
-            or capacity_source["gpu_count"] != offer.gpu_count
+            capacity_source["pool_id"] != listing_resource.pool_id
+            or capacity_source["resource_id"] != listing_resource.resource_id
+            or capacity_source["gpu_count"] != listing_resource.gpu_count
         ):
             raise ValueError(
-                "capacity source identity and gpu_count must match the offer resource"
+                "capacity source identity and gpu_count must match the listing_resource resource"
             )
         source_id = capacity_source["pool_id"] or capacity_source["resource_id"]
         self._capacity_runtime.require_binding(

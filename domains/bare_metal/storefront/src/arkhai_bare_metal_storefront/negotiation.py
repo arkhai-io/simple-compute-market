@@ -91,13 +91,13 @@ class _DefaultBareMetalSellerRoundHook:
         listing_ref: str | None = None,
         strategy_label: str | None = None,
     ) -> SellerRoundResult:
-        offer = _listing_resource(listing)
+        listing_resource = _listing_resource(listing)
         requested = BareMetalMessage.model_validate(message)
         strategy = strategy_label or "bare_metal_listed_price"
 
         if (
-            offer.min_duration_seconds is not None
-            and requested.duration_seconds < offer.min_duration_seconds
+            listing_resource.min_duration_seconds is not None
+            and requested.duration_seconds < listing_resource.min_duration_seconds
         ):
             return _rejected_result(
                 reason="bare_metal_duration_below_listing_min",
@@ -106,8 +106,8 @@ class _DefaultBareMetalSellerRoundHook:
                 message=requested,
             )
         if (
-            offer.max_duration_seconds is not None
-            and requested.duration_seconds > offer.max_duration_seconds
+            listing_resource.max_duration_seconds is not None
+            and requested.duration_seconds > listing_resource.max_duration_seconds
         ):
             return _rejected_result(
                 reason="bare_metal_duration_above_listing_max",
@@ -115,7 +115,7 @@ class _DefaultBareMetalSellerRoundHook:
                 strategy_label=strategy,
                 message=requested,
             )
-        if requested.access_method not in offer.access_methods:
+        if requested.access_method not in listing_resource.access_methods:
             return _rejected_result(
                 reason="bare_metal_access_method_not_listed",
                 seller_reference_amount=seller_reference_amount,
@@ -145,8 +145,8 @@ class _DefaultBareMetalSellerRoundHook:
             )
 
         terms = BareMetalTerms(
-            machine_id=offer.machine_id,
-            physical_host_id=offer.physical_host_id,
+            machine_id=listing_resource.machine_id,
+            physical_host_id=listing_resource.physical_host_id,
             duration_seconds=requested.duration_seconds,
             access_method=requested.access_method,
             ssh_public_key=requested.ssh_public_key,

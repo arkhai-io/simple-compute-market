@@ -245,7 +245,7 @@ def buy_bare_metal(
         allow_off_session=selected.params.get("interaction") == "saved_instrument",
     )
     hosted_option = validate_buyer_selection(demand=demand, advertised_options=options)
-    trusted_listing = BareMetalListing.model_validate(listing.offer)
+    trusted_listing = BareMetalListing.model_validate(listing.listing_resource)
     _validate_hosted_option_binding(
         trusted_listing,
         physical_host_id=facts.physical_host_id,

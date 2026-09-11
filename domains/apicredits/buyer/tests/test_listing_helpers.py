@@ -5,7 +5,7 @@ from __future__ import annotations
 from domains.apicredits.buyer.common import resolve_key_disposition
 from domains.apicredits.buyer.listing_cli import (
     format_accepted_escrows,
-    format_offer,
+    format_listing_resource,
     format_unit_price,
 )
 
@@ -33,7 +33,7 @@ _LISTING = {
 
 
 def test_offer_and_unit_price_rendering():
-    assert "weather-api" in format_offer(_LISTING["listing_resource"])
+    assert "weather-api" in format_listing_resource(_LISTING["listing_resource"])
     assert format_unit_price(_LISTING) == "3 / token"
     # Hidden reserve (no rates) renders as unpriced, not 0.
     assert format_unit_price({"accepted_escrows": [

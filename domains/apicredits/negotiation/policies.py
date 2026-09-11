@@ -206,8 +206,8 @@ def credit_quota_guard(
     context: NegotiationContext,
 ) -> NegotiationStep:
     """Veto when the quota snapshot can't cover the requested quantity."""
-    offer = coerce_resource_dict(context.listing.get("listing_resource"))
-    if offer.get("kind") != "api_credits.v1":
+    listing_resource = coerce_resource_dict(context.listing.get("listing_resource"))
+    if listing_resource.get("kind") != "api_credits.v1":
         return None, context
 
     quantity = context.intermediate.get("requested_quantity")
@@ -215,7 +215,7 @@ def credit_quota_guard(
         return None, context  # round-0 guard already rejected fresh threads
     quantity = int(quantity)
 
-    resource_id = offer.get("resource_id")
+    resource_id = listing_resource.get("resource_id")
     rows = (context.available_resources or {}).get("resources") or []
     for row in rows:
         if resource_id and str(row.get("resource_id")) != str(resource_id):

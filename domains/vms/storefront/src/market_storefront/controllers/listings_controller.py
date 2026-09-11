@@ -299,7 +299,7 @@ class AdminListingsController:
     @admin_router.post(
         "/{listing_id}/evaluate-negotiate",
         response_model=EvaluateNegotiateResponse,
-        summary="What would the negotiation strategy decide for this buyer offer? (no side effects)",
+        summary="What would the negotiation strategy decide for this buyer listing_resource? (no side effects)",
     )
     async def evaluate_negotiate(
         self, listing_id: str, body: EvaluateNegotiateRequest

@@ -179,9 +179,9 @@ def test_interruptible_listing_resource_is_marked():
         "market_storefront.utils.config.settings",
         _settings(interruptible=True),
     ):
-        offer = _listing_resource_for_listing(resource)
-    assert offer["interruptible"] is True
-    assert offer["settlement_model"] == "splitter_refund"
+        listing_resource = _listing_resource_for_listing(resource)
+    assert listing_resource["interruptible"] is True
+    assert listing_resource["settlement_model"] == "splitter_refund"
 
 
 def _artifacts(demands, heartbeat_interval=60, chain_config_paths=None):

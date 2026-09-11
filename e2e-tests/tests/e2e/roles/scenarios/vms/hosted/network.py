@@ -707,7 +707,7 @@ class NetworkMarketplacePort:
 
     def create_and_publish_listing(self) -> ListingSnapshot:
         created = self.seller.create_listing(
-            offer={**_OFFER, "resource_id": self._resource_id},
+            listing_resource={**_OFFER, "resource_id": self._resource_id},
             capacity_source={
                 "site_id": self._site_id,
                 "resource_id": self._resource_id,

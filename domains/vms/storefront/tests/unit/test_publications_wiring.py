@@ -186,7 +186,7 @@ def test_listing_validation_uses_the_exact_injected_codec(tmp_path) -> None:
         settlement_composition_provider=lambda: object(),
     )
 
-    service._parse_offer_and_escrows(
+    service._parse_listing_resource_and_escrows(
         CreateListingRequest(
             listing_resource={
                 "resource_type": "compute",

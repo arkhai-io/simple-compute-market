@@ -32,7 +32,7 @@ def accepted_binding() -> BareMetalAcceptedHostedBinding:
         physical_resource_id="resource-a",
         physical_host_id="host-a",
         pool_id="pool-a",
-        offer_expires_at=NOW + timedelta(hours=2),
+        option_expires_at=NOW + timedelta(hours=2),
         funding_deadline=NOW + timedelta(minutes=30),
         fulfillment_deadline=NOW + timedelta(hours=1),
     )

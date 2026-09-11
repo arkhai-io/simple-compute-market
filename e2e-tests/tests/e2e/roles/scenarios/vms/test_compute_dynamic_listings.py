@@ -132,7 +132,7 @@ class TestComputeDynamicListings:
         for gpu_count in range(1, 5):
             resp = storefront_admin_client.create_listing(
                 agent_wallet_address=seller_wallet,
-                offer=_offer(gpu_count),
+                listing_resource=_offer(gpu_count),
                 accepted_escrows=ACCEPTED_ESCROWS,
                 max_duration_seconds=3600,
             )
@@ -268,7 +268,7 @@ class TestFungibleComputeDynamicListings:
         for gpu_count in range(1, 5):
             resp = storefront_admin_client.create_listing(
                 agent_wallet_address=seller_wallet,
-                offer=_pool_offer(gpu_count),
+                listing_resource=_pool_offer(gpu_count),
                 accepted_escrows=ACCEPTED_ESCROWS,
                 max_duration_seconds=3600,
             )

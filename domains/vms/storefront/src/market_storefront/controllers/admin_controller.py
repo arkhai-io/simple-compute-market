@@ -603,8 +603,8 @@ class AdminController:
         listing: dict[str, Any],
         thread: dict[str, Any] | None,
     ) -> bool:
-        offer = self._json_object(listing.get("listing_resource"))
-        if offer.get("interruptible") is True:
+        listing_resource = self._json_object(listing.get("listing_resource"))
+        if listing_resource.get("interruptible") is True:
             return True
 
         proposal = (thread or {}).get("buyer_escrow_proposal")

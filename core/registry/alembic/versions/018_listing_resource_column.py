@@ -3,7 +3,7 @@
 Revision ID: 018_listing_resource_column
 Revises: 017_publisher_replay_leases
 
-A seller's published shape is a listing; ``offer`` names a negotiation message
+A seller's published shape is a listing; ``listing_resource`` names a negotiation message
 either party sends. The column is renamed rather than mapped at the boundary
 because a search for the retired name across the codebase is this rename's
 verification strategy, and a surviving column keeps producing hits an auditor

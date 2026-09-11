@@ -14,7 +14,8 @@ install: ## Install dependencies using uv
 reinit: ## Force-reinstall internal wheels without bumping versions. Run make dist-* from the monorepo root first.
 	uv sync --dev --find-links $(DIST_DIR) \
 		--upgrade-package arkhai-kit-identity --reinstall-package arkhai-kit-identity \
-		--upgrade-package arkhai-kit-site --reinstall-package arkhai-kit-site
+		--upgrade-package arkhai-kit-site --reinstall-package arkhai-kit-site \
+		--upgrade-package arkhai-kit-resource-pools --reinstall-package arkhai-kit-resource-pools
 
 test: reinit ## Run the test suite
 	PYTHONPATH=src uv run --find-links $(DIST_DIR) pytest src/tests -q

@@ -51,9 +51,16 @@ def _action(**overrides):
     return ExecutorActionEnvelope(**values)
 
 
-def test_contract_rejects_unsupported_major_version():
-    with pytest.raises(ValidationError, match="supported majors: 1"):
-        _action(contract_version="2.0")
+def test_contract_rejects_the_retired_major_version():
+    """A 1.x caller carries the retired offering-mode spelling, so the
+    contract refuses it rather than coercing it."""
+    with pytest.raises(ValidationError, match="supported majors: 2"):
+        _action(contract_version="1.0")
+
+
+def test_contract_rejects_an_unsupported_future_major_version():
+    with pytest.raises(ValidationError, match="supported majors: 2"):
+        _action(contract_version="3.0")
 
 
 @pytest.mark.asyncio

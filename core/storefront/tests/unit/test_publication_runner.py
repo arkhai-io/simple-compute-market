@@ -41,10 +41,10 @@ def _payload(*_args):
     return ([{"escrow": "e"}], [{"demand": "d"}], 60)
 
 
-def _publish(offer, *_args):
+def _publish(listing_resource, *_args):
     return {
         "status": "published",
-        "listing_id": f"listing-{offer['resource_id']}",
+        "listing_id": f"listing-{listing_resource['resource_id']}",
     }
 
 
@@ -168,9 +168,9 @@ def test_run_publication_cycle_closes_stale_and_skips_open_keys() -> None:
 def test_typed_payload_keeps_settlement_options_independent() -> None:
     captured: dict[str, Any] = {}
 
-    def publish(offer, accepted_escrows, demands, maximum, **kwargs):
+    def publish(listing_resource, accepted_escrows, demands, maximum, **kwargs):
         captured.update(
-            offer=offer,
+            listing_resource=listing_resource,
             accepted_escrows=accepted_escrows,
             demands=demands,
             maximum=maximum,

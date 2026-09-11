@@ -93,14 +93,14 @@ def build_capacity_client(sqlite_client_factory: SQLiteClientFactory) -> Aggrega
     return build_capacity_runtime(sqlite_client_factory).client()
 
 
-def capacity_binding_from_offer(offer: dict[str, Any] | str) -> CapacityBinding:
-    if isinstance(offer, str):
+def capacity_binding_from_listing_resource(listing_resource: dict[str, Any] | str) -> CapacityBinding:
+    if isinstance(listing_resource, str):
         import json
-        offer = json.loads(offer)
+        listing_resource = json.loads(listing_resource)
     return CapacityBinding(
-        str(offer.get("capacity_site_id") or ""),
-        str(offer.get("offering_mode") or ""),
-        str(offer.get("resource_id") or ""),
+        str(listing_resource.get("capacity_site_id") or ""),
+        str(listing_resource.get("offering_mode") or ""),
+        str(listing_resource.get("resource_id") or ""),
     )
 
 

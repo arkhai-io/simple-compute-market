@@ -816,7 +816,7 @@ class TestCreateListing:
         self,
         seller_auth_full_client,
     ):
-        """A compute offer with no pool_id and no resource_id can't be
+        """A compute listing_resource with no pool_id and no resource_id can't be
         reliably matched to inventory at reservation time and must be
         rejected at creation rather than published."""
         c, _ = seller_auth_full_client
@@ -833,7 +833,7 @@ class TestCreateListing:
         assert "400" in str(exc_info.value)
 
     async def test_resource_id_only_offer_succeeds(self, seller_auth_full_client):
-        """A resource_id-only offer (no pool_id) is a legitimate
+        """A resource_id-only listing_resource (no pool_id) is a legitimate
         specific-resource listing, not an error."""
         c, _ = seller_auth_full_client
         assert "pool_id" not in _OFFER  # confirms this case is what's exercised
@@ -864,7 +864,7 @@ class TestCreateListing:
                 paused=True,
             )
         assert "400" in str(exc_info.value)
-        assert "must match the offer resource" in str(exc_info.value)
+        assert "must match the listing_resource resource" in str(exc_info.value)
 
     async def test_listing_persisted_in_db(self, seller_auth_full_client):
         """Created listing returns a non-None listing_id in the response.

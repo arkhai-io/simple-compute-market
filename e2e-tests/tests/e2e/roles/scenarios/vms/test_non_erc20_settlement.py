@@ -311,7 +311,7 @@ def test_scalar_non_erc20_settlement_reaches_ready(
 
     listing_resp = storefront_admin_client.create_listing(
         agent_wallet_address=seller_wallet,
-        offer=_offer(case),
+        listing_resource=_offer(case),
         accepted_escrows=_accepted_escrows(case),
         demands=_recipient_demands(seller_wallet),
         max_duration_seconds=_DURATION_SECONDS,

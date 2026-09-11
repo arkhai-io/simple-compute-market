@@ -65,7 +65,7 @@ def vm_listing_resource_for_listing(
     interruptible: bool = False,
 ) -> dict[str, Any]:
     """Build the VM-domain listing payload for a publication candidate."""
-    offer = {
+    listing_resource = {
         "pool_id": candidate.get("pool_id"),
         "gpu_model": candidate["gpu_model"],
         "gpu_count": candidate["gpu_count"],
@@ -74,11 +74,11 @@ def vm_listing_resource_for_listing(
         "offering_mode": candidate["offering_mode"],
     }
     if candidate.get("resource_id"):
-        offer["resource_id"] = candidate["resource_id"]
+        listing_resource["resource_id"] = candidate["resource_id"]
     if interruptible:
-        offer["interruptible"] = True
-        offer["settlement_model"] = "splitter_refund"
-    return offer
+        listing_resource["interruptible"] = True
+        listing_resource["settlement_model"] = "splitter_refund"
+    return listing_resource
 
 
 def vm_publication_adapter(

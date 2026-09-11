@@ -519,7 +519,7 @@ class SettlementAbandonmentHook(Protocol):
 
     ``market_site`` must not import ``market_fulfillment`` (see
     ``openspec/specs/fulfillment/spec.md#dependency-boundary``), so this
-    protocol lets ``CapacityLedgerService`` offer every capacity-reclaiming
+    protocol lets ``CapacityLedgerService`` listing_resource every capacity-reclaiming
     site a chance to react without knowing what "settlement" or
     "fulfillment" mean. The concrete implementation is supplied by
     ``market_fulfillment`` at composition time and decides on its own

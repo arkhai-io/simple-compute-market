@@ -12,7 +12,7 @@ from typing import Any
 from apicredits_storefront.services.capacity_client import (
     build_capacity_client,
     build_capacity_runtime,
-    capacity_binding_from_offer,
+    capacity_binding_from_listing_resource,
 )
 from apicredits_storefront.services.keys_lookup import lookup_key_record
 from apicredits_storefront.utils.config import CHAINS, settings
@@ -517,15 +517,15 @@ async def _place_quota_hold(
     if ttl <= 0 or not quantity:
         return
     try:
-        offer = coerce_resource_dict(acceptance.listing_record.get("listing_resource"))
+        listing_resource = coerce_resource_dict(acceptance.listing_record.get("listing_resource"))
         claim: dict[str, Any] = {
             "offering_mode": "api_credits",
             "units": int(quantity),
         }
-        if offer.get("resource_id"):
-            claim["resource_id"] = str(offer["resource_id"])
+        if listing_resource.get("resource_id"):
+            claim["resource_id"] = str(listing_resource["resource_id"])
         capacity = build_capacity_runtime(lambda: repository)
-        binding = capacity_binding_from_offer(offer)
+        binding = capacity_binding_from_listing_resource(listing_resource)
         held = await capacity.reserve(
             binding,
             claim=claim,

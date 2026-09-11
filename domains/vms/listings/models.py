@@ -589,7 +589,7 @@ class Listing(BaseModel):
     )
 
     @model_validator(mode="after")
-    def validate_compute_offer_identity(self) -> "Listing":
+    def validate_compute_listing_identity(self) -> "Listing":
         """Require a valid storefront capacity identity for compute listings.
 
         ``ComputeResource`` is also used outside listing publication, so this

@@ -135,7 +135,7 @@ def test_listing_service_validates_offer_through_injected_domain() -> None:
     )
 
     with pytest.raises(ValueError, match="listing_resource must include gpu_model"):
-        service._parse_offer_and_escrows(
+        service._parse_listing_resource_and_escrows(
             CreateListingRequest(
                 listing_resource={"gpu_count": 1, "offering_mode": "vm"},
                 accepted_escrows=_ACCEPTED_ESCROWS,

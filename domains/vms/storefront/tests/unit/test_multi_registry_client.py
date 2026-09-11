@@ -406,7 +406,7 @@ class TestPublishListingPerRegistry:
         assert [r["registry_assigned_id"] for r in results] == ["r1-id", "r2-id"]
         # The per-registry payload is preserved on the result so the
         # caller can persist it without re-deriving. ListingRequest's
-        # to_dict serialises offer→listing_resource (the registry-wire key).
+        # to_dict serialises listing_resource→listing_resource (the registry-wire key).
         assert results[0]["payload"]["listing_resource"] == {"variant": "r1"}
         assert results[1]["payload"]["listing_resource"] == {"variant": "r2"}
 

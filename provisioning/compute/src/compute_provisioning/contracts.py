@@ -10,8 +10,13 @@ from pydantic import BaseModel, Field, model_validator
 
 from market_fulfillment import VersionedEnvelope
 
-COMPUTE_PROVISIONING_CONTRACT_VERSION = "1.0"
-SUPPORTED_COMPUTE_PROVISIONING_MAJOR_VERSIONS = frozenset({1})
+# Major 1 named the required selector on every model below differently, so a
+# 1.x caller sends a field this contract does not accept. It is refused rather
+# than coerced: honouring it would mean accepting a second name for the
+# offering mode, which is what this contract's one-name rule forbids.
+# See openspec/specs/compute-provisioning-contract/spec.md.
+COMPUTE_PROVISIONING_CONTRACT_VERSION = "2.0"
+SUPPORTED_COMPUTE_PROVISIONING_MAJOR_VERSIONS = frozenset({2})
 
 
 def contract_major(version: str) -> int:
@@ -35,11 +40,6 @@ class VersionedContractModel(BaseModel):
     def _validate_contract_version(self) -> "VersionedContractModel":
         contract_major(self.contract_version)
         return self
-
-
-class ExecutorKind(str, Enum):
-    VM = "vm"
-    BARE_METAL = "bare_metal"
 
 
 class JobState(str, Enum):

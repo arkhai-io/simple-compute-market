@@ -12,12 +12,20 @@ from __future__ import annotations
 
 import json
 
+import pytest
 from sqlalchemy import create_engine, text
+from sqlalchemy.orm import Session
 from sqlalchemy.pool import StaticPool
 
-from sqlalchemy.orm import Session
-
 from market_fulfillment.db import SettlementRecord
+from market_fulfillment.settlement_repository import (
+    SettlementRepository,
+    SettlementRequestMismatchError,
+)
+from market_fulfillment.settlement_types import (
+    SettlementRequirement,
+    SettlementResource,
+)
 
 from compute_provisioning_service.db.migrations import (
     _migrate_reservation_offering_mode_name,
@@ -75,6 +83,27 @@ def _requirement(engine, reservation_id, payload):
             )
         )
         session.commit()
+
+
+def _requirement_row(connection, reservation_id, payload):
+    """Insert a settlement row with an exact payload, bypassing the ORM.
+
+    The ORM would re-serialize through `SettlementRequirement` and so could
+    never produce the retired key; a pre-upgrade row has to be written as
+    stored bytes.
+    """
+    connection.execute(
+        text(
+            # Every NOT NULL column without a server default is supplied
+            # explicitly, because a raw insert bypasses the Python-side
+            # defaults the ORM would apply.
+            "INSERT INTO settlement_records "
+            "(capacity_reservation_id, market, scheduling_requirements, "
+            "provider_metadata, state, attempt_count) "
+            "VALUES (:rid, 'vms', :payload, '{}', 'assigned', 0)"
+        ),
+        {"rid": reservation_id, "payload": json.dumps(payload, sort_keys=True)},
+    )
 
 
 def _columns(engine, table):
@@ -232,6 +261,91 @@ class TestSchedulingRequirementsBackfill:
                 ).scalar()
             )
         assert payload == {"offering_mode": "vm"}
+
+
+class TestRetriedSettlementRecognisesItsOwnRequest:
+    """Closes 9.10 through the real idempotency path, not by payload shape.
+
+    `SettlementRepository.schedule` compares a freshly serialized
+    `SettlementRequirement` against the stored payload and returns the existing
+    aggregate on an equivalent retry. Asserting the migrated payload's *shape*
+    proves the backfill ran; only driving `schedule` proves the comparison the
+    backfill exists to protect still succeeds afterwards.
+    """
+
+    def _requirement(self):
+        return SettlementRequirement(
+            offering_mode="vm",
+            resource_kind="gpu_host",
+            dimensions={"gpu_count": 1},
+        )
+
+    def _resource(self):
+        return SettlementResource(
+            offering_mode="vm",
+            settlement_resource_id="res-1",
+            pool_id="pool-1",
+            resource_kind="gpu_host",
+            provider="ansible",
+            dimensions={"gpu_count": 1},
+        )
+
+    def test_a_settlement_written_before_the_upgrade_is_recognised_after_it(self):
+        engine = _pre_upgrade_engine()
+        requirement = self._requirement()
+
+        # A pre-upgrade row: the same requirement, serialized under the
+        # retired key, exactly as the previous version would have stored it.
+        pre_upgrade = requirement.model_dump(mode="json")
+        pre_upgrade["executor_kind"] = pre_upgrade.pop("offering_mode")
+        with engine.begin() as connection:
+            _requirement_row(connection, "r-retry", pre_upgrade)
+
+        _migrate_reservation_offering_mode_name(engine)
+
+        repository = SettlementRepository()
+        with Session(engine) as session:
+            record = repository.schedule(
+                session,
+                capacity_reservation_id="r-retry",
+                market="vms",
+                scheduling_requirements=requirement,
+                resource=self._resource(),
+            )
+            session.commit()
+
+            # Recognised as the same request: the existing aggregate is
+            # returned rather than a second one being created.
+            assert record.capacity_reservation_id == "r-retry"
+            assert session.query(SettlementRecord).count() == 1
+
+    def test_without_the_backfill_the_retry_is_refused_not_duplicated(self):
+        """The negative control, and it corrects the expected failure mode.
+
+        Without the backfill the stored payload does not compare equal, so
+        `schedule` raises `SettlementRequestMismatchError` -- it does **not**
+        silently create a second assignment. The unmigrated hazard is a
+        retried settlement that fails closed, not one that double-submits.
+        """
+
+        engine = _pre_upgrade_engine()
+        requirement = self._requirement()
+        pre_upgrade = requirement.model_dump(mode="json")
+        pre_upgrade["executor_kind"] = pre_upgrade.pop("offering_mode")
+        with engine.begin() as connection:
+            _requirement_row(connection, "r-stale", pre_upgrade)
+
+        # Migration deliberately not run.
+        repository = SettlementRepository()
+        with Session(engine) as session:
+            with pytest.raises(SettlementRequestMismatchError):
+                repository.schedule(
+                    session,
+                    capacity_reservation_id="r-stale",
+                    market="vms",
+                    scheduling_requirements=requirement,
+                    resource=self._resource(),
+                )
 
 
 class TestCutoverGate:

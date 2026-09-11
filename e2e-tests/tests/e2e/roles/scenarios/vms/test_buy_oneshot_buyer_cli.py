@@ -191,7 +191,7 @@ class TestStageB2_PublishListing:
 
         resp = storefront_admin_client.create_listing(
             agent_wallet_address=seller_wallet,
-            offer=OFFER_RESOURCE,
+            listing_resource=OFFER_RESOURCE,
             accepted_escrows=ACCEPTED_ESCROWS,
             demands=_recipient_demands(seller_wallet),
             max_duration_seconds=DURATION_HOURS * 3600,

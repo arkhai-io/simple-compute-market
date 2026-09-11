@@ -127,7 +127,7 @@ class TokenResource(Resource):
       * positive integer — the public price (the seller advertises this
         floor and uses it as the negotiation anchor).
       * ``0`` — free / public-test offering (the seller advertises zero
-        cost; strategy accepts any non-negative offer).
+        cost; strategy accepts any non-negative listing_resource).
       * ``None`` — hidden reserve (the seller publishes the listing without
         advertising a price; the negotiation strategy falls back to
         ``[seller.pricing].default_min_price`` for the floor; buyer must

@@ -265,7 +265,7 @@ The hint that governs how many candidates a pool yields is named `listing_cardin
 
 | Open gap | Owned by |
 |---|---|
-| Four names refer to the offering mode and `offer` refers to three different things, so this goal's new published fields would land under names about to change | [`settle-listing-vocabulary`](../../openspec/changes/settle-listing-vocabulary/) |
+| ~~Four names refer to the offering mode and `offer` refers to three different things~~ — closed: the offering mode is `offering_mode` on every surface, a seller's published shape is `listing_resource`, and `offer` means a negotiation message | [`settle-listing-vocabulary`](../../openspec/changes/settle-listing-vocabulary/) |
 | A pool can only authorize a mode its provider proves it can deliver, so a seller with no execution integration can advertise nothing, and no pool can say whether it can be admitted against at all | [`pool-declared-advertisement-and-backing`](../../openspec/changes/pool-declared-advertisement-and-backing/) |
 | A declared capacity resource with no host reaches no storefront, because the projection enumerates host inventory | [`project-capacity-resources-without-hosts`](../../openspec/changes/project-capacity-resources-without-hosts/) |
 | An unbacked listing has no legal binding shape, listing origin is not distinguished from admission authority, and the compute registry schema carries no backing field | [`unbacked-listing-publication`](../../openspec/changes/unbacked-listing-publication/) |

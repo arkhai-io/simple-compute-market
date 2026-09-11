@@ -89,7 +89,7 @@ def test_clause_only_listing_request_is_a_valid_publication_input() -> None:
         settlement_composition_provider=lambda: object(),
     )
 
-    _offer, accepted, options, _demands = service._parse_offer_and_escrows(request)
+    _offer, accepted, options, _demands = service._parse_listing_resource_and_escrows(request)
 
     assert accepted == []
     assert options == []

@@ -143,7 +143,7 @@ def _publish_registry_listing(
     client: SyncRegistryClient,
     *,
     listing_id: str,
-    offer: dict[str, Any],
+    listing_resource: dict[str, Any],
     accepted_escrows: list[dict[str, Any]],
     settlement_options: list[dict[str, Any]],
     demands: list[dict[str, Any]],
@@ -153,7 +153,7 @@ def _publish_registry_listing(
     response = client.publish_listing(
         ListingRequest(
             listing_id=listing_id,
-            listing_resource=offer,
+            listing_resource=listing_resource,
             accepted_escrows=accepted_escrows,
             settlement_options=settlement_options,
             demands=demands,
@@ -188,7 +188,7 @@ def run_publication_once() -> dict[str, Any]:
     demands = _json_env("BARE_METAL_STOREFRONT_DEMANDS")
     if not isinstance(demands, list):
         raise RuntimeError("BARE_METAL_STOREFRONT_DEMANDS must be a JSON list")
-    offer_expiry = _instant("BARE_METAL_STOREFRONT_OFFER_EXPIRES_AT")
+    option_expiry = _instant("BARE_METAL_STOREFRONT_OPTION_EXPIRES_AT")
     fulfillment_deadline = _instant("BARE_METAL_STOREFRONT_FULFILLMENT_DEADLINE")
     max_duration = int(os.environ["BARE_METAL_STOREFRONT_MAX_DURATION_SECONDS"])
 
@@ -224,14 +224,14 @@ def run_publication_once() -> dict[str, Any]:
     publication_candidates: dict[int, dict[str, Any]] = {}
 
     def build_payload(
-        _source: Any, candidate: dict[str, Any], offer: dict[str, Any]
+        _source: Any, candidate: dict[str, Any], listing_resource: dict[str, Any]
     ) -> Any:
-        publication_candidates[id(offer)] = candidate
+        publication_candidates[id(listing_resource)] = candidate
         return asyncio.run(
             runtime.settlement_composition.publication_payload(
                 candidate=candidate,
                 clauses=clauses,
-                offer_expires_at=offer_expiry,
+                option_expires_at=option_expiry,
                 funding_deadlines=funding_deadlines,
                 fulfillment_deadline=fulfillment_deadline,
                 demands=demands,
@@ -240,7 +240,7 @@ def run_publication_once() -> dict[str, Any]:
         )
 
     def publish_listing(
-        offer: dict[str, Any],
+        listing_resource: dict[str, Any],
         accepted_escrows: list[dict[str, Any]],
         published_demands: list[dict[str, Any]],
         duration: int | None,
@@ -248,21 +248,21 @@ def run_publication_once() -> dict[str, Any]:
         settlement_options: list[dict[str, Any]] | None = None,
         publication_clauses: list[dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
-        candidate = publication_candidates.pop(id(offer), None)
+        candidate = publication_candidates.pop(id(listing_resource), None)
         if candidate is None:
             raise RuntimeError("publication candidate binding is unavailable")
         listing_id = uuid.uuid4().hex
         _publish_registry_listing(
             client,
             listing_id=listing_id,
-            listing_resource=offer,
+            listing_resource=listing_resource,
             accepted_escrows=accepted_escrows,
             settlement_options=settlement_options or [],
             demands=published_demands,
             max_duration_seconds=duration,
             storefront_url=runtime.storefront_url,
         )
-        raw_listing = dict(offer)
+        raw_listing = dict(listing_resource)
         raw_listing.pop("offering_mode", None)
         raw_listing["max_duration_seconds"] = duration
         now = datetime.now(timezone.utc).isoformat()

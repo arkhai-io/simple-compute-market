@@ -285,7 +285,7 @@ VM and bare-metal execution MUST consume the common compute-provisioning envelop
 
 ### Requirement: Compute-owned caller contract
 
-Shared storefront/provisioner DTOs, executor-neutral resource-pool models, and generic client behavior MUST be owned by compute provisioning rather than the VM domain, while direct VM operator APIs MAY retain VM-owned host, VM action, Ansible job, credential, and lease models.
+Shared storefront/provisioner DTOs, offering-mode-neutral resource-pool models, and generic client behavior MUST be owned by compute provisioning rather than the VM domain, while direct VM operator APIs MAY retain VM-owned host, VM action, Ansible job, credential, and lease models.
 
 #### Scenario: Bare-metal storefront installs the shared client
 
@@ -295,7 +295,7 @@ Shared storefront/provisioner DTOs, executor-neutral resource-pool models, and g
 #### Scenario: Provisioning service exposes resource-pool administration
 
 - **WHEN** the VM operator client or provisioning service creates, validates, imports, or returns a resource-pool model
-- **THEN** that executor-neutral model resolves from `compute_provisioning` without depending on a VM-domain generic provisioning-client package
+- **THEN** that offering-mode-neutral model resolves from `compute_provisioning` without depending on a VM-domain generic provisioning-client package
 
 ### Requirement: Compute-owned provisioning service
 

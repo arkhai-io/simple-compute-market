@@ -55,9 +55,9 @@ def build_bare_metal_publication_selection(
         )
 
     def listing_resource(candidate: dict[str, Any]) -> dict[str, Any]:
-        offer = source.listing_resource(candidate)
-        offer["offering_mode"] = registration.binding.offering_mode
-        return offer
+        listing_resource = source.listing_resource(candidate)
+        listing_resource["offering_mode"] = registration.binding.offering_mode
+        return listing_resource
 
     return PublicationSourceSelection(
         sources=(replace(source, listing_resource=listing_resource),),

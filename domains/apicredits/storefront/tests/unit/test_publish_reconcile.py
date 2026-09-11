@@ -153,14 +153,14 @@ async def test_publish_from_quota_requires_registered_sellable_resource(
     # Registry discovery is disabled in tests; the local row is the artifact.
     row = await db.load_listing(listing_id=result["listing_id"])
     assert row["status"] == "open"
-    offer = row["listing_resource"]
-    offer = json.loads(offer) if isinstance(offer, str) else offer
-    assert offer["resource_id"] == "svc-quota"
-    assert offer["capacity_site_id"] == "tokens"
-    assert offer["offering_mode"] == "api_credits"
-    assert offer["kind"] == "api_credits.v1"
-    assert offer["service_name"] == "Acme Inference"
-    assert offer["description"] is None
+    listing_resource = row["listing_resource"]
+    listing_resource = json.loads(listing_resource) if isinstance(listing_resource, str) else listing_resource
+    assert listing_resource["resource_id"] == "svc-quota"
+    assert listing_resource["capacity_site_id"] == "tokens"
+    assert listing_resource["offering_mode"] == "api_credits"
+    assert listing_resource["kind"] == "api_credits.v1"
+    assert listing_resource["service_name"] == "Acme Inference"
+    assert listing_resource["description"] is None
 
     with pytest.raises(ValueError, match="no sellable units"):
         await svc.publish_from_quota(

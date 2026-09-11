@@ -211,8 +211,19 @@ migration, much cheaper verification.
 `record.scheduling_requirements == serialized_requirements` — a structural dict
 comparison against the persisted column, doing settlement idempotency work. A
 pre-upgrade `{"executor_kind": "vm"}` is not equal to a newly serialized
-`{"offering_mode": "vm"}`, so a retried settlement after upgrade would stop
-recognizing its own request and re-submit. Leaving the stored payload and
+`{"offering_mode": "vm"}`, so a retried settlement after upgrade would not
+recognize its own request.
+
+**The consequence is narrower than this reasoning first claimed, and testing it
+is what corrected that.** The first draft said the retry would re-submit. It
+does not: `SettlementRepository.schedule` raises
+`SettlementRequestMismatchError` when the stored requirements do not compare
+equal, so an unmigrated retry **fails closed** rather than creating a second
+assignment. The backfill is still required — a refused retry strands that deal —
+but it prevents a stuck settlement, not duplicate provisioning. The overstated
+hazard would have justified the same work for a reason that is not true.
+
+Leaving the stored payload and
 normalizing at comparison time was the alternative; rejected because it is a
 permanent piece of compatibility code carrying a retired name forever, which is the
 opposite of what this change is for.
@@ -226,11 +237,11 @@ the boundary before the cutover.
 ### The cardinality hint's derived names move with it, including the status field
 
 The hint is not only a policy-tag key. The name propagates into a module
-(`domains/vms/listings/listing_mode.py`), a resolver (`resolve_vm_listing_mode`), a
+(the retired `listing_mode` module path), a resolver (`resolve_vm_listing_mode`), a
 kit reader (`raw_listing_mode`, `LISTING_MODE_POLICY_TAG`), two reconciler row keys
 (`listing_mode` and `listing_mode_explanation`), and one HTTP response field —
 `listing_mode_explanations` on `GET /api/v1/system/status`, modelled in
-`core/storefront/models/system_models.py` and read back through
+`core/storefront/src/core_storefront/models/system_models.py` and read back through
 `core/storefront-client`.
 
 All of them move. The resolver becomes `resolve_vm_listing_cardinality_mode`, the
@@ -291,7 +302,7 @@ already edits. Note it is a different axis from the offering mode and never was 
 fourth name for it.
 
 **Client distributions take a minor version bump.** `arkhai-core-registry-client`
-(0.11.0), `arkhai-core-storefront-client` (0.17.0), and `arkhai-kit-site-client`
+(0.11.0), `arkhai-core-storefront-client` (0.17.0), and `arkhai-kit-site-client` (unchanged: schema-opaque to the claim)
 (0.2.0) all change public surface — renamed attributes, renamed response fields, a
 dropped field. Callers must not resolve a pre-rename client against a post-rename
 service, and the version is the only signal that carries that.
@@ -358,6 +369,103 @@ rename spanning four packages and 51 files of `offer_resource`, and Goal 7 loses
 one change previously assessed as ready to implement. The trade is accepted because
 the alternative is doing the rename against more code, later, with a compatibility
 window that does not exist yet.
+
+### Decisions taken after code review
+
+Code review found three production defects and a contaminated validation
+baseline. The findings are accepted in full; these are the decisions they force.
+
+#### The provisioning contract goes to 2.0 only, not 2.0-with-1.x
+
+Seven models renamed a required field while
+`COMPUTE_PROVISIONING_CONTRACT_VERSION` stayed at `"1.0"` with supported majors
+`{1}`. The permanent specification this change promoted requires the advance, so
+production currently contradicts a rule this change wrote.
+
+The contract becomes `"2.0"` with supported majors `{2}` — not `{1, 2}`.
+Accepting 1.x would mean accepting `executor_kind` on the envelope, which is the
+second spelling the change exists to remove, and the deployment posture already
+assumes a storefront and its provisioning service move together. A caller pinned
+to 1.x must be refused with actionable version information, which is what the
+contract's own incompatibility requirement already demands.
+
+#### `ExecutorKind` is deleted, not renamed
+
+`compute_provisioning.contracts.ExecutorKind` has values `vm | bare_metal` —
+the offering mode under a retired head noun — and is exported with no in-repo
+consumer beyond that export.
+
+It is deleted. An earlier draft renamed it to a package-local `OfferingMode`,
+reasoning that deleting exported public surface would need a major-version
+advance to justify it. That reasoning was self-defeating: this change *is*
+advancing the provisioning contract to 2.0, and every affected distribution is
+at major version 0, where breaking a consumer is explicitly permitted. The
+condition the draft said deletion would require was already met.
+
+Retaining it would also have cost something the rename cannot pay for. The
+change's purpose is that one concept has one name; a second closed enum over
+the same values, in a distribution whose wire field is already the settled name,
+is another place a later reader has to reconcile. The mode crosses this boundary
+as a validated string on `ExecutorActionEnvelope` and is checked against the
+adapter registry, so nothing depends on a closed set here — and
+`kit/resource-pools`, the authority that owns mode declarations, deliberately
+treats them as opaque strings precisely so domains can add modes without
+editing a shared enum. A closed enum in the provisioning contract would
+contradict that.
+
+So the value set is not re-declared anywhere in this change. The names that stay
+are the ones whose head noun is genuinely the action-dispatch abstraction; the
+names that go are every remaining place `executor` stood for the mode.
+`MissingExecutorKindError` in `kit/fulfillment`'s scheduler becomes
+`MissingOfferingModeError` on the same test: its head noun is the mode.
+
+#### `offer_expires_at` is `option_expires_at`
+
+Left unresolved as "ambiguous" during implementation. It is not ambiguous. It is
+a field of `BareMetalHostedOptionFacts`, sibling to `funding_deadline` and
+`fulfillment_deadline`, and it bounds both. What expires is the hosted settlement
+option, not a listing and not a negotiation message. `matched_offer_id` stays
+open: it plausibly does name a selected negotiation offer, and has little
+surviving production provenance to settle it from.
+
+#### The acceptance audit becomes semantic, not a curated string list
+
+Task 1.1 built an inventory of *specific retired spellings*, and 9.16 asserted
+zero hits for that list. That instrument cannot find a concept under a name
+nobody thought to enumerate, which is exactly how `ExecutorKind`,
+`MissingExecutorKindError`, and the listing-sense uses of bare `offer` survived
+an audit that reported clean. Bare `offer` was explicitly dropped from the audit
+for being noisy, and nothing replaced it.
+
+The replacement rule is a predicate over the survivors rather than a blocklist:
+**every surviving `offer` must be demonstrably a negotiation-message value, and
+every surviving `executor` must be demonstrably the action-dispatch abstraction
+or one of its own compounds.** Noise means each hit needs classifying, not
+excluding.
+
+#### The validation baseline must be rebuilt from wheels
+
+Every "identical to pristine" comparison in this change's record was taken with
+internal packages installed editable against the working tree, so the pristine
+checkout resolved the *modified* clients. The `core/registry` baseline is
+provably contaminated: a test fails there with
+`TypeError: ListingRequest.__init__() got an unexpected keyword argument 'offer'`,
+which pristine's own client cannot raise. The comparison also diffed failure
+*names* rather than causes, so a test failing before for one reason and now for
+a different one read as unchanged.
+
+No regression claim in this change survives that, and none is repaired by
+re-reading the old output. The baseline is re-established by building wheels,
+installing from `.dist`, and comparing causes.
+
+#### Integration is in-process, and was available all along
+
+Seven validation tasks were disclaimed as needing running services.
+`TESTING.md` defines integration as a real in-process application, a real
+database, and the service's canonical typed client over `ASGITransport`. Only
+the mixed-version and coordinated-cutover scenarios need a live multi-service
+environment. Task 9.18 already used the in-process pattern successfully, so this
+change shipped the counterexample to its own excuse.
 
 ## Risks / Trade-offs
 

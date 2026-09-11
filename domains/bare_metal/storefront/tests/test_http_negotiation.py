@@ -195,7 +195,7 @@ def _hosted_option() -> SettlementOption:
         physical_resource_id="resource-1",
         physical_host_id="physical-host-1",
         pool_id="pool-a",
-        offer_expires_at=now + timedelta(hours=2),
+        option_expires_at=now + timedelta(hours=2),
         funding_deadline=now + timedelta(hours=1),
         fulfillment_deadline=now + timedelta(hours=1, minutes=30),
     )

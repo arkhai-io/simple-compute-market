@@ -50,14 +50,14 @@ class ComputeContractService:
                 f"reservation {envelope.capacity_reservation_id!r} is "
                 f"{reservation.get('state')!r}, not 'leased'"
             )
-        expected_executor = reservation.get("offering_mode")
-        if not expected_executor:
+        expected_offering_mode = reservation.get("offering_mode")
+        if not expected_offering_mode:
             raise ExecutorMismatchError(
-                "reservation has no explicit executor identity"
+                "reservation records no explicit offering mode"
             )
-        if envelope.offering_mode != expected_executor:
+        if envelope.offering_mode != expected_offering_mode:
             raise ExecutorMismatchError(
-                f"reservation executor is {expected_executor!r}, "
+                f"reservation offering mode is {expected_offering_mode!r}, "
                 f"not {envelope.offering_mode!r}"
             )
         adapter = self._adapters.get(envelope.offering_mode)

@@ -47,7 +47,7 @@ class MissingResourceKindError(SettlementRequestMismatchError):
     scheduler's configured ``default_resource_kind``."""
 
 
-class MissingExecutorKindError(SettlementRequestMismatchError):
+class MissingOfferingModeError(SettlementRequestMismatchError):
     """The reservation does not carry its explicitly requested offering mode."""
 
 def _resource_from_record(record: Any) -> SettlementResource:
@@ -190,7 +190,7 @@ class PhysicalSettlementScheduler:
         deal_ref = reservation.get("deal_ref") or {}
         offering_mode = reservation.get("offering_mode")
         if not offering_mode:
-            raise MissingExecutorKindError(
+            raise MissingOfferingModeError(
                 "capacity reservation has no explicit offering_mode"
             )
         resource_kind = (

@@ -370,7 +370,7 @@ def test_scheduled_dimensions_reflect_narrowed_request_not_full_reservation(serv
 
     A negotiation may narrow a scheduling request without (yet) resizing the
     underlying reservation -- e.g. a placement/pricing check against a
-    candidate counter-offer shape. What gets provisioned if that shape is
+    candidate counter-listing_resource shape. What gets provisioned if that shape is
     accepted is the narrower, scheduled shape, not the original reservation's
     full amount. `_resource_from_record` (scheduler.py) correctly populates
     `SettlementResource.dimensions` from `record.scheduling_requirements`

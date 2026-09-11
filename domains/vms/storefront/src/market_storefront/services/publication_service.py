@@ -40,7 +40,7 @@ class VmPublicationHooks:
         offering_mode = mode.value if hasattr(mode, "value") else str(mode or "")
         if offering_mode != candidate.binding.offering_mode:
             raise CapacityBindingError(
-                "VM offer offering_mode does not match its capacity binding"
+                "VM listing_resource offering_mode does not match its capacity binding"
             )
 
     async def binding_for_listing(self, listing_id: str) -> CapacityBinding | None:
@@ -216,7 +216,7 @@ def _record_listing_published_stage_event(
         order_id=listing_id,
         agent_url=storefront_url,
         seller_principal=seller_principal,
-        offer=listing_resource,
+        listing_resource=listing_resource,
         accepted_escrows=accepted_escrows,
         settlement_options=settlement_options,
         demands=demands,

@@ -99,7 +99,6 @@ async def test_valid_listing_passes() -> None:
     assert body["listing_id"] == "test-listing-1"
     assert body["accepted_escrows_count"] == 1
     assert "listing_resource_type" not in body
-    assert "listing_resource_type" not in body
 
 
 @pytest.mark.asyncio

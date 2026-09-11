@@ -443,7 +443,7 @@ class TestStage02b_CreateListingPaused:
 
         resp = storefront_admin_client.create_listing(
             agent_wallet_address=seller_wallet,
-            offer=OFFER_RESOURCE,
+            listing_resource=OFFER_RESOURCE,
             accepted_escrows=ACCEPTED_ESCROWS,
             demands=_recipient_demands(seller_wallet),
             max_duration_seconds=DURATION_HOURS * 3600,
@@ -490,7 +490,7 @@ class TestStage03a_ValidatePublish:
     ):
         """POST registry /api/v1/listings/validate-publish → valid=True (dry-run).
 
-        Structural pre-flight: confirms the listing's offer/escrows payload is
+        Structural pre-flight: confirms the listing's listing_resource/escrows payload is
         recognisable to the registry before resume triggers the actual publish.
         Uses the same ``ACCEPTED_ESCROWS`` constant the create_listing call
         advertised so the dry-run matches the to-be-published shape.
@@ -514,7 +514,7 @@ class TestStage03a_ValidatePublish:
         )
         deal_state._registry_validate_passed = True
         log.info(
-            "[03a] Registry validate-publish: valid=%s offer=%s escrows=%d",
+            "[03a] Registry validate-publish: valid=%s listing_resource=%s escrows=%d",
             result.valid,
             result.accepted_escrows_count,
         )

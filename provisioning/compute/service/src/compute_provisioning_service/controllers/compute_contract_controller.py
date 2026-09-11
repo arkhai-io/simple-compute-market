@@ -43,7 +43,7 @@ def _lease_view(reservation: dict[str, Any]) -> LeaseView:
     offering_mode = reservation.get("offering_mode")
     if not offering_mode:
         raise ExecutorMismatchError(
-            "reservation has no explicit executor identity"
+            "reservation records no explicit offering mode"
         )
     return LeaseView(
         capacity_reservation_id=str(reservation["capacity_reservation_id"]),

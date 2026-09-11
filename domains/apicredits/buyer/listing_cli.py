@@ -41,14 +41,14 @@ def short_ts(value: Any) -> str:
     return s[:16].replace("T", " ")
 
 
-def format_offer(resource: Any) -> str:
+def format_listing_resource(resource: Any) -> str:
     """One-line summary of an api_credits.v1 listing_resource."""
-    offer = coerce_resource_dict(resource)
-    if not offer:
+    listing_resource = coerce_resource_dict(resource)
+    if not listing_resource:
         return "-"
-    parts = [str(offer.get("service_name") or "-")]
-    if offer.get("description"):
-        parts.append(shorten(str(offer["description"]), 48))
+    parts = [str(listing_resource.get("service_name") or "-")]
+    if listing_resource.get("description"):
+        parts.append(shorten(str(listing_resource["description"]), 48))
     return " — ".join(parts)
 
 
@@ -177,12 +177,12 @@ def listing_list(
     table.add_column("Created", justify="right")
 
     for row in items:
-        offer = coerce_resource_dict(row.get("listing_resource", {}))
+        listing_resource = coerce_resource_dict(row.get("listing_resource", {}))
         table.add_row(
             str(row.get("listing_id", "-")),
-            format_offer(offer),
+            format_listing_resource(listing_resource),
             format_unit_price(row),
-            shorten(str(offer.get("openapi_url") or "-"), 40),
+            shorten(str(listing_resource.get("openapi_url") or "-"), 40),
             shorten(str(row.get("storefront_url", "-")), 40),
             short_ts(row.get("created_at")),
         )
@@ -264,7 +264,7 @@ def listing_show(
         )
         raise typer.Exit(code=1)
 
-    offer = coerce_resource_dict(found.get("listing_resource", {}))
+    listing_resource = coerce_resource_dict(found.get("listing_resource", {}))
     console = Console()
     table = Table.grid(padding=(0, 2))
     table.add_column(style="bold", no_wrap=True)
@@ -273,11 +273,11 @@ def listing_show(
     table.add_row("Publisher", str(found.get("publisher_id", "-")))
     table.add_row("Status", str(found.get("status", "-")))
     table.add_row("Storefront URL", str(found.get("storefront_url", "-")))
-    table.add_row("Service", str(offer.get("service_name") or "-"))
-    if offer.get("description"):
-        table.add_row("Description", str(offer["description"]))
-    table.add_row("OpenAPI URL", str(offer.get("openapi_url") or "-"))
-    table.add_row("Base URL", str(offer.get("base_url") or "-"))
+    table.add_row("Service", str(listing_resource.get("service_name") or "-"))
+    if listing_resource.get("description"):
+        table.add_row("Description", str(listing_resource["description"]))
+    table.add_row("OpenAPI URL", str(listing_resource.get("openapi_url") or "-"))
+    table.add_row("Base URL", str(listing_resource.get("base_url") or "-"))
     table.add_row("Unit price", format_unit_price(found))
     table.add_row("Created", short_ts(found.get("created_at")))
     table.add_row("Updated", short_ts(found.get("updated_at")))
