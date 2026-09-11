@@ -44,18 +44,43 @@
 
 ## 4. Wiring
 
-- [x] 4.1 Add `make e2e-dev-identities`, printing shell exports for all fifteen
-      variables and creating the writable buyer directories.
+- [x] 4.1 Add the identity targets: `e2e-dev-identities-env` printing
+      `VAR=value` for `docker compose --env-file`, and `e2e-dev-identities`
+      wrapping it as `export` lines for a human to eval. The second derives from
+      the first so they cannot drift. Both create the writable buyer
+      directories.
 - [x] 4.2 Call it from `e2e-tests`' `test-e2e` so local and CI runs use one
       path, with a comment stating why the guards require it.
-- [ ] 4.3 Decide whether `.github/workflows/e2e.yml` needs any change. It should
-      not: `test-e2e` now supplies the variables itself. Confirm by running the
-      workflow rather than by reading it.
+- [x] 4.3 Confirm `.github/workflows/e2e.yml` needs no change: `test-e2e`
+      supplies the variables itself. Confirmed by the run — it reached
+      `compose up` and failed inside the recipe, not for want of workflow
+      environment.
+- [x] 4.4 **Fix the eval-capture defect the first CI run exposed.**
+      `eval "$($(MAKE) -s e2e-dev-identities)"` failed with
+      `/bin/sh: 1: eval: make[1]:: not found`. A recursive make implies `-w`, so
+      the sub-make printed `Entering directory` on stdout and `$(...)` captured
+      it into the eval'd string; `-s` does not suppress that. Every recursive
+      invocation now passes `--no-print-directory`, and the recipe writes a file
+      for `docker compose --env-file` instead of eval'ing captured output, so
+      nothing has to survive a shell round-trip. See `design.md`.
+      - **Also fixed:** `${VAR:?...}` written inside a recipe comment was
+        expanded by make before the shell saw it, which is why the CI log shows
+        "`` guarded". Recipe comments now avoid `$` and are `@`-prefixed so they
+        are not echoed.
+- [x] 4.5 Gitignore the generated artefacts — `.e2e-buyer/` and
+      `.e2e-identities.env` — and say in `.gitignore` that the values they point
+      at are tracked, so a reader does not conclude the identities are secret.
 
 ## 5. Validation
 
 - [x] 5.1 Assert every `:?` guard is satisfied and every exported path exists,
-      evaluated the way compose evaluates it. 17 of 17.
+      evaluated the way compose evaluates it. 17 of 17, resolved from the env
+      file alone rather than from the ambient environment — which is what
+      compose does with `--env-file`.
+- [x] 5.5 Reproduce the CI failure locally before fixing it, and confirm the fix
+      against the same shape: a nested make invoking the target through
+      `$(MAKE)`, which is what implies `-w`. The generated env file contains 15
+      lines and no `make[` noise.
 - [x] 5.2 Confirm each credential file is byte-exact for its loader: no trailing
       newline where the value is read with `read_text().strip()` and compared or
       parsed whole.

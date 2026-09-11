@@ -93,6 +93,39 @@ identities. The default stack's registries run as Anvil **eip191** accounts, so
 a reused file would fail response verification against `registry-a`. The new
 `buyer.config.toml` pins the eip191 principals and records why it is separate.
 
+### The values reach compose through `--env-file`, not an eval
+
+The first wiring had the e2e recipe run `eval "$($(MAKE) -s e2e-dev-identities)"`.
+It failed in CI with `/bin/sh: 1: eval: make[1]:: not found`, and the cause is
+worth recording because it is a property of make rather than a typo: a
+recursive make implies `-w`, so the sub-make prints
+`make[1]: Entering directory '…'` on **stdout**, and `$(...)` captures it into
+the string being eval'd. `-s` suppresses command echo and does not suppress
+that.
+
+Two changes follow. Every recursive invocation passes
+`--no-print-directory`, which removes the cause. And the recipe no longer
+evals at all: it writes the resolved paths to a file and passes
+`docker compose --env-file`, so compose reads the values itself and nothing has
+to survive a shell round-trip. Capturing a sub-make's stdout is fragile for the
+general reason that any tool writing to stdout on the way — a hook, a warning,
+a `$(shell …)` side effect — silently corrupts the result, and this repository
+already emits unrelated `git` noise during make parsing.
+
+The target keeps two forms because they have different consumers:
+`e2e-dev-identities-env` prints `VAR=value` for compose, and
+`e2e-dev-identities` wraps it as `export` lines for a human to eval. The second
+is derived from the first so the two cannot drift.
+
+### The generated artefacts are ignored, the fixtures are tracked
+
+`make e2e-dev-identities-env` creates `.e2e-buyer/{profile,state}` — compose
+mounts them read-write into the buyer container — and writes
+`.e2e-identities.env`. Both are generated and gitignored. The values they point
+at are committed. That distinction is stated in `.gitignore` itself, because a
+reader seeing `dev-env/identities` ignored alongside them would reasonably
+conclude the identities were secret after all.
+
 ## Risks / Trade-offs
 
 - **[A committed key is later used against a real network]** → Every file states

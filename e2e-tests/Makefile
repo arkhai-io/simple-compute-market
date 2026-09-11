@@ -170,12 +170,21 @@ test-ci:
 # the buyer-machine scenarios from inside the compose network. This target is
 # intentionally heavier than test-module: it verifies the deployed images and
 # clears persisted compose state before each run.
+# Generated, never committed: the resolved paths of the committed development
+# identities, in the form `docker compose --env-file` wants.
+E2E_IDENTITY_ENV ?= $(CURDIR)/../.e2e-identities.env
+
 test-e2e:
 	cd .. && docker compose down -v --remove-orphans
 	cd .. && $(MAKE) build-dev
-	# Every signer, wallet, and buyer-path mount in the compose files is
-	# `${VAR:?...}` guarded, so the stack will not start until all of them are
-	# set. They come from committed development values, which is what lets this
-	# run without repository secrets -- see dev-env/identities/README.md.
-	cd .. && eval "$$($(MAKE) -s e2e-dev-identities)" && docker compose up -d --wait
+	@# Every signer, wallet, and buyer-path mount in the compose files is
+	@# guarded with a required-variable form, so the stack will not start until
+	@# all of them are set. They come from committed development values, which
+	@# is what lets this run without repository secrets -- see
+	@# dev-env/identities/README.md. The values go through
+	@# `docker compose --env-file` rather than an eval of captured make output:
+	@# a recursive make implies -w and would print "Entering directory" into the
+	@# capture, and compose reading the file itself has nothing to quote wrong.
+	cd .. && $(MAKE) -s --no-print-directory e2e-dev-identities-env > "$(E2E_IDENTITY_ENV)"
+	cd .. && docker compose --env-file "$(E2E_IDENTITY_ENV)" up -d --wait
 	$(MAKE) test-buyer-machine BUYER_MODULE="$(E2E_MODULE)"

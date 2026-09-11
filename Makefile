@@ -57,7 +57,7 @@ HOSTED_STRIPE_TEST_AUTHORITY_ENVIRONMENT ?=
 HOSTED_STRIPE_TEST_AUTHORITY_ENV_FILE ?=
 HOSTED_STRIPE_TEST_EVIDENCE ?= $(DIST_DIR)/hosted-stripe-test-evidence.json
 
-.PHONY: e2e-dev-identities check-hosted-client-pin fix-hosted-client-pin review-wheelhouse review-wheelhouse-scope build build-dev build-seller build-apicredits-service build-apicredits-storefront build-apicredits-sample-app test test-core test-provisioning test-provisioning-iac test-registry test-storefront test-vms-buyer test-apicredits test-apicredits-middleware test-kits dist dist-release dist-ci dist-ci-kits dist-storefront-client dist-policy dist-compute-provisioning dist-compute-provisioning-service dist-kits verify-hosted-release dist-registry-client dist-registry dist-identity dist-core dist-arkhai-core-buyer dist-arkhai-core-storefront dist-bare-metal-storefront dist-alkahest dist-config dist-clean init init-prerequisites init-submodules init-zero-tier init-buyer init-storefront init-arkhai-core-registry push-runtime-artifacts push-images push-dev-image
+.PHONY: e2e-dev-identities e2e-dev-identities-env check-hosted-client-pin fix-hosted-client-pin review-wheelhouse review-wheelhouse-scope build build-dev build-seller build-apicredits-service build-apicredits-storefront build-apicredits-sample-app test test-core test-provisioning test-provisioning-iac test-registry test-storefront test-vms-buyer test-apicredits test-apicredits-middleware test-kits dist dist-release dist-ci dist-ci-kits dist-storefront-client dist-policy dist-compute-provisioning dist-compute-provisioning-service dist-kits verify-hosted-release dist-registry-client dist-registry dist-identity dist-core dist-arkhai-core-buyer dist-arkhai-core-storefront dist-bare-metal-storefront dist-alkahest dist-config dist-clean init init-prerequisites init-submodules init-zero-tier init-buyer init-storefront init-arkhai-core-registry push-runtime-artifacts push-images push-dev-image
 .PHONY: build-hosted-producer
 .PHONY: test-release-tooling test-deployment-packaging prepare-hosted-compose prepare-hosted-compose-local hosted-preflight hosted-preflight-local hosted-stripe-test-local hosted-compose-up hosted-compose-restart hosted-compose-clean hosted-stripe-test hosted-stripe-test-stop
 .PHONY: dist-arkhai-core-registry
@@ -440,29 +440,40 @@ build: init-prerequisites dist build-buyer
 # repository secrets run the stack. Every value is a well-known deterministic
 # development value; see dev-env/identities/README.md.
 #
-# Include this from a shell with `eval "$(make -s e2e-dev-identities)"`, or let
-# `make -C e2e-tests test-e2e` pick it up, which it does.
+# Two forms, deliberately. `e2e-dev-identities` prints `export` lines for a
+# human to eval. `e2e-dev-identities-env` prints bare `VAR=value` lines for
+# `docker compose --env-file`, which is what the e2e target uses: compose reads
+# the file itself, so nothing has to survive a shell round-trip. Capturing a
+# sub-make's stdout is fragile — a recursive make implies `-w` and prints
+# `Entering directory` into the capture — so the recipe writes a file instead
+# of eval'ing, and both targets pass `--no-print-directory` when recursing.
+#
+#     eval "$(make -s --no-print-directory e2e-dev-identities)"
 # ---------------------------------------------------------------------------
 E2E_IDENTITY_DIR := $(CURDIR)/dev-env/identities
 E2E_BUYER_RUNTIME_DIR ?= $(CURDIR)/.e2e-buyer
 
 e2e-dev-identities: ## Print shell exports pointing compose at committed development identities
+	@$(MAKE) -s --no-print-directory e2e-dev-identities-env \
+		| sed 's/^/export /; s/=\(.*\)$$/="\1"/'
+
+e2e-dev-identities-env: ## Print VAR=value lines for `docker compose --env-file`
 	@mkdir -p "$(E2E_BUYER_RUNTIME_DIR)/profile" "$(E2E_BUYER_RUNTIME_DIR)/state"
-	@echo 'export VMS_REGISTRY_IDENTITY_CREDENTIAL_FILE="$(E2E_IDENTITY_DIR)/registry-a.eip191"'
-	@echo 'export VMS_REGISTRY_B_IDENTITY_CREDENTIAL_FILE="$(E2E_IDENTITY_DIR)/registry-b.eip191"'
-	@echo 'export VMS_PROVISIONING_IDENTITY_ENV_FILE="$(E2E_IDENTITY_DIR)/provisioning.identity.env"'
-	@echo 'export VMS_BOB_IDENTITY_ENV_FILE="$(E2E_IDENTITY_DIR)/bob.identity.env"'
-	@echo 'export VMS_ALICE_IDENTITY_ENV_FILE="$(E2E_IDENTITY_DIR)/alice.identity.env"'
-	@echo 'export VMS_BOB_EVM_WALLET_ENV_FILE="$(CURDIR)/domains/vms/storefront/.env.bob.docker"'
-	@echo 'export VMS_ALICE_EVM_WALLET_ENV_FILE="$(CURDIR)/domains/vms/storefront/.env.alice.docker"'
-	@echo 'export VMS_BUYER_CONFIG_PATH="$(E2E_IDENTITY_DIR)/buyer.config.toml"'
-	@echo 'export VMS_BUYER_CREDENTIAL_FILE="$(E2E_IDENTITY_DIR)/buyer.eip191"'
-	@echo 'export VMS_BUYER_PROFILE_DIR="$(E2E_BUYER_RUNTIME_DIR)/profile"'
-	@echo 'export VMS_BUYER_STATE_DIR="$(E2E_BUYER_RUNTIME_DIR)/state"'
-	@echo 'export APICREDITS_REGISTRY_IDENTITY_CREDENTIAL_FILE="$(E2E_IDENTITY_DIR)/api-credits-registry.ed25519"'
-	@echo 'export APICREDITS_IDENTITY_ENV_FILE="$(E2E_IDENTITY_DIR)/api-credits.identity.env"'
-	@echo 'export APICREDITS_EVM_WALLET_ENV_FILE="$(E2E_IDENTITY_DIR)/api-credits.wallet.env"'
-	@echo 'export APICREDITS_ADMIN_KEY_FILE="$(E2E_IDENTITY_DIR)/api-credits-admin-key"'
+	@echo 'VMS_REGISTRY_IDENTITY_CREDENTIAL_FILE=$(E2E_IDENTITY_DIR)/registry-a.eip191'
+	@echo 'VMS_REGISTRY_B_IDENTITY_CREDENTIAL_FILE=$(E2E_IDENTITY_DIR)/registry-b.eip191'
+	@echo 'VMS_PROVISIONING_IDENTITY_ENV_FILE=$(E2E_IDENTITY_DIR)/provisioning.identity.env'
+	@echo 'VMS_BOB_IDENTITY_ENV_FILE=$(E2E_IDENTITY_DIR)/bob.identity.env'
+	@echo 'VMS_ALICE_IDENTITY_ENV_FILE=$(E2E_IDENTITY_DIR)/alice.identity.env'
+	@echo 'VMS_BOB_EVM_WALLET_ENV_FILE=$(CURDIR)/domains/vms/storefront/.env.bob.docker'
+	@echo 'VMS_ALICE_EVM_WALLET_ENV_FILE=$(CURDIR)/domains/vms/storefront/.env.alice.docker'
+	@echo 'VMS_BUYER_CONFIG_PATH=$(E2E_IDENTITY_DIR)/buyer.config.toml'
+	@echo 'VMS_BUYER_CREDENTIAL_FILE=$(E2E_IDENTITY_DIR)/buyer.eip191'
+	@echo 'VMS_BUYER_PROFILE_DIR=$(E2E_BUYER_RUNTIME_DIR)/profile'
+	@echo 'VMS_BUYER_STATE_DIR=$(E2E_BUYER_RUNTIME_DIR)/state'
+	@echo 'APICREDITS_REGISTRY_IDENTITY_CREDENTIAL_FILE=$(E2E_IDENTITY_DIR)/api-credits-registry.ed25519'
+	@echo 'APICREDITS_IDENTITY_ENV_FILE=$(E2E_IDENTITY_DIR)/api-credits.identity.env'
+	@echo 'APICREDITS_EVM_WALLET_ENV_FILE=$(E2E_IDENTITY_DIR)/api-credits.wallet.env'
+	@echo 'APICREDITS_ADMIN_KEY_FILE=$(E2E_IDENTITY_DIR)/api-credits-admin-key'
 
 build-dev: build build-dev-env build-test-image
 
