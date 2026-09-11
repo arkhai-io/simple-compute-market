@@ -14,19 +14,12 @@ include:
   - compose.vms.yml
   - domains/apicredits/compose.yml
 
-services:
-  api-credits-registry:
-    environment:
-      - REGISTRY_AUTHORITY_ID=api-credits-registry
-      - REGISTRY_AUTHORITY_SCHEME=ed25519
-      - REGISTRY_AUTHORITY_IDENTIFIER=_NUDENxVX6u4cMd0xzoYyQAt10QDI47bfnYnu2lTVho
-      - REGISTRY_AUTHORITY_CREDENTIAL_FILE=/run/secrets/arkhai/registry-identity/credential
-      - REGISTRY_DESCRIPTOR_BASE_URL=http://localhost:8090
-      - REGISTRY_DESCRIPTOR_DISPLAY_NAME=Local API Credits Registry
-      - REGISTRY_DESCRIPTOR_OPERATOR_IDENTITY=Arkhai local development
-    volumes:
-      - ${APICREDITS_REGISTRY_IDENTITY_CREDENTIAL_FILE:?set API-credits registry signer credential file}:/run/secrets/arkhai/registry-identity/credential:ro
-  credits-storefront:
-    env_file:
-      - ${APICREDITS_IDENTITY_ENV_FILE:?set API-credits signer credential environment file}
-      - ${APICREDITS_EVM_WALLET_ENV_FILE:?set API-credits EVM wallet environment file}
+# This file composes base topologies only. The development signer, wallet, and
+# buyer-path bindings live in `compose.local-identities.yml` and are layered on
+# with `-f`, because `include` refuses to let an including file redefine a
+# service it imported. A bare `docker compose up` here therefore starts the
+# stack *without* those bindings, and services that need a signing credential
+# will fail at runtime rather than at interpolation. Use
+# `make -C e2e-tests test-e2e`, or pass both files:
+#
+#     docker compose -f docker-compose.yml -f compose.local-identities.yml up -d

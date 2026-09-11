@@ -30,6 +30,12 @@ suite needs.
 - Add a `make e2e-dev-identities` target that prints shell exports pointing
   every guarded variable at those fixtures, and call it from
   `make -C e2e-tests test-e2e` so local and CI runs use one path.
+- **Split the compose overrides out of the `include` files.** The development
+  bindings move to `compose.local-identities.yml` and are layered with `-f`,
+  because `include` refuses to let an including file redefine an imported
+  service. The base topology stays `include`d, which is what preserves
+  per-file relative-path resolution. Reached only after the identities were
+  supplied, since every earlier run failed at interpolation first.
 - **Replace the API-credits registry identity.** It is the one identity whose
   private half was never committed and cannot be recovered from its public
   identifier. A deterministically derived replacement is committed, and its
@@ -47,7 +53,11 @@ suite needs.
   cannot be run by a contributor or on a fork is a suite whose failures only
   one person can reproduce.
 - Do not change what any service does. This supplies configuration that was
-  always required and never provided.
+  always required and never provided, and rearranges how compose files are
+  combined without altering any service's definition.
+- Do not fix `compose.apicredits.yml`, which has the same `include`-plus-override
+  shape. It is a separate entry point, not on the e2e path, and the compose
+  stack is being replaced by a Tekton pipeline over the Helm charts.
 
 ## Impact
 

@@ -47,7 +47,7 @@ jobs:
         # Same interpolation constraint as the teardown below.
         run: |
           make -s --no-print-directory e2e-dev-identities-env > .e2e-identities.env || true
-          docker compose --env-file .e2e-identities.env logs --no-color > compose-logs.txt 2>&1 || true
+          docker compose --env-file .e2e-identities.env -f docker-compose.yml -f compose.local-identities.yml logs --no-color > compose-logs.txt 2>&1 || true
       - name: Upload artifacts
         if: always()
         uses: actions/upload-artifact@v4
@@ -64,4 +64,4 @@ jobs:
         # cleanup works even when the run failed before that point.
         run: |
           make -s --no-print-directory e2e-dev-identities-env > .e2e-identities.env || true
-          docker compose --env-file .e2e-identities.env down -v --remove-orphans || true
+          docker compose --env-file .e2e-identities.env -f docker-compose.yml -f compose.local-identities.yml down -v --remove-orphans || true

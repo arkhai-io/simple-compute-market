@@ -181,6 +181,58 @@ at are committed. That distinction is stated in `.gitignore` itself, because a
 reader seeing `dev-env/identities` ignored alongside them would reasonably
 conclude the identities were secret after all.
 
+### `include` composes; `-f` overrides. The stack was using `include` for both
+
+With the identities supplied, interpolation finally succeeded and compose got far
+enough to fail on merge:
+
+    services.registry conflicts with imported resource
+
+`compose.vms.yml` `include`s `domains/vms/compose.yml` and then redefines five
+services from it; `docker-compose.yml` does the same to
+`domains/apicredits/compose.yml` for two more. `include` does not permit the
+including file to redefine an imported service — that is `-f` layering's job,
+where later files merge over earlier ones. Both files are byte-identical to the
+original archive, so this is pre-existing and was simply unreachable: every run
+failed at interpolation first.
+
+The repository already demonstrates the correct split. The `hosted-stripe-test`
+flow, which works, composes the same domain file as
+`-f domains/vms/compose.yml -f compose.hosted-settlement.yml -f compose.vms-fiat.yml`,
+and `compose.hosted-settlement.yml` uses the `!reset` tag, which only has meaning
+in an `-f` overlay.
+
+**Converting everything to `-f` was rejected.** With multiple `-f` files, compose
+resolves relative paths against one project directory, and the two base files
+need different ones: `domains/vms/compose.yml` references
+`../../core/registry/...` and `./storefront/...` relative to `domains/vms`, and
+`domains/apicredits/compose.yml` does the equivalent relative to
+`domains/apicredits`. No single project directory satisfies both, so pure `-f`
+layering would require rewriting the relative paths in both base files — and
+that would break the `hosted-stripe-test` flow, which depends on the project
+directory being `domains/vms`.
+
+So each mechanism keeps the job it is good at. The base topology stays
+`include`d, which is what preserves per-file path resolution. The development
+bindings move to `compose.local-identities.yml`, layered with `-f`, which is
+what makes overriding an imported service legal. Every path in the overlay
+arrives as an absolute value from `make e2e-dev-identities-env`, so the overlay
+has no relative paths and is indifferent to the project directory.
+
+One consequence worth stating: a bare `docker compose up` at the repository root
+now starts the stack *without* the development bindings, and a service needing a
+signing credential fails at runtime rather than at interpolation. That is a real
+regression in a UX nobody reported using — the maintainer deploys via the Helm
+charts, and this compose stack is slated for replacement by a Tekton pipeline
+over those charts. Both `include` files say so in a comment and point at the
+two-file invocation.
+
+**A remaining instance, deliberately not fixed:** `compose.apicredits.yml` has
+the same `include`-plus-override shape and would fail the same way. It is a
+separate entry point, not on the e2e path, and fixing it is not needed to
+unblock. Recorded here so the next person to run it knows the cause rather than
+rediscovering it.
+
 ## Risks / Trade-offs
 
 - **[A committed key is later used against a real network]** → Every file states

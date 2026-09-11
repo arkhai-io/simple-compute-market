@@ -1,0 +1,107 @@
+# Local-development overlay: the signer, wallet, and buyer-path bindings for
+# the compose stack.
+#
+# This is an **overlay**, applied with `-f`, not an `include`. The distinction
+# is not cosmetic:
+#
+#   * `include` composes base topologies and resolves each included file's
+#     relative paths against that file's own directory. `domains/vms/compose.yml`
+#     and `domains/apicredits/compose.yml` both rely on that — they reference
+#     `../../core/registry/...` and `./storefront/...` relative to themselves,
+#     from two different directories, so no single project directory can
+#     resolve both. They must stay `include`d.
+#   * `include` also refuses to let the including file redefine a service it
+#     imported ("services.X conflicts with imported resource"). Overriding an
+#     imported service is what `-f` layering is for: later files merge over
+#     earlier ones.
+#
+# So the base stack is assembled by `include` and the development bindings are
+# layered on top from here. Every path below arrives as an absolute value from
+# `make e2e-dev-identities-env`, so this file has no relative paths of its own
+# and is indifferent to the project directory.
+#
+# Bring the full stack up with:
+#
+#     make -C e2e-tests test-e2e          # builds, then up -d --wait
+#
+# or, for the compose part alone:
+#
+#     make -s --no-print-directory e2e-dev-identities-env > .e2e-identities.env
+#     docker compose --env-file .e2e-identities.env \
+#       -f docker-compose.yml -f compose.local-identities.yml up -d --wait
+#
+# The values are committed development fixtures; see dev-env/identities/README.md.
+
+services:
+  registry:
+    environment:
+      - REGISTRY_AUTHORITY_ID=registry-a
+      - REGISTRY_AUTHORITY_SCHEME=eip191
+      - REGISTRY_AUTHORITY_IDENTIFIER=0x90f79bf6eb2c4f870365e785982e1f101e93b906
+      - REGISTRY_AUTHORITY_CREDENTIAL_FILE=/run/secrets/arkhai/registry-identity/credential
+      - REGISTRY_DESCRIPTOR_BASE_URL=http://localhost:8080
+      - REGISTRY_DESCRIPTOR_DISPLAY_NAME=Local VM Compute Registry
+      - REGISTRY_DESCRIPTOR_OPERATOR_IDENTITY=Arkhai local development
+    volumes:
+      - ${VMS_REGISTRY_IDENTITY_CREDENTIAL_FILE:?set registry signer credential file}:/run/secrets/arkhai/registry-identity/credential:ro
+  registry-b:
+    environment:
+      - REGISTRY_AUTHORITY_SCHEME=eip191
+      - REGISTRY_AUTHORITY_ID=registry-b
+      - REGISTRY_AUTHORITY_IDENTIFIER=0x15d34aaf54267db7d7c367839aaf71a00a2c6a65
+      - REGISTRY_AUTHORITY_CREDENTIAL_FILE=/run/secrets/arkhai/registry-identity/credential
+      - REGISTRY_DESCRIPTOR_BASE_URL=http://localhost:8082
+      - REGISTRY_DESCRIPTOR_DISPLAY_NAME=Local Private VM Compute Registry
+      - REGISTRY_DESCRIPTOR_OPERATOR_IDENTITY=Arkhai local development
+      - REGISTRY_DESCRIPTOR_ACCESS_ACQUISITION_POINTER=http://localhost:8082/docs#/admin/create_api_key
+    volumes:
+      - ${VMS_REGISTRY_B_IDENTITY_CREDENTIAL_FILE:?set private registry signer credential file}:/run/secrets/arkhai/registry-identity/credential:ro
+  bob-storefront:
+    env_file:
+      - ${VMS_BOB_EVM_WALLET_ENV_FILE:?set Bob EVM wallet environment file}
+      - ${VMS_BOB_IDENTITY_ENV_FILE:?set Bob signer credential environment file}
+  alice-storefront:
+    env_file:
+      - ${VMS_ALICE_IDENTITY_ENV_FILE:?set Alice signer credential environment file}
+      - ${VMS_ALICE_EVM_WALLET_ENV_FILE:?set Alice EVM wallet environment file}
+  provisioning:
+    env_file:
+      - ${VMS_PROVISIONING_IDENTITY_ENV_FILE:?set provisioning signer credential environment file}
+    environment:
+      - PROVISIONING_IDENTITY__SCHEME=eip191
+      - PROVISIONING_IDENTITY__IDENTIFIER=0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266
+      - PROVISIONING_STOREFRONT_IDENTITY__SCHEME=eip191
+      - PROVISIONING_STOREFRONT_IDENTITY__IDENTIFIER=0x3c44cdddb6a900fa2b585dd299e03d12fa4293bc
+      - PROVISIONING_STOREFRONT_SITE_ID=default
+      - PROVISIONING_ADMIN_IDENTITY__SCHEME=eip191
+      - PROVISIONING_ADMIN_IDENTITY__IDENTIFIER=0x9965507d1a55bcc2695c58ba16fb37d819b0a4dc
+  buyer-cli:
+    image: ${VMS_BUYER_IMAGE:-arkhai:e2e-tests}
+    profiles: [buyer]
+    user: "${VMS_BUYER_UID:-1000}:${VMS_BUYER_GID:-1000}"
+    entrypoint: ["market"]
+    command: ["profile", "show"]
+    environment:
+      XDG_CONFIG_HOME: /etc
+      XDG_DATA_HOME: /var/lib/arkhai-buyer
+      XDG_STATE_HOME: /var/lib/arkhai-buyer-state
+    volumes:
+      - ${VMS_BUYER_CONFIG_PATH:?set buyer public config path}:/etc/arkhai/config.toml:ro
+      - ${VMS_BUYER_PROFILE_DIR:?set persistent buyer profile directory}:/var/lib/arkhai-buyer/arkhai/buyer:rw
+      - ${VMS_BUYER_STATE_DIR:?set persistent buyer run-state directory}:/var/lib/arkhai-buyer-state/arkhai:rw
+      - ${VMS_BUYER_CREDENTIAL_FILE:?set strict buyer credential file}:/run/secrets/arkhai/buyer-credential:ro
+  api-credits-registry:
+    environment:
+      - REGISTRY_AUTHORITY_ID=api-credits-registry
+      - REGISTRY_AUTHORITY_SCHEME=ed25519
+      - REGISTRY_AUTHORITY_IDENTIFIER=_NUDENxVX6u4cMd0xzoYyQAt10QDI47bfnYnu2lTVho
+      - REGISTRY_AUTHORITY_CREDENTIAL_FILE=/run/secrets/arkhai/registry-identity/credential
+      - REGISTRY_DESCRIPTOR_BASE_URL=http://localhost:8090
+      - REGISTRY_DESCRIPTOR_DISPLAY_NAME=Local API Credits Registry
+      - REGISTRY_DESCRIPTOR_OPERATOR_IDENTITY=Arkhai local development
+    volumes:
+      - ${APICREDITS_REGISTRY_IDENTITY_CREDENTIAL_FILE:?set API-credits registry signer credential file}:/run/secrets/arkhai/registry-identity/credential:ro
+  credits-storefront:
+    env_file:
+      - ${APICREDITS_IDENTITY_ENV_FILE:?set API-credits signer credential environment file}
+      - ${APICREDITS_EVM_WALLET_ENV_FILE:?set API-credits EVM wallet environment file}

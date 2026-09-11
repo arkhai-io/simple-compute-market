@@ -174,6 +174,14 @@ test-ci:
 # identities, in the form `docker compose --env-file` wants.
 E2E_IDENTITY_ENV ?= $(CURDIR)/../.e2e-identities.env
 
+# The base stack is assembled by `include`, which resolves each included file's
+# relative paths against that file's own directory -- `domains/vms/compose.yml`
+# and `domains/apicredits/compose.yml` need that and sit in different
+# directories, so no single project directory could replace it. The development
+# bindings are layered with `-f` because `include` refuses to let an including
+# file redefine an imported service. See compose.local-identities.yml.
+E2E_COMPOSE_FILES := -f docker-compose.yml -f compose.local-identities.yml
+
 test-e2e:
 	@# Every signer, wallet, buyer-path, and bearer-token value in the compose
 	@# files is guarded with a required-variable form, so *any* compose
@@ -191,7 +199,7 @@ test-e2e:
 	@# "Entering directory" into the capture, and compose reading the file
 	@# itself has nothing to quote wrong.
 	cd .. && $(MAKE) -s --no-print-directory e2e-dev-identities-env > "$(E2E_IDENTITY_ENV)"
-	cd .. && docker compose --env-file "$(E2E_IDENTITY_ENV)" down -v --remove-orphans
+	cd .. && docker compose --env-file "$(E2E_IDENTITY_ENV)" $(E2E_COMPOSE_FILES) down -v --remove-orphans
 	cd .. && $(MAKE) build-dev
-	cd .. && docker compose --env-file "$(E2E_IDENTITY_ENV)" up -d --wait
+	cd .. && docker compose --env-file "$(E2E_IDENTITY_ENV)" $(E2E_COMPOSE_FILES) up -d --wait
 	$(MAKE) test-buyer-machine BUYER_MODULE="$(E2E_MODULE)"

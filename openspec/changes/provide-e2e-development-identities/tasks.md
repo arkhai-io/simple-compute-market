@@ -82,12 +82,41 @@
       `.e2e-identities.env` — and say in `.gitignore` that the values they point
       at are tracked, so a reader does not conclude the identities are secret.
 
+## 4b. Compose topology
+
+Reached only once the identities were supplied: with interpolation succeeding,
+compose got to the merge stage and rejected `include`-plus-override. Scoped into
+this change rather than a separate one because this change exists to make the
+stack startable, and the compose stack is being replaced by a Tekton pipeline
+over the Helm charts — a third change document for a subsystem on its way out
+would be ceremony.
+
+- [x] 4b.1 Move the development bindings out of `compose.vms.yml` and
+      `docker-compose.yml` into `compose.local-identities.yml`, layered with
+      `-f`. Keep the base topology `include`d: the two base files resolve
+      relative paths against their own directories and sit in different
+      directories, so no single project directory could replace `include`, and
+      rewriting their paths would break the `hosted-stripe-test` flow that
+      depends on the project directory being `domains/vms`.
+- [x] 4b.2 Pass both files from the e2e recipe and from the workflow's
+      `always()` steps.
+- [x] 4b.3 State in both `include` files that a bare `docker compose up` now
+      omits the bindings, and give the two-file invocation.
+- [ ] 4b.4 `compose.apicredits.yml` has the same `include`-plus-override shape
+      and will fail identically. Not on the e2e path, so not fixed here.
+      Raise separately or leave until the Tekton migration retires it.
+
 ## 5. Validation
 
 - [x] 5.1 Assert every `:?` guard is satisfied and every exported path exists,
       evaluated the way compose evaluates it. 17 of 17, resolved from the env
       file alone rather than from the ambient environment — which is what
       compose does with `--env-file`.
+- [x] 5.7 Verify the merged stack the way compose merges it: every overlay
+      service either overrides a base service or is newly introduced (seven
+      override, `buyer-cli` is new), no `include` file defines services any
+      more, and all 20 required guards resolve. Structural only — still not a
+      run.
 - [x] 5.6 Supply the three variables the deeper include level requires:
       `VMS_BOB_STOREFRONT_SECRETS_FILE` as a secret overlay carrying
       registry-b's bearer token, and `VMS_REGISTRY_ADMIN_API_KEY` /
