@@ -106,6 +106,18 @@ would be ceremony.
       and will fail identically. Not on the e2e path, so not fixed here.
       Raise separately or leave until the Tekton migration retires it.
 
+## 4c. Make a failure diagnosable from the job log
+
+- [x] 4c.1 On `up --wait` failure, print `compose ps -a` and each service's
+      last 120 log lines **in the failing step**, then exit non-zero.
+      `up --wait` reports only *which* container went unhealthy, never why, and
+      leaving the answer to the `always()` collection step puts it in an
+      uploaded artifact that has to be downloaded separately. Verified against
+      a stub `docker` that fails `up`: the groups print and the recipe still
+      exits 1.
+- [x] 4c.2 `tee` the collection step's output so container logs land in the job
+      log as well as the artifact, wrapped in a collapsible group.
+
 ## 5. Validation
 
 - [x] 5.1 Assert every `:?` guard is satisfied and every exported path exists,

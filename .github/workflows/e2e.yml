@@ -44,10 +44,16 @@ jobs:
         run: make -C e2e-tests test-e2e
       - name: Collect compose logs
         if: always()
-        # Same interpolation constraint as the teardown below.
+        # Same interpolation constraint as the teardown below. `tee` rather than
+        # a plain redirect so the output lands in the job log as well as the
+        # artifact -- a failure that needs a separate artifact download to
+        # diagnose is a slow loop.
         run: |
+          echo "::group::compose logs"
           make -s --no-print-directory e2e-dev-identities-env > .e2e-identities.env || true
-          docker compose --env-file .e2e-identities.env -f docker-compose.yml -f compose.local-identities.yml logs --no-color > compose-logs.txt 2>&1 || true
+          docker compose --env-file .e2e-identities.env -f docker-compose.yml -f compose.local-identities.yml \
+            logs --no-color 2>&1 | tee compose-logs.txt || true
+          echo "::endgroup::"
       - name: Upload artifacts
         if: always()
         uses: actions/upload-artifact@v4

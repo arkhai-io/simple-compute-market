@@ -201,5 +201,22 @@ test-e2e:
 	cd .. && $(MAKE) -s --no-print-directory e2e-dev-identities-env > "$(E2E_IDENTITY_ENV)"
 	cd .. && docker compose --env-file "$(E2E_IDENTITY_ENV)" $(E2E_COMPOSE_FILES) down -v --remove-orphans
 	cd .. && $(MAKE) build-dev
-	cd .. && docker compose --env-file "$(E2E_IDENTITY_ENV)" $(E2E_COMPOSE_FILES) up -d --wait
+	@# On failure, print the state and the container output *here*, in the
+	@# failing step. `up --wait` reports only which container went unhealthy,
+	@# never why: the reason is in that container's log. Leaving it to the
+	@# `always()` collection step means the answer lands in an uploaded
+	@# artifact that has to be downloaded separately, which is a slow loop for
+	@# something the job log can carry.
+	cd .. && docker compose --env-file "$(E2E_IDENTITY_ENV)" $(E2E_COMPOSE_FILES) up -d --wait \
+		|| { \
+		  echo "::group::compose ps"; \
+		  docker compose --env-file "$(E2E_IDENTITY_ENV)" $(E2E_COMPOSE_FILES) ps -a; \
+		  echo "::endgroup::"; \
+		  for svc in $$(docker compose --env-file "$(E2E_IDENTITY_ENV)" $(E2E_COMPOSE_FILES) ps -a --services); do \
+		    echo "::group::logs $$svc"; \
+		    docker compose --env-file "$(E2E_IDENTITY_ENV)" $(E2E_COMPOSE_FILES) logs --no-color --tail=120 "$$svc" || true; \
+		    echo "::endgroup::"; \
+		  done; \
+		  exit 1; \
+		}
 	$(MAKE) test-buyer-machine BUYER_MODULE="$(E2E_MODULE)"
