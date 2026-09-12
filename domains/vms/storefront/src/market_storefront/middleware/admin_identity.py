@@ -256,6 +256,11 @@ def _contract(request: Request, body: Any) -> AdminRouteContract | None:
     if matched is not None:
         return AdminRouteContract(*matched, body)
 
+    if method == "GET" and path == "/api/v1/system/status":
+        return AdminRouteContract(
+            "admin_system_status", "system/status", EMPTY_BODY
+        )
+
     if method == "GET" and path == "/api/v1/system/events":
         if request.headers.get("last-event-id") is not None:
             raise AuthError("Last-Event-ID is not an authenticated query alias")

@@ -234,16 +234,66 @@ def _require(state: MRState, *fields: str) -> None:
 # parallel set.
 # ---------------------------------------------------------------------------
 
+def _alice_url() -> str:
+    return _require_setting(
+        getattr(settings, "ALICE", None) and settings.ALICE.API_URL, "ALICE.API_URL"
+    )
+
+
+def _alice_publisher_trust():
+    from market_identity import Identity, TrustedIdentitySet, create_signer
+
+    identity = create_signer(
+        "eip191",
+        _require_setting(settings.ALICE.PRIVATE_KEY, "ALICE.PRIVATE_KEY"),
+    ).identity
+    return TrustedIdentitySet(
+        identities=(
+            Identity(scheme="eip191", identifier=identity.identifier),
+        )
+    )
+
+
 @pytest.fixture(scope="module")
 def alice_admin_client():
+    """Admin-role client for Alice's storefront: system controls only.
+
+    Alice's administrator is a distinct principal from Alice's seller, exactly
+    as Bob's is, and is pinned as ``Identity.administrators.operator`` in
+    ``storefront.alice.toml``.
+    """
+    from market_identity import create_signer
     from storefront_client import SyncStorefrontClient
-    url = _require_setting(getattr(settings, "ALICE", None) and settings.ALICE.API_URL, "ALICE.API_URL")
-    private_key = _require_setting(settings.ALICE.PRIVATE_KEY, "ALICE.PRIVATE_KEY")
-    admin_key = _require_setting(settings.ALICE.ADMIN_API_KEY, "ALICE.ADMIN_API_KEY")
+
     client = SyncStorefrontClient(
-        base_url=url,
-        private_key=str(private_key),
-        admin_key=str(admin_key),
+        _alice_url(),
+        create_signer(
+            str(settings.ALICE.get("admin_scheme", "eip191") or "eip191"),
+            _require_setting(
+                settings.ALICE.get("admin_credential", ""), "ALICE.ADMIN_CREDENTIAL"
+            ),
+        ),
+        caller_role="admin",
+        expected_publishers=_alice_publisher_trust(),
+    )
+    yield client
+    client.close()
+
+
+@pytest.fixture(scope="module")
+def alice_seller_client():
+    """Seller-role client for Alice's storefront: publishing listings."""
+    from market_identity import create_signer
+    from storefront_client import SyncStorefrontClient
+
+    client = SyncStorefrontClient(
+        _alice_url(),
+        create_signer(
+            "eip191",
+            _require_setting(settings.ALICE.PRIVATE_KEY, "ALICE.PRIVATE_KEY"),
+        ),
+        caller_role="seller",
+        expected_publishers=_alice_publisher_trust(),
     )
     yield client
     client.close()
@@ -462,13 +512,13 @@ class TestStage03c_BobPublishes:
 
 class TestStage03d_AlicePublishes:
     def test_03d_alice_creates_and_resumes(
-        self, alice_admin_client, alice_wallet, mr_state
+        self, alice_admin_client, alice_seller_client, alice_wallet, mr_state
     ):
         _require(
             mr_state, "alice_sees_a", "alice_inventory_seeded",
         )
 
-        resp = alice_admin_client.create_listing(
+        resp = alice_seller_client.create_listing(
             agent_wallet_address=alice_wallet,
             listing_resource=ALICE_OFFER,
             accepted_escrows=ACCEPTED_ESCROWS,
@@ -616,10 +666,9 @@ class TestStage06a_NegotiateWithBob:
         """Buyer hits bob-storefront:8001 to start a negotiation against Bob's listing."""
         _require(mr_state, "bob_listing_id", "fanin_ok")
         from storefront_client import SyncStorefrontClient
-        buyer_to_bob = SyncStorefrontClient(
-            base_url=str(settings.SELLER.API_URL),
-            private_key=str(settings.BUYER.PRIVATE_KEY),
-        )
+        # negotiate_new is an unauthenticated route, so this client carries no
+        # signer: giving it one would require a caller_role it never asserts.
+        buyer_to_bob = SyncStorefrontClient(str(settings.SELLER.API_URL))
         try:
             resp = buyer_to_bob.negotiate_new(
                 listing_id=mr_state.bob_listing_id,
@@ -665,10 +714,8 @@ class TestStage06b_NegotiateWithAlice:
         """
         _require(mr_state, "alice_listing_id", "fanin_ok")
         from storefront_client import SyncStorefrontClient
-        buyer_to_alice = SyncStorefrontClient(
-            base_url=str(settings.ALICE.API_URL),
-            private_key=str(settings.BUYER.PRIVATE_KEY),
-        )
+        # See the note in stage 06a: negotiate_new is unauthenticated.
+        buyer_to_alice = SyncStorefrontClient(str(settings.ALICE.API_URL))
         try:
             resp = buyer_to_alice.negotiate_new(
                 listing_id=mr_state.alice_listing_id,

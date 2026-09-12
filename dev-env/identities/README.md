@@ -63,8 +63,21 @@ interchangeable:
 | `bob.env` | 2 (`0x3c44cddd…`) | `storefront.bob.toml` |
 | `alice.env` | 4 (`0x15d34aaf…`) | `storefront.alice.toml` |
 | `buyer.eip191` | 1 (`0x70997970…`) | not pinned; the buyer declares its own profile |
+| `provisioning-admin.eip191` | 5 (`0x9965507d…`) | `compose.local-identities.yml` `PROVISIONING_ADMIN_IDENTITY__IDENTIFIER` |
+| `storefront-bob-admin.eip191` | 6 (`0x976ea740…`) | `storefront.bob.toml` `[Identity.administrators.operator]` |
+| `storefront-alice-admin.eip191` | 7 (`0x14dc7996…`) | `storefront.alice.toml` `[Identity.administrators.operator]` |
 | `api-credits.identity.env` | 3 (`0x90f79bf6…`) | `[identity]` in `storefront.credits.toml` |
 | `api-credits.wallet.env` | 3 (`0x90F79bf6…`) | `[wallet].address` in `storefront.credits.toml` |
+
+The three administrator credentials are separate principals from the sellers
+and services they administer. A storefront's `Identity.principal` publishes
+listings; its `Identity.administrators.operator` performs the system controls
+that are not part of a deal. Provisioning draws the same line between its own
+signing identity (account 0, which signs responses), the storefront principal
+it accepts callbacks from (account 2), and the administrator that operates it
+(account 5). Holding the wrong one of a pair authenticates as the wrong caller
+and is refused on authorization, not at construction, so the failure surfaces
+as a `403` some distance from the mistake.
 
 The API-credits **storefront** and the API-credits **registry** are different
 principals with different schemes: the storefront signs `eip191` as Anvil 3, the

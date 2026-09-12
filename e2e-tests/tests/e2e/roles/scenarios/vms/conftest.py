@@ -148,6 +148,71 @@ def _require_setting(value: Any, name: str) -> str:
     return str(value)
 
 
+
+# ---------------------------------------------------------------------------
+# Identity helpers
+#
+# Every authenticated route resolves the caller's principal against the trust
+# set bound to the role the request asserts, so a client carries exactly one
+# role and the credential of the principal authorized to hold it. One client
+# per role, named for the role, keeps that visible at the call site and in the
+# service's request logs.
+# ---------------------------------------------------------------------------
+
+def _signer(scheme: Any, credential: Any, name: str):
+    from market_identity import create_signer
+
+    return create_signer(
+        str(scheme or "eip191"),
+        _require_setting(credential, name),
+    )
+
+
+def _trust(*identifiers: str, scheme: str = "eip191"):
+    from market_identity import Identity, TrustedIdentitySet
+
+    return TrustedIdentitySet(
+        identities=tuple(
+            Identity(scheme=scheme, identifier=str(i)) for i in identifiers
+        )
+    )
+
+
+def _publisher_trust():
+    """The storefront's publishing principal, pinned for response verification."""
+
+    return _trust(
+        _signer(
+            settings.SELLER.get("admin_scheme", "eip191"),
+            settings.SELLER.PRIVATE_KEY,
+            "SELLER.PRIVATE_KEY",
+        ).identity.identifier
+    )
+
+
+
+def _provisioning_admin_signer():
+    """Signer for the principal pinned as the provisioning admin identity."""
+
+    return _signer(
+        settings.PROVISIONING.get("admin_scheme", "eip191"),
+        settings.PROVISIONING.get("admin_credential", ""),
+        "PROVISIONING.ADMIN_CREDENTIAL",
+    )
+
+
+def _provisioning_authority_trust():
+    """The provisioning service's own signing principal, for response checks."""
+
+    return _trust(
+        _require_setting(
+            settings.PROVISIONING.get("authority_identifier", ""),
+            "PROVISIONING.AUTHORITY_IDENTIFIER",
+        ),
+        scheme=str(settings.PROVISIONING.get("authority_scheme", "eip191") or "eip191"),
+    )
+
+
 # ---------------------------------------------------------------------------
 # Module-scoped fixtures
 # ---------------------------------------------------------------------------
@@ -159,12 +224,35 @@ def deal_state() -> DealState:
 
 @pytest.fixture(scope="module")
 def storefront_client():
-    """Buyer-signed SyncStorefrontClient (no admin key)."""
+    """Buyer-role storefront client: the buyer settling its own deal."""
     from storefront_client import SyncStorefrontClient
+
     url = _require_setting(settings.SELLER.API_URL, "SELLER.API_URL")
     client = SyncStorefrontClient(
-        base_url=url,
-        private_key=str(settings.BUYER.PRIVATE_KEY),
+        url,
+        _signer("eip191", settings.BUYER.MARKETPLACE_CREDENTIAL, "BUYER.MARKETPLACE_CREDENTIAL"),
+        caller_role="buyer",
+        expected_publishers=_publisher_trust(),
+    )
+    yield client
+    client.close()
+
+
+@pytest.fixture(scope="module")
+def storefront_seller_client():
+    """Seller-role storefront client: the principal that publishes listings.
+
+    Separate from the administrator below. The seller signer must itself be a
+    pinned publisher, which the client enforces at construction.
+    """
+    from storefront_client import SyncStorefrontClient
+
+    url = _require_setting(settings.SELLER.API_URL, "SELLER.API_URL")
+    client = SyncStorefrontClient(
+        url,
+        _signer("eip191", settings.SELLER.PRIVATE_KEY, "SELLER.PRIVATE_KEY"),
+        caller_role="seller",
+        expected_publishers=_publisher_trust(),
     )
     yield client
     client.close()
@@ -172,20 +260,24 @@ def storefront_client():
 
 @pytest.fixture(scope="module")
 def storefront_admin_client():
-    """Seller-signed SyncStorefrontClient with admin key.
+    """Admin-role storefront client: system controls outside a normal deal.
 
-    Uses the seller's private key because /orders/create and similar
-    seller-owned endpoints verify EIP-191 signatures against the seller's
-    configured wallet address (CONFIG.agent_wallet_address).
-    The admin_key is a separate X-Admin-Key header that gates /admin/* routes.
+    The administrator is a distinct principal from the seller, pinned as
+    ``Identity.administrators.operator`` in the storefront config. Signing
+    these calls as the seller would authenticate as the wrong caller.
     """
     from storefront_client import SyncStorefrontClient
+
     url = _require_setting(settings.SELLER.API_URL, "SELLER.API_URL")
-    admin_key = _require_setting(settings.SELLER.ADMIN_API_KEY, "SELLER.ADMIN_API_KEY")
     client = SyncStorefrontClient(
-        base_url=url,
-        private_key=str(settings.SELLER.PRIVATE_KEY),
-        admin_key=admin_key,
+        url,
+        _signer(
+            settings.SELLER.get("admin_scheme", "eip191"),
+            settings.SELLER.get("admin_credential", ""),
+            "SELLER.ADMIN_CREDENTIAL",
+        ),
+        caller_role="admin",
+        expected_publishers=_publisher_trust(),
     )
     yield client
     client.close()
@@ -193,10 +285,47 @@ def storefront_admin_client():
 
 @pytest.fixture(scope="module")
 def registry_client():
-    """SyncRegistryClient from the canonical registry-client wheel."""
+    """Buyer-role registry client: discovery reads, as a buyer performs them.
+
+    The registry's vocabulary is ``buyer``, ``seller``, or ``service``; it has
+    no administrator. Its reads here are unauthenticated, so the role does not
+    gate them — it attributes them, which is why discovery is a buyer.
+    """
     from registry_client import SyncRegistryClient
+
     url = _require_setting(settings.REGISTRY.API_URL, "REGISTRY.API_URL")
-    client = SyncRegistryClient(base_url=url)
+    client = SyncRegistryClient(
+        url,
+        signer=_signer("eip191", settings.BUYER.MARKETPLACE_CREDENTIAL, "BUYER.MARKETPLACE_CREDENTIAL"),
+        caller_role="buyer",
+        expected_registries=_trust(_require_setting(
+            settings.REGISTRY.get("identifier", ""), "REGISTRY.IDENTIFIER"
+        )),
+        registry_authority=_require_setting(
+            settings.REGISTRY.get("authority_id", ""), "REGISTRY.AUTHORITY_ID"
+        ),
+    )
+    yield client
+    client.close()
+
+
+@pytest.fixture(scope="module")
+def registry_seller_client():
+    """Seller-role registry client: validating a payload a seller would publish."""
+    from registry_client import SyncRegistryClient
+
+    url = _require_setting(settings.REGISTRY.API_URL, "REGISTRY.API_URL")
+    client = SyncRegistryClient(
+        url,
+        signer=_signer("eip191", settings.SELLER.PRIVATE_KEY, "SELLER.PRIVATE_KEY"),
+        caller_role="seller",
+        expected_registries=_trust(_require_setting(
+            settings.REGISTRY.get("identifier", ""), "REGISTRY.IDENTIFIER"
+        )),
+        registry_authority=_require_setting(
+            settings.REGISTRY.get("authority_id", ""), "REGISTRY.AUTHORITY_ID"
+        ),
+    )
     yield client
     client.close()
 
@@ -219,31 +348,12 @@ def provisioning_client():
     ``expected_authorities`` pins the service's own signing principal, which is
     a different identity again, so responses are verified as well as requests.
     """
-    from market_identity import Identity, TrustedIdentitySet, create_signer
     from vm_provisioning_operator import SyncProvisioningClient
 
     url = _require_setting(settings.PROVISIONING.API_URL, "PROVISIONING.API_URL")
-    credential = _require_setting(
-        settings.PROVISIONING.ADMIN_CREDENTIAL,
-        "PROVISIONING.ADMIN_CREDENTIAL",
+    client = SyncProvisioningClient(
+        url, _provisioning_admin_signer(), _provisioning_authority_trust()
     )
-    authority_identifier = _require_setting(
-        settings.PROVISIONING.AUTHORITY_IDENTIFIER,
-        "PROVISIONING.AUTHORITY_IDENTIFIER",
-    )
-    signer = create_signer(
-        str(settings.PROVISIONING.ADMIN_SCHEME or "eip191"),
-        str(credential),
-    )
-    expected_authorities = TrustedIdentitySet(
-        identities=(
-            Identity(
-                scheme=str(settings.PROVISIONING.AUTHORITY_SCHEME or "eip191"),
-                identifier=str(authority_identifier),
-            ),
-        )
-    )
-    client = SyncProvisioningClient(url, signer, expected_authorities)
     yield client
     client.close()
 
@@ -255,8 +365,12 @@ def provisioning_test_client():
     Only works when the provisioning service runs with ACTIVE_PROFILES=mock.
     """
     url = _require_setting(settings.PROVISIONING.API_URL, "PROVISIONING.API_URL")
-    admin_key = str(settings.SELLER.ADMIN_API_KEY or "") or None
-    with ProvisioningTestClient(base_url=url, timeout=20.0, admin_key=admin_key) as client:
+    with ProvisioningTestClient(
+        url,
+        signer=_provisioning_admin_signer(),
+        expected_authorities=_provisioning_authority_trust(),
+        timeout=20.0,
+    ) as client:
         yield client
 
 
@@ -430,7 +544,7 @@ def wait_for_stage_event(
     Parameters
     ----------
     client:
-        A ``SyncStorefrontClient`` instance with admin_key configured.
+        A ``SyncStorefrontClient`` asserting the ``admin`` role.
     stage, event:
         Stage and event strings to match (e.g. ``"discovery"``, ``"order_published"``).
     listing_id, negotiation_id:

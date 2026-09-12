@@ -8,7 +8,11 @@ public API contract.
 
 Usage::
 
-    client = ProvisioningTestClient("http://provisioning:8081")
+    client = ProvisioningTestClient(
+        "http://provisioning:8081",
+        signer=admin_signer,
+        expected_authorities=provisioning_trust,
+    )
 
     # Add a rule that pauses before returning
     client.add_mock_rule(
@@ -30,9 +34,35 @@ Usage::
 from __future__ import annotations
 
 import logging
+import uuid
+from datetime import datetime, timezone
 from typing import Any, Optional
 
 import httpx
+from compute_provisioning import (
+    canonical_provisioning_request_body,
+    resolve_provisioning_route_contract,
+)
+from market_identity import (
+    EMPTY_BODY,
+    AuthenticatedResponse,
+    Identity,
+    RequestEnvelope,
+    SignatureProof,
+    Signer,
+    TrustedIdentitySet,
+    canonical_body_hash,
+    sign_request,
+    verify_response,
+)
+
+SIGNATURE_VERSION_HEADER = "X-Market-Signature-Version"
+IDENTITY_SCHEME_HEADER = "X-Market-Identity-Scheme"
+IDENTITY_IDENTIFIER_HEADER = "X-Market-Identity-Identifier"
+ROLE_HEADER = "X-Market-Role"
+REQUEST_ID_HEADER = "X-Market-Request-ID"
+TIMESTAMP_HEADER = "X-Market-Timestamp"
+SIGNATURE_HEADER = "X-Market-Signature"
 
 log = logging.getLogger(__name__)
 
@@ -52,19 +82,83 @@ class ProvisioningTestClient:
         Default HTTP timeout in seconds.  ``wait_for_job`` and ``drain``
         use a longer per-call timeout matching the server-side ``timeout``
         query parameter.
-    admin_key:
-        Shared secret presented as ``X-Admin-Key``. The ``/test/*`` and
-        watchdog routes sit behind the same gate as the rest of the API, so
-        when the deployment configures a key this must match it.
+    signer:
+        Signer for the principal the provisioning service trusts in the role
+        each route requires. The ``/test/*`` routes sit behind the same
+        authenticated route contract as the rest of the API — their operations
+        are administrator operations — so each request is signed per caller
+        rather than presenting a shared secret.
+    expected_authorities:
+        The provisioning service's own signing principal, so responses are
+        verified as well as requests.
     """
 
     def __init__(
-        self, base_url: str, *, timeout: float = 15.0, admin_key: str | None = None
+        self,
+        base_url: str,
+        *,
+        signer: Signer,
+        expected_authorities: TrustedIdentitySet,
+        timeout: float = 15.0,
     ) -> None:
         self._base = base_url.rstrip("/")
         self._timeout = timeout
-        headers = {"X-Admin-Key": admin_key} if admin_key else {}
-        self._client = httpx.Client(base_url=self._base, timeout=timeout, headers=headers)
+        self._signer = signer
+        self._expected_authorities = expected_authorities
+        self._client = httpx.Client(base_url=self._base, timeout=timeout)
+
+    # ------------------------------------------------------------------
+    # Request authentication
+    # ------------------------------------------------------------------
+
+    def _signed(
+        self,
+        method: str,
+        path: str,
+        *,
+        body: Any = EMPTY_BODY,
+        query: dict[str, Any] | None = None,
+    ) -> tuple[dict[str, str], str, str, str]:
+        """Build v2 authentication headers for one request.
+
+        The operation, resource, and required role all come from the shared
+        route contract rather than being restated here, so this client cannot
+        drift from the table the service authorizes against. Query values are
+        stringified because that is how they reach the service, and the signed
+        body must match what the service recomputes.
+        """
+        contract, resource = resolve_provisioning_route_contract(
+            method, path, body if body is not EMPTY_BODY else EMPTY_BODY
+        )
+        canonical_query = {
+            key: str(value) for key, value in (query or {}).items() if value is not None
+        }
+        canonical = canonical_provisioning_request_body(
+            method, path, body, query=canonical_query
+        )
+        request_id = uuid.uuid4().hex
+        authenticated = sign_request(
+            signer=self._signer,
+            envelope=RequestEnvelope(
+                role=contract.required_role,
+                principal=self._signer.identity,
+                method=method.upper(),
+                operation=contract.operation,
+                resource=resource,
+                request_id=request_id,
+                timestamp=int(datetime.now(timezone.utc).timestamp()),
+                body_hash=canonical_body_hash(canonical),
+            ),
+        )
+        return {
+            SIGNATURE_VERSION_HEADER: authenticated.protocol,
+            IDENTITY_SCHEME_HEADER: authenticated.principal.scheme.value,
+            IDENTITY_IDENTIFIER_HEADER: authenticated.principal.identifier,
+            ROLE_HEADER: authenticated.role,
+            REQUEST_ID_HEADER: authenticated.request_id,
+            TIMESTAMP_HEADER: str(authenticated.timestamp),
+            SIGNATURE_HEADER: authenticated.proof.value,
+        }, request_id, contract.operation, resource
 
     def close(self) -> None:
         self._client.close()
@@ -80,28 +174,114 @@ class ProvisioningTestClient:
     # ------------------------------------------------------------------
 
     def _get(self, path: str, *, params: dict | None = None, timeout: float | None = None) -> dict:
-        resp = self._client.get(path, params=params or {}, timeout=timeout or self._timeout)
+        headers, request_id, operation, resource = self._signed(
+            "GET", path, query=params
+        )
+        resp = self._client.get(
+            path,
+            params={k: str(v) for k, v in (params or {}).items()},
+            timeout=timeout or self._timeout,
+            headers=headers,
+        )
+        body = self._verify(
+            resp, method="GET", operation=operation,
+            resource=resource, request_id=request_id,
+        )
         if resp.status_code >= 400:
             raise ProvisioningTestClientError(
                 f"GET {self._base}{path} returned {resp.status_code}: {resp.text[:200]}"
             )
-        return resp.json()
+        return body
 
     def _post(self, path: str, body: dict | None = None) -> dict:
-        resp = self._client.post(path, json=body or {}, timeout=self._timeout)
+        payload = body if body is not None else {}
+        headers, request_id, operation, resource = self._signed(
+            "POST", path, body=payload
+        )
+        resp = self._client.post(
+            path, json=payload, timeout=self._timeout, headers=headers
+        )
+        body = self._verify(
+            resp, method="POST", operation=operation,
+            resource=resource, request_id=request_id,
+        )
         if resp.status_code >= 400:
             raise ProvisioningTestClientError(
                 f"POST {self._base}{path} returned {resp.status_code}: {resp.text[:200]}"
             )
-        return resp.json()
+        return body
 
     def _delete(self, path: str) -> dict:
-        resp = self._client.delete(path, timeout=self._timeout)
+        headers, request_id, operation, resource = self._signed("DELETE", path)
+        resp = self._client.delete(path, timeout=self._timeout, headers=headers)
+        body = self._verify(
+            resp, method="DELETE", operation=operation,
+            resource=resource, request_id=request_id,
+        )
         if resp.status_code >= 400:
             raise ProvisioningTestClientError(
                 f"DELETE {self._base}{path} returned {resp.status_code}: {resp.text[:200]}"
             )
-        return resp.json()
+        return body
+
+    def _verify(
+        self,
+        resp: httpx.Response,
+        *,
+        method: str,
+        operation: str,
+        resource: str,
+        request_id: str,
+    ) -> Any:
+        """Verify the service's response proof before reading the body.
+
+        A refusal is authenticated too, so this runs before the status check:
+        an unverified 4xx is not trustworthy evidence about why the call failed.
+        """
+        body = resp.json() if resp.content else EMPTY_BODY
+        try:
+            principal = Identity(
+                scheme=resp.headers[IDENTITY_SCHEME_HEADER],
+                identifier=resp.headers[IDENTITY_IDENTIFIER_HEADER],
+            )
+            authenticated = AuthenticatedResponse(
+                protocol=resp.headers[SIGNATURE_VERSION_HEADER],
+                role=resp.headers[ROLE_HEADER],
+                principal=principal,
+                method=method,
+                operation=operation,
+                resource=resource,
+                request_id=resp.headers[REQUEST_ID_HEADER],
+                timestamp=int(resp.headers[TIMESTAMP_HEADER]),
+                status=resp.status_code,
+                body_hash=canonical_body_hash(body),
+                proof=SignatureProof(
+                    scheme=principal.scheme,
+                    value=resp.headers[SIGNATURE_HEADER],
+                ),
+            )
+        except (KeyError, TypeError, ValueError) as exc:
+            raise ProvisioningTestClientError(
+                f"{method} {self._base}{resp.request.url.path} returned "
+                f"{resp.status_code} without usable response authentication"
+            ) from exc
+        result = verify_response(
+            authenticated,
+            body=body,
+            now=int(datetime.now(timezone.utc).timestamp()),
+            expected_role="service",
+            expected_principals=self._expected_authorities,
+            expected_method=method,
+            expected_operation=operation,
+            expected_resource=resource,
+            expected_request_id=request_id,
+        )
+        if not result.verified:
+            raise ProvisioningTestClientError(
+                f"{method} {self._base}{resp.request.url.path} response failed "
+                f"verification: {getattr(result, 'reason', 'unverified')}"
+            )
+        return body
 
     def run_lease_cycle(self) -> dict:
         """Run one production lease-lifecycle cycle."""

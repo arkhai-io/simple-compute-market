@@ -521,7 +521,7 @@ class StorefrontClient(_StorefrontClientBase):
         return HealthResponse.from_dict(
             await self._authenticated_get(
                 "/api/v1/system/status",
-                role="service",
+                role="admin",
                 operation="admin_system_status",
                 resource="system/status",
                 request_id=request_id,
@@ -1792,7 +1792,7 @@ class SyncStorefrontClient(_StorefrontClientBase):
         return HealthResponse.from_dict(
             self._authenticated_get(
                 "/api/v1/system/status",
-                role="service",
+                role="admin",
                 operation="admin_system_status",
                 resource="system/status",
                 request_id=request_id,

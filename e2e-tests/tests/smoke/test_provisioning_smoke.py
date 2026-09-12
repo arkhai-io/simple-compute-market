@@ -1,7 +1,7 @@
 """Smoke tests for the deployed provisioning service.
 
 The provisioning service gates every non-health route on a single
-shared admin key (``X-Admin-Key``); there is no per-agent identity.
+marketplace signature and asserted role, verified per caller.
 Read-only checks are selected by the Helm smoke hook; write-path checks
 are kept under a separate marker because they mutate provisioning
 state.
@@ -14,7 +14,7 @@ import logging
 import pytest
 
 from vm_provisioning_operator import ProvisioningError, SyncProvisioningClient
-from vm_provisioning_operator import HostCreate, HostUpdate, CreateVmRequest
+from vm_provisioning_operator import HostCreate, HostUpdate
 
 log = logging.getLogger(__name__)
 
@@ -23,9 +23,31 @@ def _client(
     provisioning_settings: dict,
     seller_settings: dict,
 ) -> SyncProvisioningClient:
+    from market_identity import Identity, TrustedIdentitySet, create_signer
+
+    credential = provisioning_settings.get("admin_credential") or ""
+    authority = provisioning_settings.get("authority_identifier") or ""
+    if not credential or not authority:
+        pytest.skip(
+            "provisioning.admin_credential and provisioning.authority_identifier "
+            "are required: provisioning authenticates each caller and signs its "
+            "responses, so a smoke check needs both halves configured."
+        )
     return SyncProvisioningClient(
-        base_url=provisioning_settings["api_url"],
-        admin_key=seller_settings.get("admin_api_key") or None,
+        provisioning_settings["api_url"],
+        create_signer(
+            str(provisioning_settings.get("admin_scheme") or "eip191"), str(credential)
+        ),
+        TrustedIdentitySet(
+            identities=(
+                Identity(
+                    scheme=str(
+                        provisioning_settings.get("authority_scheme") or "eip191"
+                    ),
+                    identifier=str(authority),
+                ),
+            )
+        ),
         timeout=15.0,
     )
 
@@ -137,16 +159,22 @@ class TestProvisioningSmoke:
     def test_auth_enforcement_when_enabled(
         self, provisioning_settings: dict, seller_settings: dict
     ):
-        """POST without X-Admin-Key returns 401 when a key is configured."""
-        if not seller_settings.get("admin_api_key"):
-            pytest.skip("No admin key configured on this deployment - skipping 401 check")
+        """An unsigned POST to a protected route is refused.
 
-        with SyncProvisioningClient(
-            base_url=provisioning_settings["api_url"],
-            admin_key=None,
+        The canonical client cannot express this case — it requires a signer at
+        construction — so the request goes out raw. That is the point of the
+        check: enforcement must not depend on the caller being well-behaved.
+        """
+        import httpx
+
+        base = str(provisioning_settings["api_url"]).rstrip("/")
+        resp = httpx.post(
+            f"{base}/api/v1/hosts/kvm1/vms",
+            json={"vm_target": "smoke-test-vm"},
             timeout=15.0,
-        ) as client:
-            with pytest.raises(ProvisioningError) as err:
-                client.create_vm("kvm1", CreateVmRequest(vm_target="smoke-test-vm"))
-        assert err.value.status_code == 401
-        log.info("Auth enforcement confirmed: 401 without X-Admin-Key")
+        )
+        assert resp.status_code in (401, 403), (
+            f"Unsigned request to a protected provisioning route returned "
+            f"{resp.status_code}; expected a refusal. Body: {resp.text[:200]}"
+        )
+        log.info("Auth enforcement confirmed: %s without a signature", resp.status_code)

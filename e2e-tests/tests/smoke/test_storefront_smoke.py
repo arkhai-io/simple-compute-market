@@ -35,12 +35,75 @@ def seller_api_url(seller_settings) -> str:
 
 @pytest.fixture(scope="module")
 def seller_client(seller_api_url: str, seller_settings: dict) -> SyncStorefrontClient:
+    from market_identity import Identity, TrustedIdentitySet, create_signer
+
+    signer = create_signer("eip191", seller_settings["private_key"])
     client = SyncStorefrontClient(
-        base_url=seller_api_url,
-        private_key=seller_settings["private_key"],
+        seller_api_url,
+        signer,
+        caller_role="seller",
+        expected_publishers=TrustedIdentitySet(
+            identities=(
+                Identity(
+                    scheme="eip191", identifier=signer.identity.identifier
+                ),
+            )
+        ),
     )
     yield client
     client.close()
+
+
+
+def _signed_status_headers(seller_settings: dict) -> dict[str, str]:
+    """v2 headers for GET /api/v1/system/status as the storefront administrator.
+
+    The route is an administrator operation, so a raw probe has to sign like
+    any other caller. Kept as a helper because two checks below read the
+    response directly rather than through the typed client.
+    """
+    import uuid
+    from datetime import datetime, timezone
+
+    from market_identity import (
+        EMPTY_BODY,
+        RequestEnvelope,
+        canonical_body_hash,
+        create_signer,
+        sign_request,
+    )
+
+    credential = seller_settings.get("admin_credential", "")
+    if not credential:
+        pytest.skip(
+            "seller.admin_credential not configured — /api/v1/system/status is "
+            "an administrator operation."
+        )
+    signer = create_signer(
+        str(seller_settings.get("admin_scheme") or "eip191"), str(credential)
+    )
+    authenticated = sign_request(
+        signer=signer,
+        envelope=RequestEnvelope(
+            role="admin",
+            principal=signer.identity,
+            method="GET",
+            operation="admin_system_status",
+            resource="system/status",
+            request_id=uuid.uuid4().hex,
+            timestamp=int(datetime.now(timezone.utc).timestamp()),
+            body_hash=canonical_body_hash(EMPTY_BODY),
+        ),
+    )
+    return {
+        "X-Market-Signature-Version": authenticated.protocol,
+        "X-Market-Identity-Scheme": authenticated.principal.scheme.value,
+        "X-Market-Identity-Identifier": authenticated.principal.identifier,
+        "X-Market-Role": authenticated.role,
+        "X-Market-Request-ID": authenticated.request_id,
+        "X-Market-Timestamp": str(authenticated.timestamp),
+        "X-Market-Signature": authenticated.proof.value,
+    }
 
 
 @pytest.mark.storefront
@@ -59,8 +122,7 @@ class TestStorefrontRegistration:
         registry_status='error' and the e2e deal test to fail at stage 05.
         """
         import httpx
-        admin_key = seller_settings.get("admin_api_key", "")
-        headers = {"X-Admin-Key": admin_key} if admin_key else {}
+        headers = _signed_status_headers(seller_settings)
         try:
             resp = httpx.get(
                 f"{seller_api_url}/api/v1/system/status",
@@ -97,8 +159,7 @@ class TestStorefrontRegistration:
         multi-stage e2e run.
         """
         import httpx
-        admin_key = seller_settings.get("admin_api_key", "")
-        headers = {"X-Admin-Key": admin_key} if admin_key else {}
+        headers = _signed_status_headers(seller_settings)
         try:
             resp = httpx.get(
                 f"{seller_api_url}/api/v1/system/status",
@@ -140,16 +201,27 @@ class TestStorefrontRegistration:
         diagnostic status endpoint, populated by querying the resources table
         directly on the server.
         """
-        admin_key = seller_settings.get("admin_api_key", "")
-        if not admin_key:
+        from market_identity import Identity, TrustedIdentitySet, create_signer
+
+        credential = seller_settings.get("admin_credential", "")
+        if not credential:
             pytest.skip(
-                "seller.admin_api_key not configured — cannot call admin-gated "
-                "/api/v1/system/status endpoint. Set admin_api_key in config."
+                "seller.admin_credential not configured — /api/v1/system/status is "
+                "an administrator operation, and the administrator is a separate "
+                "principal from the seller."
             )
+        publisher = create_signer("eip191", seller_settings["private_key"]).identity
         client = SyncStorefrontClient(
-            base_url=seller_api_url,
-            private_key=seller_settings["private_key"],
-            admin_key=admin_key,
+            seller_api_url,
+            create_signer(
+                str(seller_settings.get("admin_scheme") or "eip191"), str(credential)
+            ),
+            caller_role="admin",
+            expected_publishers=TrustedIdentitySet(
+                identities=(
+                    Identity(scheme="eip191", identifier=publisher.identifier),
+                )
+            ),
         )
         try:
             status = client.get_system_status()

@@ -179,7 +179,8 @@ class TestStageB1_ResourceSeed:
 
 class TestStageB2_PublishListing:
     def test_b2_create_and_publish_listing(
-        self, storefront_admin_client, seller_wallet, registry_client, deal_state: DealState
+        self, storefront_admin_client,
+        storefront_seller_client, seller_wallet, registry_client, deal_state: DealState
     ):
         """Create the listing paused, resume to publish, confirm in registry.
 
@@ -189,7 +190,7 @@ class TestStageB2_PublishListing:
         """
         require_state(deal_state, "_resources_seeded")
 
-        resp = storefront_admin_client.create_listing(
+        resp = storefront_seller_client.create_listing(
             agent_wallet_address=seller_wallet,
             listing_resource=OFFER_RESOURCE,
             accepted_escrows=ACCEPTED_ESCROWS,

@@ -103,7 +103,25 @@
       same explicit settling 2.1 got. Carrying it as the next round of this
       change rather than guessing:
       - [ ] 3.3a Settle the role split for `storefront_admin_client` and
-            reassign its callers.
+            reassign its callers. The mapping is now established by reading
+            each method's asserted role, and `storefront_admin_client` spans
+            three of them, so one client cannot serve it:
+
+            | Required role | Methods called on the fixture |
+            |---|---|
+            | `admin` | `admin_import_resources`, `admin_reserve_capacity`, `admin_release_reservations`, `admin_release_one_reservation`, `admin_interrupt_deal`, `admin_resume`, `resume_listing`, `force_accept_negotiation`, `evaluate_settle`, `get_listing`, `get_negotiation`, `get_events` |
+            | `seller` | `create_listing` |
+            | `service` | `get_system_status` |
+
+            `get_health`, `negotiate_new`, and `evaluate_negotiate` are
+            unauthenticated and need no role. `storefront_client` is
+            straightforward: `settle` and `get_settle_status` are `buyer`.
+
+            The `service` row is the open decision and is recorded as a
+            question in `design.md`: the storefront's only pinned service peer
+            is the provisioning service, so a `service`-role client would have
+            to sign as the provisioning identity, and `get_system_status` is
+            asserted in roughly ten tests, so it cannot simply be dropped.
       - [ ] 3.3b Rebuild `storefront_client`, `storefront_admin_client`,
             `registry_client`, and `test_multi_registry.py`'s clients on the
             current signatures, following `hosted/network.py`.
@@ -130,12 +148,123 @@
       and no error names `admin_key`, `private_key`, or a missing `revision`.
       Counting errors would hide that, which is the failure mode this branch
       has already recorded once.
+- [x] 4.1a **Round 1 result: 1 failed, 12 passed, 1 skipped, 263 deselected,
+      87 errors** (from 0 failed / 88 errors). Compared by cause, not count:
+
+      | Cause | Before | After |
+      |---|---|---|
+      | `SyncProvisioningClient(admin_key=...)` | 87 | **0** |
+      | `ProfileStore` missing `revision` | 1 | **0** |
+      | `SyncStorefrontClient(private_key=...)` | 0 (masked) | 87 |
+
+      Both repaired causes are gone and neither was replaced by a variant.
+      The 87 remaining errors are the single masked cause predicted by 1.2.
+
+      `provisioning_client` is confirmed working against the live service, not
+      merely constructing: the host-registration fixture drove
+      `GET /api/v1/hosts/kvm1` → 404 then `POST /api/v1/hosts/` → **201
+      Created**. A 201 means the admin-signed request was authenticated and
+      authorised and the signed response passed authority verification, which
+      settles 2.1 empirically as well as by reading the code.
+
+      The buyer-CLI repair is confirmed the same way: `test_credits_full_deal`
+      now proceeds through fixture setup and invokes the real `market` binary,
+      which is why it moved from an error to a failure.
+
 - [ ] 4.2 Classify every remaining failure: a real finding with an issue
       raised, or a genuine pass. Do not fix the findings here.
+      - [x] 4.2a `test_credits_full_deal` — **not yet classifiable, and the
+            suite's own reporter is why.**
+            `assert_market_run_succeeded` is reached only when the CLI exits
+            non-zero, so `market credits buy` did fail; but it then calls
+            `read_events()`, which resolves `run_id`, which waits ten seconds
+            for a run-log that will never appear and raises. The raise replaces
+            the prepared message — including the return code — with
+            `market did not produce a run-log ... within 10s`. A failure
+            reporter that fails while reporting yields the same blindness as a
+            check that passes while the thing it checks is broken.
+            Repaired by giving `MarketRun` a no-wait, no-raise
+            `events_or_empty()` for the failure path and having the reporter
+            use it, so the return code survives. Re-run to classify; the
+            underlying CLI failure is a finding to raise, not to fix here.
 - [ ] 4.3 Confirm the 12 currently-passing tests still pass. A fixture repair
       that changes their behaviour has changed what they exercise.
 - [ ] 4.4 Run `make test` to confirm the fixture changes did not disturb the
       unit and integration suites.
+
+## 4a. Diagnosability and wait removal
+
+Added this round: repairing the fixtures exposed that the buyer-CLI helper
+could not report its own failures, and that it synchronized by sampling the
+clock rather than on an observable transition.
+
+- [x] 4a.1 **Remove the run-id discovery wait.** `_discover_run_id` sampled the
+      run directory every 100ms for ten seconds and then raised. Every
+      `BuyerCli.run(...)` call site uses `subprocess.run`, so the process has
+      already exited before the lookup — the wait was racing a file that could
+      never appear, and the raise discarded the return code the reporter was
+      about to print. Replaced with `_resolve_run_id`, a single filesystem
+      observation: the run directory is fixture-owned and per-run, so this
+      invocation's log is the one id not already present.
+- [x] 4a.2 **Never sample against an exited process.** `wait_for_event` polled
+      until a deadline and only checked process state as a side path, so a CLI
+      that died early still cost the full timeout and reported
+      "did not see event" instead of the exit code. It now checks the
+      terminal condition first: once `exited` is true the run-log is final, and
+      the assertion names the return code and stream tails. The remaining
+      bounded 200ms sample applies only while the process is genuinely still
+      running, which is the streaming case below.
+- [ ] 4a.3 **Seam for the streaming case.** `RunLog.start` generates its run-id
+      internally via `_new_run_id()` and nothing lets a caller supply or
+      observe it before work begins, so a test that tails a *live* run still
+      has no transition to synchronize on for the log's first appearance. The
+      methodology's own instruction applies — where no seam exists, adding it
+      is the correct fix rather than a sleep — but the candidates
+      (a `--run-id` input, or emitting the run-id deterministically before the
+      first event) change `core/buyer`, which is outside this change's
+      "`e2e-tests/` fixtures only" impact statement. Raise it rather than
+      widening this change unilaterally.
+
+## 4b. Administrator role correction
+
+- [x] 4b.1 `admin_system_status` asserted `service` while binding an operation
+      named for the administrator, and its sibling read on the same prefix
+      (`GET /api/v1/system/events`) was already an administrator contract. The
+      route was misfiled in `service_peer_auth`, whose other entries are all
+      provisioning POST callbacks carrying a capacity reservation. Corrected in
+      the client (both async and sync) and moved to `admin_identity`.
+      Verified directly against the resolvers: `GET /api/v1/system/status` now
+      returns `("admin_system_status", "system/status")` from the admin
+      contract and `None` from the service-peer callback, while all five
+      fulfillment callbacks still resolve to the service peer with their
+      site and reservation intact.
+- [x] 4b.2 Seller split from administrator. `storefront.bob.toml` principal
+      `0x3c44cddd…` / operator `0x976ea740…`; `storefront.alice.toml`
+      principal `0x15d34aaf…` / operator `0x14dc7996…`. Administrators are
+      pinned only in these two files, so no compose change was needed.
+- [x] 4b.3 Storefront integration tests updated: `test_admin_api.py` gains an
+      `admin_client` fixture and the seven `get_system_status` assertions move
+      to it. `service_client` stays for the provisioning callbacks, which are
+      genuinely service-to-service.
+
+      Test evidence in this environment: storefront-client suite 30 passed
+      (includes `test_admin_auth`, `test_auth_headers`); storefront unit
+      `test_admin_auth` + `test_identity_dispatch` +
+      `test_service_peer_identity` 32 passed; e2e collection clean
+      (`test_multi_registry` 20 collected, smoke 16 collected); all eight
+      rebuilt clients construct against the committed dev credentials; and a
+      seller-role client is refused `get_system_status` with
+      `this operation requires caller_role='admin', not 'seller'`.
+
+      Two limits worth recording. `test_admin_api.py` itself cannot be
+      executed here: it imports `market_storefront.server`, which needs the
+      separately released `hosted_settlement_client` wheel, so the change to
+      it is verified by the resolver tests above rather than by running it.
+      And `tests/unit/test_config_loader.py` has two failures
+      (`test_structured_settlement_publication_defaults_are_validated`,
+      `test_structured_publication_defaults_reject_partial_or_secret_input`)
+      which reproduce identically on pristine code and are unrelated to this
+      change.
 
 ## 5. Closeout
 
@@ -188,8 +317,14 @@ which deferred them deliberately. None blocked startup.
 ## Implementation status
 
 **Partially implemented.** Both reported fixture errors are repaired and
-verified against the installed packages; task 2.1 is settled from the code and
-no longer blocks 3.1.
+confirmed against the running stack: the provisioning fixture performs
+authenticated admin writes (`201 Created`), and the buyer-CLI fixture reaches
+the real `market` binary. Task 2.1 is settled from the code and by observed
+authorisation, and no longer blocks 3.1.
+
+Round 2 repairs the failure reporter that was hiding the one new result. The
+87 remaining errors are all the single masked `SyncStorefrontClient` cause and
+are gated on the role decision in 3.3a.
 
 The survey found that the drift is wider than the proposal assumed: four
 further sites carry the same class of error and were invisible because the

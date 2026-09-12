@@ -122,9 +122,16 @@ def assert_market_run_succeeded(run: Any, *, command: str) -> None:
 
     if run.returncode == 0:
         return
-    event_names = [event.get("event", "?") for event in run.read_events()]
+    events = run.events_or_empty()
+    if events:
+        detail = f"run events={[event.get('event', '?') for event in events]!r}"
+    else:
+        detail = (
+            "no run-log was written, so the command failed before emitting its "
+            "first event"
+        )
     raise AssertionError(
-        f"{command} failed rc={run.returncode}; run events={event_names!r}. "
+        f"{command} failed rc={run.returncode}; {detail}. "
         "Inspect the role-scoped process output directly; it may contain a "
         "transient domain credential and is not copied into test evidence."
     )

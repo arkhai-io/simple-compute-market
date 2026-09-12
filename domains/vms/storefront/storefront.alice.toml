@@ -31,10 +31,13 @@ scheme = "eip191"
 identifier = "0x15d34aaf54267db7d7c367839aaf71a00a2c6a65"
 
 [Identity.administrators.operator]
+# Anvil account 7. The operator is deliberately a different principal
+# from Identity.principal above: the seller publishes and the administrator
+# operates, and the two are separately authorized rather than conflated.
 # The loader requires a list: a stable administrator may hold more than one
 # principal, and `principal = {...}` is the pre-list spelling.
 principals = [
-  { scheme = "eip191", identifier = "0x15d34aaf54267db7d7c367839aaf71a00a2c6a65" },
+  { scheme = "eip191", identifier = "0x14dc79964da2c08b23698b3d3cc7ca32193d9955" },
 ]
 
 [Identity.service_peers.provisioning_default]

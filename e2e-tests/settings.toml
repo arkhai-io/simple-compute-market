@@ -19,6 +19,8 @@ retry_backoff_seconds = 2
 # ---------------------------------------------------------------------------
 [default.registry]
 api_url            = ""
+authority_id       = ""   # REGISTRY_AUTHORITY_ID the service publishes under
+identifier         = ""   # the registry's own signing principal
 
 # ---------------------------------------------------------------------------
 # Buyer wallet
@@ -39,7 +41,21 @@ api_url           = ""
 base_url_override = ""
 private_key       = ""
 wallet_address    = ""
-admin_api_key     = ""        # X-Admin-Key for /admin/* and the provisioning service
+# The storefront administrator is a separate principal from the seller: the
+# seller publishes listings, the administrator performs the system controls
+# that are not part of a normal deal. Both are pinned in the storefront
+# config, so a credential for the wrong one authenticates as the wrong caller.
+admin_scheme      = "eip191"
+admin_credential  = ""
+
+# ---------------------------------------------------------------------------
+# Second storefront (multi-registry scenario)
+# ---------------------------------------------------------------------------
+[default.alice]
+api_url           = ""
+private_key       = ""
+admin_scheme      = "eip191"
+admin_credential  = ""
 
 # ---------------------------------------------------------------------------
 # Test behaviour

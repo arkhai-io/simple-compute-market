@@ -161,6 +161,27 @@ async def unsigned_client(admin_app) -> AsyncIterator[httpx.AsyncClient]:
 
 
 @pytest_asyncio.fixture
+async def admin_client(admin_app) -> AsyncIterator[StorefrontClient]:
+    """Administrator-role client.
+
+    System status is an administrator operation: the operation it binds is
+    named for the administrator, and its sibling read on the same prefix
+    (GET /api/v1/system/events) is an administrator contract too. The
+    service-peer client below remains for the provisioning callbacks, which
+    are genuinely service-to-service.
+    """
+    transport = httpx.ASGITransport(app=admin_app)
+    async with StorefrontClient(
+        "http://test",
+        transport=transport,
+        signer=_ADMIN_SIGNER,
+        caller_role="admin",
+        expected_publishers=_MARKETPLACE_PUBLISHERS,
+    ) as c:
+        yield c
+
+
+@pytest_asyncio.fixture
 async def service_client(admin_app) -> AsyncIterator[StorefrontClient]:
     transport = httpx.ASGITransport(app=admin_app)
     async with StorefrontClient(
@@ -185,20 +206,20 @@ class TestHealthEndpoint:
         assert result.checks.get("database") == "ok"
         assert "registry" not in result.checks
 
-    async def test_system_status_includes_paused(self, service_client):
-        result = await service_client.get_system_status()
+    async def test_system_status_includes_paused(self, admin_client):
+        result = await admin_client.get_system_status()
         assert result.paused is False
 
-    async def test_system_status_includes_registry_check(self, service_client):
-        result = await service_client.get_system_status()
+    async def test_system_status_includes_registry_check(self, admin_client):
+        result = await admin_client.get_system_status()
         registry_check = result.checks.get("registry")
         assert registry_check is not None
         assert isinstance(registry_check, str) and registry_check
 
     async def test_system_status_includes_negotiation_strategy_check(
-        self, service_client
+        self, admin_client
     ):
-        result = await service_client.get_system_status()
+        result = await admin_client.get_system_status()
         strat_check = result.checks.get("negotiation_strategy")
         assert strat_check is not None
         assert isinstance(strat_check, str) and strat_check
@@ -207,7 +228,7 @@ class TestHealthEndpoint:
         )
 
     async def test_system_status_surfaces_site_projection_state(
-        self, db, service_client
+        self, db, admin_client
     ):
         """End-to-end: a populated projection status summary must survive
         SystemService -> HealthResponse (server, pydantic) -> HTTP JSON ->
@@ -238,7 +259,7 @@ class TestHealthEndpoint:
             marketplace_signer=_MARKETPLACE_SIGNER,
             projection_status_provider=lambda: summary,
         )
-        result = await service_client.get_system_status()
+        result = await admin_client.get_system_status()
 
         assert result.site_projections == summary
         assert result.site_projections["site-a"]["resource_pool"]["state"] == "loaded"
@@ -256,7 +277,7 @@ class TestHealthEndpoint:
         assert result.site_projections is None
 
     async def test_system_status_surfaces_listing_cardinality_mode_explanations(
-        self, db, service_client
+        self, db, admin_client
     ):
         """Same real end-to-end round trip as
         test_system_status_surfaces_site_projection_state (above), for the
@@ -274,7 +295,7 @@ class TestHealthEndpoint:
             marketplace_signer=_MARKETPLACE_SIGNER,
             listing_cardinality_mode_explanation_provider=lambda: explanations,
         )
-        result = await service_client.get_system_status()
+        result = await admin_client.get_system_status()
 
         assert result.listing_cardinality_mode_explanations == explanations
 
@@ -312,10 +333,10 @@ class TestAdminPause:
         assert result.paused is True
         assert _server._GLOBALLY_PAUSED is True
 
-    async def test_pause_reflected_in_system_status(self, client, service_client):
+    async def test_pause_reflected_in_system_status(self, client, admin_client):
         c, _ = client
         await c.admin_pause()
-        status = await service_client.get_system_status()
+        status = await admin_client.get_system_status()
         assert status.paused is True
 
 
@@ -337,11 +358,11 @@ class TestAdminResume:
         assert result.paused is False
         assert _server._GLOBALLY_PAUSED is False
 
-    async def test_resume_reflected_in_system_status(self, client, service_client):
+    async def test_resume_reflected_in_system_status(self, client, admin_client):
         c, _ = client
         await c.admin_pause()
         await c.admin_resume()
-        status = await service_client.get_system_status()
+        status = await admin_client.get_system_status()
         assert status.paused is False
 
 # ---------------------------------------------------------------------------

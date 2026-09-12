@@ -84,34 +84,64 @@ class MarketRun:
     pre_existing_run_ids: frozenset[str] = field(default_factory=frozenset)
 
     @property
+    def exited(self) -> bool:
+        """Whether the CLI process has already terminated."""
+
+        if self.completed is not None:
+            return True
+        return self.popen is not None and self.popen.poll() is not None
+
+    @property
     def run_id(self) -> str:
         if self._run_id is None:
-            self._run_id = self._discover_run_id()
+            resolved = self._resolve_run_id()
+            if resolved is None:
+                raise AssertionError(
+                    f"market wrote no run-log to {self.run_dir} "
+                    f"(rc={self.returncode}, pre-existing run-ids: "
+                    f"{self.pre_existing_run_ids})."
+                )
+            self._run_id = resolved
         return self._run_id
 
-    def _discover_run_id(self) -> str:
-        deadline = time.monotonic() + 10.0
-        while time.monotonic() < deadline:
-            if self.run_dir.exists():
-                current = {p.stem for p in self.run_dir.glob("*.jsonl")}
-                new = current - self.pre_existing_run_ids
-                if len(new) == 1:
-                    return next(iter(new))
-                if len(new) > 1:
-                    newest = max(
-                        self.run_dir.glob("*.jsonl"),
-                        key=lambda p: p.stat().st_mtime,
-                    )
-                    return newest.stem
-            time.sleep(0.1)
-        raise AssertionError(
-            f"market did not produce a run-log in {self.run_dir} within 10s "
-            f"(pre-existing run-ids: {self.pre_existing_run_ids})"
-        )
+    def _resolve_run_id(self) -> Optional[str]:
+        """Resolve this run's log id from run-directory state, without waiting.
+
+        The run directory is fixture-owned and per-run, so the log this
+        invocation wrote is the one id that was not already present. Reading it
+        is a single filesystem observation: once the process has exited the set
+        of logs it will ever write is final, and while it is still running the
+        caller synchronizes on an emitted event rather than on this lookup.
+        """
+        if not self.run_dir.exists():
+            return None
+        candidates = sorted(self.run_dir.glob("*.jsonl"))
+        new = {path.stem for path in candidates} - self.pre_existing_run_ids
+        if not new:
+            return None
+        if len(new) == 1:
+            return next(iter(new))
+        return max(candidates, key=lambda path: path.stat().st_mtime).stem
 
     @property
     def log_path(self) -> Path:
         return self.run_dir / f"{self.run_id}.jsonl"
+
+    def events_or_empty(self) -> list[dict[str, Any]]:
+        """Return run events without waiting, for callers reporting a failure.
+
+        ``run_id`` blocks for ten seconds and then raises, which is correct
+        while a test waits for a run-log that should still appear. A caller
+        that already knows the process exited is not waiting for anything, and
+        raising there replaces the failure being reported with a second,
+        less informative one.
+        """
+        if self._run_id is None:
+            resolved = self._resolve_run_id()
+            if resolved is None:
+                return []
+            self._run_id = resolved
+        return self.read_events()
 
     def read_events(self) -> list[dict[str, Any]]:
         path = self.log_path
@@ -143,28 +173,32 @@ class MarketRun:
         """
         deadline = time.monotonic() + timeout
         last_seen: list[str] = []
-        while time.monotonic() < deadline:
-            events = self.read_events()
+        while True:
+            events = self.events_or_empty()
             last_seen = [e.get("event", "?") for e in events[-6:]]
             for ev in events:
                 if ev.get("event") != event_name:
                     continue
                 if predicate is None or predicate(ev):
                     return ev
-            if self.popen is not None and self.popen.poll() is not None:
-                if self.popen.returncode != 0:
-                    stdout, stderr = self._drain_streams()
-                    raise AssertionError(
-                        f"market subprocess exited rc={self.popen.returncode} "
-                        f"before emitting {event_name!r}. last events={last_seen}\n"
-                        f"stdout (tail): {stdout[-1500:]}\n"
-                        f"stderr (tail): {stderr[-1500:]}"
-                    )
+            # A terminated process emits nothing further, so the run-log is
+            # final at this point. Continuing to sample it would convert a
+            # decided outcome into a timeout and discard the return code.
+            if self.exited:
+                stdout, stderr = self._drain_streams()
+                raise AssertionError(
+                    f"market exited rc={self.returncode} without emitting "
+                    f"{event_name!r}. last events={last_seen}\n"
+                    f"stdout (tail): {stdout[-1500:]}\n"
+                    f"stderr (tail): {stderr[-1500:]}"
+                )
+            if time.monotonic() >= deadline:
+                raise AssertionError(
+                    f"Did not see event {event_name!r} in run {self.run_id} "
+                    f"within {timeout}s while the CLI was still running. "
+                    f"last events={last_seen}"
+                )
             time.sleep(0.2)
-        raise AssertionError(
-            f"Did not see event {event_name!r} in run {self.run_id} within {timeout}s. "
-            f"last events={last_seen}"
-        )
 
     def _drain_streams(self) -> tuple[str, str]:
         if self.popen is None:
