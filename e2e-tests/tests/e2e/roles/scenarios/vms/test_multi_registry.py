@@ -92,7 +92,14 @@ from typing import Any, Optional
 import httpx
 import pytest
 
-from market_identity import Identity, TrustedIdentitySet, create_signer
+from market_identity import (
+    Identity,
+    RequestEnvelope,
+    TrustedIdentitySet,
+    canonical_body_hash,
+    create_signer,
+    sign_request,
+)
 from src.settings import settings
 from tests.e2e.roles.scenarios.vms.conftest import _require_setting, capacity_source_for
 
@@ -537,6 +544,51 @@ class TestStage03d_AlicePublishes:
         log.info("[03d] alice published listing %s", listing_id)
 
 
+
+def _signed_listing_read_headers(listing_id: str) -> dict[str, str]:
+    """v2 headers for a registry `GET /listings/{id}` as the buyer.
+
+    The route authenticates and admits `buyer`, `seller`, or `service`; an
+    unsigned read is refused with `context_mismatch` rather than answered. The
+    reads below stay raw rather than going through the typed client because
+    they assert on the status code itself — 200 against 404 is what
+    distinguishes "published here" from "not published here", and the client
+    raises instead of reporting it.
+
+    The signed body must match what the route hashes, which for a query-less
+    GET is an empty query list rather than an empty body.
+    """
+    import uuid
+    from datetime import datetime, timezone
+
+    signer = create_signer(
+        "eip191",
+        _require_setting(settings.BUYER.MARKETPLACE_CREDENTIAL, "BUYER.MARKETPLACE_CREDENTIAL"),
+    )
+    authenticated = sign_request(
+        signer=signer,
+        envelope=RequestEnvelope(
+            role="buyer",
+            principal=signer.identity,
+            method="GET",
+            operation="listing.get",
+            resource=listing_id,
+            request_id=uuid.uuid4().hex,
+            timestamp=int(datetime.now(timezone.utc).timestamp()),
+            body_hash=canonical_body_hash({"query": []}),
+        ),
+    )
+    return {
+        "X-Market-Signature-Version": authenticated.protocol,
+        "X-Market-Identity-Scheme": authenticated.principal.scheme.value,
+        "X-Market-Identity-Identifier": authenticated.principal.identifier,
+        "X-Market-Role": authenticated.role,
+        "X-Market-Request-ID": authenticated.request_id,
+        "X-Market-Timestamp": str(authenticated.timestamp),
+        "X-Market-Signature": authenticated.proof.value,
+    }
+
+
 # ===========================================================================
 # Phase 4 — registry footprints differ as configured
 # ===========================================================================
@@ -546,6 +598,7 @@ class TestStage04a_BobInRegistryA:
         _require(mr_state, "bob_listing_id")
         resp = httpx.get(
             f"{_REGISTRY_A}/listings/{mr_state.bob_listing_id}", timeout=5.0,
+            headers=_signed_listing_read_headers(mr_state.bob_listing_id),
         )
         assert resp.status_code == 200, (
             f"registry-A {resp.status_code} for bob's listing: {resp.text[:200]}"
@@ -559,7 +612,13 @@ class TestStage04b_BobInRegistryB:
         resp = httpx.get(
             f"{_REGISTRY_B}/listings/{mr_state.bob_listing_id}",
             timeout=5.0,
-            headers={"Authorization": f"Bearer {_REGISTRY_B_TOKEN}"},
+            # Both gates apply: the bearer token grants read access to this
+            # private registry, and the marketplace signature identifies the
+            # caller. Neither substitutes for the other.
+            headers={
+                "Authorization": f"Bearer {_REGISTRY_B_TOKEN}",
+                **_signed_listing_read_headers(mr_state.bob_listing_id),
+            },
         )
         assert resp.status_code == 200, (
             f"registry-B {resp.status_code} for bob's listing: {resp.text[:200]}.\n"
@@ -574,6 +633,7 @@ class TestStage04c_AliceInRegistryA:
         _require(mr_state, "alice_listing_id")
         resp = httpx.get(
             f"{_REGISTRY_A}/listings/{mr_state.alice_listing_id}", timeout=5.0,
+            headers=_signed_listing_read_headers(mr_state.alice_listing_id),
         )
         assert resp.status_code == 200, (
             f"registry-A {resp.status_code} for alice's listing: {resp.text[:200]}"
@@ -591,7 +651,13 @@ class TestStage04d_AliceAbsentFromRegistryB:
         resp = httpx.get(
             f"{_REGISTRY_B}/listings/{mr_state.alice_listing_id}",
             timeout=5.0,
-            headers={"Authorization": f"Bearer {_REGISTRY_B_TOKEN}"},
+            # Both gates apply: the bearer token grants read access to this
+            # private registry, and the marketplace signature identifies the
+            # caller. Neither substitutes for the other.
+            headers={
+                "Authorization": f"Bearer {_REGISTRY_B_TOKEN}",
+                **_signed_listing_read_headers(mr_state.alice_listing_id),
+            },
         )
         assert resp.status_code == 404, (
             f"Alice's listing {mr_state.alice_listing_id} unexpectedly present "

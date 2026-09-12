@@ -33,7 +33,13 @@ confirms settlement becomes ready has not happened yet.
       only on DNS for the compose-internal RPC host.
 - [x] 3.2 `alkahest_preflight` carries `alkahest.address_config_invalid` for
       the current path and not for the mounted one.
-- [ ] 3.3 `make -C e2e-tests test-e2e`: confirm `checks.alkahest` reports
+- [x] 3.3 **Confirmed.** `[SETTLEMENT] mechanism=alkahest.v1 configured=True
+      enabled=True ready=True blockers=` with zero `option suppressed` lines.
+      **10 failed, 47 passed, 44 skipped** from 11 failed / 38 passed / 52
+      skipped: the seven listing-create refusals are gone, nine more tests
+      pass, and eight fewer skip. The escrow phases now execute.
+- [x] 3.3a Original wording, kept for the criteria it names:
+      `make -C e2e-tests test-e2e`: confirm `checks.alkahest` reports
       `anvil`, that no `[SETTLEMENT] option suppressed` line names
       `alkahest.v1`, and that the seven listing-create refusals are gone.
       Compare failure *causes*, not counts — the escrow phases have never run,
@@ -41,6 +47,38 @@ confirms settlement becomes ready has not happened yet.
       result and are findings for classification, not regressions.
 - [ ] 3.4 `make test` stays green. No production Python changed, so nothing is
       expected here; run it rather than assume.
+
+## 3b. Drift the settling stack exposed
+
+Publishing listings reached code that had never run. Three were mine.
+
+- [x] 3b.1 `ProvisioningTestClient._verify` omitted `verify_response`'s
+      required `max_skew`. Now carries `max_timestamp_skew=300`, mirroring the
+      canonical client's own default rather than a new number.
+- [x] 3b.2 `validate_publish_listing` is a seller operation but two tests still
+      called it on the buyer-role client. The registry refused it and the
+      refusal was not a signed v2 response, so the client reported
+      `unsupported_version` wrapped as `502` — a confusing surface for a plain
+      role error. Repointed to `registry_seller_client`, which existed but had
+      no callers.
+- [x] 3b.3 Four raw `httpx.get` reads of `/listings/{id}` sent no headers;
+      that route authenticates and admits `buyer`, `seller`, or `service`, so
+      it answered `401 context_mismatch`. Signed via a helper, verified against
+      the registry's own `verify_request`. They stay raw because they assert on
+      the status code — 200 against 404 is what distinguishes "published here"
+      from "not published here", and the typed client raises instead of
+      reporting it. The two private-registry reads keep their bearer token
+      alongside the signature: both gates apply and neither substitutes for
+      the other.
+
+- [ ] 3b.4 **Findings, not repaired here.** Each is downstream of a listing
+      that now publishes, so none was observable before this change:
+
+      | Finding | Tests |
+      |---|---|
+      | `409 No available compute VM matched required attributes` on admin reservation | 2 |
+      | `500 UNIQUE constraint failed: storefront_listing_bindings.derivation_key` on a second listing create | 1 |
+      | `market credits buy` exits `rc=2` before writing a run-log (carried from the previous change) | 1 |
 
 ## 4. Closeout
 

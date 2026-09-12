@@ -100,11 +100,13 @@ class ProvisioningTestClient:
         signer: Signer,
         expected_authorities: TrustedIdentitySet,
         timeout: float = 15.0,
+        max_timestamp_skew: int = 300,
     ) -> None:
         self._base = base_url.rstrip("/")
         self._timeout = timeout
         self._signer = signer
         self._expected_authorities = expected_authorities
+        self._max_timestamp_skew = max_timestamp_skew
         self._client = httpx.Client(base_url=self._base, timeout=timeout)
 
     # ------------------------------------------------------------------
@@ -269,6 +271,7 @@ class ProvisioningTestClient:
             authenticated,
             body=body,
             now=int(datetime.now(timezone.utc).timestamp()),
+            max_skew=self._max_timestamp_skew,
             expected_role="service",
             expected_principals=self._expected_authorities,
             expected_method=method,

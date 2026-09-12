@@ -489,7 +489,7 @@ class TestStage02b_CreateListingPaused:
 
 class TestStage03a_ValidatePublish:
     def test_03a_listing_payload_validates_against_registry(
-        self, registry_client, deal_state: DealState
+        self, registry_client, registry_seller_client, deal_state: DealState
     ):
         """POST registry /api/v1/listings/validate-publish → valid=True (dry-run).
 
@@ -508,7 +508,7 @@ class TestStage03a_ValidatePublish:
             accepted_escrows=ACCEPTED_ESCROWS,
             max_duration_seconds=DURATION_HOURS * 3600,
         )
-        result = registry_client.validate_publish_listing(req)
+        result = registry_seller_client.validate_publish_listing(req)
         assert result.valid, (
             f"Registry validate-publish returned valid=False for listing "
             f"{deal_state.seller_listing_id}.\n"
