@@ -114,15 +114,16 @@ contact-payload-retention ──► compose-contact-exchange-across-compute
 | [`contact-payload-retention`](contact-payload-retention/) | active; no blocking dependency; design-complete | Makes the existing bounded-PII retention requirement executable: a 30-day-default window applied as an aggregate policy read live, one deletion handler shared by a scheduled sweep and an operator-invoked path, and disclosure of the window both before a buyer commits contact data and again at reveal. The deletion primitive already exists in the mechanism kit with no caller |
 | [`compose-contact-exchange-across-compute`](compose-contact-exchange-across-compute/) | blocked on `contact-payload-retention`; design-complete | Promotes the domain-neutral introduction composition glue out of bare metal so accepted-state interpretation has one implementation, composes the mechanism in the VM storefront — the one remaining compute-family domain — extends delivery to it, and resolves the seller's contact payload per listing origin rather than per storefront. Goal 7's multi-seller introduction value depends on that last part |
 
-## Unblocking work — the local stack cannot start
+## Unblocking work — the local end-to-end stack
 
 ```text
-provide-e2e-development-identities ──► (unblocks) settle-listing-vocabulary's system-level validation
+provide-e2e-development-identities (archived) ──► repair-e2e-fixture-drift
 ```
 
 | Change | Status | Acceptance boundary |
 |---|---|---|
-| [`provide-e2e-development-identities`](provide-e2e-development-identities/) | active; no blocking dependency; awaiting a Docker-capable run | `docker compose up` has been unable to start since mid-August: seventeen `${VAR:?...}` guards over fifteen variables, and nothing in the repository supplies them. Commits the development signer, wallet, admin-key, and buyer-config values with the fixture statement `AGENTS.md` requires, exports them from one make target, and replaces the one identity whose private half was never committed. No repository secrets, so a contributor or a fork can run the suite |
+| [`provide-e2e-development-identities`](archive/2026-09-12-provide-e2e-development-identities/) | **archived** 2026-09-12 | `docker compose up` had been unable to start since mid-August. Committed the development signer, wallet, admin-key, and buyer-config values; split the compose overrides out of the `include` files; and repaired five pre-existing defects the startup path had been masking. The stack now comes up healthy with no repository secrets, so a contributor or a fork can run it |
+| [`repair-e2e-fixture-drift`](repair-e2e-fixture-drift/) | active; depends on nothing further; the stack it needs now starts | With the stack up, the e2e suite reaches pytest and reports 12 passed and 88 fixture errors from two signature mismatches between the suite and the libraries it drives. Brings the fixtures back in step so the suite's result means something again, and inherits four deferred questions about the API-credits capacity topology |
 
 ## Roadmap goal — Sell capacity the marketplace cannot admit against
 

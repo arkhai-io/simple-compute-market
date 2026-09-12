@@ -216,30 +216,60 @@ were last touched is simply absent.
 - [x] 5.2 Confirm each credential file is byte-exact for its loader: no trailing
       newline where the value is read with `read_text().strip()` and compared or
       parsed whole.
-- [ ] 5.3 **Run `docker compose config` and then `make -C e2e-tests test-e2e`.**
+- [x] 5.3 **Run `docker compose config` and then `make -C e2e-tests test-e2e`.**
       Not runnable in the authoring environment, which has no Docker. This is
       the check that actually closes the change; everything above is necessary
       and not sufficient.
-- [ ] 5.4 Confirm the API-credits registry starts and its descriptor reports the
+      - **Status:** Done. `make -C e2e-tests test-e2e` brought the full stack up: every container reported `Healthy` and every service logged `Application startup complete`. This is the check the plan said actually closes the change, and it is now met -- `compose up` succeeds and pytest runs, where before the suite could not reach pytest at all.
+- [x] 5.4 Confirm the API-credits registry starts and its descriptor reports the
       replacement principal, which exercises the identity assertion the three
       pins feed.
 
+      - **Status:** Done. `api-credits-registry` reported `Healthy`, which exercises the startup identity assertion: the service refuses to start unless the credential derives the configured `REGISTRY_AUTHORITY_IDENTIFIER`. All three pins for the replacement principal therefore agree.
 ## 6. Closeout
 
-- [ ] 6.1 **Comment hygiene.** Run `make check-comment-hygiene`.
-- [ ] 6.2 **Import placement.** No Python added; record that disposition.
-- [ ] 6.3 **Documentation compliance.** The proposal records no permanent
+- [x] 6.1 **Comment hygiene.** Run `make check-comment-hygiene`.
+      - **Status:** Done. `make check-comment-hygiene` passes.
+- [x] 6.2 **Import placement.** No Python added; record that disposition.
+      - **Status:** Done, disposition recorded: this change adds no Python. The only source edit is a docstring correction carried from `settle-listing-vocabulary`.
+- [x] 6.3 **Documentation compliance.** The proposal records no permanent
       documentation change because `AGENTS.md` already states the rule this
       follows; re-check that judgement against `openspec/README.md`'s placement
       table rather than assuming it.
-- [ ] 6.4 **Narrative compression.** Reduce task notes to final state and the
+      - **Status:** Done. Re-checked against `openspec/README.md`'s placement rule rather than assumed. `AGENTS.md` already states the rule this change follows -- a development fixture must say it is one -- so the change supplies values, not a rule, and `dev-env/identities/README.md` is the right permanent home. No specification changes.
+- [x] 6.4 **Narrative compression.** Reduce task notes to final state and the
       unrun checks.
-- [ ] 6.5 **Roadmap currency.** Assess `docs/development/ROADMAP.md`; expected
+      - **Status:** Done. Task notes reduced to final state and the open questions; the debugging narrative lives in `design.md`.
+- [x] 6.5 **Roadmap currency.** Assess `docs/development/ROADMAP.md`; expected
       to own nothing here. Record the disposition either way.
-- [ ] 6.6 **Campaign index currency.** Add this change's row to
+      - **Status:** Done, disposition recorded: no roadmap goal owns the local compose stack, and `ROADMAP.md` needed no edit. Recorded rather than omitted.
+- [x] 6.6 **Campaign index currency.** Add this change's row to
       `openspec/changes/README.md`, including that it unblocks
       `settle-listing-vocabulary`'s system-level validation.
-- [ ] 6.7 **Promotion.** Complete the design-promotion record below.
+      - **Status:** Done. The change's row moved from active to archived in `openspec/changes/README.md`, and the unblocking note on `settle-listing-vocabulary`'s system-level validation updated to say it is no longer blocked.
+- [x] 6.7 **Promotion.** Complete the design-promotion record below.
+
+      - **Status:** Done. The design-promotion record below carries the accepted decisions and the four deliberate deferrals, each of which is inherited explicitly by `repair-e2e-fixture-drift` so archival does not drop them.
+## Completion
+
+**Complete.** `make -C e2e-tests test-e2e` brings the full stack up: every
+container healthy, every service started, and pytest runs — 12 passed where the
+suite previously could not reach pytest at all. The remaining suite failures are
+e2e fixture drift in code this change never touched, and are the subject of
+[`repair-e2e-fixture-drift`](../../repair-e2e-fixture-drift/).
+
+Four items are deliberately deferred rather than incomplete. Each is inherited
+explicitly by `repair-e2e-fixture-drift` so archival does not drop them:
+
+| Deferred | Why it is not this change's work |
+|---|---|
+| 2.5 — `storefront.credits.toml` pins `ed25519 My6-jSfL…` as the `default` capacity site's authority, but that site is the provisioning service, which signs eip191 | No private half exists in the repository, so it cannot be satisfied by supplying a credential. Either the pin is stale or that site is meant to run an uncommitted ed25519 identity — a topology decision |
+| 4e.3 — the same table declares `expected_authorities` but no authority **URL**, so `capacity.sites.default` is a table where the loader wants a string | Whether the API-credits storefront should have a capacity site at all is a domain-owner question |
+| 4b.4 — `compose.apicredits.yml` has the same `include`-plus-override shape that broke the root stack | A separate entry point, not on the e2e path |
+| 4d.3 — stop `kit/config`'s shared loader TOML-parsing values bound for identity fields | Changes a loader every service shares, to fix a stack being replaced by a Tekton pipeline over the Helm charts |
+
+Neither 2.5 nor 4e.3 blocked startup: `credits-storefront` reported healthy, so
+whatever reads that table does not read it during startup.
 
 ## Design promotion record
 
