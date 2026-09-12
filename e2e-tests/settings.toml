@@ -38,6 +38,9 @@ chain_rpc_url     = ""   # RPC URL for on-chain escrow creation; falls back to r
 # ---------------------------------------------------------------------------
 [default.seller]
 api_url           = ""
+# Home site the storefront publishes capacity against; matches
+# [capacity.sites] in the storefront config.
+site_id           = "default"
 base_url_override = ""
 private_key       = ""
 wallet_address    = ""
@@ -53,6 +56,7 @@ admin_credential  = ""
 # ---------------------------------------------------------------------------
 [default.alice]
 api_url           = ""
+site_id           = "default"
 private_key       = ""
 wallet_address    = ""
 admin_scheme      = "eip191"

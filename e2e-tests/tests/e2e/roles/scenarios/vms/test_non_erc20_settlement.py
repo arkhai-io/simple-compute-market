@@ -24,6 +24,7 @@ from market_alkahest.alkahest import (
 )
 from src.settings import settings
 from tests.e2e.roles.scenarios.vms.conftest import (
+    capacity_source_for,
     delete_mock_rules_if_present,
     wait_for_stage_event,
 )
@@ -311,6 +312,7 @@ def test_scalar_non_erc20_settlement_reaches_ready(
 
     listing_resp = storefront_seller_client.create_listing(
         listing_resource=_offer(case),
+        capacity_source=capacity_source_for(_offer(case)),
         accepted_escrows=_accepted_escrows(case),
         demands=_recipient_demands(seller_wallet),
         max_duration_seconds=_DURATION_SECONDS,

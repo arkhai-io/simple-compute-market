@@ -42,6 +42,7 @@ from market_alkahest.alkahest import (
 from src.settings import settings
 from tests.e2e.roles.scenarios.vms.conftest import (
     DealState,
+    capacity_source_for,
     delete_mock_rules_if_present,
     require_state,
 )
@@ -192,6 +193,7 @@ class TestStageB2_PublishListing:
 
         resp = storefront_seller_client.create_listing(
             listing_resource=OFFER_RESOURCE,
+            capacity_source=capacity_source_for(OFFER_RESOURCE),
             accepted_escrows=ACCEPTED_ESCROWS,
             demands=_recipient_demands(seller_wallet),
             max_duration_seconds=DURATION_HOURS * 3600,

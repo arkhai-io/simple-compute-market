@@ -17,7 +17,7 @@ from dataclasses import dataclass, field
 import pytest
 
 from src.settings import settings
-from tests.e2e.roles.scenarios.vms.conftest import require_state
+from tests.e2e.roles.scenarios.vms.conftest import capacity_source_for, require_state
 
 log = logging.getLogger(__name__)
 
@@ -132,6 +132,7 @@ class TestComputeDynamicListings:
         for gpu_count in range(1, 5):
             resp = storefront_seller_client.create_listing(
                 listing_resource=_offer(gpu_count),
+                capacity_source=capacity_source_for(_offer(gpu_count)),
                 accepted_escrows=ACCEPTED_ESCROWS,
                 max_duration_seconds=3600,
             )
@@ -267,6 +268,7 @@ class TestFungibleComputeDynamicListings:
         for gpu_count in range(1, 5):
             resp = storefront_seller_client.create_listing(
                 listing_resource=_pool_offer(gpu_count),
+                capacity_source=capacity_source_for(_pool_offer(gpu_count)),
                 accepted_escrows=ACCEPTED_ESCROWS,
                 max_duration_seconds=3600,
             )

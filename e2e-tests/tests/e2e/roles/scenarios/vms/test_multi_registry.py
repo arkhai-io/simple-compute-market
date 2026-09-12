@@ -93,7 +93,7 @@ import httpx
 import pytest
 
 from src.settings import settings
-from tests.e2e.roles.scenarios.vms.conftest import _require_setting
+from tests.e2e.roles.scenarios.vms.conftest import _require_setting, capacity_source_for
 
 log = logging.getLogger(__name__)
 
@@ -492,6 +492,7 @@ class TestStage03c_BobPublishes:
 
         resp = storefront_seller_client.create_listing(
             listing_resource=BOB_OFFER,
+            capacity_source=capacity_source_for(BOB_OFFER),
             accepted_escrows=ACCEPTED_ESCROWS,
             max_duration_seconds=DURATION_HOURS * 3600,
             paused=True,
@@ -519,6 +520,7 @@ class TestStage03d_AlicePublishes:
 
         resp = alice_seller_client.create_listing(
             listing_resource=ALICE_OFFER,
+            capacity_source=capacity_source_for(ALICE_OFFER),
             accepted_escrows=ACCEPTED_ESCROWS,
             max_duration_seconds=DURATION_HOURS * 3600,
             paused=True,

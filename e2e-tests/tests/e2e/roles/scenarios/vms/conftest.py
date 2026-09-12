@@ -149,6 +149,26 @@ def _require_setting(value: Any, name: str) -> str:
 
 
 
+
+def capacity_source_for(resource: dict[str, Any], *, site_id: str | None = None) -> dict[str, Any]:
+    """Capacity provenance bound to the listing resource being published.
+
+    The storefront refuses a listing whose declared source disagrees with its
+    resource on pool, resource, or GPU count, so this is derived from the
+    resource rather than restated alongside it — a hand-written copy is a
+    second place that has to stay in sync.
+    """
+    source: dict[str, Any] = {
+        "site_id": site_id or str(settings.SELLER.get("site_id", "default") or "default"),
+        "gpu_count": resource.get("gpu_count", 1),
+    }
+    if resource.get("pool_id"):
+        source["pool_id"] = resource["pool_id"]
+    else:
+        source["resource_id"] = resource["resource_id"]
+    return source
+
+
 # ---------------------------------------------------------------------------
 # Identity helpers
 #

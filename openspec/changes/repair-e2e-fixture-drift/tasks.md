@@ -331,6 +331,42 @@ Run: **12 failed, 32 passed, 50 skipped, 263 deselected, 7 errors** (from
       `rc=2` with no run-log, which the 4a reporter repair made legible;
       classify separately.
 
+## 4d. Round 4 — zero errors reached
+
+Run: **11 failed, 38 passed, 52 skipped, 263 deselected, 0 errors.**
+Task 4.1's bar is met: every fixture constructs and authenticates, and every
+remaining item is a result rather than a setup failure. `make test` is green.
+
+- [x] 4d.1 **`create_listing` requires `capacity_source`.** Removing
+      `agent_wallet_address` in 4c.2 exposed the next layer: the request now
+      carries trusted capacity provenance (`site_id` plus `pool_id` or
+      `resource_id`, and `gpu_count`) bound atomically to the listing, and the
+      storefront refuses a listing whose source disagrees with its resource.
+
+      Added `capacity_source_for`, which derives the source from the listing
+      resource rather than restating it beside it — a hand-written copy would
+      be a second place to keep in sync, and the service compares the two
+      field by field. Wired into all eight call sites. Verified against the
+      real `VmCapacitySource` model for the resource-backed, pool-backed, and
+      absent-`gpu_count` shapes.
+
+      `seller.site_id` / `alice.site_id` default to `default`, matching
+      `[capacity.sites]` in the storefront configs. This is another instance
+      of the duplication recorded below, not a new one.
+
+- [ ] 4d.2 **Remaining failures, classified.** Four failures across three
+      causes, none of them fixture drift:
+
+      | Cause | Tests | Classification |
+      |---|---|---|
+      | `checks.alkahest='unconfigured'` | 3 | Real defect. `[chains.anvil]` in the storefront config lacks `rpc_url` / `alkahest_address_config_path`. Blocks the on-chain escrow phases. Raise an issue. |
+      | `market credits buy` exits `rc=2`, no run-log | 1 | Real defect. `rc=2` is an argument error, so the CLI's interface has moved away from what the scenario passes. Raise an issue. |
+
+      The seven `capacity_source` failures are resolved by 4d.1 and are not in
+      this table. Per the scope boundary, neither remaining defect is fixed
+      here: both have been invisible since mid-August, and absorbing them is
+      what made the archived identities change less true than when written.
+
 ## 5. Closeout
 
 - [ ] 5.1 **Comment hygiene.** `make check-comment-hygiene`.
