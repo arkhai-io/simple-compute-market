@@ -145,6 +145,35 @@ would be ceremony.
       values destined for identity fields. Not done here: it changes a loader
       every service shares to fix a stack being replaced.
 
+## 4e. Stale deployment profiles
+
+Reached once identities stopped being the blocker. All three storefronts failed
+at startup on missing configuration keys, each different, none identity-related.
+The mounted deployment profile **replaces** the shipped `settings.toml` rather
+than layering over it, so a key the code began requiring after these profiles
+were last touched is simply absent.
+
+- [x] 4e.1 Add `[capacity.sites] default = "http://provisioning:8081"` to
+      `storefront.bob.toml` and `storefront.alice.toml`.
+      `_capacity_settings()` raises when the table is empty, and the shipped
+      `settings.toml` only documents the table without defaulting it. The name
+      matches each profile's `Identity.service_peers.provisioning_default.site_id`
+      and the URL matches its own `[provisioning].service_url` — the comment
+      already in those files describes an `authority_url` default from
+      `provisioning.service_url` that the code no longer applies.
+- [x] 4e.2 Add top-level `enable_registry_discovery = true` to
+      `storefront.credits.toml`, matching the shipped default. Placed in the
+      root namespace, where that file's `port`/`base_url`/`db_path` live —
+      inserting it before `[registry]` would have made it a member of the
+      preceding table instead.
+- [ ] 4e.3 `storefront.credits.toml` declares
+      `[capacity.sites.default.expected_authorities]` but no authority **URL**
+      for that site, so `capacity.sites.default` is a table where the loader
+      expects a URL string. Whether the API-credits storefront should have a
+      capacity site at all, and if so which service, is a topology question for
+      the domain owner. Related to 2.5's unsatisfiable `My6-…` pin on the same
+      table.
+
 ## 5. Validation
 
 - [x] 5.1 Assert every `:?` guard is satisfied and every exported path exists,

@@ -97,6 +97,15 @@ poll_interval    = 1
 # while production defaults to placing no pre-settlement hold.
 hold_ttl_seconds = 900
 
+# Site name -> authority URL. Required: the shipped settings.toml documents
+# this table but does not default it, and `_capacity_settings()` raises when it
+# is empty. The name matches `Identity.service_peers.provisioning_default`'s
+# `site_id`, and the URL is the same provisioning service `[provisioning]`
+# names below -- the comment above this block describes an authority_url
+# default from `provisioning.service_url` that the code no longer applies.
+[capacity.sites]
+default = "http://provisioning:8081"
+
 [provisioning]
 service_url = "http://provisioning:8081"
 # Compose-stack default. Tests override via PROVISIONING_MODE shell env

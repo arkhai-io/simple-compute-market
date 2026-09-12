@@ -10,6 +10,12 @@ port          = 8000
 base_url      = "http://credits-storefront:8000/"
 db_path       = "/app/data/storefront.db"
 
+# Registry discovery (seller-side). Matches the shipped default in
+# apicredits_storefront/settings.toml, stated explicitly because this
+# deployment profile replaces those defaults rather than layering over
+# them, and `server.py` reads the key unconditionally.
+enable_registry_discovery = true
+
 [identity]
 scheme     = "eip191"
 identifier = "0x90f79bf6eb2c4f870365e785982e1f101e93b906"
