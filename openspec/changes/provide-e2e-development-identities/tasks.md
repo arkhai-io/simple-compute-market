@@ -31,8 +31,19 @@
       shell-format file; in `README.md` for the files whose loader reads the
       whole contents and would reject a comment. Record that distinction in the
       README so an absent comment reads as a constraint rather than an omission.
-- [x] 2.3 Verify every credential derives its pinned identifier through
-      `create_signer`, rather than assuming the Anvil mapping.
+- [x] 2.3 Verify every credential derives **the identifier its consumer
+      declares**, read out of that consumer's own configuration — not merely
+      that it derives some identifier. The weaker check passed while
+      `api-credits.identity.env` held the ed25519 *registry* credential for a
+      storefront that declares eip191, and the container failed at startup.
+      All four identity files now pass the stronger check.
+- [ ] 2.5 `storefront.credits.toml` pins
+      `ed25519 My6-jSfLcyOzpAHBwTtd1kvMwOEOzaHCtdEaA3eaheU` as the `default`
+      capacity site's expected authority, but that site is the provisioning
+      service, which signs eip191. Pre-existing, no committed private half, and
+      not satisfiable by supplying a credential. Either the pin is stale or
+      that site is meant to run an ed25519 identity that was never committed —
+      a topology question, so raised rather than guessed.
 - [x] 2.4 Write the buyer config against the default stack's **eip191** registry
       authorities. `e2e-tests/config/hosted-buyer.toml` pins ed25519 and cannot
       be reused; record why in the file.

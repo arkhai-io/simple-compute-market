@@ -63,6 +63,14 @@ interchangeable:
 | `bob.env` | 2 (`0x3c44cddd…`) | `storefront.bob.toml` |
 | `alice.env` | 4 (`0x15d34aaf…`) | `storefront.alice.toml` |
 | `buyer.eip191` | 1 (`0x70997970…`) | not pinned; the buyer declares its own profile |
+| `api-credits.identity.env` | 3 (`0x90f79bf6…`) | `[identity]` in `storefront.credits.toml` |
+| `api-credits.wallet.env` | 3 (`0x90F79bf6…`) | `[wallet].address` in `storefront.credits.toml` |
+
+The API-credits **storefront** and the API-credits **registry** are different
+principals with different schemes: the storefront signs `eip191` as Anvil 3, the
+registry signs `ed25519` as `_NUDEN…`. The shared name prefix makes them easy to
+conflate, and `create_signer` refuses the wrong scheme outright rather than
+producing a subtly wrong signature.
 
 `bob.storefront.secrets.toml` and `buyer.config.toml` are configuration rather
 than identity, and both carry their own explanation inline.

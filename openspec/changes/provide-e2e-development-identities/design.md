@@ -274,6 +274,45 @@ that feed identity fields, in `kit/config`. Not done here: it changes a loader
 every service shares, to fix a development compose stack that is being replaced
 by a Tekton pipeline over the Helm charts.
 
+### The API-credits storefront and the API-credits registry are different principals
+
+`credits-storefront` then failed with:
+
+    ValueError: eip191 private key must be 32-byte hexadecimal text
+
+Because `api-credits.identity.env` carried the **ed25519 registry** credential.
+The two are unrelated principals that share a domain name:
+`storefront.credits.toml`'s `[identity]` declares `eip191` with
+`0x90f79bf6…` — Anvil account 3 — while the registry declares `ed25519` with
+the regenerated `_NUDEN…`. The shared prefix in the variable names made them
+look like one identity.
+
+`api-credits.wallet.env` was wrong for the same reason: it carried Anvil 2's key
+while `[wallet].address` in that file is Anvil 3.
+
+The lesson is about the check rather than the values. Task 2.3 verified that each
+*credential* derives *some* identifier; it never verified that the identifier is
+the one its consumer declares. Those are different assertions, and only the
+second would have caught this. The verification now reads each consumer's
+declared `scheme` and `identifier` out of its own configuration and derives the
+supplied credential against it — all four pass, and it would have failed on this
+before the container ever started.
+
+### A trust pin nothing in this change can satisfy
+
+`storefront.credits.toml`'s `[capacity.sites.default.expected_authorities]`
+pins `ed25519 My6-jSfLcyOzpAHBwTtd1kvMwOEOzaHCtdEaA3eaheU`. The capacity site
+for `default` is the provisioning service, which signs with **eip191** Anvil 0 —
+so that pin cannot match what the site presents.
+
+It is pre-existing: unchanged from the original archive, and unreachable until
+now because the stack never started. No private half for it exists in the
+repository, so it cannot be satisfied by supplying a credential; either the pin
+is stale and should name the provisioning principal, or that site is expected to
+run under an ed25519 identity that was never committed. Deciding which is a
+question about intended topology, not about development fixtures, so it is
+recorded rather than guessed at.
+
 ## Risks / Trade-offs
 
 - **[A committed key is later used against a real network]** → Every file states
