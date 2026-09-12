@@ -118,28 +118,34 @@ contact-payload-retention ──► compose-contact-exchange-across-compute
 
 ```text
 provide-e2e-development-identities (archived) ──► repair-e2e-fixture-drift (archived)
+                                                          │
+                                                          ▼
+                                          repair-storefront-alkahest-configuration
 ```
 
-Both changes in this campaign are archived. The stack starts and the e2e suite
-reports results rather than setup errors. What remains are two classified
-findings and four inherited questions, listed below; none has an owning change
-yet.
+The stack starts and the e2e suite reports results rather than setup errors.
+The active change addresses the larger of the two findings that repair left:
+the VM storefronts cannot settle, which accounts for ten of the eleven
+remaining failures.
 
 | Change | Status | Acceptance boundary |
 |---|---|---|
 | [`provide-e2e-development-identities`](archive/2026-09-12-provide-e2e-development-identities/) | **archived** 2026-09-12 | `docker compose up` had been unable to start since mid-August. Committed the development signer, wallet, admin-key, and buyer-config values; split the compose overrides out of the `include` files; and repaired five pre-existing defects the startup path had been masking. The stack now comes up healthy with no repository secrets, so a contributor or a fork can run it |
 | [`repair-e2e-fixture-drift`](archive/2026-09-13-repair-e2e-fixture-drift/) | **archived** 2026-09-13 | The e2e suite reached pytest reporting 12 passed and 88 fixture errors. The drift was wider than two signature mismatches: six construction sites and three payload shapes, four of them masked because pytest reports only the first fixture to raise. Rebuilt the fixtures as one client per role, corrected a misfiled route role in the storefront (system status is an administrator operation also readable by a service peer), and separated storefront administrators from their sellers in development configuration. The suite now reports **0 errors, 38 passed, 11 failed**, and every failure is classified |
+| [`repair-storefront-alkahest-configuration`](repair-storefront-alkahest-configuration/) | active; depends on nothing further | Alkahest is the VM storefronts' only enabled settlement mechanism and never becomes ready, so composition refuses every listing. Three configuration gaps: the storefront never receives its EVM credential because the wallet env files use a name only the buyer-side loader resolves, and both Alkahest address-config paths point into a source tree the image does not contain. Settles the stack so the on-chain escrow phases run for the first time since mid-August |
 
 ### Unowned work left by this campaign
 
 No change owns these yet. Recorded here so the next reader sees them rather
-than rediscovering them.
+than rediscovering them. The storefront settlement fault that this table also
+held is now owned by `repair-storefront-alkahest-configuration` above.
 
 | Item | Origin |
 |---|---|
-| The storefront's `Settlement.alkahest.address_config_path` points at a source-tree layout the wheel-based image does not have, so no settlement mechanism is ready. Accounts for 10 of the 11 remaining e2e failures | `repair-e2e-fixture-drift` finding |
 | `market credits buy` exits `rc=2` before writing a run-log, indicating its argument interface has moved | `repair-e2e-fixture-drift` finding |
 | A run-id seam for tailing a live buyer-CLI run, so the streaming case can synchronize on a transition rather than a bounded sample | `repair-e2e-fixture-drift`, deferred (changes `core/buyer`) |
+| Compose configuration is assembled by hand across a root file, domain files, an identity overlay, and legacy env files, with duplicated paths and per-value TOML workarounds; the Helm charts express the same deployment more coherently. Converging compose onto one source shared with the tests | accepted as follow-up during `repair-storefront-alkahest-configuration` |
+| `domains/vms/storefront/.env.{bob,alice}.docker` carry configuration for a layout that no longer exists, including a stale Alkahest address path | `repair-storefront-alkahest-configuration`, left in place because compose still references them |
 | Four questions about the API-credits capacity topology: a stale ed25519 authority pin, a capacity-site table where the loader expects a string, an `include`-plus-override compose shape, and `kit/config` TOML-parsing `0x` values into integers | inherited from `provide-e2e-development-identities`, carried through `repair-e2e-fixture-drift` |
 
 ## Roadmap goal — Sell capacity the marketplace cannot admit against

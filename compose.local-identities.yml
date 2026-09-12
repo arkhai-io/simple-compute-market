@@ -60,10 +60,21 @@ services:
     env_file:
       - ${VMS_BOB_EVM_WALLET_ENV_FILE:?set Bob EVM wallet environment file}
       - ${VMS_BOB_IDENTITY_ENV_FILE:?set Bob signer credential environment file}
+    environment:
+    # The wallet env files above carry `AGENT_PRIV_KEY`, which the buyer-side
+    # loader in `kit/config` understands. This service resolves its EVM
+    # credential through Dynaconf under the `STOREFRONT` prefix instead, so
+    # that name never reaches it and the Alkahest mechanism builds no clients
+    # at all. Supplied here under the name the storefront reads. `@str` for
+    # the reason given under `provisioning` below: a bare `0x...` is a valid
+    # TOML integer literal and arrives as a decimal.
+      - STOREFRONT_WALLET__PRIVATE_KEY=@str 0x5de4111afa1a4b94908f83103eb1f1706367c2e68ca870fc3fb9a804cdab365a
   alice-storefront:
     env_file:
       - ${VMS_ALICE_IDENTITY_ENV_FILE:?set Alice signer credential environment file}
       - ${VMS_ALICE_EVM_WALLET_ENV_FILE:?set Alice EVM wallet environment file}
+    environment:
+      - STOREFRONT_WALLET__PRIVATE_KEY=@str 0x47e179ec197488593b187f80a00eb0da91f1b9d0b13f8733639f19c30a34926a
   provisioning:
     env_file:
       - ${VMS_PROVISIONING_IDENTITY_ENV_FILE:?set provisioning signer credential environment file}
