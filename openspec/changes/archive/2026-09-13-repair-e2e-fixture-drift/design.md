@@ -96,6 +96,85 @@ question invisible, which is part of why the drift went unnoticed.
   nightly workflow now exercises this path, so the next divergence surfaces in
   a day rather than a month.
 
+## What the repair actually found
+
+The proposal assumed two drifted construction sites. There were six, plus two
+payload-shape mismatches behind them. The other four were invisible: pytest
+reports the first fixture that raises, and `provisioning_client` raised first,
+so `storefront_client`, `storefront_admin_client`, `registry_client`, and
+`ProvisioningTestClient` were never constructed. An error count is a count of
+*first* failures, which is why the survey had to read every construction site
+against the installed signature rather than work down the reported list.
+
+The same shape recurred at the payload level once construction succeeded:
+`create_listing` first refused a retired `agent_wallet_address`, then required
+a `capacity_source` that had not existed, then required the resource to declare
+`offering_mode`. Each was one layer under the last, and three consecutive runs
+reported identical counts while the cause changed every time.
+
+## One client per role
+
+The retired shared admin key made every caller look alike, so nothing forced
+the question of who the suite is when it acts. Per-caller identity forces it,
+and `SyncStorefrontClient` binds exactly one role per instance and refuses
+operations belonging to another. The suite therefore carries one client per
+role, named for the role, so the assertion is visible at the call site and in
+the service's request log:
+
+| Caller | Role | Principal |
+|---|---|---|
+| Buyer | `buyer` | buyer marketplace credential |
+| Seller | `seller` | storefront publishing principal |
+| Storefront administrator | `admin` | `Identity.administrators.operator` |
+| Provisioning administrator | `admin` (fixed by the client) | provisioning admin identity |
+| Registry discovery | `buyer` | buyer credential |
+| Registry publish validation | `seller` | seller credential |
+
+The registry has no administrator in its vocabulary — it accepts `buyer`,
+`seller`, or `service` — so its two clients split on what the call means rather
+than on privilege. Its reads here are unauthenticated, so the role attributes
+the call without gating it.
+
+Seller and administrator were the same principal in development configuration,
+which is precisely the conflation the identity model separates: a storefront's
+`Identity.principal` publishes, and its `Identity.administrators.operator`
+operates. They are now distinct accounts, so the suite exercises the boundary
+instead of assuming the two parties coincide.
+
+## System status is readable by two roles
+
+`admin_system_status` asserted `service` while binding an operation named for
+an administrator, and its sibling read on the same prefix,
+`GET /api/v1/system/events`, was already an administrator contract. Correcting
+it to `admin` then broke the provisioning adapter's `storefront_auth` health
+check, which reads status as a service peer to confirm its own signing path
+works — the only side-effect-free service operation there is, since every other
+one is a fulfillment callback that mutates state.
+
+The route serves both callers, and the design already said so: both middlewares
+dispatch on the asserted role for this exact path, with the administrator
+middleware passing a `service` request through to the service-peer middleware.
+The original error was removing one branch instead of adding the other beside
+it. A client now asserts whichever of the two roles it holds.
+
+The general lesson, which the branch's existing lessons did not cover: a route's
+required role is not always single-valued, and reading one middleware's contract
+table is not reading the dispatch.
+
+## Diagnosing through suppression rather than through the error
+
+The last seven listing failures returned `400 no enabled settlement mechanism
+is ready`, which reads like a third defect and is not one. Settlement
+composition suppresses any mechanism that is not ready and raises only when
+nothing survives, so the message names the consequence rather than the cause.
+The storefront logged `[SETTLEMENT] option suppressed mechanism=alkahest.v1
+blockers=alkahest.address_config_invalid` exactly once per failure, which is
+what tied those seven to the same configuration fault as the three alkahest
+preflight assertions — ten of eleven failures being one fault, not two.
+
+This is the reason the change reports causes rather than counts, and the reason
+the failure classification is worth more than the failure list.
+
 ## Resolved questions
 
 - **Admin or storefront principal for `provisioning_client`?** **Admin**, and

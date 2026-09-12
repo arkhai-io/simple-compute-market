@@ -27,6 +27,7 @@ from typing import Any, Optional
 
 import pytest
 
+from market_identity import Identity, TrustedIdentitySet, create_signer
 from src.settings import settings
 from src.provisioning_test_client import ProvisioningTestClient
 from tests.e2e.roles.helpers.domain_deal import DomainDealState, require_state
@@ -180,8 +181,6 @@ def capacity_source_for(resource: dict[str, Any], *, site_id: str | None = None)
 # ---------------------------------------------------------------------------
 
 def _signer(scheme: Any, credential: Any, name: str):
-    from market_identity import create_signer
-
     return create_signer(
         str(scheme or "eip191"),
         _require_setting(credential, name),
@@ -189,8 +188,6 @@ def _signer(scheme: Any, credential: Any, name: str):
 
 
 def _trust(*identifiers: str, scheme: str = "eip191"):
-    from market_identity import Identity, TrustedIdentitySet
-
     return TrustedIdentitySet(
         identities=tuple(
             Identity(scheme=scheme, identifier=str(i)) for i in identifiers

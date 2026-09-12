@@ -17,6 +17,18 @@ import logging
 
 import pytest
 
+import uuid
+from datetime import datetime, timezone
+
+from market_identity import (
+    EMPTY_BODY,
+    Identity,
+    RequestEnvelope,
+    TrustedIdentitySet,
+    canonical_body_hash,
+    create_signer,
+    sign_request,
+)
 from storefront_client import SyncStorefrontClient
 
 log = logging.getLogger(__name__)
@@ -35,8 +47,6 @@ def seller_api_url(seller_settings) -> str:
 
 @pytest.fixture(scope="module")
 def seller_client(seller_api_url: str, seller_settings: dict) -> SyncStorefrontClient:
-    from market_identity import Identity, TrustedIdentitySet, create_signer
-
     signer = create_signer("eip191", seller_settings["private_key"])
     client = SyncStorefrontClient(
         seller_api_url,
@@ -62,17 +72,6 @@ def _signed_status_headers(seller_settings: dict) -> dict[str, str]:
     any other caller. Kept as a helper because two checks below read the
     response directly rather than through the typed client.
     """
-    import uuid
-    from datetime import datetime, timezone
-
-    from market_identity import (
-        EMPTY_BODY,
-        RequestEnvelope,
-        canonical_body_hash,
-        create_signer,
-        sign_request,
-    )
-
     credential = seller_settings.get("admin_credential", "")
     if not credential:
         pytest.skip(
@@ -201,8 +200,6 @@ class TestStorefrontRegistration:
         diagnostic status endpoint, populated by querying the resources table
         directly on the server.
         """
-        from market_identity import Identity, TrustedIdentitySet, create_signer
-
         credential = seller_settings.get("admin_credential", "")
         if not credential:
             pytest.skip(

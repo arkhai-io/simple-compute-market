@@ -92,6 +92,7 @@ from typing import Any, Optional
 import httpx
 import pytest
 
+from market_identity import Identity, TrustedIdentitySet, create_signer
 from src.settings import settings
 from tests.e2e.roles.scenarios.vms.conftest import _require_setting, capacity_source_for
 
@@ -245,8 +246,6 @@ def _alice_url() -> str:
 
 
 def _alice_publisher_trust():
-    from market_identity import Identity, TrustedIdentitySet, create_signer
-
     identity = create_signer(
         "eip191",
         _require_setting(settings.ALICE.PRIVATE_KEY, "ALICE.PRIVATE_KEY"),
@@ -266,7 +265,6 @@ def alice_admin_client():
     as Bob's is, and is pinned as ``Identity.administrators.operator`` in
     ``storefront.alice.toml``.
     """
-    from market_identity import create_signer
     from storefront_client import SyncStorefrontClient
 
     client = SyncStorefrontClient(
@@ -287,7 +285,6 @@ def alice_admin_client():
 @pytest.fixture(scope="module")
 def alice_seller_client():
     """Seller-role client for Alice's storefront: publishing listings."""
-    from market_identity import create_signer
     from storefront_client import SyncStorefrontClient
 
     client = SyncStorefrontClient(

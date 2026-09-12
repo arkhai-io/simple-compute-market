@@ -13,6 +13,7 @@ import logging
 
 import pytest
 
+from market_identity import Identity, TrustedIdentitySet, create_signer
 from vm_provisioning_operator import ProvisioningError, SyncProvisioningClient
 from vm_provisioning_operator import HostCreate, HostUpdate
 
@@ -23,8 +24,6 @@ def _client(
     provisioning_settings: dict,
     seller_settings: dict,
 ) -> SyncProvisioningClient:
-    from market_identity import Identity, TrustedIdentitySet, create_signer
-
     credential = provisioning_settings.get("admin_credential") or ""
     authority = provisioning_settings.get("authority_identifier") or ""
     if not credential or not authority:
