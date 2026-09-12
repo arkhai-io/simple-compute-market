@@ -60,6 +60,9 @@ pytestmark = pytest.mark.e2e_buy
 BUY_RESOURCE_ID = "compute-e2e-buy-001"
 BUY_GPU_MODEL = "RTX 4090"
 OFFER_RESOURCE = {
+    # The storefront refuses a listing whose resource does not declare the
+    # offering mode its domain binding selected.
+    "offering_mode": "vm",
     "resource_id": BUY_RESOURCE_ID,
     "gpu_model": BUY_GPU_MODEL,
     "gpu_count": 1,

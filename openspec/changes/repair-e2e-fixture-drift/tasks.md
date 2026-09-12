@@ -367,6 +367,34 @@ remaining item is a result rather than a setup failure. `make test` is green.
       here: both have been invisible since mid-August, and absorbing them is
       what made the archived identities change less true than when written.
 
+## 4e. Round 5 — listing vocabulary
+
+Run: **11 failed, 38 passed, 52 skipped, 263 deselected, 0 errors** — the same
+counts as round 4, and a different cause. Recorded because this is exactly the
+trap this branch already paid for once: the seven listing failures are no
+longer a `TypeError` before the request is built but a `400` from the
+storefront, so the request now constructs, authenticates, and carries valid
+capacity provenance. Comparing counts would have called this "no progress".
+
+- [x] 4e.1 **`listing_resource` must declare `offering_mode`.** The storefront
+      refuses a listing whose resource does not declare the mode its domain
+      binding selected: `listing_resource.offering_mode must match the selected
+      offering mode 'vm'`. This is the `settle-listing-vocabulary` rename
+      reaching the e2e fixtures — `offering_mode` is that change's one name for
+      the mode, and these resource dicts predate it.
+
+      Added `"offering_mode": "vm"` to all seven listing resources across six
+      modules. Verified both shapes against the real `ComputeResource` model,
+      where the field resolves to `OfferingMode.VM`.
+
+      `test_pool_declared_offering_modes.py` already declared the field (with a
+      deliberately unsupported value), which is what confirmed the key and
+      placement rather than inferring them from the error text.
+
+- [ ] 4e.2 Findings unchanged from 4d.2: the storefront's unconfigured
+      alkahest chain (3 tests) and `market credits buy` exiting `rc=2`
+      (1 test). Still to be raised as issues rather than fixed here.
+
 ## 5. Closeout
 
 - [ ] 5.1 **Comment hygiene.** `make check-comment-hygiene`.

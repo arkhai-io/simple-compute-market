@@ -80,6 +80,9 @@ def seller_wallet() -> str:
 
 def _offer(gpu_count: int) -> dict:
     return {
+        # The storefront refuses a listing whose resource does not declare the
+        # offering mode its domain binding selected.
+        "offering_mode": "vm",
         "resource_id": DYNAMIC_RESOURCE_ID,
         "gpu_model": "H200",
         "gpu_count": gpu_count,
@@ -90,6 +93,7 @@ def _offer(gpu_count: int) -> dict:
 
 def _pool_offer(gpu_count: int) -> dict:
     return {
+        "offering_mode": "vm",
         "pool_id": FUNGIBLE_POOL_ID,
         "gpu_model": "H200",
         "gpu_count": gpu_count,

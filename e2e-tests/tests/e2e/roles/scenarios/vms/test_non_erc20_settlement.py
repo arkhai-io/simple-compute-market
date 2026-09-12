@@ -176,6 +176,9 @@ def _resource_csv(cases: list[SettlementCase]) -> str:
 
 def _offer(case: SettlementCase) -> dict[str, Any]:
     return {
+        # The storefront refuses a listing whose resource does not declare the
+        # offering mode its domain binding selected.
+        "offering_mode": "vm",
         "resource_id": case.resource_id,
         "gpu_model": "RTX 5080",
         "gpu_count": 1,

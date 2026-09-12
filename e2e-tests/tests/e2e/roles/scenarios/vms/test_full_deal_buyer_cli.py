@@ -109,6 +109,9 @@ pytestmark = pytest.mark.e2e_deal_buyer_cli
 # ---------------------------------------------------------------------------
 
 OFFER_RESOURCE = {
+    # The storefront refuses a listing whose resource does not declare the
+    # offering mode its domain binding selected.
+    "offering_mode": "vm",
     "interruptible": True,
     # Matches E2E_RESOURCE_CSV below. The test imports that CSV through the
     # storefront admin API so it does not depend on a mounted resource file.

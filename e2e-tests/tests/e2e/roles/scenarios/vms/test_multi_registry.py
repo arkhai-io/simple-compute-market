@@ -154,6 +154,9 @@ ACCEPTED_ESCROWS = [{
 }]
 
 BOB_OFFER = {
+    # The storefront refuses a listing whose resource does not declare the
+    # offering mode its domain binding selected.
+    "offering_mode": "vm",
     "resource_id": "compute-mr-bob-001",
     "gpu_model": "RTX 5080",
     "gpu_count": 1,
@@ -161,6 +164,7 @@ BOB_OFFER = {
     "region": "California, US",
 }
 ALICE_OFFER = {
+    "offering_mode": "vm",
     "resource_id": "compute-mr-alice-001",
     "gpu_model": "RTX 5080",
     "gpu_count": 1,
