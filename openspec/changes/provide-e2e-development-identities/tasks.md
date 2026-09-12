@@ -118,6 +118,22 @@ would be ceremony.
 - [x] 4c.2 `tee` the collection step's output so container logs land in the job
       log as well as the artifact, wrapped in a collapsible group.
 
+## 4d. Environment values that are not strings
+
+- [x] 4d.1 Mark the three `PROVISIONING_*_IDENTITY__IDENTIFIER` values with
+      Dynaconf's `@str`. An eip191 address is a valid TOML hexadecimal integer
+      literal, so Dynaconf delivered it as a 48-digit decimal and identity
+      validation refused it. Reproduced against `parse_conf_data` rather than
+      inferred from the traceback.
+- [x] 4d.2 Establish the blast radius instead of fixing only what failed: the
+      registries read settings with `pydantic_settings` (no TOML parsing, and
+      both healthy in the same run), and `ARKHAI_IDENTITY_CREDENTIAL` is read
+      from `os.environ` directly — so the credentials, which are also
+      `0x`-prefixed, would not have failed next.
+- [ ] 4d.3 Consider stopping `kit/config`'s shared loader from TOML-parsing
+      values destined for identity fields. Not done here: it changes a loader
+      every service shares to fix a stack being replaced.
+
 ## 5. Validation
 
 - [x] 5.1 Assert every `:?` guard is satisfied and every exported path exists,

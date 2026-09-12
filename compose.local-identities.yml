@@ -68,13 +68,22 @@ services:
     env_file:
       - ${VMS_PROVISIONING_IDENTITY_ENV_FILE:?set provisioning signer credential environment file}
     environment:
+    # `@str` is not decoration. This service loads configuration through
+    # Dynaconf, which parses each environment value as TOML before handing it
+    # over -- and `0x9965...` is a valid TOML hexadecimal integer literal, so
+    # an eip191 address arrives as a 48-digit decimal and fails identity
+    # validation. `@str` is Dynaconf's marker for "take this verbatim".
+    #
+    # The registries above need no marker: `core/registry` reads its settings
+    # with `pydantic_settings`, which does no TOML parsing. Anything reaching
+    # a Dynaconf-loaded service as a bare `0x...` value does need one.
       - PROVISIONING_IDENTITY__SCHEME=eip191
-      - PROVISIONING_IDENTITY__IDENTIFIER=0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266
+      - PROVISIONING_IDENTITY__IDENTIFIER=@str 0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266
       - PROVISIONING_STOREFRONT_IDENTITY__SCHEME=eip191
-      - PROVISIONING_STOREFRONT_IDENTITY__IDENTIFIER=0x3c44cdddb6a900fa2b585dd299e03d12fa4293bc
+      - PROVISIONING_STOREFRONT_IDENTITY__IDENTIFIER=@str 0x3c44cdddb6a900fa2b585dd299e03d12fa4293bc
       - PROVISIONING_STOREFRONT_SITE_ID=default
       - PROVISIONING_ADMIN_IDENTITY__SCHEME=eip191
-      - PROVISIONING_ADMIN_IDENTITY__IDENTIFIER=0x9965507d1a55bcc2695c58ba16fb37d819b0a4dc
+      - PROVISIONING_ADMIN_IDENTITY__IDENTIFIER=@str 0x9965507d1a55bcc2695c58ba16fb37d819b0a4dc
   buyer-cli:
     image: ${VMS_BUYER_IMAGE:-arkhai:e2e-tests}
     profiles: [buyer]

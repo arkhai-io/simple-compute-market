@@ -233,6 +233,47 @@ separate entry point, not on the e2e path, and fixing it is not needed to
 unblock. Recorded here so the next person to run it knows the cause rather than
 rediscovering it.
 
+### An eip191 address delivered by environment variable arrives as an integer
+
+With the stack finally starting, `provisioning` failed its healthcheck on:
+
+    eip191 identifier must be a 20-byte hexadecimal address
+      [input_value='139084929578607176827638...50238675083608645509734']
+
+That 48-digit decimal is `0xf39fd6e5…` — Anvil account 0 — converted to an
+integer. The provisioning service loads configuration through Dynaconf, which
+parses each environment value as TOML before handing it over, and
+`0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266` is a valid TOML hexadecimal
+integer literal. `_principal` then `str()`s it and gets decimal digits.
+
+Reproduced directly rather than inferred:
+
+    parse_conf_data('0xf39f…', tomlfy=True)        -> int
+    parse_conf_data('@str 0xf39f…', tomlfy=True)   -> str
+
+The three `PROVISIONING_*_IDENTITY__IDENTIFIER` values now carry Dynaconf's
+`@str` marker. Scope was established rather than assumed:
+
+- **The registries need no marker.** `core/registry` reads settings with
+  `pydantic_settings`, which does no TOML parsing — and both registries
+  reported healthy in the same run, which is the proof rather than the theory.
+- **The signing credentials need no marker.** `identity.py` reads
+  `ARKHAI_IDENTITY_CREDENTIAL` from `os.environ` directly, bypassing Dynaconf.
+  Worth checking, because those values are also `0x`-prefixed and fixing only
+  the identifiers would have moved the failure one step later.
+- **The api-credits registry identifier is base64url**, so it never looked like
+  a number. That is also why the `hosted-stripe-test` flow never hit this: its
+  registries are configured with ed25519 identifiers.
+
+This is pre-existing and was unreachable. The `PROVISIONING_*` values live in
+the override block that `include` rejected outright, so they had never been
+delivered to a container before.
+
+A durable alternative would be to stop the shared loader TOML-parsing values
+that feed identity fields, in `kit/config`. Not done here: it changes a loader
+every service shares, to fix a development compose stack that is being replaced
+by a Tekton pipeline over the Helm charts.
+
 ## Risks / Trade-offs
 
 - **[A committed key is later used against a real network]** → Every file states
