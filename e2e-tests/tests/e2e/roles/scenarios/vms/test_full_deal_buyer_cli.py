@@ -366,15 +366,14 @@ class TestStage00h_ProvisioningStorefrontLink:
 
             provisioning LeaseWatchdog
               → PATCH {storefront_url}/api/v1/admin/portfolio/resources/{id}
-                  X-Admin-Key: {storefront_admin_key}
 
         Two sub-checks from the provisioning health endpoint:
           - storefront      — GET {storefront_url}/health responded 200
           - storefront_auth — GET {storefront_url}/api/v1/system/status with
-                              X-Admin-Key responded 200
+                              a signed request responded 200
 
         If this fails with storefront='unconfigured':
-          - For deploy-docker: ensure storefront_url and storefront_admin_key
+          - For deploy-docker: ensure storefront_url and the service-peer identity
             are set in provisioning/compute/service/src/compute_provisioning_service/config/config-docker.yml.
             The compose service name resolved by docker DNS is 'bob-storefront'.
           - For Helm: provisioning.storefront.url defaults to the release's
@@ -387,7 +386,7 @@ class TestStage00h_ProvisioningStorefrontLink:
 
         If this fails with storefront_auth='unauthorized':
           - The admin key in config-docker.yml / provisioning-secrets must
-            match the storefront's admin_api_key in config.bob.toml.
+            match the principal pinned in storefront.bob.toml.
         """
         require_state(deal_state, "_provisioning_healthy", "_storefront_healthy")
 
@@ -408,9 +407,9 @@ class TestStage00h_ProvisioningStorefrontLink:
         auth_check = checks.get("storefront_auth", "absent")
         assert auth_check == "ok", (
             f"Provisioning storefront auth failed: checks.storefront_auth={auth_check!r}\n"
-            "The lease watchdog uses X-Admin-Key to authenticate; 'unauthorized' means\n"
-            "storefront_admin_key in config-docker.yml does not match the storefront's\n"
-            "admin_api_key in config.bob.toml.\n"
+            "The lease watchdog signs as the provisioning service; 'unauthorized'\n"
+            "means its principal is not the one storefront.bob.toml pins as a\n"
+            "service peer.\n"
             f"Full health response: {health}"
         )
 
@@ -429,7 +428,7 @@ class TestStage00h_ProvisioningStorefrontLink:
 
 class TestStage02b_CreateListingPaused:
     def test_02b_create_listing_paused_local_only(
-        self, storefront_admin_client, seller_wallet, registry_client, deal_state: DealState
+        self, storefront_admin_client, storefront_seller_client, seller_wallet, registry_client, deal_state: DealState
     ):
         """Create listing with paused=True; confirm locally visible and registry absent.
 
@@ -441,8 +440,7 @@ class TestStage02b_CreateListingPaused:
         """
         require_state(deal_state, "_resources_seeded", "_registry_reachable")
 
-        resp = storefront_admin_client.create_listing(
-            agent_wallet_address=seller_wallet,
+        resp = storefront_seller_client.create_listing(
             listing_resource=OFFER_RESOURCE,
             accepted_escrows=ACCEPTED_ESCROWS,
             demands=_recipient_demands(seller_wallet),

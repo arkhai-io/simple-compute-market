@@ -512,6 +512,19 @@ class StorefrontClient(_StorefrontClientBase):
         """GET /health"""
         return HealthResponse.from_dict(await self._get("/health"))
 
+    def _system_status_role(self) -> str:
+        """Role to assert for system status, which two callers may read.
+
+        The storefront dispatches this route on the asserted role: the
+        administrator middleware handles it and passes a request asserting
+        `service` to the service-peer middleware. A client therefore asserts
+        whichever of the two roles it holds. Anything else falls through to
+        `admin` so the refusal names the role an operator would need.
+        """
+        if self._caller_role in ("admin", "service"):
+            return self._caller_role
+        return "admin"
+
     async def get_system_status(
         self,
         *,
@@ -521,7 +534,7 @@ class StorefrontClient(_StorefrontClientBase):
         return HealthResponse.from_dict(
             await self._authenticated_get(
                 "/api/v1/system/status",
-                role="admin",
+                role=self._system_status_role(),
                 operation="admin_system_status",
                 resource="system/status",
                 request_id=request_id,
@@ -1783,6 +1796,19 @@ class SyncStorefrontClient(_StorefrontClientBase):
         """GET /health"""
         return HealthResponse.from_dict(self._get("/health"))
 
+    def _system_status_role(self) -> str:
+        """Role to assert for system status, which two callers may read.
+
+        The storefront dispatches this route on the asserted role: the
+        administrator middleware handles it and passes a request asserting
+        `service` to the service-peer middleware. A client therefore asserts
+        whichever of the two roles it holds. Anything else falls through to
+        `admin` so the refusal names the role an operator would need.
+        """
+        if self._caller_role in ("admin", "service"):
+            return self._caller_role
+        return "admin"
+
     def get_system_status(
         self,
         *,
@@ -1792,7 +1818,7 @@ class SyncStorefrontClient(_StorefrontClientBase):
         return HealthResponse.from_dict(
             self._authenticated_get(
                 "/api/v1/system/status",
-                role="admin",
+                role=self._system_status_role(),
                 operation="admin_system_status",
                 resource="system/status",
                 request_id=request_id,

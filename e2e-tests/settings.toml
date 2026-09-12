@@ -54,6 +54,7 @@ admin_credential  = ""
 [default.alice]
 api_url           = ""
 private_key       = ""
+wallet_address    = ""
 admin_scheme      = "eip191"
 admin_credential  = ""
 

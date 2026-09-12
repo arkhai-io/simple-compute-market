@@ -51,5 +51,11 @@ api_credits:
 
 # Second storefront (multi-registry scenario)
 alice:
+  # Second storefront in the multi-registry scenario; runs as
+  # alice-storefront in the compose stack. Seller principal is Anvil 4,
+  # matching Identity.principal in storefront.alice.toml.
+  api_url:        "http://alice-storefront:8002"
+  private_key:    "0x47e179ec197488593b187f80a00eb0da91f1b9d0b13f8733639f19c30a34926a"
+  wallet_address: "0x15d34AAf54267DB7D7c367839AAf71A00a2C6A65"
   admin_scheme:     "eip191"
   admin_credential: "0x4bbbf85ce3377467afe5d46f804f221813b2bb87f24d81f60f1fcdbf7cbf4356"

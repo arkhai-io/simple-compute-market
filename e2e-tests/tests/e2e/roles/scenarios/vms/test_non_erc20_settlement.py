@@ -294,7 +294,7 @@ def _assert_services_ready(storefront_admin_client, provisioning_client) -> None
 def test_scalar_non_erc20_settlement_reaches_ready(
     case: SettlementCase,
     storefront_client,
-    storefront_admin_client,
+    storefront_admin_client, storefront_seller_client,
     provisioning_client,
     provisioning_test_client,
     buyer_config,
@@ -309,8 +309,7 @@ def test_scalar_non_erc20_settlement_reaches_ready(
     )
     assert import_result.failed_count == 0, import_result
 
-    listing_resp = storefront_admin_client.create_listing(
-        agent_wallet_address=seller_wallet,
+    listing_resp = storefront_seller_client.create_listing(
         listing_resource=_offer(case),
         accepted_escrows=_accepted_escrows(case),
         demands=_recipient_demands(seller_wallet),

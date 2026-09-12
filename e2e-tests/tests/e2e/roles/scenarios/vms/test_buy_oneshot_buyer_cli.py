@@ -191,7 +191,6 @@ class TestStageB2_PublishListing:
         require_state(deal_state, "_resources_seeded")
 
         resp = storefront_seller_client.create_listing(
-            agent_wallet_address=seller_wallet,
             listing_resource=OFFER_RESOURCE,
             accepted_escrows=ACCEPTED_ESCROWS,
             demands=_recipient_demands(seller_wallet),

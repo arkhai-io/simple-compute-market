@@ -123,15 +123,14 @@ class TestComputeDynamicListings:
 
     def test_01_creates_slice_listings(
         self,
-        storefront_admin_client,
+        storefront_admin_client, storefront_seller_client,
         seller_wallet: str,
         dynamic_state: DynamicListingState,
     ):
         require_state(dynamic_state, "resources_seeded")
 
         for gpu_count in range(1, 5):
-            resp = storefront_admin_client.create_listing(
-                agent_wallet_address=seller_wallet,
+            resp = storefront_seller_client.create_listing(
                 listing_resource=_offer(gpu_count),
                 accepted_escrows=ACCEPTED_ESCROWS,
                 max_duration_seconds=3600,
@@ -259,15 +258,14 @@ class TestFungibleComputeDynamicListings:
 
     def test_01_creates_one_pool_listing_set(
         self,
-        storefront_admin_client,
+        storefront_admin_client, storefront_seller_client,
         seller_wallet: str,
         fungible_state: FungiblePoolState,
     ):
         require_state(fungible_state, "resources_seeded")
 
         for gpu_count in range(1, 5):
-            resp = storefront_admin_client.create_listing(
-                agent_wallet_address=seller_wallet,
+            resp = storefront_seller_client.create_listing(
                 listing_resource=_pool_offer(gpu_count),
                 accepted_escrows=ACCEPTED_ESCROWS,
                 max_duration_seconds=3600,

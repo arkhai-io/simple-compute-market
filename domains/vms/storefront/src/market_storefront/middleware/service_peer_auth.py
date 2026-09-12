@@ -105,12 +105,29 @@ def _storefront_signer():
 
 def _callback(request: Request, body: Any) -> ServiceCallback | None:
     path = request.url.path.rstrip("/")
-    # System status is an operator control, not a service-to-service callback.
-    # The operation it binds is named for the administrator that performs it,
-    # and its sibling read on this prefix — GET /api/v1/system/events — is an
-    # administrator contract, so both resolve through the admin middleware.
-    # Everything this callback resolves is a provisioning POST carrying a
-    # capacity reservation.
+    # System status is readable by two callers, and the middlewares dispatch on
+    # the asserted role: the administrator middleware hands a request asserting
+    # `service` straight through to this one. A service peer reads status to
+    # confirm its own signing path works, which is the only side-effect-free
+    # service operation there is — the rest are fulfillment callbacks.
+    if request.method == "GET" and path == "/api/v1/system/status":
+        configured = [
+            (site_id, principal)
+            for role, site_id, principal in get_service_peer_configs().values()
+            if role == "service"
+        ]
+        if len(configured) != 1:
+            raise AuthError(
+                "System status requires exactly one configured service peer",
+                status_code=503,
+            )
+        return ServiceCallback(
+            "GET",
+            "admin_system_status",
+            "system/status",
+            configured[0][0],
+            EMPTY_BODY,
+        )
     operation = _CALLBACK_OPERATIONS.get(path)
     if operation is None or request.method != "POST":
         return None

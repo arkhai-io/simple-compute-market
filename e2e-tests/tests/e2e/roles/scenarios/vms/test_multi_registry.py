@@ -484,14 +484,13 @@ class TestStage02b_AliceInventory:
 
 class TestStage03c_BobPublishes:
     def test_03c_bob_creates_and_resumes(
-        self, storefront_admin_client, seller_wallet, mr_state
+        self, storefront_admin_client, storefront_seller_client, seller_wallet, mr_state
     ):
         _require(
             mr_state, "bob_sees_both", "bob_inventory_seeded"
         )
 
-        resp = storefront_admin_client.create_listing(
-            agent_wallet_address=seller_wallet,
+        resp = storefront_seller_client.create_listing(
             listing_resource=BOB_OFFER,
             accepted_escrows=ACCEPTED_ESCROWS,
             max_duration_seconds=DURATION_HOURS * 3600,
@@ -519,7 +518,6 @@ class TestStage03d_AlicePublishes:
         )
 
         resp = alice_seller_client.create_listing(
-            agent_wallet_address=alice_wallet,
             listing_resource=ALICE_OFFER,
             accepted_escrows=ACCEPTED_ESCROWS,
             max_duration_seconds=DURATION_HOURS * 3600,

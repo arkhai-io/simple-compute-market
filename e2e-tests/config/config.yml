@@ -61,5 +61,8 @@ provisioning:
 
 # Second storefront (multi-registry scenario)
 alice:
+  api_url:
+  private_key:
+  wallet_address:
   admin_scheme:     ""
   admin_credential: ""

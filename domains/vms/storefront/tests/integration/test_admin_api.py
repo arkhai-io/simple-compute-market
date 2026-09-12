@@ -210,6 +210,18 @@ class TestHealthEndpoint:
         result = await admin_client.get_system_status()
         assert result.paused is False
 
+    async def test_system_status_readable_by_service_peer(self, service_client):
+        """A service peer reads status to confirm its own signing path works.
+
+        This is the provisioning adapter's `storefront_auth` health check. It
+        is the only side-effect-free service operation available — every other
+        one is a fulfillment callback that mutates state — so if this route
+        stops accepting the `service` role, provisioning loses its only way to
+        verify the credential it uses for those callbacks.
+        """
+        result = await service_client.get_system_status()
+        assert result.status in ("ok", "degraded")
+
     async def test_system_status_includes_registry_check(self, admin_client):
         result = await admin_client.get_system_status()
         registry_check = result.checks.get("registry")

@@ -247,24 +247,89 @@ clock rather than on an observable transition.
       to it. `service_client` stays for the provisioning callbacks, which are
       genuinely service-to-service.
 
-      Test evidence in this environment: storefront-client suite 30 passed
-      (includes `test_admin_auth`, `test_auth_headers`); storefront unit
-      `test_admin_auth` + `test_identity_dispatch` +
-      `test_service_peer_identity` 32 passed; e2e collection clean
-      (`test_multi_registry` 20 collected, smoke 16 collected); all eight
-      rebuilt clients construct against the committed dev credentials; and a
-      seller-role client is refused `get_system_status` with
-      `this operation requires caller_role='admin', not 'seller'`.
+      Test evidence:
 
-      Two limits worth recording. `test_admin_api.py` itself cannot be
-      executed here: it imports `market_storefront.server`, which needs the
-      separately released `hosted_settlement_client` wheel, so the change to
-      it is verified by the resolver tests above rather than by running it.
-      And `tests/unit/test_config_loader.py` has two failures
-      (`test_structured_settlement_publication_defaults_are_validated`,
-      `test_structured_publication_defaults_reject_partial_or_secret_input`)
-      which reproduce identically on pristine code and are unrelated to this
-      change.
+      | Suite | Result |
+      |---|---|
+      | `domains/vms/storefront` unit + integration | 1106 passed, 1 skipped, 4 failed |
+      | `provisioning/compute/service` (owns the auth middleware and route table) | 867 passed |
+      | `kit/identity` unit | 163 passed |
+      | `core/storefront-client` | 30 passed |
+      | `test_admin_api.py` alone | 44 passed |
+
+      The four storefront failures
+      (`test_server_uses_shared_storefront_app_shell`, `test_alkahest.py`
+      `test_rust`/`test_python`, and
+      `test_negotiate_controller.py::test_amountless_exact_escrow_can_start_and_accept`)
+      reproduce identically on pristine code and are unrelated to this change.
+
+      The relocated tests were confirmed to exercise the change rather than
+      merely pass alongside it: against pristine production code with the new
+      `admin_client` fixture in place, exactly the seven `get_system_status`
+      tests fail and the other 37 pass, because the service-peer gate refuses
+      an administrator. With the correction all 44 pass. The nine service-peer
+      callback assertions pass in both, confirming the callback channel was
+      not disturbed.
+
+      `arkhai-hosted-settlement-client==0.4.2` and `alkahest-py==1.1.2` are
+      both installable from PyPI; the storefront app shell additionally needs
+      `domains/vms/domain` and `domains/vms/storefront` installed so that the
+      `market.storefront_domains` and `market.storefront_contributions` entry
+      points resolve. Note those are two distinct groups declared by two
+      different packages, and the app shell reads only the latter — installing
+      the domain alone still fails with `contribution 'vms' is not
+      installed`.
+
+## 4c. Round 3 findings
+
+Run: **12 failed, 32 passed, 50 skipped, 263 deselected, 7 errors** (from
+1 failed / 12 passed / 87 errors). Errors 87 → 7, passes 12 → 32.
+
+- [x] 4c.1 **Regression, mine: system status is a dual-role route.** The
+      provisioning adapter's `storefront_auth` health check builds a
+      `caller_role="service"` storefront client and reads system status; after
+      4b.1 that raised `ValueError`, surfacing as
+      `checks.storefront_auth='error: ValueError'`.
+
+      The route was always meant to serve two callers, and the evidence was
+      already in the code: both middlewares dispatch on the asserted role for
+      this exact path — `service_peer_auth` claims it only when the role is
+      `service`, and `admin_identity` explicitly passes a `service` request
+      through. 4b.1 removed the service branch instead of adding the admin one
+      beside it. Restored, and the client now asserts whichever of the two
+      roles it holds. Status remains the only side-effect-free service
+      operation, which is why provisioning uses it to verify the credential
+      its fulfillment callbacks depend on; a regression guard now covers that
+      read (`test_system_status_readable_by_service_peer`).
+
+      The lesson generalizes the one already on this branch: the role a route
+      requires is not always single-valued, and reading one middleware's
+      contract table is not reading the dispatch.
+
+- [x] 4c.2 **`create_listing` no longer accepts `agent_wallet_address`** — the
+      seller is the signer now, so the wallet argument is gone. Six call sites
+      passed it; all removed. Auditing the callers also found five
+      `create_listing` calls still on the admin client, which would have been
+      refused for asserting the wrong role: all eight now use a seller-role
+      client.
+
+- [x] 4c.3 **Regression, mine: the alice storefront was half-configured.**
+      Adding an `alice` section with only administrator keys turned a clean
+      skip into `dynaconf AccessError: 'API_URL'` — seven errors. Alice does
+      run in the stack (`alice-storefront`, port 8002), so the section is now
+      complete rather than removed: the tests were skipping because config was
+      absent, which is the same drift this change exists to repair. Expect
+      previously-skipped alice stages to produce results now.
+
+- [x] 4c.4 Stale retired-model diagnostics in `test_full_deal_buyer_cli.py`
+      (a file missed in the earlier sweep) corrected.
+
+- [ ] 4c.5 **Findings to classify, not fix here.** `checks.alkahest='unconfigured'`
+      on the storefront and the resulting escrow-phase failures are a real
+      configuration defect invisible since mid-August — `[chains.anvil]` in the
+      storefront config. Raise an issue. The buyer-CLI credits run now reports
+      `rc=2` with no run-log, which the 4a reporter repair made legible;
+      classify separately.
 
 ## 5. Closeout
 
