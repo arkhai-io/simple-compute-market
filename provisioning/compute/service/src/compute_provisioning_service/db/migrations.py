@@ -1731,8 +1731,10 @@ def _migrate_reservation_offering_mode_name(engine: Engine) -> None:
     serialized requirement to decide whether a settlement request is a retry
     of one it already has. A payload left under the retired key would not
     compare equal to a newly serialized one, so a settlement retried across
-    this upgrade would stop recognizing its own request and submit a second
-    time.
+    this upgrade would be refused as a mismatch rather than recognized --
+    `SettlementRepository.schedule` raises `SettlementRequestMismatchError`
+    rather than creating a second assignment, so the hazard is a stranded
+    settlement, not duplicate provisioning.
 
     Expand/contract rather than a rename statement: add, copy, then rebuild
     without the old column, so an interrupted run leaves a readable table
