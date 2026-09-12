@@ -45,3 +45,10 @@ tests:
 
 provisioning:
   api_url: ""          # injected from environment profile file or ARKHAI_PROVISIONING__API_URL
+  # Caller credential for the provisioning admin principal, and the trust pin
+  # for the service's own signing principal. Both are injected per environment;
+  # provisioning authenticates each caller and signs its responses.
+  admin_scheme: "eip191"
+  admin_credential: ""
+  authority_scheme: "eip191"
+  authority_identifier: ""

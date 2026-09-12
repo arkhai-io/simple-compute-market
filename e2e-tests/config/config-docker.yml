@@ -26,6 +26,16 @@ seller:
 
 provisioning:
   api_url: "http://provisioning:8081"
+  # Well-known deterministic development values (standard Anvil accounts), as
+  # with the keys above. Not secret, and MUST NOT be used on a public network.
+  # `admin_credential` is Anvil 5, the principal the compose stack pins as the
+  # provisioning admin identity; `authority_identifier` is Anvil 0, the
+  # service's own signer. The compose stack pins both, so they are not
+  # interchangeable and a swap fails as an authorisation error.
+  admin_scheme:         "eip191"
+  admin_credential:     "0x8b3a350cf5c34c9194ca85829a2df0ec3153be0318b5e2d3348e872092edffba"
+  authority_scheme:     "eip191"
+  authority_identifier: "0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266"
 
 api_credits:
   registry_url:   "http://api-credits-registry:8080"

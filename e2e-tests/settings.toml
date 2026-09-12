@@ -59,6 +59,16 @@ e2e_poll_interval_s = 3
 # ---------------------------------------------------------------------------
 [default.provisioning]
 api_url = ""
+# Credential for the principal pinned as the provisioning service's admin
+# identity. The operator client asserts the `admin` role on every request and
+# the service resolves the trust set from that role, so a credential for any
+# other principal authenticates as the wrong caller.
+admin_scheme     = "eip191"
+admin_credential = ""
+# The provisioning service's own signing principal, pinned so the client
+# verifies responses. Distinct from both caller principals above.
+authority_scheme     = "eip191"
+authority_identifier = ""
 
 # ---------------------------------------------------------------------------
 # API-credits topology (item 6)

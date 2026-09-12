@@ -7,39 +7,112 @@
       `e2e-tests/tests/e2e/roles/scenarios/vms/conftest.py`'s
       `provisioning_client`, and `e2e-tests/tests/e2e/roles/buyer_cli.py`'s
       `ProfileStore(...)` near line 378.
-- [ ] 1.2 Sweep every e2e fixture that constructs a library client or model for
+- [x] 1.2 Sweep every e2e fixture that constructs a library client or model for
       the same class of drift, instead of fixing only the two that surfaced.
-      88 errors came from 2 causes, so a third would be invisible behind them
-      until the first two are fixed. Check at minimum `SyncStorefrontClient`,
-      `SyncRegistryClient`, `SyncProvisioningClient`, `SiteCapacityClient`, and
-      every `market_identity` model the suite builds directly.
-- [ ] 1.3 For each construction site, compare against the installed wheel's
+      **Four further sites found, all masked behind the two that surfaced.**
+      The two reported causes are not the whole drift:
+
+      | Site | Current call | Installed signature |
+      |---|---|---|
+      | `vms/conftest.py` `storefront_client` | `private_key=` | `TypeError: unexpected keyword argument 'private_key'` |
+      | `vms/conftest.py` `storefront_admin_client` | `private_key=`, `admin_key=` | same |
+      | `vms/conftest.py` `registry_client` | `SyncRegistryClient(base_url=...)` | `TypeError: missing 4 required keyword-only arguments: 'signer', 'caller_role', 'expected_registries', 'registry_authority'` |
+      | `vms/conftest.py` `provisioning_test_client` | `X-Admin-Key` only | constructs, then rejected: `/test/*` operations are in `ADMIN_PROVISIONING_OPERATIONS` and go through `ProvisioningAuthMiddleware` |
+
+      `test_multi_registry.py` (`alice_admin_client`, and the two inline
+      `SyncStorefrontClient` constructions in stages 06a/06b) and
+      `tests/smoke/test_provisioning_smoke.py` / `test_storefront_smoke.py`
+      carry the same shapes. The smoke modules are deselected in the e2e run,
+      so they are invisible there and will fail identically once selected.
+
+      `tests/e2e/roles/scenarios/vms/hosted/network.py` is already correct and
+      is the in-repo reference for all of these: it builds a signer, a
+      `TrustedIdentitySet`, and an explicit `caller_role` per client.
+- [x] 1.3 For each construction site, compare against the installed wheel's
       signature — not the source tree. The suite runs against
       `.dist`-resolved wheels, and that is the shape that will actually bind.
+      Signatures confirmed by introspection and by executing each construction
+      site's exact call, rather than by reading the definitions.
 
 ## 2. Settle the caller question
 
-- [ ] 2.1 **Decide whether the suite drives provisioning as the admin principal
-      or the storefront principal**, and record the reasoning. They are
-      different callers with different authorisation, and the retired shared
-      admin key made the distinction invisible. Blocking for 3.1.
-- [ ] 2.2 Determine whether `SELLER.ADMIN_API_KEY` retains any consumer once
-      the provisioning fixture stops using it. If the storefront's `/admin/*`
-      routes still gate on it, `storefront_admin_client` keeps it; if nothing
-      uses it, remove the setting and its compose plumbing rather than leaving
-      a retired-model artefact.
+- [x] 2.1 **Decide whether the suite drives provisioning as the admin principal
+      or the storefront principal.** Settled as the **admin** principal, and
+      the code decides it rather than a preference: `SyncProvisioningClient`
+      fixes `caller_role` to `admin` in its base `__init__` with no parameter
+      to override, and `ProvisioningAuthMiddleware` resolves
+      `active_principals(asserted_role)` and verifies the request principal
+      against that set. A storefront credential would construct and then be
+      refused with 403. Recorded in the fixture docstring.
+- [x] 2.2 Determine whether `SELLER.ADMIN_API_KEY` retains any consumer once
+      the provisioning fixture stops using it. **It retains none.** The
+      storefront's `/admin/*` routes moved to signed marketplace v2 identity
+      with administrator trust pins resolved from
+      `Identity.administrators.*` (`storefront.bob.toml`,
+      `storefront.alice.toml`); `SyncStorefrontClient` no longer accepts an
+      `admin_key` argument at all. The only remaining readers are the three
+      fixtures listed in 1.2, each of which is itself drifted. Removal is
+      therefore correct but is gated on repairing those fixtures, so it is
+      deferred to 3.3 rather than done piecemeal here. Note this is a
+      *different* setting from the registry bearer tokens
+      (`VMS_REGISTRY_ADMIN_API_KEY`), which `SyncRegistryClient` still accepts
+      as `api_key` and which stay.
 
 ## 3. Repair
 
-- [ ] 3.1 Rebuild `provisioning_client` on the current signature — a signer for
-      the principal chosen in 2.1, plus an `expected_authorities` set pinning
-      the provisioning service's own principal (`0xf39fd6e5…`,
-      `PROVISIONING_IDENTITY__IDENTIFIER`). Correct the docstring, which still
-      asserts "there is no per-agent identity".
-- [ ] 3.2 Build the buyer-CLI `ProfileStore` through the model's own
+- [x] 3.1 Rebuild `provisioning_client` on the current signature — a signer for
+      the admin principal settled in 2.1, plus an `expected_authorities` set
+      pinning the provisioning service's own principal
+      (`PROVISIONING_IDENTITY__IDENTIFIER`). Docstring corrected; it no longer
+      asserts "there is no per-agent identity" and now records which principal
+      the suite drives and why the choice is forced.
+
+      The credential had no home in the suite's settings: the config exposed
+      `SELLER.PRIVATE_KEY` and `SELLER.ADMIN_API_KEY`, and no credential for
+      the admin principal existed anywhere in the repository — the
+      `dev-env/identities/` provenance table has no row for it. Added
+      `provisioning.admin_scheme` / `admin_credential` and
+      `provisioning.authority_scheme` / `authority_identifier` across
+      `settings.toml`, `config/config.yml`, and `config/config-docker.yml`.
+      No compose plumbing was needed: the service side already pins all three
+      principals, and only the suite lacked the private half.
+- [x] 3.2 Build the buyer-CLI `ProfileStore` through the model's own
       initial-state classmethod rather than passing `revision=0` literally, so
       the initial revision stays owned by the model.
-- [ ] 3.3 Apply the same repair to any further sites 1.2 found.
+
+      **The classmethod alone is not sufficient, and the original instruction
+      would have produced a second broken fixture.** `ProfileRepository.replace`
+      rejects a candidate whose revision does not advance past
+      `expected_revision`, and `ProfileStore.empty()` returns revision 0
+      against `expected_revision=0`. Constructing from `empty()` and populating
+      it — like hard-coding `revision=0` — fails with
+      `ProfileRevisionConflict: candidate revision must advance beyond current`.
+      Verified by running all four candidates against the installed package.
+      The working repair is `add_profile(ProfileStore.empty(), profile,
+      select=True)`, which routes through `_next_store` and so keeps both the
+      initial revision and its increment owned by the model.
+- [ ] 3.3 Apply the same repair to the further sites 1.2 found. **Not done in
+      this round, deliberately.** Unlike 3.1 and 3.2, these are not mechanical:
+      `SyncStorefrontClient` binds exactly one `caller_role` per instance and
+      refuses any operation belonging to another role, and the storefront now
+      distinguishes four roles (`admin`, `buyer`, `seller`, `service`). The
+      existing `storefront_admin_client` is used for both seller-owned routes
+      and `/admin/*`, which are now different roles, so it has to become two
+      clients and each caller has to be reassigned. That is a decision about
+      what the suite asserts, not a signature translation, and it needs the
+      same explicit settling 2.1 got. Carrying it as the next round of this
+      change rather than guessing:
+      - [ ] 3.3a Settle the role split for `storefront_admin_client` and
+            reassign its callers.
+      - [ ] 3.3b Rebuild `storefront_client`, `storefront_admin_client`,
+            `registry_client`, and `test_multi_registry.py`'s clients on the
+            current signatures, following `hosted/network.py`.
+      - [ ] 3.3c Re-sign `ProvisioningTestClient` for `/test/*`, which is
+            behind the same authenticated route contract as the rest of the API.
+      - [ ] 3.3d Apply the same to the smoke modules, and correct their
+            module docstrings, which still assert the retired shared-key model.
+      - [ ] 3.3e Remove `SELLER.ADMIN_API_KEY` and its plumbing once the
+            fixtures above stop reading it (2.2).
 
 ## 4. Validation
 
@@ -47,6 +120,16 @@
       passed / failed / errored counts, and confirm **zero errors** — an error
       means a fixture is still wrong, which is this change's scope; a failure
       means the suite ran, which is not.
+
+      **Zero errors is not the expected outcome of this round**, and that is
+      not a regression. The 1.2 sites were masked: with `provisioning_client`
+      repaired, `storefront_client`, `storefront_admin_client`, and
+      `registry_client` now raise during setup where previously the
+      provisioning fixture raised first. The check to apply this round is that
+      the error *causes* have changed — the two reported constructors are gone
+      and no error names `admin_key`, `private_key`, or a missing `revision`.
+      Counting errors would hide that, which is the failure mode this branch
+      has already recorded once.
 - [ ] 4.2 Classify every remaining failure: a real finding with an issue
       raised, or a genuine pass. Do not fix the findings here.
 - [ ] 4.3 Confirm the 12 currently-passing tests still pass. A fixture repair
@@ -104,5 +187,14 @@ which deferred them deliberately. None blocked startup.
 
 ## Implementation status
 
-**Not started.** Written from a diagnosis of the first e2e run to reach pytest;
-no code changed. Task 2.1 is blocking for 3.1.
+**Partially implemented.** Both reported fixture errors are repaired and
+verified against the installed packages; task 2.1 is settled from the code and
+no longer blocks 3.1.
+
+The survey found that the drift is wider than the proposal assumed: four
+further sites carry the same class of error and were invisible because the
+`provisioning_client` fixture raised first. Two of them need a decision about
+which role the suite asserts, not a signature translation, so they are carried
+as 3.3a–3.3e rather than guessed at. The proposal's "Impact" line — that a
+repair turns 88 errors into 88 results — holds only once 3.3 lands; this round
+moves the error causes rather than eliminating them.

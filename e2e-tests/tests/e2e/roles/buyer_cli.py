@@ -35,6 +35,7 @@ from market_identity import (
     IdentityScheme,
     ProfileRepository,
     ProfileStore,
+    add_profile,
     create_signer,
     new_profile,
 )
@@ -374,11 +375,13 @@ def create_profiled_buyer_cli(
         credential_reference=credential_reference,
     )
     profile_path = data_dir / "arkhai" / "buyer" / "profiles.json"
+    # The store carries a revision for optimistic concurrency, and `replace`
+    # requires the candidate to advance past the revision it expects. Going
+    # through `add_profile` keeps both the initial revision and the increment
+    # owned by the model: building the candidate directly at revision 0 — the
+    # revision `empty()` returns — is refused as a non-advancing write.
     ProfileRepository(profile_path).replace(
-        ProfileStore(
-            selected_profile_id=profile.profile_id,
-            profiles=(profile,),
-        ),
+        add_profile(ProfileStore.empty(), profile, select=True),
         expected_revision=0,
     )
 

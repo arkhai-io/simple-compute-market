@@ -28,13 +28,26 @@ optimistic concurrency on the buyer profile document. The fixture already passes
 `expected_revision=0`, so it half-knows about the mechanism; it just does not
 set the field on the candidate.
 
-### The initial state has a constructor; use it
+### The initial state has a constructor, but the constructor is not enough
 
-`ProfileStore` already exposes a classmethod that returns `cls(revision=0)`.
-The fixture should call that and populate it rather than pass `revision=0`
-literally: a hard-coded zero is a second place that has to change if the
-initial revision ever stops being zero, and the model is the right owner of
-that fact.
+`ProfileStore` exposes a classmethod returning `cls(revision=0)`, and the
+instinct is to call that and populate it rather than pass `revision=0`
+literally — a hard-coded zero is a second place to change if the initial
+revision ever stops being zero.
+
+That instinct is right about ownership and wrong about mechanism.
+`ProfileRepository.replace` refuses a candidate whose revision does not advance
+past `expected_revision`, so `empty()` populated in place fails exactly as a
+literal `revision=0` does, with `ProfileRevisionConflict` instead of the
+`ValidationError` seen today. Both were run against the installed package to
+confirm it.
+
+The model owns the increment as well as the initial value: `add_profile` goes
+through `_next_store`, which returns `revision=store.revision + 1`. So the
+fixture composes the two — `add_profile(ProfileStore.empty(), profile,
+select=True)` — and hard-codes neither number. The general form of the lesson
+is the one already on this branch: reading a field's default is not the same as
+reading the contract that field participates in.
 
 ### Repair, then classify — not repair and chase
 
@@ -83,13 +96,36 @@ question invisible, which is part of why the drift went unnoticed.
   nightly workflow now exercises this path, so the next divergence surfaces in
   a day rather than a month.
 
+## Resolved questions
+
+- **Admin or storefront principal for `provisioning_client`?** **Admin**, and
+  the client decides it. `SyncProvisioningClient` sets `caller_role = "admin"`
+  in its base `__init__` and offers no override; the service resolves the trust
+  set from the asserted role. The storefront credential would construct and
+  then 403. The question was real, but it had an answer in the code rather than
+  in topology preference.
+
+- **Does `SELLER.ADMIN_API_KEY` still have any consumer?** No. The storefront's
+  `/admin/*` routes moved to signed identity with administrator trust pins, and
+  `SyncStorefrontClient` has no `admin_key` parameter. Its only readers are
+  fixtures that are themselves drifted, so the removal is correct but ordered
+  behind their repair. Distinct from the registry bearer tokens, which survive
+  as `SyncRegistryClient(api_key=...)`.
+
 ## Open questions
 
-- **Admin or storefront principal for `provisioning_client`?** Stated above;
-  blocking for that fixture only.
-- **Does `SELLER.ADMIN_API_KEY` still have any consumer?** If the provisioning
-  fixture was its last user, the setting and its compose plumbing are dead and
-  should go rather than linger as a retired-model artefact. Check before
-  removing — the storefront's `/admin/*` routes may still gate on it, in which
-  case `storefront_admin_client` keeps it and only the provisioning fixture
-  stops using it.
+- **What role does each storefront fixture assert?** `SyncStorefrontClient`
+  binds one `caller_role` and refuses operations belonging to another, and the
+  storefront now separates `admin`, `buyer`, `seller`, and `service`. The
+  existing `storefront_admin_client` serves both seller-owned routes and
+  `/admin/*`, so it becomes two clients and its callers must be reassigned.
+  This is the same shape of question as the provisioning caller — invisible
+  while a shared key made every caller look alike — and it wants the same
+  explicit answer before the fixture is written.
+
+- **Should the suite keep a single `registry_client` at all?**
+  `SyncRegistryClient` now requires `signer`, `caller_role`,
+  `expected_registries`, and `registry_authority`. The last is per-registry,
+  and the multi-registry scenario spans `registry-a` and `registry-b` with
+  different authorities and schemes, so one module-scoped fixture may no longer
+  be the right shape.

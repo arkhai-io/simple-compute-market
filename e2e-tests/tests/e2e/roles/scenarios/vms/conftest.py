@@ -11,7 +11,8 @@ Clients
 * ``storefront_client``        — canonical ``SyncStorefrontClient``, buyer key
 * ``storefront_admin_client``  — same, seller key + admin key
 * ``registry_client``          — ``SyncRegistryClient`` from the registry-client wheel
-* ``provisioning_client``      — canonical ``SyncProvisioningClient``
+* ``provisioning_client``      — ``SyncProvisioningClient`` signing as the
+  provisioning admin principal
 * ``provisioning_test_client`` — thin sync wrapper over ``/test/*`` endpoints
 
 Settings access uses the ``settings.SECTION.KEY`` attribute pattern
@@ -202,19 +203,47 @@ def registry_client():
 
 @pytest.fixture(scope="module")
 def provisioning_client():
-    """Canonical SyncProvisioningClient.
+    """Admin-signed SyncProvisioningClient.
 
-    Provisioning is an internal dependency of the storefront. It gates
-    every non-health route on a single shared admin key (X-Admin-Key);
-    there is no per-agent identity.
+    Provisioning authenticates per caller: each request carries the caller's
+    marketplace signature plus an asserted role, and the service verifies the
+    principal against the durable trust set bound to that role.
+
+    This suite drives provisioning as the **admin** principal, and that is not
+    a preference. ``SyncProvisioningClient`` asserts ``admin`` on every request
+    and exposes no way to override it, while the service resolves the trust set
+    from the asserted role. Signing as the storefront principal would construct
+    successfully and then be refused on authorisation, so the credential here
+    must be the principal pinned as the provisioning admin identity.
+
+    ``expected_authorities`` pins the service's own signing principal, which is
+    a different identity again, so responses are verified as well as requests.
     """
+    from market_identity import Identity, TrustedIdentitySet, create_signer
     from vm_provisioning_operator import SyncProvisioningClient
+
     url = _require_setting(settings.PROVISIONING.API_URL, "PROVISIONING.API_URL")
-    admin_key = str(settings.SELLER.ADMIN_API_KEY or "") or None
-    client = SyncProvisioningClient(
-        base_url=url,
-        admin_key=admin_key,
+    credential = _require_setting(
+        settings.PROVISIONING.ADMIN_CREDENTIAL,
+        "PROVISIONING.ADMIN_CREDENTIAL",
     )
+    authority_identifier = _require_setting(
+        settings.PROVISIONING.AUTHORITY_IDENTIFIER,
+        "PROVISIONING.AUTHORITY_IDENTIFIER",
+    )
+    signer = create_signer(
+        str(settings.PROVISIONING.ADMIN_SCHEME or "eip191"),
+        str(credential),
+    )
+    expected_authorities = TrustedIdentitySet(
+        identities=(
+            Identity(
+                scheme=str(settings.PROVISIONING.AUTHORITY_SCHEME or "eip191"),
+                identifier=str(authority_identifier),
+            ),
+        )
+    )
+    client = SyncProvisioningClient(url, signer, expected_authorities)
     yield client
     client.close()
 
