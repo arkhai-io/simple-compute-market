@@ -31,13 +31,18 @@ scheme = "eip191"
 identifier = "0x15d34aaf54267db7d7c367839aaf71a00a2c6a65"
 
 [Identity.administrators.operator]
-principal = { scheme = "eip191", identifier = "0x15d34aaf54267db7d7c367839aaf71a00a2c6a65" }
+# The loader requires a list: a stable administrator may hold more than one
+# principal, and `principal = {...}` is the pre-list spelling.
+principals = [
+  { scheme = "eip191", identifier = "0x15d34aaf54267db7d7c367839aaf71a00a2c6a65" },
+]
 
 [Identity.service_peers.provisioning_default]
 role = "service"
 site_id = "default"
-principal = { scheme = "eip191", identifier = "0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266" }
-
+principals = [
+  { scheme = "eip191", identifier = "0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266" },
+]
 [Settlement]
 schema_version = 1
 priority = ["alkahest.v1"]

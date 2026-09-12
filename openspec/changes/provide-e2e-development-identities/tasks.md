@@ -166,6 +166,23 @@ were last touched is simply absent.
       root namespace, where that file's `port`/`base_url`/`db_path` live —
       inserting it before `[registry]` would have made it a member of the
       preceding table instead.
+- [x] 4e.4 **Fix the cause instead of the symptoms.** Ten root-level keys in
+      `apicredits_storefront/settings.toml` sat *below* the
+      `[identity.admin_principals]` header, so TOML made every one of them a
+      member of that table and no `settings.<key>` lookup could reach them:
+      `agent_id`, `agent_name`, `port`, `base_url`, `db_path`, `log_level`,
+      `enable_registry_discovery`, `negotiation_timeout_seconds`,
+      `negotiation_watchdog_interval`, `claims_sweep_interval`. That is why the
+      credits storefront failed on one missing attribute per run — each startup
+      reached one key further. Moved above the first table header, where root
+      keys must be, and 4e.2's per-key patch to the deployment profile reverted
+      as redundant.
+- [x] 4e.5 `storefront.bob.toml` and `storefront.alice.toml` spelled
+      administrator and service-peer trust as `principal = {...}` where
+      `_trusted_identity_set` requires `principals = [...]` — it accepts one or
+      two identities so an authority can rotate. Both fields in both profiles
+      converted. `[Identity.principal]`, the storefront's own single identity,
+      is correctly singular and left alone.
 - [ ] 4e.3 `storefront.credits.toml` declares
       `[capacity.sites.default.expected_authorities]` but no authority **URL**
       for that site, so `capacity.sites.default` is a table where the loader
