@@ -28,6 +28,7 @@ import time
 import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
+from collections.abc import Mapping
 from typing import Any, Callable, Iterable, Optional
 from market_identity import (
     CredentialProviderKind,
@@ -357,6 +358,46 @@ def _toml_quote(value: str) -> str:
     return '"' + value.replace("\\", "\\\\").replace('"', '\\"') + '"'
 
 
+def _registry_authority_sections(
+    registry_urls: tuple[str, ...],
+    authorities: Mapping[str, Mapping[str, Any]] | None,
+) -> tuple[str, ...]:
+    """Emit `[registry.authorities."<url>"]` pins for every configured registry.
+
+    The buyer refuses to start without them, and requires the pinned URLs to
+    match `registry.urls` exactly, so a partial mapping is a configuration
+    error rather than a reduced trust set. Each entry names the authority the
+    registry publishes under and the identities whose signatures the buyer will
+    accept from it.
+    """
+    if not authorities:
+        return ()
+    missing = [url for url in registry_urls if url not in authorities]
+    if missing:
+        raise ValueError(
+            f"registry_authorities is missing pins for {missing}; the buyer "
+            "requires one per entry in registry.urls"
+        )
+    lines: list[str] = []
+    for url in registry_urls:
+        entry = authorities[url]
+        identities = entry["identities"]
+        rendered = ", ".join(
+            "{ scheme = "
+            + _toml_quote(str(identity["scheme"]))
+            + ", identifier = "
+            + _toml_quote(str(identity["identifier"]))
+            + " }"
+            for identity in identities
+        )
+        lines.extend([
+            f"[registry.authorities.{_toml_quote(url)}]",
+            f"authority = {_toml_quote(str(entry['authority']))}",
+            f"identities = [{rendered}]",
+            "",
+        ])
+    return tuple(lines)
+
 def create_profiled_buyer_cli(
     *,
     binary: Path,
@@ -365,6 +406,7 @@ def create_profiled_buyer_cli(
     marketplace_scheme: IdentityScheme | str,
     marketplace_credential: str,
     registries: Iterable[str],
+    registry_authorities: Mapping[str, Mapping[str, Any]] | None = None,
     toml_sections: Iterable[str] = (),
     credential_variable: str | None = None,
 ) -> BuyerCli:
@@ -427,6 +469,7 @@ def create_profiled_buyer_cli(
         "[registry]",
         "urls = [" + ", ".join(_toml_quote(url) for url in registry_urls) + "]",
         "",
+        *_registry_authority_sections(registry_urls, registry_authorities),
         *tuple(toml_sections),
     ]
     config_path = config_dir / "buyer.toml"
@@ -554,6 +597,17 @@ def buyer_cli(buyer_cli_binary: Path, tmp_path_factory) -> BuyerCli:
         marketplace_scheme=IdentityScheme.EIP191,
         marketplace_credential=marketplace_credential,
         registries=(registry_url,),
+        registry_authorities={
+            registry_url.rstrip("/"): {
+                "authority": str(settings.REGISTRY.get("authority_id", "") or ""),
+                "identities": [
+                    {
+                        "scheme": "eip191",
+                        "identifier": str(settings.REGISTRY.get("identifier", "") or ""),
+                    }
+                ],
+            }
+        },
         toml_sections=sections,
         credential_variable="ARKHAI_E2E_BUYER_MARKETPLACE_CREDENTIAL",
     )

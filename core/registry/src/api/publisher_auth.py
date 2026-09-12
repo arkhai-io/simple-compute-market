@@ -5,6 +5,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 import time
+import json
+
 from typing import Any
 import uuid
 
@@ -83,6 +85,25 @@ def normalize_if_match(value: str | None) -> str | None:
     if value is None:
         return None
     return value.strip().removeprefix("W/").strip().strip('"')
+
+
+def wire_body(raw: bytes) -> Any:
+    """The body as the caller sent it, for signature verification.
+
+    A proof binds the bytes the caller hashed. Verifying against a value
+    re-serialized from a typed model instead compares a different document:
+    every field the model defaults or coerces is present in the server's view
+    and absent from the caller's, so a payload that omits an optional field
+    fails with a context mismatch that names nothing about the cause. Routes
+    that parse into a model keep the model for validation and pass this for
+    authentication.
+    """
+    if not raw:
+        return EMPTY_BODY
+    try:
+        return json.loads(raw)
+    except (TypeError, ValueError):
+        return raw.decode("utf-8", errors="replace")
 
 
 def canonical_query_body(request: Request) -> dict[str, Any]:

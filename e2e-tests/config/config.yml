@@ -20,6 +20,7 @@ registry: # injected from environment profile file
   # signed responses, and the authority id it publishes under.
   identifier:
   authority_id:
+  bootstrap_api_key: ""
 
 buyer:
   # Marketplace signing is resolved only through the selected persistent

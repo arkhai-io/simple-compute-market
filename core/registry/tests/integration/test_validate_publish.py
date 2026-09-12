@@ -23,7 +23,6 @@ from market_identity import (
 )
 
 from src.main import app
-from src.api.validate_model import ValidatePublishRequest
 
 
 class _ValidationAuth(httpx.Auth):
@@ -31,9 +30,12 @@ class _ValidationAuth(httpx.Auth):
         self.signer = Ed25519Signer(bytes(range(32)))
 
     def auth_flow(self, request):
-        body = ValidatePublishRequest.model_validate(
-            json.loads(request.content)
-        ).model_dump(mode="json")
+        # Sign the bytes on the wire, as every real client does. Re-serializing
+        # through the request model here would reproduce whatever the server
+        # does to the body, so the pair would agree even when both are wrong --
+        # which is exactly how a defaulted field once broke real callers while
+        # this suite stayed green.
+        body = json.loads(request.content)
         authenticated = sign_request(
             signer=self.signer,
             envelope=RequestEnvelope(
@@ -100,6 +102,24 @@ async def test_valid_listing_passes() -> None:
     assert body["accepted_escrows_count"] == 1
     assert "listing_resource_type" not in body
 
+
+
+@pytest.mark.asyncio
+async def test_payload_omitting_optional_fields_authenticates() -> None:
+    """A caller that omits optional fields is still authenticated.
+
+    The proof binds the document the caller hashed. `demands` and
+    `settlement_options` are optional and default to empty lists, so a server
+    that verified against its own parsed model would compare a body carrying
+    both against one carrying neither, and refuse a well-formed request with a
+    context mismatch.
+    """
+    payload = _valid_payload()
+    assert "demands" not in payload and "settlement_options" not in payload
+    async with _client() as c:
+        resp = await c.post("/api/v1/listings/validate-publish", json=payload)
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["valid"] is True
 
 @pytest.mark.asyncio
 async def test_hosted_settlement_option_passes_without_alkahest_choice() -> None:

@@ -30,6 +30,7 @@ from src.api.publisher_auth import (
     complete_authenticated_request,
     registry_authority_signer,
     signed_response,
+    wire_body,
 )
 from src.db.database import get_db
 from sqlalchemy.orm import Session
@@ -78,14 +79,16 @@ async def validate_publish(
     body: ValidatePublishRequest,
     db: Session = Depends(get_db),
 ):
-    request_body = body.model_dump(mode="json")
+    # Authenticate against the bytes the caller signed. `body` stays the parsed
+    # model for the validation below, but its `model_dump` materializes every
+    # defaulted field, which is a different document from the one hashed.
     authenticated = authenticate_publisher_request(
         request=request,
         db=db,
         method="POST",
         operation="listing.validate",
         resource="listings",
-        body=request_body,
+        body=wire_body(await request.body()),
         allowed_roles=frozenset({"buyer", "seller", "service"}),
     )
     require_read_access(request, db)

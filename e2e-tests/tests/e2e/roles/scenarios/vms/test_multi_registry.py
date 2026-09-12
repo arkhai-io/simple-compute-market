@@ -11,7 +11,7 @@ through negotiation start, and they only become non-trivial with two
 The docker-compose stack runs:
   * ``registry``    on host port 8080 — public, no auth
   * ``registry-b``  on host port 8082 — read + write gated, seeded with
-                    a write-scoped bearer ``test-buyer-token``
+                    the stack's single write-scoped bootstrap key
   * ``bob-storefront``   (Bob)   on host port 8001 — Anvil acct #2,
                          [registry] urls = [registry, registry-b]
   * ``alice-storefront`` (Alice) on host port 8002 — Anvil acct #4,
@@ -133,7 +133,12 @@ def _registry_urls() -> tuple[str, str, str]:
 
 
 _REGISTRY_A, _REGISTRY_B, _REGISTRY_DEAD = _registry_urls()
-_REGISTRY_B_TOKEN = "test-buyer-token"
+# The private registry seeds exactly one write-scoped key at startup, from
+# the stack's bootstrap value. Reading it from configuration rather than
+# restating it keeps the test and the stack from drifting apart.
+_REGISTRY_B_TOKEN = str(
+    settings.REGISTRY.get("bootstrap_api_key", "") or ""
+)
 
 
 # ---------------------------------------------------------------------------

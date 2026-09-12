@@ -12,6 +12,7 @@ registry:
   api_url: "http://registry:8080"
   authority_id: "registry-a"
   identifier: "0x90f79bf6eb2c4f870365e785982e1f101e93b906"
+  bootstrap_api_key: "development-registry-bootstrap-key"
 
 buyer:
   marketplace_credential: "0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d"

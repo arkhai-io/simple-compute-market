@@ -21,6 +21,9 @@ retry_backoff_seconds = 2
 api_url            = ""
 authority_id       = ""   # REGISTRY_AUTHORITY_ID the service publishes under
 identifier         = ""   # the registry's own signing principal
+# Bearer token for a read/write gated private registry. The stack seeds one
+# write-scoped key at startup; this must be the key it seeded.
+bootstrap_api_key  = ""
 
 # ---------------------------------------------------------------------------
 # Buyer wallet

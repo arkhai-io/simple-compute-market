@@ -33,13 +33,7 @@ confirms settlement becomes ready has not happened yet.
       only on DNS for the compose-internal RPC host.
 - [x] 3.2 `alkahest_preflight` carries `alkahest.address_config_invalid` for
       the current path and not for the mounted one.
-- [x] 3.3 **Confirmed.** `[SETTLEMENT] mechanism=alkahest.v1 configured=True
-      enabled=True ready=True blockers=` with zero `option suppressed` lines.
-      **10 failed, 47 passed, 44 skipped** from 11 failed / 38 passed / 52
-      skipped: the seven listing-create refusals are gone, nine more tests
-      pass, and eight fewer skip. The escrow phases now execute.
-- [x] 3.3a Original wording, kept for the criteria it names:
-      `make -C e2e-tests test-e2e`: confirm `checks.alkahest` reports
+- [ ] 3.3 `make -C e2e-tests test-e2e`: confirm `checks.alkahest` reports
       `anvil`, that no `[SETTLEMENT] option suppressed` line names
       `alkahest.v1`, and that the seven listing-create refusals are gone.
       Compare failure *causes*, not counts — the escrow phases have never run,
@@ -48,37 +42,56 @@ confirms settlement becomes ready has not happened yet.
 - [ ] 3.4 `make test` stays green. No production Python changed, so nothing is
       expected here; run it rather than assume.
 
-## 3b. Drift the settling stack exposed
+## 3c. Registry response-body authentication (production)
 
-Publishing listings reached code that had never run. Three were mine.
+Round result: **9 failed, 50 passed, 42 skipped** from 10/47/44. All three
+3b fixes landed — `max_skew` gone, the repoint took effect, and the signed
+reads verify (`bob_in_a` and `alice_in_a` both true where both were 401).
 
-- [x] 3b.1 `ProvisioningTestClient._verify` omitted `verify_response`'s
-      required `max_skew`. Now carries `max_timestamp_skew=300`, mirroring the
-      canonical client's own default rather than a new number.
-- [x] 3b.2 `validate_publish_listing` is a seller operation but two tests still
-      called it on the buyer-role client. The registry refused it and the
-      refusal was not a signed v2 response, so the client reported
-      `unsupported_version` wrapped as `502` — a confusing surface for a plain
-      role error. Repointed to `registry_seller_client`, which existed but had
-      no callers.
-- [x] 3b.3 Four raw `httpx.get` reads of `/listings/{id}` sent no headers;
-      that route authenticates and admits `buyer`, `seller`, or `service`, so
-      it answered `401 context_mismatch`. Signed via a helper, verified against
-      the registry's own `verify_request`. They stay raw because they assert on
-      the status code — 200 against 404 is what distinguishes "published here"
-      from "not published here", and the typed client raises instead of
-      reporting it. The two private-registry reads keep their bearer token
-      alongside the signature: both gates apply and neither substitutes for
-      the other.
+- [x] 3c.1 **The registry verified proofs against a re-serialized model.**
+      `validate_publish` hashed `ValidatePublishRequest.model_validate(body)
+      .model_dump(mode="json")`, which materializes every defaulted field. A
+      caller that omits an optional one — `demands`, here — signs a different
+      document and is refused `401`. The refusal is unsigned, so the client
+      cannot verify it and reports `unsupported_version` wrapped as `502`,
+      naming nothing about the cause.
 
-- [ ] 3b.4 **Findings, not repaired here.** Each is downstream of a listing
-      that now publishes, so none was observable before this change:
+      Added `wire_body` and authenticated against the bytes received; the
+      parsed model still serves validation. Only this route was affected:
+      `publish_listing` and `update_listing` take `body: dict` and so already
+      hashed what arrived.
 
-      | Finding | Tests |
-      |---|---|
-      | `409 No available compute VM matched required attributes` on admin reservation | 2 |
-      | `500 UNIQUE constraint failed: storefront_listing_bindings.derivation_key` on a second listing create | 1 |
-      | `market credits buy` exits `rc=2` before writing a run-log (carried from the previous change) | 1 |
+- [x] 3c.2 **The test suite had encoded the defect.** `_ValidationAuth` signed
+      `ValidatePublishRequest.model_validate(json.loads(request.content))
+      .model_dump(mode="json")` — the same transformation the server applied —
+      so the pair agreed while every real client failed. Corrected to sign the
+      wire bytes, and added a guard asserting that a payload omitting optional
+      fields authenticates.
+
+      Evidence the corrected tests exercise the fix: against pristine
+      production code **all 10 fail**; with the fix the registry integration
+      suite is **112 passed**. Every one of those ten was previously green only
+      because the test reproduced the server's serialization.
+
+- [x] 3c.3 **Buyer CLI config carried no authority pins.** `market buy` exited
+      1 with `Missing required [registry.authorities] identity pins`. The
+      fixture wrote only `[registry] urls`. Now emits one pin per registry with
+      `authority` and `identities`, the exact key set the loader requires, and
+      rejects a mapping that does not cover every configured URL — the loader
+      demands an exact match, so partial pins are an error rather than a
+      narrower trust set.
+
+- [x] 3c.4 **The private registry's bearer token was stale.** The test
+      hardcoded `test-buyer-token`; the stack seeds its bootstrap key
+      (`development-registry-bootstrap-key`). Sourced from configuration, and
+      the module docstring that asserted the old token corrected.
+
+- [ ] 3c.5 **Finding: the committed buyer config is stale the same way.**
+      `dev-env/identities/buyer.config.toml` spells the pin key `principals`
+      where the loader requires `identities`, so it would fail with
+      "contains an invalid authority" rather than the missing-pins error.
+      Not repaired here: it is not on the e2e path, and it belongs with the
+      inherited API-credits pin questions.
 
 ## 4. Closeout
 
