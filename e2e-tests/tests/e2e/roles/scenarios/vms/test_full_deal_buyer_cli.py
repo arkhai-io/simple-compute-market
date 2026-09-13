@@ -92,12 +92,21 @@ from market_alkahest.alkahest import (
     resolve_alkahest_address_config,
 )
 from src.settings import settings
+from tests.e2e.roles.scenarios.vms.host_registry import (
+    E2E_DEAL_CLI_HOST,
+    E2E_DEAL_CLI_POOL_ID,
+    E2E_HOST_GPU_COUNT,
+    provision_e2e_executor,
+    refresh_storefront_projections,
+)
 from tests.e2e.roles.scenarios.vms.conftest import (
     DealLease,
     DealState,
     _signer,
+    advance_storefront,
     capacity_source_for,
     delete_mock_rules_if_present,
+    pause_storefront,
     require_state,
     signed_listing_read_headers,
 )
@@ -185,6 +194,24 @@ compute-e2e-deal-001,compute.gpu,rtx5080,count,1,available,10000,0x9fe46736679d2
 # ===========================================================================
 # Phase 0 — E2E readiness
 # ===========================================================================
+
+
+class TestStage00_LifecyclePause:
+    def test_00_pauses_the_storefront_loops(self, storefront_admin_client):
+        """Hold the storefront's timer loops idle for the rest of this scenario.
+
+        A named stage rather than a fixture because every later assertion depends
+        on it: with the loops running, a listing status read after a reserve races
+        the capacity poller's next cycle, and a defect that reorders two writes
+        shows up as an intermittent failure instead of a reproducible one.
+
+        Trading is unaffected — this pauses the loops, not the storefront's
+        willingness to negotiate — so the deal stages below still work. Loops are
+        held, not stopped: nothing is torn down and no cycle is cut in half. Work
+        a loop would have done is requested explicitly from here on, through
+        `advance_storefront`.
+        """
+        pause_storefront(storefront_admin_client)
 
 
 class TestStage00a_StorefrontHealth:
@@ -336,6 +363,62 @@ class TestStage00f_ResourceSeed:
             "[00f] Imported e2e resource inventory row %s (resource_count=%s)",
             E2E_RESOURCE_ID,
             status.resource_count,
+        )
+
+
+class TestStage00f1_ExecutorHostRegistry:
+    def test_00f1_registers_executor_host_and_syncs_projection(
+        self, provisioning_client, storefront_admin_client,
+        site_capacity_admin_client, deal_state: DealState,
+    ):
+        """Register this scenario's executor and declare its sellable capacity.
+
+        Two separate stores, and both are required. The host is executor identity;
+        the capacity declaration is what `probe`, `reserve`, and the seller's
+        inventory guard all match against, and only a declaration creates one.
+        With the host alone, every inventory match fails and the storefront refuses
+        each negotiation with `no_matching_inventory` — several stages from the
+        cause. The declaration's categorical attributes mirror the seeded listing,
+        because the guard compares `region` and `gpu_model` by equality.
+
+        The executor is this scenario's own. Sharing one across scenarios is
+        incompatible with one declaration per executor, and previously let one
+        scenario's GPU count decide another's reservation.
+
+        Registered through the admin API rather than a mounted inventory file:
+        `inventory_path` is docker-compose-specific while the canonical Helm
+        deployment supplies inventory as an inline secret, and a mount is shared
+        state no scenario declares. The storefront is then told to pull
+        projections immediately and the pull is asserted, rather than sleeping
+        out the poller interval.
+        """
+        require_state(deal_state, "_resources_seeded")
+
+        host = provision_e2e_executor(
+            provisioning_client,
+            site_capacity_admin_client,
+            host=E2E_DEAL_CLI_HOST,
+            pool_id=E2E_DEAL_CLI_POOL_ID,
+            resource_id="compute-e2e-deal-cli-001",
+            sellable_units=1,
+            attributes={
+                "gpu_model": "RTX 5080",
+                "region": "California, US",
+                "sla": "90.0",
+            },
+        )
+        assert host.name == E2E_DEAL_CLI_HOST
+        assert (host.gpu_count or 0) >= E2E_HOST_GPU_COUNT, (
+            f"executor host {E2E_DEAL_CLI_HOST} reports {host.gpu_count} GPU(s); "
+            f"scenarios reserve up to {E2E_HOST_GPU_COUNT}"
+        )
+
+        sites = refresh_storefront_projections(storefront_admin_client)
+
+        deal_state._executor_host_registered = True
+        log.info(
+            "[00f1] Executor host %s registered (gpus=%s); projections confirmed for %s",
+            E2E_DEAL_CLI_HOST, host.gpu_count, sorted(sites),
         )
 
 
@@ -1189,6 +1272,48 @@ class TestStage10a_ExplicitInterruptionSetup:
         )
         assert interrupted.get("status") == "interrupted", interrupted
         assert interrupted.get("capacity_reservation_id") == deal_state.lease_id
+        deal_state._termination_requested = True
+
+
+class TestStage10a_LeaseExpirySetup:
+    def test_10a_expire_lease_and_arm_teardown_gate(
+        self, provisioning_client, provisioning_test_client,
+        deal_state: DealState,
+    ):
+        """Expire the deal's lease and hold provider teardown at its gate.
+
+        The watchdog is paused first so the expiry sits unobserved until 10b runs
+        one cycle: that keeps the trigger and the reaction as separate, asserted
+        steps rather than one race.
+        """
+        # `deal_lease` is now a dependency: this stage back-dates through it
+        # rather than posting an interrupt, so a missing lease view must skip here
+        # rather than raise an AttributeError two lines down.
+        require_state(deal_state, "lease_id", "real_escrow_uid",
+                      "reserved_resource_id", "deal_lease")
+        assert provisioning_client.pause_lease_watchdog().get("paused") is True
+        delete_mock_rules_if_present(provisioning_test_client, REMOVE_RULE_ID)
+        provisioning_test_client.add_mock_rule(
+            rule_id=REMOVE_RULE_ID,
+            match={"vm_action": "vm_remove"},
+            pause_before_result=True,
+        )
+        # Expire the lease rather than interrupting the deal. Expiry is what ends
+        # a lease in production; interruption is an operator escape hatch for a
+        # deal sold as interruptible, and driving the main teardown path with the
+        # escape hatch left the ordinary path uncovered — `DealLease.backdate`
+        # was written for exactly this and had never been called by anything.
+        #
+        # The watchdog is paused above, so nothing acts on the expiry until 10b
+        # runs one cycle deliberately.
+        lease = deal_state.deal_lease.backdate(_expired_lease_end())
+        assert lease.get("id") == deal_state.lease_id, (
+            f"back-dated the wrong reservation: {lease}"
+        )
+        assert lease.get("status") == "active", (
+            "the lease should still read active until a watchdog cycle observes "
+            f"the expiry — 10b is what advances it: {lease}"
+        )
         deal_state._termination_requested = True
 
 

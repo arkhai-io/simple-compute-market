@@ -101,6 +101,13 @@ from market_identity import (
     sign_request,
 )
 from src.settings import settings
+from tests.e2e.roles.scenarios.vms.host_registry import (
+    E2E_HOST_GPU_COUNT,
+    E2E_MULTI_REGISTRY_HOST,
+    E2E_MULTI_REGISTRY_POOL_ID,
+    provision_e2e_executor,
+    refresh_storefront_projections,
+)
 from tests.e2e.roles.scenarios.vms.conftest import _require_setting, _signer, _trust, capacity_source_for, signed_listing_read_headers
 
 log = logging.getLogger(__name__)
@@ -517,6 +524,62 @@ class TestStage02a_BobInventory:
         assert result.failed_count == 0, f"bob import failed: {result}"
         assert result.imported_count >= 1
         mr_state.bob_inventory_seeded = True
+
+
+class TestStage02a1_ExecutorHostRegistry:
+    def test_02a1_registers_executor_hosts_and_syncs_projection(
+        self, provisioning_client, storefront_admin_client,
+        site_capacity_admin_client, mr_state,
+    ):
+        """One executor and one capacity declaration per storefront's resource.
+
+        Both storefronts reach the same site authority, and each negotiates over
+        its own resource, so each needs its own executor with its own declaration.
+        The declarations differ in `region` — the field both listings advertise and
+        the inventory guard compares by equality — so a claim from one storefront
+        cannot be satisfied by the other's capacity, which is what makes stage 06c's
+        independence assertion meaningful rather than incidental.
+
+        Two declarations on one executor would sell the same machine twice and the
+        site authority refuses that correlation, so the two hosts are required
+        rather than tidier.
+        """
+        _require(mr_state, "bob_inventory_seeded")
+
+        bob_host = provision_e2e_executor(
+            provisioning_client,
+            site_capacity_admin_client,
+            host=E2E_MULTI_REGISTRY_HOST,
+            pool_id=E2E_MULTI_REGISTRY_POOL_ID,
+            resource_id="compute-mr-bob-001",
+            sellable_units=1,
+            attributes={
+                "gpu_model": "RTX 5080",
+                "region": "California, US",
+                "sla": "90.0",
+            },
+        )
+        provision_e2e_executor(
+            provisioning_client,
+            site_capacity_admin_client,
+            host=f"{E2E_MULTI_REGISTRY_HOST}-ny",
+            pool_id=E2E_MULTI_REGISTRY_POOL_ID,
+            resource_id="compute-mr-alice-001",
+            sellable_units=1,
+            attributes={
+                "gpu_model": "RTX 5080",
+                "region": "New York, US",
+                "sla": "90.0",
+            },
+        )
+        assert (bob_host.gpu_count or 0) >= E2E_HOST_GPU_COUNT
+
+        sites = refresh_storefront_projections(storefront_admin_client)
+        log.info(
+            "[02a1] executor hosts %s registered (gpus=%s); projections confirmed for %s",
+            [E2E_MULTI_REGISTRY_HOST, f"{E2E_MULTI_REGISTRY_HOST}-ny"],
+            bob_host.gpu_count, sorted(sites),
+        )
 
 
 class TestStage02b_AliceInventory:

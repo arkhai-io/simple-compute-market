@@ -42,58 +42,36 @@ confirms settlement becomes ready has not happened yet.
 - [ ] 3.4 `make test` stays green. No production Python changed, so nothing is
       expected here; run it rather than assume.
 
-## 3g. Restore the pause/advance lifecycle controls (production)
+## 3h. Restore the deleted scenario stages
 
-The August green run (commit `a1128a4c`) showed seven admin routes that no
-longer exist. Two were relocated and survive; the rest were deleted with no
-record in `openspec/` or `docs/`. The e2e stages that used them were deleted
-in the same window, which is why nothing failed.
+- [x] 3h.1 Eleven stages restored from commit `a1128a4c`, 514 lines: four
+      `pauses_the_storefront_loops`, five
+      `registers_executor_host_and_syncs_projection`,
+      `test_09bb_claims_cycle_registers_the_seller_claim`, and
+      `test_10a_expire_lease_and_arm_teardown_gate`. Seven arrived as whole
+      classes that had been removed; placement was computed by comparing class
+      order against the August file rather than guessed, because pytest runs
+      stages in file order and a capacity declaration after the listing it
+      backs is useless.
+- [x] 3h.2 Collection rises 127 → 140, with all 11 stages selected.
+- [x] 3h.3 **Signature check over the restored code**, extended this round to
+      flag calls to methods that do not exist at all — the earlier version
+      skipped them, which is why it reported clean while three were broken.
 
-- [x] 3g.1 **Corrected an earlier claim.** I reported that the settlement
-      worker had no sweep entry point, having found `jobs.py`'s per-settlement
-      `run_once` and stopped. `servicing.py`'s
-      `SettlementServicingWorker.run_once(limit) -> int` is the direct
-      equivalent of the old `ClaimsEngine.tick()`. The sweep/loop split
-      survived the settlement-neutrality redesign intact.
-- [x] 3g.2 **What was actually lost was the pause, and it had inverted.** The
-      old `ClaimsEngine.run(interval, paused=...)` took a predicate and held
-      the loop at its cycle boundary. Today `admin_pause` sets one
-      `_GLOBALLY_PAUSED` flag whose only consumers are the negotiation runtime
-      and the status read: **no loop consults it**. So pause used to stop
-      reconciliation and leave trading open, and now stops trading and leaves
-      reconciliation running — the opposite control, not a weaker one.
-- [x] 3g.3 Added `core_storefront/loop_lifecycle.py`: a pause gate plus
-      per-loop state, kept deliberately separate from the trading pause
-      because a scenario needs deterministic reconciliation *and* a deal to
-      agree. Gated `fulfillment_resume` and `site_projection_poller` directly;
-      gave `run_negotiation_watchdog` and `SettlementServicingWorker.run` an
-      injected `paused` predicate, restoring the shape the claims engine had,
-      and wired the storefront's gate into the worker at startup.
-      Verified: a gated loop reports `running`, is held at `paused` across a
-      pause, and resumes on release.
-- [x] 3g.4 Restored `POST /api/v1/admin/capacity/projections/refresh` and
-      added three `lifecycle/{loop}/run-cycle` advances (`claims`,
-      `fulfillment-resume`, `site-projections`), each over the operation its
-      timer already invokes, with admin route contracts and client methods on
-      both variants.
-- [x] 3g.5 `pause_storefront`, `advance_storefront`, `site_capacity_admin_client`
-      and the 307-line `host_registry.py` restored in the e2e fixtures.
-      Storefront suites: **1107 passed**, with the 4 failures that reproduce on
-      pristine code. E2e collection clean at 127.
+- [ ] 3h.4 **Six pre-existing mismatches surfaced by the stronger check.**
+      Verified present in the checkpoint before this restoration, so not
+      introduced here:
 
-- [ ] 3g.6 **Deferred, with reasons.**
-      - `capacity-events/run-cycle`: the per-event drain has no callable unit —
-        it is inline in the kit's `poll_events` loop. August had the same
-        problem and called a full reconcile instead, which its own docstring
-        admits runs a *superset* of the subscriber's work. Extracting a
-        one-cycle drain is new design, not restoration.
-      - Per-loop state is logged but not returned: `AdminPauseResponse.loops`
-        and `HealthResponse.loops` were both dropped, so reporting it typed
-        means changing the server model and the client's. Until then
-        `pause_storefront` can only assert the aggregate, and a scenario cannot
-        verify that the specific loop it depends on reached its gate.
-      - The ~11 deleted scenario stages are not yet restored; they consume the
-        controls above.
+      | Site | Problem |
+      |---|---|
+      | `test_compute_dynamic_listings.py` ×4 | reaches into `storefront_admin_client._post` and `._admin_headers` — private helpers, and `_admin_headers` belongs to the retired shared-key model |
+      | `test_full_deal.py`, `test_full_deal_buyer_cli.py` | call `admin_release_one_reservation`, which the client no longer exposes |
+
+      The private-helper reach-through is the more interesting one: a test that
+      calls a client's internals bypasses exactly the signed-request
+      construction the client exists to own, so it would keep working while the
+      public path was broken. Both need a public route or a recorded reason,
+      and the release call needs its replacement identified.
 
 ## 4. Closeout
 

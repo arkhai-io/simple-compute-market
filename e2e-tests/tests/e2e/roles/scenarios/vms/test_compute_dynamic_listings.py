@@ -17,7 +17,14 @@ from dataclasses import dataclass, field
 import pytest
 
 from src.settings import settings
-from tests.e2e.roles.scenarios.vms.conftest import capacity_source_for, require_state
+from tests.e2e.roles.scenarios.vms.host_registry import (
+    E2E_DYNAMIC_HOST,
+    E2E_FUNGIBLE_HOSTS,
+    E2E_HOST_GPU_COUNT,
+    provision_e2e_executor,
+    refresh_storefront_projections,
+)
+from tests.e2e.roles.scenarios.vms.conftest import capacity_source_for, pause_storefront, require_state
 
 log = logging.getLogger(__name__)
 
@@ -110,6 +117,24 @@ def _listing_statuses(storefront_admin_client, ids_by_gpu_count: dict[int, str])
 
 
 class TestComputeDynamicListings:
+    def test_00_pauses_the_storefront(
+        self, storefront_admin_client, dynamic_state: DynamicListingState
+    ):
+        """Hold the storefront's timer loops idle for the rest of this scenario.
+
+        Named as a stage rather than hidden in a fixture because every later
+        assertion depends on it: with the loops running, a listing status read
+        after a reserve races the capacity poller's next cycle. Advances are
+        explicit from here on.
+
+        Pausing this early is safe *here* and not in general: a paused storefront
+        also refuses new negotiations, so a scenario that has to agree a deal
+        cannot hold the pause across that step. This one reserves capacity through
+        the admin API and never negotiates, so it can pause at the start; the deal
+        scenarios pause after agreement instead.
+        """
+        dynamic_state.storefront_paused = pause_storefront(storefront_admin_client)
+
     def test_00_imports_4x_compute_resource(
         self, storefront_admin_client, dynamic_state: DynamicListingState
     ):
@@ -124,6 +149,55 @@ class TestComputeDynamicListings:
         assert result.imported_count >= 1
         dynamic_state.resources_seeded = True
         log.info("[dynamic] imported resource %s", DYNAMIC_RESOURCE_ID)
+
+    def test_00a_registers_executor_host_and_syncs_projection(
+        self, provisioning_client, storefront_admin_client,
+        site_capacity_admin_client, dynamic_state: DynamicListingState,
+    ):
+        """Register the executor host the seeded resources sit on.
+
+        The site authority projects capacity by iterating host rows, so with no
+        host registered the projection is empty and `test_02`'s reserve is
+        refused with "No available compute VM matched required attributes".
+
+        Registered through the admin API rather than a mounted inventory file:
+        `inventory_path` is docker-compose-specific while the canonical Helm
+        deployment supplies inventory as an inline secret, and a mount is shared
+        state no scenario declares. The projection pull that follows is asserted
+        rather than slept out.
+        """
+        require_state(dynamic_state, "resources_seeded")
+
+        # `reserve` matches CapacityBucket rows, which only a capacity declaration
+        # creates — the host-derived projection is a different store. The
+        # declaration's attributes mirror the seeded CSV so a claim built from the
+        # listing matches by equality.
+        host = provision_e2e_executor(
+            provisioning_client,
+            site_capacity_admin_client,
+            host=E2E_DYNAMIC_HOST,
+            resource_id=DYNAMIC_RESOURCE_ID,
+            sellable_units=4,
+            pool_id=DYNAMIC_POOL_ID,
+            listing_mode="specific_resource",
+            attributes={
+                "gpu_model": "H200",
+                "region": "California, US",
+                "sla": "99.0",
+            },
+        )
+        assert (host.gpu_count or 0) >= E2E_HOST_GPU_COUNT, (
+            f"executor host {E2E_DYNAMIC_HOST} reports {host.gpu_count} GPU(s); "
+            f"this scenario reserves up to {E2E_HOST_GPU_COUNT}"
+        )
+
+        sites = refresh_storefront_projections(storefront_admin_client)
+
+        dynamic_state.executor_host_registered = True
+        log.info(
+            "[dynamic] executor host %s registered (gpus=%s); projections confirmed for %s",
+            E2E_DYNAMIC_HOST, host.gpu_count, sorted(sites),
+        )
 
     def test_01_creates_slice_listings(
         self,
@@ -260,6 +334,62 @@ class TestFungibleComputeDynamicListings:
         )
         assert result.imported_count >= 2
         fungible_state.resources_seeded = True
+
+    def test_00a_registers_executor_hosts_and_syncs_projection(
+        self, provisioning_client, storefront_admin_client,
+        site_capacity_admin_client, fungible_state: FungiblePoolState,
+    ):
+        """Register one executor per pool member, each with its own declaration.
+
+        A fungible pool is several executors with one capacity declaration each. Two
+        declarations on one executor would advertise eight GPUs on a four-GPU
+        machine, and the site authority refuses that correlation outright — so the
+        member count is what makes the pool fungible, not the row count.
+
+        The grouped-capacity projection collapses the two identically-shaped
+        declarations into one entry carrying `resource_count`, which is the source
+        the storefront publishes a fungible listing from.
+
+        Registered through the admin APIs rather than a mounted inventory file:
+        `inventory_path` is docker-compose-specific while the canonical Helm
+        deployment supplies inventory as an inline secret, and a mount is shared
+        state no scenario declares. The projection pull that follows is asserted
+        rather than slept out.
+        """
+        require_state(fungible_state, "resources_seeded")
+
+        members = ("compute-e2e-fungible-a", "compute-e2e-fungible-b")
+        hosts = []
+        for host_name, member in zip(E2E_FUNGIBLE_HOSTS, members):
+            hosts.append(provision_e2e_executor(
+                provisioning_client,
+                site_capacity_admin_client,
+                host=host_name,
+                resource_id=member,
+                sellable_units=4,
+                pool_id=FUNGIBLE_POOL_ID,
+                listing_mode="fungible",
+                attributes={
+                    "gpu_model": "H200",
+                    "region": "California, US",
+                    "sla": "99.0",
+                },
+            ))
+
+        for host in hosts:
+            assert (host.gpu_count or 0) >= E2E_HOST_GPU_COUNT, (
+                f"executor host {host.name} reports {host.gpu_count} GPU(s); "
+                f"this scenario reserves up to {E2E_HOST_GPU_COUNT} from one member"
+            )
+
+        sites = refresh_storefront_projections(storefront_admin_client)
+
+        fungible_state.executor_host_registered = True
+        log.info(
+            "[fungible] executor hosts %s registered (gpus=%s each); "
+            "projections confirmed for %s",
+            list(E2E_FUNGIBLE_HOSTS), E2E_HOST_GPU_COUNT, sorted(sites),
+        )
 
     def test_01_creates_one_pool_listing_set(
         self,
