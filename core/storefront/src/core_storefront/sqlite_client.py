@@ -33,6 +33,7 @@ from market_core import DomainIdentity, MarketDomainContract
 from market_identity import Identity, ReplayIdentity, ReplayReservation
 
 from core_storefront.auth import ReplayClaim
+from core_storefront.models.system_models import STAGE_EVENT_PAGE_CAP
 from core_storefront.domain_registry import (
     PreparedStorefrontDomainArtifact,
     StorefrontDomainBinding,
@@ -4518,12 +4519,17 @@ class SQLiteClient:
     ) -> list[dict]:
         """Query stage_events rows with optional filters.
 
+        The rows only. Callers that need to know whether the log continued
+        past the page -- anything that filters the result and then draws a
+        conclusion about the whole log -- want
+        :meth:`list_stage_events_page` instead.
+
         Parameters
         ----------
         after_id:
             Return only rows with id > after_id (for SSE cursor-based tailing).
         limit:
-            Maximum rows to return (capped at 500).
+            Maximum rows to return (capped at ``STAGE_EVENT_PAGE_CAP``).
         stage:
             Filter by stage column (e.g. 'discovery', 'negotiation').
         listing_id:
@@ -4531,11 +4537,44 @@ class SQLiteClient:
         negotiation_id:
             Filter by negotiation_id column.
         """
+        rows, _ = await self.list_stage_events_page(
+            after_id=after_id,
+            limit=limit,
+            stage=stage,
+            listing_id=listing_id,
+            negotiation_id=negotiation_id,
+        )
+        return rows
+
+    async def list_stage_events_page(
+        self,
+        *,
+        after_id: int = 0,
+        limit: int = 100,
+        stage: str | None = None,
+        listing_id: str | None = None,
+        negotiation_id: str | None = None,
+    ) -> tuple[list[dict], bool]:
+        """One page of stage_events rows, and whether more matched beyond it.
+
+        Truncation is reported here rather than inferred by the caller because
+        this is the only layer that knows both numbers: the caller's requested
+        ``limit`` and the ``STAGE_EVENT_PAGE_CAP`` that may have lowered it.
+        ``len(rows) == limit`` is not the same question -- a log ending exactly
+        on the boundary and a log continuing past it produce identical pages.
+
+        Answered by selecting one row past the page and reporting its presence
+        as a boolean instead of returning it, so the flag is exact at every
+        page size including the cap itself. Over-fetching inside the clamp is
+        what makes that work; asking the store for ``limit + 1`` from outside
+        would be clamped straight back to the cap and read "not truncated" for
+        precisely the full log a reader most needs warning about.
+        """
         import json as _json
 
-        limit = min(limit, 500)
+        page_size = max(1, min(limit, STAGE_EVENT_PAGE_CAP))
 
-        def _query() -> list[dict]:
+        def _query() -> tuple[list[dict], bool]:
             conn = sqlite3.connect(self.db_path, timeout=2)
             try:
                 conditions = ["id > ?"]
@@ -4550,7 +4589,7 @@ class SQLiteClient:
                     conditions.append("negotiation_id = ?")
                     params.append(negotiation_id)
                 where = " AND ".join(conditions)
-                params.append(limit)
+                params.append(page_size + 1)
                 cur = conn.execute(
                     f"SELECT id, ts, stage, event, negotiation_id, listing_id, escrow_uid, data "
                     f"FROM stage_events WHERE {where} ORDER BY id ASC LIMIT ?",
@@ -4575,7 +4614,7 @@ class SQLiteClient:
                             "data": data,
                         }
                     )
-                return rows
+                return rows[:page_size], len(rows) > page_size
             finally:
                 conn.close()
 

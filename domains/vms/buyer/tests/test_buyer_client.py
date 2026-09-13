@@ -20,6 +20,7 @@ import pytest
 
 
 from market_policy.negotiation_middleware import load_negotiation_chain
+from market_policy.scalar_policies import parse_wire_amount
 
 from market_core.schemas import (
     EscrowProposal,
@@ -445,7 +446,15 @@ def test_round_0_request_preserves_literal_fields(mock_urlopen):
     )
 
     proposal = seen_body["proposal"]
-    assert proposal["fields"] == {"amount": 50}
+    # Read back through the production reader rather than restating the
+    # encoding. The amount travels as a decimal-digit string -- canonical JSON
+    # has no number form above 2^53-1 -- so an assertion spelling the literal
+    # `50` was asserting the wire convention, not this test's subject, and
+    # would have to be edited again the next time that convention moved. What
+    # this test is actually about is that round 0 carries the arithmetic the
+    # caller asked for, alongside untouched literal fields.
+    assert set(proposal["fields"]) == {"amount"}
+    assert parse_wire_amount(proposal["fields"]["amount"]) == 50
     assert proposal["literal_fields"] == {"token": token}
     assert seen_body["provision_terms"] == {
         "kind": "compute.v1",

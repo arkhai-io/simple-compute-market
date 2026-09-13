@@ -1440,14 +1440,20 @@ class TestStage09c_LeaseRegistered:
     ):
         """Provisioning owns the happy-path lease row after fulfillment.
 
-        Resource identity is confirmed here, not at stage 08b, because
-        ``resource_id``/``vm_host`` are intentionally opaque across the
-        ordinary buyer-facing reservation boundary
-        (openspec/specs/site-capacity/spec.md's "Capacity accounting is
-        private to the site authority" requirement) -- this admin-only
+        Placement is confirmed here, not at stage 08b, because ``vm_host`` is
+        intentionally opaque across the ordinary buyer-facing reservation
+        boundary (openspec/specs/site-capacity/spec.md's "Capacity accounting
+        is private to the site authority" requirement) -- this admin-only
         ``DealLease`` view (backed by ``get_capacity_reservation``) is a
-        legitimate, separate introspection channel from that guarantee,
-        not a way around it.
+        legitimate, separate introspection channel from that guarantee, not a
+        way around it.
+
+        Placement, not physical identity: the lease reports a null
+        ``resource_id``, which is the same strip that retired the field from
+        the reservation response reaching one surface further on. Whether a
+        lease *should* carry its backing resource is an open question for the
+        authority that owns physical identity; until it does, the executor is
+        what it reports and what an operator needs to find the VM.
         """
         require_state(
             deal_state,
@@ -1461,8 +1467,11 @@ class TestStage09c_LeaseRegistered:
         lease_view = DealLease(provisioning_client, deal_state.real_escrow_uid)
         lease = lease_view.refresh()
         assert lease.get("escrow_uid") == deal_state.real_escrow_uid
-        assert lease.get("resource_id") == E2E_RESOURCE_ID
-        assert lease.get("vm_host") == deal_state._evaluate_settle_vm_host
+        assert lease.get("vm_host") == deal_state._evaluate_settle_vm_host, (
+            f"lease bound to executor {lease.get('vm_host')!r}; stage 08a's "
+            f"evaluate_settle chose {deal_state._evaluate_settle_vm_host!r}. "
+            f"Lease: {lease}"
+        )
         assert lease.get("create_job_id"), (
             f"Expected a tracked Ansible create job on the admin lease view, "
             f"got: {lease}"
@@ -1472,7 +1481,11 @@ class TestStage09c_LeaseRegistered:
         )
 
         deal_state.deal_lease = lease_view
-        deal_state.reserved_resource_id = lease.get("resource_id")
+        # This scenario's own constant, not the lease's null field. The later
+        # stages that consume this address the *storefront's* resource row by
+        # id (portfolio reads, the resize's required attributes), so the value
+        # they need is the one 00f imported -- the lease never reported it.
+        deal_state.reserved_resource_id = E2E_RESOURCE_ID
         deal_state.lease_id = lease.get("id")
         deal_state.lease_status = lease.get("status")
         log.info(

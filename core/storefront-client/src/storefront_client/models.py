@@ -333,16 +333,26 @@ class StageEvent:
 
 @dataclass
 class StageEventListResponse:
-    """Response from GET /api/v1/system/events (non-streaming)."""
+    """Response from GET /api/v1/system/events (non-streaming).
+
+    `truncated` says whether more rows matched the query than `events`
+    carries. It is the server's answer, not a local comparison of `count`
+    against the requested limit -- the server applied the page cap and is the
+    only side that can tell a log ending on the boundary from one continuing
+    past it. A caller filtering `events` and concluding something about the
+    whole log should check it first.
+    """
 
     events: list[StageEvent] = field(default_factory=list)
     count: int = 0
+    truncated: bool = False
 
     @classmethod
     def from_dict(cls, d: dict) -> "StageEventListResponse":
         return cls(
             events=[StageEvent.from_dict(e) for e in d.get("events", [])],
             count=d.get("count", 0),
+            truncated=bool(d.get("truncated", False)),
         )
 
 

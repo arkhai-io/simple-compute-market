@@ -108,6 +108,8 @@ from tests.e2e.roles.scenarios.vms.conftest import (
     capacity_site_id,
     capacity_source_for,
     delete_mock_rules_if_present,
+    dry_run_storefront,
+    one_site,
     pause_storefront,
     require_state,
     signed_listing_read_headers,
@@ -1141,6 +1143,101 @@ class TestStage09a_ProvisioningCompletes:
         log.info("[09a] Fulfillment %s converged to active", deal_state.fulfillment_id)
 
 
+# ===========================================================================
+# Phase 09a2 — capacity-event reconciliation, stepped
+# ===========================================================================
+
+
+class TestStage09a2_CapacityEventCycle:
+    def test_09a2_capacity_events_dry_run_then_advance(
+        self, storefront_admin_client, deal_state: DealState
+    ):
+        """Step the capacity-event loop before 09b asserts its effect.
+
+        The deal holds this scenario's sellable unit, so its listing is no
+        longer satisfiable. Nothing on the deal path closes it: the settle
+        route reserves capacity and leaves the derived-listing reconciliation
+        to the capacity-delta subscriber, which this scenario holds paused
+        from its readiness stage. So 09b's `status=closed` is only true once a
+        cycle has run, and this stage is where it is asked for rather than
+        raced against a timer.
+
+        Dry run first, while the listing is still open: that names the cause
+        and keeps it separable from the effect 09b asserts. The twin stages
+        are `B4c` in the one-shot scenario and `09a2` in the hosted deal.
+        """
+        require_state(deal_state, "seller_listing_id", "provisioning_result_injected")
+
+        # Without this the stage could pass vacuously against a listing that
+        # something else had already closed, and 09b would then agree for a
+        # reason neither stage checked.
+        before = storefront_admin_client.get_listing(deal_state.seller_listing_id)
+        assert before.status == "open", (
+            f"listing is {before.status!r} before the capacity cycle was "
+            "advanced; something other than this stage reconciled it, and the "
+            "assertions here and in 09b no longer say what they claim"
+        )
+
+        preview = dry_run_storefront(storefront_admin_client, "capacity-events")
+        pending = one_site(preview)
+        assert pending["error"] is None, (
+            f"capacity-event dry run failed for site {pending['site']!r}: "
+            f"{pending['error']}"
+        )
+        assert not pending["would_position"], (
+            "the dry run would position at the feed head rather than apply "
+            "this deal's events, so the poller's cursor was lost"
+        )
+        assert pending["pending_count"] >= 1, (
+            "the deal reserved capacity, so its authority has events waiting; "
+            f"the feed reports none (cursor={pending['cursor']!r} "
+            f"head={pending['feed_head']!r})"
+        )
+
+        # Projections before deltas. With `use_site_projection_for_listings`
+        # on (the shipped default) the close path decides from the
+        # storefront's own projection cache, and only the site-projections
+        # loop refills it -- held here like every other loop. Applying the
+        # deltas against a pre-deal projection closes nothing however many of
+        # them there are.
+        projections = advance_storefront(storefront_admin_client, "site-projections")
+        assert projections.get("sites"), (
+            "the site-projections advance reported no site state, so the "
+            "projection the close path reads was not refreshed and the "
+            "capacity cycle below would decide from stale availability"
+        )
+
+        # One cycle per call, so a truncated page is stepped rather than
+        # drained behind the caller's back. Bounded: a feed that never reaches
+        # its head is a failure to report, not a loop to keep running.
+        applied_total = 0
+        for step in range(5):
+            cycle = one_site(
+                advance_storefront(storefront_admin_client, "capacity-events")
+            )
+            assert cycle["error"] is None, (
+                f"capacity-event cycle {step} failed for site "
+                f"{cycle['site']!r}: {cycle['error']}"
+            )
+            applied_total += int(cycle["applied_count"])
+            if not cycle["truncated"]:
+                break
+        else:
+            raise AssertionError(
+                "capacity-event feed still reports a truncated page after "
+                f"five cycles (applied {applied_total} events)"
+            )
+        assert applied_total >= pending["pending_count"], (
+            f"the advance applied {applied_total} event(s) where the dry run "
+            f"named {pending['pending_count']} pending"
+        )
+        deal_state._capacity_events_advanced = True
+        log.info(
+            "[09a2] Capacity events stepped: %s pending, %s applied",
+            pending["pending_count"], applied_total,
+        )
+
+
 class TestStage09b_BuyerObservesReadyAndCleanExit:
     def test_09b_settle_terminal_ready_credentials_and_clean_exit(
         self, storefront_admin_client, deal_state: DealState
@@ -1154,7 +1251,7 @@ class TestStage09b_BuyerObservesReadyAndCleanExit:
         credentials to its run-log, then `run_ended`, then exits.
 
         Seller-side cross-checks (HTTP, not in the run-log):
-          - listing → status open
+          - listing → status closed, the deal holding its sellable unit
           - per-negotiation primary escrow → status=ready,
             fulfillment_uid populated
         """
@@ -1165,6 +1262,10 @@ class TestStage09b_BuyerObservesReadyAndCleanExit:
             "seller_listing_id",
             "negotiation_id",
             "settle_run_handle",
+            # The listing closes when the capacity cycle is advanced, which
+            # 09a2 does; without that dependency this stage races a loop the
+            # scenario deliberately holds.
+            "_capacity_events_advanced",
         )
 
         run = deal_state.settle_run_handle

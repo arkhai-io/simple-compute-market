@@ -21,6 +21,7 @@ import pytest
 import pytest_asyncio
 from fastapi import FastAPI
 from market_identity import Ed25519Signer, Identity, TrustedIdentitySet
+from core_storefront.models.system_models import STAGE_EVENT_PAGE_CAP
 
 import market_storefront.container as _container
 from market_storefront.middleware.admin_identity import (
@@ -572,7 +573,11 @@ class TestFulfillmentEvents:
             )
 
         assert response.capacity_reservation_id
-        assert response.resource_id == "pool-h200-1"
+        # Pool membership, not physical identity: the capacity boundary
+        # strips `resource_id` from every reservation response, so the
+        # storefront reports the pool its own durable listing binding
+        # recorded at publication.
+        assert response.pool_id == "pool-h200-1"
         assert response.gpu_count == 2
         assert sorted(response.closed_listing_ids) == ["listing-3x", "listing-4x"]
         statuses = {
@@ -610,7 +615,10 @@ class TestFulfillmentEvents:
             )
 
         assert response.capacity_reservation_id
-        assert response.resource_id == "pool-h200-1"
+        # The site this listing is bound to, read back from the binding that
+        # pinned it -- the response carries no physical resource identity to
+        # assert on, by design of the capacity boundary.
+        assert response.pool_id == "pool-h200-1"
 
     async def test_admin_reserve_capacity_honors_a_live_refusal_over_a_cached_projection(
         self, client,
@@ -1149,6 +1157,79 @@ class TestStreamEvents:
         neg_events = await c.get_events(stage="negotiation")
         assert neg_events.count == 1
         assert neg_events.events[0].stage == "negotiation"
+
+    @staticmethod
+    def _seed_events(db, count: int, *, stage: str = "discovery") -> None:
+        import json as _json
+        import sqlite3
+
+        conn = sqlite3.connect(db.db_path)
+        try:
+            conn.executemany(
+                "INSERT INTO stage_events (ts, stage, event, data) VALUES (?, ?, ?, ?)",
+                [
+                    ("2025-01-01T00:00:00Z", stage, f"event_{i}", _json.dumps({"seq": i}))
+                    for i in range(count)
+                ],
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+    async def test_reports_not_truncated_when_the_log_fits(self, client):
+        c, db = client
+        self._seed_events(db, 3)
+
+        result = await c.get_events(limit=10)
+        assert result.count == 3
+        assert result.truncated is False
+
+    async def test_reports_truncated_when_rows_remain_beyond_the_page(self, client):
+        c, db = client
+        self._seed_events(db, 5)
+
+        result = await c.get_events(limit=2)
+        assert result.count == 2
+        assert result.truncated is True
+
+    async def test_not_truncated_when_the_log_ends_on_the_page_boundary(self, client):
+        """A full page that exhausted the log is not truncated.
+
+        The case a caller cannot work out for itself, and the reason the flag
+        is served rather than derived: `count == limit` holds here and in the
+        test above, so anything inferring truncation from that comparison
+        reports this exact-fit log as incomplete and sends a reader looking
+        for a second page that does not exist.
+        """
+        c, db = client
+        self._seed_events(db, 2)
+
+        result = await c.get_events(limit=2)
+        assert result.count == 2
+        assert result.truncated is False
+
+    async def test_truncation_is_reported_at_the_page_cap(self, client):
+        """The cap is the boundary the e2e claims stage actually reads at.
+
+        `STAGE_EVENT_PAGE_CAP` is both the route's accepted maximum and the
+        store's internal clamp, so a page requested at the cap is the one case
+        where over-fetching from outside the store would be clamped back to
+        the cap and read as complete. Asserted at the cap, not just at a small
+        limit, because that is where a plausible implementation goes quiet.
+        """
+        c, db = client
+        self._seed_events(db, STAGE_EVENT_PAGE_CAP + 1)
+
+        result = await c.get_events(limit=STAGE_EVENT_PAGE_CAP)
+        assert result.count == STAGE_EVENT_PAGE_CAP
+        assert result.truncated is True
+
+        # And the tail beyond it is reachable and complete.
+        tail = await c.get_events(
+            since_id=result.events[-1].id, limit=STAGE_EVENT_PAGE_CAP
+        )
+        assert tail.count == 1
+        assert tail.truncated is False
 
 
 

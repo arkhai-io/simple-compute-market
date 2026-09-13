@@ -46,6 +46,7 @@ from market_policy.negotiation_middleware import (
     run_negotiation_chain,
 )
 from market_policy.scalar_policies import (
+    format_wire_amount,
     make_escrow_kind_dispatch_middleware,
     parse_wire_amount,
 )
@@ -880,6 +881,42 @@ def negotiate_with_seller(
             return None
         return parse_wire_amount((p.get("fields") or {}).get("amount"))
 
+    def _wire_proposal(p: dict[str, Any]) -> dict[str, Any]:
+        """Spell a proposal's scalar amount in its canonical wire form.
+
+        The write-side counterpart of `_amount`, applied where a proposal
+        becomes a signed request body. `parse_wire_amount` already accepts
+        either an `int` or a decimal-digit string, so this boundary read both
+        forms while the boundary write emitted whichever one the configured
+        policy happened to produce -- and only two of the shipped decision
+        producers call `format_wire_amount` themselves. A policy that returns
+        a plain `int` is fine for a small amount and fails at *signing* time
+        for a realistic 18-decimal one, because canonical JSON has no number
+        form above 2^53-1. That puts the error in the canonicalizer, several
+        frames from the policy that caused it.
+
+        One normalization here instead of the same obligation restated in
+        every policy: the chain is a configurable surface, so requiring each
+        policy author to know the wire spelling of an integer is a contract
+        that leaks. This narrows the leak to encoding only -- whether an
+        amount is present at all, and what it is, stay entirely the policy's.
+
+        Lossless, and loud rather than lenient: valid input is re-spelled and
+        `format_wire_amount`/`parse_wire_amount` refuse a float, a boolean or
+        a negative, so a policy defect surfaces here by name instead of being
+        coerced into a plausible-looking number.
+        """
+        fields = p.get("fields")
+        if not isinstance(fields, dict) or fields.get("amount") is None:
+            return p
+        amount = parse_wire_amount(fields.get("amount"))
+        if amount is None:
+            return p
+        return {
+            **p,
+            "fields": {**fields, "amount": format_wire_amount(amount)},
+        }
+
     neg_id: str | None
     if resume is not None:
         # Resume mode: skip /api/v1/negotiate/new and the first counter exchange.
@@ -900,7 +937,11 @@ def negotiate_with_seller(
         # Recover the buyer's first-pinned proposal from the transcript.
         for entry in transcript:
             if entry.sender == "us" and entry.proposal is not None:
-                pinned_proposal = entry.proposal
+                # Normalized on the way out of the run-log for the same reason
+                # as the fresh pin: a prior run may have recorded an integer
+                # amount, and the guard compares this against a seller echo
+                # that arrives as a decimal-digit string.
+                pinned_proposal = _wire_proposal(entry.proposal)
                 break
         round_idx = max(1, resume.rounds_completed)
     else:
@@ -986,7 +1027,11 @@ def negotiate_with_seller(
                 f"opening — only counter (with a proposal), exit, or "
                 f"reject make sense before the seller has said anything."
             )
-        pinned_proposal = opening.proposal
+        # Pinned in wire form, not merely sent in it. This value is also the
+        # buyer's commitment for `buyer_escrow_shape_guard` and the chain
+        # context below, and a commitment spelled differently from the request
+        # that carried it would read as the seller having mutated a field.
+        pinned_proposal = _wire_proposal(opening.proposal)
 
         new_body = {
             "listing_id": listing_id,
@@ -1171,7 +1216,7 @@ def negotiate_with_seller(
                 raise RuntimeError(
                     f"chain returned {next_move.action!r} without a proposal"
                 )
-            body["proposal"] = next_move.proposal
+            body["proposal"] = _wire_proposal(next_move.proposal)
         elif next_move.action in ("exit", "reject"):
             body["reason"] = next_move.reason or "buyer_exit"
 

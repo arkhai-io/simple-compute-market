@@ -129,6 +129,16 @@ class DealState(DomainDealState):
     # row in embedded-capacity mode, a site-ledger reservation in remote
     # mode. Phases 10-11 drive the expiry lifecycle through it.
     deal_lease: Optional[Any] = None
+    # Set by whichever stage steps the capacity-event loop (`B4c`, `09a2`),
+    # and required by the stage that asserts a derived listing closed.
+    #
+    # Declared rather than attached ad hoc by those stages. `require_state`
+    # reads through `getattr(..., None)`, so an undeclared sentinel skips its
+    # dependents identically whether the producing stage failed or the name
+    # was simply misspelled on one of the two sides -- a scenario that silently
+    # skips forever looks like a passing run. A declared default of False makes
+    # the absent case a stated precondition instead of a typo's side effect.
+    _capacity_events_advanced: bool = False
 
 
 

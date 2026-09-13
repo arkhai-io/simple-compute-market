@@ -51,9 +51,30 @@ class AdminPauseResponse(BaseModel):
     message: str = ""
 
 
+#: Largest page `GET /api/v1/system/events` will return, and the bound its
+#: `limit` query parameter is validated against.
+#:
+#: One constant for the route's validation and the store's clamp because the
+#: two disagreeing is unobservable: a caller asking for exactly the cap gets a
+#: full page either way, and cannot tell it apart from a page with more behind
+#: it. `StageEventResponse.truncated` is what makes the difference reportable,
+#: and it is only meaningful if the cap has a single definition.
+STAGE_EVENT_PAGE_CAP = 500
+
+
 class StageEventResponse(BaseModel):
     events: list[dict[str, Any]]
     count: int
+    #: Whether more rows matched the query than this page carries.
+    #:
+    #: The server's to report, not the client's to infer. `count == limit` is
+    #: ambiguous -- it is equally a log that ended exactly at the page boundary
+    #: and a log that continues past it -- and the requested limit may have been
+    #: lowered by `STAGE_EVENT_PAGE_CAP` before the page was cut, so the caller
+    #: does not necessarily know which boundary it hit. A reader that filters
+    #: this page is only entitled to conclusions about the whole log when this
+    #: is false.
+    truncated: bool = False
 
 
 

@@ -1881,6 +1881,28 @@ failures.
       which is what the credits service is: `X-Admin-Key` gating, `401` to a
       marketplace-signed request, and the `401` itself unsigned.
 
+- [x] 3ar.7 **Where the shared contract table goes, decided against the
+      packaging rather than by preference.** `kit/site-client` already owns
+      `CAPACITY_ROUTE_CONTRACTS` -- method, path, operation, resource for
+      every capacity route -- and it depends on `kit/identity` alone.
+      `kit/site` depends on `kit/resource-pools`, FastAPI, pydantic and
+      SQLAlchemy, and *not* on `kit/identity` or on the client.
+
+      So the server half cannot simply read the client's table without
+      `kit/site` taking a dependency on the client package, which is the
+      wrong direction for a router to depend on its own caller. The
+      provisioning service solves the same problem by having both ends read
+      one table from `compute_provisioning.client`, which is a shared
+      contract module rather than a client.
+
+      Decision: the roles table and the middleware live in `kit/site`,
+      keyed by the operation names `kit/site-client` already signs with,
+      with a parity test asserting the two tables name the same operations
+      for the same method and path. `kit/site` gains `arkhai-kit-identity`,
+      which it needs regardless to verify a signature and sign a response.
+      A parity test is the cheaper of the two costs here: the alternative is
+      a package inversion that outlives this change.
+
 - [ ] 3ar.2 Planned shape. `kit/site` gains the server side of its own wire
       contract: a route-contract table (method and path to operation,
       resource, allowed roles) beside the router that defines those paths,
@@ -1996,6 +2018,109 @@ failures.
       have passed against the shipped wiring, which is precisely how this
       survived. The third keeps the refusal, so a service genuinely composed
       without a watchdog still says which one is missing.
+
+## 3au. Three of the four remaining, and a wire convention with one writer short
+
+- [x] 3au.1 **`09bb` read `events.truncated`, which no layer reported.** The
+      stage reads the whole claims log and then filters it, so whether it saw
+      the whole log is load-bearing; nothing on either side carried the
+      answer. Not derived from `count >= limit` either, because that is
+      ambiguous by construction — a log ending exactly on the page boundary
+      and a log continuing past it produce identical pages, and the requested
+      limit may have been lowered by the cap before the page was cut.
+
+      Reported by the store, which is the only layer holding both numbers: a
+      new `list_stage_events_page` selects one row past the page and returns
+      its presence as a boolean. `list_stage_events` delegates to it, so the
+      SSE branch and the single SQL body stay shared. `STAGE_EVENT_PAGE_CAP`
+      now backs the route's `le=` bound and the store's clamp together.
+
+      The clamp is why the obvious version does not work: `min(limit, 500)`
+      lives *inside* the store, so a controller asking for `limit + 1` is
+      clamped straight back to the cap and reads "not truncated" for exactly
+      the oversized log a reader most needs warning about — and the cap is the
+      page size the e2e stage requests. Over-fetching therefore happens inside
+      the clamp, and one of the four new tests asserts at the cap rather than
+      only at a small limit, because that is where a plausible implementation
+      goes quiet. Both negative controls were run: the tests fail against the
+      absent field, and the boundary test fails against a `count >= limit`
+      implementation.
+
+      Two writers, not one — the vms *and* API-credits system controllers.
+      Both clients share one reader model, so the async and sync halves were
+      covered by a single edit.
+
+- [x] 3au.2 **`09c`'s lease assertion wanted physical identity, like `B5`.**
+      Same strip, one surface further on. The `vm_host` assertion beside it
+      was already correct and already passing, so only the `resource_id` line
+      went. Its docstring had justified asserting resource identity through
+      that channel, and was rewritten to claim placement instead.
+
+      The consequential half was quieter: `deal_state.reserved_resource_id`
+      was being fed from `lease.get("resource_id")`, so it had been silently
+      `None`, and four later stages consume it to address the *storefront's*
+      resource row by id. It now comes from the scenario's own constant, as
+      `B5` already does with `BUY_RESOURCE_ID`.
+
+- [x] 3au.3 **The buyer-CLI deal scenario had no stepped capacity stage.**
+      Added `09a2`, mirroring the hosted deal's rather than `B4c`'s heavier
+      form so the twin scenarios read alike; `09b` now declares
+      `_capacity_events_advanced` and its docstring, which still promised
+      `listing → status open` against an assertion reading `closed`, was
+      corrected. One assertion the twin lacks: the listing is checked `open`
+      *before* the cycle, without which the stage passes vacuously against an
+      already-closed listing and `09b` then agrees for a reason neither stage
+      checked.
+
+- [x] 3au.4 **`_capacity_events_advanced` was never a declared field.** All
+      three scenarios attached it to `DealState` ad hoc. `require_state` reads
+      through `getattr(..., None)`, so it skips dependents safely — and
+      identically whether the producing stage failed or the name was simply
+      misspelled on one of the two sides. A scenario that silently skips
+      forever looks like a passing run. Declared with a `False` default so the
+      absent case is a stated precondition rather than a typo's side effect.
+
+- [x] 3au.5 **`make test`, again, saw what the e2e could not: the uint256
+      convention had one writer short.** Two failures, and they contradicted
+      each other, which is what made them worth reading rather than
+      correcting. `test_round_0_request_preserves_literal_fields` restated the
+      *old* encoding — round 0 runs the real scalar policy, which formats, so
+      production was right and the assertion was stale. It now reads back
+      through `parse_wire_amount`, leaving the test about the arithmetic it is
+      actually for.
+
+      `test_resume_buyer_counters_then_seller_accepts` was the reverse: a real
+      gap. The negotiation client never normalized on the *write* side —
+      `body["proposal"]` went through verbatim from the chain — while the read
+      side at the same boundary already accepted either form. So the boundary
+      read both spellings and emitted whichever the configured policy happened
+      to produce, and of six production decision producers only two call
+      `format_wire_amount`. A policy returning a plain `int` is fine for a
+      small amount and fails at *signing* for a realistic 18-decimal one,
+      several frames from the cause.
+
+      Added `_wire_proposal`, the write-side counterpart of `_amount`, at
+      three sites rather than one: the continue body and both pins. The pins
+      matter because `pinned_proposal` is also the buyer's commitment for
+      `buyer_escrow_shape_guard` and the chain context, and a commitment
+      spelled differently from the request that carried it reads as the seller
+      having mutated a field.
+
+- [ ] 3au.6 Left as a judgement to confirm rather than a change to defend:
+      round 0 carries an emphatic comment that the loop must not interpret the
+      policy's fields. Read as applying to *placement*, not encoding — the
+      loop already reads `fields["amount"]` through `parse_wire_amount` to
+      compute `agreed_amount`, so it already knows that key means money, and
+      the normalization narrows the leak to spelling while leaving whether an
+      amount exists, and what it is, entirely the policy's. The cheaper
+      alternative was to change the fake to emit a string, which would have
+      left the test proving only that the client forwards what it is given.
+
+- [x] 3au.7 **`hosted_settlement_client` is installable after all**, as
+      `arkhai-hosted-settlement-client==0.4.2` — not the module name. This
+      retires the "cannot run in the agent container" note against
+      `test_settlement_composition.py` and `test_selection_dispatch.py`, and
+      the stub substitution recorded there as unverified can now be executed.
 
 ## 4. Closeout
 
