@@ -92,6 +92,21 @@ class BareMetalFulfillmentTransport:
             resolve_response_principals=self.resolve_seller_principals,
         )
 
+    def settlement_status(self, escrow_uid: str) -> dict[str, Any]:
+        """Read the seller's authenticated lifecycle for one funded escrow."""
+        return signed_storefront_json(
+            self.seller_url.rstrip("/")
+            + f"/api/v1/settle/{escrow_uid}/status",
+            None,
+            signer=self.signer,
+            principal=self.principal,
+            method="GET",
+            operation="settle_status",
+            resource=escrow_uid,
+            timeout=self.timeout,
+            resolve_response_principals=self.resolve_seller_principals,
+        )
+
     def status(self, negotiation_id: str) -> dict[str, Any]:
         return self._request(
             negotiation_id,

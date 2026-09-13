@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 import json
+from types import SimpleNamespace
 
 import pytest
 import typer
@@ -135,6 +136,96 @@ def test_physical_transport_uses_signed_buyer_routes(monkeypatch) -> None:
         ),
     ]
     assert all(body is None for _url, body, _kwargs in calls)
+
+
+def test_crypto_status_projects_authenticated_seller_collection(
+    monkeypatch, capsys
+) -> None:
+    from arkhai_bare_metal_buyer import cli
+
+    class Hosted:
+        def status(self, **_kwargs):
+            raise AssertionError("crypto status must not call the hosted rail")
+
+    class Fulfillment:
+        def status(self, negotiation_id):
+            assert negotiation_id == "neg-1"
+            return {"state": "active"}
+
+        def settlement_status(self, escrow_uid):
+            assert escrow_uid == "escrow-1"
+            return {
+                "escrow_uid": escrow_uid,
+                "obligation_ref": "obligation-1",
+                "status": "collected",
+            }
+
+    monkeypatch.setattr(
+        cli,
+        "_recovered_transports",
+        lambda run_id, config: (
+            SimpleNamespace(
+                negotiation_id="neg-1",
+                settlement_ref=None,
+                escrow_uid="escrow-1",
+            ),
+            object(),
+            Hosted(),
+            Fulfillment(),
+        ),
+    )
+
+    cli.hosted_status(run_id="run-1", config=None)
+
+    assert json.loads(capsys.readouterr().out) == {
+        "fulfillment": {"state": "active"},
+        "settlement": {
+            "escrow_uid": "escrow-1",
+            "obligation_ref": "obligation-1",
+            "status": "collected",
+        },
+    }
+
+
+def test_hosted_status_keeps_the_existing_settlement_transport(
+    monkeypatch, capsys
+) -> None:
+    from arkhai_bare_metal_buyer import cli
+
+    class Hosted:
+        def status(self, *, settlement_ref):
+            assert settlement_ref == "hosted-1"
+            return {"status": "ready"}
+
+    class Fulfillment:
+        def status(self, negotiation_id):
+            assert negotiation_id == "neg-1"
+            return {"state": "active"}
+
+        def settlement_status(self, _escrow_uid):
+            raise AssertionError("hosted status must not call the Alkahest route")
+
+    monkeypatch.setattr(
+        cli,
+        "_recovered_transports",
+        lambda run_id, config: (
+            SimpleNamespace(
+                negotiation_id="neg-1",
+                settlement_ref="hosted-1",
+                escrow_uid="escrow-1",
+            ),
+            object(),
+            Hosted(),
+            Fulfillment(),
+        ),
+    )
+
+    cli.hosted_status(run_id="run-1", config=None)
+
+    assert json.loads(capsys.readouterr().out) == {
+        "fulfillment": {"state": "active"},
+        "settlement": {"status": "ready"},
+    }
 
 
 def test_json_output_serializes_nested_wire_models(capsys) -> None:

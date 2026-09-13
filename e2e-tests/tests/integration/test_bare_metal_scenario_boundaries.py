@@ -195,6 +195,9 @@ class _World:
         self.access_proof = UNPRIVILEGED_PROOF
         self.state = "pending"
         self.next_state = {"provisioning": "active", "releasing": "released"}
+        self.settlement_state = "pending"
+        self.next_settlement_state = {"pending": "collected"}
+        self.settlement_states: list[str] = []
 
     # --- buyer CLI seam -------------------------------------------------
     def run(self, args, **kwargs):
@@ -236,8 +239,29 @@ class _World:
         if args[:2] == ["bare-metal", "status"]:
             # One intermediate observation per transition, so a scenario that
             # read the first answer as terminal would fail here.
-            projection = _Run({"fulfillment": _fulfillment(self.state)})
+            physical_state = self.state
+            settlement_state = (
+                self.settlement_states.pop(0)
+                if self.settlement_states
+                else self.settlement_state
+            )
+            projection = _Run(
+                {
+                    "fulfillment": _fulfillment(self.state),
+                    "settlement": {
+                        "escrow_uid": ESCROW_UID,
+                        "obligation_ref": "obligation-1",
+                        "status": settlement_state,
+                        "fulfillment_available": True,
+                    },
+                }
+            )
+            self.events.append(f"settlement:{settlement_state}")
             self.state = self.next_state.get(self.state, self.state)
+            if physical_state == "active":
+                self.settlement_state = self.next_settlement_state.get(
+                    settlement_state, settlement_state
+                )
             return projection
         if args[:2] == ["bare-metal", "list"]:
             listings = []
@@ -288,6 +312,7 @@ def world(monkeypatch, tmp_path):
         "ACTIVE_FULFILLMENT_STATE": "active",
         "POLL_INTERVAL_SECONDS": 0,
         "PROVISIONING_TIMEOUT_SECONDS": 5,
+        "COLLECTION_TIMEOUT_SECONDS": 0.01,
         "TEARDOWN_TIMEOUT_SECONDS": 5,
     }
     monkeypatch.setattr(scenario, "_setting",
@@ -399,6 +424,131 @@ def test_the_settlement_command_runs_before_delivery_is_claimed(world, tmp_path)
 
     assert funded, world.events
     assert funded[0] < delivered[0], "settlement must precede the delivery view"
+
+
+def test_native_collection_is_confirmed_before_teardown(world, tmp_path):
+    _drive(world, tmp_path)
+
+    collected = world.events.index("settlement:collected")
+    teardown = next(
+        index
+        for index, event in enumerate(world.events)
+        if event.startswith("bare-metal teardown")
+    )
+
+    assert collected < teardown, world.events
+
+
+def test_pending_native_collection_blocks_normal_teardown(world, tmp_path):
+    world.settlement_state = "collection_unknown"
+    world.next_settlement_state = {}
+
+    with pytest.raises(AssertionError, match="seller collection did not reach"):
+        _drive(world, tmp_path)
+
+    # Once delivery is active, even failure cleanup must preserve the evidence
+    # window rather than recreate the former teardown-before-collection race.
+    assert "settlement:collection_unknown" in world.events
+    assert "settlement:collected" not in world.events
+    assert not any(event.startswith("bare-metal teardown") for event in world.events)
+
+
+def test_physical_activation_with_settlement_status_failure_remains_fenced(
+    world, tmp_path
+):
+    original = world.run
+    status_calls = 0
+
+    def fail_after_physical_activation(args, **kwargs):
+        nonlocal status_calls
+        if list(args)[:2] == ["bare-metal", "status"]:
+            status_calls += 1
+            world.events.append("bare-metal status transport-error")
+            world.state = "active"
+            raise RuntimeError("controlled settlement status transport error")
+        return original(args, **kwargs)
+
+    world.run = fail_after_physical_activation
+
+    with pytest.raises(RuntimeError, match="settlement status transport error"):
+        _drive(world, tmp_path)
+
+    assert status_calls == 1
+    assert world.leased is True
+    assert not any(event.startswith("bare-metal teardown") for event in world.events)
+
+
+def test_uncertain_settlement_command_never_authorizes_teardown(world, tmp_path):
+    original = world.run
+
+    def lose_settlement_acknowledgement(args, **kwargs):
+        if list(args)[:2] == ["bare-metal", "fund"]:
+            world.events.append("bare-metal fund transport-error")
+            world.leased = True
+            world.state = "provisioning"
+            world.run_log.funded()
+            raise RuntimeError("controlled settlement acknowledgement uncertainty")
+        return original(args, **kwargs)
+
+    world.run = lose_settlement_acknowledgement
+
+    with pytest.raises(RuntimeError, match="settlement acknowledgement uncertainty"):
+        _drive(world, tmp_path)
+
+    assert world.leased is True
+    assert not any(event.startswith("bare-metal teardown") for event in world.events)
+
+
+def test_in_progress_collection_is_polled_until_collected_before_teardown(
+    world, tmp_path
+):
+    world.settlement_state = "collection_unknown"
+    world.next_settlement_state = {}
+    world.settlement_states = [
+        "collection_unknown",
+        "collection_unknown",
+        "collection_unknown",
+        "collected",
+    ]
+
+    _drive(world, tmp_path)
+
+    unknown = [
+        index
+        for index, event in enumerate(world.events)
+        if event == "settlement:collection_unknown"
+    ]
+    collected = world.events.index("settlement:collected")
+    teardown = next(
+        index
+        for index, event in enumerate(world.events)
+        if event.startswith("bare-metal teardown")
+    )
+    assert len(unknown) >= 2
+    assert max(unknown) < collected < teardown
+    assert sum(event.startswith("bare-metal fund") for event in world.events) == 1
+
+
+def test_collection_timeout_does_not_extend_or_teardown_an_expired_lease(
+    world, tmp_path
+):
+    world.settlement_state = "collection_unknown"
+    world.next_settlement_state = {}
+    original = world.run
+
+    def expire_after_delivery_is_observed(args, **kwargs):
+        result = original(args, **kwargs)
+        if list(args)[:2] == ["bare-metal", "result"]:
+            world.next_state["active"] = "released"
+        return result
+
+    world.run = expire_after_delivery_is_observed
+
+    with pytest.raises(AssertionError, match="seller collection did not reach"):
+        _drive(world, tmp_path)
+
+    assert world.state == "released"
+    assert not any(event.startswith("bare-metal teardown") for event in world.events)
 
 
 def test_a_lane_whose_settlement_command_does_nothing_fails(world, tmp_path):

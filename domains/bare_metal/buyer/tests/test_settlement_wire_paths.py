@@ -101,6 +101,19 @@ def test_begin_addresses_the_fulfillment_route(transport) -> None:
     assert body["escrow_uid"] == "escrow-1"
 
 
+def test_settlement_status_addresses_the_authenticated_escrow_route(transport) -> None:
+    client, calls = transport
+
+    assert client.settlement_status("escrow-1") == {"ok": True}
+
+    url, body, kwargs = calls[0]
+    assert url == "https://seller.example/api/v1/settle/escrow-1/status"
+    assert body is None
+    assert kwargs["method"] == "GET"
+    assert kwargs["operation"] == "settle_status"
+    assert kwargs["resource"] == "escrow-1"
+
+
 def test_the_request_bodies_match_the_server_request_models() -> None:
     """A missing required field would be a 422 only at a live run."""
     from arkhai_bare_metal_buyer import fulfillment as buyer_fulfillment
@@ -136,6 +149,7 @@ def test_the_request_bodies_match_the_server_request_models() -> None:
     ("path", "operation"),
     [
         ('"/api/v1/settle/{escrow_uid}"', "settle_escrow"),
+        ('"/api/v1/settle/{escrow_uid}/status"', "settle_status"),
         ('"/api/v1/fulfillments/begin"', "bare_metal_fulfillment_begin"),
     ],
 )

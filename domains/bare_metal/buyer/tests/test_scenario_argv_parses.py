@@ -63,6 +63,10 @@ def entered(monkeypatch):
             seen.append("status")
             return {"state": "released"}
 
+        def settlement_status(self, escrow_uid):
+            seen.append("settlement_status")
+            return {"status": "collected", "escrow_uid": escrow_uid}
+
         def settle(self, **kwargs):
             seen.append("settle")
             return {"obligation_ref": "o"}

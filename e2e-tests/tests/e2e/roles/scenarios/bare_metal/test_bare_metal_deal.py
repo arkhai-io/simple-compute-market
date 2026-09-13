@@ -575,6 +575,49 @@ def _await_fulfillment_state(
         time.sleep(float(_setting("POLL_INTERVAL_SECONDS", 2)))
 
 
+def _settlement_state(view: dict[str, Any]) -> str:
+    """The authenticated financial state beside the physical projection."""
+    settlement = view.get("settlement")
+    if not isinstance(settlement, dict) or "status" not in settlement:
+        raise AssertionError(
+            "bare-metal status did not return its declared settlement projection"
+        )
+    return str(settlement.get("status") or "")
+
+
+def _await_seller_collection(
+    cli: BuyerCli,
+    run_id: str,
+    *,
+    timeout_seconds: float,
+) -> dict[str, Any]:
+    """Wait for the signed seller projection to confirm native collection."""
+    deadline = time.monotonic() + timeout_seconds
+    terminal_failures = frozenset(
+        {"expired", "failed", "manual_required", "reclaimed"}
+    )
+    observed = ""
+    while True:
+        view = _json_result(
+            cli.run(["bare-metal", "status", "--run-id", run_id]),
+            command="market bare-metal status",
+        )
+        observed = _settlement_state(view)
+        if observed == "collected":
+            return view
+        if observed in terminal_failures:
+            raise AssertionError(
+                "seller collection ended in state "
+                f"{observed!r} before teardown was authorized"
+            )
+        if time.monotonic() >= deadline:
+            raise AssertionError(
+                "seller collection did not reach 'collected' before timeout "
+                f"(last state {observed!r})"
+            )
+        time.sleep(float(_setting("POLL_INTERVAL_SECONDS", 2)))
+
+
 def _request_teardown(cli: BuyerCli, run_id: str) -> dict[str, Any] | None:
     """Best-effort teardown used when the scenario is failing.
 
@@ -643,6 +686,7 @@ def test_bare_metal_complete_deal(
         timeout=float(_setting("DEAL_TIMEOUT_SECONDS", 900)),
     )
     teardown_needed = True
+    collection_fences_teardown = False
     try:
         assert_market_run_succeeded(buy, command="market bare-metal buy")
         started, _accepted, _ended = ordered_event_groups(
@@ -661,6 +705,10 @@ def test_bare_metal_complete_deal(
         # until the rail's own settlement command runs, so a lane that went
         # straight to `result` here would be asserting delivery of a lease
         # nobody paid for.
+        # A crypto settlement may activate the host before its acknowledgement
+        # reaches this process. Fence cleanup before invoking it: after this
+        # boundary, only confirmed collection makes physical teardown safe.
+        collection_fences_teardown = _is_crypto_settlement(settle_command)
         _json_result(
             bare_metal_buyer_cli.run(
                 [*settle_command, "--run-id", buy.run_id],
@@ -691,7 +739,6 @@ def test_bare_metal_complete_deal(
             failure_states=_TERMINAL_FAILURE_STATES,
             timeout_seconds=float(_setting("PROVISIONING_TIMEOUT_SECONDS", 900)),
         )
-
         result = _json_result(
             bare_metal_buyer_cli.run(
                 ["bare-metal", "result", "--run-id", buy.run_id]
@@ -700,6 +747,19 @@ def test_bare_metal_complete_deal(
         )
         state.complete(DealStage.DELIVERY, delivery=result)
         leased = _leased_host(result)
+
+        # Once an on-chain lease is active, physical teardown must remain
+        # fenced until the seller's shared servicing runtime has bound
+        # fulfillment evidence and verified the native collection receipt.
+        if collection_fences_teardown:
+            _await_seller_collection(
+                bare_metal_buyer_cli,
+                buy.run_id,
+                timeout_seconds=float(
+                    _setting("COLLECTION_TIMEOUT_SECONDS", 900)
+                ),
+            )
+            collection_fences_teardown = False
 
         # The listing published before the purchase stays open until an
         # operator publication round reconciles it against current capacity, so
@@ -799,9 +859,11 @@ def test_bare_metal_complete_deal(
             occupied_before_teardown=occupied_before_teardown,
         )
     finally:
-        # A failure between purchase and teardown would otherwise leave a real
-        # host leased. Requested without raising so the original failure stands.
-        if teardown_needed:
+        # Before an on-chain lease is active, or after collection is confirmed,
+        # best-effort cleanup avoids leaving a real host leased. An active lease
+        # whose collection is still pending retains its evidence window; an
+        # operator must reconcile that outcome instead of destroying the proof.
+        if teardown_needed and not collection_fences_teardown:
             _request_teardown(bare_metal_buyer_cli, buy.run_id)
 
 

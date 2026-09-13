@@ -720,12 +720,15 @@ def hosted_status(
     projection: dict[str, Any] = {
         "fulfillment": fulfillment.status(deal.negotiation_id)
     }
-    # A settlement reference exists only on the hosted rail; an Alkahest run
-    # settles on chain and has none. Refusing here would leave a crypto lease
-    # with no way to observe its own physical convergence.
+    # Hosted and Alkahest settlements have different stable identifiers, but
+    # both status reads reuse the accepted storefront and signer.
     if deal.settlement_ref is not None:
         projection["settlement"] = _safe_projection(
             hosted.status(settlement_ref=deal.settlement_ref)
+        )
+    elif deal.escrow_uid is not None:
+        projection["settlement"] = _safe_projection(
+            fulfillment.settlement_status(deal.escrow_uid)
         )
     _json(projection)
 
