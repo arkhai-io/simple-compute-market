@@ -1568,6 +1568,35 @@ class SQLiteClient:
 
         return await asyncio.to_thread(_load)
 
+    async def listing_id_for_derivation_key(
+        self, derivation_key: str
+    ) -> str | None:
+        """The listing already bound to this publication source, if any.
+
+        `derivation_key` is unique across bindings, so at most one listing can
+        hold a given source. Reported so a refused publication can name the
+        listing that owns the source rather than the column that rejected it:
+        a caller told "UNIQUE constraint failed" learns which index complained,
+        not which of its own listings it is colliding with.
+        """
+
+        def _load() -> str | None:
+            conn = self._connect()
+            try:
+                row = conn.execute(
+                    """
+                    SELECT listing_id
+                    FROM storefront_listing_bindings
+                    WHERE derivation_key=?
+                    """,
+                    (derivation_key,),
+                ).fetchone()
+                return str(row[0]) if row else None
+            finally:
+                conn.close()
+
+        return await asyncio.to_thread(_load)
+
     @staticmethod
     def _listing_binding_from_row(row: tuple[Any, ...]) -> StorefrontListingBinding:
         return StorefrontListingBinding(

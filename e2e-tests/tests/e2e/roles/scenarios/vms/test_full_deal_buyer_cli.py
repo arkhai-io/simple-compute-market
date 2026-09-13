@@ -105,6 +105,7 @@ from tests.e2e.roles.scenarios.vms.conftest import (
     DealState,
     _signer,
     advance_storefront,
+    capacity_site_id,
     capacity_source_for,
     delete_mock_rules_if_present,
     pause_storefront,
@@ -127,7 +128,7 @@ OFFER_RESOURCE = {
     "interruptible": True,
     # Matches E2E_RESOURCE_CSV below. The test imports that CSV through the
     # storefront admin API so it does not depend on a mounted resource file.
-    "resource_id": "compute-e2e-deal-001",
+    "resource_id": "compute-e2e-deal-cli-001",
     "gpu_model": "RTX 5080",
     "gpu_count": 1,
     "sla": 90.0,
@@ -187,9 +188,14 @@ BUYER_INITIAL_PRICE = 7_000  # below seller floor (10_000) — forces counter at
 BUYER_MAX_PRICE = 12_000
 PROV_RULE_ID = "e2e-create-pause"
 REMOVE_RULE_ID = "e2e-remove-pause"  # mock rule that pauses provider teardown
-E2E_RESOURCE_ID = "compute-e2e-deal-001"
+#: This scenario's own commercial resource id, distinct from the deal
+#: scenario's. A listing's publication binding is keyed on site, offering
+#: mode, contract, and its source identity -- pool, resource, GPU count --
+#: so two scenarios advertising one resource on one site derive the same key
+#: and the second listing create is refused outright.
+E2E_RESOURCE_ID = "compute-e2e-deal-cli-001"
 E2E_RESOURCE_CSV = """resource_id,resource_type,resource_subtype,unit,value,state,min_price,token,max_duration_seconds,attribute.gpu_model,attribute.sla,attribute.region,attribute.vm_host
-compute-e2e-deal-001,compute.gpu,rtx5080,count,1,available,10000,0x9fe46736679d2d9a65f0992f2272de9f3c7fa6e0,,RTX 5080,90.0,"California, US",kvm1
+compute-e2e-deal-cli-001,compute.gpu,rtx5080,count,1,available,10000,0x9fe46736679d2d9a65f0992f2272de9f3c7fa6e0,,RTX 5080,90.0,"California, US",kvm-deal-cli
 """
 
 # ===========================================================================
@@ -1391,7 +1397,7 @@ class TestStage11b_TeardownCompletion:
         self,
         provisioning_client,
         provisioning_test_client,
-        storefront_admin_client,
+        storefront_admin_client, storefront_service_client,
         deal_state: DealState,
     ):
         require_state(deal_state, "fulfillment_id", "lease_id", "reserved_resource_id")
@@ -1422,6 +1428,13 @@ class TestStage11b_TeardownCompletion:
             escrow_uid=f"{deal_state.real_escrow_uid}-reuse",
         )
         assert reserved_again.resource_id == deal_state.reserved_resource_id
-        storefront_admin_client.admin_release_one_reservation(reserved_again.resource_id)
+        # Released per reservation through the peer callback, which is how
+        # provisioning releases one in production. `admin_release_reservations`
+        # is fleet-wide and would clear other scenarios' holds.
+        storefront_service_client.notify_capacity_released(
+            reserved_again.capacity_reservation_id,
+            site_id=capacity_site_id(),
+            resource_id=reserved_again.resource_id,
+        )
         deal_state.lease_status = "released"
         provisioning_client.resume_lease_watchdog()

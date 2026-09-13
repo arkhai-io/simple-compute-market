@@ -103,6 +103,7 @@ from tests.e2e.roles.scenarios.vms.conftest import (
     DealState,
     _signer,
     advance_storefront,
+    capacity_site_id,
     capacity_source_for,
     delete_mock_rules_if_present,
     pause_storefront,
@@ -1506,7 +1507,7 @@ class TestStage11a_TeardownDispatch:
 class TestStage11b_TeardownCompletion:
     def test_11b_provider_completion_releases_lease_and_capacity(
         self, provisioning_client, provisioning_test_client,
-        storefront_admin_client, deal_state: DealState,
+        storefront_admin_client, storefront_service_client, deal_state: DealState,
     ):
         require_state(deal_state, "fulfillment_id", "lease_id",
                       "reserved_resource_id")
@@ -1537,8 +1538,14 @@ class TestStage11b_TeardownCompletion:
             escrow_uid=f"{deal_state.real_escrow_uid}-reuse",
         )
         assert reserved_again.resource_id == deal_state.reserved_resource_id
-        storefront_admin_client.admin_release_one_reservation(
-            reserved_again.resource_id
+        # Released per reservation through the peer callback, which is how
+        # provisioning releases one in production. `admin_release_reservations`
+        # is fleet-wide and would clear other scenarios' holds -- the race a
+        # previous fleet-wide teardown caused before it was removed.
+        storefront_service_client.notify_capacity_released(
+            reserved_again.capacity_reservation_id,
+            site_id=capacity_site_id(),
+            resource_id=reserved_again.resource_id,
         )
         deal_state.lease_status = "released"
         provisioning_client.resume_lease_watchdog()

@@ -103,6 +103,13 @@ _GATE_CALLS: dict[str, int] = {}
 #: misspelled name once per second does not fill the log with one fact.
 _UNREGISTERED_REPORTED: set[str] = set()
 
+#: Gated names with no task handle of their own. Capacity polling fans out one
+#: poller per site inside `kit/capacity-publication`, which owns the gather, so
+#: the storefront never holds a task per site. It still has to wait for each to
+#: reach its gate, and `await_quiescence` waits on handles -- so a declared name
+#: is one that acknowledges and is waited on without the registry owning it.
+_DECLARED: set[str] = set()
+
 #: How long `await_quiescence` waits for loops to reach their gates. Bounded on
 #: purpose: a loop's gate is at the end of its interval, and the shipped intervals
 #: run to 30s, so an unbounded wait would let an operator endpoint hang for half a
@@ -139,6 +146,21 @@ def start_registered_loop(
     handle.add_done_callback(partial(_log_loop_completion, task.name))
     logger.info("[LIFECYCLE] registered %s (pid=%s)", task.name, os.getpid())
     return handle
+
+
+def declare_and_gate(name: str) -> Callable[[], bool]:
+    """Declare a gated name the registry holds no handle for, and bind its gate.
+
+    For loops whose tasks are created elsewhere -- the per-site capacity
+    pollers, whose fan-out belongs to the kit. Declaring is what makes
+    `await_quiescence` wait for them; without it a site poller could still be
+    mid-cycle while the pause reported every loop idle, which is optimistic in
+    the one direction a pause exists to prevent.
+    """
+    _DECLARED.add(name)
+    _ACKED.setdefault(name, asyncio.Event())
+    logger.info("[LIFECYCLE] declared gated name %s (no handle)", name)
+    return partial(gate, name)
 
 
 def acknowledge_gate(name: str, *, paused: bool) -> None:
@@ -182,6 +204,8 @@ async def await_quiescence(timeout: float | None = None) -> None:
         _ACKED[name].wait()
         for name, handle in _HANDLES.items()
         if not handle.done() and name in _ACKED
+    ] + [
+        _ACKED[name].wait() for name in sorted(_DECLARED) if name in _ACKED
     ]
     if not pending:
         return
@@ -220,7 +244,11 @@ def gate(name: str) -> bool:
     two must not be separately forgettable. `_pause_requested` is private for the
     same reason — there is no supported way to read the flag without saying so.
     """
-    if name not in _HANDLES and name not in _UNREGISTERED_REPORTED:
+    if (
+        name not in _HANDLES
+        and name not in _DECLARED
+        and name not in _UNREGISTERED_REPORTED
+    ):
         _UNREGISTERED_REPORTED.add(name)
         logger.warning(
             "[LIFECYCLE] %s gated under a name that is not registered; "
@@ -283,8 +311,13 @@ def loop_states() -> dict[str, str]:
     """
     paused = _pause_requested()
     states: dict[str, str] = {}
-    for name, handle in _HANDLES.items():
-        if handle.done():
+    # Declared names have no handle, so they have no `exited` or `cancelled`
+    # state to report -- the task belongs to whoever created it. Everything the
+    # gate itself knows still applies, and a declared name left out of this
+    # would be waited on by `await_quiescence` while reporting nothing, which is
+    # the least useful place to be silent.
+    for name, handle in [(n, None) for n in sorted(_DECLARED)] + list(_HANDLES.items()):
+        if handle is not None and handle.done():
             states[name] = "cancelled" if handle.cancelled() else "exited"
         elif not _GATE_CALLS.get(name):
             states[name] = "starting"
@@ -350,3 +383,4 @@ def reset_for_tests() -> None:
     _ACKED.clear()
     _GATE_CALLS.clear()
     _UNREGISTERED_REPORTED.clear()
+    _DECLARED.clear()

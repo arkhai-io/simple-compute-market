@@ -201,6 +201,15 @@ def signed_listing_read_headers(listing_id: str) -> dict[str, str]:
         "X-Market-Signature": authenticated.proof.value,
     }
 
+def capacity_site_id() -> str:
+    """The site the storefront publishes capacity against.
+
+    Fulfillment callbacks are scoped to a site, and the value matches
+    `[capacity.sites]` in the storefront config.
+    """
+    return str(settings.SELLER.get("site_id", "default") or "default")
+
+
 def capacity_source_for(resource: dict[str, Any], *, site_id: str | None = None) -> dict[str, Any]:
     """Capacity provenance bound to the listing resource being published.
 
@@ -436,6 +445,39 @@ def storefront_admin_client():
             "SELLER.ADMIN_CREDENTIAL",
         ),
         caller_role="admin",
+        expected_publishers=_publisher_trust(),
+    )
+    yield client
+    client.close()
+
+
+@pytest.fixture(scope="module")
+def storefront_service_client():
+    """Service-role storefront client: the provisioning peer's callbacks.
+
+    Fulfillment events -- usage started, capacity released, fulfillment failed
+    -- are delivered by the provisioning service, not by an operator. The
+    storefront authenticates them against its one configured service peer, so
+    this signs as the provisioning service's own principal rather than as the
+    administrator.
+
+    A scenario that needs to drive one of those events stands in for the peer,
+    and does it through the public typed methods. Reaching into the client's
+    private `_post` and `_admin_headers` instead — which is what these
+    scenarios used to do — bypasses the signed-request construction the client
+    exists to own, so the call keeps working while the real path is broken.
+    """
+    from storefront_client import SyncStorefrontClient
+
+    url = _require_setting(settings.SELLER.API_URL, "SELLER.API_URL")
+    client = SyncStorefrontClient(
+        url,
+        _signer(
+            settings.PROVISIONING.get("service_scheme", "eip191"),
+            settings.PROVISIONING.get("service_credential", ""),
+            "PROVISIONING.SERVICE_CREDENTIAL",
+        ),
+        caller_role="service",
         expected_publishers=_publisher_trust(),
     )
     yield client

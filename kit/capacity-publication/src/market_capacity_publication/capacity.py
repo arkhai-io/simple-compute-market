@@ -327,8 +327,21 @@ class CapacityRuntime:
             )
         )
 
-    async def poll_events(self, *, interval_seconds: float) -> None:
-        """Tail every configured authority and reconcile at feed boundaries."""
+    async def poll_events(
+        self,
+        *,
+        interval_seconds: float,
+        paused: Callable[[str], Callable[[], bool]] | None = None,
+    ) -> None:
+        """Tail every configured authority and reconcile at feed boundaries.
+
+        ``paused`` is a factory, not a predicate: it receives a site id and
+        returns that site's gate. The pollers run concurrently and each holds
+        its own feed position, so one site being held must not hold the others
+        -- a single shared predicate could only stop all of them together.
+        Supplying the gate per site keeps the naming with the caller, which is
+        the only party that knows what each loop is registered as.
+        """
         if interval_seconds <= 0:
             raise CapacityConfigurationError("poll interval must be positive")
         aggregate = self.client()
@@ -340,6 +353,7 @@ class CapacityRuntime:
                     self.site_client(site_id),
                     interval_seconds,
                     full_reconcile=self.reconcile_now,
+                    paused=paused(site_id) if paused is not None else None,
                 )
                 for site_id in self.site_ids
             )

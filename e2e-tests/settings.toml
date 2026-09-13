@@ -99,6 +99,11 @@ admin_credential = ""
 # verifies responses. Distinct from both caller principals above.
 authority_scheme     = "eip191"
 authority_identifier = ""
+# The provisioning service's own signing credential. Distinct from the admin
+# credential above: the storefront trusts this principal as its service peer,
+# which is the caller fulfillment callbacks must come from.
+service_scheme       = "eip191"
+service_credential   = ""
 
 # ---------------------------------------------------------------------------
 # API-credits topology (item 6)

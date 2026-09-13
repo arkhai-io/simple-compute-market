@@ -21,6 +21,10 @@ from core_storefront.capacity import CapacityDelta
 logger = logging.getLogger(__name__)
 
 
+#: Cadence for re-reading a held gate; idle work only.
+_PAUSED_POLL_SECONDS = 0.05
+
+
 async def site_events_poller(
     aggregate: Any,
     site_name: str,
@@ -28,6 +32,7 @@ async def site_events_poller(
     interval: float,
     *,
     full_reconcile: Callable[[], Awaitable[None]],
+    paused: Callable[[], bool] | None = None,
 ) -> None:
     """Tail one site authority's capacity-event feed into the local bus.
 
@@ -40,6 +45,12 @@ async def site_events_poller(
     ``client`` is a ``kit/site-client`` ``SiteCapacityClient`` (typed
     here as ``Any`` to avoid a dependency this package doesn't otherwise
     need); only ``events_after`` and ``base_url`` are used.
+
+    ``paused`` is consulted once per cycle before any request, so a cycle
+    either runs completely or never starts: the feed position is loop-local,
+    and a poller interrupted mid-cycle would either replay or skip events.
+    Core supplies no gate of its own -- the caller owns the pause, because only
+    it knows what the loop is registered as.
     """
     last_applied: int | None = None
     logger.info(
@@ -47,6 +58,9 @@ async def site_events_poller(
         site_name, client.base_url, interval,
     )
     while True:
+        if paused is not None and paused():
+            await asyncio.sleep(_PAUSED_POLL_SECONDS)
+            continue
         try:
             if last_applied is None:
                 _, last_applied = await client.events_after(0, limit=1)

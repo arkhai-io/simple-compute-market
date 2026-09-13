@@ -24,7 +24,7 @@ from tests.e2e.roles.scenarios.vms.host_registry import (
     provision_e2e_executor,
     refresh_storefront_projections,
 )
-from tests.e2e.roles.scenarios.vms.conftest import capacity_source_for, pause_storefront, require_state
+from tests.e2e.roles.scenarios.vms.conftest import capacity_site_id, capacity_source_for, pause_storefront, require_state
 
 log = logging.getLogger(__name__)
 
@@ -267,17 +267,14 @@ class TestComputeDynamicListings:
         log.info("[dynamic] reserved reservation %s; statuses=%s", result.capacity_reservation_id, statuses)
 
     def test_03_usage_started_keeps_oversized_listings_closed(
-        self, storefront_admin_client, dynamic_state: DynamicListingState
+        self, storefront_admin_client, storefront_service_client, dynamic_state: DynamicListingState
     ):
         require_state(dynamic_state, "capacity_reservation_id")
 
-        result = storefront_admin_client._post(
-            "/api/v1/admin/fulfillment/events/usage-started",
-            {
-                "capacity_reservation_id": dynamic_state.capacity_reservation_id,
-                "escrow_uid": "e2e-dynamic-reserve-2x",
-            },
-            extra_headers=storefront_admin_client._admin_headers(),
+        result = storefront_service_client.notify_usage_started(
+            dynamic_state.capacity_reservation_id,
+            site_id=capacity_site_id(),
+            escrow_uid="e2e-dynamic-reserve-2x",
         )
 
         assert result["state"] == "leased"
@@ -294,17 +291,14 @@ class TestComputeDynamicListings:
         dynamic_state.usage_started = True
 
     def test_04_capacity_release_reopens_oversized_listings(
-        self, storefront_admin_client, dynamic_state: DynamicListingState
+        self, storefront_admin_client, storefront_service_client, dynamic_state: DynamicListingState
     ):
         require_state(dynamic_state, "capacity_reservation_id", "usage_started")
 
-        result = storefront_admin_client._post(
-            "/api/v1/admin/fulfillment/events/capacity-released",
-            {
-                "capacity_reservation_id": dynamic_state.capacity_reservation_id,
-                "released_at": "2026-01-01T00:00:00Z",
-            },
-            extra_headers=storefront_admin_client._admin_headers(),
+        result = storefront_service_client.notify_capacity_released(
+            dynamic_state.capacity_reservation_id,
+            site_id=capacity_site_id(),
+            released_at="2026-01-01T00:00:00Z",
         )
 
         assert result["state"] == "released"

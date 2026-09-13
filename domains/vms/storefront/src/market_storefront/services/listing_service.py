@@ -47,6 +47,17 @@ from market_storefront.publication_binding import prepare_vm_listing_binding
 logger = logging.getLogger(__name__)
 
 
+
+class ListingSourceAlreadyBound(Exception):
+    """A listing's publication source is already bound to another listing.
+
+    Raised instead of letting the database's own error surface. A publication
+    source -- site, offering mode, contract, pool, resource, GPU count -- may
+    back exactly one listing, so publishing a second listing against it is a
+    conflicting request rather than a server fault, and the caller needs to
+    know which of its listings already holds the source.
+    """
+
 class ListingService:
     def __init__(
         self,
@@ -367,6 +378,39 @@ class ListingService:
             demands,
         )
 
+
+    async def _describe_source_conflict(
+        self, binding: Any, exc: BaseException
+    ) -> str | None:
+        """A caller-facing description if `exc` is a source-uniqueness breach.
+
+        Matched on the constraint the database names rather than on the
+        exception type, because the driver reports every integrity breach the
+        same way and only this one is the caller's to fix. Returns None for
+        anything else, so an unrelated integrity error keeps its existing
+        treatment instead of being reported as a conflict.
+        """
+        if "derivation_key" not in str(exc):
+            return None
+        holder = None
+        try:
+            holder = await self._db.listing_id_for_derivation_key(
+                binding.derivation_key
+            )
+        except Exception:  # pragma: no cover - reporting must not raise
+            logger.exception(
+                "[LISTINGS] could not resolve the holder of a bound source"
+            )
+        source = getattr(binding, "source_envelope_json", None) or "unknown"
+        held_by = (
+            f"listing {holder!r}" if holder else "another listing"
+        )
+        return (
+            "this publication source is already bound to "
+            f"{held_by}: {source}. A source backs one listing at a time -- "
+            "publish a distinct resource or pool, or close the listing that "
+            "holds this one."
+        )
     async def create_listing(
         self, request: VmCreateListingRequest
     ) -> CreateListingResponse:
@@ -462,6 +506,12 @@ class ListingService:
                 paused=bool(request.paused),
             )
         except Exception as exc:
+            conflict = await self._describe_source_conflict(binding, exc)
+            if conflict is not None:
+                logger.warning(
+                    "[LISTINGS] %s refused: %s", listing_id, conflict
+                )
+                raise ListingSourceAlreadyBound(conflict) from exc
             logger.error(
                 "[LISTINGS] upsert_listing_with_binding %s failed: %s",
                 listing_id,

@@ -553,6 +553,19 @@ async def capacity_events_poller_loop(sqlite_client: Any) -> None:
         )
         or 5
     )
+    from market_storefront.lifecycle import (
+        CAPACITY_EVENTS_POLLER,
+        capacity_site_loop_name,
+        declare_and_gate,
+        gate,
+    )
+
+    # The aggregate name is what the admin advance route addresses and what a
+    # storefront with no site configured still reports; the per-site gates are
+    # what actually hold the pollers, since the kit owns their fan-out.
+    if gate(CAPACITY_EVENTS_POLLER):
+        pass
     await build_capacity_runtime(lambda: sqlite_client).poll_events(
-        interval_seconds=interval
+        interval_seconds=interval,
+        paused=lambda site: declare_and_gate(capacity_site_loop_name(site)),
     )

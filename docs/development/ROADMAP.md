@@ -43,6 +43,7 @@ Capacity declaration is the one place the provisioning service is not yet the fu
 | Stale physical-placement fields on the current fulfillment path, and VM shape not reaching the provisioning request | [`fix-vm-fulfillment-capacity-boundary`](../../openspec/changes/fix-vm-fulfillment-capacity-boundary/) |
 | Buyer VM tunnels coordinated through a relay's management dashboard, with relay location and credential held in storefront configuration | [`relay-vm-access-without-a-dashboard`](../../openspec/changes/relay-vm-access-without-a-dashboard/) |
 | One SSH key reaches every host in an environment, so a host prepared by another party cannot be registered with its own credential | [`contain-embedded-host-key-material`](../../openspec/changes/contain-embedded-host-key-material/) |
+| The provisioning service serves one storefront: its storefront principal and site binding are single values, so a second commercial front-end over the same hardware is not a configuration | [`repair-multi-storefront-scenario`](../../openspec/changes/repair-multi-storefront-scenario/) |
 
 A schema drop of the frozen columns is deliberately excluded from the retirement and belongs to a later follow-up, after a deployment cycle confirms the freeze never needed rolling back.
 

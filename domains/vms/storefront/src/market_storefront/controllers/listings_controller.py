@@ -28,6 +28,10 @@ Admin evaluation (X-Admin-Key, no side effects):
 from __future__ import annotations
 
 import logging
+
+from market_storefront.services.listing_service import (
+    ListingSourceAlreadyBound,
+)
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
@@ -199,6 +203,11 @@ class ListingsController:
             result = await self._listing_svc.create_listing(body)
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc))
+        except ListingSourceAlreadyBound as exc:
+            # A conflicting request, not a server fault: the caller asked to
+            # publish a source another of its listings already holds. Reported
+            # as such so the answer names what to change.
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
         except Exception as exc:
             logger.error("[LISTINGS] create unexpected: %s", exc, exc_info=True)
             raise HTTPException(status_code=500, detail=str(exc))

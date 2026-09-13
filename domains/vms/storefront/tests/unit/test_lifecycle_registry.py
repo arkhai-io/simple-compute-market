@@ -377,6 +377,60 @@ class TestPauseDoesNotClaimQuiescenceItCannotSee:
         )
 
 
+class TestDeclaredGatesWithoutAHandle:
+    """Gated names whose tasks are created elsewhere still hold a pause.
+
+    Capacity polling fans out one poller per site inside
+    `kit/capacity-publication`, which owns the gather, so the storefront never
+    holds a task per site. `await_quiescence` waits on handles, so without
+    declaring those names a site poller could still be mid-cycle while the
+    pause reported every loop idle -- optimistic in the one direction a pause
+    exists to prevent.
+    """
+
+    async def test_a_declared_gate_is_waited_on_and_reports_paused(self):
+        name = lifecycle.capacity_site_loop_name("default")
+        site_gate = lifecycle.declare_and_gate(name)
+        at_gate = asyncio.Event()
+        stop = asyncio.Event()
+
+        async def _site_poller():
+            while not stop.is_set():
+                if site_gate():
+                    at_gate.set()
+                    await asyncio.sleep(0.001)
+                    continue
+                await asyncio.sleep(0.001)
+
+        task = asyncio.create_task(_site_poller())
+        try:
+            await asyncio.wait_for(_until(lambda: name in lifecycle.loop_states()), 1.0)
+            states = await server._set_loops_paused(True)
+            assert states.get(name) == "paused", (
+                "a declared per-site gate was not waited on; the pause reported "
+                f"{states}, which would let a site still writing look idle"
+            )
+            assert at_gate.is_set()
+        finally:
+            stop.set()
+            await server._set_loops_paused(False)
+            task.cancel()
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
+
+    async def test_declaring_does_not_warn_about_an_unregistered_name(self, caplog):
+        """A declared name is known, so gating it is not a wiring mistake."""
+        name = lifecycle.capacity_site_loop_name("somewhere")
+        gate = lifecycle.declare_and_gate(name)
+        with caplog.at_level("WARNING"):
+            gate()
+        assert not [r for r in caplog.records if "not registered" in r.message], (
+            "declaring a name should suppress the unregistered-name warning, "
+            "which exists for names nobody waits on"
+        )
+
 async def _until(predicate, interval: float = 0.001) -> None:
     """Yield until a predicate holds. Bounded by the caller's `wait_for`."""
     while not predicate():

@@ -42,36 +42,37 @@ confirms settlement becomes ready has not happened yet.
 - [ ] 3.4 `make test` stays green. No production Python changed, so nothing is
       expected here; run it rather than assume.
 
-## 3l. Startup crash from the lifecycle rewiring
+## 3r. The Alice stages, handed over
 
-The run never reached pytest. Both VM storefronts exited (3) on
-`TypeError: start_registered_loop() got an unexpected keyword argument
-'logger'` — I substituted the function name at four call sites and left an
-argument it does not take. Its logger parameter is `task_logger`, because it
-forwards to `start_storefront_background_task` and needs to distinguish the
-two.
+- [x] 3r.1 **Declared, not deleted.** `test_06b` and `test_06c` skip with the
+      reason at the call site: provisioning's storefront principal is a single
+      identity, so Alice is never a trusted caller and never loads capacity.
 
-- [x] 3l.1 Fixed the four registered-loop call sites. The two remaining
-      `logger=` sites are correct: the capacity-events poller, still ungated
-      and therefore still on `start_storefront_background_task`, and the
-      startup-steps runner.
-- [x] 3l.2 Checked every call in `startup.py` against the real signatures by
-      AST rather than by eye: **0 mismatches**. The same technique that has
-      been catching client drift applies to internal calls, and would have
-      caught this before the run.
-- [x] 3l.3 Storefront suite **1128 passed**, 4 pre-existing failures.
+      Only these two. The scenario's subject -- registry isolation, Alice's
+      absence from registry-B, fan-in across two storefronts, resilience to a
+      dead registry -- does not touch provisioning and keeps running. `00g`
+      reads system status and `02b` imports a storefront-local CSV, so both are
+      expected to pass; neither has been *observed* passing, because the whole
+      scenario was skipped until this week, so the successor change widens the
+      skip set on evidence rather than on my expectation.
 
-      Recorded because the lesson is specific: nothing in the unit suites
-      exercises `startup.py`'s call sites, so a signature error there is
-      invisible until a container starts. `test_loop_gate_wiring.py` — held
-      back in 3k.4 — is what covers this, which makes landing it the priority
-      rather than a follow-up.
+- [x] 3r.2 **Not a regression, and worth being precise about why.** The Aug 15
+      green run skipped every Alice stage, and the skip was incidental:
+      `ALICE.*` was absent from configuration and `_require_setting` skips on an
+      empty value. This change configured Alice while repairing the identity
+      plumbing, which turned silent absences into real runs. The auth work made
+      a pre-existing limitation visible; it did not cause it.
 
-- [x] 3l.4 `credits-storefront` logs `KeyError: 'X-Market-Identity-Scheme'`
-      and a failed quota registration against the credits service, but the
-      container reports **healthy** and did not fail the run. Pre-existing
-      noise in the API-credits lane, adjacent to the inherited questions about
-      that topology; recorded rather than chased.
+      The configuration stays. Reverting it would restore the silence that let
+      this scenario go unexercised for months.
+
+- [x] 3r.3 Handed to `repair-multi-storefront-scenario`, which owns letting
+      provisioning trust more than one storefront principal. ROADMAP Goal 1's
+      open-gap table names the gap and that change as its owner -- the goal
+      already argues that consolidating physical authority is what makes a
+      storefront replaceable by another front-end over the same hardware, so
+      the fact that it cannot yet serve two belongs in its current state rather
+      than only in a skip string.
 
 ## 4. Closeout
 

@@ -394,7 +394,18 @@ async def test_poller_loop_delegates_to_composed_kit_runtime():
     ):
         await cc.capacity_events_poller_loop(repository)
 
-    runtime.poll_events.assert_awaited_once_with(interval_seconds=0.01)
+    # The gate factory is passed per site: the kit owns the fan-out, and one
+    # shared predicate could only hold every site together. Asserted by shape
+    # rather than identity -- it is a closure bound to the loop's own name.
+    runtime.poll_events.assert_awaited_once()
+    kwargs = runtime.poll_events.await_args.kwargs
+    assert kwargs["interval_seconds"] == 0.01
+    site_gate = kwargs["paused"]("default")
+    assert callable(site_gate), (
+        "poll_events must receive a factory returning one site's gate, so a "
+        "held site does not hold the others"
+    )
+    assert site_gate() is False, "no pause was requested, so the gate is open"
 
 
 # ---------------------------------------------------------------------------

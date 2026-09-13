@@ -59,6 +59,8 @@ provisioning:
   admin_credential: ""
   authority_scheme: "eip191"
   authority_identifier: ""
+  service_scheme:     "eip191"
+  service_credential: ""
 
 # Second storefront (multi-registry scenario)
 alice:

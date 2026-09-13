@@ -177,7 +177,14 @@ async def run_negotiation_watchdog(
     """Continuously run the shared sweep until the task is cancelled."""
 
     active_logger = logger or logging.getLogger(__name__)
-    await asyncio.sleep(policy.initial_delay_seconds)
+    # The initial delay is applied inside the loop, after the gate, so it holds
+    # the first sweep and not the acknowledgement. Its purpose is to avoid
+    # measuring freshly created threads against a clock that has not caught up,
+    # which constrains when a sweep may run -- nothing about it requires the
+    # loop to be unobservable. Delaying before the first gate call made the
+    # watchdog invisible for the whole window, and the first pause of an
+    # end-to-end run lands inside it.
+    pending_initial_delay = float(policy.initial_delay_seconds or 0.0)
     if policy.log_loop_start:
         active_logger.info(
             "negotiation_watchdog_loop: started (interval=%ds, timeout=%ds)",
@@ -189,6 +196,9 @@ async def run_negotiation_watchdog(
             if paused is not None and paused():
                 await asyncio.sleep(_PAUSED_POLL_SECONDS)
                 continue
+            if pending_initial_delay:
+                await asyncio.sleep(pending_initial_delay)
+                pending_initial_delay = 0.0
             await asyncio.sleep(policy.interval_seconds)
             abandoned = await sweep_stale_negotiations(
                 repository,

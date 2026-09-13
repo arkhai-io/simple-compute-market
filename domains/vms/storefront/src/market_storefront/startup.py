@@ -10,6 +10,7 @@ import logging
 from functools import partial
 
 from market_storefront.lifecycle import (
+    CAPACITY_EVENTS_POLLER,
     FULFILLMENT_RESUME,
     NEGOTIATION_WATCHDOG,
     SETTLEMENT_SERVICING,
@@ -178,7 +179,7 @@ def _start_negotiation_watchdog(sqlite_client: Any) -> None:
                 sqlite_client,
                 policy,
                 emit_stage_event=stage_event,
-                task_logger=logger,
+                logger=logger,
                 paused=loop_gate(NEGOTIATION_WATCHDOG),
             ),
             log_message=(
@@ -263,12 +264,12 @@ def _start_capacity_events_poller(sqlite_client: Any) -> None:
     # Tail every authority's capacity-event feed after provisioning preflight.
     from market_storefront.services.capacity_client import capacity_events_poller_loop
 
-    start_storefront_background_task(
+    start_registered_loop(
         StorefrontBackgroundTask(
-            name="capacity_events_poller",
+            name=CAPACITY_EVENTS_POLLER,
             task_factory=partial(capacity_events_poller_loop, sqlite_client),
         ),
-        logger=logger,
+        task_logger=logger,
     )
 
 

@@ -44,6 +44,11 @@ provisioning:
   admin_credential:     "0x8b3a350cf5c34c9194ca85829a2df0ec3153be0318b5e2d3348e872092edffba"
   authority_scheme:     "eip191"
   authority_identifier: "0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266"
+  # Anvil 0 — the provisioning service's own signer, pinned as the
+  # storefront's service peer. Not interchangeable with the admin
+  # credential; the two are trusted for different roles.
+  service_scheme:     "eip191"
+  service_credential: "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80"
 
 api_credits:
   registry_url:   "http://api-credits-registry:8080"
