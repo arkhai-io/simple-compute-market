@@ -95,8 +95,11 @@ def _bare_metal_bundle(runtime, site_authority):
     return runtime.adapter_bundle(site_authority)
 
 
-def _system_service(runtime, lease_lifecycle_service):
-    return runtime.system_service(lease_lifecycle_service=lease_lifecycle_service)
+def _system_service(runtime, lease_lifecycle_service, fulfillment_convergence_watchdog):
+    return runtime.system_service(
+        lease_lifecycle_service=lease_lifecycle_service,
+        fulfillment_convergence_watchdog=fulfillment_convergence_watchdog,
+    )
 
 
 def _compose_adapters(vm_bundle, bare_metal_bundle):
@@ -448,6 +451,12 @@ class Container(containers.DeclarativeContainer):
         _system_service,
         runtime=vm_runtime,
         lease_lifecycle_service=lease_lifecycle_service,
+        # The admin convergence route exists to run exactly one cycle of this
+        # watchdog. Its parameter was there and nothing ever passed it, so the
+        # route answered `503 fulfillment_convergence_watchdog not
+        # initialised` for every caller -- the only thing missing was the
+        # wiring between two singletons in this container.
+        fulfillment_convergence_watchdog=fulfillment_convergence_watchdog,
     )
 
 

@@ -1966,6 +1966,37 @@ failures.
       is the authority's own surface to decide about, and it belongs with the
       `pools-9-retire-local-physical-authority` items rather than here.
 
+## 3at. 94 passing; one wire never connected
+
+- [x] 3at.1 `B5` and both `08b` stages pass: the fulfillment reads are shared
+      with the operator role, and the lease assertion now names what the
+      authority reports. Three failures left -- two of them the same one, and
+      the credits blocker.
+
+- [x] 3at.2 **`09a` in both deal scenarios: `503
+      fulfillment_convergence_watchdog not initialised`.** Not a missing
+      watchdog: the provisioning container builds one, and
+      `SystemService.__init__` has accepted it since the admin convergence
+      route was added. Nothing ever passed it. `runtime.system_service()`
+      omitted the argument and the container's provider omitted it too, so
+      the parameter sat on its `None` default and the route that exists to
+      run exactly one cycle answered `503` for every caller that ever called
+      it.
+
+      Wired it: the adapter runtime forwards the argument, and the
+      container's `system_service` provider passes the watchdog singleton
+      declared twelve lines above it.
+
+- [x] 3at.3 **Why no test caught it, and what now does.** A parameter with a
+      `None` default and no supplier is invisible to every test that
+      exercises either side alone -- the service's own tests pass a watchdog
+      in by hand, and the container's tests never asked what it forwards. So
+      one of the three new tests reads the *provider's* declared keyword
+      arguments rather than the object it builds: the forwarding test would
+      have passed against the shipped wiring, which is precisely how this
+      survived. The third keeps the refusal, so a service genuinely composed
+      without a watchdog still says which one is missing.
+
 ## 4. Closeout
 
 - [ ] 4.1 **Comment hygiene.** `make check-comment-hygiene`.
