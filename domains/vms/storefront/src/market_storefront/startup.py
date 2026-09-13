@@ -178,7 +178,7 @@ def _start_negotiation_watchdog(sqlite_client: Any) -> None:
                 sqlite_client,
                 policy,
                 emit_stage_event=stage_event,
-                logger=logger,
+                task_logger=logger,
                 paused=loop_gate(NEGOTIATION_WATCHDOG),
             ),
             log_message=(
@@ -189,7 +189,7 @@ def _start_negotiation_watchdog(sqlite_client: Any) -> None:
                 policy.timeout_seconds,
             ),
         ),
-        logger=logger,
+        task_logger=logger,
     )
 
 
@@ -239,7 +239,7 @@ def _start_settlement_servicing() -> None:
             log_message="[STARTUP] Settlement servicing started (interval=%ss)",
             log_args=(getattr(settings, "claims_sweep_interval", 30),),
         ),
-        logger=logger,
+        task_logger=logger,
     )
 
 
@@ -255,7 +255,7 @@ def _start_fulfillment_resume(sqlite_client: Any) -> None:
             log_message="[STARTUP] Fulfillment resume worker started (interval=%ss)",
             log_args=(getattr(settings, "fulfillment_resume_sweep_interval", 30),),
         ),
-        logger=logger,
+        task_logger=logger,
     )
 
 
@@ -288,7 +288,7 @@ def _start_site_projection_poller(sqlite_client: Any) -> None:
             name=SITE_PROJECTION_POLLER,
             task_factory=partial(site_projection_poller_loop, sqlite_client),
         ),
-        logger=logger,
+        task_logger=logger,
     )
 
 

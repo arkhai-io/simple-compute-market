@@ -42,50 +42,36 @@ confirms settlement becomes ready has not happened yet.
 - [ ] 3.4 `make test` stays green. No production Python changed, so nothing is
       expected here; run it rather than assume.
 
-## 3k. The lifecycle module I was reinventing
+## 3l. Startup crash from the lifecycle rewiring
 
-Run: **10 failed, 72 passed, 32 skipped** from 7/69/38. Six previously-skipped
-stages now run, which is why passes and failures both rose.
+The run never reached pytest. Both VM storefronts exited (3) on
+`TypeError: start_registered_loop() got an unexpected keyword argument
+'logger'` — I substituted the function name at four call sites and left an
+argument it does not take. Its logger parameter is `task_logger`, because it
+forwards to `start_storefront_background_task` and needs to distinguish the
+two.
 
-- [x] 3k.1 **My pause assertion asserted what I had documented it could not.**
-      `set_loops_paused` returned a snapshot, and my own docstring said so: *"a
-      loop mid-cycle when the request arrives is still `running` ... a caller
-      that needs the stronger property waits."* `pause_storefront` then
-      asserted every loop was already `paused`. Two rounds running I wrote the
-      correct reasoning in a comment and contradicted it in code.
+- [x] 3l.1 Fixed the four registered-loop call sites. The two remaining
+      `logger=` sites are correct: the capacity-events poller, still ungated
+      and therefore still on `start_storefront_background_task`, and the
+      startup-steps runner.
+- [x] 3l.2 Checked every call in `startup.py` against the real signatures by
+      AST rather than by eye: **0 mismatches**. The same technique that has
+      been catching client drift applies to internal calls, and would have
+      caught this before the run.
+- [x] 3l.3 Storefront suite **1128 passed**, 4 pre-existing failures.
 
-- [x] 3k.2 **An eighth deleted module: `market_storefront/lifecycle.py`**, 350
-      lines, which is the designed version of the gate I hand-rolled. It has
-      what mine lacked: a per-loop acknowledgement event, `await_quiescence`
-      with a bounded wait so pausing returns only once loops sit at their
-      gates, `pausing` distinguished from `paused`, and a warning when a loop
-      gates under an unregistered name. Its comments also record the exact
-      trap I fell into: *"conflating the two made the second impossible to ask
-      for."*
+      Recorded because the lesson is specific: nothing in the unit suites
+      exercises `startup.py`'s call sites, so a signature error there is
+      invisible until a container starts. `test_loop_gate_wiring.py` — held
+      back in 3k.4 — is what covers this, which makes landing it the priority
+      rather than a follow-up.
 
-      Restored it and tombstoned my `core_storefront/loop_lifecycle.py`.
-      `server._set_loops_paused` awaits quiescence before reporting.
-      `CLAIMS_ENGINE` becomes `SETTLEMENT_SERVICING`, the same periodic sweep
-      under the name the neutrality redesign gave it.
-
-- [x] 3k.3 Restored `test_lifecycle_registry.py` and
-      `test_lifecycle_client_parity.py`, also deleted. Storefront suite
-      **1128 passed** (from 1107), with the 4 pre-existing failures.
-
-- [ ] 3k.4 **`test_loop_gate_wiring.py` is held back, and is the next task.**
-      Restoring it fails 10 tests, which is the correct answer: it asserts that
-      *every* production loop acknowledges its gate, and my rewiring covers
-      four of five. The capacity-events poller is ungated and registers one
-      loop per site, which the test also checks. Not shipped only because
-      landing a red suite is worse than landing a precise specification of the
-      remaining wiring; it goes in next round with the wiring that satisfies
-      it, and must not be weakened to fit.
-
-- [ ] 3k.5 **New, needs diagnosis.** Reservations moved from `502` to
-      `500` and a `settle/{escrow}` call now fails — both further along the
-      capacity path than before, both first-time-reached. Findings unchanged:
-      `500 UNIQUE ...derivation_key`, credits `rc=2`, `market buy` `rc=0`.
-      Out of scope: alice `offer_unfulfillable`.
+- [x] 3l.4 `credits-storefront` logs `KeyError: 'X-Market-Identity-Scheme'`
+      and a failed quota registration against the credits service, but the
+      container reports **healthy** and did not fail the run. Pre-existing
+      noise in the API-credits lane, adjacent to the inherited questions about
+      that topology; recorded rather than chased.
 
 ## 4. Closeout
 
