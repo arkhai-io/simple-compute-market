@@ -42,36 +42,44 @@ confirms settlement becomes ready has not happened yet.
 - [ ] 3.4 `make test` stays green. No production Python changed, so nothing is
       expected here; run it rather than assume.
 
-## 3h. Restore the deleted scenario stages
+## 3i. Faults in the restored stages
 
-- [x] 3h.1 Eleven stages restored from commit `a1128a4c`, 514 lines: four
-      `pauses_the_storefront_loops`, five
-      `registers_executor_host_and_syncs_projection`,
-      `test_09bb_claims_cycle_registers_the_seller_claim`, and
-      `test_10a_expire_lease_and_arm_teardown_gate`. Seven arrived as whole
-      classes that had been removed; placement was computed by comparing class
-      order against the August file rather than guessed, because pytest runs
-      stages in file order and a capacity declaration after the listing it
-      backs is useless.
-- [x] 3h.2 Collection rises 127 → 140, with all 11 stages selected.
-- [x] 3h.3 **Signature check over the restored code**, extended this round to
-      flag calls to methods that do not exist at all — the earlier version
-      skipped them, which is why it reported clean while three were broken.
+Run: **14 failed, 61 passed, 39 skipped** from 8/57/36. The rise is the 13
+restored stages running for the first time since August; 14 = the 8 carried
+failures plus 6 new, all in the restored code.
 
-- [ ] 3h.4 **Six pre-existing mismatches surfaced by the stronger check.**
-      Verified present in the checkpoint before this restoration, so not
-      introduced here:
+- [x] 3i.1 **The capacity-admin client was signing as the wrong principal.**
+      Five failures, one per executor stage:
+      `SiteCapacityAdminClientError: Invalid marketplace authentication`.
+      `SiteCapacityAdminClient` asserts the `seller` role, and provisioning
+      binds that role to the storefront principal it serves
+      (`PROVISIONING_STOREFRONT_IDENTITY__IDENTIFIER`, Anvil 2). The fixture
+      signed as the provisioning administrator, which is trusted for `admin`
+      and refused here.
 
-      | Site | Problem |
-      |---|---|
-      | `test_compute_dynamic_listings.py` ×4 | reaches into `storefront_admin_client._post` and `._admin_headers` — private helpers, and `_admin_headers` belongs to the retired shared-key model |
-      | `test_full_deal.py`, `test_full_deal_buyer_cli.py` | call `admin_release_one_reservation`, which the client no longer exposes |
+      The August fixture passed a shared admin key, under which the caller's
+      identity did not matter; it does now. Declaring sellable capacity is a
+      seller's act, so the corrected principal agrees with what the call means
+      rather than merely satisfying the check. Verified the signer derives to
+      exactly the identifier provisioning pins.
 
-      The private-helper reach-through is the more interesting one: a test that
-      calls a client's internals bypasses exactly the signed-request
-      construction the client exists to own, so it would keep working while the
-      public path was broken. Both need a public route or a recorded reason,
-      and the release call needs its replacement identified.
+- [x] 3i.2 **Two constants and a helper were left behind by the restoration.**
+      `DYNAMIC_POOL_ID`, and `E2E_LEASE_EXPIRY_BACKDATE` with
+      `_expired_lease_end()`. Inserting stage bodies moved the code that used
+      module-level names without the names themselves — the restoration was
+      scoped to functions and classes, and nothing checked what they referenced.
+
+      Swept the modules with pyflakes rather than fixing the one name the run
+      reported: that found the other two before they cost a round. Added to the
+      pre-handoff checks alongside the signature comparison, for the same
+      reason — a `NameError` in a stage that has not run yet is invisible to
+      both collection and the AST signature check.
+
+- [ ] 3i.3 Findings unchanged: `409 No available compute VM` (2),
+      `offer_unfulfillable` (2), `no_matching_inventory` (1),
+      `500 UNIQUE ...derivation_key` (1), `market credits buy` `rc=2` (1),
+      `market buy` `rc=0` with no run-log (1). The inventory cluster should
+      clear once the executor stages authenticate.
 
 ## 4. Closeout
 

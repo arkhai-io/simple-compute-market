@@ -83,6 +83,7 @@ Phase 11 — Fulfillment convergence and resource release
 from __future__ import annotations
 
 import logging
+from datetime import datetime, timedelta, timezone
 import os
 from importlib import resources
 
@@ -1396,6 +1397,29 @@ class TestStage10a_ExplicitInterruptionSetup:
         assert interrupted.get("status") == "interrupted", interrupted
         assert interrupted.get("capacity_reservation_id") == deal_state.lease_id
         deal_state._termination_requested = True
+
+
+#: How far back to move a lease end so the watchdog treats it as expired.
+#:
+#: Bounded on both sides, which is why it is not simply "a long time ago". The
+#: lease must be past its end for the watchdog to begin releasing, but it must
+#: NOT be past `lease_watchdog_grace_period_seconds` (300s), because the release
+#: path marks `release_failed` the moment grace elapses with `vm_remove`
+#: unfinished — and stages 11a/11b deliberately hold `vm_remove` at a mock gate.
+#: Back-dating two hours put the lease past grace immediately, so the first cycle
+#: both dispatched the removal and timed it out.
+#:
+#: One minute expires the lease and leaves roughly four minutes for the gated
+#: stages, which is ample for three stages that make no network waits.
+E2E_LEASE_EXPIRY_BACKDATE = timedelta(minutes=1)
+
+
+def _expired_lease_end() -> str:
+    """A lease end the watchdog reads as expired but still inside its grace."""
+    return (
+        datetime.now(timezone.utc) - E2E_LEASE_EXPIRY_BACKDATE
+    ).isoformat().replace("+00:00", "Z")
+
 
 
 class TestStage10a_LeaseExpirySetup:

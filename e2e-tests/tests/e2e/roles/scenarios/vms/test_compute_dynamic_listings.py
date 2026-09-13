@@ -31,6 +31,10 @@ log = logging.getLogger(__name__)
 pytestmark = pytest.mark.e2e_compute_dynamic_listings
 
 
+#: This scenario's own pool. One pool per scenario: a pool's `listing_mode`
+#: is resolved per pool and its structural default flips above one member, so
+#: sharing one would let adding a scenario change how another publishes.
+DYNAMIC_POOL_ID = "compute-e2e-dynamic-pool"
 DYNAMIC_RESOURCE_ID = "compute-e2e-dynamic-4x"
 DYNAMIC_RESOURCE_CSV = """resource_id,resource_type,resource_subtype,unit,value,state,min_price,token,max_duration_seconds,attribute.gpu_model,attribute.sla,attribute.region,attribute.vm_host
 compute-e2e-dynamic-4x,compute.gpu,h200,count,4,available,10000,0x9fe46736679d2d9a65f0992f2272de9f3c7fa6e0,,H200,99.0,"California, US",kvm1

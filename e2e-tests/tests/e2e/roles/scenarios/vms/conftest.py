@@ -289,15 +289,24 @@ def site_capacity_admin_client():
     creates, and nothing derives one from a registered host. A scenario that
     reserves capacity has to put a resource there.
 
-    Signs as the provisioning admin principal, the same caller the operator
-    client uses, because the capacity-admin surface is part of the same
-    authenticated API rather than a separate shared-key control.
+    Signs as the **storefront** principal, not the provisioning administrator.
+    `SiteCapacityAdminClient` asserts the `seller` role, and provisioning binds
+    that role to the storefront principal it is configured to serve; the
+    administrator is trusted for `admin` and is refused here with
+    `Invalid marketplace authentication`. Declaring sellable capacity is a
+    seller's act, so the role and the principal agree with what the call means.
+
+    The August fixture passed a shared admin key, under which the caller's
+    identity did not matter. It does now, and the two principals are not
+    interchangeable.
     """
     from market_site_client import SiteCapacityAdminClient
 
     url = _require_setting(settings.PROVISIONING.API_URL, "PROVISIONING.API_URL")
     return SiteCapacityAdminClient(
-        url, _provisioning_admin_signer(), _provisioning_authority_trust()
+        url,
+        _signer("eip191", settings.SELLER.PRIVATE_KEY, "SELLER.PRIVATE_KEY"),
+        _provisioning_authority_trust(),
     )
 
 
