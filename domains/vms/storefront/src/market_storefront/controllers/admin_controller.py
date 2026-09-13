@@ -95,6 +95,42 @@ router = APIRouter(prefix="/api/v1/admin", tags=["admin"])
 #: than inferred. Declaring it makes the route's spelling and the registry's
 #: agree by construction, which is the drift that let `claims` outlive the
 #: claims engine.
+#: Fields `ReserveCapacityResponse` cannot be built without.
+_REQUIRED_RESERVATION_FIELDS = ("capacity_reservation_id", "resource_id")
+
+
+def require_reservation_fields(
+    reserved: Mapping[str, Any], *, site_id: str
+) -> None:
+    """Refuse a reservation payload this response cannot be built from.
+
+    These fields were subscripted directly, two lines after the sibling stage
+    event read the same payload with `.get`. When one was absent the `KeyError`
+    reached the caller as `500 Storefront administrator request failed`, naming
+    neither the field nor the authority that returned it -- a message that cost
+    several rounds to trace back to one subscript.
+
+    A `502`, not a `500`: the site authority returned something this storefront
+    cannot use, which is a bad gateway rather than this service faulting. The
+    payload's keys are reported because the useful question is what the
+    authority *did* send -- a fungible pool reservation legitimately has no
+    resource of its own to name, and whether it should carry one is a contract
+    question this error surfaces instead of hiding.
+    """
+    missing = [f for f in _REQUIRED_RESERVATION_FIELDS if f not in reserved]
+    if not missing:
+        return
+    raise HTTPException(
+        status_code=502,
+        detail=(
+            f"site {site_id!r} returned a reservation without "
+            f"{', '.join(missing)}; payload carried {sorted(reserved)}. This "
+            "response requires those fields, so either the authority omitted "
+            "them or the two disagree on the reservation shape."
+        ),
+    )
+
+
 ADVANCE_LOOP_NAMES = {
     "settlement-servicing": SETTLEMENT_SERVICING,
     "fulfillment-resume": FULFILLMENT_RESUME,
@@ -1247,6 +1283,7 @@ class AdminController:
         pool_id = reserved.get("pool_id") or (reserved.get("attributes") or {}).get(
             "pool_id"
         )
+        require_reservation_fields(reserved, site_id=binding.site_id)
         return ReserveCapacityResponse(
             capacity_reservation_id=str(reserved["capacity_reservation_id"]),
             pool_id=str(pool_id) if pool_id else None,

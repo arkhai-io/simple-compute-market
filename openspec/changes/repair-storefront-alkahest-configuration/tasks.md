@@ -121,53 +121,64 @@ not in this head.
 - [ ] 3t.5 Unchanged: `market negotiate` exits 2, `market credits buy` exits 2,
       `market buy` exits 0 with no run-log.
 
-## 3u. Two loops reached their gate once and never again
+## 3v. The admin reserve `500`, and what `resource_id` means for a pool
 
-Run: **10 failed, 76 passed, 28 skipped**. The restored intervals worked --
-every loop now reports `paused` except two, and both are mine.
+Run: **6 failed, 80 passed**. The gate-cadence fix cleared the four pause
+failures.
 
-- [x] 3u.1 **The capacity aggregate gated once, then blocked forever.** It
-      awaited `poll_events`, which gathers the site pollers and never returns.
-      One gate call is enough to be *acknowledged* and not enough to ever
-      *observe a pause*, so every pause reported it `pausing` until the bounded
-      wait expired. It now runs the fan-out as a task and gates and idles,
-      which is also what keeps a storefront with no site configured reporting a
-      capacity loop at all. A completed fan-out is awaited rather than idled
-      over, so its failure surfaces instead of being hidden behind a healthy
-      aggregate.
+- [x] 3v.1 **The `500` is `KeyError: 'resource_id'`** at
+      `admin_controller.py:1254` in `reserve_capacity`. My earlier
+      double-body-read hypothesis was wrong: the `EndOfStream` frames are
+      starlette unwinding *after* an inner exception, and the three middleware
+      frames are the chain the request passes through rather than where it
+      fails. The loudest thing in the trace was the least informative.
 
-      Its idle cadence is its own constant, not the poll interval: the loop
-      does no work, so the only thing the interval controls is how soon a pause
-      is seen, and tying that to polling made observation as slow as the
-      slowest deployment's polling.
+- [x] 3v.2 **Discovery: what `resource_id` means per cardinality mode.**
+      Settled from `openspec/specs/storefront-publication/spec.md`:
 
-- [x] 3u.2 **The watchdog's startup delay stopped it cycling.** In 3o.2 I moved
-      the delay inside the loop so the gate came first. That fixed
-      acknowledgement and not observability: the loop gated once, then slept 30
-      seconds, so a pause requested after that first call went unseen for the
-      whole window. Now a monotonic deadline holds the *sweep* while the cycle,
-      and therefore the gate, keeps its cadence -- which is what the August
-      implementation did, and what I should have copied rather than
-      approximated.
+      | Mode | Candidate identity | `resource_id` |
+      |---|---|---|
+      | `specific_resource` | one per enabled member, each naming a physical resource; derivation key is resource-keyed | the node |
+      | `fungible` | one pooled candidate, sized to what a single member can satisfy | absent -- pool-keyed |
 
-- [x] 3u.3 **The tests could not have caught either.** Both asserted a loop
-      reached its gate *at least once*, which both loops did. They now assert
-      the gate is reached more than once, and the capacity case runs past one
-      aggregate cadence so the window can contain a second call.
+      `resource-pool-management/spec.md` corroborates the optionality
+      directly: every durable reference to a pool keys on
+      `(site_id, pool_id[, resource_id])`. There is no `resource_id`-as-shape
+      anywhere; a fungible candidate's shape is structural -- pool, slice size,
+      and projected attributes. A named compute shape would come from ROADMAP
+      Goal 2, whose dimensions Goal 1 records as not yet expressible, so it is
+      a plausible future design rather than a current one.
 
-      Two consequences of the loop no longer returning:
-      `test_poller_loop_delegates_to_composed_kit_runtime` awaited it and hung
-      the suite, and its patched minimal settings then broke the app build that
-      the gate's first `server` import performs. Both fixed in the test --
-      driven as a task, with `server` imported up front.
+      A fungible *reservation* is the separate question: the ledger does choose
+      a member at reserve time, and records it as `member_id` plus a backing
+      resource. So the likely contract answer is
+      `ReserveCapacityResponse.resource_id: str | None` -- which is how the
+      controller already treats `pool_id` two lines above, under the comment
+      that pools are the aggregator's concept and not the ledger's.
 
-      `domains/vms/storefront` unit **1007 passed**, 1 pre-existing failure;
-      `kit/storefront` 7 passed with its pre-existing `test_composition`
-      failure; the lifecycle files 59 passed.
+- [x] 3v.3 **Root cause not settled statically, and the failure now says so.**
+      Traced the payload through ledger, HTTP, site client and aggregator.
+      Both ledger builders (`_match_payload`,
+      `_reservation_payload_for_reserve`) always include `resource_id`, the
+      transport is a passthrough `dict` that would carry a `None` rather than
+      drop a key, and the only `exclude_none` in the path is on the *request*
+      body. So a genuinely absent key is unexplained, and changing the response
+      type on that basis would paper over a payload that should be complete.
 
-- [ ] 3u.4 Unchanged: admin reservations `500` (traced to
-      `service_peer_auth.py:312`), settle `409` for provision terms carrying no
-      SSH key, and the three buyer-CLI exits.
+      Extracted `require_reservation_fields`, which refuses such a payload with
+      a `502` naming the missing field, the authority, and the keys the payload
+      *did* carry. Absent and null stay distinct: a null `resource_id` is the
+      authority saying there is no single backing resource, an absent key is
+      the two sides disagreeing about shape, and collapsing them would turn the
+      contract question into a silent empty string.
+
+      Five tests against the extracted function -- not a copy of the guard,
+      which is what my first draft did and is the antipattern this suite has
+      already been caught by twice.
+
+- [ ] 3v.4 The next run's failure text should name the actual shape and settle
+      3v.2's contract question. Remaining: settle `409` for provision terms
+      carrying no SSH key, and the three buyer-CLI exits.
 
 ## 4. Closeout
 
