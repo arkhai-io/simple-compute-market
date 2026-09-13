@@ -1426,11 +1426,85 @@ failures.
       decimal string by ordinary lax coercion, so no caller changes were
       needed alongside.
 
-- [ ] 3aj.5 Unverified until the stack runs: whether any other response the
-      scenarios read carries an amount in a bare `int` field. The sweep
-      covered `core_storefront` and the VM storefront's models; a fixture
-      amount past the range will now name the field it cannot canonicalize
-      rather than failing silently, which is the point.
+- [x] 3aj.5 One did, and it was not a model field: the stage-event stream.
+      Carried in 3ak.3.
+
+## 3ak. The repriced fixtures reached further and found four more seams
+
+- [x] 3ak.1 **`market buy` negotiated, escrowed, settled and provisioned.**
+      Round 0 countered at 8.5 tokens exactly as the fixture intends, the
+      buyer escrowed `8500000000000000000`, settlement submitted, the
+      provisioning job ran. It then failed publishing fulfillment evidence:
+      `'AlkahestConditionalEscrowClient' object has no attribute
+      'string_obligation'`.
+
+      The same defect as the settle path, at the other end of the deal, on
+      the line this change noticed and left alone one round ago: peer
+      settlement publishes its evidence as a string obligation through the
+      alkahest client's codecs, and it was handed the mechanism adapter.
+      Fixed the same way, through `chain_client()`, with the chain taken from
+      the projection context. Worth naming: this one surfaces *after* the VM
+      exists and the buyer's money is committed.
+
+- [x] 3ak.2 **The evaluate-negotiate stages fail in the test's own request
+      body.** Those fixtures build the proposal dict themselves and carried
+      `"amount": BUYER_INITIAL_PRICE` as an int, so the buyer signed nothing
+      -- `IntegerDomainError` came out of the client's own canonicalization.
+      The fixtures now send the decimal-digit form.
+
+      Deliberately not fixed by having the client rewrite the amount inside a
+      proposal it is handed: `negotiate_new` constructs that field and can
+      own its form, but silently editing a caller's signed body is a
+      different promise. The refusal is loud and names the value.
+
+- [x] 3ak.3 **The multi-registry stage broke on a `500` from
+      `/api/v1/system/events`, three stages away from its cause.** The
+      negotiation logged `round_decided` with `our_amount`, `their_amount`
+      and `decision_amount` as raw integers; the events route serves those
+      payloads in a signed response, and the response could not be
+      canonicalized.
+
+      Fixed in `_public_value`, the single funnel every stage-event field
+      already passes through, so it covers the VM, API-credits and
+      bare-metal emitters and any nested payload rather than seven call
+      sites. Deliberately magnitude-dependent: `round` and `gpu_count` are
+      genuinely numbers and consumers read them as such, so only a value
+      with no canonical number form changes shape, and it changes to the
+      same decimal string the rest of the contract uses.
+
+- [x] 3ak.4 **The fungible reservation now reports its pool; the
+      resource-keyed one still did not, and the fixtures explain why.** The
+      fungible scenario declares `attribute.pool_id` on its resources and
+      passes `pool_id` on its offers. The dynamic scenario declared the pool
+      only in its *capacity declaration* -- the provisioning side -- while
+      its CSV and its offers named a resource and nothing else. So the
+      listing carried no pool provenance, its durable binding recorded none,
+      and the reservation had no membership to report. The storefront was
+      right; the fixture was asserting something it had never been told.
+
+      Declared it, matching the capacity declaration this scenario already
+      makes: `attribute.pool_id` in the CSV and `pool_id` on the offer. A
+      `specific_resource` candidate is still a member of its pool, which is
+      what `(site_id, pool_id[, resource_id])` says.
+
+- [x] 3ak.5 **`credits buy` exits 2 because `--service-name` does not
+      exist.** One line of redacted stderr, after three rounds of
+      hypotheses -- the CLI printed it every time and the helper was
+      throwing it away. Service selection goes through the typed resource
+      query, which the option's own help text uses as its example
+      (`'service_name=weather ...'`). Both invocations now pass
+      `--resource 'service_name="weather-api"'`.
+
+      The masking change earned its place here: the refusal text survived
+      redaction intact, which is exactly what it was built for.
+
+- [ ] 3ak.6 Unverified: whether `service_name` is a filterable field in the
+      api-credits registry's published filter spec. The option's help
+      documents it, and the seeded listing is the only credits listing in the
+      stack, so a rejected filter fails loudly on the query rather than
+      silently matching nothing. If it is rejected, dropping the filter
+      entirely is the fallback -- discovery is already schema-routed to that
+      registry.
 
 ## 4. Closeout
 

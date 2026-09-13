@@ -736,7 +736,10 @@ class TestStage05a_EvaluateNegotiate:
                 "chain_name": "anvil",
                 "escrow_address": "0x" + "0" * 40,
                 "fields": {
-                    "amount": BUYER_INITIAL_PRICE,
+                    # Decimal-digit string: the request body is
+                    # canonicalized for signing, and a base-unit
+                    # amount has no JSON number form.
+                    "amount": str(BUYER_INITIAL_PRICE),
                     "token": DEMAND_RESOURCE["token"]["contract_address"],
                 },
                 "expiration_unix": 2_000_000_000,

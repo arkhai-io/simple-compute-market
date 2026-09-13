@@ -36,8 +36,13 @@ pytestmark = pytest.mark.e2e_compute_dynamic_listings
 #: sharing one would let adding a scenario change how another publishes.
 DYNAMIC_POOL_ID = "compute-e2e-dynamic-pool"
 DYNAMIC_RESOURCE_ID = "compute-e2e-dynamic-4x"
-DYNAMIC_RESOURCE_CSV = """resource_id,resource_type,resource_subtype,unit,value,state,min_price,token,max_duration_seconds,attribute.gpu_model,attribute.sla,attribute.region,attribute.vm_host
-compute-e2e-dynamic-4x,compute.gpu,h200,count,4,available,10000,0x9fe46736679d2d9a65f0992f2272de9f3c7fa6e0,,H200,99.0,"California, US",kvm1
+#: `attribute.pool_id` matches the capacity declaration below, which places
+#: this resource in the pool as a `specific_resource` member. Without it the
+#: listing carried no pool provenance, its durable binding recorded none, and
+#: a reservation had no membership to report -- the fungible case declared it
+#: and the resource-keyed case did not.
+DYNAMIC_RESOURCE_CSV = """resource_id,resource_type,resource_subtype,unit,value,state,min_price,token,max_duration_seconds,attribute.pool_id,attribute.gpu_model,attribute.sla,attribute.region,attribute.vm_host
+compute-e2e-dynamic-4x,compute.gpu,h200,count,4,available,10000,0x9fe46736679d2d9a65f0992f2272de9f3c7fa6e0,,compute-e2e-dynamic-pool,H200,99.0,"California, US",kvm1
 """
 
 FUNGIBLE_POOL_ID = "compute-e2e-fungible-pool"
@@ -95,6 +100,10 @@ def _offer(gpu_count: int) -> dict:
         # offering mode its domain binding selected.
         "offering_mode": "vm",
         "resource_id": DYNAMIC_RESOURCE_ID,
+        # Resource-keyed *and* pool-bound: a `specific_resource` candidate is
+        # still a member of its pool, and the durable binding keys on
+        # (site, pool[, resource]).
+        "pool_id": DYNAMIC_POOL_ID,
         "gpu_model": "H200",
         "gpu_count": gpu_count,
         "sla": 99.0,

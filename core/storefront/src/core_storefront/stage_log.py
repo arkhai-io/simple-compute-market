@@ -29,6 +29,28 @@ _FORBIDDEN_KEYS = frozenset(
 )
 
 
+#: JSON numbers are IEEE-754 doubles to most parsers, and canonical JSON has
+#: no number form for an integer outside this range at all. The stage stream
+#: is served through a signed response, so an amount past it made the events
+#: route fail to canonicalize its own body -- a 500 several stages away from
+#: the negotiation that logged it.
+_JSON_SAFE_INT_MAX = 2**53 - 1
+
+
+def _json_safe_int(value: int) -> int | str:
+    """Emit an out-of-range integer in the form canonical JSON can carry.
+
+    Deliberately magnitude-dependent rather than stringifying every integer:
+    `round`, `gpu_count` and their kind are genuinely numbers and consumers
+    read them as such. Only a value with no canonical number form changes
+    shape, and it changes to the same decimal-digit string the rest of the
+    uint256 contract uses.
+    """
+    if -_JSON_SAFE_INT_MAX <= value <= _JSON_SAFE_INT_MAX:
+        return value
+    return str(value)
+
+
 def _public_value(value: Any) -> Any:
     if isinstance(value, Identity):
         return value.model_dump(mode="json")
@@ -53,6 +75,8 @@ def _public_value(value: Any) -> Any:
         return {key: _public_value(item) for key, item in value.items()}
     if isinstance(value, (list, tuple)):
         return [_public_value(item) for item in value]
+    if isinstance(value, int) and not isinstance(value, bool):
+        return _json_safe_int(value)
     return value
 
 

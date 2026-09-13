@@ -148,7 +148,10 @@ def test_credits_full_deal(
         "credits", "buy",
         "--quantity", "3",
         "--new-key",
-        "--service-name", "weather-api",
+        # `market credits buy` has no --service-name; service selection
+        # goes through the typed resource query, the same surface the
+        # VM buyer filters on.
+        "--resource", 'service_name="weather-api"',
         "--chain", "anvil",
         "--max-matches", "5",
         "--max-rounds", "10",
@@ -219,7 +222,10 @@ def test_credits_full_deal(
         "credits", "buy",
         "--quantity", "2",
         "--key-id", key_id,
-        "--service-name", "weather-api",
+        # `market credits buy` has no --service-name; service selection
+        # goes through the typed resource query, the same surface the
+        # VM buyer filters on.
+        "--resource", 'service_name="weather-api"',
         "--chain", "anvil",
         "--max-matches", "5",
         "--max-rounds", "10",

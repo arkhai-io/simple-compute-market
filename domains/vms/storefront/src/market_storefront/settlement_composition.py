@@ -496,7 +496,17 @@ async def fulfill_vm_settlement(
         raise TypeError("VM settlement listing input is missing")
     selected_obligation = prepared.obligations[prepared.selected_obligation_index]
     hosted = selected_obligation.get("mechanism") == "fiat.stripe.v1"
-    delivery_client = fulfillment_input.evidence_client if hosted else mechanism_client
+    # Peer settlement publishes its fulfillment evidence as a string
+    # obligation through the alkahest client's own codecs, so it takes the
+    # chain client the mechanism adapter resolves rather than the adapter --
+    # the same distinction escrow verification needs. Handing over the
+    # adapter failed with "no attribute 'string_obligation'" after the VM
+    # was already provisioned, which is the most expensive place to find out.
+    delivery_client = (
+        fulfillment_input.evidence_client
+        if hosted
+        else mechanism_client.chain_client(prepared.projection_context.chain_name)
+    )
     delivery_anchor = (
         fulfillment_input.fulfillment_anchor if hosted else prepared.mechanism_ref
     )
