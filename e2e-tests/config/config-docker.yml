@@ -54,6 +54,13 @@ api_credits:
   registry_url:   "http://api-credits-registry:8080"
   service_url:    "http://credits-service:8082"
   storefront_url: "http://credits-storefront:8000"
+  # The credits registry's own signing principal, pinned by the buyer: a
+  # registry read is authenticated in both directions, and the buyer refuses
+  # to discover through an index it cannot pin. Matches
+  # REGISTRY_AUTHORITY_ID / _IDENTIFIER in compose.apicredits.yml.
+  registry_authority_id: "api-credits-registry"
+  registry_scheme:       "ed25519"
+  registry_identifier:   "_NUDENxVX6u4cMd0xzoYyQAt10QDI47bfnYnu2lTVho"
 
 # Second storefront (multi-registry scenario)
 alice:

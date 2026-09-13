@@ -1498,13 +1498,84 @@ failures.
       The masking change earned its place here: the refusal text survived
       redaction intact, which is exactly what it was built for.
 
-- [ ] 3ak.6 Unverified: whether `service_name` is a filterable field in the
-      api-credits registry's published filter spec. The option's help
+- [x] 3ak.6 `service_name` is filterable: the query was accepted and the
+      credits CLI moved on to its next refusal (3al.4). The option's help
       documents it, and the seeded listing is the only credits listing in the
       stack, so a rejected filter fails loudly on the query rather than
       silently matching nothing. If it is rejected, dropping the filter
       entirely is the fallback -- discovery is already schema-routed to that
       registry.
+
+## 3al. Five failures, four of them further on
+
+- [x] 3al.1 **`market buy` reaches ready.** B4 passes: negotiated, escrowed,
+      settled, provisioned, evidence published. The chain-client fixes at
+      both ends of settlement were the last of it. B5 is now the frontier
+      (3al.5).
+
+- [x] 3al.2 **I broke `test_01` of the dynamic-listings scenario.** Declaring
+      `pool_id` on the offer made the listing resource carry pool *and*
+      resource, while `capacity_source_for` copies one or the other -- so the
+      declared source disagreed with the resource it was derived from and
+      `listings/create` refused with `400 capacity source identity and
+      gpu_count must match the listing_resource resource`.
+
+      The helper's either/or predated any resource declaring both. It now
+      copies both when both are present, which is what a `specific_resource`
+      member is: pool-bound and resource-keyed. The route compares the two
+      fields independently, so an either/or copy could only ever agree with
+      an either/or resource.
+
+- [x] 3al.3 **Force-accept sends the amount as a JSON number.** The response
+      model was retyped last round; the client's request body was not, and
+      `{"amount": int(amount)}` put `9500000000000000000` through
+      canonicalization. Now the decimal string, which the route already
+      parses. Same omission shape as the retirement that reached three of
+      four places.
+
+- [x] 3al.4 **The credits buyer pins no registry authorities.** With
+      `--service-name` gone the CLI got further and refused with
+      `Missing required [registry.authorities] identity pins`: a registry
+      read is authenticated in both directions and the buyer will not
+      discover through an index it cannot attribute. The VM fixture passes
+      pins; the credits fixture never did.
+
+      Pinned both registries, because the schema filter routing to the
+      credits index is the thing this scenario exercises -- so the compute
+      registry has to be pinned too, even though nothing here discovers
+      through it. The credits registry's own principal now lives in the
+      docker profile beside its URL, matching what compose pins, and the
+      fixture skips with the missing URLs named rather than failing opaquely
+      if either pin is absent.
+
+- [ ] 3al.5 **B5: the listing stays `open` where the scenario expects
+      `closed` while capacity is held.** First run to get here, so this
+      expectation has never been observed either way in this change. Not
+      investigated: whether closing is driven by a loop this scenario pauses,
+      whether a one-GPU listing against a larger host is genuinely still
+      satisfiable, or whether the expectation is stale. Read the seller's
+      reconciliation for this listing before touching either side.
+
+- [ ] 3al.6 **05b: the buyer refuses the seller's acceptance -- a design
+      question, not a defect I should guess at.** `market negotiate` exits 3
+      on "seller accept state omitted the buyer-selected settlement option".
+      The negotiation itself is healthy: round 0 counters at 8.5 tokens and
+      the buyer's convergence rule accepts.
+
+      Why only this command: round 0 synthesizes an `expected_selection` from
+      the advertised option whenever one is in the policy params, and
+      `market negotiate` puts it there for alkahest while `market buy`'s
+      orchestration sets it only for hosted settlement. So `buy` skips the
+      echo check and completes the same deal against the same seller, while
+      `negotiate` requires an echo the alkahest accept path does not produce.
+
+      The question is which side is right: whether a peer (alkahest)
+      acceptance is supposed to echo a settlement selection at all, or
+      whether synthesizing an expectation from an advertised escrow option is
+      the overreach. The spec sentence about exact option matching on
+      acceptance is written about hosted options. Both fixes are one-liners
+      and they mean opposite things, so this wants a decision rather than a
+      patch.
 
 ## 4. Closeout
 

@@ -783,7 +783,10 @@ class StorefrontClient(_StorefrontClientBase):
         return NegotiationActionResponse.from_dict(
             await self._authenticated_post(
                 f"/api/v1/listings/{listing_id}/negotiations/{neg_id}/force-accept",
-                {"amount": int(amount)},
+                # Decimal-digit string: this body is canonicalized for
+                # signing, and an 18-decimal amount has no JSON number
+                # form. The route parses either.
+                {"amount": str(int(amount))},
                 role="admin",
                 operation="admin_force_accept_negotiation",
                 resource=f"{listing_id}/{neg_id}",
@@ -2140,7 +2143,10 @@ class SyncStorefrontClient(_StorefrontClientBase):
         return NegotiationActionResponse.from_dict(
             self._authenticated_post(
                 f"/api/v1/listings/{listing_id}/negotiations/{neg_id}/force-accept",
-                {"amount": int(amount)},
+                # Decimal-digit string: this body is canonicalized for
+                # signing, and an 18-decimal amount has no JSON number
+                # form. The route parses either.
+                {"amount": str(int(amount))},
                 role="admin",
                 operation="admin_force_accept_negotiation",
                 resource=f"{listing_id}/{neg_id}",

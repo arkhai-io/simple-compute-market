@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import logging
 import time
+from typing import Any
 
 import httpx
 from market_identity import IdentityScheme
@@ -82,6 +83,46 @@ def credits_buyer_cli(buyer_cli_binary, tmp_path_factory) -> BuyerCli:
         pytest.skip("Could not locate alkahest_anvil_addresses.json")
 
     registries = tuple(url for url in (vms_registry, credits_registry) if url)
+    # Every registry the buyer reads has to be pinned: discovery is
+    # authenticated in both directions and the CLI refuses outright ("Missing
+    # required [registry.authorities] identity pins") rather than reading an
+    # index whose responses it cannot attribute. Two registries here, because
+    # the schema filter routing to the credits one is what this scenario
+    # exercises — so the compute registry must be pinned as well, even though
+    # nothing in this scenario discovers through it.
+    authorities: dict[str, dict[str, Any]] = {
+        vms_registry.rstrip("/"): {
+            "authority": str(settings.REGISTRY.get("authority_id", "") or ""),
+            "identities": [
+                {
+                    "scheme": "eip191",
+                    "identifier": str(settings.REGISTRY.get("identifier", "") or ""),
+                }
+            ],
+        },
+        credits_registry.rstrip("/"): {
+            "authority": str(
+                settings.get("API_CREDITS.REGISTRY_AUTHORITY_ID", "") or ""
+            ),
+            "identities": [
+                {
+                    "scheme": str(
+                        settings.get("API_CREDITS.REGISTRY_SCHEME", "") or "ed25519"
+                    ),
+                    "identifier": str(
+                        settings.get("API_CREDITS.REGISTRY_IDENTIFIER", "") or ""
+                    ),
+                }
+            ],
+        },
+    }
+    missing = sorted(
+        url
+        for url, pin in authorities.items()
+        if not pin["authority"] or not pin["identities"][0]["identifier"]
+    )
+    if missing:
+        pytest.skip(f"registry authority pins not configured for {missing}")
     log.info("[credits_buyer_cli] registries=%s rpc=%s", registries, rpc_url)
     yield create_profiled_buyer_cli(
         binary=buyer_cli_binary,
@@ -90,6 +131,7 @@ def credits_buyer_cli(buyer_cli_binary, tmp_path_factory) -> BuyerCli:
         marketplace_scheme=IdentityScheme.EIP191,
         marketplace_credential=marketplace_credential,
         registries=registries,
+        registry_authorities=authorities,
         credential_variable="ARKHAI_E2E_BUYER_MARKETPLACE_CREDENTIAL",
         toml_sections=(
             "[wallet]",

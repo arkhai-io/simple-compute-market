@@ -222,9 +222,13 @@ def capacity_source_for(resource: dict[str, Any], *, site_id: str | None = None)
         "site_id": site_id or str(settings.SELLER.get("site_id", "default") or "default"),
         "gpu_count": resource.get("gpu_count", 1),
     }
+    # Both when the resource declares both: a `specific_resource` member is
+    # pool-bound *and* resource-keyed, and the storefront compares the two
+    # fields independently, so an either/or copy disagrees with the resource
+    # it was derived from.
     if resource.get("pool_id"):
         source["pool_id"] = resource["pool_id"]
-    else:
+    if resource.get("resource_id"):
         source["resource_id"] = resource["resource_id"]
     return source
 
