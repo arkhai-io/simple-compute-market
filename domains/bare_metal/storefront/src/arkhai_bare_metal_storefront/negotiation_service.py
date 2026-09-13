@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import time
 import uuid
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
@@ -26,6 +27,7 @@ from market_core.schemas import (
     SettlementPlan,
     SettlementSelection,
     compute_rate_total,
+    rate_scales_by_time,
 )
 from market_policy.negotiation_middleware import NegotiationRound
 from market_identity import Identity
@@ -153,6 +155,28 @@ def _selection_proposal_amount(request: NegotiateNewRequest) -> int | None:
     )
 
 
+def _provisions_machine(option: SettlementOption) -> bool:
+    """True when accepting this option leases the listed machine.
+
+    Keyed on the option's shape rather than on its mechanism: an option
+    carrying the trusted physical facts inline provisions, and so does any
+    option priced against elapsed lease time. An option that prices nothing
+    per unit of time — a contact introduction — sells no machine time and
+    must not reach physical validation or reserve capacity.
+
+    A scalar mechanism that advertised a machine at a flat price would fall
+    on the introduction side of that line, so it must not be able to accept
+    silently: an amount-negotiating mechanism with no rate to scale cannot
+    build an accepted obligation, and the selection is refused before any
+    write. Supporting flat-priced machine time needs a producer that says so
+    in the option, not a looser reading here.
+    """
+
+    return "bare_metal" in option.params or any(
+        rate.field == "amount" and rate_scales_by_time(rate) for rate in option.rates
+    )
+
+
 def _seller_reference_amount(
     accepted: AcceptedEscrow | None,
     *,
@@ -181,6 +205,11 @@ class BareMetalNegotiationService:
     build_plan: PlanBuilder
     accepted_obligation_dispatch: AcceptedObligationDispatch = field(
         default_factory=dict
+    )
+    # Injected so a selection expiry can be judged against a controlled
+    # instant in tests without moving the process clock.
+    now_unix: Callable[[], int] = field(
+        default_factory=lambda: lambda: int(time.time())
     )
 
     async def open(
@@ -371,10 +400,9 @@ class BareMetalNegotiationService:
                 "selection does not exact-match one trusted listing option",
                 status_code=400,
             )
-        provisions_machine = "bare_metal" in selected_option.params
         terms: BareMetalTerms | None = None
         service_terms: dict[str, Any] = {}
-        if provisions_machine:
+        if _provisions_machine(selected_option):
             terms, service_terms = await self._validate_physical_selection(
                 request=request,
                 message=message,
@@ -387,6 +415,7 @@ class BareMetalNegotiationService:
             selected_option=selected_option,
             request=request,
             buyer_principal=buyer_principal,
+            listing=listing,
             message=message,
             selection=selection,
         )
@@ -463,27 +492,44 @@ class BareMetalNegotiationService:
         options: list[SettlementOption],
         selected_option: SettlementOption,
     ) -> tuple[BareMetalTerms, dict[str, Any]]:
-        """Hold a machine-provisioning selection to the trusted physical facts."""
+        """Hold a machine-provisioning selection to the trusted physical facts.
 
-        try:
-            demand = BareMetalBuyerDemand(
-                duration_seconds=message.duration_seconds,
-                access_method=message.access_method,
-                ssh_public_key=message.ssh_public_key or "",
-                settlement=selection,
-                allow_off_session=(
-                    selected_option.params.get("interaction") == "saved_instrument"
-                ),
-            )
-            selected = validate_buyer_selection(
-                demand=demand,
-                advertised_options=options,
-            )
-        except (TypeError, ValueError) as exc:
+        An option that carries the physical facts inline is held to them and
+        to the binding they were published from. An option that carries only
+        its own settlement terms — the buyer picked the expiry, and nothing
+        physical rides on the option — is composed from the seller's own
+        trusted listing and binding instead. Neither path lets the buyer
+        supply a physical fact.
+        """
+
+        selected = None
+        if "bare_metal" in selected_option.params:
+            try:
+                demand = BareMetalBuyerDemand(
+                    duration_seconds=message.duration_seconds,
+                    access_method=message.access_method,
+                    ssh_public_key=message.ssh_public_key or "",
+                    settlement=selection,
+                    allow_off_session=(
+                        selected_option.params.get("interaction") == "saved_instrument"
+                    ),
+                )
+                selected = validate_buyer_selection(
+                    demand=demand,
+                    advertised_options=options,
+                )
+            except (TypeError, ValueError) as exc:
+                raise NegotiationRequestError(
+                    "hosted selection does not exact-match one trusted listing option",
+                    status_code=400,
+                ) from exc
+        elif selection.expiration_unix <= self.now_unix():
+            # Nothing in this option pins the expiry, so the clock is the only
+            # thing that can refuse an already-reclaimable selection.
             raise NegotiationRequestError(
-                "hosted selection does not exact-match one trusted listing option",
+                "settlement selection has already expired",
                 status_code=400,
-            ) from exc
+            )
         trusted_listing = await self.db.load_bare_metal_listing_payload(
             listing_id=request.listing_id
         )
@@ -492,13 +538,13 @@ class BareMetalNegotiationService:
         )
         if trusted_listing is None or listing_binding is None:
             raise NegotiationRequestError("trusted bare-metal listing is unavailable")
-        facts = selected.facts
-        if (
-            facts.site_id != listing_binding.site_id
-            or facts.physical_resource_id != listing_binding.physical_resource_id
-            or facts.pool_id != listing_binding.pool_id
-            or facts.physical_host_id != trusted_listing.physical_host_id
-            or facts.access_method != message.access_method
+        if selected is not None and (
+            selected.facts.site_id != listing_binding.site_id
+            or selected.facts.physical_resource_id
+            != listing_binding.physical_resource_id
+            or selected.facts.pool_id != listing_binding.pool_id
+            or selected.facts.physical_host_id != trusted_listing.physical_host_id
+            or selected.facts.access_method != message.access_method
         ):
             raise NegotiationRequestError(
                 "hosted selection changes trusted physical listing terms"
@@ -530,12 +576,37 @@ class BareMetalNegotiationService:
             ssh_public_key=message.ssh_public_key,
             listing_ref=request.listing_id,
         )
-        physical_terms = {
-            "listing_id": request.listing_id,
-            "option_id": selected.option.option_id,
-            "option_facts": selected.facts.model_dump(mode="json", exclude_none=True),
-            "provision_terms": terms.model_dump(mode="json", exclude_none=True),
-        }
+        provision_terms = terms.model_dump(mode="json", exclude_none=True)
+        if selected is not None:
+            # Exactly the envelope ``validate_accepted_hosted_plan`` and
+            # ``build_accepted_hosted_plan`` reconstruct and compare whole;
+            # an extra key here fails that equality and blocks the hosted
+            # lifecycle binding. See arkhai_bare_metal.hosted_contract.
+            physical_terms: dict[str, Any] = {
+                "listing_id": request.listing_id,
+                "option_id": selected.option.option_id,
+                "option_facts": selected.facts.model_dump(
+                    mode="json", exclude_none=True
+                ),
+                "provision_terms": provision_terms,
+            }
+        else:
+            # The option advertised nothing physical, so the binding the
+            # listing was published from is the whole physical record, and
+            # the mechanism that priced it is not recoverable from facts.
+            physical_terms = {
+                "listing_id": request.listing_id,
+                "option_id": selected_option.option_id,
+                "mechanism": selected_option.mechanism,
+                "physical_binding": {
+                    "site_id": listing_binding.site_id,
+                    "pool_id": listing_binding.pool_id,
+                    "physical_resource_id": listing_binding.physical_resource_id,
+                    "physical_host_id": trusted_listing.physical_host_id,
+                    "access_method": message.access_method,
+                },
+                "provision_terms": provision_terms,
+            }
         return terms, {"bare_metal.v1": physical_terms}
 
     def _build_accepted_obligation(
@@ -547,6 +618,7 @@ class BareMetalNegotiationService:
         selected_option: SettlementOption,
         request: NegotiateNewRequest,
         buyer_principal: Identity,
+        listing: Mapping[str, Any],
         message: BareMetalMessage,
         selection: SettlementSelection,
     ) -> AcceptedObligationArtifacts:
@@ -560,6 +632,10 @@ class BareMetalNegotiationService:
                     "duration_seconds": message.duration_seconds,
                     "domain_param_keys": ("bare_metal",),
                     "listing_id": request.listing_id,
+                    # The seller's own published demands: a mechanism whose
+                    # obligation binds an arbiter reads them from the trusted
+                    # listing, never from the request.
+                    "listing_demands": list(listing.get("demands") or ()),
                 },
             )
         except (TypeError, ValueError) as exc:

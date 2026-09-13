@@ -194,9 +194,10 @@ class ListingRequest:
     max_duration_seconds: int | None = None
     listing_id: str = field(default_factory=lambda: __import__("uuid").uuid4().hex)
     storefront_url: str = ""
+    status: str | None = None
 
     def to_dict(self) -> dict:
-        return {
+        data = {
             "listing_id": self.listing_id,
             "offer_resource": self.offer,
             "accepted_escrows": self.accepted_escrows,
@@ -205,6 +206,9 @@ class ListingRequest:
             "max_duration_seconds": self.max_duration_seconds,
             "storefront_url": self.storefront_url,
         }
+        if self.status is not None:
+            data["status"] = self.status
+        return data
 
 
 @dataclass

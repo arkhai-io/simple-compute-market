@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 import time
 import uuid
 from typing import Any, Optional, cast
@@ -39,6 +40,35 @@ from registry_client.models import (
     ValidatePublishRequest,
     ValidatePublishResponse,
 )
+
+
+# A bearer credential reaches the wire verbatim as an Authorization value, so
+# it must be a single run of printable US-ASCII: no line break, no surrounding
+# space, nothing an HTTP header cannot carry.
+_HEADER_SAFE_CREDENTIAL = re.compile(r"[\x21-\x7e]+")
+
+
+def _static_headers(api_key: str | None) -> dict[str, str]:
+    """Build the headers every request inherits, refusing an unsendable key.
+
+    An illegal header value is rejected by the transport at request time, and
+    that rejection quotes the offending header — credential included — into an
+    exception message callers routinely record. Refusing the value up front
+    keeps it out of every later diagnostic, so this message names the
+    constraint and never the value. An unset or empty key stays absent rather
+    than becoming an empty bearer.
+    """
+
+    headers = {"Accept": "application/json"}
+    if not api_key:
+        return headers
+    if not _HEADER_SAFE_CREDENTIAL.fullmatch(api_key):
+        raise ValueError(
+            "registry api_key must be one line of printable US-ASCII with no "
+            "whitespace; a trailing newline is the usual cause"
+        )
+    headers["Authorization"] = f"Bearer {api_key}"
+    return headers
 
 
 class _RegistryClientBase:
@@ -406,9 +436,7 @@ class RegistryClient(_RegistryClientBase):
             expected_registries,
             registry_authority,
         )
-        headers = {"Accept": "application/json"}
-        if api_key:
-            headers["Authorization"] = f"Bearer {api_key}"
+        headers = _static_headers(api_key)
         self._client = httpx.AsyncClient(
             base_url=self._base,
             timeout=timeout,
@@ -782,9 +810,7 @@ class SyncRegistryClient(_RegistryClientBase):
             expected_registries,
             registry_authority,
         )
-        headers = {"Accept": "application/json"}
-        if api_key:
-            headers["Authorization"] = f"Bearer {api_key}"
+        headers = _static_headers(api_key)
         self._client = httpx.Client(
             base_url=self._base,
             timeout=timeout,

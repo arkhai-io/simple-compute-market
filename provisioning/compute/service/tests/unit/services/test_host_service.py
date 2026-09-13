@@ -488,3 +488,130 @@ class TestGpuModel:
         ))
         updated = svc.update_host("kvm1", HostUpdate(kvm_host="10.0.0.2"))
         assert updated.gpu_model == "H100"
+
+
+# ---------------------------------------------------------------------------
+# Tenant-facing endpoint persistence and rendering
+#
+# The buyer is told public_host/public_port when a host separates the endpoint
+# its tenants use from the one the provisioner arrives through.
+# ---------------------------------------------------------------------------
+
+
+def test_inventory_public_port_is_parsed(tmp_path):
+    """Parsing only. Persistence is proved by the seed/read-back test below."""
+    from vm_provisioning_adapter.services.host_service import _parse_ini
+
+    entries = _parse_ini(
+        "[bare_metal_nodes]\n"
+        "bm1 ansible_host=10.0.0.5 ansible_port=6001 public_host=192.168.1.50"
+        "  public_port=22 ansible_user=svc\n"
+    )
+
+    assert len(entries) == 1
+    assert entries[0]["public_host"] == "192.168.1.50"
+    assert entries[0]["public_port"] == 22
+    assert entries[0]["ssh_port"] == 6001
+
+
+def test_seeded_tenant_endpoint_survives_a_read_back(svc, session_factory):
+    """Seed through the real service, then read the row back from the database.
+
+    The buyer is handed whatever is stored here, so a column that parses but
+    never persists would hand the buyer the provisioner's endpoint instead.
+    """
+    from compute_provisioning_service.db.models import Host
+
+    svc.seed_from_ini(
+        "[bare_metal_nodes]\n"
+        "bm1 ansible_host=10.0.0.5 ansible_port=6001 public_host=192.168.1.50"
+        "  public_port=22 ansible_user=svc ansible_ssh_private_key_file=/k\n"
+    )
+
+    with session_factory() as db:
+        row = db.query(Host).filter(Host.name == "bm1").one()
+        assert row.kvm_host == "10.0.0.5"
+        assert row.ssh_port == 6001
+        assert row.public_host == "192.168.1.50"
+        assert row.public_port == 22
+
+
+def test_reseeding_updates_the_stored_tenant_endpoint(svc, session_factory):
+    from compute_provisioning_service.db.models import Host
+
+    base = ("[bare_metal_nodes]\nbm1 ansible_host=10.0.0.5 ansible_port=6001 "
+            "ansible_user=svc ansible_ssh_private_key_file=/k")
+    svc.seed_from_ini(base + " public_host=192.168.1.50  public_port=22\n")
+    svc.seed_from_ini(base + " public_host=192.168.1.99  public_port=2222\n")
+
+    with session_factory() as db:
+        row = db.query(Host).filter(Host.name == "bm1").one()
+        assert row.public_host == "192.168.1.99"
+        assert row.public_port == 2222
+
+
+def test_a_host_without_a_tenant_endpoint_persists_none(svc, session_factory):
+    from compute_provisioning_service.db.models import Host
+
+    svc.seed_from_ini(
+        "[kvm_hosts]\nbm2 ansible_host=10.0.0.6 ansible_user=svc "
+        "ansible_ssh_private_key_file=/k\n"
+    )
+
+    with session_factory() as db:
+        row = db.query(Host).filter(Host.name == "bm2").one()
+        assert row.public_host is None
+        assert row.public_port is None
+
+
+def test_both_inventory_renderings_emit_the_stored_tenant_endpoint(
+    svc, session_factory, settings
+):
+    """The two renderings of one row must not disagree about the endpoint.
+
+    Exercises the real renderers, not the shared helper they both call: a
+    renderer that stopped calling it would still pass a helper-only test.
+    """
+    from vm_provisioning_adapter.services.ansible_service import AnsibleService
+    from compute_provisioning_service.db.models import Host
+
+    svc.seed_from_ini(
+        "[bare_metal_nodes]\n"
+        "bm1 ansible_host=10.0.0.5 ansible_port=6001 public_host=192.168.1.50"
+        "  public_port=22 ansible_user=svc ansible_ssh_private_key_file=/k\n"
+    )
+    with session_factory() as db:
+        hosts = db.query(Host).all()
+
+        ini_text = svc.render_inventory_ini(hosts)
+        inventory_path = AnsibleService(settings).write_inventory(hosts)
+        try:
+            written = inventory_path.read_text(encoding="utf-8")
+        finally:
+            inventory_path.unlink(missing_ok=True)
+
+    for rendering, label in ((ini_text, "render_inventory_ini"),
+                             (written, "write_inventory")):
+        assert "public_host=192.168.1.50" in rendering, label
+        assert "public_port=22" in rendering, label
+        assert "ansible_port=6001" in rendering, label
+
+
+def test_inventory_without_a_public_port_stays_unset(tmp_path):
+    from vm_provisioning_adapter.services.host_service import _parse_ini
+
+    entries = _parse_ini(
+        "[kvm_hosts]\nbm1 ansible_host=10.0.0.5 ansible_user=svc\n"
+    )
+
+    assert entries[0]["public_port"] is None
+
+
+def test_an_out_of_range_public_port_is_refused(tmp_path):
+    from vm_provisioning_adapter.services.host_service import _parse_ini
+
+    entries = _parse_ini(
+        "[kvm_hosts]\nbm1 ansible_host=10.0.0.5 ansible_user=svc public_port=70000\n"
+    )
+
+    assert entries == []

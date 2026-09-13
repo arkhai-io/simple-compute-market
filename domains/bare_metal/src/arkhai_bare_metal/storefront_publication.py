@@ -175,6 +175,30 @@ def load_derived_bare_metal_listing(
     return dict(zip(keys, row))
 
 
+def load_derived_bare_metal_listing_by_id(
+    db_path: str,
+    *,
+    listing_id: str,
+) -> dict[str, Any] | None:
+    conn = _read_connection(db_path)
+    try:
+        row = conn.execute(
+            """
+            SELECT d.derivation_key, d.status, l.status AS listing_status
+            FROM derived_bare_metal_listings d
+            LEFT JOIN listings l ON l.listing_id = d.listing_id
+            WHERE d.listing_id = ?
+            LIMIT 1
+            """,
+            (listing_id,),
+        ).fetchone()
+    finally:
+        conn.close()
+    if row is None:
+        return None
+    return dict(zip(["derivation_key", "status", "listing_status"], row))
+
+
 def record_derived_bare_metal_listing(
     db_path: str,
     *,
@@ -248,6 +272,77 @@ def mark_derived_bare_metal_listings_closed(
         conn.close()
 
 
+_LISTING_TERMS_ASSIGNMENT = """
+        updated_at = STRFTIME('%Y-%m-%dT%H:%M:%fZ', 'now'),
+        offer_resource = ?, accepted_escrows = ?,
+        settlement_options = ?, publication_clauses = ?, demands = ?,
+        max_duration_seconds = ?, storefront_url = ?
+"""
+
+
+def commit_derived_bare_metal_listing(
+    db_path: str,
+    *,
+    listing_id: str,
+    base_url: str,
+    candidate: dict[str, Any],
+    offer: dict[str, Any],
+    accepted_escrows: list[dict[str, Any]],
+    demands: list[dict[str, Any]],
+    max_duration_seconds: int | None,
+    settlement_options: list[dict[str, Any]] | None,
+    publication_clauses: list[dict[str, Any]] | None,
+    reopen: bool,
+) -> None:
+    """Atomically commit confirmed terms and derived lifecycle state."""
+    listing = BareMetalListing.model_validate(candidate["listing"])
+    lifecycle = "status = 'open', paused = 0," if reopen else ""
+    conn = sqlite3.connect(db_path)
+    try:
+        conn.execute("BEGIN IMMEDIATE")
+        listing_update = conn.execute(
+            f"UPDATE listings SET {lifecycle}{_LISTING_TERMS_ASSIGNMENT}"
+            " WHERE listing_id = ?",
+            (
+                json.dumps(offer),
+                json.dumps(accepted_escrows),
+                json.dumps(settlement_options or []),
+                json.dumps(publication_clauses or []),
+                json.dumps(demands),
+                max_duration_seconds,
+                base_url,
+                listing_id,
+            ),
+        )
+        if listing_update.rowcount != 1:
+            raise ValueError("bare-metal lifecycle listing is not tracked")
+        derived_update = conn.execute(
+            """
+            UPDATE derived_bare_metal_listings
+            SET site_id = ?, physical_resource_id = ?, machine_id = ?,
+                physical_host_id = ?, status = 'open',
+                last_reconciled_at = STRFTIME('%Y-%m-%dT%H:%M:%fZ', 'now')
+            WHERE listing_id = ? AND derivation_key = ?
+            """,
+            (
+                str(candidate["site_id"]),
+                str(candidate["physical_resource_id"]),
+                listing.machine_id,
+                listing.physical_host_id,
+                listing_id,
+                str(candidate["derivation_key"]),
+            ),
+        )
+        if derived_update.rowcount != 1:
+            raise ValueError("bare-metal lifecycle derivation is not tracked")
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
+
+
 def reopen_derived_bare_metal_listing_if_present(
     *,
     db_path: str,
@@ -260,8 +355,15 @@ def reopen_derived_bare_metal_listing_if_present(
     publish_existing_listing: Any,
     settlement_options: list[dict[str, Any]] | None = None,
     publication_clauses: list[dict[str, Any]] | None = None,
+    refresh_listing_ids: frozenset[str] = frozenset(),
 ) -> dict[str, Any] | None:
-    """Reopen a tracked listing through caller-supplied publication."""
+    """Reopen or explicitly refresh a tracked listing through publication.
+
+    An open listing is left alone unless an operator named its identifier in
+    ``refresh_listing_ids``. That named refresh republishes the same listing
+    identifier, so buyers keep the identity they already hold and accepted
+    agreements against it stay valid.
+    """
     derived = load_derived_bare_metal_listing(
         db_path,
         derivation_key=str(candidate["derivation_key"]),
@@ -270,43 +372,25 @@ def reopen_derived_bare_metal_listing_if_present(
         return None
     listing_id = str(derived["listing_id"])
     if derived.get("listing_status") == "open":
-        return None
-
-    conn = sqlite3.connect(db_path)
-    try:
-        conn.execute(
-            """
-            UPDATE listings
-            SET status = 'open', paused = 0,
-                updated_at = STRFTIME('%Y-%m-%dT%H:%M:%fZ', 'now'),
-                offer_resource = ?, accepted_escrows = ?,
-                settlement_options = ?, publication_clauses = ?, demands = ?,
-                max_duration_seconds = ?, storefront_url = ?
-            WHERE listing_id = ?
-            """,
-            (
-                json.dumps(offer),
-                json.dumps(accepted_escrows),
-                json.dumps(settlement_options or []),
-                json.dumps(publication_clauses or []),
-                json.dumps(demands),
-                max_duration_seconds,
-                base_url,
-                listing_id,
-            ),
+        if listing_id not in refresh_listing_ids:
+            return None
+        return publish_existing_listing(
+            listing_id=listing_id,
+            transition="refresh",
+            candidate=candidate,
+            offer=offer,
+            accepted_escrows=accepted_escrows,
+            settlement_options=settlement_options or [],
+            publication_clauses=publication_clauses or [],
+            demands=demands,
+            max_duration_seconds=max_duration_seconds,
+            storefront_url=base_url,
         )
-        conn.commit()
-    finally:
-        conn.close()
 
-    record_derived_bare_metal_listing(
-        db_path,
-        listing_id=listing_id,
-        candidate=candidate,
-        status="open",
-    )
     return publish_existing_listing(
         listing_id=listing_id,
+        transition="reopen",
+        candidate=candidate,
         offer=offer,
         accepted_escrows=accepted_escrows,
         settlement_options=settlement_options or [],
@@ -315,6 +399,31 @@ def reopen_derived_bare_metal_listing_if_present(
         max_duration_seconds=max_duration_seconds,
         storefront_url=base_url,
     )
+
+
+def resolve_refresh_target_derivation_key(
+    db_path: str,
+    *,
+    listing_id: str,
+    candidates: Iterable[dict[str, Any]],
+) -> str:
+    """Return the derivation key an explicit refresh of ``listing_id`` covers.
+
+    A refresh republishes an existing identifier, so the target must be one
+    this storefront derived and still offers: an untracked identifier, one
+    whose local listing is not open, or one whose resource is absent from the
+    current available candidates is refused before anything is written.
+    """
+    row = load_derived_bare_metal_listing_by_id(db_path, listing_id=listing_id)
+    if row is None:
+        raise ValueError("refresh target is not a tracked bare-metal listing")
+    if row.get("status") != "open" or row.get("listing_status") != "open":
+        raise ValueError("refresh target is not an open bare-metal listing")
+    derivation_key = str(row["derivation_key"])
+    available = {str(candidate["derivation_key"]) for candidate in candidates}
+    if derivation_key not in available:
+        raise ValueError("refresh target is not an available bare-metal candidate")
+    return derivation_key
 
 
 def close_stale_bare_metal_listings(

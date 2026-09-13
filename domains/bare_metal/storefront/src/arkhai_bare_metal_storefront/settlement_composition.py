@@ -195,7 +195,13 @@ class BareMetalStorefrontSettlementComposition:
     def accepted_obligation_dispatch(
         self,
     ) -> dict[str, Callable[[Mapping[str, Any], Mapping[str, Any]], Any]]:
-        """Curried registry dispatch for every enabled obligation-building mechanism."""
+        """Curried registry dispatch for every enabled obligation-building mechanism.
+
+        The seller's injected settlement resources travel with the acceptance
+        context: a mechanism that materializes against a chain needs the same
+        address book and payout wallet at acceptance that it published from.
+        The domain never reads them; only the owning mechanism does.
+        """
 
         dispatch: dict[str, Callable[[Mapping[str, Any], Mapping[str, Any]], Any]] = {}
         for mechanism_id in self.config.priority:
@@ -214,7 +220,7 @@ class BareMetalStorefrontSettlementComposition:
                     option,
                     self.config,
                     role="seller",
-                    context=context,
+                    context={"settlement_resources": self.resources, **context},
                 )
 
             dispatch[mechanism_id] = build

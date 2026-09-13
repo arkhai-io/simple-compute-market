@@ -242,3 +242,53 @@ def test_the_read_command_can_redeliver() -> None:
         if item.name == "introduction"
     )
     assert "deliver" in command.callback.__code__.co_varnames
+
+
+def test_one_file_serves_both_the_domain_and_the_shared_chain_loader(
+    tmp_path: Path,
+) -> None:
+    """The buyer reads one config through two loaders, so both must accept it.
+
+    `BARE_METAL_BUYER_CONFIG` selects this file for the domain's strict
+    `[bare_metal]` section, and the core `--config` flag points the shared
+    `market_config` loader at the same path for `[chains.<name>]`. A domain
+    section that forbids unknown keys must not therefore forbid the tables the
+    other loader owns.
+    """
+    from market_config.config_loader import chains_from_config, set_user_config_path
+
+    path = tmp_path / "buyer.toml"
+    path.write_text(
+        """
+[BuyerProfile]
+store_path = "/tmp/profiles.json"
+
+[registry]
+urls = ["https://registry.example"]
+
+[bare_metal]
+registry_url = "https://registry.example"
+registry_authority = "registry-prod"
+registry_principals = [{scheme = "ed25519", identifier = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"}]
+
+[chains.arkhai_dev]
+rpc_url = "http://chain.invalid:8545"
+chain_id = 31337
+alkahest_address_config_path = "/etc/arkhai/alkahest.json"
+""".strip(),
+        encoding="utf-8",
+    )
+
+    config = load_bare_metal_buyer_config(path)
+    assert config.registry_authority == "registry-prod"
+
+    try:
+        set_user_config_path(path)
+        chains = chains_from_config()
+    finally:
+        set_user_config_path(None)
+
+    chain = chains["arkhai_dev"]
+    assert chain.rpc_url == "http://chain.invalid:8545"
+    assert chain.chain_id == 31337
+    assert chain.alkahest_address_config_path == "/etc/arkhai/alkahest.json"

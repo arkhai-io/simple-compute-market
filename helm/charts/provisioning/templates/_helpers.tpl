@@ -65,6 +65,20 @@ config-provisioning-secrets.yml.
 {{- end }}
 
 {{/*
+Resolve the required pre-existing Secret holding the Ansible known_hosts pins.
+*/}}
+{{- define "provisioning.hostKeyPinsSecretName" -}}
+{{- required "provisioning.hostKeyPins.secretName must reference a pre-existing Secret when hostKeyPins.enabled" .Values.hostKeyPins.secretName -}}
+{{- end }}
+
+{{/*
+Absolute path of the mounted known_hosts file inside the container.
+*/}}
+{{- define "provisioning.hostKeyPinsPath" -}}
+{{- printf "%s/%s" (trimSuffix "/" .Values.hostKeyPins.mountPath) (required "provisioning.hostKeyPins.key is required when hostKeyPins.enabled" .Values.hostKeyPins.key) -}}
+{{- end }}
+
+{{/*
 Resolve the ConfigMap name for the production config profile.
 */}}
 {{- define "provisioning.configMapName" -}}

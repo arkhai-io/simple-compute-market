@@ -9,10 +9,14 @@
     "identity",
     "adminPrincipals",
     "siteBindingsSecret",
+    "registryApiKeySecret",
     "sitePlacement",
     "publicUrl",
     "sellerEvmAddress",
     "alkahestEnabled",
+    "chainsJson",
+    "chainAddressConfig",
+    "walletSecret",
     "settlementConfigSecret",
     "databasePath",
     "persistence"
@@ -52,6 +56,7 @@
       "items": {"$ref": "#/definitions/publicIdentity"}
     },
     "siteBindingsSecret": {"$ref": "#/definitions/secretReference"},
+    "registryApiKeySecret": {"$ref": "#/definitions/optionalSecretReference"},
     "sitePlacement": {"enum": ["fill_first", "round_robin"]},
     "publicUrl": {"type": "string", "format": "uri", "pattern": "^https?://"},
     "sellerEvmAddress": {
@@ -59,6 +64,19 @@
       "pattern": "^(|0x[0-9a-fA-F]{40})$"
     },
     "alkahestEnabled": {"type": "boolean"},
+    "chainsJson": {"type": "string"},
+    "chainAddressConfig": {
+      "type": "object",
+      "required": ["enabled"],
+      "properties": {
+        "enabled": {"type": "boolean"},
+        "secretName": {"type": "string"},
+        "key": {"type": "string"},
+        "mountPath": {"type": "string"}
+      },
+      "additionalProperties": false
+    },
+    "walletSecret": {"$ref": "#/definitions/secretReference"},
     "settlementConfigSecret": {"$ref": "#/definitions/secretReference"},
     "databasePath": {"type": "string", "minLength": 1, "pattern": "^/"},
     "persistence": {
@@ -103,6 +121,15 @@
       "required": ["name", "key"],
       "properties": {
         "name": {"type": "string", "minLength": 1},
+        "key": {"type": "string", "minLength": 1}
+      }
+    },
+    "optionalSecretReference": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "key"],
+      "properties": {
+        "name": {"type": "string"},
         "key": {"type": "string", "minLength": 1}
       }
     },

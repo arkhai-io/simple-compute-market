@@ -187,6 +187,15 @@ fan-out, durable publication result recording, and close-before-reopen
 lifecycle. A domain contribution supplies only schema-opaque candidates and
 codecs plus hooks that resolve each listing's durable capacity binding.
 
+For explicit refresh and reopen, the kit also owns authenticated exact-target
+preflight/readback and an immutable current-operation result used by explicit
+recovery. Core constructs and fans out the typed registry request; the kit does
+not duplicate transport. Each domain supplies explicit eligibility,
+disabled-publication, and atomic local-commit policy. This keeps ordinary
+publication's at-least-one-success compatibility while a confirmed lifecycle
+operation reports every nonconfirmed target as partial and commits locally only
+after safe receipt persistence and at least one matching readback.
+
 Every capacity-backed candidate carries
 `CapacityBinding(site_id, offering_mode, source_id)`. The site ID comes from
 trusted local composition, the offering mode must be declared by the selected
@@ -583,17 +592,28 @@ Configuration resolution, ConfigMap/Secret mounting, stateful-service persistenc
 
 Internal Python packages are built as wheels into the repository `.dist` directory. Consumers install those wheels with `--find-links`; they do not use editable relative sibling paths.
 
-The required development pattern is:
+The development pattern is:
 
 ```text
 build prerequisite internal wheels
         ↓
 uv sync --find-links <repo>/.dist
         ↓
---upgrade-package / --reinstall-package changed internal distributions
+reinstall changed internal distributions
         ↓
 run focused tests
 ```
+
+Three qualification targets make dependency selection reproducible while still
+refreshing same-version local artifacts: the bare-metal storefront, Alkahest,
+and E2E `reinit` targets run `uv sync --locked` with explicit
+`--reinstall-package` inventories and no `--upgrade-package`. Their checked-in
+locks select dependency versions; reinstall selects newly built bytes at those
+versions. The bare-metal storefront distribution target builds registry-client,
+config, and Alkahest before the storefront wheel. Other reinstalled wheels are
+still supplied by the established build flow, and other repository `reinit`
+targets retain their existing behavior; these three targets are not a
+repository-wide conversion.
 
 Docker builds copy `.dist` from the build context in every stage that resolves internal packages. Using a sibling source path forces an unnecessarily broad Docker context and can allow local source layout to differ from packaged behavior.
 

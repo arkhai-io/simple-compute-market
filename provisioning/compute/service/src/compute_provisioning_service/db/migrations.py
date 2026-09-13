@@ -352,6 +352,10 @@ def _migrate_hosts_public_host(engine: Engine) -> None:
     _add_column_if_missing(engine, "hosts", "public_host", "VARCHAR")
 
 
+def _migrate_hosts_public_port(engine: Engine) -> None:
+    _add_column_if_missing(engine, "hosts", "public_port", "INTEGER")
+
+
 def _migrate_relay_reachable_hosts(engine: Engine) -> None:
     """Everything needed to reach a host, and a VM on it, without an inbound route.
 
@@ -1722,6 +1726,7 @@ def _migrate_executor_identities_and_pool_modes(engine: Engine) -> None:
 MIGRATIONS: tuple[Migration, ...] = (
     Migration("20260603_001_ansible_jobs_escrow_uid", _migrate_ansible_jobs_escrow_uid),
     Migration("20260603_002_hosts_public_host", _migrate_hosts_public_host),
+    Migration("20260906_001_hosts_public_port", _migrate_hosts_public_port),
     Migration("20260603_003_vm_leases_table", _migrate_vm_leases_table),
     Migration("20260603_004_vm_leases_allocation_id", _migrate_vm_leases_allocation_id),
     Migration(
