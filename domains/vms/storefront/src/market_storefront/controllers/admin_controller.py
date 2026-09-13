@@ -59,6 +59,11 @@ from market_storefront.models.capacity_admin_models import (
     ResourcePatchResponse,
     UsageStartedEventRequest,
 )
+from market_storefront.lifecycle import (
+    FULFILLMENT_RESUME,
+    SETTLEMENT_SERVICING,
+    SITE_PROJECTION_POLLER,
+)
 from market_storefront.server import _set_globally_paused, _set_loops_paused
 from market_capacity_publication import (
     CapacityBinding,
@@ -82,6 +87,19 @@ _INTERRUPTIBLE_HELD_STATES = frozenset(
 )
 
 router = APIRouter(prefix="/api/v1/admin", tags=["admin"])
+
+
+#: Route alias -> the loop's registered name. Aliases are hyphenated where loop
+#: names are underscored, and `site-projections` does not transform into
+#: `site_projection_poller` by any rule -- so the mapping is declared rather
+#: than inferred. Declaring it makes the route's spelling and the registry's
+#: agree by construction, which is the drift that let `claims` outlive the
+#: claims engine.
+ADVANCE_LOOP_NAMES = {
+    "settlement-servicing": SETTLEMENT_SERVICING,
+    "fulfillment-resume": FULFILLMENT_RESUME,
+    "site-projections": SITE_PROJECTION_POLLER,
+}
 
 
 @cbv(router)
@@ -304,6 +322,12 @@ class AdminController:
     # ------------------------------------------------------------------
     # One cycle of one loop, while the timers are held.
     #
+    # Each route reports the loop's registered name from `lifecycle` rather
+    # than a literal. A literal is a third place a loop's name is spelled --
+    # after the registration and the gate call -- and this one had already
+    # drifted: the route was still called `claims` and a caller still expected
+    # `claims_engine` after the claims engine became settlement servicing.
+    #
     # Each route calls the operation the timer was already invoking and returns
     # what that operation returns. None drives an iteration of the loop itself,
     # and none implements a transition the loop does not: a manual cycle that
@@ -344,10 +368,10 @@ class AdminController:
         return {"paused": False, "loops": loops}
 
     @router.post(
-        "/lifecycle/claims/run-cycle",
+        "/lifecycle/settlement-servicing/run-cycle",
         summary="Run one settlement-servicing sweep now (admin)",
     )
-    async def run_claims_cycle(self) -> dict:
+    async def run_settlement_servicing_cycle(self) -> dict:
         import market_storefront.container as _container
 
         composition = _container.resolved_settlement_composition
@@ -356,7 +380,10 @@ class AdminController:
                 status_code=503, detail="settlement composition is not initialized"
             )
         processed = await composition.worker.run_once()
-        return {"loop": "settlement_servicing", "processed": int(processed)}
+        return {
+            "loop": ADVANCE_LOOP_NAMES["settlement-servicing"],
+            "processed": int(processed),
+        }
 
     @router.post(
         "/lifecycle/fulfillment-resume/run-cycle",
@@ -368,7 +395,7 @@ class AdminController:
         )
 
         await resume_incomplete_fulfillments_once(sqlite_client=self._db)
-        return {"loop": "fulfillment_resume"}
+        return {"loop": ADVANCE_LOOP_NAMES["fulfillment-resume"]}
 
     @router.post(
         "/lifecycle/site-projections/run-cycle",
@@ -387,7 +414,10 @@ class AdminController:
         )
 
         await load_site_projections(self._db)
-        return {"loop": "site_projection_poller", "sites": projection_status_summary()}
+        return {
+            "loop": ADVANCE_LOOP_NAMES["site-projections"],
+            "sites": projection_status_summary(),
+        }
 
     @router.post(
         "/capacity/projections/refresh",

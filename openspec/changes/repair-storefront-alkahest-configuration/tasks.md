@@ -74,6 +74,53 @@ confirms settlement becomes ready has not happened yet.
       the fact that it cannot yet serve two belongs in its current state rather
       than only in a skip string.
 
+## 3t. Prior-head run: 11 failed, 75 passed, 28 skipped
+
+From 10/72/32. Four fewer skips and three more passes; the claims-name fix is
+not in this head.
+
+- [x] 3t.1 **The pause could never be observed: loop intervals were lost.**
+      Four failures reported loops `pausing` -- mid-cycle when the bounded wait
+      expired. `storefront.bob.toml` and `storefront.alice.toml` used to carry
+      `negotiation_watchdog_interval`, `claims_sweep_interval` and
+      `fulfillment_resume_sweep_interval` at 2 seconds, with a comment saying
+      exactly why: a pause is observed only when a loop next reaches its gate,
+      and the shipped defaults (60s watchdog, 30s sweeps) exceed the pause's
+      own 5s wait, so every loop reports `pausing` forever. All three settings
+      were gone from both files; `poll_interval = 1` survived.
+
+      Restored with that reasoning. This is the same class as every other
+      config loss this session, and it is why the restored pause stages could
+      not pass however correct the gate was.
+
+- [x] 3t.2 **A malformed log call, not a product defect.**
+      `TypeError: not enough arguments for format string` in
+      `test_full_deal_buyer_cli.py`: three placeholders, two arguments -- a
+      stray `listing_resource=%s` the equivalent call in `test_full_deal.py`
+      does not have. Swept every e2e module for lazy-log
+      placeholder/argument mismatches; this was the only one, and it is now
+      zero.
+
+- [ ] 3t.3 **`500` on admin reservations, located.** The generic
+      `"Storefront administrator request failed"` is the admin middleware
+      wrapping a downstream error -- it does log the cause, and the traceback
+      runs through `service_peer_auth.py:312`, the line after that
+      middleware's claim test. `POST /api/v1/admin/portfolio/reservations` is
+      not a callback and not the status read, so the middleware should pass it
+      straight through; it is failing inside the branch that decides. Reading
+      the body is the first thing past that point, and the outer frames show an
+      `EndOfStream` on the request stream, which suggests the body is being
+      consumed twice on this path. Needs the full frame list to confirm.
+
+- [ ] 3t.4 **`409` on settle: "accepted provision terms have no SSH public
+      key".** The scenario passes `ssh_public_key` to `settle`, but the key has
+      to be in the *accepted* provision terms, which come from the negotiation.
+      So `negotiate_new`'s `provision_terms` is missing it -- payload drift on
+      the same axis as `capacity_source` and `offering_mode`.
+
+- [ ] 3t.5 Unchanged: `market negotiate` exits 2, `market credits buy` exits 2,
+      `market buy` exits 0 with no run-log.
+
 ## 4. Closeout
 
 - [ ] 4.1 **Comment hygiene.** `make check-comment-hygiene`.

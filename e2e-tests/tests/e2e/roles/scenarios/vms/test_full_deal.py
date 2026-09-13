@@ -1281,8 +1281,11 @@ class TestStage09bb_ClaimSubmittedForTheFulfilledEscrow:
         """
         require_state(deal_state, "real_escrow_uid", "settlement_status")
 
-        result = advance_storefront(storefront_admin_client, "claims")
-        assert result.get("loop") == "claims_engine", result
+        # The claims engine became settlement servicing when settlement
+        # mechanisms were made neutral. Same periodic sweep, new name -- the
+        # loop, its advance route, and this assertion all use it.
+        result = advance_storefront(storefront_admin_client, "settlement-servicing")
+        assert result.get("loop") == "settlement_servicing", result
         assert "processed" in result, (
             f"claims advance returned no sweep count: {result}"
         )

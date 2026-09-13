@@ -609,7 +609,7 @@ class TestStage03a_ValidatePublish:
         )
         deal_state._registry_validate_passed = True
         log.info(
-            "[03a] Registry validate-publish: valid=%s listing_resource=%s escrows=%d",
+            "[03a] Registry validate-publish: valid=%s escrows=%d",
             result.valid,
             result.accepted_escrows_count,
         )
