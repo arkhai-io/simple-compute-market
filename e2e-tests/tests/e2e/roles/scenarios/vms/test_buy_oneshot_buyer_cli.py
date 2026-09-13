@@ -40,6 +40,7 @@ from market_alkahest.alkahest import (
     resolve_alkahest_address_config,
 )
 from src.settings import settings
+from tests.e2e.roles.buyer_cli import MarketRun
 from tests.e2e.roles.scenarios.vms.host_registry import (
     E2E_BUY_HOST,
     E2E_BUY_POOL_ID,
@@ -98,6 +99,48 @@ ACCEPTED_ESCROWS = [
         "rates": [{"field": "amount", "per": "hour", "value": str(DEMAND_AMOUNT)}],
     }
 ]
+
+
+#: Run-log fields safe to print into CI output, and sufficient to say what
+#: the buy did. The whole event carries proposals, accepted terms and
+#: tenant credentials; an assertion message is not the place for those.
+_REPORTABLE_EVENT_FIELDS = (
+    "event",
+    "status",
+    "reason",
+    "error",
+    "listing_id",
+    "seller_url",
+    "negotiation_id",
+    "round",
+    "rounds",
+    "agreed_amount",
+    "attempts",
+)
+
+
+def _run_log_digest(run: MarketRun) -> str:
+    """Summarize a finished `market buy` run-log for a failure message.
+
+    ``market buy`` reports one aggregate reason for a buy that agreed with
+    nobody, and stdout carries no per-candidate detail. The run-log does:
+    the negotiation events say whether the buyer opened, what the seller
+    answered, and what the outcome was. Read without waiting — the process
+    has exited, so the log is final and ``run_id`` would only raise a
+    second, less informative failure.
+    """
+    events = run.events_or_empty()
+    if not events:
+        return "run-log: none written"
+    lines = []
+    for event in events:
+        fields = {
+            key: event[key]
+            for key in _REPORTABLE_EVENT_FIELDS
+            if key in event and event[key] is not None
+        }
+        lines.append(" ".join(f"{k}={v!r}" for k, v in fields.items()))
+    return "run-log events:\n  " + "\n  ".join(lines)
 
 
 def _recipient_demands(seller_wallet: str) -> list[dict]:
@@ -393,7 +436,8 @@ class TestStageB4_MarketBuy:
         assert run.returncode == 0, (
             f"`market buy` exited {run.returncode}; expected 0 (ready).\n"
             f"stdout (tail): {run.stdout()[-2500:]}\n"
-            f"stderr (tail): {run.stderr()[-2500:]}"
+            f"stderr (tail): {run.stderr()[-2500:]}\n"
+            f"{_run_log_digest(run)}"
         )
 
         events = run.read_events()

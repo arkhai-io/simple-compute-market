@@ -889,9 +889,12 @@ failures.
       which is what my first draft did and is the antipattern this suite has
       already been caught by twice.
 
-- [ ] 3v.4 The next run's failure text should name the actual shape and settle
-      3v.2's contract question. Remaining: settle `409` for provision terms
-      carrying no SSH key, and the three buyer-CLI exits.
+- [x] 3v.4 The next run's failure text did name the shape, from the other
+      end: the guard passed, the hold landed, and `ReserveCapacityResponse`
+      refused to serialize a payload with no `resource_id`. So 3v.2's
+      contract question is answered by retirement rather than by
+      `str | None` -- the field is not optional, it is absent by design.
+      Completed in 3z.
 
 ## 3w. The SSH key is a negotiated term
 
@@ -940,9 +943,14 @@ failures.
       accepted. Storefront unit **1013 passed**, 1 pre-existing failure;
       `core/storefront-client` 30 passed.
 
-- [ ] 3x.5 Remaining: `market negotiate` reports the listing has no installed,
-      enabled, compatible settlement option; `market credits buy` exits 2;
-      `market buy` exits 0 with no run-log.
+- [x] 3x.5 The next run settled all three, and none of them the way the
+      counts suggested: same six failures, four different causes.
+      `market negotiate` got past the settlement option and exited 1 on a
+      strict-contract parse (3aa); `market credits buy` still exits 2, on the
+      missing buyer `[Settlement]` after all (3ab); `market buy` now exits 4
+      rather than 0, and is the one cause this round could not establish
+      (3ac). The reservation `500` was this retirement landing incompletely
+      (3z).
 
 ## 3y. The buyer CLI had no settlement mechanism enabled
 
@@ -975,10 +983,169 @@ failures.
       failure exactly. E2e collection 140; pyflakes clean apart from one
       pre-existing unused local.
 
-- [ ] 3y.4 `market credits buy` exits 2 and `market buy` exits 0 with no
-      run-log. The credits scenario drives a different storefront and its own
-      buyer profile, so whether it needs the same section is not assumed --
-      the next run's error text decides.
+- [x] 3y.4 The credits scenario did need the same section, and not assuming
+      it was still right: the error text was the deciding evidence and it
+      arrived by a different route -- `credits buy` refuses earlier and in
+      its own words, before any run-log exists. Carried in 3ab.
+
+## 3z. The retirement landed in three of four places
+
+- [x] 3z.1 **Both dynamic-listing stages still `500` on admin reserve, and
+      the innermost frame names a different layer.** The `KeyError` is gone;
+      what raises now is
+      `ValidationError: 1 validation error for ReserveCapacityResponse /
+      resource_id / Field required`, from the model's `__init__` inside the
+      route.
+
+      The reservation itself succeeded: the stage event
+      `capacity_reserved_by_admin` records the hold with its
+      `closed_listing_ids`, and the site authority returned 200. Only the
+      response refused to serialize. So the failure moved from before the
+      write to after it -- the route now performs its effect and then reports
+      a 500, which is worse than the original for a caller that retries.
+
+- [x] 3z.2 **Cause: the retirement was applied to the client dataclass, the
+      controller's construction and the required-fields tuple, and not to the
+      server's response model.** Four places hold this field's shape and 3x
+      moved three of them. `capacity_admin_models.ReserveCapacityResponse`
+      still declared `resource_id: str`, required.
+
+      Removed, with the boundary's reason stated on the model the way the
+      client dataclass already states it -- the next reader of either sees
+      why the field is absent rather than missing.
+
+- [x] 3z.3 **Why the existing tests did not catch it.** The five tests added
+      in 3x.4 bind `require_reservation_fields`, which is the guard, and the
+      guard was correct. Nothing constructed the response. That is the
+      shape this suite has been caught by before from the other direction:
+      a test that exercises one layer and reads as though it covered the
+      contract.
+
+      Added two tests that build `ReserveCapacityResponse` the way the
+      controller builds it, from the same stripped payload the guard accepts,
+      plus one asserting the field is absent from `model_fields`. The guard
+      and the response now fail together or pass together.
+
+## 3aa. `TrustedIdentitySet` refused its own decoded wire form
+
+- [x] 3aa.1 **`market negotiate` now exits 1, ~200 lines further on.** 3y's
+      `[Settlement]` section worked: the CLI selects the advertised option,
+      resolves prices, and dies at
+      `TrustedIdentitySet.model_validate(listing_dict.get("publisher_principals"))`
+      with `identities / Input should be a valid tuple ... input_type=list`.
+
+- [x] 3aa.2 **The contract accepts an array over the wire and refuses the
+      same array once decoded.** `ContractModel` is `strict=True`, and
+      strict validation's Python-mode conversion table refuses a `list` for a
+      `tuple` field -- while its JSON-mode table accepts an array. Verified
+      both directions against the installed pydantic rather than from the
+      documentation: `model_validate_json` parses the payload,
+      `model_validate` of the decoded dict does not. Nested `Identity` dicts
+      are accepted either way, so list-versus-tuple was the whole of it.
+
+      Every caller reading a listing's publisher principals is on the decoded
+      path. Three of them -- `core_buyer.orchestration._seller_principals`,
+      `core_buyer.deal_helpers._parse_publisher_trust` and
+      `registry_client.models.from_dict` -- hand-roll the conversion, which
+      is what kept the gap invisible until a fourth validated the decoded
+      payload directly.
+
+- [x] 3aa.3 **Fixed on the contract, once, following the convention this
+      repository already uses for it.** `AlkahestSettlementConfig` is the
+      same kind of model -- `extra="forbid"`, `frozen=True`, `strict=True`
+      with tuple fields -- and carries `accept_toml_address_lists`, a
+      `mode="before"` validator converting the array form to a tuple. The
+      validator added to `identities` mirrors it.
+
+      Deliberately not `Field(strict=False)`, which would also admit a set or
+      a generator and let the caller decide the order of a contract whose
+      docstring pins it as ordered. A `list` only; everything else still
+      fails.
+
+- [x] 3aa.4 Tests: the decoded form parses and equals the JSON-parsed form,
+      and every constraint survives it -- uniqueness, the one-to-two bound,
+      identifier validation, and a set still refused. Verified by executing
+      the model, not by reading it.
+
+## 3ab. The credits buyer had no settlement mechanism either
+
+- [x] 3ab.1 **`market credits buy --new-key` exits 2 with no run-log, and
+      the credits CLI refuses earlier than the VM one.** Its generated config
+      carries `[wallet]` and `[chains.anvil]` and no `[Settlement]`, so
+      `buy_cli` raises
+      `no buyer settlement mechanism is enabled` before `RunLog.start` --
+      which is exactly the reported symptom, rc 2 and no first event.
+
+      3y.4 declined to assume this from the VM failure. The assumption would
+      have been right and the caution was still correct: the two CLIs refuse
+      at different points for the same missing section, and the credits one
+      refuses without leaving evidence, so the guess could not have been
+      confirmed from a run-log that does not exist.
+
+- [x] 3ab.2 Added the section by mirroring the VM fixture's working one
+      rather than assembling it from the field list, as in 3y.2:
+      `priority = ["alkahest.v1"]`, `enabled = true`, and
+      `address_config_path` on the mechanism section as well as the chain
+      entry. The seeded credits listing is priced in an anvil ERC-20, so
+      alkahest is the mechanism the seller advertises.
+
+- [ ] 3ab.3 Unverified beyond this: the credits storefront's own config has
+      no `[Settlement]` section, and its seller-side readiness raises
+      `no enabled settlement mechanism is ready` when nothing is enabled. It
+      reported healthy this run, but it also failed its demo seed (the
+      carried-forward `X-Market-Identity-Scheme` quota-registration 401), so
+      it never published and never exercised that path. If the next run
+      discovers no credits listing, this is the first place to look -- and a
+      missing seller section, not the buyer's.
+
+## 3ac. `market buy` exits 4, and the cause is not established
+
+- [x] 3ac.1 **What the run proves.** The buy discovers one match, prints
+      `negotiate →`, and reports `exited / no_match_agreed_to_terms` with
+      rc 4. No `/api/v1/negotiate/new` reaches bob-storefront at any point in
+      the scenario's window -- the whole container log was read, not the tail
+      -- so the buyer abandoned the negotiation locally, before contacting
+      the seller. Progress from the previous run's rc 0, which produced no
+      run-log at all.
+
+- [x] 3ac.2 **What it rules out, and why the remainder does not add up.**
+      Every local exit path in the negotiate hook returns before
+      `negotiation_started` is emitted, and that event was emitted. An
+      exit-at-opening decision, a `RuntimeError`, and an escaping exception
+      each leave a visible trace -- `negotiate ←`, `negotiate ✗`, or a rich
+      traceback with rc 1 -- and none appears. Stdout is complete: the
+      assertion tails 2500 characters and the captured output is shorter.
+
+      So the evidence and the source disagree. Rather than pick the most
+      plausible frame and act on it -- the mistake this change has already
+      paid for once -- this round buys evidence.
+
+- [x] 3ac.3 **Product diagnostics, not test-only.** Three gaps, each real
+      outside the suite:
+
+      - The negotiate hook narrows its handler to `RuntimeError`, which is
+        what the transport raises. Anything else left a negotiation with an
+        opening and no outcome and no error -- a silence with three
+        explanations. Now named in an event and an attempt record, then
+        reraised unchanged.
+      - A `negotiation_returned` event carrying scalars only, emitted before
+        the outcome is serialized. The serialization can itself refuse a
+        payload, and this separates "the seller declined" from "the buyer
+        could not write down what happened".
+      - `market buy` collected per-candidate attempts and dropped them,
+        reporting one aggregate reason for a buy that agreed with nobody.
+        The digest now reaches the run-log's terminal event and a
+        `Candidates tried` panel on any non-ready outcome.
+
+- [x] 3ac.4 The `B4` assertion prints the run-log's events on failure,
+      through `events_or_empty` -- the non-blocking read added for callers
+      reporting a failure they already have. Whitelisted fields: the full
+      events carry proposals, accepted terms and tenant credentials, and an
+      assertion message in CI output is not the place for those. Checked by
+      running the selection over representative events.
+
+- [ ] 3ac.5 The next run's digest decides this. Read the attempt reason
+      before theorising again.
 
 ## 4. Closeout
 

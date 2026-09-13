@@ -82,6 +82,51 @@ class TestPhysicalIdentityIsNotRequired:
         )
 
 
+class TestTheResponseModelAgreesWithTheGuard:
+    """A guard that accepts a stripped payload is only half the contract.
+
+    The first pass at this retirement dropped the field from the guard, from
+    the controller's construction and from the client dataclass, and left it
+    required on the response model. The hold landed in the ledger, the stage
+    event recorded it, and then serialization refused -- the same
+    `500 Storefront administrator request failed` this guard was extracted to
+    eliminate, one layer further out. Building the response the way the
+    controller builds it is what binds the two together; asserting only on
+    the guard is what let the gap through.
+    """
+
+    def test_a_stripped_reservation_also_serializes(self):
+        from market_storefront.models.capacity_admin_models import (
+            ReserveCapacityResponse,
+        )
+
+        stripped = {k: v for k, v in _COMPLETE.items() if k != "resource_id"}
+        require_reservation_fields(stripped, site_id="default")
+
+        response = ReserveCapacityResponse(
+            capacity_reservation_id=str(stripped["capacity_reservation_id"]),
+            pool_id=None,
+            member_id=None,
+            gpu_count=int(stripped["allocated_gpu_count"]),
+            resource_state=stripped["state"],
+            closed_listing_ids=[],
+        )
+
+        assert response.capacity_reservation_id == "cap-1"
+        assert response.gpu_count == 2
+        assert response.pool_id is None
+
+    def test_the_response_declares_no_physical_identity(self):
+        from market_storefront.models.capacity_admin_models import (
+            ReserveCapacityResponse,
+        )
+
+        assert "resource_id" not in ReserveCapacityResponse.model_fields, (
+            "the boundary strips physical identity from every reservation, so "
+            "a response field for it is unsatisfiable rather than optional"
+        )
+
+
 class TestAMissingFieldIsNamed:
     @pytest.mark.parametrize("absent", ["capacity_reservation_id"])
     def test_the_message_names_the_field_and_the_authority(self, absent):

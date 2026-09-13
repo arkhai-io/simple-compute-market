@@ -78,6 +78,31 @@ from .run_log import RunLog
 from .settle_cli import run_settle_from_log
 
 
+def _attempt_digest(attempts: list[dict[str, Any]]) -> list[dict[str, str]]:
+    """Reduce collected negotiation attempts to a reportable summary.
+
+    An attempt carries the whole candidate listing and the whole
+    negotiation outcome — too much for a console panel or for the
+    run-log's terminal event. These are the fields that say which
+    candidate was tried and why it did not become a deal.
+    """
+    digest: list[dict[str, str]] = []
+    for attempt in attempts:
+        match = attempt.get("match") or {}
+        outcome = attempt.get("outcome") or {}
+        summary = {
+            "listing_id": attempt.get("listing_id") or match.get("listing_id"),
+            "seller_url": attempt.get("seller_url") or match.get("storefront_url"),
+            "error": attempt.get("error"),
+            "status": outcome.get("status"),
+            "reason": outcome.get("reason"),
+            "rounds": outcome.get("rounds"),
+            "agreed_amount": outcome.get("agreed_amount"),
+        }
+        digest.append({k: str(v) for k, v in summary.items() if v is not None})
+    return digest
+
+
 def _normalize_start_utc(value: str | None) -> str | None:
     if value is None:
         return None
@@ -1086,6 +1111,7 @@ def register(app: typer.Typer) -> None:
             typer.secho(f"Buy failed: {exc}", err=True, fg=typer.colors.RED)
             raise typer.Exit(3) from exc
 
+        attempt_digest = _attempt_digest(result.attempts)
         run_log.end(
             result.status,
             seller_url=result.seller_url,
@@ -1094,6 +1120,7 @@ def register(app: typer.Typer) -> None:
             escrow_uid=result.escrow_uid,
             fulfillment_uid=result.fulfillment_uid,
             reason=result.reason,
+            attempts=attempt_digest,
         )
 
         # Quiet mode: one concise block instead of the full panel. The public
@@ -1151,6 +1178,27 @@ def register(app: typer.Typer) -> None:
             "no_matches": "yellow",
         }.get(result.status, "white")
         console.print(Panel(tbl, title="Buy complete", border_style=border))
+
+        # A buy that agreed with nobody reports the aggregate
+        # "no_match_agreed_to_terms" and, until now, nothing about why any
+        # individual candidate declined — the per-candidate reasons were
+        # collected and then dropped. Print them on any non-ready outcome.
+        if result.status != "ready" and attempt_digest:
+            attempt_tbl = Table.grid(padding=(0, 2))
+            attempt_tbl.add_column(style="bold")
+            attempt_tbl.add_column()
+            for index, attempt in enumerate(attempt_digest):
+                attempt_tbl.add_row(
+                    str(index),
+                    " ".join(f"{k}={v}" for k, v in attempt.items()),
+                )
+            console.print(
+                Panel(
+                    attempt_tbl,
+                    title="Candidates tried",
+                    border_style=border,
+                )
+            )
 
         if result.status != "ready":
             raise typer.Exit(4)

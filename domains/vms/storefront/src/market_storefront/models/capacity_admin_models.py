@@ -23,12 +23,22 @@ class ReserveCapacityRequest(BaseModel):
 
 
 class ReserveCapacityResponse(BaseModel):
-    """Response from POST /api/v1/admin/portfolio/reservations."""
+    """Response from POST /api/v1/admin/portfolio/reservations.
+
+    No physical resource identity. The capacity boundary strips
+    `resource_id`, `backing_resource_id`, `capacity_bucket_id` and `vm_host`
+    from every reservation response, because which physical resource backs a
+    reservation is the provisioning service's fact and not a commercial one.
+    Declaring it required here made the field unsatisfiable for every
+    reservation rather than only for pooled ones: the hold landed in the
+    ledger, the stage event recorded it, and then this model refused to
+    serialize the result as `500 Storefront administrator request failed`.
+    `pool_id` and `member_id` are what the boundary does report.
+    """
 
     capacity_reservation_id: str
     pool_id: str | None = None
     member_id: str | None = None
-    resource_id: str
     gpu_count: int
     resource_state: str | None = None
     closed_listing_ids: list[str] = Field(default_factory=list)

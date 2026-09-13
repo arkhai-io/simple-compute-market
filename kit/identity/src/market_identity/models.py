@@ -69,6 +69,26 @@ class TrustedIdentitySet(ContractModel):
 
     identities: tuple[Identity, ...] = Field(min_length=1, max_length=2)
 
+    @field_validator("identities", mode="before")
+    @classmethod
+    def accept_wire_identity_array(cls, values: object) -> object:
+        """Accept the array form this field takes on the wire.
+
+        The strict tuple pins that the set is ordered and hashable; it was
+        never meant to refuse JSON. Strict validation already accepts an
+        array here when the payload is parsed as JSON, so only the
+        Python-mode path -- a payload something else has already decoded
+        into dicts and lists -- saw a list and refused it. Every caller
+        reading a listing's `publisher_principals` is on that path, and the
+        three that hand-rolled this conversion masked the gap until a fourth
+        validated the decoded payload directly and got `Input should be a
+        valid tuple` for a listing the contract accepts over the wire.
+
+        A list only. A set or a generator would decide the order here, and
+        the order is part of what this contract pins.
+        """
+        return tuple(values) if isinstance(values, list) else values
+
     @model_validator(mode="after")
     def identities_are_unique(self) -> TrustedIdentitySet:
         if len(set(self.identities)) != len(self.identities):
