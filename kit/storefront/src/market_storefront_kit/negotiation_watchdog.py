@@ -161,12 +161,18 @@ async def sweep_stale_negotiations(
     return len(stale)
 
 
+#: Cadence for re-checking a held gate. Short enough that an advance
+#: request is not delayed behind a sweep interval, and idle work only.
+_PAUSED_POLL_SECONDS = 0.05
+
+
 async def run_negotiation_watchdog(
     repository: NegotiationRepository,
     policy: NegotiationWatchdogPolicy,
     *,
     emit_stage_event: Callable[..., None] | None = None,
     logger: LoggerLike | None = None,
+    paused: Callable[[], bool] | None = None,
 ) -> None:
     """Continuously run the shared sweep until the task is cancelled."""
 
@@ -180,6 +186,9 @@ async def run_negotiation_watchdog(
         )
     while True:
         try:
+            if paused is not None and paused():
+                await asyncio.sleep(_PAUSED_POLL_SECONDS)
+                continue
             await asyncio.sleep(policy.interval_seconds)
             abandoned = await sweep_stale_negotiations(
                 repository,

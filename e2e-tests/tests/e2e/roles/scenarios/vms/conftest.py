@@ -280,6 +280,83 @@ def _provisioning_authority_trust():
     )
 
 
+@pytest.fixture(scope="module")
+def site_capacity_admin_client():
+    """Capacity-admin client for the provisioning site authority.
+
+    The site ledger is a separate store from the host registry: `probe` and
+    `reserve` match `CapacityBucket` rows, which only `register_resource`
+    creates, and nothing derives one from a registered host. A scenario that
+    reserves capacity has to put a resource there.
+
+    Signs as the provisioning admin principal, the same caller the operator
+    client uses, because the capacity-admin surface is part of the same
+    authenticated API rather than a separate shared-key control.
+    """
+    from market_site_client import SiteCapacityAdminClient
+
+    url = _require_setting(settings.PROVISIONING.API_URL, "PROVISIONING.API_URL")
+    return SiteCapacityAdminClient(
+        url, _provisioning_admin_signer(), _provisioning_authority_trust()
+    )
+
+
+def advance_storefront(storefront_admin_client, loop: str) -> dict:
+    """Run one cycle of a paused storefront loop and return what it reports.
+
+    `loop` is the loop's route name: `claims`, `fulfillment-resume`, or
+    `site-projections`. Each calls the operation the timer was already
+    invoking, so a stage advances production behaviour rather than a test-only
+    path.
+
+    This is the other half of `pause_storefront`. Pausing without advancing
+    just stops the system; the pair is what makes ordering assertable -- a
+    stage asks for the work it is about to assert on, instead of racing a timer
+    that may or may not have run.
+    """
+    result = storefront_admin_client.admin_run_lifecycle_cycle(loop)
+    log.info("[lifecycle] advanced %s: %s", loop, result)
+    return result
+
+
+def pause_storefront(storefront_admin_client) -> bool:
+    """Hold the storefront's timer loops idle, and prove they are.
+
+    Pauses the loops only -- trading stays open, so a scenario can pause at its
+    readiness stage and still agree a deal.
+
+    Called from a scenario's own stage rather than an autouse fixture: a
+    scenario should name the state it depends on, and pausing a service is a
+    dependency as much as registering a host is. It also keeps the pause with
+    the scenario that wants it -- the API-credits scenario shares this module
+    and drives a different storefront, which has no such control.
+
+    Every side effect a scenario asserts on should be one the scenario asked
+    for. While the timer loops run, a stage's observation races them: a listing
+    reconciled a second later reads differently than one reconciled a second
+    earlier. Waiting for the system to settle instead is what
+    `docs/development/TESTING.md` forbids, and it cannot establish ordering
+    even when it passes.
+
+    The pause response reports a single aggregate state; it no longer names
+    each loop, so this asserts the storefront reports itself paused rather than
+    that every loop reached its gate individually. A scenario that needs the
+    finer guarantee has to observe the effect it cares about directly.
+    """
+    result = storefront_admin_client.admin_pause()
+    assert getattr(result, "paused", False), (
+        f"storefront did not report itself paused: {result!r}. An assertion "
+        "made now would race the timer loops it was meant to hold."
+    )
+    status = storefront_admin_client.get_system_status()
+    assert getattr(status, "paused", False), (
+        "storefront status does not report the pause the pause call "
+        "acknowledged, so the two disagree about whether the loops are held."
+    )
+    log.info("[lifecycle] storefront paused")
+    return True
+
+
 # ---------------------------------------------------------------------------
 # Module-scoped fixtures
 # ---------------------------------------------------------------------------

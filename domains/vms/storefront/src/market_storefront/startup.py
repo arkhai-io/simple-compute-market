@@ -8,6 +8,8 @@ step, no agent-card publication, and no heartbeat loop.
 import asyncio
 import logging
 from functools import partial
+
+from core_storefront.loop_lifecycle import loops_paused, register_loop
 from typing import Any
 
 from core_storefront.app_startup import (
@@ -223,7 +225,7 @@ def _start_settlement_servicing() -> None:
     start_storefront_background_task(
         StorefrontBackgroundTask(
             name="settlement_servicing",
-            task_factory=composition.worker.run,
+            task_factory=partial(composition.worker.run, paused=loops_paused),
             log_message="[STARTUP] Settlement servicing started (interval=%ss)",
             log_args=(getattr(settings, "claims_sweep_interval", 30),),
         ),

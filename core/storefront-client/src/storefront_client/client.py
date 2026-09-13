@@ -812,6 +812,50 @@ class StorefrontClient(_StorefrontClientBase):
             )
         )
 
+    async def admin_run_lifecycle_cycle(
+        self,
+        loop: str,
+        *,
+        request_id: str | None = None,
+    ) -> dict[str, Any]:
+        """POST /api/v1/admin/lifecycle/{loop}/run-cycle.
+
+        Run one cycle of a paused loop and return what that cycle reports.
+        `loop` is the loop's route name -- `claims`, `fulfillment-resume`,
+        `site-projections`. The route calls the operation the timer was already
+        invoking, so a caller advances production behaviour rather than a
+        test-only path.
+        """
+        return await self._authenticated_post(
+            f"/api/v1/admin/lifecycle/{loop}/run-cycle",
+            {},
+            role="admin",
+            operation="admin_run_lifecycle_cycle",
+            resource=loop,
+            request_id=request_id,
+        )
+
+    async def admin_refresh_site_projections(
+        self,
+        *,
+        request_id: str | None = None,
+    ) -> dict[str, Any]:
+        """POST /api/v1/admin/capacity/projections/refresh.
+
+        Pull every site-authority projection now instead of waiting out the
+        poller interval, and return the per-site load state. A caller that has
+        just declared capacity at the site authority uses this rather than
+        sleeping: the response says whether the pull actually landed.
+        """
+        return await self._authenticated_post(
+            "/api/v1/admin/capacity/projections/refresh",
+            {},
+            role="admin",
+            operation="admin_refresh_site_projections",
+            resource="capacity/projections",
+            request_id=request_id,
+        )
+
     async def admin_resume(
         self,
         *,
@@ -2085,6 +2129,50 @@ class SyncStorefrontClient(_StorefrontClientBase):
                 resource="",
                 request_id=request_id,
             )
+        )
+
+    def admin_run_lifecycle_cycle(
+        self,
+        loop: str,
+        *,
+        request_id: str | None = None,
+    ) -> dict[str, Any]:
+        """POST /api/v1/admin/lifecycle/{loop}/run-cycle.
+
+        Run one cycle of a paused loop and return what that cycle reports.
+        `loop` is the loop's route name -- `claims`, `fulfillment-resume`,
+        `site-projections`. The route calls the operation the timer was already
+        invoking, so a caller advances production behaviour rather than a
+        test-only path.
+        """
+        return self._authenticated_post(
+            f"/api/v1/admin/lifecycle/{loop}/run-cycle",
+            {},
+            role="admin",
+            operation="admin_run_lifecycle_cycle",
+            resource=loop,
+            request_id=request_id,
+        )
+
+    def admin_refresh_site_projections(
+        self,
+        *,
+        request_id: str | None = None,
+    ) -> dict[str, Any]:
+        """POST /api/v1/admin/capacity/projections/refresh.
+
+        Pull every site-authority projection now instead of waiting out the
+        poller interval, and return the per-site load state. A caller that has
+        just declared capacity at the site authority uses this rather than
+        sleeping: the response says whether the pull actually landed.
+        """
+        return self._authenticated_post(
+            "/api/v1/admin/capacity/projections/refresh",
+            {},
+            role="admin",
+            operation="admin_refresh_site_projections",
+            resource="capacity/projections",
+            request_id=request_id,
         )
 
     def admin_resume(

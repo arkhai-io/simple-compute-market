@@ -59,6 +59,7 @@ from market_storefront.models.capacity_admin_models import (
     ResourcePatchResponse,
     UsageStartedEventRequest,
 )
+from core_storefront.loop_lifecycle import loop_states, set_loops_paused
 from market_storefront.server import _set_globally_paused
 from market_capacity_publication import (
     CapacityBinding,
@@ -180,6 +181,8 @@ class AdminController:
         summary="Pause new negotiations globally (admin)",
     )
     async def pause(self) -> AdminPauseResponse:
+        loops = set_loops_paused(True)
+        logger.info("[ADMIN] Timer loops paused: %s", loops)
         _set_globally_paused(True)
         return AdminPauseResponse(
             paused=True, message="Storefront paused. New negotiations will receive 503."
@@ -191,6 +194,8 @@ class AdminController:
         summary="Resume new negotiations globally (admin)",
     )
     async def resume(self) -> AdminPauseResponse:
+        loops = set_loops_paused(False)
+        logger.info("[ADMIN] Timer loops resumed: %s", loops)
         _set_globally_paused(False)
         return AdminPauseResponse(paused=False, message="Storefront resumed.")
 
@@ -300,6 +305,98 @@ class AdminController:
             refund_amount=body.refund_amount,
             reservation=truncated or reservation,
         )
+
+    # ------------------------------------------------------------------
+    # One cycle of one loop, while the timers are held.
+    #
+    # Each route calls the operation the timer was already invoking and returns
+    # what that operation returns. None drives an iteration of the loop itself,
+    # and none implements a transition the loop does not: a manual cycle that
+    # behaved differently from the timer would prove nothing about production.
+    # Running while paused is the entire purpose.
+    # ------------------------------------------------------------------
+
+    @router.post(
+        "/lifecycle/claims/run-cycle",
+        summary="Run one settlement-servicing sweep now (admin)",
+    )
+    async def run_claims_cycle(self) -> dict:
+        import market_storefront.container as _container
+
+        composition = _container.resolved_settlement_composition
+        if composition is None:
+            raise HTTPException(
+                status_code=503, detail="settlement composition is not initialized"
+            )
+        processed = await composition.worker.run_once()
+        return {"loop": "settlement_servicing", "processed": int(processed)}
+
+    @router.post(
+        "/lifecycle/fulfillment-resume/run-cycle",
+        summary="Run one fulfillment-resume sweep now (admin)",
+    )
+    async def run_fulfillment_resume_cycle(self) -> dict:
+        from market_storefront.services.fulfillment_resume_runtime import (
+            resume_incomplete_fulfillments_once,
+        )
+
+        await resume_incomplete_fulfillments_once(sqlite_client=self._db)
+        return {"loop": "fulfillment_resume"}
+
+    @router.post(
+        "/lifecycle/site-projections/run-cycle",
+        summary="Pull site-authority projections now (admin)",
+    )
+    async def run_site_projection_cycle(self) -> dict:
+        """The projection poller's own cycle, named as a loop advance.
+
+        Same work as `/capacity/projections/refresh`, which predates the
+        lifecycle controls and is kept because callers use it. This one is
+        reachable by loop name like every other advance.
+        """
+        from market_storefront.services.site_projection_cache import (
+            load_site_projections,
+            projection_status_summary,
+        )
+
+        await load_site_projections(self._db)
+        return {"loop": "site_projection_poller", "sites": projection_status_summary()}
+
+    @router.post(
+        "/capacity/projections/refresh",
+        summary="Pull site-authority projections now (admin)",
+    )
+    async def refresh_site_projections(self) -> dict[str, Any]:
+        """Reload every site projection and report what each site now holds.
+
+        Projections are pull-synchronized on a poller interval. A caller that
+        has just declared capacity at the site authority would otherwise wait
+        that interval out, and a caller holding the lifecycle loops paused
+        would wait forever: the poller that would pull it is one of the loops
+        being held. Neither is a wait a test may take.
+
+        Returns the per-site load state so a caller asserts the pull happened
+        rather than assuming it. A site reporting `not_loaded`, `unavailable`,
+        or `invalid` has not confirmed its projection and must not be read as
+        an authoritative empty -- an unconfirmed projection and an empty one
+        are indistinguishable downstream, which is how an inventory failure
+        becomes a negotiation failure several stages away.
+        """
+        from market_storefront.services.site_projection_cache import (
+            load_site_projections,
+            projection_status_summary,
+        )
+
+        await load_site_projections(self._db)
+        summary = projection_status_summary()
+        logger.info(
+            "[ADMIN] Site projections refreshed on demand: %s",
+            {
+                site: {family: view.get("state") for family, view in families.items()}
+                for site, families in summary.items()
+            },
+        )
+        return {"sites": summary}
 
     @router.post(
         "/portfolio/resources/import",

@@ -42,44 +42,58 @@ confirms settlement becomes ready has not happened yet.
 - [ ] 3.4 `make test` stays green. No production Python changed, so nothing is
       expected here; run it rather than assume.
 
-## 3f. Buyer identity on the negotiation path
+## 3g. Restore the pause/advance lifecycle controls (production)
 
-Round result: **8 failed, 57 passed, 36 skipped** from 8/55/38. Fan-in is
-fixed; no per-URL registry errors remain.
+The August green run (commit `a1128a4c`) showed seven admin routes that no
+longer exist. Two were relocated and survive; the rest were deleted with no
+record in `openspec/` or `docs/`. The e2e stages that used them were deleted
+in the same window, which is why nothing failed.
 
-- [x] 3f.1 **`buyer_address` is retired across the client.** No method accepts
-      it, so all 14 call sites were latent `TypeError`s; only two had been
-      reached. The replacement differs by method, which is why a blanket
-      rename would have been wrong:
-      - `negotiate_new` derives `buyer_principal` from the signer — the
-        argument is simply gone.
-      - `evaluate_negotiate` takes `buyer_principal: Identity`.
-      - `settle` still needs the wallet, now as `buyer_evm_address`.
-      - `get_settle_status` and `wait_for_settlement` never needed it.
-- [x] 3f.2 **Corrected an error from 3d.** The two multi-registry buyer clients
-      were built without a signer on the belief that `negotiate_new` is
-      unauthenticated. It signs with `role="buyer"` and takes the buyer
-      principal from the signer, so both now carry one.
-- [x] 3f.3 **Checked the whole surface statically rather than per run.** Walked
-      the AST of every e2e module and compared each storefront-client call
-      against the installed signature: unknown keywords and missing required
-      arguments. That found two sites in a module this round had not touched.
-      **0 mismatches** remain suite-wide. Reacting to one `TypeError` per run
-      is what turned this into five rounds; the signatures were readable all
-      along.
+- [x] 3g.1 **Corrected an earlier claim.** I reported that the settlement
+      worker had no sweep entry point, having found `jobs.py`'s per-settlement
+      `run_once` and stopped. `servicing.py`'s
+      `SettlementServicingWorker.run_once(limit) -> int` is the direct
+      equivalent of the old `ClaimsEngine.tick()`. The sweep/loop split
+      survived the settlement-neutrality redesign intact.
+- [x] 3g.2 **What was actually lost was the pause, and it had inverted.** The
+      old `ClaimsEngine.run(interval, paused=...)` took a predicate and held
+      the loop at its cycle boundary. Today `admin_pause` sets one
+      `_GLOBALLY_PAUSED` flag whose only consumers are the negotiation runtime
+      and the status read: **no loop consults it**. So pause used to stop
+      reconciliation and leave trading open, and now stops trading and leaves
+      reconciliation running — the opposite control, not a weaker one.
+- [x] 3g.3 Added `core_storefront/loop_lifecycle.py`: a pause gate plus
+      per-loop state, kept deliberately separate from the trading pause
+      because a scenario needs deterministic reconciliation *and* a deal to
+      agree. Gated `fulfillment_resume` and `site_projection_poller` directly;
+      gave `run_negotiation_watchdog` and `SettlementServicingWorker.run` an
+      injected `paused` predicate, restoring the shape the claims engine had,
+      and wired the storefront's gate into the worker at startup.
+      Verified: a gated loop reports `running`, is held at `paused` across a
+      pause, and resumes on release.
+- [x] 3g.4 Restored `POST /api/v1/admin/capacity/projections/refresh` and
+      added three `lifecycle/{loop}/run-cycle` advances (`claims`,
+      `fulfillment-resume`, `site-projections`), each over the operation its
+      timer already invokes, with admin route contracts and client methods on
+      both variants.
+- [x] 3g.5 `pause_storefront`, `advance_storefront`, `site_capacity_admin_client`
+      and the 307-line `host_registry.py` restored in the e2e fixtures.
+      Storefront suites: **1107 passed**, with the 4 failures that reproduce on
+      pristine code. E2e collection clean at 127.
 
-- [x] 3f.4 **The 05a assertion earned its keep immediately.** It now reports
-      `decision='reject' reason='no_matching_inventory'` — not a price problem.
-      The message it replaced would have sent the reader to adjust
-      `BUYER_INITIAL_PRICE`, which is why it was worth fixing before tuning
-      anything.
-
-- [ ] 3f.5 **Findings.** `no_matching_inventory` and the two
-      `409 No available compute VM` reservation failures are plausibly one
-      cause — the seeded inventory not matching the demanded resource
-      attributes — and should be investigated together rather than as three.
-      Also open: `500 UNIQUE ...derivation_key` (1), `market credits buy`
-      `rc=2` (1), `market buy` `rc=0` with no run-log (1).
+- [ ] 3g.6 **Deferred, with reasons.**
+      - `capacity-events/run-cycle`: the per-event drain has no callable unit —
+        it is inline in the kit's `poll_events` loop. August had the same
+        problem and called a full reconcile instead, which its own docstring
+        admits runs a *superset* of the subscriber's work. Extracting a
+        one-cycle drain is new design, not restoration.
+      - Per-loop state is logged but not returned: `AdminPauseResponse.loops`
+        and `HealthResponse.loops` were both dropped, so reporting it typed
+        means changing the server model and the client's. Until then
+        `pause_storefront` can only assert the aggregate, and a scenario cannot
+        verify that the specific loop it depends on reached its gate.
+      - The ~11 deleted scenario stages are not yet restored; they consume the
+        controls above.
 
 ## 4. Closeout
 

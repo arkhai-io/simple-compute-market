@@ -268,6 +268,16 @@ def _contract(request: Request, body: Any) -> AdminRouteContract | None:
             "admin_system_events", _system_events_resource(request), EMPTY_BODY
         )
 
+    prefix = "/api/v1/admin/lifecycle/"
+    if method == "POST" and path.startswith(prefix) and path.endswith("/run-cycle"):
+        loop = path[len(prefix) : -len("/run-cycle")]
+        return AdminRouteContract("admin_run_lifecycle_cycle", loop, body)
+
+    if method == "POST" and path == "/api/v1/admin/capacity/projections/refresh":
+        return AdminRouteContract(
+            "admin_refresh_site_projections", "capacity/projections", body
+        )
+
     if method == "POST" and path == "/api/v1/admin/portfolio/resources/import":
         return AdminRouteContract("admin_import_resources", "portfolio/resources", body)
 

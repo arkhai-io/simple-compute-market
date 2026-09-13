@@ -25,6 +25,10 @@ class _ServicingStepError(RuntimeError):
         self.operation = operation
 
 
+#: Cadence for re-checking a held gate; idle work only.
+_PAUSED_POLL_SECONDS = 0.05
+
+
 class SettlementServicingWorker:
     def __init__(
         self,
@@ -95,9 +99,20 @@ class SettlementServicingWorker:
             processed += 1
         return processed
 
-    async def run(self) -> None:
+    async def run(self, *, paused: Callable[[], bool] | None = None) -> None:
+        """Sweep due obligations on an interval until cancelled.
+
+        `paused` holds the loop at the top of a cycle without stopping it:
+        nothing is torn down, no sweep is cut part-way, and `run_once` stays
+        callable so an operator or a scenario can advance one cycle while the
+        timer is held. The previous claims engine carried the same predicate,
+        and dropping it left callers with no way to stop racing this loop.
+        """
         while True:
             try:
+                if paused is not None and paused():
+                    await asyncio.sleep(_PAUSED_POLL_SECONDS)
+                    continue
                 await asyncio.sleep(self._interval_seconds)
                 await self.run_once()
             except asyncio.CancelledError:
