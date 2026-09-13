@@ -126,6 +126,47 @@ OptionalUint256Amount = Annotated[
 ]
 
 
+#: JSON numbers are IEEE-754 doubles to most parsers, and canonical JSON has
+#: no number form for an integer outside this range at all.
+JSON_SAFE_INT_MAX = 2**53 - 1
+
+
+def json_safe_wire_value(value: Any) -> Any:
+    """Rewrite out-of-range integers in an untyped payload as decimal strings.
+
+    For payloads that reach the wire without passing through a typed field:
+    persisted rows embedded in a response, diagnostic event bodies. A
+    response is canonicalized for the responder's signature, so an amount
+    read back out of storage as a Python int makes the whole response
+    unsignable -- and the failure lands on whichever route embeds it rather
+    than on the negotiation that recorded the value.
+
+    Deliberately magnitude-dependent: round numbers, counts and identifiers
+    are genuinely numbers and consumers read them as such. Only a value with
+    no canonical number form changes shape, and it changes to the same
+    decimal-digit string typed uint256 fields serialize to.
+    """
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, int):
+        if -JSON_SAFE_INT_MAX <= value <= JSON_SAFE_INT_MAX:
+            return value
+        return str(value)
+    if isinstance(value, dict):
+        return {key: json_safe_wire_value(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [json_safe_wire_value(item) for item in value]
+    return value
+
+
+#: Untyped rows embedded in a signed response: normalized on the way in so
+#: the response can be canonicalized whatever storage handed back.
+EmbeddedWireRows = Annotated[
+    list[dict[str, Any]],
+    BeforeValidator(json_safe_wire_value),
+]
+
+
 class Resource(BaseModel):
     """Domain-agnostic base resource model."""
 

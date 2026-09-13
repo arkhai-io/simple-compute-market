@@ -106,6 +106,8 @@ from tests.e2e.roles.scenarios.vms.conftest import (
     capacity_site_id,
     capacity_source_for,
     delete_mock_rules_if_present,
+    dry_run_storefront,
+    one_site,
     pause_storefront,
     require_state,
     signed_listing_read_headers,
@@ -1203,6 +1205,67 @@ class TestStage09a_ProvisioningCompletes:
         )
 
 
+class TestStage09a2_CapacityEventCycle:
+    def test_09a2_capacity_events_dry_run_then_advance(
+        self, storefront_admin_client, deal_state: DealState
+    ):
+        """Step the capacity-event loop before asserting its effect.
+
+        The deal holds this scenario's sellable unit, so its listing is no
+        longer satisfiable. The settle path reserves capacity and leaves the
+        derived-listing reconciliation to the capacity-delta subscriber, which
+        this scenario holds paused -- so 09b's `status=closed` is only true
+        once a cycle has run, and this stage is where it is asked for.
+
+        Dry run first, while the listing is still open: that is the cause,
+        named, and separable from the effect 09b asserts.
+        """
+        require_state(deal_state, "seller_listing_id", "provisioning_result_injected")
+
+        preview = dry_run_storefront(storefront_admin_client, "capacity-events")
+        pending = one_site(preview)
+        assert pending["error"] is None, (
+            f"capacity-event dry run failed for site {pending['site']!r}: "
+            f"{pending['error']}"
+        )
+        assert not pending["would_position"], (
+            "the dry run would position at the feed head rather than apply "
+            "this deal's events, so the poller's cursor was lost"
+        )
+        assert pending["pending_count"] >= 1, (
+            "the deal reserved capacity, so its authority has events waiting; "
+            f"the feed reports none (cursor={pending['cursor']!r} "
+            f"head={pending['feed_head']!r})"
+        )
+
+        applied_total = 0
+        for step in range(5):
+            cycle = one_site(
+                advance_storefront(storefront_admin_client, "capacity-events")
+            )
+            assert cycle["error"] is None, (
+                f"capacity-event cycle {step} failed for site "
+                f"{cycle['site']!r}: {cycle['error']}"
+            )
+            applied_total += int(cycle["applied_count"])
+            if not cycle["truncated"]:
+                break
+        else:
+            raise AssertionError(
+                "capacity-event feed still reports a truncated page after "
+                f"five cycles (applied {applied_total} events)"
+            )
+        assert applied_total >= pending["pending_count"], (
+            f"the advance applied {applied_total} event(s) where the dry run "
+            f"named {pending['pending_count']} pending"
+        )
+        deal_state._capacity_events_advanced = True
+        log.info(
+            "[09a2] Capacity events stepped: %s pending, %s applied",
+            pending["pending_count"], applied_total,
+        )
+
+
 class TestStage09b_SettlementReadyAndCredentials:
     def test_09b_settlement_ready_credentials_and_listing_open(
         self, storefront_client, storefront_admin_client, buyer_config, deal_state: DealState
@@ -1216,7 +1279,8 @@ class TestStage09b_SettlementReadyAndCredentials:
           4. GET .../negotiations/{neg_id} → primary escrow ready + fulfillment_uid
         """
         require_state(deal_state, "real_escrow_uid", "provisioning_result_injected",
-                      "seller_listing_id", "negotiation_id")
+                      "seller_listing_id", "negotiation_id",
+                      "_capacity_events_advanced")
 
         wait_result = storefront_admin_client.wait_for_settlement(
             deal_state.real_escrow_uid,

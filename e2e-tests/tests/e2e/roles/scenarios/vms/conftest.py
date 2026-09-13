@@ -341,6 +341,35 @@ def advance_storefront(storefront_admin_client, loop: str) -> dict:
     return result
 
 
+def dry_run_storefront(storefront_admin_client, loop: str) -> dict:
+    """Report what one cycle of a paused loop would do, without doing it.
+
+    The read half of `advance_storefront`. A capacity-event cycle closes and
+    reopens derived listings, so advancing changes what buyers can discover;
+    asking first is what lets a stage assert the cause (the pending events)
+    separately from the effect (the listing's status), instead of asserting
+    the effect and inferring the cause.
+    """
+    result = storefront_admin_client.admin_dry_run_lifecycle_cycle(loop)
+    log.info("[lifecycle] dry-run %s: %s", loop, result)
+    return result
+
+
+def one_site(report: dict) -> dict:
+    """The single site in a lifecycle report, refusing an ambiguous one.
+
+    These scenarios drive a storefront with one configured site. Picking the
+    first of several would make an assertion about whichever site happened to
+    be enumerated first.
+    """
+    sites = report.get("sites") or []
+    assert len(sites) == 1, (
+        f"expected exactly one configured capacity site, got "
+        f"{[site.get('site') for site in sites]!r}"
+    )
+    return sites[0]
+
+
 def pause_storefront(storefront_admin_client) -> bool:
     """Hold the storefront's timer loops idle, and prove they are.
 

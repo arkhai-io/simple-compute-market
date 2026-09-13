@@ -61,6 +61,7 @@ from market_storefront.models.capacity_admin_models import (
     UsageStartedEventRequest,
 )
 from market_storefront.lifecycle import (
+    CAPACITY_EVENTS_POLLER,
     FULFILLMENT_RESUME,
     SETTLEMENT_SERVICING,
     SITE_PROJECTION_POLLER,
@@ -140,6 +141,7 @@ ADVANCE_LOOP_NAMES = {
     "settlement-servicing": SETTLEMENT_SERVICING,
     "fulfillment-resume": FULFILLMENT_RESUME,
     "site-projections": SITE_PROJECTION_POLLER,
+    "capacity-events": CAPACITY_EVENTS_POLLER,
 }
 
 
@@ -458,6 +460,62 @@ class AdminController:
         return {
             "loop": ADVANCE_LOOP_NAMES["site-projections"],
             "sites": projection_status_summary(),
+        }
+
+    @router.post(
+        "/lifecycle/capacity-events/dry-run",
+        summary="Report what one capacity-event cycle would do (admin)",
+    )
+    async def dry_run_capacity_events_cycle(self) -> dict:
+        """Read each site's feed and report the cycle without running it.
+
+        The read half of stepping this loop. Capacity deltas are what close
+        and reopen derived listings, so an advance changes what buyers can
+        discover; a caller that can see the pending events first can assert
+        on the cause before committing to the effect, which is what the
+        evaluate routes do for a negotiation and a settlement.
+
+        Emits nothing, reconciles nothing, and leaves every cursor where it
+        was -- two consecutive dry runs report the same thing.
+        """
+        runtime = self._runtime()
+        sites = [
+            (await runtime.preview_events_once(site_id)).to_dict()
+            for site_id in runtime.site_ids
+        ]
+        return {
+            "loop": ADVANCE_LOOP_NAMES["capacity-events"],
+            "dry_run": True,
+            "sites": sites,
+            "pending_count": sum(int(site["pending_count"]) for site in sites),
+        }
+
+    @router.post(
+        "/lifecycle/capacity-events/run-cycle",
+        summary="Drain one capacity-event cycle per site now (admin)",
+    )
+    async def run_capacity_events_cycle(self) -> dict:
+        """Run exactly one cycle of each site's capacity-event feed.
+
+        One cycle per site per call, not a drain to the head: a truncated page
+        reports `truncated` so a caller advancing deliberately can step again
+        and see each page separately, rather than having the route decide how
+        far to go.
+
+        Addresses the same per-site cursor the running poller holds. Intended
+        to be called while the loop is held -- a cycle either runs completely
+        or never starts, so an advance under the pause has the feed to itself.
+        """
+        runtime = self._runtime()
+        sites = [
+            (await runtime.drain_events_once(site_id)).to_dict()
+            for site_id in runtime.site_ids
+        ]
+        logger.info("[ADMIN] Capacity-event cycle advanced: %s", sites)
+        return {
+            "loop": ADVANCE_LOOP_NAMES["capacity-events"],
+            "sites": sites,
+            "applied_count": sum(int(site["applied_count"]) for site in sites),
         }
 
     @router.post(

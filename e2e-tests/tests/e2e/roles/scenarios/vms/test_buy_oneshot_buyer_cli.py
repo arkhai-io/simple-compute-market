@@ -53,6 +53,8 @@ from tests.e2e.roles.scenarios.vms.conftest import (
     advance_storefront,
     capacity_source_for,
     delete_mock_rules_if_present,
+    dry_run_storefront,
+    one_site,
     pause_storefront,
     require_state,
 )
@@ -487,6 +489,114 @@ class TestStageB4_MarketBuy:
 
 
 # ===========================================================================
+# Phase B4c — capacity-event reconciliation, stepped
+# ===========================================================================
+
+
+class TestStageB4c_CapacityEventCycle:
+    def test_b4c_capacity_events_dry_run_then_advance(
+        self, storefront_admin_client, deal_state: DealState
+    ):
+        """Step the capacity-event loop: read the cause, then apply it.
+
+        The deal holds this scenario's only sellable unit, so the 1x listing
+        it was published from is no longer satisfiable. Nothing on the deal
+        path closes it -- the settle route reserves capacity and leaves the
+        derived-listing reconciliation to the capacity-delta subscriber, which
+        this scenario holds paused. So the close is asserted where it is
+        asked for rather than raced against a timer.
+
+        Two halves on purpose. The dry run names the pending events while the
+        listing is still open, which is the cause; the advance applies them
+        and the listing closes, which is the effect. Asserting only the effect
+        would pass for any reason the listing happened to close.
+        """
+        require_state(
+            deal_state,
+            "seller_listing_id",
+            "settlement_status",
+        )
+
+        before = storefront_admin_client.get_listing(deal_state.seller_listing_id)
+        assert before.status == "open", (
+            f"listing is {before.status!r} before the capacity cycle was "
+            "advanced; something other than this stage reconciled it, and the "
+            "assertions below no longer say what they claim"
+        )
+
+        preview = dry_run_storefront(storefront_admin_client, "capacity-events")
+        assert preview["dry_run"] is True
+        pending = one_site(preview)
+        assert pending["error"] is None, (
+            f"capacity-event dry run failed for site {pending['site']!r}: "
+            f"{pending['error']}"
+        )
+        assert not pending["would_position"], (
+            "the dry run reports it would position at the feed head, which "
+            "means the poller's cursor was lost — a following advance would "
+            "full-reconcile instead of applying the deal's own events"
+        )
+        assert pending["pending_count"] >= 1, (
+            "the deal reserved capacity, so its authority has events waiting; "
+            f"the feed reports none (cursor={pending['cursor']!r} "
+            f"head={pending['feed_head']!r})"
+        )
+
+        # A dry run that changes something is not a dry run: same answer
+        # twice, and the listing still open after both.
+        repeated = one_site(dry_run_storefront(storefront_admin_client, "capacity-events"))
+        assert repeated == pending, (
+            "two consecutive dry runs disagree, so the first one had an "
+            f"effect: {pending!r} then {repeated!r}"
+        )
+        unchanged = storefront_admin_client.get_listing(deal_state.seller_listing_id)
+        assert unchanged.status == "open", (
+            f"the listing became {unchanged.status!r} across two dry runs, "
+            "which are supposed to emit nothing and reconcile nothing"
+        )
+
+        # One cycle per call, so a truncated page is stepped rather than
+        # drained behind the caller's back. Bounded: a feed that never
+        # reaches its head is a failure to report, not a loop to keep running.
+        applied_total = 0
+        for step in range(5):
+            cycle = one_site(advance_storefront(storefront_admin_client, "capacity-events"))
+            assert cycle["error"] is None, (
+                f"capacity-event cycle {step} failed for site "
+                f"{cycle['site']!r}: {cycle['error']}"
+            )
+            applied_total += int(cycle["applied_count"])
+            if not cycle["truncated"]:
+                break
+        else:
+            raise AssertionError(
+                "capacity-event feed still reports a truncated page after "
+                f"five cycles (applied {applied_total} events)"
+            )
+        assert applied_total >= pending["pending_count"], (
+            f"the advance applied {applied_total} event(s) where the dry run "
+            f"named {pending['pending_count']} pending"
+        )
+        assert cycle["cursor"] == cycle["feed_head"], (
+            f"cursor {cycle['cursor']!r} did not reach the feed head "
+            f"{cycle['feed_head']!r} after draining"
+        )
+
+        closed = storefront_admin_client.get_listing(deal_state.seller_listing_id)
+        assert closed.status == "closed", (
+            f"listing is {closed.status!r} after {applied_total} capacity "
+            "event(s) were applied. The deal holds the only sellable unit, so "
+            "reconciliation should have closed it — check the reconcile hook "
+            "wired to the aggregate the advance route resolves, not the feed."
+        )
+        deal_state._capacity_events_advanced = True
+        log.info(
+            "[B4c] Capacity events stepped: %s pending, %s applied, listing closed",
+            pending["pending_count"], applied_total,
+        )
+
+
+# ===========================================================================
 # Phase B5 — seller-side + provisioning lease cross-checks
 # ===========================================================================
 
@@ -509,6 +619,10 @@ class TestStageB5_SellerAndLease:
             "negotiation_id",
             "seller_listing_id",
             "settlement_status",
+            # The listing closes when the capacity cycle is advanced, which
+            # B4c does and asserts; without that dependency this stage races
+            # a loop the scenario deliberately holds.
+            "_capacity_events_advanced",
         )
 
         listing = storefront_admin_client.get_listing(deal_state.seller_listing_id)

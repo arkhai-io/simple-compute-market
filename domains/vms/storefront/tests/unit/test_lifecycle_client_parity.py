@@ -26,6 +26,27 @@ def test_lifecycle_advance_signatures_match() -> None:
     )
 
 
+def test_lifecycle_dry_run_exists_on_both_clients() -> None:
+    """The read half of an advance is as load-bearing as the advance.
+
+    A scenario checks what a held loop is about to do, then does it. A
+    dry-run available on only one client flavour would be found by whichever
+    scenario reached for the other one.
+    """
+    assert callable(getattr(StorefrontClient, "admin_dry_run_lifecycle_cycle", None))
+    assert callable(
+        getattr(SyncStorefrontClient, "admin_dry_run_lifecycle_cycle", None)
+    )
+    assert (
+        inspect.signature(StorefrontClient.admin_dry_run_lifecycle_cycle)
+        == inspect.signature(SyncStorefrontClient.admin_dry_run_lifecycle_cycle)
+    )
+    assert (
+        inspect.signature(StorefrontClient.admin_dry_run_lifecycle_cycle)
+        == inspect.signature(StorefrontClient.admin_run_lifecycle_cycle)
+    ), "a caller switching between the two should not have to switch arguments"
+
+
 def test_pause_and_resume_remain_paired() -> None:
     """Pause gained a `loops` field; both variants parse it through one model."""
     for name in ("admin_pause", "admin_resume"):

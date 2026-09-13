@@ -132,6 +132,28 @@ class TestTheRouteAliasNamesTheLoop:
             "outlived the claims engine."
         )
 
+    def test_every_dry_run_route_is_in_the_declared_mapping(self):
+        """A dry-run route is a fifth spelling of the same loop name.
+
+        It reports `loop` like an advance does, so a caller reads the two
+        against each other; a dry run naming a loop the mapping does not know
+        would report a name that cannot be found in `loop_states()`.
+        """
+        source = (ac.__file__ and open(ac.__file__).read()) or ""
+        prefix = '"/lifecycle/'
+        aliases = {
+            line.strip()[len(prefix):-len('/dry-run",')]
+            for line in source.splitlines()
+            if line.strip().startswith(prefix)
+            and line.strip().endswith('/dry-run",')
+        }
+        assert aliases, "no dry-run routes found; this test looks in the wrong place"
+        undeclared = aliases - set(ac.ADVANCE_LOOP_NAMES)
+        assert not undeclared, (
+            f"these dry-run routes are not in ADVANCE_LOOP_NAMES: "
+            f"{sorted(undeclared)}"
+        )
+
     def test_the_mapping_only_names_registered_loops(self):
         """Every mapped value must be a name `loop_states()` can report.
 

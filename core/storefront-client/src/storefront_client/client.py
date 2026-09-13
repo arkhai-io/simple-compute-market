@@ -862,16 +862,42 @@ class StorefrontClient(_StorefrontClientBase):
         """POST /api/v1/admin/lifecycle/{loop}/run-cycle.
 
         Run one cycle of a paused loop and return what that cycle reports.
-        `loop` is the loop's route name -- `claims`, `fulfillment-resume`,
-        `site-projections`. The route calls the operation the timer was already
-        invoking, so a caller advances production behaviour rather than a
-        test-only path.
+        `loop` is the loop's route name -- `settlement-servicing`,
+        `fulfillment-resume`, `site-projections`, `capacity-events`. The route
+        calls the operation the timer was already invoking, so a caller
+        advances production behaviour rather than a test-only path.
+
+        `admin_dry_run_lifecycle_cycle` reports what a cycle would do for the
+        loops that support it, so a caller can assert the cause before
+        committing to the effect.
         """
         return await self._authenticated_post(
             f"/api/v1/admin/lifecycle/{loop}/run-cycle",
             {},
             role="admin",
             operation="admin_run_lifecycle_cycle",
+            resource=loop,
+            request_id=request_id,
+        )
+
+    async def admin_dry_run_lifecycle_cycle(
+        self,
+        loop: str,
+        *,
+        request_id: str | None = None,
+    ) -> dict[str, Any]:
+        """POST /api/v1/admin/lifecycle/{loop}/dry-run.
+
+        Report what one cycle of a paused loop would do, without doing any of
+        it. Supported by `capacity-events`, whose deltas close and reopen
+        derived listings: the dry run names the pending events so a caller can
+        check the cause before advancing.
+        """
+        return await self._authenticated_post(
+            f"/api/v1/admin/lifecycle/{loop}/dry-run",
+            {},
+            role="admin",
+            operation="admin_dry_run_lifecycle_cycle",
             resource=loop,
             request_id=request_id,
         )
@@ -2222,16 +2248,42 @@ class SyncStorefrontClient(_StorefrontClientBase):
         """POST /api/v1/admin/lifecycle/{loop}/run-cycle.
 
         Run one cycle of a paused loop and return what that cycle reports.
-        `loop` is the loop's route name -- `claims`, `fulfillment-resume`,
-        `site-projections`. The route calls the operation the timer was already
-        invoking, so a caller advances production behaviour rather than a
-        test-only path.
+        `loop` is the loop's route name -- `settlement-servicing`,
+        `fulfillment-resume`, `site-projections`, `capacity-events`. The route
+        calls the operation the timer was already invoking, so a caller
+        advances production behaviour rather than a test-only path.
+
+        `admin_dry_run_lifecycle_cycle` reports what a cycle would do for the
+        loops that support it, so a caller can assert the cause before
+        committing to the effect.
         """
         return self._authenticated_post(
             f"/api/v1/admin/lifecycle/{loop}/run-cycle",
             {},
             role="admin",
             operation="admin_run_lifecycle_cycle",
+            resource=loop,
+            request_id=request_id,
+        )
+
+    def admin_dry_run_lifecycle_cycle(
+        self,
+        loop: str,
+        *,
+        request_id: str | None = None,
+    ) -> dict[str, Any]:
+        """POST /api/v1/admin/lifecycle/{loop}/dry-run.
+
+        Report what one cycle of a paused loop would do, without doing any of
+        it. Supported by `capacity-events`, whose deltas close and reopen
+        derived listings: the dry run names the pending events so a caller can
+        check the cause before advancing.
+        """
+        return self._authenticated_post(
+            f"/api/v1/admin/lifecycle/{loop}/dry-run",
+            {},
+            role="admin",
+            operation="admin_dry_run_lifecycle_cycle",
             resource=loop,
             request_id=request_id,
         )

@@ -947,17 +947,16 @@ def negotiate_with_seller(
                     "escrow proposal encoder"
                 )
             base_proposal = encode_escrow_proposal(escrow_proposal)
-        if expected_selection is None and advertised_option is not None:
-            raw_expiration = base_proposal.get("expiration_unix")
-            if isinstance(raw_expiration, bool) or not isinstance(raw_expiration, int):
-                raise RuntimeError(
-                    "selected advertised settlement option has no pinned expiry"
-                )
-            expected_selection = SettlementSelection(
-                mechanism=advertised_option.mechanism,
-                option_id=advertised_option.option_id,
-                expiration_unix=raw_expiration,
-            )
+        # No synthesized selection for peer settlement. The selection
+        # contract is what the buyer *sent*, not what the listing advertised:
+        # when the buyer sends an escrow proposal instead of a selection, the
+        # seller's acceptance echoes the accepted escrow proposal and builds
+        # neither a selection nor a settlement plan -- one or the other by
+        # construction, not an omission. Deriving an expectation from the
+        # advertised option here ran the acceptance validator, which requires
+        # both of those, against a reply not shaped to carry them, so
+        # `market negotiate` refused a deal `market buy` completes against
+        # the same seller in the same round.
         opening = run_negotiation_chain(
             chain,
             [],

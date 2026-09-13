@@ -1548,34 +1548,215 @@ failures.
       fixture skips with the missing URLs named rather than failing opaquely
       if either pin is absent.
 
-- [ ] 3al.5 **B5: the listing stays `open` where the scenario expects
-      `closed` while capacity is held.** First run to get here, so this
-      expectation has never been observed either way in this change. Not
-      investigated: whether closing is driven by a loop this scenario pauses,
-      whether a one-GPU listing against a larger host is genuinely still
-      satisfiable, or whether the expectation is stale. Read the seller's
-      reconciliation for this listing before touching either side.
+- [x] 3al.5 **B5 diagnosed, then resolved by making the loop steppable (3an).**
+      The original finding: nothing closes the listing on the deal path. The admin reserve route calls
+      `_close_oversized_compute_listings` inline and reports the result; the
+      settle path's `resource_reserved` event carries no `closed_listing_ids`
+      field at all, because it never runs that reconciliation. Closing is
+      left to the capacity-delta subscriber, and this scenario pauses the
+      timer loops as the suite's discipline requires.
 
-- [ ] 3al.6 **05b: the buyer refuses the seller's acceptance -- a design
-      question, not a defect I should guess at.** `market negotiate` exits 3
-      on "seller accept state omitted the buyer-selected settlement option".
-      The negotiation itself is healthy: round 0 counters at 8.5 tokens and
-      the buyer's convergence rule accepts.
+      The test-side fix is unavailable: the loop that would do it is the
+      capacity-events poller, and `capacity-events/run-cycle` has no callable
+      one-cycle unit -- the drain is inline in the kit's `poll_events`. That
+      deferred item is now load-bearing for an assertion.
 
-      Why only this command: round 0 synthesizes an `expected_selection` from
-      the advertised option whenever one is in the policy params, and
-      `market negotiate` puts it there for alkahest while `market buy`'s
-      orchestration sets it only for hosted settlement. So `buy` skips the
-      echo check and completes the same deal against the same seller, while
-      `negotiate` requires an echo the alkahest accept path does not produce.
+      So either the deal path closes oversized listings inline the way the
+      admin path already does, or the capacity-events loop becomes
+      advanceable and B5 asks for the work. I would argue the first on
+      product grounds: an admin hold closes a listing whose capacity is gone
+      while a paying buyer's hold leaves it discoverable. But it changes
+      settle-path behaviour, so it wants a decision rather than a quiet edit.
 
-      The question is which side is right: whether a peer (alkahest)
-      acceptance is supposed to echo a settlement selection at all, or
-      whether synthesizing an expectation from an advertised escrow option is
-      the overreach. The spec sentence about exact option matching on
-      acceptance is written about hosted options. Both fixes are one-liners
-      and they mean opposite things, so this wants a decision rather than a
-      patch.
+- [x] 3al.6 **05b resolved against the seller's own code: the buyer was
+      overreaching.** `market negotiate` exited 3 on "seller accept state
+      omitted the buyer-selected settlement option" while `market buy`
+      completed the same deal against the same seller in the same round.
+
+      `_accepted_settlement_artifacts` returns *either* an accepted escrow
+      proposal *or* a selection-plus-plan, decided by whether the buyer's
+      proposal carried a selection. For peer settlement the seller builds
+      neither a selection nor a plan by construction -- and the buyer's
+      acceptance validator requires both. Round 0 was synthesizing an
+      expectation from the *advertised* option, which ran a hosted-shaped
+      validator against a reply that cannot carry hosted artifacts.
+
+      Removed the synthesis: the selection contract is what the buyer sent,
+      not what the listing advertised, which is what `market buy` has done
+      all along on the path that now completes end to end. Hosted settlement
+      keeps the full validator; the peer path keeps its own guard, the
+      pinned-shape comparison on the accepted escrow proposal.
+
+- [x] 3al.7 **The credits scenario is now blocked by the carried-forward seed
+      failure, not by the CLI.** `credits buy` exits **0** having discovered
+      nothing: the registry pins were the last configuration problem, and the
+      command now runs as far as "No listings matched the resource
+      constraints". There is nothing to match because the credits storefront
+      still cannot register its seed quota --
+      `KeyError: 'X-Market-Identity-Scheme'` from the credits-service, whose
+      unsigned response the site client refuses. That deferred item is now
+      the whole remaining scenario.
+
+      Also worth its own look: a buy that discovers nothing exits 0, so a
+      caller cannot tell "nothing for sale" from "bought it" by return code.
+      The missing run-log is the only signal, which is what the assertion
+      tripped over.
+
+## 3am. The third place an amount reached the wire untyped
+
+- [x] 3am.1 **Force-accept succeeded and the negotiation detail read `500`.**
+      `NegotiationDetailResponse` embeds `messages`, `stage_events` and
+      `escrows` as `list[dict[str, Any]]` -- persisted rows, not typed
+      fields. Storage hands amounts back as Python ints, which is what
+      `_amount_from_db_text` is for, and the response is signed over
+      canonical JSON. So the route that embedded them failed rather than the
+      negotiation that recorded them.
+
+- [x] 3am.2 Third occurrence of one rule, so it is now one function:
+      `json_safe_wire_value` in `market_core.schemas` beside the uint256
+      helpers, with `EmbeddedWireRows` applying it as a before-validator on
+      the untyped lists. The stage-event funnel calls the same function
+      instead of its own copy. Verified by canonicalizing a detail response
+      carrying an out-of-range amount in each of the three lists.
+
+- [ ] 3am.3 Noted, not fixed: the admin reserve *stage event* still logs the
+      ledger's `pool_id` (null) while the response now reports the binding's.
+      Both are true statements about different sources, and a reader
+      comparing them would not guess that.
+
+
+## 3an. The capacity-events loop is steppable
+
+- [x] 3an.1 **Why it was not.** The feed position lived in
+      `site_events_poller`'s closure, so a single cycle was not callable from
+      anywhere else -- the deferred note said as much, and B5 turned it into a
+      failing assertion. An advance holding its own cursor would replay events
+      the poller had applied or skip past ones it had not, which is the reason
+      the position was never handed out.
+
+- [x] 3an.2 **Extracted, position and all** (and then moved -- see 3ao).
+      `drain_site_events_once` is the poller's loop body: positioning and its full reconcile, the
+      backwards-head resync, the per-event delta emission, the truncated-page
+      report. The poller now calls it and does nothing else but gate and
+      sleep, so the two cannot drift into different behaviour for one feed.
+
+      The cursor moved into a process-level registry keyed by site
+      (`site_event_cursor`), which makes the shared-position invariant
+      explicit rather than incidental: one position per site, addressed by
+      both the poller and any advance. What makes sharing safe is the pause
+      the suite already relies on -- a cycle either runs completely or never
+      starts, so an advance under the pause has the feed to itself.
+
+- [x] 3an.3 **One cycle per call, not a drain to the head.** A truncated page
+      is reported as `truncated` and the caller steps again. An advance that
+      drained to the head would collapse several state changes into one call,
+      which is the opposite of what stepping a held loop is for.
+
+- [x] 3an.4 **A dry run that is a read by construction.**
+      `/lifecycle/capacity-events/dry-run` reports each site's cursor, feed
+      head, and the events the next cycle would emit, having emitted nothing,
+      reconciled nothing, and moved no cursor. Capacity deltas close and
+      reopen derived listings, so an advance changes what buyers can
+      discover; the dry run is what lets a scenario assert the cause before
+      committing to the effect, the way the evaluate routes already do for a
+      negotiation and a settlement.
+
+      Its own operation name rather than the advance's, because a replayed
+      request is answered from the recorded outcome of the operation it names
+      and these two differ in whether they change anything.
+
+- [x] 3an.5 **Product surface unchanged unless an administrator calls it.**
+      The poller's behaviour is the same function it always ran; the two new
+      routes are admin-authenticated and do nothing on their own. Both
+      clients gained the dry-run method, and the parity check now covers it
+      -- a scenario reaching for the sync client would otherwise find only
+      half the pair.
+
+- [x] 3an.6 **Stages that step rather than wait.** `B4c` in the one-shot buy
+      scenario and `09a2` in the full deal: read the pending events while the
+      listing is still open, prove two consecutive dry runs agree and change
+      nothing, advance until the page is not truncated (bounded at five, a
+      feed that never reaches its head being a failure to report), then
+      assert the listing closed. `B5` and `09b` now require the state those
+      stages set, so the assertion they inherited depends on the stage that
+      asks for the work instead of racing a loop the scenario holds.
+
+- [x] 3an.7 Tests: 12 in `core/storefront` binding the extracted cycle --
+      positioning and its single reconcile, in-order emission, cursor
+      movement, the truncated page read as one page, the backwards-head
+      resync reconciling rather than replaying, a failing read reported
+      rather than raised, the dry run's purity and repeatability, and the
+      shared-cursor invariant. Plus the poller body bound to the same
+      function, and route-alias coverage extended so a dry-run route must
+      name a declared loop.
+
+- [ ] 3an.8 Unverified until the stack runs: whether one cycle is enough for
+      the listing to close, or whether the reserve and the usage-start deltas
+      arrive as separate pages. The stages step until the feed reports no
+      truncation, so several pages are handled -- but if the close needs a
+      delta the deal emits later, the stage will say so by failing on the
+      status after a drained feed rather than on a timeout.
+
+## 3ao. The reconciliation loop moved to the kit that owns it
+
+- [x] 3ao.1 **Raised as a pre-existing concern about the core wheel, and the
+      documentation settles it.** ARCHITECTURE.md gives
+      `arkhai-kit-capacity-publication` "the storefront-side multi-site
+      capacity source, exact site projections, capacity-event reconciliation
+      loop, registry fan-out, durable publication result recording, and
+      close-before-reopen lifecycle". `site_events_poller` *is* that
+      reconciliation loop and it sat in `core_storefront`, so the code
+      contradicted the document rather than being defensible either way.
+
+      Not an oversight either: `pools-8-capacity-projection-and-listing-hints`
+      investigated moving `core_storefront.capacity`/`capacity_remote.py` into
+      `kit/` concretely and recorded it as a deliberate future decision,
+      deferred on blast radius. The same change had already evacuated the
+      buyer-facing site HTTP client from this module into `kit/site-client`
+      for the same reason.
+
+- [x] 3ao.2 **Moved the cheap slice, left the expensive one.**
+      `capacity_remote.py` had exactly one production importer -- the kit the
+      document names as its owner -- so the move is one import line, a
+      tombstone, and the test file that covers it. The modules
+      `pools-8` balked at are untouched: `capacity.py` (200 lines, imported by
+      `kit/site` and the VM storefront), `aggregation.py` (552, all three
+      domain storefronts), `site_projections.py` (118). That decision stays
+      open and is now strictly smaller.
+
+- [x] 3ao.3 **What deliberately did not move: the site coordinate.** Core
+      persists and compares `site_id` on a listing's durable binding without
+      interpreting it, and the common binding schema freezes site by design
+      ("offering mode, domain identity/version, site, and Physical
+      Resource"). `CapacityDelta` is a carrier in the same spirit. What moved
+      is the mechanism that walks a feed and holds a position in it. Core
+      keeps the vocabulary; the kit owns the loop.
+
+- [x] 3ao.4 **Net effect on the core wheel: 303 lines out, not 180 in.** This
+      change was about to grow a module already marked for eviction; the
+      module is at the smallest audience it will ever have and every line of
+      it was already being touched, so moving it now is the smaller long-run
+      debt.
+
+      One improvement the new home allows: the poller's `client` and
+      `aggregate` parameters are now annotated as `SiteCapacityClient` and
+      `AggregateCapacityClient`. In core they could only be `Any` -- the
+      docstring said so, "to avoid a dependency this package doesn't
+      otherwise need", which is the placement smell stated out loud in the
+      code. Both were already declared dependencies of this kit.
+
+- [x] 3ao.5 The filename is unchanged (`capacity_remote.py`) so the move reads
+      as a move rather than a rewrite. `event_feed.py` would read better in
+      the new package; renaming is a separate, free change whenever someone
+      wants it.
+
+- [ ] 3ao.6 Two unstarted changes' design records still cite
+      `core_storefront.capacity_remote` as a location
+      (`refactor-e2e-fulfillment-lifecycle`,
+      `market-platform-bare-metal-10-storefront-composition`). Left alone:
+      they are another change's narrative, not permanent documentation, and
+      editing them would rewrite history this change did not make. Whoever
+      picks either up will find the module one package over.
 
 ## 4. Closeout
 

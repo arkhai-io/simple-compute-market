@@ -9,6 +9,7 @@ from market_identity import Identity
 
 
 from market_core.schemas import (
+    EmbeddedWireRows,
     EscrowProposal,
     OptionalUint256Amount,
     ProvisionTerms,
@@ -104,7 +105,7 @@ class NegotiationSummary(BaseModel):
 
 class NegotiationListResponse(BaseModel):
     listing_id: str
-    negotiations: list[dict[str, Any]]
+    negotiations: EmbeddedWireRows
     count: int
     limit: int
     offset: int
@@ -128,9 +129,12 @@ class NegotiationDetailResponse(BaseModel):
     terminal_state: str | None = None
     agreed_amount: OptionalUint256Amount = None
     round_count: int = 0
-    messages: list[dict[str, Any]] = Field(default_factory=list)
-    stage_events: list[dict[str, Any]] = Field(default_factory=list)
-    escrows: list[dict[str, Any]] = Field(default_factory=list)
+    # Persisted rows, not typed fields: an amount read back out of storage
+    # arrives as a Python int, and this response is signed over canonical
+    # JSON. Normalized on the way in rather than at each producer.
+    messages: EmbeddedWireRows = Field(default_factory=list)
+    stage_events: EmbeddedWireRows = Field(default_factory=list)
+    escrows: EmbeddedWireRows = Field(default_factory=list)
     model_config = {"extra": "allow"}
 
 

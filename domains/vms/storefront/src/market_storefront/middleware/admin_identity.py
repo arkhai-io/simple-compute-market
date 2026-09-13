@@ -279,6 +279,13 @@ def _contract(request: Request, body: Any) -> AdminRouteContract | None:
         loop = path[len(prefix) : -len("/run-cycle")]
         return AdminRouteContract("admin_run_lifecycle_cycle", loop, body)
 
+    if method == "POST" and path.startswith(prefix) and path.endswith("/dry-run"):
+        # Its own operation name rather than the advance's: the two differ in
+        # whether they change anything, and a replayed request is answered
+        # from the recorded outcome of the operation it names.
+        loop = path[len(prefix) : -len("/dry-run")]
+        return AdminRouteContract("admin_dry_run_lifecycle_cycle", loop, body)
+
     if method == "POST" and path == "/api/v1/admin/capacity/projections/refresh":
         return AdminRouteContract(
             "admin_refresh_site_projections", "capacity/projections", body
