@@ -42,36 +42,44 @@ confirms settlement becomes ready has not happened yet.
 - [ ] 3.4 `make test` stays green. No production Python changed, so nothing is
       expected here; run it rather than assume.
 
-## 3e. Fan-in conversion and a misleading assertion
+## 3f. Buyer identity on the negotiation path
 
-Round result: **8 failed, 55 passed, 38 skipped** from 9/54/38.
+Round result: **8 failed, 57 passed, 36 skipped** from 8/55/38. Fan-in is
+fixed; no per-URL registry errors remain.
 
-- [x] 3e.1 **The fan-in signing worked; my conversion did not.** The typed
-      client returned results and I then called `model_dump` on them.
-      `ListingListResponse.listings` holds `ListingSummary` dataclasses whose
-      serializer is `to_dict`, so every URL failed with
-      `'ListingSummary' object has no attribute 'model_dump'` — after the
-      request had already succeeded. Replaced the defensive `getattr` chain
-      with the two names the class actually has. This is the branch's own
-      lesson landing on me: `ListingListResponse` is exactly the type that
-      taught it, and I modelled it instead of reading it.
-- [x] 3e.2 **An assertion that gave inverted guidance.** Stage 05a's
-      evaluate-negotiate check now reaches a real decision (`200 OK`), and got
-      `reject`. Its failure message was written for `accept` only: it reported
-      "Strategy accepted at round 0", told the reader to *lower* the opening
-      price, and printed neither the decision nor the reason. Following it
-      would have moved the price the wrong way. Now reports the actual
-      decision, reason, and both reference amounts, and separates the guidance
-      for `accept` from `reject` while warning that a guard can decline for
-      reasons unrelated to price.
+- [x] 3f.1 **`buyer_address` is retired across the client.** No method accepts
+      it, so all 14 call sites were latent `TypeError`s; only two had been
+      reached. The replacement differs by method, which is why a blanket
+      rename would have been wrong:
+      - `negotiate_new` derives `buyer_principal` from the signer — the
+        argument is simply gone.
+      - `evaluate_negotiate` takes `buyer_principal: Identity`.
+      - `settle` still needs the wallet, now as `buyer_evm_address`.
+      - `get_settle_status` and `wait_for_settlement` never needed it.
+- [x] 3f.2 **Corrected an error from 3d.** The two multi-registry buyer clients
+      were built without a signer on the belief that `negotiate_new` is
+      unauthenticated. It signs with `role="buyer"` and takes the buyer
+      principal from the signer, so both now carry one.
+- [x] 3f.3 **Checked the whole surface statically rather than per run.** Walked
+      the AST of every e2e module and compared each storefront-client call
+      against the installed signature: unknown keywords and missing required
+      arguments. That found two sites in a module this round had not touched.
+      **0 mismatches** remain suite-wide. Reacting to one `TypeError` per run
+      is what turned this into five rounds; the signatures were readable all
+      along.
 
-      Deliberately not tuned `BUYER_INITIAL_PRICE`: the reason is not yet
-      known, and choosing a price to make a red test green without it would be
-      guessing at the scenario's intent.
+- [x] 3f.4 **The 05a assertion earned its keep immediately.** It now reports
+      `decision='reject' reason='no_matching_inventory'` — not a price problem.
+      The message it replaced would have sent the reader to adjust
+      `BUYER_INITIAL_PRICE`, which is why it was worth fixing before tuning
+      anything.
 
-- [ ] 3e.3 **Findings unchanged:** `409 No available compute VM` (2),
-      `500 UNIQUE constraint failed: ...derivation_key` (1), `market credits
-      buy` `rc=2` (1), and `market buy` exiting `rc=0` without a run-log (1).
+- [ ] 3f.5 **Findings.** `no_matching_inventory` and the two
+      `409 No available compute VM` reservation failures are plausibly one
+      cause — the seeded inventory not matching the demanded resource
+      attributes — and should be investigated together rather than as three.
+      Also open: `500 UNIQUE ...derivation_key` (1), `market credits buy`
+      `rc=2` (1), `market buy` `rc=0` with no run-log (1).
 
 ## 4. Closeout
 

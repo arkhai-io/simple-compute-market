@@ -24,6 +24,7 @@ from market_alkahest.alkahest import (
 )
 from src.settings import settings
 from tests.e2e.roles.scenarios.vms.conftest import (
+    _signer,
     capacity_source_for,
     delete_mock_rules_if_present,
     wait_for_stage_event,
@@ -336,7 +337,11 @@ def test_scalar_non_erc20_settlement_reaches_ready(
         listing_id,
         proposal=_proposal(case, _BUYER_INITIAL_AMOUNT),
         requested_duration_seconds=_DURATION_SECONDS,
-        buyer_address=buyer_config["wallet_address"],
+        buyer_principal=_signer(
+            "eip191",
+            settings.BUYER.MARKETPLACE_CREDENTIAL,
+            "BUYER.MARKETPLACE_CREDENTIAL",
+        ).identity,
     )
     assert eval_result.would_negotiate, (
         f"{case.name} evaluate-negotiate exited: {eval_result}"
@@ -345,7 +350,6 @@ def test_scalar_non_erc20_settlement_reaches_ready(
 
     negotiate_resp = storefront_client.negotiate_new(
         listing_id=listing_id,
-        buyer_address=buyer_config["wallet_address"],
         initial_amount=_BUYER_INITIAL_AMOUNT,
         provision_terms={
             "kind": "compute.v1",
@@ -377,7 +381,6 @@ def test_scalar_non_erc20_settlement_reaches_ready(
     escrow_uid = _create_on_chain_escrow(
         case=case,
         buyer_private_key=buyer_config["private_key"],
-        buyer_address=buyer_config["wallet_address"],
         seller_wallet_address=seller_wallet,
         rpc_url=buyer_config["rpc_url"],
     )
@@ -428,7 +431,7 @@ def test_scalar_non_erc20_settlement_reaches_ready(
     settle = storefront_client.settle(
         escrow_uid,
         negotiation_id=negotiation_id,
-        buyer_address=buyer_config["wallet_address"],
+        buyer_evm_address=buyer_config["wallet_address"],
         ssh_public_key=buyer_config["ssh_public_key"],
     )
     assert settle.status == "provisioning", settle
@@ -444,7 +447,6 @@ def test_scalar_non_erc20_settlement_reaches_ready(
 
     status = storefront_client.get_settle_status(
         escrow_uid,
-        buyer_address=buyer_config["wallet_address"],
     )
     # provisioning_job_id is always None for a fulfillment on the durable
     # path; fulfillment_id is that path's durable identity. See
@@ -464,7 +466,6 @@ def test_scalar_non_erc20_settlement_reaches_ready(
 
     final_status = storefront_client.get_settle_status(
         escrow_uid,
-        buyer_address=buyer_config["wallet_address"],
     )
     assert final_status.status == "ready"
     assert final_status.tenant_credentials

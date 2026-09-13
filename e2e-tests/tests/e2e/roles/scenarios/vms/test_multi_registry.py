@@ -735,13 +735,22 @@ class TestStage06a_NegotiateWithBob:
         """Buyer hits bob-storefront:8001 to start a negotiation against Bob's listing."""
         _require(mr_state, "bob_listing_id", "fanin_ok")
         from storefront_client import SyncStorefrontClient
-        # negotiate_new is an unauthenticated route, so this client carries no
-        # signer: giving it one would require a caller_role it never asserts.
-        buyer_to_bob = SyncStorefrontClient(str(settings.SELLER.API_URL))
+        # negotiate_new derives `buyer_principal` from the signer and asserts
+        # the buyer role, so this client signs; the storefront records the
+        # thread against whichever principal opened it.
+        buyer_to_bob = SyncStorefrontClient(
+            str(settings.SELLER.API_URL),
+            _signer("eip191", settings.BUYER.MARKETPLACE_CREDENTIAL,
+                    "BUYER.MARKETPLACE_CREDENTIAL"),
+            caller_role="buyer",
+            expected_publishers=_trust(
+                _signer("eip191", settings.SELLER.PRIVATE_KEY,
+                        "SELLER.PRIVATE_KEY").identity.identifier
+            ),
+        )
         try:
             resp = buyer_to_bob.negotiate_new(
                 listing_id=mr_state.bob_listing_id,
-                buyer_address=buyer_config["wallet_address"],
                 initial_amount=BUYER_INITIAL_PRICE,
                 provision_terms={
                     "kind": "compute.v1",
@@ -783,12 +792,17 @@ class TestStage06b_NegotiateWithAlice:
         """
         _require(mr_state, "alice_listing_id", "fanin_ok")
         from storefront_client import SyncStorefrontClient
-        # See the note in stage 06a: negotiate_new is unauthenticated.
-        buyer_to_alice = SyncStorefrontClient(str(settings.ALICE.API_URL))
+        # See the note in stage 06a: this client signs as the buyer.
+        buyer_to_alice = SyncStorefrontClient(
+            str(settings.ALICE.API_URL),
+            _signer("eip191", settings.BUYER.MARKETPLACE_CREDENTIAL,
+                    "BUYER.MARKETPLACE_CREDENTIAL"),
+            caller_role="buyer",
+            expected_publishers=_alice_publisher_trust(),
+        )
         try:
             resp = buyer_to_alice.negotiate_new(
                 listing_id=mr_state.alice_listing_id,
-                buyer_address=buyer_config["wallet_address"],
                 initial_amount=BUYER_INITIAL_PRICE,
                 provision_terms={
                     "kind": "compute.v1",

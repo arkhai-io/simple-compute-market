@@ -95,6 +95,7 @@ from src.settings import settings
 from tests.e2e.roles.scenarios.vms.conftest import (
     DealLease,
     DealState,
+    _signer,
     capacity_source_for,
     delete_mock_rules_if_present,
     require_state,
@@ -638,7 +639,11 @@ class TestStage05a_EvaluateNegotiate:
                 "expiration_unix": 2_000_000_000,
             },
             requested_duration_seconds=DURATION_HOURS * 3600,
-            buyer_address=buyer_config["wallet_address"],
+            buyer_principal=_signer(
+                "eip191",
+                settings.BUYER.MARKETPLACE_CREDENTIAL,
+                "BUYER.MARKETPLACE_CREDENTIAL",
+            ).identity,
         )
         assert result.would_negotiate, (
             f"Strategy would exit at round 0 for BUYER_INITIAL_PRICE={BUYER_INITIAL_PRICE}.\n"
@@ -977,7 +982,6 @@ class TestStage08b_SettlementSubmittedAndJobQueued:
 
         status_resp = storefront_client.get_settle_status(
             deal_state.real_escrow_uid,
-            buyer_address=buyer_config["wallet_address"],
         )
         # provisioning_job_id is always None for a fulfillment on the
         # durable path; fulfillment_id is that path's durable identity.

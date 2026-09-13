@@ -697,7 +697,6 @@ class TestStage05b_NegotiationStartsAndVisible:
 
         resp = storefront_client.negotiate_new(
             listing_id=deal_state.seller_listing_id,
-            buyer_address=buyer_config["wallet_address"],
             initial_amount=BUYER_INITIAL_PRICE,
             provision_terms={
                 "kind": "compute.v1",
@@ -1012,7 +1011,7 @@ class TestStage08b_SettlementSubmittedAndJobQueued:
         settle_resp = storefront_client.settle(
             deal_state.real_escrow_uid,
             negotiation_id=deal_state.negotiation_id,
-            buyer_address=buyer_config["wallet_address"],
+            buyer_evm_address=buyer_config["wallet_address"],
             ssh_public_key=buyer_config["ssh_public_key"],
         )
         assert settle_resp.status == "provisioning", (
@@ -1033,7 +1032,6 @@ class TestStage08b_SettlementSubmittedAndJobQueued:
 
         status_resp = storefront_client.get_settle_status(
             deal_state.real_escrow_uid,
-            buyer_address=buyer_config["wallet_address"],
         )
         # provisioning_job_id is always None for a fulfillment on the
         # durable path (no raw executor job id crosses the buyer-facing
@@ -1130,7 +1128,6 @@ class TestStage09b_SettlementReadyAndCredentials:
 
         status_resp = storefront_client.get_settle_status(
             deal_state.real_escrow_uid,
-            buyer_address=buyer_config["wallet_address"],
         )
         assert status_resp.status == "ready", (
             f"Settlement not 'ready' after provision fulfilled event. "
