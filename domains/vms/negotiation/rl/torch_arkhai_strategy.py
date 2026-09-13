@@ -35,6 +35,7 @@ from market_policy.negotiation_middleware import (
 )
 from domains.vms.negotiation.policies import (
     _amount_from_proposal,
+    format_wire_amount,
     our_previous_counters,
     their_proposed_amount,
 )
@@ -286,11 +287,15 @@ def _proposal_with_amount(
     ``{"fields": {"amount": …}}`` when no skeleton is available (e.g.
     the very first opening counter before any peer proposal arrived).
     """
+    # Canonical wire form, matching every other amount writer: the response
+    # carrying this proposal is signed over canonical JSON, which has no
+    # number form for a uint256 above 2^53-1.
+    wire_amount = format_wire_amount(int(amount))
     if not isinstance(skeleton, dict):
-        return {"fields": {"amount": int(amount)}}
+        return {"fields": {"amount": wire_amount}}
     pinned_fields = skeleton.get("fields") if isinstance(skeleton.get("fields"), dict) else {}
     merged = dict(pinned_fields) if isinstance(pinned_fields, dict) else {}
-    merged["amount"] = int(amount)
+    merged["amount"] = wire_amount
     return {**skeleton, "fields": merged}
 
 

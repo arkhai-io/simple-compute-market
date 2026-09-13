@@ -143,9 +143,14 @@ DEMAND_RESOURCE = {
         # tokens against this contract so the storefront's pre-settlement
         # on-chain verifier (commit 03e47bf) finds the EAS attestation.
         "contract_address": "0x9fe46736679d2d9a65f0992f2272de9f3c7fa6e0",
-        "decimals": 0,  # listing-display only; raw amounts are what land on-chain
+        # 18, which is what the contract reports. A listing claiming 0 was
+        # the fiction that made display prices look like base units: the
+        # funding script mints whole tokens (1 000 of them to this buyer),
+        # and the buyer CLI scales its price flags by the decimals it reads
+        # from the chain, not by what a listing advertises.
+        "decimals": 18,
     },
-    "amount": 10_000,
+    "amount": 10 * 10**18,
 }
 # Listing-side accepted_escrows. The escrow_address is resolved from the
 # same alkahest_anvil_addresses.json that ships with market-storefront and
@@ -184,8 +189,20 @@ def _recipient_demands(seller_wallet: str) -> list[dict]:
 
 
 DURATION_HOURS = 1
-BUYER_INITIAL_PRICE = 7_000  # below seller floor (10_000) — forces counter at round 0
-BUYER_MAX_PRICE = 12_000
+# Base units of an 18-decimal asset, so past the JSON safe-integer range:
+# these amounts ride the wire as decimal-digit strings, which is the shape
+# canonical JSON can sign. 10 tokens/hour asking price, so the opening bid
+# sits under the floor (round-0 counter) and the ceiling over it (the buyer
+# accepts the seller's first counter). Both stay far inside the 1 000 tokens
+# the dev chain funds this buyer with — every scenario in a run escrows
+# against the same wallet.
+BUYER_INITIAL_PRICE = 7 * 10**18
+BUYER_MAX_PRICE = 12 * 10**18
+#: The same two prices as a person types them. `market negotiate` takes
+#: display units and multiplies by the asset's on-chain decimals, so the
+#: flags carry whole tokens where the API calls above carry base units.
+BUYER_INITIAL_PRICE_TOKENS = 7
+BUYER_MAX_PRICE_TOKENS = 12
 PROV_RULE_ID = "e2e-create-pause"
 REMOVE_RULE_ID = "e2e-remove-pause"  # mock rule that pauses provider teardown
 #: This scenario's own commercial resource id, distinct from the deal
@@ -195,7 +212,7 @@ REMOVE_RULE_ID = "e2e-remove-pause"  # mock rule that pauses provider teardown
 #: and the second listing create is refused outright.
 E2E_RESOURCE_ID = "compute-e2e-deal-cli-001"
 E2E_RESOURCE_CSV = """resource_id,resource_type,resource_subtype,unit,value,state,min_price,token,max_duration_seconds,attribute.gpu_model,attribute.sla,attribute.region,attribute.vm_host
-compute-e2e-deal-cli-001,compute.gpu,rtx5080,count,1,available,10000,0x9fe46736679d2d9a65f0992f2272de9f3c7fa6e0,,RTX 5080,90.0,"California, US",kvm-deal-cli
+compute-e2e-deal-cli-001,compute.gpu,rtx5080,count,1,available,10,0x9fe46736679d2d9a65f0992f2272de9f3c7fa6e0,,RTX 5080,90.0,"California, US",kvm-deal-cli
 """
 
 # ===========================================================================
@@ -775,11 +792,12 @@ class TestStage05b_BuyerCliDrivesNegotiation:
           - Exits 0 on agreed, 4 on exited, 2 on usage errors, 3 on
             transport errors.
 
-        With buyer_initial=7000 and seller_floor=10000 the seller counters
-        at round 0; with buyer_max=12000 the buyer accepts the seller's
-        first counter (8500 — midpoint of 10000 and 7000) because it's
-        comfortably under the buyer ceiling. Single-round agreed terminal,
-        no admin shortcuts.
+        Whole tokens on the flags, base units on the wire: an opening bid
+        of 7 against a 10-token asking rate makes the seller counter at
+        round 0, and a 12-token ceiling makes the buyer accept that first
+        counter (8.5 tokens — the midpoint of 10 and 7, i.e. 85e17 base
+        units) because it sits under the ceiling. Single-round agreed
+        terminal, no admin shortcuts.
 
         Asserts:
           - subprocess exits 0
@@ -796,9 +814,9 @@ class TestStage05b_BuyerCliDrivesNegotiation:
                 "--seller",
                 str(settings.SELLER.API_URL),
                 "--initial-price",
-                str(BUYER_INITIAL_PRICE),
+                str(BUYER_INITIAL_PRICE_TOKENS),
                 "--max-price",
-                str(BUYER_MAX_PRICE),
+                str(BUYER_MAX_PRICE_TOKENS),
                 "--duration-hours",
                 str(DURATION_HOURS),
                 "--settlement",

@@ -11,7 +11,11 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 from market_identity import Identity
 
 
-from market_core.schemas import EscrowDemand
+from market_core.schemas import (
+    EscrowDemand,
+    OptionalUint256Amount,
+    Uint256Amount,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -182,7 +186,7 @@ class RefundResponse(BaseModel):
     from_address: str | None = None
     to_address: str | None = None
     token: dict[str, Any] | None = None
-    amount_raw: int | None = None
+    amount_raw: OptionalUint256Amount = None
     block_number: int | None = None
 
 
@@ -248,14 +252,15 @@ class EvaluateNegotiateResponse(BaseModel):
     """
 
     listing_id: str
-    our_reference_amount: (
-        int  # Seller's absolute reference (per-hour × duration / 3600)
-    )
-    their_proposed_amount: int  # Echoed back from the request's proposal.fields.amount
+    # Base units, uint256 domain, as decimal-digit strings on the wire: an
+    # 18-decimal reference amount has no JSON number form, and this response
+    # is canonicalized for the seller's signature.
+    our_reference_amount: Uint256Amount  # per-hour × duration / 3600
+    their_proposed_amount: Uint256Amount  # echoed from proposal.fields.amount
     direction: str  # "maximize" (seller always maximises amount)
     strategy: str  # e.g. "bisection" or "rl"
     decision: str  # "accept" | "counter" | "exit"
-    decision_amount: int | None = None
+    decision_amount: OptionalUint256Amount = None
     decision_proposal: dict[str, Any] | None = None
     decision_reason: str | None = None
     would_negotiate: bool  # True when decision != "exit"

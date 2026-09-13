@@ -495,9 +495,17 @@ def register(credits_app: typer.Typer) -> None:
                         fg=typer.colors.RED,
                     )
                     raise typer.Exit(2)
-            scale = 10 ** int(token_decimals)
-            initial_price = initial_price * scale
-            max_price = max_price * scale
+            from core_buyer.negotiation_client import display_to_base_units
+
+            try:
+                initial_price = display_to_base_units(
+                    initial_price, token_decimals, field="--initial-price"
+                )
+                max_price = display_to_base_units(
+                    max_price, token_decimals, field="--max-price"
+                )
+            except ValueError as exc:
+                raise typer.BadParameter(str(exc)) from exc
         if explicit_prices and hosted_requested:
             if (
                 not float(initial_price).is_integer()

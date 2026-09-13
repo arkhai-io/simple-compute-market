@@ -825,9 +825,17 @@ def register(app: typer.Typer) -> None:
                     raise typer.BadParameter(
                         "could not resolve the selected Alkahest asset decimals"
                     ) from exc
-                scale = 10 ** int(token_decimals)
-                initial_price = initial_price * scale
-                max_price = max_price * scale
+                from core_buyer.negotiation_client import display_to_base_units
+
+                try:
+                    initial_price = display_to_base_units(
+                        initial_price, token_decimals, field="--initial-price"
+                    )
+                    max_price = display_to_base_units(
+                        max_price, token_decimals, field="--max-price"
+                    )
+                except ValueError as exc:
+                    raise typer.BadParameter(str(exc)) from exc
             build_escrow_terms = make_buyer_payment_escrow_terms_fn(
                 chain_name=selected_chain_name,
                 addr_config_path=addr_cfg or None,

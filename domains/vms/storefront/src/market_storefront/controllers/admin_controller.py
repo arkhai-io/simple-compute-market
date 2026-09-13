@@ -12,6 +12,7 @@ import json
 import logging
 import time
 import uuid
+from collections.abc import Mapping
 from datetime import datetime, timezone
 from typing import Any
 
@@ -1282,10 +1283,17 @@ class AdminController:
             escrow_uid=body.escrow_uid,
             closed_listing_ids=closed_listing_ids,
         )
-        # Pools are the aggregator's concept, not the ledger's — surface
-        # the membership from the resource attributes the sync mirrored.
-        pool_id = reserved.get("pool_id") or (reserved.get("attributes") or {}).get(
-            "pool_id"
+        # Pools are the aggregator's concept, not the ledger's. The
+        # reservation payload carries neither a `pool_id` nor pool-bearing
+        # resource attributes -- the capacity boundary reports the hold and
+        # withholds the topology the storefront published from -- so read the
+        # membership from the durable listing binding, which is where this
+        # storefront recorded it at publication time.
+        durable = await self._db.load_listing_binding(listing_id=body.listing_id)
+        pool_id = (
+            reserved.get("pool_id")
+            or (reserved.get("attributes") or {}).get("pool_id")
+            or (durable.pool_id if durable is not None else None)
         )
         require_reservation_fields(reserved, site_id=binding.site_id)
         return ReserveCapacityResponse(

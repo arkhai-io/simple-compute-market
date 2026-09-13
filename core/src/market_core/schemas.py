@@ -30,11 +30,13 @@ import hashlib
 import json
 import re
 
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 
 from pydantic import (
     BaseModel,
+    BeforeValidator,
     Field,
+    PlainSerializer,
     SerializeAsAny,
     field_serializer,
     field_validator,
@@ -99,6 +101,29 @@ def _parse_uint256_str(v: Any, field_name: str) -> int | None:
 
 def _serialize_uint256_str(v: int | None) -> str | None:
     return None if v is None else str(v)
+
+
+def _uint256_before(v: Any) -> Any:
+    return _parse_uint256_str(v, "uint256 amount")
+
+
+#: A uint256-domain amount: Python ``int`` in memory, decimal-digit string on
+#: the wire. Use this for any field carrying base units rather than a bare
+#: ``int`` -- a response body is canonicalized for the responder's signature,
+#: and a JSON number above 2^53-1 has no canonical form, so an ordinary
+#: 18-decimal amount in a bare ``int`` field makes the response unsignable.
+Uint256Amount = Annotated[
+    int,
+    BeforeValidator(_uint256_before),
+    PlainSerializer(lambda v: str(v), return_type=str),
+]
+
+#: The same, where absent is a distinct answer from zero.
+OptionalUint256Amount = Annotated[
+    int | None,
+    BeforeValidator(_uint256_before),
+    PlainSerializer(_serialize_uint256_str, return_type=str | None),
+]
 
 
 class Resource(BaseModel):

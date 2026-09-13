@@ -33,6 +33,7 @@ import urllib.request
 import uuid
 from collections.abc import Mapping
 from dataclasses import dataclass
+from decimal import Decimal, InvalidOperation
 from typing import Any, Callable, Optional
 
 from market_policy.negotiation_middleware import (
@@ -44,7 +45,10 @@ from market_policy.negotiation_middleware import (
     normalize_policies_by_escrow_kind_config,
     run_negotiation_chain,
 )
-from market_policy.scalar_policies import make_escrow_kind_dispatch_middleware
+from market_policy.scalar_policies import (
+    make_escrow_kind_dispatch_middleware,
+    parse_wire_amount,
+)
 from market_core.schemas import (
     SettlementOption,
     SettlementPlan,
@@ -162,6 +166,56 @@ def load_buyer_chain(
 
 
 DEFAULT_TIMEOUT_SECONDS = 30.0
+
+
+def display_to_base_units(price: Any, decimals: Any, *, field: str) -> int:
+    """Convert a human display price into exact base units.
+
+    `price * 10**decimals` through a float is lossy for any 18-decimal
+    asset -- and the product is what gets signed, persisted, and escrowed, so
+    a dropped digit is a different deal. Decimal shifts the exponent exactly.
+    A price finer than the asset's smallest unit is refused rather than
+    rounded: nobody can pay a fraction of a base unit, and rounding it would
+    move money the caller did not name.
+    """
+    try:
+        scaled = Decimal(str(price)).scaleb(int(decimals))
+    except (InvalidOperation, ValueError, TypeError) as exc:
+        raise ValueError(f"{field} is not a numeric price: {price!r}") from exc
+    integral = scaled.to_integral_value()
+    if scaled != integral:
+        raise ValueError(
+            f"{field} is finer than the asset's smallest unit: {price!r} at "
+            f"{int(decimals)} decimals is {scaled}"
+        )
+    if integral < 0:
+        raise ValueError(f"{field} must be non-negative")
+    return int(integral)
+
+
+def scaled_base_units(per_unit: Any, unit_count: Any, *, field: str) -> int:
+    """Per-unit rate times unit count, as an exact integer of base units.
+
+    Amounts live in the uint256 domain, so this multiplication cannot go
+    through a float: `7000 * 10**18` is already past the point where a double
+    keeps every digit, and the product is what both parties sign. Decimal
+    multiplies the two exactly and a non-integral product is refused rather
+    than rounded -- a price with more precision than the asset's base unit is
+    a caller error, not something to silently resolve.
+    """
+    try:
+        product = Decimal(str(per_unit)) * Decimal(str(unit_count))
+    except (InvalidOperation, ValueError) as exc:
+        raise RuntimeError(f"{field} is not a numeric amount: {per_unit!r}") from exc
+    integral = product.to_integral_value()
+    if product != integral:
+        raise RuntimeError(
+            f"{field} x unit count is not a whole number of base units "
+            f"({product}); the asset has no smaller unit to pay in"
+        )
+    if integral < 0:
+        raise RuntimeError(f"{field} must be non-negative")
+    return int(integral)
 
 
 def _dump_payload(value: Any, *, mode: str | None = None) -> dict[str, Any]:
@@ -819,10 +873,12 @@ def negotiate_with_seller(
     pinned_proposal: dict[str, Any] | None = None
 
     def _amount(p: dict | None) -> int | None:
+        # Through the shared uint256 reader: the seller sends the accepted
+        # amount as a decimal-digit string, and a float or a negative here is
+        # a contract disagreement rather than a number to coerce.
         if not isinstance(p, dict):
             return None
-        v = (p.get("fields") or {}).get("amount")
-        return int(v) if v is not None else None
+        return parse_wire_amount((p.get("fields") or {}).get("amount"))
 
     neg_id: str | None
     if resume is not None:
@@ -868,9 +924,10 @@ def negotiate_with_seller(
                 "unit_count must be > 0 to translate per-unit bounds "
                 "into absolute amounts."
             )
-        scale = float(unit_count)
-        initial_amount = int(round(float(initial_price) * scale))
-        ceiling_amount = float(max_price) * scale
+        initial_amount = scaled_base_units(
+            initial_price, unit_count, field="initial_price"
+        )
+        ceiling_amount = scaled_base_units(max_price, unit_count, field="max_price")
 
         # Pin the buyer's first proposal: the policy chain owns the
         # round-0 opening (ARCHITECTURE.md, "Buyer negotiation policy surface") — run it
@@ -1059,18 +1116,18 @@ def negotiate_with_seller(
                     proposal=seller_counter_proposal,
                 )
             )
-        ceiling_amount = (
-            float(max_price) * float(unit_count)
-            if unit_count is not None
-            else float(max_price)
+        ceiling_amount = scaled_base_units(
+            max_price,
+            unit_count if unit_count is not None else 1,
+            field="max_price",
         )
         ctx = NegotiationContext(
             direction="minimize",
             our_reference_amount=ceiling_amount,
-            our_opening_amount=(
-                float(initial_price) * float(unit_count)
-                if unit_count is not None
-                else float(initial_price)
+            our_opening_amount=scaled_base_units(
+                initial_price,
+                unit_count if unit_count is not None else 1,
+                field="initial_price",
             ),
             listing={},
             our_escrow_proposal=pinned_proposal,

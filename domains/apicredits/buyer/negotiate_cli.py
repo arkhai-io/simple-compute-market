@@ -411,11 +411,19 @@ def register(credits_app: typer.Typer) -> None:
                     fg=typer.colors.RED,
                 )
                 raise typer.Exit(2)
-            scale = 10 ** int(decimals)
-            if _initial_explicit and initial_price is not None:
-                initial_price = initial_price * scale
-            if _max_explicit and max_price is not None:
-                max_price = max_price * scale
+            from core_buyer.negotiation_client import display_to_base_units
+
+            try:
+                if _initial_explicit and initial_price is not None:
+                    initial_price = display_to_base_units(
+                        initial_price, decimals, field="--initial-price"
+                    )
+                if _max_explicit and max_price is not None:
+                    max_price = display_to_base_units(
+                        max_price, decimals, field="--max-price"
+                    )
+            except ValueError as exc:
+                raise typer.BadParameter(str(exc)) from exc
 
         from market_identity import TrustedIdentitySet
 

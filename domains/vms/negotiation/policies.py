@@ -40,6 +40,7 @@ from market_policy.scalar_policies import (  # noqa: F401 — re-exports
     _peer_proposal,
     _proposal_requires_exact_amount,
     _set_proposal_amount,
+    format_wire_amount,
     accept_exact_listing_middleware,
     amount_bisection_middleware,
     bisection_middleware,
@@ -255,6 +256,7 @@ def has_matching_inventory_guard(
 
 __all__ = [
     "_amount_from_proposal",
+    "format_wire_amount",
     "accept_exact_listing_middleware",
     "amount_bisection_middleware",
     "bisection_middleware",

@@ -40,29 +40,110 @@ logger = logging.getLogger(__name__)
 DEFAULT_CONVERGENCE_RATIO = 0.01
 DEFAULT_REASONABLE_MULTIPLIER = 1.5
 
+#: The same two bounds as exact integer ratios. A uint256 amount cannot be
+#: compared against `our_amount * 1.01` without being pulled through a
+#: float first, which discards digits above 2^53-1; `their * 100 <= our * 101`
+#: is the same bound and is exact at any magnitude.
+_CONVERGENCE_NUM, _CONVERGENCE_DEN = 101, 100
+_SHORTFALL_NUM, _SHORTFALL_DEN = 99, 100
+_REASONABLE_NUM, _REASONABLE_DEN = 3, 2
+
 _ZERO_ADDRESS = "0x" + "0" * 40
 
 
-def _amount_from_proposal(proposal: dict[str, Any] | None) -> Optional[float]:
-    """Pull the absolute payment amount out of a VM EscrowProposal dict."""
+class NegotiationAmountError(ValueError):
+    """A scalar amount is not a non-negative decimal integer."""
+
+
+def parse_wire_amount(raw: Any) -> Optional[int]:
+    """Read a uint256-domain scalar amount off the wire.
+
+    Payment amounts are EVM ``uint256`` values, and an ordinary 18-decimal
+    token amount exceeds both JavaScript's safe-integer range and SQLite's
+    signed 64-bit range. So Python evaluates them as arbitrary-precision
+    integers, persistence stores decimal text, and canonical JSON carries
+    decimal-digit strings: a JSON number above 2^53-1 has no canonical form,
+    and the canonicalizer refuses to invent one rather than emit a value the
+    other party would read back as a different number.
+
+    ``None`` means the proposal carries no amount at all -- exact escrows
+    negotiate no scalar -- which is a different answer from a malformed one.
+    Malformed raises instead of rounding: a float, a negative, a boolean, or
+    a non-digit string is the two sides disagreeing about the contract.
+    """
+    if raw is None:
+        return None
+    if isinstance(raw, bool):
+        raise NegotiationAmountError("amount must not be a boolean")
+    if isinstance(raw, int):
+        if raw < 0:
+            raise NegotiationAmountError("amount must be non-negative")
+        return raw
+    if isinstance(raw, float):
+        raise NegotiationAmountError(
+            "amount must not be a floating-point value: uint256 amounts "
+            "travel as decimal-digit strings and a float cannot hold them"
+        )
+    if isinstance(raw, str):
+        text = raw.strip()
+        if not text:
+            return None
+        if not text.isdigit():
+            raise NegotiationAmountError(
+                f"amount must be a non-negative decimal-digit string, got {raw!r}"
+            )
+        return int(text)
+    raise NegotiationAmountError(f"amount has no uint256 reading: {raw!r}")
+
+
+def format_wire_amount(amount: Any) -> str:
+    """Render a uint256-domain amount in its canonical wire form."""
+    if isinstance(amount, bool) or not isinstance(amount, int):
+        raise NegotiationAmountError(
+            f"wire amounts must be Python integers, got {amount!r}"
+        )
+    if amount < 0:
+        raise NegotiationAmountError("amount must be non-negative")
+    return str(amount)
+
+
+def _exact_amount(value: Any, *, field: str) -> int:
+    """Read a context bound as an exact integer, refusing a lossy float.
+
+    Callers used to hand these in as floats and the policies compared them
+    that way. At 18 decimals a float has already dropped digits by the time
+    it arrives, so accepting one here would make the comparison agree with a
+    number neither party proposed. An integral float is allowed through for
+    callers that still spell a small bound `10_000.0`; a fractional one is
+    not an amount.
+    """
+    if isinstance(value, bool):
+        raise NegotiationAmountError(f"{field} must not be a boolean")
+    if isinstance(value, int):
+        return value
+    if isinstance(value, float):
+        if not value.is_integer():
+            raise NegotiationAmountError(
+                f"{field} must be a whole number of base units, got {value!r}"
+            )
+        return int(value)
+    parsed = parse_wire_amount(value)
+    if parsed is None:
+        raise NegotiationAmountError(f"{field} is required")
+    return parsed
+
+
+def _amount_from_proposal(proposal: dict[str, Any] | None) -> Optional[int]:
+    """Pull the absolute payment amount out of a scalar escrow proposal."""
     if not isinstance(proposal, dict):
         return None
     fields = proposal.get("fields") or {}
     if not isinstance(fields, dict):
         return None
-    raw = fields.get("amount")
-    if raw is None:
-        return None
-    if isinstance(raw, (int, float)):
-        return float(raw)
-    if isinstance(raw, str):
-        s = raw.strip()
-        if s.isdigit():
-            return float(int(s))
-    return None
+    return parse_wire_amount(fields.get("amount"))
 
 
-def their_proposed_amount(history: list[NegotiationRound]) -> Optional[float]:
+def their_proposed_amount(history: list[NegotiationRound]) -> Optional[int]:
     """Most recent absolute amount the other side proposed. None if not yet."""
     for round_ in reversed(history):
         if round_.sender == "them":
@@ -104,9 +185,9 @@ def proposal_escrow_kind(
         return None
 
 
-def our_previous_counters(history: list[NegotiationRound]) -> list[float]:
+def our_previous_counters(history: list[NegotiationRound]) -> list[int]:
     """Absolute amounts we counter-proposed in earlier rounds, oldest first."""
-    out: list[float] = []
+    out: list[int] = []
     for h in history:
         if h.sender == "us" and h.action == "counter":
             amount = _amount_from_proposal(h.proposal)
@@ -123,10 +204,13 @@ def our_first_proposal(history: list[NegotiationRound]) -> Optional[dict[str, An
     return None
 
 
-def _set_proposal_amount(proposal: dict[str, Any], amount: float) -> dict[str, Any]:
+def _set_proposal_amount(proposal: dict[str, Any], amount: int) -> dict[str, Any]:
     out = dict(proposal)
     fields = dict(out.get("fields") or {})
-    fields["amount"] = int(round(amount))
+    # Canonical wire form, not a JSON number: the seller writes the accepted
+    # amount the same way, and a number above 2^53-1 cannot be canonicalized
+    # for signing at all.
+    fields["amount"] = format_wire_amount(amount)
     out["fields"] = fields
     return out
 
@@ -154,9 +238,12 @@ def escrow_shape_uses_scalar_amount(proposal: dict[str, Any] | None) -> bool:
     )
 
 
-def _opening_amount(context: NegotiationContext) -> float:
+def _opening_amount(context: NegotiationContext) -> int:
     opening = getattr(context, "our_opening_amount", None)
-    return opening if opening is not None else context.our_reference_amount
+    return _exact_amount(
+        opening if opening is not None else context.our_reference_amount,
+        field="our_opening_amount",
+    )
 
 
 def _opening_proposal(context: NegotiationContext) -> dict[str, Any]:
@@ -185,7 +272,9 @@ def bisection_middleware(
     if len(counters) >= 2 and counters[-1] == counters[-2]:
         return NegotiationDecision(action="exit", reason="stale_negotiation"), context
 
-    our_amount = context.our_reference_amount
+    our_amount = _exact_amount(
+        context.our_reference_amount, field="our_reference_amount"
+    )
     their_amount = their_proposed_amount(history)
     their_proposal = their_last_proposal(history)
 
@@ -195,12 +284,12 @@ def bisection_middleware(
             context,
         )
 
-    conv = DEFAULT_CONVERGENCE_RATIO
-    reasonable = DEFAULT_REASONABLE_MULTIPLIER
     skeleton = their_proposal or context.our_escrow_proposal or {}
-
+    # Every comparison below is the float bound restated as a cross-multiplied
+    # integer one, and every midpoint is a floor division. Nothing in this
+    # policy may put a uint256 amount through a float.
     if context.direction == "minimize":
-        if their_amount <= our_amount * (1 + conv):
+        if their_amount * _CONVERGENCE_DEN <= our_amount * _CONVERGENCE_NUM:
             return (
                 NegotiationDecision(
                     action="accept",
@@ -209,10 +298,8 @@ def bisection_middleware(
                 ),
                 context,
             )
-        if their_amount <= our_amount * reasonable:
-            proposed = (our_amount + their_amount) / 2
-            if proposed > our_amount:
-                proposed = our_amount
+        if their_amount * _REASONABLE_DEN <= our_amount * _REASONABLE_NUM:
+            proposed = min((our_amount + their_amount) // 2, our_amount)
             return (
                 NegotiationDecision(
                     action="counter",
@@ -223,7 +310,7 @@ def bisection_middleware(
         return NegotiationDecision(action="exit", reason="price_unreasonable"), context
 
     if context.direction == "maximize":
-        if their_amount >= our_amount * (1 - conv):
+        if their_amount * _SHORTFALL_DEN >= our_amount * _SHORTFALL_NUM:
             return (
                 NegotiationDecision(
                     action="accept",
@@ -232,8 +319,8 @@ def bisection_middleware(
                 ),
                 context,
             )
-        if their_amount >= our_amount / reasonable:
-            proposed = (our_amount + their_amount) / 2
+        if their_amount * _REASONABLE_NUM >= our_amount * _REASONABLE_DEN:
+            proposed = (our_amount + their_amount) // 2
             return (
                 NegotiationDecision(
                     action="counter",
@@ -302,7 +389,7 @@ def listed_price_middleware(
             context,
         )
 
-    bound = context.our_reference_amount
+    bound = _exact_amount(context.our_reference_amount, field="our_reference_amount")
     within = (
         their_amount <= bound
         if context.direction == "minimize"
@@ -642,7 +729,7 @@ def buyer_counter_guard(
             )
         buyer_amount = 0
     else:
-        buyer_amount = int(raw_amount)
+        buyer_amount = raw_amount
 
     context.intermediate["buyer_amount"] = buyer_amount
     if uses_scalar_amount:
@@ -789,9 +876,11 @@ def accept_exact_listing_middleware(
                 context,
             )
         if option_uses_scalar_amount(matched_option):
-            expected_amount = int(round(context.our_reference_amount))
+            expected_amount = _exact_amount(
+                context.our_reference_amount, field="our_reference_amount"
+            )
             proposed_amount = _amount_from_proposal(proposal)
-            if proposed_amount is None or int(proposed_amount) != expected_amount:
+            if proposed_amount is None or proposed_amount != expected_amount:
                 return (
                     NegotiationDecision(
                         action="reject",
@@ -850,11 +939,13 @@ def accept_exact_listing_middleware(
             ),
             context,
         )
-    expected_amount = int(round(context.our_reference_amount))
+    expected_amount = _exact_amount(
+        context.our_reference_amount, field="our_reference_amount"
+    )
     requires_amount = _proposal_requires_exact_amount(matched)
     if requires_amount:
         proposed_amount = _amount_from_proposal(proposal)
-        if proposed_amount is None or int(proposed_amount) != expected_amount:
+        if proposed_amount is None or proposed_amount != expected_amount:
             return (
                 NegotiationDecision(
                     action="reject",
@@ -1058,6 +1149,9 @@ def buyer_escrow_shape_guard(
 
 __all__ = [
     "_amount_from_proposal",
+    "NegotiationAmountError",
+    "format_wire_amount",
+    "parse_wire_amount",
     "accept_exact_listing_middleware",
     "amount_bisection_middleware",
     "bisection_middleware",

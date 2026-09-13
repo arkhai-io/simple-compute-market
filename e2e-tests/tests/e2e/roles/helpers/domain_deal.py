@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Iterable
@@ -117,6 +118,30 @@ def ordered_events(
     return ordered_event_groups(events, *((name,) for name in event_names))
 
 
+#: Credential-shaped runs masked out of any process output copied into test
+#: evidence: long hexadecimal (wallet keys, 0x-prefixed material) and long
+#: opaque base64url (issued API-credit secrets, ed25519 keys). Deliberately
+#: wider than the material actually expected — over-masking costs a reader
+#: nothing, under-masking writes a key into CI output forever.
+_CREDENTIAL_SHAPED = re.compile(
+    r"(0x)?[0-9a-fA-F]{32,}|[A-Za-z0-9_-]{32,}",
+)
+
+
+def _redacted(text: str, *, limit: int = 1200) -> str:
+    """Mask credential-shaped runs in process output, then tail it.
+
+    A command that refuses before writing its first run-log event leaves its
+    reason only on stderr, and withholding stderr entirely left three
+    consecutive runs unable to say which refusal fired. Masking is what makes
+    that output safe to quote; the refusals themselves name config keys and
+    mechanism IDs, which survive masking intact.
+    """
+    if not text:
+        return "<empty>"
+    return _CREDENTIAL_SHAPED.sub("<redacted>", text)[-limit:]
+
+
 def assert_market_run_succeeded(run: Any, *, command: str) -> None:
     """Report a bounded, secret-safe CLI failure without domain assumptions."""
 
@@ -131,7 +156,8 @@ def assert_market_run_succeeded(run: Any, *, command: str) -> None:
             "first event"
         )
     raise AssertionError(
-        f"{command} failed rc={run.returncode}; {detail}. "
-        "Inspect the role-scoped process output directly; it may contain a "
-        "transient domain credential and is not copied into test evidence."
+        f"{command} failed rc={run.returncode}; {detail}.\n"
+        f"stderr (redacted tail): {_redacted(run.stderr())}\n"
+        "Full role-scoped process output is not copied into test evidence: it "
+        "may contain a transient domain credential."
     )

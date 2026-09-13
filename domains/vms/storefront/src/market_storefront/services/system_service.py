@@ -363,7 +363,7 @@ class SystemService:
             ]
             context = NegotiationContext(
                 direction="maximize",
-                our_reference_amount=10_000.0,
+                our_reference_amount=10_000,
             )
             probe = run_negotiation_chain(chain, history, context)
             if probe.action in ("exit", "reject"):

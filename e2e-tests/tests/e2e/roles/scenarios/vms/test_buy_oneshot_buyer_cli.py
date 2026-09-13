@@ -80,9 +80,12 @@ OFFER_RESOURCE = {
     "region": "California, US",
 }
 # MockERC20 at the deterministic alkahest address; buyer (account #1) is
-# pre-funded with it in the baked chain state. decimals=0 → raw == display.
+# funded with 1 000 whole tokens in the baked chain state (see
+# dev-env/generate_state.py). The contract reports 18 decimals, so the
+# advertised rate is in base units and the CLI's price flags below are in
+# whole tokens — the CLI scales them by the decimals it reads on chain.
 DEMAND_TOKEN_ADDRESS = "0x9fe46736679d2d9a65f0992f2272de9f3c7fa6e0"
-DEMAND_AMOUNT = 10_000
+DEMAND_AMOUNT = 10 * 10**18
 
 _ALKAHEST_ADDRESSES_PATH = str(
     resources.files("market_storefront.data").joinpath("alkahest_anvil_addresses.json")
@@ -157,14 +160,18 @@ def _recipient_demands(seller_wallet: str) -> list[dict]:
 
 
 DURATION_HOURS = 1
-BUYER_INITIAL_PRICE = 7_000  # below the seller floor (10_000) — forces a round-0 counter
-BUYER_MAX_PRICE = 12_000  # above floor — buyer accepts the seller's first counter
+#: Whole tokens, as `market buy` takes them: under the 10-token asking
+#: rate so round 0 counters, ceiling over it so the buyer accepts the
+#: seller's counter. In base units these become 7e18 and 1.2e19, past the
+#: JSON safe-integer range and so carried as decimal-digit strings.
+BUYER_INITIAL_PRICE = 7
+BUYER_MAX_PRICE = 12
 BUY_RULE_ID = "e2e-buy-create"  # non-pausing mock rule: create job returns immediately
 
 BUY_RESOURCE_CSV = (
     "resource_id,resource_type,resource_subtype,unit,value,state,min_price,token,"
     "max_duration_seconds,attribute.gpu_model,attribute.sla,attribute.region,attribute.vm_host\n"
-    f"{BUY_RESOURCE_ID},compute.gpu,rtx4090,count,1,available,10000,{DEMAND_TOKEN_ADDRESS},,"
+    f"{BUY_RESOURCE_ID},compute.gpu,rtx4090,count,1,available,10,{DEMAND_TOKEN_ADDRESS},,"
     f'{BUY_GPU_MODEL},90.0,"California, US",kvm1\n'
 )
 
@@ -399,8 +406,9 @@ class TestStageB4_MarketBuy:
         The typed resource query returns only this suite's listing, and the
         settlement clause selects its advertised Alkahest token option.
 
-        Explicit negotiation prices mirror the full-deal suite: initial 7000
-        (below the 10000 seller floor → round-0 counter), max 12000 (above the
+        Explicit negotiation prices mirror the full-deal suite, in whole
+        tokens as the CLI takes them: initial 7 (below the 10-token asking
+        rate → round-0 counter), max 12 (above the
         floor → buyer accepts the seller's first counter).
         """
         require_state(deal_state, "seller_listing_id", "provisioning_gate_armed")

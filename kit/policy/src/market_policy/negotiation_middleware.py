@@ -68,11 +68,14 @@ class NegotiationContext:
     """
 
     direction: Literal["minimize", "maximize"]
-    our_reference_amount: float
+    #: Base units, uint256 domain. An 18-decimal amount does not survive a
+    #: float, so the scalar policies refuse a fractional one rather than
+    #: comparing against a number neither party proposed.
+    our_reference_amount: int
     # Round-0 opening when it differs from the bound (a haggler opens low
     # and concedes toward the bound). None means "open at the bound" —
     # the listed_price default, where the two coincide.
-    our_opening_amount: Optional[float] = None
+    our_opening_amount: Optional[int] = None
     listing: dict[str, Any] = field(default_factory=dict)
     our_escrow_proposal: dict[str, Any] | None = None
     available_resources: dict[str, Any] = field(default_factory=dict)

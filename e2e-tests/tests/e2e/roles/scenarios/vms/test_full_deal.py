@@ -141,9 +141,14 @@ DEMAND_RESOURCE = {
         # tokens against this contract so the storefront's pre-settlement
         # on-chain verifier (commit 03e47bf) finds the EAS attestation.
         "contract_address": "0x9fe46736679d2d9a65f0992f2272de9f3c7fa6e0",
-        "decimals": 0,   # listing-display only; raw amounts are what land on-chain
+        # 18, which is what the contract reports. A listing claiming 0 was
+        # the fiction that made display prices look like base units: the
+        # funding script mints whole tokens (1 000 of them to this buyer),
+        # and the buyer CLI scales its price flags by the decimals it reads
+        # from the chain, not by what a listing advertises.
+        "decimals": 18,
     },
-    "amount": 10_000,
+    "amount": 10 * 10**18,
 }
 # Listing-side accepted_escrows advertisement. The escrow_address here is a
 # stub — the buyer sends the placeholder zero address on its EscrowProposal
@@ -175,13 +180,20 @@ def _recipient_demands(seller_wallet: str) -> list[dict]:
 
 
 DURATION_HOURS = 1
-BUYER_INITIAL_PRICE = 7_000    # below seller floor (10_000) — forces counter at round 0
-BUYER_MAX_PRICE = 12_000
+# Base units of an 18-decimal asset, so past the JSON safe-integer range:
+# these amounts ride the wire as decimal-digit strings, which is the shape
+# canonical JSON can sign. 10 tokens/hour asking price, so the opening bid
+# sits under the floor (round-0 counter) and the ceiling over it (the buyer
+# accepts the seller's first counter). Both stay far inside the 1 000 tokens
+# the dev chain funds this buyer with — every scenario in a run escrows
+# against the same wallet.
+BUYER_INITIAL_PRICE = 7 * 10**18
+BUYER_MAX_PRICE = 12 * 10**18
 PROV_RULE_ID = "e2e-create-pause"
 REMOVE_RULE_ID = "e2e-remove-pause"   # mock rule that pauses provider teardown
 E2E_RESOURCE_ID = "compute-e2e-deal-001"
 E2E_RESOURCE_CSV = """resource_id,resource_type,resource_subtype,unit,value,state,min_price,token,max_duration_seconds,attribute.gpu_model,attribute.sla,attribute.region,attribute.vm_host
-compute-e2e-deal-001,compute.gpu,rtx5080,count,1,available,10000,0x9fe46736679d2d9a65f0992f2272de9f3c7fa6e0,,RTX 5080,90.0,"California, US",kvm1
+compute-e2e-deal-001,compute.gpu,rtx5080,count,1,available,10,0x9fe46736679d2d9a65f0992f2272de9f3c7fa6e0,,RTX 5080,90.0,"California, US",kvm1
 """
 
 # ===========================================================================

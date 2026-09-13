@@ -156,15 +156,27 @@ _REGISTRY_B_TOKEN = str(
 # ---------------------------------------------------------------------------
 
 DURATION_HOURS = 1
-BUYER_INITIAL_PRICE = 7_000
+# Base units of an 18-decimal asset, so past the JSON safe-integer range:
+# these amounts ride the wire as decimal-digit strings, which is the shape
+# canonical JSON can sign. 10 tokens/hour asking price, so the opening bid
+# sits under the floor (round-0 counter) and the ceiling over it (the buyer
+# accepts the seller's first counter). Both stay far inside the 1 000 tokens
+# the dev chain funds this buyer with — every scenario in a run escrows
+# against the same wallet.
+BUYER_INITIAL_PRICE = 7 * 10**18
 
 DEMAND_RESOURCE = {
     "token": {
         "symbol": "MOCK",
         "contract_address": "0x9fe46736679d2d9a65f0992f2272de9f3c7fa6e0",
-        "decimals": 0,
+        # 18, which is what the contract reports. A listing claiming 0 was
+        # the fiction that made display prices look like base units: the
+        # funding script mints whole tokens (1 000 of them to this buyer),
+        # and the buyer CLI scales its price flags by the decimals it reads
+        # from the chain, not by what a listing advertises.
+        "decimals": 18,
     },
-    "amount": 10_000,
+    "amount": 10 * 10**18,
 }
 ACCEPTED_ESCROWS = [{
     "chain_name": "anvil",
@@ -199,14 +211,14 @@ _BOB_CSV = (
     "resource_id,resource_type,resource_subtype,unit,value,state,min_price,token,"
     "max_duration_seconds,attribute.gpu_model,attribute.sla,attribute.region,"
     "attribute.vm_host\n"
-    'compute-mr-bob-001,compute.gpu,rtx5080,count,1,available,10000,0x9fe46736679d2d9a65f0992f2272de9f3c7fa6e0,,'
+    'compute-mr-bob-001,compute.gpu,rtx5080,count,1,available,10,0x9fe46736679d2d9a65f0992f2272de9f3c7fa6e0,,'
     'RTX 5080,90.0,"California, US",kvm1\n'
 )
 _ALICE_CSV = (
     "resource_id,resource_type,resource_subtype,unit,value,state,min_price,token,"
     "max_duration_seconds,attribute.gpu_model,attribute.sla,attribute.region,"
     "attribute.vm_host\n"
-    'compute-mr-alice-001,compute.gpu,rtx5080,count,1,available,10000,0x9fe46736679d2d9a65f0992f2272de9f3c7fa6e0,,'
+    'compute-mr-alice-001,compute.gpu,rtx5080,count,1,available,10,0x9fe46736679d2d9a65f0992f2272de9f3c7fa6e0,,'
     'RTX 5080,90.0,"New York, US",ny1\n'
 )
 

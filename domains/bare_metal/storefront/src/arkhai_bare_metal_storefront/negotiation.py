@@ -160,7 +160,7 @@ class _DefaultBareMetalSellerRoundHook:
         )
         context = NegotiationContext(
             direction="maximize",
-            our_reference_amount=float(seller_reference_amount),
+            our_reference_amount=int(seller_reference_amount),
             listing=listing_data,
             our_escrow_proposal=peer_proposal,
             intermediate={

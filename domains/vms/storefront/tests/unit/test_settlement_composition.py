@@ -331,12 +331,19 @@ async def test_prepare_pins_the_exact_verified_obligation(tmp_path, monkeypatch)
         {"anvil": SimpleNamespace(alkahest_address_config_path="/addresses.json")},
     )
 
+    # A bare `object()` here would pass whatever it was given straight to a
+    # mocked verifier, which is how a mechanism adapter reached a function
+    # that needs the chain client. The stub resolves a chain client the way
+    # the real adapter does, and the assertion below binds it.
+    chain_client = object()
+    mechanism_client = SimpleNamespace(chain_client=lambda chain: chain_client)
+
     prepared = await prepare_vm_settlement(
         domain=domain,
         escrow_uid="0xverified",
         negotiation_id="neg-1",
         local_principal=_SELLER,
-        mechanism_client=object(),
+        mechanism_client=mechanism_client,
         chain_name="anvil",
         request={"ssh_public_key": "ssh-ed25519 substituted"},
         sqlite_client=db,
@@ -361,6 +368,10 @@ async def test_prepare_pins_the_exact_verified_obligation(tmp_path, monkeypatch)
     assert build_context.buyer_principal == _BUYER
     assert build_context.seller_principal == _SELLER
     verify.assert_awaited_once()
+    assert verify.await_args.kwargs["alkahest_client"] is chain_client, (
+        "escrow verification reads the chain through the alkahest client's "
+        "escrow codecs; the mechanism adapter does not carry them"
+    )
     assert (
         prepared.fulfillment_input.domain_input["provision"].ssh_public_key
         == "ssh-ed25519 accepted"

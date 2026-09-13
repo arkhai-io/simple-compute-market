@@ -367,13 +367,17 @@ async def prepare_vm_settlement(
         raise ValueError(
             f"chain {accepted_chain!r} is not configured on this storefront"
         )
+    # Escrow verification reads the attestation off the chain through the
+    # alkahest client's escrow codecs, so it takes the chain client the
+    # mechanism adapter resolves rather than the adapter itself — the same
+    # object the admin dry-run and the resume sweep pass.
     obligation_index = await escrow_verification.verify_escrow_for_settlement(
         escrow_uid=escrow_uid,
         seller_wallet=storefront_config.get_evm_wallet_address(),
         agreed_price=int(thread["agreed_price"]),
         agreed_duration_seconds=provision.duration_seconds,
         listing=order,
-        alkahest_client=mechanism_client,
+        alkahest_client=mechanism_client.chain_client(accepted_chain),
         chain_name=accepted_chain,
         alkahest_address_config_path=chain.alkahest_address_config_path,
         escrow_proposal=proposal,

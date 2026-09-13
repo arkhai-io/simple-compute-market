@@ -176,7 +176,7 @@ async def _run_seller_round(
     chain = _load_chain(negotiation_config=negotiation_config, chains=chains)
     context = NegotiationContext(
         direction="maximize",
-        our_reference_amount=float(reference_amount),
+        our_reference_amount=int(reference_amount),
         listing=listing_dict,
         our_escrow_proposal=their_proposal,
         available_resources=policy_inputs.get("available_resources")

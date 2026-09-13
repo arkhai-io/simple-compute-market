@@ -272,7 +272,7 @@ async def _run_default_seller_round_policy(
     )
     context = NegotiationContext(
         direction=direction,
-        our_reference_amount=float(reference_amount),
+        our_reference_amount=int(reference_amount),
         listing=listing_dict if isinstance(listing_dict, dict) else {},
         our_escrow_proposal=their_proposal,
         available_resources=(

@@ -142,7 +142,7 @@ class TestAcceptExactListing:
         assert decision is not None
         assert decision.action == "accept"
         assert decision.reason == "exact_listing"
-        assert decision.proposal["fields"]["amount"] == 1000
+        assert decision.proposal["fields"]["amount"] == "1000"
 
     def test_accepted_escrows_can_be_serialized_json(self):
         import json

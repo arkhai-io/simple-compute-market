@@ -1144,8 +1144,293 @@ failures.
       assertion message in CI output is not the place for those. Checked by
       running the selection over representative events.
 
-- [ ] 3ac.5 The next run's digest decides this. Read the attempt reason
-      before theorising again.
+- [x] 3ac.5 The digest decided it in one run:
+      `CanonicalizationError: body is not canonicalizable JSON`, raised inside
+      the negotiation and now named in the event stream, the attempt record
+      and a `Candidates tried` panel. Not a seller refusal at all. Carried
+      into 3ah, which is where it stops being an e2e repair.
+
+## 3ad. Four fixes landed; four causes moved
+
+- [x] 3ad.1 Same six tests, and every one of them a different failure:
+      admin reserve returns `200` and the response now reports no `pool_id`
+      (3af); settle passes the SSH term and fails reading the escrow from
+      chain (3ae); both buyer CLIs reach the wire and fail to canonicalize an
+      18-decimal amount (3ah); `credits buy` still exits 2, still without
+      evidence (3ag). The count has not moved in three runs and the stack has
+      moved every time -- read causes, not counts.
+
+## 3ae. Settle handed the mechanism adapter to escrow verification
+
+- [x] 3ae.1 **`400 Failed to read escrow ...:
+      'AlkahestConditionalEscrowClient' object has no attribute 'erc20'`.**
+      `create_client("alkahest.v1")` returns the conditional-escrow adapter --
+      the mechanism's materialize/check surface -- while escrow verification
+      reads an attestation through the alkahest client's own escrow codecs and
+      needs the resolved chain client. `prepare_vm_settlement` passed the
+      adapter.
+
+      Three other callers get this right and pass the chain client: the admin
+      dry-run (which is why stage `07b` verifies the same escrow
+      successfully), the resume sweep, and the resume convergence path. The
+      settle path is the one outlier, and the mismatch surfaces *after* the
+      buyer has created and funded the escrow.
+
+- [x] 3ae.2 Added `chain_client()` to the adapter and used it at the call
+      site, rather than reaching into composition for a second copy of the
+      client map. The adapter already resolves chains internally for
+      materialize and status; this makes that resolution available to a caller
+      holding the mechanism client.
+
+- [x] 3ae.3 **The unit test passed `object()` into a mocked verifier**, so any
+      client type satisfied it. Replaced with a stub that resolves a chain
+      client the way the adapter does, and an assertion that the verifier
+      received *that* object. Same shape of gap as 3z.3: a test that binds one
+      layer and reads as though it covered the seam.
+
+## 3af. The reservation response reports no pool membership
+
+- [x] 3af.1 **Both dynamic stages now get `200` and assert on `pool_id`,
+      which is `None`.** Flagged as the likely next failure when the response
+      model was fixed, so this is the contract question from 3v.2 arriving in
+      its final form rather than a regression.
+
+- [x] 3af.2 The payload carries neither `pool_id` nor pool-bearing resource
+      attributes: the boundary reports the hold and withholds the topology.
+      But the storefront is not missing this fact -- it recorded it at
+      publication time in `storefront_listing_bindings.pool_id`, which is the
+      durable `(site_id, pool_id[, resource_id])` reference the specs require
+      every pool reference to key on. Read it from there, after the ledger and
+      the mirrored attributes, so an authority that does report membership
+      still wins.
+
+      This is what "pools are the aggregator's concept, not the ledger's"
+      means in practice: asking the ledger to echo the aggregator's topology
+      was the same mistake as asking it for physical identity.
+
+- [ ] 3af.3 Unverified: whether the `specific_resource` listing's durable
+      binding carries `pool_id` as well as `physical_resource_id`. The
+      publication binding is keyed on pool, resource and GPU count, so it
+      should; if it does not, the next run reports `None` again and the answer
+      is that the binding is incomplete at publication, not that the response
+      is wrong.
+
+## 3ag. The credits refusal still has no evidence
+
+- [x] 3ag.1 `credits buy` exits 2 with no run-log for the third consecutive
+      run. The `[Settlement]` section from 3ab did not change the outcome, and
+      the reason is unknown because the helper deliberately withheld process
+      output as possibly carrying a transient domain credential -- correct
+      instinct, wrong consequence: three rounds of guessing about a message
+      the command printed every time.
+
+- [x] 3ag.2 Masked rather than withheld. Credential-shaped runs -- long
+      hexadecimal and long opaque base64url -- are replaced before the stderr
+      tail is quoted. Checked against the refusals this command can emit: the
+      config-key and mechanism-ID text survives masking intact, while wallet
+      keys, issued secrets and ed25519 material do not. Deliberately
+      over-masks: a reader loses nothing, and CI output keeps a key forever.
+
+- [ ] 3ag.3 Candidate refusals the next run will discriminate between, in
+      order of suspicion: the hosted-funding branch demanding
+      `[Settlement.stripe]` when the resolved funding mode is not
+      `interactive`; a missing-config refusal for registry URLs or wallet
+      material; and price resolution returning nothing. Read the text first.
+
+## 3ah. Uint256 amounts do not survive canonical JSON — outside this change
+
+- [x] 3ah.1 **Both buyer CLIs now reach the wire and fail there.**
+      `market negotiate` and `market buy` raise
+      `CanonicalizationError: body is not canonicalizable JSON` while signing
+      the round-0 body. The underlying error is
+      `IntegerDomainError: 7000000000000000000000 exceeds safe integer domain
+      for JSON floats`, reproduced directly against the installed `rfc8785`:
+      a Python `int` above 2^53-1 has no canonical JSON number form.
+
+      The amount is `7000 × 10^18`. Both CLIs scale explicit prices from
+      display units to base units using the asset's on-chain `decimals`, and
+      the dev-stack MockERC20 reports 18 -- while the fixture's listing
+      advertises `decimals: 0` and prices in raw units, on the belief that
+      display equals raw here. So the scaling is not spurious; it is the
+      product converting a human price correctly and then being unable to
+      sign it.
+
+- [x] 3ah.2 **This is an unimplemented existing requirement, not a fixture
+      defect.** `negotiation-protocol/spec.md`, "Uint256-safe negotiation
+      values": canonical JSON wire representations MUST encode uint256-domain
+      values as decimal-digit strings, persistence MUST round-trip values
+      beyond JSON's safe-integer range, and amounts MUST NOT be interpreted
+      through floating point. Its first scenario is literally an 18-decimal
+      token amount.
+
+      The convention is implemented in `market_core.schemas` -- int
+      internally, decimal-digit string on serialization -- and advertised
+      rates already travel as strings. It stops at the negotiation proposal:
+      `EscrowProposal.fields` is an untyped `dict[str, Any]`, and the scalar
+      policy writes `fields["amount"] = int(round(amount))` through float
+      arithmetic. So the wire carries a JSON number where the spec requires a
+      string, and the policy layer reasons in doubles where the spec forbids
+      it.
+
+      Consequence beyond the suite: no deal denominated in whole units of an
+      18-decimal asset can be signed by either party. The cap is ~0.009 of
+      such a token.
+
+- [x] 3ah.3 **Raised for disposition, and the disposition was to implement it
+      here.** The work spans proposal encoding, integer arithmetic through
+      the policy chain, the seller's context boundary, the accepted echo, and
+      the refusal path -- a requirement being implemented rather than a
+      fileset repairing a fixture. Carried out in 3ai.
+
+## 3ai. Uint256-safe negotiation values, implemented
+
+- [x] 3ai.1 **What had actually changed, since "it worked a month ago" is the
+      right question.** The requirement was implemented server-side and on
+      the typed contracts; the buyer's proposal path kept the old shape.
+      Already correct before this round: `_amount_to_db_text` /
+      `_amount_from_db_text` storing amount columns as decimal text because
+      SQLite INTEGER cannot hold an 18-decimal amount; `market_core.schemas`
+      carrying uint256 fields as int internally and decimal-digit strings on
+      serialization; `kit/alkahest`'s accepted-escrow builder writing
+      `fields["amount"] = str(agreed_amount)`; `_seller_reference_amount`
+      computing the seller's price through `Decimal` and returning an int.
+
+      Three places kept the old shape, all on the same field:
+      `_set_proposal_amount` wrote `int(round(amount))` as a JSON *number*,
+      `_amount_from_proposal` returned a float and the bisection compared and
+      averaged in floats, and `NegotiationContext.our_reference_amount` was
+      typed `float` with the round hook casting its exact integer through
+      `float()` one line after computing it. `EscrowProposal.fields` is
+      `dict[str, Any]`, so no typed model ever saw the value and nothing
+      complained.
+
+      It survived because the two conditions never met until now: the
+      API-driven scenarios negotiate raw amounts near 10 000, and the
+      buyer-CLI scenarios only began scaling display prices into base units
+      when the settlement-DSL work introduced `price × 10**decimals`. This
+      session's earlier fixes are what carried a CLI negotiation as far as
+      signing for the first time. `rfc8785` did not change; the first
+      uint256-magnitude value to reach `canonical_body_hash` arrived three
+      runs ago, and it arrived as a JSON number.
+
+- [x] 3ai.2 **The contract, in one place.** `parse_wire_amount` and
+      `format_wire_amount` in `kit/policy`. Absent stays distinct from
+      malformed: `None` for no scalar (exact escrows negotiate none), and a
+      refusal for a float, a negative, a boolean, or a non-digit string. A
+      float is refused even when integral at today's magnitude -- accepting
+      `7000.0` is accepting `7e21`, and the contract is the type rather than
+      the current magnitude.
+
+- [x] 3ai.3 **Integer arithmetic through the policies.** The `0.01` and `1.5`
+      float bounds restated as cross-multiplied integer comparisons
+      (`their × 100 ≤ our × 101`, `their × 2 ≤ our × 3`) and midpoints as
+      floor division. Same bounds, exact at any magnitude. `_exact_amount`
+      guards the context bounds and still admits an integral float, so
+      existing callers spelling a small bound `10_000.0` keep working while a
+      fractional one is refused.
+
+- [x] 3ai.4 **Types made honest.** `NegotiationContext` amounts are `int`,
+      and the four sites casting to `float()` -- the VM, API-credits and
+      bare-metal seller round hooks, plus the system-service dry run -- pass
+      integers.
+
+- [x] 3ai.5 **Exact scaling in both directions.** `display_to_base_units`
+      shifts the exponent with `Decimal.scaleb` and refuses a price finer
+      than the asset's smallest unit rather than rounding money the caller
+      did not name; `scaled_base_units` multiplies a per-unit rate by the
+      unit count exactly and refuses a non-integral product. Wired into all
+      four CLI scaling sites (VM buy and negotiate, API-credits buy and
+      negotiate) and both the fresh and resume paths of the negotiation
+      client.
+
+- [x] 3ai.6 **One wire convention, not three.** The RL strategy's own
+      `_proposal_with_amount` was a fourth amount writer, also emitting a
+      JSON number into a body the seller signs; it now uses the shared
+      formatter.
+
+- [x] 3ai.7 **A refusal rather than a 404.** `NegotiationAmountError` maps to
+      `400 invalid_proposal_amount` on both negotiate routes, ahead of the
+      generic `ValueError → 404` that would otherwise report a malformed
+      amount as a missing listing.
+
+- [x] 3ai.8 **Verified by execution.** 22 tests binding the production
+      helpers in `kit/policy` (round trip, refusals, opening counter,
+      clamping, convergence, the floor-division midpoint observed on the
+      maximize side where it is not clamped, and a malformed peer amount
+      refused rather than read as absent) and 8 in `core/buyer` binding the
+      seam: an 18-decimal display price becomes an exact base-unit integer,
+      the policy's round-0 body carries it as a string, and
+      `canonical_body_hash` produces a digest -- the assertion that was
+      failing in the stack. Six existing assertions moved to the wire form.
+      All 30 run green here.
+
+- [x] 3ai.9 **The balance question had an answer in the repository.**
+      `dev-env/generate_state.py` funds the buyer with
+      `FUNDING = 1_000 * 10**18` -- one thousand whole tokens of an
+      18-decimal MockERC20, transferred in `9 * 10**18` chunks. So the dev
+      chain has always treated this asset as 18-decimal with whole-token
+      balances, and the fixtures' `decimals: 0` was the only place claiming
+      otherwise. It also settles the 7000-token bid: it was seven times the
+      buyer's entire balance and would have failed at escrow creation.
+
+## 3aj. The fixtures now price at the asset's real decimals
+
+- [x] 3aj.1 **What was inconsistent.** The listings advertised
+      `decimals: 0` with a comment reading "listing-display only; raw
+      amounts are what land on-chain", and priced in units of 10 000. The
+      contract reports 18 decimals, the funding script mints whole tokens,
+      and the publication clause compiler scales a resource's `min_price` by
+      `resolve_token(...).decimals` read from the chain -- so nothing except
+      those four fixture files believed in 0.
+
+      That belief is what made a display price and a base-unit amount look
+      like the same number, which is why a CLI scenario could pass explicit
+      prices for a year and only now produce an unsignable one.
+
+- [x] 3aj.2 **The new shape, one asking rate expressed once per path.** Ten
+      tokens per hour: `10 * 10**18` base units in the explicitly advertised
+      accepted-escrow rates, and `10` in the resource-import CSV's
+      `min_price`, which is a display amount the clause compiler scales. The
+      two paths now agree rather than coinciding, which they previously did
+      only because a scale of `10**0` is the identity.
+
+      Buyer prices keep their relationship to it: opening 7 tokens (under
+      the rate, so round 0 counters), ceiling 12 (over it, so the buyer
+      accepts the seller's first counter at 8.5). API-driven scenarios carry
+      base units, `7 * 10**18` and `12 * 10**18`; the CLI scenarios carry
+      whole tokens on the flags and let the CLI scale them, which is the
+      product behaviour under test.
+
+- [x] 3aj.3 **All three amounts are past 2^53-1 by construction**, so the
+      scenarios now exercise the uint256 wire path rather than staying below
+      the range where the old `int` form happened to work. Checked
+      arithmetically rather than by eye: opening < rate < ceiling, the first
+      counter lands under the ceiling, and worst-case exposure is 1.2% of the
+      funded balance -- eight concurrent scenario escrows against the shared
+      buyer wallet still fit.
+
+- [x] 3aj.4 **The response models had to move with them.** An amount
+      above 2^53-1 in a bare `int` response field is as unsignable as one in
+      a request: the seller canonicalizes its own response body. Added
+      `Uint256Amount` / `OptionalUint256Amount` to `market_core.schemas`
+      beside the existing parse/serialize helpers, and applied them to the
+      fields the scenarios now push into that range: negotiation
+      `agreed_amount` and `proposed_amount`, force-accept request and
+      response `amount`, `agreed_price` on the settle verification request,
+      evaluate-negotiate's `our_reference_amount`, `their_proposed_amount`
+      and `decision_amount`, and a listing refund's `amount_raw`. Verified by
+      canonicalizing each of the changed responses at 18-decimal magnitudes.
+
+      `negotiate_new` in the storefront client already sent
+      `str(initial_amount)`, and `ForceAcceptRequest.amount` accepts the
+      decimal string by ordinary lax coercion, so no caller changes were
+      needed alongside.
+
+- [ ] 3aj.5 Unverified until the stack runs: whether any other response the
+      scenarios read carries an amount in a bare `int` field. The sweep
+      covered `core_storefront` and the VM storefront's models; a fixture
+      amount past the range will now name the field it cannot canonicalize
+      rather than failing silently, which is the point.
 
 ## 4. Closeout
 

@@ -141,7 +141,9 @@ def test_exact_accept_holds_scalar_selection_to_reference_amount() -> None:
     decision, _ = accept_exact_listing_middleware(history, _context(100.0))
     assert decision is not None
     assert decision.action == "accept"
-    assert decision.proposal["fields"]["amount"] == 100
+    # Decimal-digit string: the amount rides the wire in its uint256 form,
+    # which is what canonical JSON can carry at 18-decimal magnitudes.
+    assert decision.proposal["fields"]["amount"] == "100"
 
 
 def test_buyer_counter_guard_tolerates_non_scalar_counter_without_amount() -> None:
