@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import pytest
+from market_alkahest import AlkahestSettlementConfig
 from market_core.schemas import RateValue, derive_settlement_option_id
 from market_hosted_settlement import (
     StripeSettlementConfig,
@@ -11,6 +12,7 @@ from market_hosted_settlement import (
 from market_identity import Ed25519Signer
 from market_negotiation_runtime import OfferUnfulfillableError
 from market_settlement_runtime import SettlementConfig
+
 from market_storefront.negotiation_runtime import _accepted_selection_artifacts
 from market_storefront.settlement_composition import (
     VmSettlementComposition,
@@ -142,11 +144,29 @@ def test_uncomposed_mechanism_selection_is_refused() -> None:
         )
 
 
-def test_composition_dispatch_surfaces_only_obligation_builders() -> None:
+@pytest.mark.parametrize(
+    ("alkahest", "expected_mechanisms"),
+    [
+        (None, {"fiat.stripe.v1"}),
+        (AlkahestSettlementConfig(), {"fiat.stripe.v1"}),
+        (
+            AlkahestSettlementConfig(enabled=True),
+            {"alkahest.v1", "fiat.stripe.v1"},
+        ),
+    ],
+    ids=("alkahest-absent", "alkahest-disabled", "alkahest-enabled"),
+)
+def test_composition_dispatch_surfaces_only_obligation_builders(
+    alkahest: AlkahestSettlementConfig | None,
+    expected_mechanisms: set[str],
+) -> None:
     registry = build_storefront_settlement_registry()
+    mechanisms = {"stripe": StripeSettlementConfig()}
+    if alkahest is not None:
+        mechanisms["alkahest"] = alkahest
     config = SettlementConfig(
         priority=("alkahest.v1", "fiat.stripe.v1"),
-        mechanisms={"stripe": StripeSettlementConfig()},
+        mechanisms=mechanisms,
     )
     composition = VmSettlementComposition(
         domain=None,
@@ -162,7 +182,7 @@ def test_composition_dispatch_surfaces_only_obligation_builders() -> None:
         mechanism_resources={},
     )
     dispatch = composition.accepted_obligation_dispatch()
-    assert set(dispatch) == {"fiat.stripe.v1"}
+    assert set(dispatch) == expected_mechanisms
     built = dispatch["fiat.stripe.v1"](
         _hosted_option(),
         {

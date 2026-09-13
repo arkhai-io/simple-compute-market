@@ -146,8 +146,13 @@
       ssh_user: "{{ bare_metal_ssh_user }}"
       escrow_uid: "{{ escrow_uid | default('') }}"
       timestamp: "{{ node_access_timestamp.stdout }}"
-      host: "{{ hostvars[target_host].ansible_host | default(target_host) }}"
-      port: "{{ hostvars[target_host].ansible_port | default(22) }}"
+      # The buyer is told the tenant-facing endpoint, which is not necessarily
+      # the one the provisioner arrived through. When the provisioner reaches
+      # this host over a management tunnel, handing back its own endpoint would
+      # point the buyer at that tunnel. Falls back to the provisioner's values
+      # when a host serves both from one endpoint.
+      host: "{{ hostvars[target_host].public_host | default(hostvars[target_host].ansible_host | default(target_host)) }}"
+      port: "{{ hostvars[target_host].public_port | default(hostvars[target_host].ansible_port | default(22)) }}"
       status: "success"
   when:
     - node_action == "node_grant_access"

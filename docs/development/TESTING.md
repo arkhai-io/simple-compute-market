@@ -261,7 +261,11 @@ it once the producer gains coverage.
 A service's tests split into `unit/` and `integration/` subdirectories
 under its own `tests/` root, matching the four-level hierarchy above.
 System-level tests live in the separate `e2e-tests` package, itself
-split into `unit/` (its own helper logic), `smoke/`, and `e2e/`.
+split into `unit/` (its own helper logic), `integration/` (offline
+orchestration through a production scenario with external boundaries
+substituted), `smoke/`, and `e2e/`. Integration placement does not turn a
+controlled dependency into live evidence: only the `e2e/` lane may establish
+cross-service behavior against running services.
 
 ## Pool Offering-Mode Enforcement
 

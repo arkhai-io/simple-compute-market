@@ -7,32 +7,34 @@ The fan-out client is mocked; the SQLite layer is real so the test
 asserts on actual rows.
 """
 from __future__ import annotations
+
 from dataclasses import replace
 from types import SimpleNamespace
-
 from unittest.mock import AsyncMock, MagicMock, Mock, patch
 
 import pytest
-from market_identity import Ed25519Signer
 from core_storefront.models.listing_models import CreateListingRequest
+from core_storefront.multi_registry_client import PublishResult
 from core_storefront.site_projections import (
     ProjectionCache,
     ProjectionIdentity,
     ProjectionState,
 )
 from market_capacity_publication import BoundListing
+from market_identity import Ed25519Signer
 
-from market_storefront.services import publication_service
-from core_storefront.multi_registry_client import PublishResult
-from market_storefront.utils.config import BASE_URL_OVERRIDE
-from market_storefront.domain_runtime import build_vm_storefront_domain, build_vm_storefront_registry
+from market_storefront.domain_runtime import (
+    build_vm_storefront_domain,
+    build_vm_storefront_registry,
+)
 from market_storefront.publication_binding import prepare_vm_listing_binding
+from market_storefront.services import publication_service, site_projection_cache
 from market_storefront.services.listing_service import ListingService
+from market_storefront.utils.config import BASE_URL_OVERRIDE
 from market_storefront.utils.sqlite_client import SQLiteClient
-from market_storefront.services import site_projection_cache
 from tests._settings_overrides import settings_overrides
-from tests.listing_service_fixtures import vm_listing_collaborators
 from tests.fake_site import TEST_SITE_AUTHORITIES
+from tests.listing_service_fixtures import vm_listing_collaborators
 
 _SELLER = Ed25519Signer(b"\x73" * 32)
 _SELLER_PRINCIPAL = _SELLER.identity
@@ -250,6 +252,33 @@ def test_listing_composition_mismatch_fails_before_side_effects() -> None:
 
 class TestPublishOrderRecordsPublications:
     @pytest.mark.asyncio
+    async def test_disabled_reopen_retains_legacy_local_commit_policy(
+        self, patched_sqlite,
+    ):
+        order = _compute_order("L-disabled-reopen")
+        await _persist_bound_listing(patched_sqlite, order)
+        await patched_sqlite.update_listing(
+            listing_id="L-disabled-reopen",
+            status="closed",
+        )
+        factory = Mock()
+        with settings_overrides(enable_registry_discovery=False):
+            runtime = publication_service.build_publication_runtime(
+                patched_sqlite,
+                registry_client_factory=factory,
+            )
+            result = await runtime.reopen(
+                await publication_service._candidate(patched_sqlite, order)
+            )
+
+        assert result.status == "disabled"
+        assert result.local_committed is True
+        assert (await patched_sqlite.load_listing(
+            listing_id="L-disabled-reopen"
+        ))["status"] == "open"
+        factory.assert_not_called()
+
+    @pytest.mark.asyncio
     async def test_invalid_legacy_row_is_rejected_before_registry_contact(self, db):
         order = {
             "listing_id": "legacy-invalid",
@@ -380,7 +409,9 @@ class TestPublishOrderRecordsPublications:
             )
 
         assert result["status"] == "error"
-        assert "exact configured fanout" in result["message"]
+        assert result["failure_stage"] == "setup"
+        assert result["error_type"] == "ValueError"
+        assert "registry_results" not in result
         client.publish_listing_per_registry.assert_not_awaited()
         assert await patched_sqlite.load_publications(
             listing_id="Lfanout-mismatch"

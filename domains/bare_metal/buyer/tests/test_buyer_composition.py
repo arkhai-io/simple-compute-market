@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 import json
+from types import SimpleNamespace
 
 import pytest
 import typer
@@ -137,6 +138,96 @@ def test_physical_transport_uses_signed_buyer_routes(monkeypatch) -> None:
     assert all(body is None for _url, body, _kwargs in calls)
 
 
+def test_crypto_status_projects_authenticated_seller_collection(
+    monkeypatch, capsys
+) -> None:
+    from arkhai_bare_metal_buyer import cli
+
+    class Hosted:
+        def status(self, **_kwargs):
+            raise AssertionError("crypto status must not call the hosted rail")
+
+    class Fulfillment:
+        def status(self, negotiation_id):
+            assert negotiation_id == "neg-1"
+            return {"state": "active"}
+
+        def settlement_status(self, escrow_uid):
+            assert escrow_uid == "escrow-1"
+            return {
+                "escrow_uid": escrow_uid,
+                "obligation_ref": "obligation-1",
+                "status": "collected",
+            }
+
+    monkeypatch.setattr(
+        cli,
+        "_recovered_transports",
+        lambda run_id, config: (
+            SimpleNamespace(
+                negotiation_id="neg-1",
+                settlement_ref=None,
+                escrow_uid="escrow-1",
+            ),
+            object(),
+            Hosted(),
+            Fulfillment(),
+        ),
+    )
+
+    cli.hosted_status(run_id="run-1", config=None)
+
+    assert json.loads(capsys.readouterr().out) == {
+        "fulfillment": {"state": "active"},
+        "settlement": {
+            "escrow_uid": "escrow-1",
+            "obligation_ref": "obligation-1",
+            "status": "collected",
+        },
+    }
+
+
+def test_hosted_status_keeps_the_existing_settlement_transport(
+    monkeypatch, capsys
+) -> None:
+    from arkhai_bare_metal_buyer import cli
+
+    class Hosted:
+        def status(self, *, settlement_ref):
+            assert settlement_ref == "hosted-1"
+            return {"status": "ready"}
+
+    class Fulfillment:
+        def status(self, negotiation_id):
+            assert negotiation_id == "neg-1"
+            return {"state": "active"}
+
+        def settlement_status(self, _escrow_uid):
+            raise AssertionError("hosted status must not call the Alkahest route")
+
+    monkeypatch.setattr(
+        cli,
+        "_recovered_transports",
+        lambda run_id, config: (
+            SimpleNamespace(
+                negotiation_id="neg-1",
+                settlement_ref="hosted-1",
+                escrow_uid="escrow-1",
+            ),
+            object(),
+            Hosted(),
+            Fulfillment(),
+        ),
+    )
+
+    cli.hosted_status(run_id="run-1", config=None)
+
+    assert json.loads(capsys.readouterr().out) == {
+        "fulfillment": {"state": "active"},
+        "settlement": {"status": "ready"},
+    }
+
+
 def test_json_output_serializes_nested_wire_models(capsys) -> None:
     class NestedWireModel(BaseModel):
         value: str
@@ -242,3 +333,53 @@ def test_the_read_command_can_redeliver() -> None:
         if item.name == "introduction"
     )
     assert "deliver" in command.callback.__code__.co_varnames
+
+
+def test_one_file_serves_both_the_domain_and_the_shared_chain_loader(
+    tmp_path: Path,
+) -> None:
+    """The buyer reads one config through two loaders, so both must accept it.
+
+    `BARE_METAL_BUYER_CONFIG` selects this file for the domain's strict
+    `[bare_metal]` section, and the core `--config` flag points the shared
+    `market_config` loader at the same path for `[chains.<name>]`. A domain
+    section that forbids unknown keys must not therefore forbid the tables the
+    other loader owns.
+    """
+    from market_config.config_loader import chains_from_config, set_user_config_path
+
+    path = tmp_path / "buyer.toml"
+    path.write_text(
+        """
+[BuyerProfile]
+store_path = "/tmp/profiles.json"
+
+[registry]
+urls = ["https://registry.example"]
+
+[bare_metal]
+registry_url = "https://registry.example"
+registry_authority = "registry-prod"
+registry_principals = [{scheme = "ed25519", identifier = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"}]
+
+[chains.arkhai_dev]
+rpc_url = "http://chain.invalid:8545"
+chain_id = 31337
+alkahest_address_config_path = "/etc/arkhai/alkahest.json"
+""".strip(),
+        encoding="utf-8",
+    )
+
+    config = load_bare_metal_buyer_config(path)
+    assert config.registry_authority == "registry-prod"
+
+    try:
+        set_user_config_path(path)
+        chains = chains_from_config()
+    finally:
+        set_user_config_path(None)
+
+    chain = chains["arkhai_dev"]
+    assert chain.rpc_url == "http://chain.invalid:8545"
+    assert chain.chain_id == 31337
+    assert chain.alkahest_address_config_path == "/etc/arkhai/alkahest.json"

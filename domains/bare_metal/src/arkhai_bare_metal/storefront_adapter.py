@@ -93,8 +93,9 @@ def reopen_bare_metal_listing_adapter(
     publish_existing_listing: PublishExistingListing,
     settlement_options: list[dict[str, Any]] | None = None,
     publication_clauses: list[dict[str, Any]] | None = None,
+    refresh_listing_ids: frozenset[str] = frozenset(),
 ) -> dict[str, Any] | None:
-    """Reopen a tracked listing through caller-supplied publication."""
+    """Reopen or explicitly refresh a tracked listing through publication."""
     return reopen_derived_bare_metal_listing_if_present(
         db_path=db_path,
         base_url=base_url,
@@ -106,6 +107,7 @@ def reopen_bare_metal_listing_adapter(
         publish_existing_listing=publish_existing_listing,
         settlement_options=settlement_options,
         publication_clauses=publication_clauses,
+        refresh_listing_ids=refresh_listing_ids,
     )
 
 
@@ -114,6 +116,7 @@ def bare_metal_publication_adapter(
     projection_snapshot: ProjectionSnapshot,
     close_listing: CloseListing,
     publish_existing_listing: PublishExistingListing,
+    refresh_listing_ids: frozenset[str] = frozenset(),
 ) -> PublicationSource:
     """Build the source selected by the concrete bare-metal storefront."""
 
@@ -140,6 +143,7 @@ def bare_metal_publication_adapter(
             publish_existing_listing=publish_existing_listing,
             settlement_options=settlement_options,
             publication_clauses=publication_clauses,
+            refresh_listing_ids=refresh_listing_ids,
         )
 
     return PublicationSource(

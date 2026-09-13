@@ -44,6 +44,21 @@ class HostNotFoundError(Exception):
     """Raised when a requested host name does not exist in the DB."""
 
 
+def _tenant_segments(host) -> str:
+    """Inventory segments for the tenant-facing address and port.
+
+    Emitted by both renderings of a host row. Omitted when unset, so a host
+    whose tenants and provisioner share one endpoint renders exactly as before
+    and the playbook falls back to the provisioner's values.
+    """
+    segments = ""
+    if getattr(host, "public_host", None):
+        segments += f"  public_host={host.public_host}"
+    if getattr(host, "public_port", None):
+        segments += f"  public_port={host.public_port}"
+    return segments
+
+
 class HostService:
     """CRUD operations and inventory helpers for the ``hosts`` table."""
 
@@ -262,6 +277,7 @@ class HostService:
                     self._require_pool_exists(db, entry["pool_id"])
                     existing.kvm_host = entry["kvm_host"]
                     existing.public_host = entry["public_host"]
+                    existing.public_port = entry.get("public_port")
                     existing.ssh_user = entry["ssh_user"]
                     existing.ssh_port = entry["ssh_port"]
                     existing.ssh_key_type = ssh_key_type
@@ -275,6 +291,7 @@ class HostService:
                         name=entry["name"],
                         kvm_host=entry["kvm_host"],
                         public_host=entry["public_host"],
+                        public_port=entry.get("public_port"),
                         ssh_user=entry["ssh_user"],
                         ssh_port=entry["ssh_port"],
                         ssh_key_type=ssh_key_type,
@@ -340,6 +357,7 @@ class HostService:
             lines.append(
                 f"{host.name}"
                 f"  ansible_host={host.kvm_host}"
+                f"{_tenant_segments(host)}"
                 f"  ansible_port={host.ssh_port}"
                 f"  ansible_user={host.ssh_user}"
                 f"  ansible_ssh_private_key_file={key_ref}"
@@ -379,6 +397,7 @@ def _parse_ini(ini_text: str) -> list[dict]:
         ``gpus=``                         → ``gpu_count`` (int, default 0)
         ``gpu_model=``                    → ``gpu_model`` (str, default None)
         ``public_host=``                  → ``public_host`` (tenant-facing addr)
+        ``public_port=``                  → ``public_port`` (tenant-facing port)
         ``ansible_ssh_private_key_file=`` → preserved verbatim
         ``pool_id=``                      → Resource Pool id (default "default")
         All other variables              → ignored
@@ -445,10 +464,27 @@ def _parse_ini(ini_text: str) -> list[dict]:
                 )
                 continue
 
+        public_port = None
+        if host_vars.get("public_port") is not None:
+            try:
+                candidate = int(host_vars["public_port"])
+            except (TypeError, ValueError):
+                candidate = -1
+            if not 1 <= candidate <= 65535:
+                logger.warning(
+                    "seed_from_ini: skipping '%s' — public_port '%s' is not a "
+                    "port number between 1 and 65535",
+                    name,
+                    host_vars["public_port"],
+                )
+                continue
+            public_port = candidate
+
         results.append({
             "name": name,
             "kvm_host": kvm_host,
             "public_host": host_vars.get("public_host"),
+            "public_port": public_port,
             "ssh_user": ssh_user,
             "ssh_port": ssh_port,
             "gpu_count": gpu_count,

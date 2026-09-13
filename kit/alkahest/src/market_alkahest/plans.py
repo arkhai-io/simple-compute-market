@@ -13,10 +13,14 @@ contract is structural — both sides derive byte-identical payloads.
 """
 
 from __future__ import annotations
-from copy import deepcopy
 
+from collections.abc import Mapping
+from copy import deepcopy
+from dataclasses import dataclass
+from string import hexdigits
 from typing import Any, Literal
 
+from alkahest_py import RecipientArbiterDemandData
 from pydantic import (
     BaseModel,
     Field,
@@ -25,8 +29,11 @@ from pydantic import (
     model_validator,
 )
 
+from .alkahest import address_to_slot
 from .schemas import (
+    EscrowProposal,
     EscrowTerms,
+    accepted_recipient_address,
     _parse_uint256_str,
     _serialize_uint256_str,
 )
@@ -180,6 +187,197 @@ def settlement_obligation_to_escrow_terms(
         obligation_data=obligation_data,
         expiration_unix=ob.expiration_unix,
     )
+
+
+@dataclass(frozen=True, slots=True)
+class AcceptedAlkahestObligation:
+    """Validated, non-serialized view of one accepted Alkahest obligation."""
+
+    escrow_terms: EscrowTerms
+    obligation_data: dict[str, Any]
+    amount: int
+    asset: str
+    payout_address: str | None
+    verifier_proposal: EscrowProposal
+
+
+def _obligation_payload(obligation: BaseModel | Mapping[str, Any]) -> Any:
+    if isinstance(obligation, (SettlementObligation, Mapping)):
+        return obligation
+    if hasattr(obligation, "model_dump"):
+        return obligation.model_dump(mode="json")
+    return obligation
+
+
+def _accepted_payout_address(
+    obligation_data: Mapping[str, Any],
+    *,
+    chain_name: str,
+    address_config_path: str | None,
+) -> str | None:
+    direct = accepted_recipient_address(
+        {"demand": {"demand_data": dict(obligation_data)}}
+    )
+    if direct:
+        return direct
+
+    arbiter = obligation_data["arbiter"]
+    try:
+        arbiter_kind = address_to_slot(
+            chain_name, arbiter, config_path=address_config_path
+        )
+    except Exception:
+        return None
+    if arbiter_kind != "recipient_arbiter":
+        return None
+    try:
+        decoded = RecipientArbiterDemandData.decode(
+            bytes.fromhex(obligation_data["demand"].removeprefix("0x"))
+        )
+    except Exception as exc:
+        raise ValueError("accepted Alkahest demand is not decodable") from exc
+    recipient = getattr(decoded, "recipient", None)
+    return recipient if isinstance(recipient, str) and recipient else None
+
+
+def decode_accepted_alkahest_obligation(
+    obligation: BaseModel | Mapping[str, Any],
+    *,
+    address_config_path: str | None = None,
+) -> AcceptedAlkahestObligation:
+    """Validate and project the payment terms an accepted obligation carries."""
+    raw = _obligation_payload(obligation)
+    if isinstance(raw, Mapping):
+        expiration_unix = raw.get("expiration_unix")
+        if isinstance(expiration_unix, bool) or not isinstance(expiration_unix, int):
+            raise ValueError("accepted Alkahest obligation has no integer expiry")
+    ob = (
+        raw
+        if isinstance(raw, SettlementObligation)
+        else SettlementObligation.model_validate(raw)
+    )
+    if ob.mechanism != ALKAHEST_MECHANISM:
+        raise ValueError(f"not an {ALKAHEST_MECHANISM} obligation")
+    if ob.amount is None:
+        raise ValueError("accepted Alkahest obligation has no scalar amount")
+    if not isinstance(ob.asset, str) or not ob.asset:
+        raise ValueError("accepted Alkahest obligation has no asset")
+    if ob.conditions:
+        raise ValueError("accepted Alkahest obligation declares unsupported conditions")
+
+    params = ob.params
+    if set(params) != {"chain_name", "escrow_contract", "obligation_data"}:
+        raise ValueError("accepted Alkahest obligation has invalid mechanism params")
+    chain_name = params["chain_name"]
+    escrow_contract = params["escrow_contract"]
+    obligation_data = params["obligation_data"]
+    if (
+        not isinstance(chain_name, str)
+        or not chain_name
+        or chain_name != chain_name.strip()
+    ):
+        raise ValueError("accepted Alkahest obligation has no chain")
+    if (
+        not isinstance(escrow_contract, str)
+        or not escrow_contract
+        or escrow_contract != escrow_contract.strip()
+    ):
+        raise ValueError("accepted Alkahest obligation has no escrow contract")
+    if not isinstance(obligation_data, Mapping) or not obligation_data:
+        raise ValueError("accepted Alkahest obligation has no obligation data")
+
+    data = dict(obligation_data)
+    token = data.get("token")
+    if not isinstance(token, str) or not token or token != token.strip():
+        raise ValueError("accepted Alkahest obligation data has no token")
+    nested_amount = _parse_uint256_str(data.get("amount"), "obligation_data.amount")
+    if nested_amount is None or nested_amount != ob.amount:
+        raise ValueError("accepted Alkahest amount carriers disagree")
+    if token.lower() != ob.asset.lower():
+        raise ValueError("accepted Alkahest asset and token disagree")
+    arbiter = data.get("arbiter")
+    demand = data.get("demand")
+    if not isinstance(arbiter, str) or not arbiter or arbiter != arbiter.strip():
+        raise ValueError("accepted Alkahest obligation data has no arbiter")
+    if not isinstance(demand, str) or not demand or demand != demand.strip():
+        raise ValueError("accepted Alkahest obligation data has no demand")
+    demand_hex = demand.removeprefix("0x")
+    if (
+        not demand_hex
+        or len(demand_hex) % 2
+        or any(character not in hexdigits for character in demand_hex)
+    ):
+        raise ValueError("accepted Alkahest demand is not hexadecimal")
+
+    escrow_terms = settlement_obligation_to_escrow_terms(ob)
+    return AcceptedAlkahestObligation(
+        escrow_terms=escrow_terms,
+        obligation_data=deepcopy(data),
+        amount=ob.amount,
+        asset=ob.asset,
+        payout_address=_accepted_payout_address(
+            data,
+            chain_name=chain_name,
+            address_config_path=address_config_path,
+        ),
+        verifier_proposal=EscrowProposal(
+            chain_name=chain_name,
+            escrow_address=escrow_contract,
+            fields={"token": token},
+            literal_fields={"token": token},
+            expiration_unix=ob.expiration_unix,
+        ),
+    )
+
+
+def validate_accepted_alkahest_obligation(
+    *,
+    obligation: BaseModel | Mapping[str, Any],
+    proposal: EscrowProposal,
+    duration_seconds: int,
+    address_config_path: str | None = None,
+    seller_payout_address: str | None = None,
+) -> AcceptedAlkahestObligation:
+    """Re-materialize and compare every mechanism-owned accepted field."""
+    accepted = decode_accepted_alkahest_obligation(
+        obligation,
+        address_config_path=address_config_path,
+    )
+    terms = accepted.escrow_terms
+    if terms.chain_name != proposal.chain_name:
+        raise ValueError("accepted Alkahest chain differs from the proposal")
+    if terms.escrow_contract.lower() != proposal.escrow_address.lower():
+        raise ValueError("accepted Alkahest escrow differs from the proposal")
+    payout = seller_payout_address or accepted.payout_address
+    if not payout:
+        raise ValueError("accepted Alkahest obligation has no payout address")
+    if seller_payout_address is not None and (
+        accepted.payout_address or ""
+    ).lower() != seller_payout_address.lower():
+        raise ValueError("accepted Alkahest payout differs from the pinned seller")
+    try:
+        expected = materialize_settlement_plan_from_proposal(
+            proposal=proposal,
+            seller_wallet_address=payout,
+            agreed_amount=accepted.amount,
+            duration_seconds=duration_seconds,
+            addr_config_path=address_config_path,
+        ).obligations[0]
+    except Exception as exc:
+        raise ValueError(
+            "accepted Alkahest obligation could not be re-derived"
+        ) from exc
+    raw = _obligation_payload(obligation)
+    actual = (
+        raw
+        if isinstance(raw, SettlementObligation)
+        else SettlementObligation.model_validate(raw)
+    )
+    if actual.params != expected.params or actual.conditions != expected.conditions:
+        raise ValueError(
+            "accepted Alkahest obligation differs from its re-derived terms"
+        )
+    return accepted
 
 
 def escrow_terms_from_settlement_plan(

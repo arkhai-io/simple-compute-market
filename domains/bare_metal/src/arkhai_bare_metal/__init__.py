@@ -1,10 +1,13 @@
 """Bare-metal market domain schema."""
 
 from .evidence import (
+    BARE_METAL_ALKAHEST_LEASE_READY_EVIDENCE_KIND,
     BARE_METAL_LEASE_READY_EVIDENCE_KIND,
     BARE_METAL_LEASE_READY_RESULT_KIND,
+    BareMetalAlkahestLeaseReadyEvidence,
     BareMetalLeaseReadyEvidence,
     BareMetalLeaseReadyResult,
+    build_bare_metal_alkahest_lease_ready_evidence,
     build_bare_metal_lease_ready_evidence,
     derive_bare_metal_fulfillment_identity,
 )
@@ -24,6 +27,14 @@ from .hosted_contract import (
     decode_bare_metal_hosted_option_facts,
     validate_buyer_selection,
     validate_accepted_hosted_plan,
+)
+from .lease_accounts import (
+    LEASE_ACCOUNT_DIGEST_LENGTH,
+    LEASE_ACCOUNT_PATTERN,
+    LEASE_ACCOUNT_PREFIX,
+    BareMetalLeaseAccountError,
+    admissible_lease_account,
+    canonical_lease_account,
 )
 from .hosted_publication import (
     BareMetalHostedPublicationPolicy,
@@ -73,14 +84,17 @@ from .storefront_publication import (
     close_stale_bare_metal_listings,
     closed_available_bare_metal_listing_ids,
     load_derived_bare_metal_listing,
+    load_derived_bare_metal_listing_by_id,
     mark_derived_bare_metal_listings_closed,
     open_bare_metal_listing_keys,
     record_derived_bare_metal_listing,
     reopen_derived_bare_metal_listing_if_present,
+    resolve_refresh_target_derivation_key,
     stale_open_bare_metal_listing_ids,
 )
 
 __all__ = [
+    "BARE_METAL_ALKAHEST_LEASE_READY_EVIDENCE_KIND",
     "BARE_METAL_ACCEPTED_BINDING_KIND",
     "BARE_METAL_LEASE_READY_EVIDENCE_KIND",
     "BARE_METAL_LEASE_READY_RESULT_KIND",
@@ -100,6 +114,7 @@ __all__ = [
     "SSH_ACCESS_METHOD",
     "BareMetalAcceptedHostedBinding",
     "BareMetalAccessResult",
+    "BareMetalAlkahestLeaseReadyEvidence",
     "BareMetalLeaseReadyEvidence",
     "BareMetalLeaseReadyResult",
     "BareMetalLeaseCreate",
@@ -125,17 +140,26 @@ __all__ = [
     "bare_metal_listing_candidates",
     "bare_metal_executor_ref",
     "bind_bare_metal_hosted_option",
+    "build_bare_metal_alkahest_lease_ready_evidence",
     "build_bare_metal_lease_ready_evidence",
     "build_ready_bare_metal_hosted_options",
     "close_stale_bare_metal_listings",
     "closed_available_bare_metal_listing_ids",
     "load_derived_bare_metal_listing",
+    "load_derived_bare_metal_listing_by_id",
     "mark_derived_bare_metal_listings_closed",
+    "resolve_refresh_target_derivation_key",
     "derive_accepted_hosted_binding",
     "decode_bare_metal_hosted_option_facts",
     "validate_accepted_hosted_plan",
     "derive_bare_metal_fulfillment_identity",
     "make_bare_metal_provision_terms",
+    "LEASE_ACCOUNT_DIGEST_LENGTH",
+    "LEASE_ACCOUNT_PATTERN",
+    "LEASE_ACCOUNT_PREFIX",
+    "BareMetalLeaseAccountError",
+    "admissible_lease_account",
+    "canonical_lease_account",
     "materialization_to_lease_create",
     "open_bare_metal_listing_keys",
     "record_derived_bare_metal_listing",

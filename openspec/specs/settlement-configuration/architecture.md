@@ -31,6 +31,21 @@ A composition root injects only the resources a registration declares. Alkahest 
 
 Registration extends the existing settlement mechanism registry. It does not create another lifecycle: every configured client enters the same mechanism-neutral settlement runtime, obligation journal, retry policy, and aggregate status authority.
 
+Accepted mechanism terms have the same ownership boundary. The Alkahest plan
+codec projects an immutable accepted obligation into its existing typed escrow
+terms, exact funded data and verifier proposal; buyer acceptance, buyer funding
+and seller verification consume that projection instead of interpreting the
+mechanism envelope independently. The projection is not a second persisted
+plan. Generic buyer checks still own parties, roles and selection consistency,
+and a domain seller still owns its physical agreement and binding checks.
+
+The accepted obligation, rather than a refreshed listing, remains the financial
+authority. Buyer acceptance re-materializes the whole Alkahest mechanism payload
+from the buyer proposal and accepted payout. Funding submits the accepted bytes
+and deadline unchanged. Seller verification supplies those same values to the
+chain verifier. Hosted obligations and the legacy proposal path retain their
+existing codecs and recovery behavior.
+
 ## Readiness, publication, and selection
 
 Preflight normalizes mechanism-owned checks into a public-safe result: canonical ID, configured, enabled, ready, blocker codes and messages, capabilities, and contract/schema versions. Mechanism detail is allowlisted. Status is observational: it does not publish, create transient browser actions, submit transactions, or mutate provider or settlement state.

@@ -12,6 +12,7 @@ from typing import Any, TypeVar
 from arkhai_bare_metal import (
     BareMetalAcceptedHostedBinding,
     BareMetalAccessResult,
+    BareMetalAlkahestLeaseReadyEvidence,
     BareMetalLeaseReadyEvidence,
     BareMetalLeaseReadyResult,
     BareMetalListing,
@@ -765,6 +766,307 @@ class SQLiteClient(CoreSQLiteClient):
                 conn.close()
 
         return await asyncio.to_thread(_save)
+
+    async def ensure_bare_metal_alkahest_evidence_binding(
+        self,
+        *,
+        obligation_ref: str,
+        agreement_ref: str,
+        escrow_uid: str,
+        accepted_plan_digest: str,
+        seller_recipient: str,
+    ) -> dict[str, Any]:
+        """Persist the immutable accepted identities used by evidence publication."""
+
+        def _save() -> dict[str, Any]:
+            conn = sqlite3.connect(self.db_path)
+            conn.row_factory = sqlite3.Row
+            try:
+                with conn:
+                    conn.execute(
+                        """
+                        INSERT OR IGNORE INTO bare_metal_alkahest_evidence(
+                          obligation_ref, agreement_ref, escrow_uid,
+                          accepted_plan_digest, seller_recipient
+                        ) VALUES (?, ?, ?, ?, ?)
+                        """,
+                        (
+                            obligation_ref,
+                            agreement_ref,
+                            escrow_uid,
+                            accepted_plan_digest,
+                            seller_recipient.lower(),
+                        ),
+                    )
+                row = conn.execute(
+                    "SELECT * FROM bare_metal_alkahest_evidence "
+                    "WHERE obligation_ref=?",
+                    (obligation_ref,),
+                ).fetchone()
+                if row is None:
+                    raise RuntimeError(
+                        "bare-metal Alkahest evidence binding is missing"
+                    )
+                result = dict(row)
+                expected = {
+                    "agreement_ref": agreement_ref,
+                    "escrow_uid": escrow_uid,
+                    "accepted_plan_digest": accepted_plan_digest,
+                    "seller_recipient": seller_recipient.lower(),
+                }
+                if any(result[key] != value for key, value in expected.items()):
+                    raise RuntimeError(
+                        "bare-metal Alkahest evidence binding changed on replay"
+                    )
+                return result
+            finally:
+                conn.close()
+
+        return await asyncio.to_thread(_save)
+
+    async def load_bare_metal_alkahest_evidence(
+        self,
+        *,
+        obligation_ref: str,
+    ) -> dict[str, Any] | None:
+        def _load() -> dict[str, Any] | None:
+            conn = sqlite3.connect(self.db_path)
+            conn.row_factory = sqlite3.Row
+            try:
+                row = conn.execute(
+                    "SELECT * FROM bare_metal_alkahest_evidence "
+                    "WHERE obligation_ref=?",
+                    (obligation_ref,),
+                ).fetchone()
+                return dict(row) if row is not None else None
+            finally:
+                conn.close()
+
+        return await asyncio.to_thread(_load)
+
+    async def record_bare_metal_alkahest_evidence_intent(
+        self,
+        *,
+        obligation_ref: str,
+        evidence: BareMetalAlkahestLeaseReadyEvidence,
+    ) -> dict[str, Any]:
+        evidence_json = evidence.canonical_json()
+
+        def _save() -> dict[str, Any]:
+            conn = sqlite3.connect(self.db_path)
+            conn.row_factory = sqlite3.Row
+            try:
+                with conn:
+                    row = conn.execute(
+                        "SELECT * FROM bare_metal_alkahest_evidence "
+                        "WHERE obligation_ref=?",
+                        (obligation_ref,),
+                    ).fetchone()
+                    if row is None:
+                        raise RuntimeError(
+                            "bare-metal Alkahest evidence binding is missing"
+                        )
+                    current = dict(row)
+                    expected = {
+                        "obligation_ref": evidence.obligation_ref,
+                        "agreement_ref": evidence.agreement_ref,
+                        "escrow_uid": evidence.escrow_uid,
+                        "accepted_plan_digest": evidence.accepted_plan_digest,
+                        "seller_recipient": evidence.seller_recipient,
+                    }
+                    if obligation_ref != evidence.obligation_ref or any(
+                        current[key] != value for key, value in expected.items()
+                    ):
+                        raise RuntimeError(
+                            "bare-metal Alkahest evidence conflicts with its binding"
+                        )
+                    if current["evidence_json"] not in (None, evidence_json):
+                        raise RuntimeError(
+                            "bare-metal Alkahest evidence changed on replay"
+                        )
+                    if current["evidence_digest"] not in (
+                        None,
+                        evidence.evidence_digest,
+                    ):
+                        raise RuntimeError(
+                            "bare-metal Alkahest evidence digest changed on replay"
+                        )
+                    conn.execute(
+                        """
+                        UPDATE bare_metal_alkahest_evidence SET
+                          evidence_json=COALESCE(evidence_json, ?),
+                          evidence_digest=COALESCE(evidence_digest, ?),
+                          publication_state=CASE
+                            WHEN publication_state='pending' THEN 'intent_recorded'
+                            ELSE publication_state
+                          END,
+                          updated_at=STRFTIME('%Y-%m-%dT%H:%M:%fZ', 'now')
+                        WHERE obligation_ref=?
+                        """,
+                        (evidence_json, evidence.evidence_digest, obligation_ref),
+                    )
+                saved = conn.execute(
+                    "SELECT * FROM bare_metal_alkahest_evidence "
+                    "WHERE obligation_ref=?",
+                    (obligation_ref,),
+                ).fetchone()
+                assert saved is not None
+                return dict(saved)
+            finally:
+                conn.close()
+
+        return await asyncio.to_thread(_save)
+
+    async def advance_bare_metal_alkahest_evidence(
+        self,
+        *,
+        obligation_ref: str,
+        publication_state: str | None = None,
+        fulfillment_uid: str | None = None,
+        terminal_state: str | None = None,
+        failure_reason: str | None = None,
+        publication_owner: str | None = None,
+    ) -> dict[str, Any]:
+        """Advance publication/collection state without replacing bound identities."""
+
+        def _save() -> dict[str, Any]:
+            conn = sqlite3.connect(self.db_path)
+            conn.row_factory = sqlite3.Row
+            try:
+                with conn:
+                    row = conn.execute(
+                        "SELECT * FROM bare_metal_alkahest_evidence "
+                        "WHERE obligation_ref=?",
+                        (obligation_ref,),
+                    ).fetchone()
+                    if row is None:
+                        raise RuntimeError(
+                            "bare-metal Alkahest evidence binding is missing"
+                        )
+                    current = dict(row)
+                    if (
+                        fulfillment_uid is not None
+                        and current["fulfillment_uid"] is not None
+                        and current["fulfillment_uid"] != fulfillment_uid
+                    ):
+                        raise RuntimeError(
+                            "bare-metal fulfillment UID changed on replay"
+                        )
+                    cursor = conn.execute(
+                        """
+                        UPDATE bare_metal_alkahest_evidence SET
+                          publication_state=COALESCE(?, publication_state),
+                          fulfillment_uid=COALESCE(?, fulfillment_uid),
+                          terminal_state=COALESCE(?, terminal_state),
+                          failure_reason=?,
+                          updated_at=STRFTIME('%Y-%m-%dT%H:%M:%fZ', 'now')
+                        WHERE obligation_ref=?
+                          AND (? IS NULL OR publication_owner=?)
+                        """,
+                        (
+                            publication_state,
+                            fulfillment_uid,
+                            terminal_state,
+                            failure_reason,
+                            obligation_ref,
+                            publication_owner,
+                            publication_owner,
+                        ),
+                    )
+                    if cursor.rowcount != 1:
+                        raise RuntimeError(
+                            "bare-metal Alkahest publication ownership was lost"
+                        )
+                saved = conn.execute(
+                    "SELECT * FROM bare_metal_alkahest_evidence "
+                    "WHERE obligation_ref=?",
+                    (obligation_ref,),
+                ).fetchone()
+                assert saved is not None
+                return dict(saved)
+            finally:
+                conn.close()
+
+        return await asyncio.to_thread(_save)
+
+    async def claim_bare_metal_alkahest_evidence_submission(
+        self,
+        *,
+        obligation_ref: str,
+        evidence_digest: str,
+        worker_id: str,
+    ) -> dict[str, Any] | None:
+        """Atomically claim one immutable publication intent for submission."""
+        if not worker_id:
+            raise ValueError("worker_id must be non-empty")
+
+        def _claim() -> dict[str, Any] | None:
+            conn = sqlite3.connect(self.db_path)
+            conn.row_factory = sqlite3.Row
+            try:
+                with conn:
+                    changed = conn.execute(
+                        "UPDATE bare_metal_alkahest_evidence SET "
+                        "publication_state='submitting', publication_owner=?, "
+                        "failure_reason=NULL, "
+                        "updated_at=STRFTIME('%Y-%m-%dT%H:%M:%fZ', 'now') "
+                        "WHERE obligation_ref=? AND evidence_digest=? "
+                        "AND publication_state='intent_recorded' "
+                        "AND publication_owner IS NULL AND fulfillment_uid IS NULL",
+                        (worker_id, obligation_ref, evidence_digest),
+                    ).rowcount
+                if changed != 1:
+                    return None
+                row = conn.execute(
+                    "SELECT * FROM bare_metal_alkahest_evidence "
+                    "WHERE obligation_ref=?",
+                    (obligation_ref,),
+                ).fetchone()
+                assert row is not None
+                return dict(row)
+            finally:
+                conn.close()
+
+        return await asyncio.to_thread(_claim)
+
+    async def reconcile_bare_metal_alkahest_publication_absent(
+        self,
+        *,
+        obligation_ref: str,
+        evidence_digest: str,
+    ) -> dict[str, Any]:
+        """Reset an ambiguous intent only after authoritative absence is supplied."""
+
+        def _reset() -> dict[str, Any]:
+            conn = sqlite3.connect(self.db_path)
+            conn.row_factory = sqlite3.Row
+            try:
+                with conn:
+                    changed = conn.execute(
+                        "UPDATE bare_metal_alkahest_evidence SET "
+                        "publication_state='intent_recorded', publication_owner=NULL, "
+                        "failure_reason=NULL, "
+                        "updated_at=STRFTIME('%Y-%m-%dT%H:%M:%fZ', 'now') "
+                        "WHERE obligation_ref=? AND evidence_digest=? "
+                        "AND publication_state IN ('submitting','submission_unknown') "
+                        "AND fulfillment_uid IS NULL",
+                        (obligation_ref, evidence_digest),
+                    ).rowcount
+                if changed != 1:
+                    raise RuntimeError(
+                        "ambiguous publication is not eligible for absence recovery"
+                    )
+                row = conn.execute(
+                    "SELECT * FROM bare_metal_alkahest_evidence "
+                    "WHERE obligation_ref=?",
+                    (obligation_ref,),
+                ).fetchone()
+                assert row is not None
+                return dict(row)
+            finally:
+                conn.close()
+
+        return await asyncio.to_thread(_reset)
 
     @staticmethod
     def _hosted_lifecycle_from_row(

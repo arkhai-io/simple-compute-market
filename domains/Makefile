@@ -2,7 +2,8 @@
 	dist-bare-metal-storefront dist-storefront dist-provisioning-operator-client dist-provisioning-adapters \
 	dist-apicredits-domain dist-apicredits-service dist-apicredits-storefront \
 	dist-apicredits-middleware dist-apicredits-sample-app dist-apicredits-buyer \
-	dist-buyer test-provisioning-iac test-provisioning-adapter test-storefront \
+	dist-buyer test-provisioning-iac test-provisioning-adapter \
+	test-bare-metal-provisioning-adapter test-storefront \
 	test-vms-buyer test-apicredits test-apicredits-middleware
 
 DIST_DIR ?= $(abspath ../.dist)
@@ -131,3 +132,6 @@ test-apicredits-middleware:
 
 test-provisioning-adapter: ## VM provisioning adapter tests against built wheels
 	cd vms/provisioning/adapter && $(MAKE) test DIST_DIR=$(abspath $(DIST_DIR))
+
+test-bare-metal-provisioning-adapter: ## Bare-metal provisioning adapter tests against built wheels
+	cd bare_metal/provisioning/adapter && $(MAKE) test DIST_DIR=$(abspath $(DIST_DIR))

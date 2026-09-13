@@ -13,6 +13,7 @@ from market_settlement_runtime import (
     EffectOutcome,
     MaterializationOutcome,
     SettlementManualRequired,
+    SettlementEffectReadbackUnknown,
     SettlementRuntime,
     SettlementSQLiteRepository,
     StatusOutcome,
@@ -627,6 +628,352 @@ async def test_fulfillment_lease_excludes_duplicate_vm_provisioning(repository) 
 
     assert completed.fulfillment_ref == "portable-fulfillment-ref"
     assert replayed.status == "succeeded"
+
+
+async def test_explicit_fulfillment_enqueue_is_claimant_owned_and_idempotent(
+    repository,
+) -> None:
+    runtime = SettlementRuntime(repository, {"test.v1": Client()}, clock=lambda: 50)
+    record = await register(runtime, obligation())
+
+    assert await repository.list_due_settlement_obligations(now_unix=50) == []
+    with pytest.raises(PermissionError):
+        await runtime.enqueue_fulfillment(
+            record.obligation_ref, local_principal=BUYER
+        )
+    with pytest.raises(ValueError, match="not materialized"):
+        await runtime.enqueue_fulfillment(
+            record.obligation_ref, local_principal=SELLER
+        )
+    assert await repository.list_due_settlement_obligations(now_unix=50) == []
+    materialized = await runtime.materialize(
+        obligation_ref=record.obligation_ref,
+        local_principal=BUYER,
+        worker_id="payer",
+    )
+    assert materialized.status == "succeeded"
+    first = await runtime.enqueue_fulfillment(
+        record.obligation_ref, local_principal=SELLER
+    )
+    replay = await runtime.enqueue_fulfillment(
+        record.obligation_ref, local_principal=SELLER
+    )
+    due = await repository.list_due_settlement_obligations(now_unix=50)
+
+    assert first.status == replay.status == "pending"
+    assert [row["obligation_ref"] for row in due] == [record.obligation_ref]
+
+
+async def test_publication_fence_survives_crash_lease_expiry_and_deferral(
+    repository,
+) -> None:
+    now = [50.0]
+    runtime = SettlementRuntime(
+        repository,
+        {"test.v1": Client()},
+        clock=lambda: now[0],
+        lease_seconds=10,
+    )
+    record = await register(runtime, obligation(expiration_unix=100))
+    await runtime.adopt(
+        record.obligation_ref,
+        local_principal=BUYER,
+        mechanism_ref="escrow",
+    )
+    await runtime.enqueue_fulfillment(
+        record.obligation_ref, local_principal=SELLER
+    )
+    await runtime.reserve_fulfillment(
+        record.obligation_ref,
+        local_principal=SELLER,
+        worker_id="publisher-a",
+    )
+    await runtime.fence_fulfillment_publication(
+        record.obligation_ref,
+        local_principal=SELLER,
+        worker_id="publisher-a",
+    )
+
+    # The publisher process disappears without reaching any retry handler.
+    now[0] = 200
+    blocked = await runtime.reclaim(
+        obligation_ref=record.obligation_ref,
+        local_principal=BUYER,
+        worker_id="payer-a",
+    )
+    assert blocked.status == "busy"
+
+    resumed = await runtime.reserve_fulfillment(
+        record.obligation_ref,
+        local_principal=SELLER,
+        worker_id="publisher-b",
+    )
+    assert resumed.status == "pending"
+    await runtime.defer_fulfillment(
+        record.obligation_ref,
+        local_principal=SELLER,
+        worker_id="publisher-b",
+    )
+    operation = await repository.load_settlement_operation(
+        record.obligation_ref, "fulfill"
+    )
+    assert operation is not None
+    assert operation["uncertain_acknowledgement"] is True
+    await runtime.reserve_fulfillment(
+        record.obligation_ref,
+        local_principal=SELLER,
+        worker_id="publisher-c",
+    )
+    await runtime.retry_fulfillment(
+        record.obligation_ref,
+        RuntimeError("physical status unavailable"),
+        local_principal=SELLER,
+        worker_id="publisher-c",
+        uncertain=False,
+    )
+    retried = await repository.load_settlement_operation(
+        record.obligation_ref, "fulfill"
+    )
+    assert retried is not None
+    assert retried["uncertain_acknowledgement"] is True
+    blocked_after_deferral = await runtime.reclaim(
+        obligation_ref=record.obligation_ref,
+        local_principal=BUYER,
+        worker_id="payer-b",
+    )
+    assert blocked_after_deferral.status == "busy"
+
+
+async def test_expired_fulfillment_owner_cannot_acquire_publication_fence(
+    repository,
+) -> None:
+    now = [50.0]
+    runtime = SettlementRuntime(
+        repository,
+        {"test.v1": Client()},
+        clock=lambda: now[0],
+        lease_seconds=10,
+    )
+    record = await register(runtime, obligation(expiration_unix=100))
+    await runtime.adopt(
+        record.obligation_ref,
+        local_principal=BUYER,
+        mechanism_ref="escrow",
+    )
+    await runtime.enqueue_fulfillment(
+        record.obligation_ref, local_principal=SELLER
+    )
+    await runtime.reserve_fulfillment(
+        record.obligation_ref,
+        local_principal=SELLER,
+        worker_id="stale-seller",
+    )
+
+    now[0] = 61
+    with pytest.raises(RuntimeError, match="lease was lost"):
+        await runtime.fence_fulfillment_publication(
+            record.obligation_ref,
+            local_principal=SELLER,
+            worker_id="stale-seller",
+        )
+
+
+async def test_replacement_fulfillment_owner_alone_can_acquire_fence(
+    repository,
+) -> None:
+    now = [50.0]
+    runtime = SettlementRuntime(
+        repository,
+        {"test.v1": Client()},
+        clock=lambda: now[0],
+        lease_seconds=10,
+    )
+    record = await register(runtime, obligation())
+    await runtime.adopt(
+        record.obligation_ref,
+        local_principal=BUYER,
+        mechanism_ref="escrow",
+    )
+    await runtime.enqueue_fulfillment(
+        record.obligation_ref, local_principal=SELLER
+    )
+    await runtime.reserve_fulfillment(
+        record.obligation_ref,
+        local_principal=SELLER,
+        worker_id="seller-a",
+    )
+    now[0] = 61
+    await runtime.reserve_fulfillment(
+        record.obligation_ref,
+        local_principal=SELLER,
+        worker_id="seller-b",
+    )
+
+    with pytest.raises(RuntimeError, match="lease was lost"):
+        await runtime.fence_fulfillment_publication(
+            record.obligation_ref,
+            local_principal=SELLER,
+            worker_id="seller-a",
+        )
+    await runtime.fence_fulfillment_publication(
+        record.obligation_ref,
+        local_principal=SELLER,
+        worker_id="seller-b",
+    )
+
+
+async def test_reclaim_reservation_excludes_late_publication_fence(
+    repository,
+) -> None:
+    entered = asyncio.Event()
+    release = asyncio.Event()
+
+    class BlockingReclaimClient(Client):
+        async def reclaim_expired(self, *args, **kwargs):
+            self.reclaim_calls += 1
+            entered.set()
+            await release.wait()
+            return EffectOutcome(receipt={"effect": "reclaimed"})
+
+    now = [50.0]
+    client = BlockingReclaimClient()
+    runtime = SettlementRuntime(
+        repository,
+        {"test.v1": client},
+        clock=lambda: now[0],
+        lease_seconds=10,
+    )
+    record = await register(runtime, obligation(expiration_unix=100))
+    await runtime.adopt(
+        record.obligation_ref,
+        local_principal=BUYER,
+        mechanism_ref="escrow",
+    )
+    await runtime.enqueue_fulfillment(
+        record.obligation_ref, local_principal=SELLER
+    )
+    await runtime.reserve_fulfillment(
+        record.obligation_ref,
+        local_principal=SELLER,
+        worker_id="stale-seller",
+    )
+    now[0] = 200
+    reclaim = asyncio.create_task(
+        runtime.reclaim(
+            obligation_ref=record.obligation_ref,
+            local_principal=BUYER,
+            worker_id="payer",
+        )
+    )
+    await entered.wait()
+
+    with pytest.raises(RuntimeError, match="lease was lost"):
+        await runtime.fence_fulfillment_publication(
+            record.obligation_ref,
+            local_principal=SELLER,
+            worker_id="stale-seller",
+        )
+    release.set()
+    assert (await reclaim).status == "succeeded"
+    with pytest.raises(RuntimeError, match="lease was lost"):
+        await runtime.fence_fulfillment_publication(
+            record.obligation_ref,
+            local_principal=SELLER,
+            worker_id="stale-seller",
+        )
+    assert client.reclaim_calls == 1
+
+
+async def test_uncertain_fulfillment_fences_reclaim_until_explicit_resolution(
+    repository,
+) -> None:
+    runtime = SettlementRuntime(repository, {"test.v1": Client()}, clock=lambda: 200)
+    record = await register(runtime, obligation(expiration_unix=100))
+    await runtime.adopt(
+        record.obligation_ref,
+        local_principal=BUYER,
+        mechanism_ref="escrow",
+    )
+    await runtime.enqueue_fulfillment(
+        record.obligation_ref, local_principal=SELLER
+    )
+    await runtime.reserve_fulfillment(
+        record.obligation_ref,
+        local_principal=SELLER,
+        worker_id="publisher",
+    )
+    await runtime.retry_fulfillment(
+        record.obligation_ref,
+        TimeoutError("publication unknown"),
+        local_principal=SELLER,
+        worker_id="publisher",
+        uncertain=True,
+    )
+
+    blocked = await runtime.reclaim(
+        obligation_ref=record.obligation_ref,
+        local_principal=BUYER,
+        worker_id="payer",
+    )
+    assert blocked.status == "busy"
+    await runtime.resolve_fulfillment_not_published(
+        record.obligation_ref, local_principal=SELLER
+    )
+    reclaimed = await runtime.reclaim(
+        obligation_ref=record.obligation_ref,
+        local_principal=BUYER,
+        worker_id="payer",
+    )
+    assert reclaimed.status == "succeeded"
+
+
+async def test_collection_readback_unknown_preserves_receipt_without_repeat(
+    repository,
+) -> None:
+    class UnknownCollectionClient(Client):
+        async def collect(self, *args, **kwargs):
+            self.collect_calls += 1
+            raise SettlementEffectReadbackUnknown(
+                "collection receipt unavailable",
+                receipt={"receipt": "0xtransaction"},
+                mechanism_state={"transaction_ref": "0xtransaction"},
+            )
+
+    client = UnknownCollectionClient()
+    runtime = SettlementRuntime(repository, {"test.v1": client}, clock=lambda: 50)
+    record = await register(runtime, obligation())
+    await runtime.adopt(
+        record.obligation_ref,
+        local_principal=BUYER,
+        mechanism_ref="escrow",
+    )
+    await runtime.bind_fulfillment(
+        record.obligation_ref, "fulfillment", local_principal=SELLER
+    )
+    await runtime.check(
+        obligation_ref=record.obligation_ref,
+        local_principal=SELLER,
+        worker_id="checker",
+    )
+    with pytest.raises(SettlementEffectReadbackUnknown):
+        await runtime.collect(
+            obligation_ref=record.obligation_ref,
+            local_principal=SELLER,
+            worker_id="collector-a",
+        )
+    replay = await runtime.collect(
+        obligation_ref=record.obligation_ref,
+        local_principal=SELLER,
+        worker_id="collector-b",
+    )
+    operation = await repository.load_settlement_operation(
+        record.obligation_ref, "collect"
+    )
+
+    assert replay.status == "manual_required"
+    assert client.collect_calls == 1
+    assert operation is not None
+    assert operation["receipt"] == {"receipt": "0xtransaction"}
 
 
 async def test_fulfillment_restart_repairs_commit_before_acknowledgement(

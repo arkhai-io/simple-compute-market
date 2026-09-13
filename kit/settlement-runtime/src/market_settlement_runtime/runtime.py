@@ -25,6 +25,11 @@ from .ports import ConditionalEscrowClient, SettlementRuntimeRepository
 #: to find it and no mechanism needs a schema change to report one.
 MANUAL_REASON_KEY = "manual_reason"
 
+# Set only when a mechanism has returned an external effect identity but could
+# not read back its outcome. Ordinary idempotent authority errors remain
+# retryable with the operation journal's stable request identity.
+_EFFECT_READBACK_REQUIRED_KEY = "effect_readback_required"
+
 
 class SettlementManualRequired(RuntimeError):
     """A mechanism cannot safely converge without operator evidence.
@@ -34,9 +39,33 @@ class SettlementManualRequired(RuntimeError):
     repeating free text a mechanism may have redacted for a reason.
     """
 
-    def __init__(self, message: str, *, code: str = "") -> None:
+    def __init__(
+        self,
+        message: str,
+        *,
+        code: str = "",
+        receipt: dict[str, Any] | None = None,
+        mechanism_state: dict[str, Any] | None = None,
+    ) -> None:
         super().__init__(message)
         self.code = code
+        self.receipt = receipt
+        self.mechanism_state = mechanism_state
+
+
+class SettlementEffectReadbackUnknown(RuntimeError):
+    """An effect returned an identity but its success readback is unavailable."""
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        receipt: dict[str, Any],
+        mechanism_state: dict[str, Any],
+    ) -> None:
+        super().__init__(message)
+        self.receipt = receipt
+        self.mechanism_state = mechanism_state
 
 
 class SettlementRuntime:
@@ -213,6 +242,38 @@ class SettlementRuntime:
             return self._outcome(record, "fulfill", "succeeded", receipt)
         return self._outcome(record, "fulfill", "pending")
 
+    async def enqueue_fulfillment(
+        self,
+        obligation_ref: str,
+        *,
+        local_principal: Identity,
+    ) -> SettlementOperationOutcome:
+        """Durably make an accepted claimant-owned fulfillment eligible."""
+        record = await self._load(obligation_ref)
+        self._require_principal(record, local_principal, "claimant")
+        self._require_materialized(record)
+        if record.reclaim_state in {"in_progress", "succeeded"}:
+            raise ValueError("fulfillment cannot enqueue after reclaim reservation")
+        request_hash = _request_hash(
+            record,
+            "fulfill",
+            local_principal=local_principal,
+        )
+        operation = await self._repository.upsert_settlement_operation(
+            {
+                "obligation_ref": obligation_ref,
+                "operation": "fulfill",
+                "request_hash": request_hash,
+                "state": "pending",
+            }
+        )
+        return self._outcome(
+            record,
+            "fulfill",
+            "succeeded" if operation["state"] == "succeeded" else "pending",
+            operation.get("receipt"),
+        )
+
     async def complete_fulfillment(
         self,
         obligation_ref: str,
@@ -237,6 +298,25 @@ class SettlementRuntime:
         )
         return await self._load(obligation_ref)
 
+    async def fence_fulfillment_publication(
+        self,
+        obligation_ref: str,
+        *,
+        local_principal: Identity,
+        worker_id: str,
+    ) -> None:
+        """Persist reclaim exclusion before a fulfillment publication can start."""
+        record = await self._load(obligation_ref)
+        self._require_principal(record, local_principal, "claimant")
+        fenced = await self._repository.mark_settlement_operation_uncertain(
+            obligation_ref=obligation_ref,
+            operation="fulfill",
+            lease_owner=worker_id,
+            now_unix=self._clock(),
+        )
+        if not fenced:
+            raise RuntimeError("settlement operation lease was lost")
+
     async def defer_fulfillment(
         self,
         obligation_ref: str,
@@ -247,11 +327,17 @@ class SettlementRuntime:
         """Release a fulfillment lease while asynchronous work remains pending."""
         record = await self._load(obligation_ref)
         self._require_principal(record, local_principal, "claimant")
+        operation = await self._repository.load_settlement_operation(
+            obligation_ref, "fulfill"
+        )
         await self._finish(
             record,
             "fulfill",
             worker_id,
             state="pending",
+            uncertain_acknowledgement=bool(
+                operation and operation.get("uncertain_acknowledgement")
+            ),
         )
 
     async def retry_fulfillment(
@@ -261,17 +347,43 @@ class SettlementRuntime:
         *,
         local_principal: Identity,
         worker_id: str,
+        uncertain: bool = True,
     ) -> None:
         """Release a failed fulfillment lease for deterministic retry."""
         record = await self._load(obligation_ref)
         self._require_principal(record, local_principal, "claimant")
+        operation = await self._repository.load_settlement_operation(
+            obligation_ref, "fulfill"
+        )
         await self._finish_retry(
             record,
             "fulfill",
             worker_id,
             error,
-            uncertain=True,
+            uncertain=uncertain
+            or bool(operation and operation.get("uncertain_acknowledgement")),
         )
+
+    async def resolve_fulfillment_not_published(
+        self,
+        obligation_ref: str,
+        *,
+        local_principal: Identity,
+    ) -> None:
+        """Clear a publication fence after authoritative absence is established."""
+        record = await self._load(obligation_ref)
+        self._require_principal(record, local_principal, "claimant")
+        operation = await self._repository.load_settlement_operation(
+            obligation_ref, "fulfill"
+        )
+        if operation is None or not operation.get("uncertain_acknowledgement"):
+            raise ValueError("fulfillment has no publication uncertainty to resolve")
+        resolved = await self._repository.resolve_settlement_operation_uncertainty(
+            obligation_ref=obligation_ref,
+            operation="fulfill",
+        )
+        if not resolved:
+            raise RuntimeError("fulfillment uncertainty resolution was lost")
 
     async def reserve_cleanup(
         self,
@@ -539,6 +651,18 @@ class SettlementRuntime:
         terminal = self._terminal_outcome(record, "collect", reserved)
         if terminal is not None:
             return terminal
+        if reserved.get("uncertain_acknowledgement") and record.mechanism_state.get(
+            _EFFECT_READBACK_REQUIRED_KEY
+        ):
+            return await self._finish_manual(
+                record,
+                "collect",
+                worker_id,
+                SettlementManualRequired(
+                    "collection acknowledgement requires receipt reconciliation",
+                    code="collection_receipt_unknown",
+                ),
+            )
         try:
             result = await client.collect(
                 self._operation_obligation(record),
@@ -551,6 +675,21 @@ class SettlementRuntime:
             )
         except SettlementManualRequired as exc:
             return await self._finish_manual(record, "collect", worker_id, exc)
+        except SettlementEffectReadbackUnknown as exc:
+            mechanism_state = {
+                **exc.mechanism_state,
+                _EFFECT_READBACK_REQUIRED_KEY: True,
+            }
+            await self._finish_retry(
+                record,
+                "collect",
+                worker_id,
+                exc,
+                uncertain=True,
+                receipt=exc.receipt,
+                mechanism_state=mechanism_state,
+            )
+            raise
         except Exception as exc:
             await self._finish_retry(record, "collect", worker_id, exc, uncertain=True)
             raise
@@ -849,6 +988,8 @@ class SettlementRuntime:
         error: Exception,
         *,
         uncertain: bool,
+        receipt: dict[str, Any] | None = None,
+        mechanism_state: dict[str, Any] | None = None,
     ) -> None:
         await self._finish(
             record,
@@ -857,6 +998,8 @@ class SettlementRuntime:
             state="pending",
             last_error=f"{type(error).__name__}: {error}",
             uncertain_acknowledgement=uncertain,
+            receipt=receipt,
+            mechanism_state=mechanism_state,
         )
 
     async def _finish_manual(
@@ -871,8 +1014,14 @@ class SettlementRuntime:
         # joins the mechanism's own state so a projection reads it structurally
         # rather than parsing the message back out.
         code = getattr(error, "code", "") or ""
+        error_state = getattr(error, "mechanism_state", None)
+        base_state = (
+            dict(error_state)
+            if isinstance(error_state, Mapping)
+            else dict(record.mechanism_state)
+        )
         state = (
-            {**record.mechanism_state, MANUAL_REASON_KEY: code} if code else None
+            {**base_state, MANUAL_REASON_KEY: code} if code else error_state
         )
         await self._finish(
             record,
@@ -881,6 +1030,7 @@ class SettlementRuntime:
             state="manual_required",
             last_error=str(error),
             mechanism_state=state,
+            receipt=getattr(error, "receipt", None),
         )
         return self._outcome(record, operation, "manual_required")
 

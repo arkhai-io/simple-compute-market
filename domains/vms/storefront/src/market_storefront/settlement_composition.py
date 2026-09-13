@@ -21,7 +21,11 @@ from core_storefront.domain_lifecycle import (
     fulfill_domain,
 )
 from core_storefront.stage_log import stage_event
-from market_alkahest import create_alkahest_registration
+from market_alkahest import (
+    ALKAHEST_CONFIG_KEY,
+    ALKAHEST_MECHANISM_ID,
+    create_alkahest_registration,
+)
 from market_core import MarketDomainContract
 from market_core.schemas import (
     EscrowProposal,
@@ -105,6 +109,12 @@ class VmSettlementComposition:
         dispatch: dict[str, Callable[[Mapping[str, Any], Mapping[str, Any]], Any]] = {}
         for mechanism_id in self.settlement_config.priority:
             registration = self.configuration_registry.registration(mechanism_id)
+            if mechanism_id == ALKAHEST_MECHANISM_ID:
+                alkahest = self.settlement_config.mechanism_config(
+                    ALKAHEST_CONFIG_KEY
+                )
+                if alkahest is None or not bool(getattr(alkahest, "enabled", False)):
+                    continue
             if registration.accepted_obligation_builder is None:
                 continue
 

@@ -75,6 +75,19 @@ spec:
                 secretKeyRef:
                   name: {{ required "provisioning identity credential Secret name is required" .Values.identity.credentialSecret.name | quote }}
                   key: {{ required "provisioning identity credential Secret key is required" .Values.identity.credentialSecret.key | quote }}
+            {{- if .Values.hostKeyPins.enabled }}
+            # Ansible reads its configuration from files only where the
+            # environment leaves a setting unset, so these two are what actually
+            # decide host trust for every playbook this container spawns. They
+            # are set together on purpose: leaving checking enabled without the
+            # pinned file would consult a known_hosts that does not exist, and
+            # supplying the file without enabling checking would let Ansible
+            # keep passing StrictHostKeyChecking=no.
+            - name: ANSIBLE_HOST_KEY_CHECKING
+              value: "True"
+            - name: ANSIBLE_SSH_COMMON_ARGS
+              value: "-o StrictHostKeyChecking=yes -o UserKnownHostsFile={{ include "provisioning.hostKeyPinsPath" . }} -o GlobalKnownHostsFile=/dev/null"
+            {{- end }}
           volumeMounts:
             - name: data
               mountPath: /app/data
@@ -86,6 +99,12 @@ spec:
               mountPath: /app/config/config-provisioning-secrets.yml
               subPath: config-provisioning-secrets.yml
               readOnly: true
+            {{- if .Values.hostKeyPins.enabled }}
+            - name: host-key-pins
+              mountPath: {{ include "provisioning.hostKeyPinsPath" . }}
+              subPath: {{ .Values.hostKeyPins.key }}
+              readOnly: true
+            {{- end }}
             - name: ssh-key
               mountPath: /home/appuser/.ssh/id_ed25519
               subPath: id_ed25519
@@ -137,6 +156,12 @@ spec:
           secret:
             secretName: {{ include "provisioning.sshKeySecretName" . }}
             defaultMode: 0400
+        {{- if .Values.hostKeyPins.enabled }}
+        - name: host-key-pins
+          secret:
+            secretName: {{ include "provisioning.hostKeyPinsSecretName" . }}
+            defaultMode: 0444
+        {{- end }}
       {{- with .Values.nodeSelector }}
       nodeSelector:
         {{- toYaml . | nindent 8 }}

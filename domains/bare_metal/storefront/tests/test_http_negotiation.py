@@ -398,6 +398,37 @@ async def test_hosted_only_opening_derives_exact_plan_and_first_binding(
     assert persisted.capacity_reservation_id is None
 
 
+async def test_hosted_physical_service_terms_stay_the_canonical_envelope(
+    tmp_path,
+) -> None:
+    """The hosted physical envelope is compared whole, so its keys are pinned.
+
+    ``validate_accepted_hosted_plan`` reconstructs these service terms and
+    requires equality, so one extra key anywhere in the seller's composition
+    blocks hosted lifecycle preparation for every deal.
+    """
+
+    runtime = _runtime(str(tmp_path / "storefront.db"))
+    option = await _insert_hosted_listing(runtime)
+    opening = _hosted_opening(option)
+
+    with TestClient(_app(runtime)) as client:
+        response = client.post(
+            "/api/v1/negotiate/new",
+            json=opening,
+            headers=_headers("negotiate_new", "hosted-listing", opening),
+        )
+
+    assert response.status_code == 200
+    plan = SettlementPlan.model_validate(response.json()["settlement_plan"])
+    assert set(plan.service_terms["bare_metal.v1"]) == {
+        "listing_id",
+        "option_id",
+        "option_facts",
+        "provision_terms",
+    }
+
+
 async def test_hosted_opening_rejects_mutated_and_ambiguous_selection(
     tmp_path,
 ) -> None:

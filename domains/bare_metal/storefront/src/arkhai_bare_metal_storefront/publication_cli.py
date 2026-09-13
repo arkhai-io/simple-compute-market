@@ -15,22 +15,61 @@ from arkhai_bare_metal import (
     BareMetalResourceProjection,
     TrustedBareMetalProjection,
     bare_metal_digest,
+    bare_metal_listing_candidates,
+    resolve_refresh_target_derivation_key,
 )
 from core_storefront.publication_command import (
     StorefrontPublicationCommandCallbacks,
     StorefrontPublicationCommandConfig,
 )
+from core_storefront.multi_registry_client import (
+    MultiRegistryClient,
+    RegistryAuthorityTrust,
+)
+from market_capacity_publication import (
+    CapacityBinding,
+    PublicationCandidate,
+    PublicationTransition,
+)
 from market_identity import Identity, TrustedIdentitySet
 from market_settlement_runtime import SettlementPublicationClause
 from pydantic_core import to_jsonable_python
-from registry_client import ListingRequest, SyncRegistryClient, UpdateListingRequest
+from registry_client import (
+    ListingRequest,
+    RegistryClientError,
+    SyncRegistryClient,
+    UpdateListingRequest,
+)
 
 from .publication import (
+    build_bare_metal_lifecycle_runtime,
     build_bare_metal_publication_selection,
     run_bare_metal_publication,
 )
 from .runtime import BareMetalStorefrontRuntime, build_runtime_from_environment
 from .server import build_bare_metal_storefront_registry
+
+
+class RegistryPublicationError(RuntimeError):
+    """A registry call failure described without any request material."""
+
+
+def _registry_failure(operation: str, exc: Exception) -> RegistryPublicationError:
+    """Reduce a registry call failure to what is safe to record.
+
+    The publication round records ``str(exception)`` against each failed
+    candidate and that record is written to an operator's run log. Everything
+    the underlying exception carries is request or response material: the
+    transport quotes the rejected header, and ``RegistryClientError`` carries
+    the URL and the response body, either of which may repeat the bearer
+    credential. The exception type and the HTTP status say what went wrong
+    without repeating what was sent.
+    """
+
+    detail = type(exc).__name__
+    if isinstance(exc, RegistryClientError):
+        detail = f"{detail} HTTP {exc.status_code}"
+    return RegistryPublicationError(f"registry {operation} failed: {detail}")
 
 
 def _json_env(name: str) -> Any:
@@ -51,19 +90,54 @@ def _instant(name: str) -> datetime:
     return parsed.astimezone(timezone.utc)
 
 
-def _registry(runtime: BareMetalStorefrontRuntime) -> SyncRegistryClient:
+def _registry_configuration(
+    runtime: BareMetalStorefrontRuntime,
+) -> tuple[str, TrustedIdentitySet, str, str | None]:
     raw_principals = _json_env("BARE_METAL_STOREFRONT_REGISTRY_PRINCIPALS")
     if not isinstance(raw_principals, list):
         raise RuntimeError("registry principals must be a JSON list")
     trust = TrustedIdentitySet(
         identities=tuple(Identity.model_validate(item) for item in raw_principals)
     )
-    return SyncRegistryClient(
+    # A registry that gates writes rejects the seller's per-request signature
+    # alone: publication additionally needs a write-scoped registry API key,
+    # carried as the client's bearer credential. Registries with open
+    # publishing supply no key, and the header is then absent rather than
+    # empty, so this stays optional in both directions.
+    api_key = os.environ.get("BARE_METAL_STOREFRONT_REGISTRY_API_KEY") or None
+    return (
         os.environ["BARE_METAL_STOREFRONT_REGISTRY_URL"],
+        trust,
+        os.environ["BARE_METAL_STOREFRONT_REGISTRY_AUTHORITY"],
+        api_key,
+    )
+
+
+def _registry(runtime: BareMetalStorefrontRuntime) -> SyncRegistryClient:
+    url, trust, authority, api_key = _registry_configuration(runtime)
+    return SyncRegistryClient(
+        url,
         signer=runtime.marketplace_signer,
         caller_role="seller",
         expected_registries=trust,
-        registry_authority=os.environ["BARE_METAL_STOREFRONT_REGISTRY_AUTHORITY"],
+        registry_authority=authority,
+        api_key=api_key,
+    )
+
+
+def _multi_registry(runtime: BareMetalStorefrontRuntime) -> MultiRegistryClient:
+    url, trust, authority, api_key = _registry_configuration(runtime)
+    return MultiRegistryClient(
+        [url],
+        signer=runtime.marketplace_signer,
+        caller_role="seller",
+        expected_registries={
+            url: RegistryAuthorityTrust(
+                authority=authority,
+                principals=trust,
+            )
+        },
+        auth={url: api_key} if api_key is not None else None,
     )
 
 
@@ -150,24 +224,34 @@ def _publish_registry_listing(
     max_duration_seconds: int | None,
     storefront_url: str,
 ) -> dict[str, Any]:
-    response = client.publish_listing(
-        ListingRequest(
-            listing_id=listing_id,
-            offer=offer,
-            accepted_escrows=accepted_escrows,
-            settlement_options=settlement_options,
-            demands=demands,
-            max_duration_seconds=max_duration_seconds,
-            storefront_url=storefront_url,
+    try:
+        response = client.publish_listing(
+            ListingRequest(
+                listing_id=listing_id,
+                offer=offer,
+                accepted_escrows=accepted_escrows,
+                settlement_options=settlement_options,
+                demands=demands,
+                max_duration_seconds=max_duration_seconds,
+                storefront_url=storefront_url,
+            )
         )
-    )
+    # Chaining is suppressed deliberately: the original message is the leak, and
+    # an uncaught traceback would print it alongside the safe one.
+    except Exception as exc:
+        raise _registry_failure("listing.publish", exc) from None
     if str(response.get("listing_id") or "") != listing_id:
         raise RuntimeError("registry returned a conflicting listing identity")
     return {"status": "published", "listing_id": listing_id}
 
 
-def run_publication_once() -> dict[str, Any]:
-    """Publish one exact round from freshly authenticated site projections."""
+def run_publication_once(*, refresh_listing_id: str | None = None) -> dict[str, Any]:
+    """Publish one exact round from freshly authenticated site projections.
+
+    ``refresh_listing_id`` names one tracked open listing to republish under
+    its existing identifier, which an operator needs after settlement
+    configuration changes. Without it the round leaves open listings alone.
+    """
 
     runtime = build_runtime_from_environment()
     if runtime.settlement_composition is None:
@@ -197,29 +281,79 @@ def run_publication_once() -> dict[str, Any]:
     def close_listing(
         _base_url: str, listing_id: str, _reason: str | None = None
     ) -> dict[str, Any]:
-        client.update_listing(
-            listing_id, UpdateListingRequest(updates={"status": "closed"})
-        )
+        try:
+            client.update_listing(
+                listing_id, UpdateListingRequest(updates={"status": "closed"})
+            )
+        except Exception as exc:
+            raise _registry_failure("listing.update", exc) from None
         return {"status": "closed", "listing_id": listing_id}
 
-    def publish_existing_listing(*, listing_id: str, **values: Any) -> dict[str, Any]:
-        return _publish_registry_listing(
-            client,
-            listing_id=listing_id,
-            offer=values["offer"],
-            accepted_escrows=values["accepted_escrows"],
-            settlement_options=values["settlement_options"],
-            demands=values["demands"],
-            max_duration_seconds=values["max_duration_seconds"],
-            storefront_url=values["storefront_url"],
-        )
-
     projections = _projections(runtime)
+    refresh_listing_ids: frozenset[str] = frozenset()
+    refresh_key: str | None = None
+    if refresh_listing_id:
+        refresh_key = resolve_refresh_target_derivation_key(
+            runtime.db.db_path,
+            listing_id=refresh_listing_id,
+            candidates=bare_metal_listing_candidates(projections),
+        )
+        refresh_listing_ids = frozenset({refresh_listing_id})
+    available_candidates = bare_metal_listing_candidates(projections)
+    lifecycle = build_bare_metal_lifecycle_runtime(
+        repository=runtime.db,
+        available_keys=frozenset(
+            str(candidate["derivation_key"])
+            for candidate in available_candidates
+        ),
+        enabled=True,
+        registry_urls=(os.environ["BARE_METAL_STOREFRONT_REGISTRY_URL"],),
+        registry_client_factory=lambda: _multi_registry(runtime),
+        listing_request_factory=ListingRequest,
+        update_listing_request_factory=UpdateListingRequest,
+        storefront_url=runtime.storefront_url,
+    )
+
+    def publish_existing_listing(
+        *,
+        listing_id: str,
+        transition: str,
+        candidate: dict[str, Any],
+        **values: Any,
+    ) -> dict[str, Any]:
+        publication_candidate = PublicationCandidate(
+            listing_id=listing_id,
+            binding=CapacityBinding(
+                str(candidate["site_id"]),
+                "bare_metal",
+                str(candidate["physical_resource_id"]),
+            ),
+            payload={
+                "listing_id": listing_id,
+                "seller_principal": runtime.seller_principal,
+                "offer_resource": values["offer"],
+                "accepted_escrows": values["accepted_escrows"],
+                "settlement_options": values["settlement_options"],
+                "publication_clauses": values["publication_clauses"],
+                "demands": values["demands"],
+                "max_duration_seconds": values["max_duration_seconds"],
+                "storefront_url": values["storefront_url"],
+                "bare_metal_candidate": candidate,
+            },
+        )
+        if transition == PublicationTransition.REFRESH.value:
+            result = asyncio.run(lifecycle.refresh(publication_candidate))
+        elif transition == PublicationTransition.REOPEN.value:
+            result = asyncio.run(lifecycle.reopen(publication_candidate))
+        else:
+            raise ValueError("unsupported bare-metal publication transition")
+        return result.to_dict()
     selection = build_bare_metal_publication_selection(
         build_bare_metal_storefront_registry(domain=runtime.domain),
         projection_snapshot=lambda: projections,
         close_listing=close_listing,
         publish_existing_listing=publish_existing_listing,
+        refresh_listing_ids=refresh_listing_ids,
     )
     publication_candidates: dict[int, dict[str, Any]] = {}
 
@@ -286,17 +420,28 @@ def run_publication_once() -> dict[str, Any]:
         )
         return {"status": "published", "listing_id": listing_id}
 
+    # A refresh has to reach a candidate whose listing is open, which the
+    # routine round skips wholesale. The skip set is instead computed here and
+    # narrowed by exactly the refreshed key, so every other open listing is
+    # still passed over.
+    skip_open = refresh_key is None
+    skip_ids: set[str] | None = None
+    if refresh_key is not None:
+        skip_ids = selection.open_keys(runtime.db.db_path) - {refresh_key}
+
     try:
         result = run_bare_metal_publication(
             selection,
             config=StorefrontPublicationCommandConfig(
                 db_path=runtime.db.db_path,
                 base_url=runtime.storefront_url,
+                skip_open=skip_open,
             ),
             callbacks=StorefrontPublicationCommandCallbacks(
                 build_payload=build_payload,
                 publish_offer=publish_offer,
             ),
+            skip_ids=skip_ids,
         )
         return to_jsonable_python(
             {

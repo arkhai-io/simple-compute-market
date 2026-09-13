@@ -187,6 +187,15 @@ fan-out, durable publication result recording, and close-before-reopen
 lifecycle. A domain contribution supplies only schema-opaque candidates and
 codecs plus hooks that resolve each listing's durable capacity binding.
 
+For explicit refresh and reopen, the kit also owns authenticated exact-target
+preflight/readback and an immutable current-operation result used by explicit
+recovery. Core constructs and fans out the typed registry request; the kit does
+not duplicate transport. Each domain supplies explicit eligibility,
+disabled-publication, and atomic local-commit policy. This keeps ordinary
+publication's at-least-one-success compatibility while a confirmed lifecycle
+operation reports every nonconfirmed target as partial and commits locally only
+after safe receipt persistence and at least one matching readback.
+
 Every capacity-backed candidate carries
 `CapacityBinding(site_id, offering_mode, source_id)`. The site ID comes from
 trusted local composition, the offering mode must be declared by the selected
@@ -493,7 +502,7 @@ Terms
 
 ### Settlement servicing
 
-Settlement materializes agreed terms into a mechanism-neutral plan. Servicing may outlive fulfillment and repeatedly evaluate conditions, collect claims, accept heartbeats, or reclaim expired obligations. The settlement-runtime kit owns one stable per-obligation lifecycle and operation journal; mechanism kits translate and execute opaque conditional-escrow calls; domain policy selects and interprets conditions. A verified-only domain may register and adopt an obligation, but servicing does not begin until its composition binds a real immutable fulfillment reference.
+Settlement materializes agreed terms into a mechanism-neutral plan. Servicing may outlive fulfillment and repeatedly evaluate conditions, collect claims, accept heartbeats, or reclaim expired obligations. The settlement-runtime kit owns one stable per-obligation lifecycle and operation journal; mechanism kits translate and execute opaque conditional-escrow calls; domain policy selects and interprets conditions. A verified-only domain may register and adopt an obligation, but servicing begins only after its composition either binds a real immutable fulfillment reference or explicitly enqueues claimant-owned fulfillment work. The enqueue is durable and opt-in, so historical or unconfigured obligations are not selected implicitly.
 
 ```text
 Terms → SettlementPlan → active obligations → Receipt
@@ -583,17 +592,28 @@ Configuration resolution, ConfigMap/Secret mounting, stateful-service persistenc
 
 Internal Python packages are built as wheels into the repository `.dist` directory. Consumers install those wheels with `--find-links`; they do not use editable relative sibling paths.
 
-The required development pattern is:
+The development pattern is:
 
 ```text
 build prerequisite internal wheels
         ↓
 uv sync --find-links <repo>/.dist
         ↓
---upgrade-package / --reinstall-package changed internal distributions
+reinstall changed internal distributions
         ↓
 run focused tests
 ```
+
+Three qualification targets make dependency selection reproducible while still
+refreshing same-version local artifacts: the bare-metal storefront, Alkahest,
+and E2E `reinit` targets run `uv sync --locked` with explicit
+`--reinstall-package` inventories and no `--upgrade-package`. Their checked-in
+locks select dependency versions; reinstall selects newly built bytes at those
+versions. The bare-metal storefront distribution target builds registry-client,
+config, and Alkahest before the storefront wheel. Other reinstalled wheels are
+still supplied by the established build flow, and other repository `reinit`
+targets retain their existing behavior; these three targets are not a
+repository-wide conversion.
 
 Docker builds copy `.dist` from the build context in every stage that resolves internal packages. Using a sibling source path forces an unnecessarily broad Docker context and can allow local source layout to differ from packaged behavior.
 
@@ -662,3 +682,25 @@ Alkahest remains an independent mechanism lane. API-credit and bare-metal hosted
 Bare metal composes the same provider-neutral hosted mechanism without importing VM packages or the released client directly. The installed buyer plugin uses the core `HostedSettlementTransport`; the seller binds bare-owned callbacks into the shared `HostedSettlementRouteService`. On first start, the seller rebuilds the accepted physical binding only from the durable negotiation thread, trusted listing, exact option, settlement plan, and canonical parties, then persists it under the obligation identity.
 
 Authoritative funding is the gate into the existing selected-site capacity and fulfillment clients. A deterministic fulfillment identity survives retries and restart. Access-ready state produces a credential-free public result and content-addressed lease-ready evidence; the resolver returns the canonical evidence with a marketplace-signer proof. Collection follows evidence. Reclaim is blocked after evidence, committed collection, or unknown physical authority. Financial return/loss recovery and post-collection lease teardown remain separate convergent lifecycles.
+
+The bare-metal Alkahest lane uses the same physical authority and shared
+settlement worker. Exact settlement persists an evidence binding to the accepted
+plan, obligation, escrow, and seller wallet, then explicitly enqueues claimant-
+authorized fulfillment in the shared operation journal. Legacy settlements are
+not implicitly selected. Buyer-usable active access produces canonical
+credential-free evidence; the Alkahest kit publishes one StringObligation and
+confirms its UID, escrow refUID, seller recipient, revocation state, and bytes
+before the shared fulfillment reference is committed. RecipientArbiter validates
+only recipient identity, not the physical document. The existing mechanism
+codec still owns ERC-20 collection. Bare-metal composition additionally reads
+the returned transaction and receipt and requires the exact escrow call and one
+successful token Transfer from that escrow to the configured seller for the
+accepted amount. The shared journal owns ambiguity, receipt, expiry, and reclaim
+exclusion. Atomic publication ownership prevents stale workers from submitting
+twice; the shared operation is fenced before submission and retains that fence
+through lease expiry, retry, and physical deferral. Possibly successful
+publication or collection remains fenced from both blind repetition and reclaim
+until explicit read-only reconciliation.
+Fence acquisition and reclaim reservation share one database write boundary;
+an expired or replaced fulfillment owner and an already-reserved reclaim are
+rejected before domain publication ownership or an external write.

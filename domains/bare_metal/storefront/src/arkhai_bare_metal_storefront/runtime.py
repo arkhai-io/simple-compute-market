@@ -11,9 +11,14 @@ from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass, field
 from typing import Any
 
+from eth_account import Account
 from core_storefront.identity_config import IdentityConfig, resolve_storefront_signer
 from market_identity import Identity, IdentityScheme, Signer, TrustedIdentitySet
-from market_alkahest import create_alkahest_registration
+from market_alkahest import (
+    AlkahestStringFulfillmentPublisher,
+    create_alkahest_registration,
+    web3_collection_receipt_reader,
+)
 from market_core import MarketDomainContract, validate_domain_contract
 from market_hosted_settlement import PortableRemoteFulfillmentRef, canonical_json
 from market_settlement_runtime import (
@@ -27,33 +32,34 @@ from market_storefront_kit import (
     build_alkahest_clients,
 )
 
+from .alkahest_lifecycle import BareMetalAlkahestLifecycleCallbacks
+from .delivery import (
+    build_introduction_delivery,
+    load_storefront_delivery_sinks,
+    storefront_delivery_section,
+)
 from .domain_runtime import get_market_domain_contract
-from .negotiation import default_seller_round_hook
-from .negotiation_service import BareMetalNegotiationService
-from .settlement import build_bare_metal_settlement_plan
-from .settlement_service import BareMetalSettlementService
 from .fulfillment_service import BareMetalFulfillmentService
 from .hosted_lifecycle import BareMetalHostedLifecycleCallbacks
 from .hosted_routes import (
     BareMetalHostedDomainCallbacks,
     lifecycle_domain_callbacks,
 )
-from .delivery import (
-    build_introduction_delivery,
-    load_storefront_delivery_sinks,
-    storefront_delivery_section,
-)
-from .sqlite_client import SQLiteClient
-from .site_clients import (
-    BareMetalSiteBinding,
-    build_trusted_site_clients,
-    parse_site_bindings,
-)
+from .negotiation import default_seller_round_hook
+from .negotiation_service import BareMetalNegotiationService
+from .settlement import build_bare_metal_settlement_plan
 from .settlement_composition import (
     ALKAHEST_MECHANISM,
     BareMetalStorefrontSettlementComposition,
     default_hosted_selection_dispatch,
 )
+from .settlement_service import BareMetalSettlementService
+from .site_clients import (
+    BareMetalSiteBinding,
+    build_trusted_site_clients,
+    parse_site_bindings,
+)
+from .sqlite_client import SQLiteClient
 
 
 def _portable_evidence_reference(
@@ -105,6 +111,10 @@ class BareMetalStorefrontRuntime:
         repr=False,
     )
     hosted_domain_callbacks: BareMetalHostedDomainCallbacks | None = field(
+        default=None,
+        repr=False,
+    )
+    alkahest_domain_callbacks: BareMetalAlkahestLifecycleCallbacks | None = field(
         default=None,
         repr=False,
     )
@@ -171,6 +181,7 @@ class BareMetalStorefrontRuntime:
             build_plan=self.plan_builder,
             verify_escrow=self.escrow_verifier,
             settlement_runtime=self.settlement_runtime,
+            settlement_repository=self.settlement_repository,
         )
 
     def fulfillment_service(self) -> BareMetalFulfillmentService:
@@ -235,7 +246,10 @@ class BareMetalStorefrontRuntime:
         }
 
 
-def _build_chain_clients_from_environment() -> tuple[
+def _build_chain_clients_from_environment(
+    *,
+    expected_wallet: str | None = None,
+) -> tuple[
     dict[str, Any],
     dict[str, str | None],
 ]:
@@ -266,6 +280,15 @@ def _build_chain_clients_from_environment() -> tuple[
         ) from exc
     private_key = os.environ.get("BARE_METAL_STOREFRONT_EVM_PRIVATE_KEY", "").strip()
     missing = ("wallet.private_key",) if chains and not private_key else ()
+    if chains and private_key and expected_wallet:
+        try:
+            actual_wallet = Account.from_key(private_key).address
+        except Exception as exc:
+            raise RuntimeError("bare-metal seller wallet key is invalid") from exc
+        if actual_wallet.lower() != expected_wallet.lower():
+            raise RuntimeError(
+                "bare-metal seller wallet key does not match the configured address"
+            )
     clients = build_alkahest_clients(
         AlkahestClientPolicy(
             private_key=private_key,
@@ -357,7 +380,9 @@ def build_runtime_from_environment(
             "BARE_METAL_STOREFRONT_EVM_ADDRESS is required when Alkahest is enabled",
         )
     if alkahest_enabled:
-        chain_clients, chain_config_paths = _build_chain_clients_from_environment()
+        chain_clients, chain_config_paths = _build_chain_clients_from_environment(
+            expected_wallet=seller_evm_address,
+        )
     else:
         chain_clients, chain_config_paths = {}, {}
     if settlement_config is not None:
@@ -372,6 +397,14 @@ def build_runtime_from_environment(
                     "wallet_ready": bool(seller_evm_address),
                     "clients": chain_clients,
                     "chains": raw_chains,
+                    "collection_receipt_reader": web3_collection_receipt_reader(
+                        {
+                            str(name): str(value["rpc_url"])
+                            for name, value in raw_chains.items()
+                            if isinstance(value, Mapping) and value.get("rpc_url")
+                        }
+                    ),
+                    "collection_recipient": seller_evm_address,
                 },
             )
         )
@@ -429,6 +462,8 @@ def build_runtime_from_environment(
         capacity_client=capacity_client,
         fulfillment_client=fulfillment_client,
     )
+    hosted_callbacks: BareMetalHostedDomainCallbacks | None = None
+    alkahest_callbacks: BareMetalAlkahestLifecycleCallbacks | None = None
     if settlement_composition is not None and "fiat.stripe.v1" in (
         settlement_composition.enabled_mechanisms
     ):
@@ -454,22 +489,53 @@ def build_runtime_from_environment(
             fulfillment_client=fulfillment_client,
             publish_evidence=publish_evidence,
         )
-        callbacks = lifecycle_domain_callbacks(db=db, lifecycle=lifecycle)
-        object.__setattr__(runtime, "hosted_domain_callbacks", callbacks)
+        hosted_callbacks = lifecycle_domain_callbacks(db=db, lifecycle=lifecycle)
+        object.__setattr__(runtime, "hosted_domain_callbacks", hosted_callbacks)
+    if settlement_composition is not None and ALKAHEST_MECHANISM in (
+        settlement_composition.enabled_mechanisms
+    ):
+        alkahest_callbacks = BareMetalAlkahestLifecycleCallbacks(
+            db=db,
+            runtime=runtime.settlement_runtime,
+            settlement_repository=runtime.settlement_repository,
+            local_principal=identity_config.principal,
+            fulfillment_service=runtime.fulfillment_service(),
+            publishers={
+                chain: AlkahestStringFulfillmentPublisher(
+                    client=client,
+                    publisher_address=seller_evm_address,
+                )
+                for chain, client in chain_clients.items()
+            },
+        )
+        object.__setattr__(runtime, "alkahest_domain_callbacks", alkahest_callbacks)
+    if hosted_callbacks is not None or alkahest_callbacks is not None:
 
         async def on_ready(record: Any, worker_id: str) -> None:
-            await callbacks.fulfill(record, worker_id)
+            mechanism = record.obligation.get("mechanism")
+            if mechanism == "fiat.stripe.v1" and hosted_callbacks is not None:
+                await hosted_callbacks.fulfill(record, worker_id)
+                return
+            if mechanism == ALKAHEST_MECHANISM and alkahest_callbacks is not None:
+                await alkahest_callbacks.fulfill(record, worker_id)
+                return
+            raise RuntimeError("no bare-metal lifecycle callback for settlement")
 
         async def on_terminal(
             record: Any,
             state: str,
             reason: str | None,
         ) -> None:
-            if state != "collected":
-                await callbacks.cleanup(
-                    record.agreement_ref,
-                    reason or state,
-                )
+            mechanism = record.obligation.get("mechanism")
+            if mechanism == "fiat.stripe.v1" and hosted_callbacks is not None:
+                if state != "collected":
+                    await hosted_callbacks.cleanup(
+                        record.agreement_ref,
+                        reason or state,
+                    )
+                return
+            if mechanism == ALKAHEST_MECHANISM and alkahest_callbacks is not None:
+                await alkahest_callbacks.reconcile_terminal(record, state, reason)
 
         object.__setattr__(
             runtime,
@@ -477,7 +543,10 @@ def build_runtime_from_environment(
             SettlementServicingWorker(
                 runtime.settlement_runtime,
                 runtime.settlement_repository,
-                worker_id=f"bare-metal-storefront:{identity_config.principal.identifier}",
+                worker_id=(
+                    "bare-metal-storefront:"
+                    f"{identity_config.principal.identifier}"
+                ),
                 interval_seconds=float(
                     os.environ.get(
                         "BARE_METAL_SETTLEMENT_SERVICING_INTERVAL_SECONDS",

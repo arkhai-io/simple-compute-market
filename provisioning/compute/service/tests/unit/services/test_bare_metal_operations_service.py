@@ -1,5 +1,12 @@
 from __future__ import annotations
 
+from arkhai_bare_metal import canonical_lease_account
+
+# The executor admits only the account the domain derives for this
+# settlement, so the fixture uses that derivation rather than a free name.
+LEASE_ACCOUNT = canonical_lease_account("0xbm")
+
+
 from datetime import datetime, timezone
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
@@ -41,7 +48,7 @@ async def test_grant_access_submits_node_grant_job():
             physical_host_id="host-physical-1",
             lease_end_utc=datetime(2099, 1, 1, tzinfo=timezone.utc),
             access_ref={
-                "ssh_user": "tenant-a",
+                "ssh_user": LEASE_ACCOUNT,
                 "ssh_public_key": "ssh-ed25519 AAAA tenant-a",
             },
         ),
@@ -58,12 +65,12 @@ async def test_grant_access_submits_node_grant_job():
     assert params.executor_target == "bm-node-1"
     assert params.executor_ref == {
         "physical_host_id": "host-physical-1",
-        "ssh_user": "tenant-a",
+        "ssh_user": LEASE_ACCOUNT,
         "ssh_public_key": "ssh-ed25519 AAAA tenant-a",
     }
     assert params.escrow_uid == "0xbm"
     assert params.physical_host_id == "host-physical-1"
-    assert params.ssh_user == "tenant-a"
+    assert params.ssh_user == LEASE_ACCOUNT
     assert params.ssh_public_key == "ssh-ed25519 AAAA tenant-a"
 
 
@@ -89,7 +96,7 @@ async def test_reclaim_access_submits_node_reclaim_job_from_reservation():
         "executor_ref": bare_metal_executor_ref(
             "host-physical-1",
             access_ref={
-                "ssh_user": "tenant-a",
+                "ssh_user": LEASE_ACCOUNT,
                 "ssh_public_key": "ssh-ed25519 AAAA tenant-a",
             },
         ),
@@ -106,12 +113,12 @@ async def test_reclaim_access_submits_node_reclaim_job_from_reservation():
     assert params.executor_target == "bm-node-1"
     assert params.executor_ref == {
         "physical_host_id": "host-physical-1",
-        "ssh_user": "tenant-a",
+        "ssh_user": LEASE_ACCOUNT,
         "ssh_public_key": "ssh-ed25519 AAAA tenant-a",
     }
     assert params.escrow_uid == "0xbm"
     assert params.physical_host_id == "host-physical-1"
-    assert params.ssh_user == "tenant-a"
+    assert params.ssh_user == LEASE_ACCOUNT
     assert params.ssh_public_key == "ssh-ed25519 AAAA tenant-a"
     assert params.bare_metal_reclaim_policy == "lock_user"
 

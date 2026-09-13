@@ -385,6 +385,11 @@ class Host(Base):
     # the host over a different network than buyers do. NULL → fall back to
     # kvm_host in tenant-facing connection info.
     public_host = Column(String, nullable=True)
+    # Port tenants reach this host on, when it differs from the port the
+    # provisioner uses. Same split as public_host/kvm_host: the provisioner may
+    # arrive through a tunnel or bastion port that is not the one a tenant
+    # dials. NULL → fall back to ssh_port in tenant-facing connection info.
+    public_port = Column(Integer, nullable=True)
     ssh_user = Column(String, nullable=False)  # SSH login user on the KVM host
     # Port the provisioner connects to. Non-default when the host answers
     # through a reverse tunnel, a NAT forward, or a bastion rather than on 22

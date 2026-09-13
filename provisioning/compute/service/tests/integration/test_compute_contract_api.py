@@ -9,7 +9,7 @@ from compute_provisioning import (
     ComputeProvisioningError,
     ExecutorActionEnvelope,
 )
-from arkhai_bare_metal import NODE_GRANT_ACCESS_ACTION
+from arkhai_bare_metal import NODE_GRANT_ACCESS_ACTION, canonical_lease_account
 from market_site.ledger import ALLOCATION_MODE_EXCLUSIVE
 
 from compute_provisioning_service.main import app
@@ -141,7 +141,11 @@ async def test_bare_metal_uses_same_executor_neutral_client(client_and_queue):
         executor_kind="bare_metal",
         action_kind=NODE_GRANT_ACCESS_ACTION,
         idempotency_key="grant-contract-bare-metal",
-        parameters={"access_ref": {"ssh_user": "tenant"}},
+        parameters={
+            "access_ref": {
+                "ssh_user": canonical_lease_account("escrow-bare-contract"),
+            },
+        },
     )
 
     async with _compute_provisioning_client("http://test", transport=ASGITransport(app=app)) as client:

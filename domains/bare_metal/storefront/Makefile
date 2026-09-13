@@ -9,22 +9,25 @@ help: ## Show available commands
 
 init: ## Install dependencies from public indexes and internal wheels
 	@command -v uv >/dev/null 2>&1 || { echo "uv is not installed. Install from https://docs.astral.sh/uv/"; exit 1; }
-	uv sync --dev --find-links $(DIST_DIR)
+	uv sync --locked --dev --find-links $(DIST_DIR)
 
-reinit: ## Upgrade and reinstall changed internal wheel dependencies
-	uv sync --dev --find-links $(DIST_DIR) \
+reinit: ## Reinstall changed internal wheel dependencies
+	uv sync --locked --dev --find-links $(DIST_DIR) \
 		--reinstall-package arkhai-bare-metal-storefront \
-		--upgrade-package arkhai-bare-metal    --reinstall-package arkhai-bare-metal \
-		--upgrade-package arkhai-core          --reinstall-package arkhai-core \
-		--upgrade-package arkhai-core-storefront --reinstall-package arkhai-core-storefront \
-		--upgrade-package arkhai-compute-provisioning --reinstall-package arkhai-compute-provisioning \
-		--upgrade-package arkhai-kit-alkahest   --reinstall-package arkhai-kit-alkahest \
-		--upgrade-package arkhai-kit-contact-exchange --reinstall-package arkhai-kit-contact-exchange \
-		--upgrade-package arkhai-kit-identity  --reinstall-package arkhai-kit-identity \
-		--upgrade-package arkhai-kit-policy     --reinstall-package arkhai-kit-policy \
-		--upgrade-package arkhai-kit-site-client --reinstall-package arkhai-kit-site-client \
-		--upgrade-package arkhai-kit-settlement-runtime --reinstall-package arkhai-kit-settlement-runtime \
-		--upgrade-package arkhai-kit-storefront --reinstall-package arkhai-kit-storefront
+		--reinstall-package arkhai-bare-metal \
+		--reinstall-package arkhai-core \
+		--reinstall-package arkhai-core-registry-client \
+		--reinstall-package arkhai-core-storefront \
+		--reinstall-package arkhai-compute-provisioning \
+		--reinstall-package arkhai-kit-alkahest \
+		--reinstall-package arkhai-kit-capacity-publication \
+		--reinstall-package arkhai-kit-config \
+		--reinstall-package arkhai-kit-contact-exchange \
+		--reinstall-package arkhai-kit-identity \
+		--reinstall-package arkhai-kit-policy \
+		--reinstall-package arkhai-kit-site-client \
+		--reinstall-package arkhai-kit-settlement-runtime \
+		--reinstall-package arkhai-kit-storefront
 
 test: reinit ## Run the storefront package tests
 	uv run --find-links $(DIST_DIR) pytest tests -q

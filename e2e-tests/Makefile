@@ -11,9 +11,10 @@ CONFIG_DIRECTORY ?= $(PWD)/config
 MODULE ?= contracts
 
 # Path to the monorepo .dist/ wheel directory, relative to e2e-tests/.
-# Used by uv when resolving pure-Python internal packages (arkhai-vms-buyer,
-# arkhai-kit-policy, arkhai-vms-storefront, and the VM operator client) that are distributed as wheels rather than editable
-# source installs.  The Dockerfile passes --find-links /dist on the uv sync
+# Used by uv when resolving pure-Python internal packages (including domain
+# buyer/storefront contributions, policy, and operator clients) that are
+# distributed as wheels rather than editable source installs. The Dockerfile
+# passes --find-links /dist on the uv sync
 # CLI instead; this variable is for local development only.
 DIST_DIR ?= ../.dist
 
@@ -27,34 +28,36 @@ init-venv:
 	uv venv --allow-existing
 
 init: init-venv
-	uv sync --find-links $(DIST_DIR)
+	uv sync --locked --find-links $(DIST_DIR)
 
 reinit: init-venv
-	uv sync --find-links $(DIST_DIR) \
-	--upgrade-package arkhai-core                           --reinstall-package arkhai-core \
-	--upgrade-package arkhai-core-buyer                     --reinstall-package arkhai-core-buyer \
-	--upgrade-package arkhai-core-storefront                --reinstall-package arkhai-core-storefront \
-	--upgrade-package arkhai-core-registry-client            --reinstall-package arkhai-core-registry-client \
-	--upgrade-package arkhai-core-storefront-client          --reinstall-package arkhai-core-storefront-client \
-	--upgrade-package arkhai-kit-config                      --reinstall-package arkhai-kit-config \
-	--upgrade-package arkhai-kit-identity                    --reinstall-package arkhai-kit-identity \
-	--upgrade-package arkhai-kit-policy                      --reinstall-package arkhai-kit-policy \
-	--upgrade-package arkhai-kit-settlement-runtime          --reinstall-package arkhai-kit-settlement-runtime \
-	--upgrade-package arkhai-kit-storefront                 --reinstall-package arkhai-kit-storefront \
-	--upgrade-package arkhai-kit-alkahest                    --reinstall-package arkhai-kit-alkahest \
-	--upgrade-package arkhai-hosted-settlement-client        --reinstall-package arkhai-hosted-settlement-client \
-	--upgrade-package arkhai-kit-hosted-settlement           --reinstall-package arkhai-kit-hosted-settlement \
-	--upgrade-package arkhai-kit-site                        --reinstall-package arkhai-kit-site \
-	--upgrade-package arkhai-kit-site-client                 --reinstall-package arkhai-kit-site-client \
-	--upgrade-package arkhai-kit-resource-pools              --reinstall-package arkhai-kit-resource-pools \
-	--upgrade-package arkhai-kit-fulfillment                 --reinstall-package arkhai-kit-fulfillment \
-	--upgrade-package arkhai-vms                             --reinstall-package arkhai-vms \
-	--upgrade-package arkhai-vms-buyer                       --reinstall-package arkhai-vms-buyer \
-	--upgrade-package arkhai-vms-storefront                  --reinstall-package arkhai-vms-storefront \
-	--upgrade-package arkhai-bare-metal                      --reinstall-package arkhai-bare-metal \
-	--upgrade-package arkhai-compute-provisioning            --reinstall-package arkhai-compute-provisioning \
-	--upgrade-package arkhai-vms-provisioning-operator-client --reinstall-package arkhai-vms-provisioning-operator-client \
-	--upgrade-package arkhai-apicredits-buyer                --reinstall-package arkhai-apicredits-buyer
+	uv sync --locked --find-links $(DIST_DIR) \
+	--reinstall-package arkhai-core \
+	--reinstall-package arkhai-core-buyer \
+	--reinstall-package arkhai-core-storefront \
+	--reinstall-package arkhai-core-registry-client \
+	--reinstall-package arkhai-core-storefront-client \
+	--reinstall-package arkhai-kit-config \
+	--reinstall-package arkhai-kit-identity \
+	--reinstall-package arkhai-kit-policy \
+	--reinstall-package arkhai-kit-settlement-runtime \
+	--reinstall-package arkhai-kit-storefront \
+	--reinstall-package arkhai-kit-alkahest \
+	--reinstall-package arkhai-hosted-settlement-client \
+	--reinstall-package arkhai-kit-hosted-settlement \
+	--reinstall-package arkhai-kit-site \
+	--reinstall-package arkhai-kit-site-client \
+	--reinstall-package arkhai-kit-resource-pools \
+	--reinstall-package arkhai-kit-fulfillment \
+	--reinstall-package arkhai-vms \
+	--reinstall-package arkhai-vms-buyer \
+	--reinstall-package arkhai-vms-storefront \
+	--reinstall-package arkhai-bare-metal \
+	--reinstall-package arkhai-bare-metal-buyer \
+	--reinstall-package arkhai-bare-metal-storefront \
+	--reinstall-package arkhai-compute-provisioning \
+	--reinstall-package arkhai-vms-provisioning-operator-client \
+	--reinstall-package arkhai-apicredits-buyer
 
 # -----------------------------------------------------------------------
 # Build

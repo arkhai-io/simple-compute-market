@@ -19,9 +19,13 @@ from .hosted_contract import (
 
 BARE_METAL_LEASE_READY_RESULT_KIND = "bare_metal.lease-ready-result.v1"
 BARE_METAL_LEASE_READY_EVIDENCE_KIND = "bare_metal.lease-ready-evidence.v1"
+BARE_METAL_ALKAHEST_LEASE_READY_EVIDENCE_KIND = (
+    "bare_metal.alkahest-lease-ready-evidence.v1"
+)
 
 _SHA256 = re.compile(r"^sha256:[0-9a-f]{64}$")
 _OPAQUE_REF = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$")
+_ADDRESS = re.compile(r"^0x[0-9a-fA-F]{40}$")
 
 
 class BareMetalLeaseReadyResult(BaseModel):
@@ -135,6 +139,72 @@ class BareMetalLeaseReadyEvidence(BaseModel):
         return canonical_bare_metal_json(self)
 
 
+class BareMetalAlkahestLeaseReadyEvidence(BaseModel):
+    """Public physical evidence bound to one accepted on-chain obligation.
+
+    The recipient-only condition authorizes the named seller to collect. It
+    does not make the RecipientArbiter an evaluator of the physical fields.
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
+
+    kind: Literal["bare_metal.alkahest-lease-ready-evidence.v1"] = (
+        BARE_METAL_ALKAHEST_LEASE_READY_EVIDENCE_KIND
+    )
+    condition_semantics: Literal["recipient-only.v1"] = "recipient-only.v1"
+    agreement_ref: str = Field(min_length=1, max_length=256)
+    obligation_ref: str = Field(min_length=1, max_length=256)
+    obligation_hash: str
+    accepted_plan_digest: str
+    escrow_uid: str = Field(min_length=1, max_length=256)
+    buyer_principal: CanonicalPrincipal
+    seller_principal: CanonicalPrincipal
+    seller_recipient: str
+    result: BareMetalLeaseReadyResult
+    result_digest: str
+
+    @field_validator("agreement_ref", "obligation_ref", "escrow_uid")
+    @classmethod
+    def _validate_reference(cls, value: str) -> str:
+        if _OPAQUE_REF.fullmatch(value) is None:
+            raise ValueError("Alkahest evidence references must be opaque tokens")
+        return value
+
+    @field_validator("obligation_hash")
+    @classmethod
+    def _validate_hash(cls, value: str) -> str:
+        if re.fullmatch(r"[0-9a-f]{64}", value) is None:
+            raise ValueError("obligation hash must be lower-case SHA-256")
+        return value
+
+    @field_validator("accepted_plan_digest", "result_digest")
+    @classmethod
+    def _validate_digest(cls, value: str) -> str:
+        if _SHA256.fullmatch(value) is None:
+            raise ValueError("evidence digests must be lower-case SHA-256 references")
+        return value
+
+    @field_validator("seller_recipient")
+    @classmethod
+    def _validate_recipient(cls, value: str) -> str:
+        if _ADDRESS.fullmatch(value) is None:
+            raise ValueError("seller recipient must be a 20-byte hex address")
+        return value.lower()
+
+    @model_validator(mode="after")
+    def _validate_result(self) -> "BareMetalAlkahestLeaseReadyEvidence":
+        if self.result_digest != self.result.result_digest:
+            raise ValueError("evidence result digest does not match")
+        return self
+
+    @property
+    def evidence_digest(self) -> str:
+        return bare_metal_digest(self)
+
+    def canonical_json(self) -> str:
+        return canonical_bare_metal_json(self)
+
+
 def derive_bare_metal_fulfillment_identity(
     binding: BareMetalAcceptedHostedBinding,
 ) -> str:
@@ -189,11 +259,42 @@ def build_bare_metal_lease_ready_evidence(
     )
 
 
+def build_bare_metal_alkahest_lease_ready_evidence(
+    *,
+    agreement_ref: str,
+    obligation_ref: str,
+    obligation_hash: str,
+    accepted_plan_digest: str,
+    escrow_uid: str,
+    buyer_principal: CanonicalPrincipal,
+    seller_principal: CanonicalPrincipal,
+    seller_recipient: str,
+    result: BareMetalLeaseReadyResult,
+) -> BareMetalAlkahestLeaseReadyEvidence:
+    """Bind authoritative lease readiness to immutable accepted payment state."""
+
+    return BareMetalAlkahestLeaseReadyEvidence(
+        agreement_ref=agreement_ref,
+        obligation_ref=obligation_ref,
+        obligation_hash=obligation_hash,
+        accepted_plan_digest=accepted_plan_digest,
+        escrow_uid=escrow_uid,
+        buyer_principal=buyer_principal,
+        seller_principal=seller_principal,
+        seller_recipient=seller_recipient,
+        result=result,
+        result_digest=result.result_digest,
+    )
+
+
 __all__ = [
+    "BARE_METAL_ALKAHEST_LEASE_READY_EVIDENCE_KIND",
     "BARE_METAL_LEASE_READY_EVIDENCE_KIND",
     "BARE_METAL_LEASE_READY_RESULT_KIND",
+    "BareMetalAlkahestLeaseReadyEvidence",
     "BareMetalLeaseReadyEvidence",
     "BareMetalLeaseReadyResult",
+    "build_bare_metal_alkahest_lease_ready_evidence",
     "build_bare_metal_lease_ready_evidence",
     "derive_bare_metal_fulfillment_identity",
 ]

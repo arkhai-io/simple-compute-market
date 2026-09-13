@@ -177,12 +177,15 @@ inventory, pool declaration, site authority, or credential blocks startup or
 scenario preflight; it never selects a test signer, default site, payload-
 guessed domain, direct executor, or provider simulator.
 
-The bare-metal image currently exposes the signed publication command seam but
-does not autonomously publish to the registry, and a public settlement address
-alone does not compose a settlement authority. Its stack may be brought up for
-operator integration, but it is not release-qualified or discoverable-deal
-evidence until accepted publication and settlement lifecycles are ready and
-the installed buyer completes real access and revocation.
+The bare-metal image exposes the operator-invoked signed publication command,
+including confirmed same-identifier refresh and reopen, and composes the shared
+accepted-settlement lifecycle. It still does not publish autonomously, and a
+public settlement address alone does not compose a settlement authority.
+Installed-wheel and offline scenario qualification establish package and
+orchestration behavior only. Bringing up the stack is not discoverable-deal or
+physical-host evidence; that requires separately approved publication, rental,
+real buyer access, teardown, revocation, capacity restoration, and financial
+closeout against reviewed artifacts and operator-supplied authorities.
 
 ## Stateful service persistence
 
@@ -445,6 +448,8 @@ editable sibling sources and compatible-major substitution are rejected.
 `arkhai-bare-metal-buyer` is an installed core buyer-domain wheel. Its TOML contains a registry URL, registry authority/trust pins, and bounded public defaults only; the XDG buyer profile service resolves the fresh or run-recorded signer. The `bare-metal` commands use authenticated discovery and the shared schema-opaque hosted storefront transport. Raw payer/instrument/provider values and action material are not domain configuration or durable CLI output.
 
 The bare-metal storefront accepts one strict shared settlement JSON root through `BARE_METAL_STOREFRONT_SETTLEMENT`. Hosted-only configuration leaves `BARE_METAL_STOREFRONT_EVM_ADDRESS` empty and constructs no Alkahest wallet, chain, or RPC client. Publication additionally requires authenticated registry trust, exact typed clauses, per-profile funding deadlines, offer/fulfillment bounds, fresh signed selected-site projections, and a maximum lease duration. The Compose wrapper exposes those as public/config inputs; the Helm chart mounts the settlement JSON from an existing Secret. Neither deployment surface carries Stripe credentials or hosted provider state.
+
+A registry that gates writes resolves a bearer credential in addition to the per-request seller signature, so publication against one also needs `BARE_METAL_STOREFRONT_REGISTRY_API_KEY` carrying a write-scoped registry API key. It is optional: unset or empty sends no bearer header, which is what a registry with open publishing expects, and the credential never weakens or replaces the signature check. The Helm chart renders the variable only when `registryApiKeySecret.name` is set, and only as a reference to an existing Secret. A registry's admin key is a different credential for the registry's own administrative routes and is not this value. The value is sent verbatim as the bearer credential, so it must be one line of printable US-ASCII: a key file written with a trailing newline is refused when the client is built, before any request, and the refusal names the constraint rather than the value. The publication command prints the round as JSON and exits non-zero when any candidate failed, so an operator script that checks only the exit status cannot read a round that published nothing as success. A candidate failure caused by a registry call carries only the exception type and, where available, the HTTP status — no header, URL or response body — because that round is written to an operator log.
 
 The hosted authority remains a separately verified deployment. The storefront needs its public URL, authority/environment trust, seller account reference, contract fingerprint, supported profile/currency/country policy, and exact manifest/client/API capability pins through the shared settlement config. The selected-site authority keeps inventory, executor routing, provisioning SSH credentials, and teardown ownership. The buyer, storefront, site authority, and hosted authority each retain independent signer credentials and databases.
 

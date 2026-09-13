@@ -9,19 +9,28 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import re
 import time
-from collections.abc import Callable, Mapping
+from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass
 from typing import Any, Literal
 
+from web3 import AsyncWeb3, Web3
+from web3.providers import AsyncHTTPProvider
 from market_settlement_runtime.models import (
     ConditionOutcome,
     EffectOutcome,
     MaterializationOutcome,
     StatusOutcome,
 )
+from market_settlement_runtime.runtime import (
+    SettlementEffectReadbackUnknown,
+    SettlementManualRequired,
+)
 
 logger = logging.getLogger(__name__)
+CollectionReceiptReader = Callable[[str, str], Awaitable[tuple[Any, Any]]]
+_ADDRESS = re.compile(r"^0x[0-9a-fA-F]{40}$")
 
 
 def _demand_bytes(value: Any) -> bytes | None:
@@ -57,6 +66,9 @@ def _receipt_ref(receipt: Any) -> str | None:
             candidate = receipt.get(key)
             if isinstance(candidate, (str, int)):
                 return str(candidate)
+            encoded = _hex(candidate)
+            if encoded:
+                return encoded
     try:
         encoded = json.dumps(
             receipt, default=str, separators=(",", ":"), sort_keys=True
@@ -64,6 +76,94 @@ def _receipt_ref(receipt: Any) -> str | None:
     except (TypeError, ValueError):
         encoded = repr(receipt).encode()
     return f"sha256:{hashlib.sha256(encoded).hexdigest()}"
+
+
+def _hex(value: Any) -> str:
+    if isinstance(value, str):
+        return value.lower()
+    if isinstance(value, (bytes, bytearray)):
+        return "0x" + bytes(value).hex()
+    hex_method = getattr(value, "hex", None)
+    if callable(hex_method):
+        encoded = str(hex_method())
+        return (encoded if encoded.startswith("0x") else f"0x{encoded}").lower()
+    return ""
+
+
+def _topic_address(value: Any) -> str:
+    encoded = _hex(value)
+    if len(encoded) != 66:
+        return ""
+    return "0x" + encoded[-40:]
+
+
+def _verify_erc20_collection_receipt(
+    *,
+    receipt: Any,
+    transaction: Any,
+    transaction_hash: str,
+    escrow_contract: str,
+    escrow_uid: str,
+    fulfillment_uid: str,
+    token: str,
+    recipient: str,
+    amount: int,
+) -> None:
+    """Verify the successful exact ERC-20 seller-payment transaction."""
+    status = _value(receipt, "status")
+    if isinstance(status, bool) or not isinstance(status, int) or status != 1:
+        raise ValueError("Alkahest collection transaction did not succeed")
+    if _hex(_value(receipt, "transactionHash")) != transaction_hash.lower():
+        raise ValueError("Alkahest collection receipt names another transaction")
+    if str(_value(transaction, "to") or "").lower() != escrow_contract.lower():
+        raise ValueError("Alkahest collection targeted another escrow contract")
+
+    call_data = _hex(_value(transaction, "input") or _value(transaction, "data"))
+    selector = "0x" + Web3.keccak(text="collect(bytes32,bytes32)")[:4].hex()
+    expected_args = escrow_uid.removeprefix("0x") + fulfillment_uid.removeprefix("0x")
+    if call_data != (selector + expected_args).lower():
+        raise ValueError("Alkahest collection call names another obligation")
+
+    transfer_topic = _hex(Web3.keccak(text="Transfer(address,address,uint256)"))
+    matches = []
+    for log in _value(receipt, "logs", ()) or ():
+        topics = _value(log, "topics", ()) or ()
+        if (
+            str(_value(log, "address") or "").lower() == token.lower()
+            and len(topics) == 3
+            and _hex(topics[0]) == transfer_topic
+            and _topic_address(topics[1]) == escrow_contract.lower()
+            and _topic_address(topics[2]) == recipient.lower()
+        ):
+            data = _hex(_value(log, "data"))
+            try:
+                transferred = int(data, 16)
+            except ValueError:
+                continue
+            if transferred == amount:
+                matches.append(log)
+    if len(matches) != 1:
+        raise ValueError("Alkahest collection lacks the exact seller token transfer")
+
+
+def web3_collection_receipt_reader(
+    rpc_urls: Mapping[str, str],
+) -> CollectionReceiptReader:
+    """Build the read-only RPC boundary used after SDK collection submission."""
+    urls = dict(rpc_urls)
+
+    async def read(chain: str, transaction_hash: str) -> tuple[Any, Any]:
+        try:
+            rpc_url = urls[chain]
+        except KeyError as exc:
+            raise ValueError(f"no receipt RPC configured for chain {chain!r}") from exc
+        w3 = AsyncWeb3(AsyncHTTPProvider(rpc_url))
+        return (
+            await w3.eth.get_transaction_receipt(transaction_hash),
+            await w3.eth.get_transaction(transaction_hash),
+        )
+
+    return read
 
 
 @dataclass(frozen=True)
@@ -88,6 +188,8 @@ class AlkahestConditionalEscrowClient:
         default_chain: str | None = None,
         arbitration_probe_timeout: float = 5.0,
         clock: Callable[[], float] = time.time,
+        collection_receipt_reader: CollectionReceiptReader | None = None,
+        collection_recipient: str | None = None,
     ) -> None:
         if arbitration_probe_timeout <= 0:
             raise ValueError("arbitration_probe_timeout must be positive")
@@ -96,6 +198,18 @@ class AlkahestConditionalEscrowClient:
         self._default_chain = default_chain
         self._probe_timeout = arbitration_probe_timeout
         self._clock = clock
+        if (collection_receipt_reader is None) != (collection_recipient is None):
+            raise ValueError(
+                "collection receipt reader and recipient must be configured together"
+            )
+        if collection_recipient is not None and _ADDRESS.fullmatch(
+            collection_recipient
+        ) is None:
+            raise ValueError("collection recipient must be a 20-byte hex address")
+        self._collection_receipt_reader = collection_receipt_reader
+        self._collection_recipient = (
+            collection_recipient.lower() if collection_recipient is not None else None
+        )
 
     async def materialize(
         self, obligation: dict[str, Any], *, operation_ref: str
@@ -273,6 +387,49 @@ class AlkahestConditionalEscrowClient:
                 config_path=self._config_paths.get(chain or ""),
                 escrow_address=address,
             )
+        if self._collection_receipt_reader is not None:
+            provider_ref = _receipt_ref(provider_receipt)
+            params = obligation.get("params")
+            obligation_data = params.get("obligation_data") if isinstance(params, Mapping) else None
+            if (
+                provider_ref is None
+                or not provider_ref.startswith("0x")
+                or not isinstance(obligation_data, Mapping)
+                or not isinstance(address, str)
+                or not isinstance(self._collection_recipient, str)
+            ):
+                raise ValueError("Alkahest collection receipt inputs are incomplete")
+            state = self._state(mechanism_state, operation_ref, codec.kind)
+            state["alkahest"]["collection_transaction_hash"] = provider_ref
+            try:
+                receipt, transaction = await self._collection_receipt_reader(
+                    chain or "", provider_ref
+                )
+            except Exception as exc:
+                raise SettlementEffectReadbackUnknown(
+                    "Alkahest collection receipt readback is unknown",
+                    receipt=self._receipt(operation_ref, codec.kind, provider_receipt),
+                    mechanism_state=state,
+                ) from exc
+            try:
+                _verify_erc20_collection_receipt(
+                    receipt=receipt,
+                    transaction=transaction,
+                    transaction_hash=provider_ref,
+                    escrow_contract=address,
+                    escrow_uid=mechanism_ref,
+                    fulfillment_uid=fulfillment_ref,
+                    token=str(obligation_data.get("token") or ""),
+                    recipient=self._collection_recipient,
+                    amount=int(obligation_data.get("amount")),
+                )
+            except ValueError as exc:
+                raise SettlementManualRequired(
+                    "Alkahest collection receipt failed exact verification",
+                    code="collection_receipt_invalid",
+                    receipt=self._receipt(operation_ref, codec.kind, provider_receipt),
+                    mechanism_state=state,
+                ) from exc
         return EffectOutcome(
             receipt=self._receipt(operation_ref, codec.kind, provider_receipt),
             mechanism_state=self._state(mechanism_state, operation_ref, codec.kind),

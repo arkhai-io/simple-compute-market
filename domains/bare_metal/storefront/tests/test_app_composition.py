@@ -151,6 +151,32 @@ def test_bare_metal_contributes_chain_values_to_shared_factory(monkeypatch) -> N
     assert captured[0].chains[0].rpc_url == "http://rpc"
 
 
+def test_chain_client_rejects_wallet_key_address_mismatch_before_factory(
+    monkeypatch,
+) -> None:
+    monkeypatch.setenv(
+        "BARE_METAL_STOREFRONT_CHAINS",
+        '{"anvil":{"rpc_url":"http://rpc"}}',
+    )
+    monkeypatch.setenv(
+        "BARE_METAL_STOREFRONT_EVM_PRIVATE_KEY",
+        "0x" + "11" * 32,
+    )
+    calls = []
+    monkeypatch.setattr(
+        runtime_module,
+        "build_alkahest_clients",
+        lambda *_args, **_kwargs: calls.append(True) or {},
+    )
+
+    with pytest.raises(RuntimeError, match="does not match"):
+        runtime_module._build_chain_clients_from_environment(
+            expected_wallet="0x" + "22" * 20,
+        )
+
+    assert calls == []
+
+
 def test_bare_metal_watchdog_uses_domain_environment_schedule(monkeypatch) -> None:
     monkeypatch.setenv("BARE_METAL_NEGOTIATION_TIMEOUT_SECONDS", "900")
     monkeypatch.setenv("BARE_METAL_NEGOTIATION_WATCHDOG_INTERVAL", "45")

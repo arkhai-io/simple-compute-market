@@ -157,7 +157,7 @@ dist-arkhai-core-storefront: ## Build arkhai-core-storefront wheel into .dist/
 dist-bare-metal-buyer: dist-core dist-arkhai-core-buyer dist-registry-client dist-kits ## Build the bare-metal buyer contribution wheel.
 	cd domains && $(MAKE) dist-bare-metal-buyer DIST_DIR=$(DIST_DIR)
 
-dist-bare-metal-storefront: dist-core dist-arkhai-core-storefront dist-kits ## Build the bare-metal storefront contribution wheel.
+dist-bare-metal-storefront: dist-core dist-arkhai-core-storefront dist-registry-client dist-config dist-alkahest dist-kits ## Build the bare-metal storefront contribution wheel.
 	cd domains && $(MAKE) dist-bare-metal-storefront DIST_DIR=$(DIST_DIR)
 
 verify-hosted-release: ## Verify the staged signed production release and exact client wheel.

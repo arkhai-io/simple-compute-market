@@ -216,6 +216,36 @@ class CommitThenInvalidResponseClient(FakeClient):
         return self.escrow_result
 
 
+class RetryableCollectionClient(FakeClient):
+    def __init__(self, *, accept_before_error: bool) -> None:
+        super().__init__()
+        self.accept_before_error = accept_before_error
+        self.collect_requests: list[OperationRequest] = []
+        self.provider_effects = 0
+
+    async def collect(
+        self, escrow_ref: str, request: OperationRequest
+    ) -> OperationReceipt:
+        self.collect_requests.append(request)
+        if len(self.collect_requests) == 1:
+            if self.accept_before_error:
+                self.provider_effects += 1
+            raise HostedSettlementError(
+                code="temporarily_unavailable",
+                message="provider detail must not persist",
+                retryable=True,
+                status_code=503,
+            )
+        if not self.accept_before_error:
+            self.provider_effects += 1
+        return OperationReceipt(
+            escrow_ref=escrow_ref,
+            operation_ref=request.request_id,
+            financial_state=FinancialState.COLLECTED,
+            receipt="sha256:" + "77" * 32,
+        )
+
+
 def _obligation(
     *,
     funding_profile: FundingProfile = FundingProfile.CARD,
@@ -728,6 +758,65 @@ async def test_commit_then_invalid_response_retries_exact_identity_once(tmp_path
     assert stored is not None
     assert stored["uncertain_acknowledgement"] is False
     assert "client_secret" not in json.dumps(stored, sort_keys=True)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("accept_before_error", [False, True])
+async def test_hosted_collection_retry_reuses_authority_request_identity(
+    tmp_path, accept_before_error
+) -> None:
+    client = RetryableCollectionClient(accept_before_error=accept_before_error)
+    adapter = HostedConditionalEscrowClient(client)  # type: ignore[arg-type]
+    repository = SettlementSQLiteRepository(str(tmp_path / "collect-retry.db"))
+    runtime = SettlementRuntime(
+        repository,
+        {"fiat.stripe.v1": adapter},
+        clock=lambda: 2_000_000_000,
+    )
+    record = (
+        await runtime.register_plan(
+            agreement_ref="agreement-collect-retry",
+            obligations=[_obligation()],
+        )
+    )[0]
+    await runtime.adopt(
+        record.obligation_ref,
+        local_principal=BUYER,
+        mechanism_ref="escrow-public",
+    )
+    await runtime.bind_fulfillment(
+        record.obligation_ref,
+        "opaque-fulfillment",
+        local_principal=SELLER,
+    )
+    stored = await repository.load_settlement_obligation(record.obligation_ref)
+    assert stored is not None
+    expected_version = int(stored["version"])
+    stored["condition_state"] = "ready"
+    assert await repository.save_settlement_obligation(
+        stored, expected_version=expected_version
+    )
+
+    with pytest.raises(
+        RuntimeError,
+        match="hosted settlement collection temporarily unavailable",
+    ):
+        await runtime.collect(
+            obligation_ref=record.obligation_ref,
+            local_principal=SELLER,
+            worker_id="collector-a",
+        )
+    completed = await runtime.collect(
+        obligation_ref=record.obligation_ref,
+        local_principal=SELLER,
+        worker_id="collector-b",
+    )
+
+    assert completed.status == "succeeded"
+    assert client.provider_effects == 1
+    assert len(client.collect_requests) == 2
+    assert client.collect_requests[0] == client.collect_requests[1]
+    assert client.collect_requests[0].request_id.endswith(":collect")
 @pytest.mark.asyncio
 async def test_readiness_fails_on_identity_capability_drift() -> None:
     client = FakeClient()

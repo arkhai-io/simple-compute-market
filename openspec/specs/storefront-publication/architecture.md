@@ -35,6 +35,56 @@ new listings for only that mode. Accepted records retain their binding.
 Mapped capacity traffic pins the selected site and never falls back to another
 authority on refusal or outage.
 
+## Confirmed publication lifecycle
+
+Core storefront remains the schema-opaque transport owner. Its opened-client
+publication helper constructs the protocol request, validates an exact ordered
+target subset, fans out through `MultiRegistryClient`, records write receipts,
+and returns safe per-target outcomes. The capacity-publication kit owns the
+higher-level refresh/reopen state machine: local eligibility, authenticated
+same-target preflight, canonical typed readback comparison, partial-result
+classification, and the remote-before-local commit gate. A domain adapter owns
+the meaning of its candidate and the local transaction that commits confirmed
+terms.
+
+The lifecycle result carries an immutable intent. It binds the canonical typed
+request—including omitted refresh status or explicit reopen status—to the
+capacity binding, publisher identity, transition, configured target order, and
+each target's locally configured URL, authority, and trust set. Recovery takes
+that result explicitly; no shared runtime slot, database journal, scheduler, or
+automatic retry policy exists. Confirmed targets are retained, definitively
+rejected writes may be retried with the identical request, and ambiguous or
+unconfirmed writes receive read-only reconfirmation.
+
+The candidate ID must equal the ID serialized by the domain payload before the
+registry context opens. Fanout then uses that already-canonicalized request, so
+intent identity and transmitted identity cannot diverge. The immutable result
+also records completion of required receipt persistence and publication-event
+delivery. Recovery resumes either outstanding side effect without rewriting a
+confirmed target. A preflight match is still a publication decision and gains a
+durable receipt before local commit even though it needs no remote write.
+
+At-least-one write acceptance remains the compatibility contract of ordinary
+publication. Confirmed lifecycle operations are deliberately stronger: at
+least one target must match the current intent before a local commit, every
+unconfirmed target keeps the result partial, and receipt/event failures block
+the local commit without erasing known remote outcomes. VM and API-credit
+adapters explicitly retain their existing disabled-publication reopen policy;
+bare metal skips local lifecycle mutation when registry publication is
+disabled. This policy belongs to each domain adapter rather than an optional
+hook or payload-shape test.
+
+Bare metal commits generic listing terms and its derived physical-resource
+mapping in one SQLite transaction. Refresh preserves listing status and pause;
+reopen sets both records open and clears pause. Registry state and storefront
+state are not one atomic store, so a concurrent GET/POST/GET change is surfaced
+as a mismatch rather than described as atomic preservation.
+An exact-intent recovery whose earlier partial reopen already committed locally
+expects the listing and derivation to remain open. That recovery still reloads
+the durable binding and current available capacity, and rejects stale local
+state before I/O; it does not reuse fresh-reopen eligibility or repeat the local
+transaction.
+
 ## Advisory publication, authoritative admission
 
 A listing is an offer based on the seller's latest complete capacity view. It is not a physical reservation.

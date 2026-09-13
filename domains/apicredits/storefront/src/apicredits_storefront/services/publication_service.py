@@ -1,6 +1,7 @@
 """API-credit candidate hooks composed onto kit-owned publication."""
 from __future__ import annotations
 
+import json
 from typing import Any
 
 from domains.apicredits.listings.reconciler import (
@@ -11,8 +12,10 @@ from market_capacity_publication import (
     BoundListing,
     CapacityBinding,
     CapacityBindingError,
+    DisabledPublicationPolicy,
     PublicationCandidate,
     PublicationRuntime,
+    PublicationTransition,
     ReconciliationPlan,
 )
 from registry_client import ListingRequest, UpdateListingRequest
@@ -33,7 +36,6 @@ class ApiCreditPublicationHooks:
     def validate_candidate(self, candidate: PublicationCandidate[dict[str, Any]]) -> None:
         offer = candidate.payload.get("offer_resource") or {}
         if isinstance(offer, str):
-            import json
             offer = json.loads(offer)
         if offer.get("offering_mode") != candidate.binding.offering_mode:
             raise CapacityBindingError("API-credit offer mode differs from binding")
@@ -46,6 +48,39 @@ class ApiCreditPublicationHooks:
             return capacity_binding_from_offer(row.get("offer_resource") or {})
         except (ValueError, TypeError):
             return None
+
+    async def validate_lifecycle(
+        self,
+        candidate: PublicationCandidate[dict[str, Any]],
+        transition: PublicationTransition,
+        *,
+        previous_local_committed: bool,
+    ) -> None:
+        del previous_local_committed
+        if transition is not PublicationTransition.REOPEN:
+            raise ValueError("API-credit publication supports lifecycle reopen only")
+
+    def disabled_publication_policy(
+        self,
+        transition: PublicationTransition,
+    ) -> DisabledPublicationPolicy:
+        return (
+            DisabledPublicationPolicy.COMMIT_LOCAL
+            if transition is PublicationTransition.REOPEN
+            else DisabledPublicationPolicy.SKIP_LOCAL
+        )
+
+    async def commit_candidate(
+        self,
+        candidate: PublicationCandidate[dict[str, Any]],
+        transition: PublicationTransition,
+    ) -> None:
+        if transition is not PublicationTransition.REOPEN:
+            raise ValueError("API-credit publication supports lifecycle reopen only")
+        await self._db.update_listing(
+            listing_id=candidate.listing_id,
+            status="open",
+        )
 
 
 def _make_registry_client():

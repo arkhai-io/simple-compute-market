@@ -234,6 +234,8 @@ class BuyerCli:
         data_dir: Path,
         home_dir: Path,
         credential_env: dict[str, str],
+        base_env: dict[str, str] | None = None,
+        extra_env: dict[str, str] | None = None,
     ):
         self.binary = binary
         self.config_path = config_path
@@ -241,6 +243,17 @@ class BuyerCli:
         self.data_dir = data_dir
         self.home_dir = home_dir
         self.credential_env = credential_env
+        # Non-credential names the buyer process needs, such as a domain
+        # plugin's own configuration-path variable. Kept apart from
+        # ``credential_env`` so a secret is never added here by habit.
+        self.extra_env = dict(extra_env or {})
+        # The environment the buyer process starts from. ``None`` keeps the
+        # inherited copy every existing scenario relies on. A scenario that
+        # also runs operator commands passes an explicit allowlist here, so an
+        # operator credential exported into the test process cannot answer a
+        # challenge on the buyer's behalf. A separate HOME is not enough for
+        # that: agent sockets and credential paths travel in the environment.
+        self.base_env = base_env
 
     @property
     def run_dir(self) -> Path:
@@ -249,7 +262,7 @@ class BuyerCli:
     def _resolve_run_id_from_args(self, args: Iterable[str]) -> Optional[str]:
         args_list = list(args)
         for i, a in enumerate(args_list):
-            if a in ("--from", "--run", "-r") and i + 1 < len(args_list):
+            if a in ("--from", "--run", "--run-id", "-r") and i + 1 < len(args_list):
                 return args_list[i + 1]
         return None
 
@@ -278,10 +291,11 @@ class BuyerCli:
             p.stem for p in self.run_dir.glob("*.jsonl")
         ) if self.run_dir.exists() else frozenset()
 
-        env = dict(os.environ)
+        env = dict(os.environ if self.base_env is None else self.base_env)
         env["XDG_STATE_HOME"] = str(self.state_dir)
         env["XDG_CONFIG_HOME"] = str(self.config_path.parent.parent)
         env["XDG_DATA_HOME"] = str(self.data_dir)
+        env.update(self.extra_env)
         env.update(self.credential_env)
         env["HOME"] = str(self.home_dir)
 
@@ -332,6 +346,9 @@ def create_profiled_buyer_cli(
     registries: Iterable[str],
     toml_sections: Iterable[str] = (),
     credential_variable: str | None = None,
+    base_env: dict[str, str] | None = None,
+    extra_env: dict[str, str] | None = None,
+    config_path_variables: Iterable[str] = (),
 ) -> BuyerCli:
     """Create one hermetic buyer over the shared profile/config boundary.
 
@@ -339,6 +356,11 @@ def create_profiled_buyer_cli(
     helper owns the persistent profile, exact credential reference, XDG
     directories, and registry list without assuming a VM wallet, listing
     shape, provisioning service, result carrier, or teardown mechanism.
+
+    ``config_path_variables`` names environment variables that must carry the
+    path of the file this helper generates. A domain plugin that reads its own
+    configuration by environment variable rather than from the shared
+    ``--config`` flag would otherwise load a different file, or none.
     """
     if not marketplace_credential:
         raise ValueError(f"{domain_identity} marketplace credential is missing")
@@ -376,6 +398,9 @@ def create_profiled_buyer_cli(
     profile_path = data_dir / "arkhai" / "buyer" / "profiles.json"
     ProfileRepository(profile_path).replace(
         ProfileStore(
+            # The repository refuses a candidate that does not advance past the
+            # revision it expects, so the first write of an empty store is 1.
+            revision=1,
             selected_profile_id=profile.profile_id,
             profiles=(profile,),
         ),
@@ -404,6 +429,10 @@ def create_profiled_buyer_cli(
         config_path,
         registry_urls,
     )
+    resolved_extra_env = dict(extra_env or {})
+    resolved_extra_env.update(
+        {str(name): str(config_path) for name in config_path_variables}
+    )
     return BuyerCli(
         binary=binary,
         config_path=config_path,
@@ -411,6 +440,8 @@ def create_profiled_buyer_cli(
         data_dir=data_dir,
         home_dir=home_dir,
         credential_env={variable: marketplace_credential},
+        base_env=base_env,
+        extra_env=resolved_extra_env,
     )
 
 

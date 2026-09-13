@@ -14,10 +14,16 @@ from .capacity import (
 )
 from .publication import (
     BoundListing,
+    DisabledPublicationPolicy,
     PublicationCandidate,
     PublicationDomainHooks,
+    PublicationIntent,
+    PublicationLifecycleResult,
     PublicationRepository,
     PublicationRuntime,
+    PublicationTargetResult,
+    PublicationTargetState,
+    PublicationTransition,
     ReconciliationPlan,
 )
 
@@ -32,10 +38,16 @@ __all__ = [
     "CapacityReconciler",
     "CapacityRuntime",
     "CapacitySite",
+    "DisabledPublicationPolicy",
     "remote_site_clients",
     "PublicationCandidate",
     "PublicationDomainHooks",
+    "PublicationIntent",
+    "PublicationLifecycleResult",
     "PublicationRepository",
     "PublicationRuntime",
+    "PublicationTargetResult",
+    "PublicationTargetState",
+    "PublicationTransition",
     "ReconciliationPlan",
 ]

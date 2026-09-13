@@ -7,12 +7,12 @@ provider integrations live in separate packages that depend on this package.
 
 from __future__ import annotations
 
-import hashlib
 from datetime import datetime
 from typing import Any, Literal
 
 from pydantic import BaseModel, Field, model_validator
 
+from .lease_accounts import canonical_lease_account
 from .provision_terms import BareMetalProvisionTerms
 
 BARE_METAL_SCHEMA_KIND = "bare_metal.v1"
@@ -462,10 +462,10 @@ def materialization_to_lease_create(
     settlement_identity = str(
         materialization.settlement_obligation_ref or materialization.escrow_uid
     )
-    access_ref.setdefault(
-        "ssh_user",
-        f"arkhai-{hashlib.sha256(settlement_identity.encode('utf-8')).hexdigest()[:16]}",
-    )
+    # setdefault, not assignment: a caller-supplied name is preserved here so
+    # that the executing authority sees it and refuses it. Overwriting it
+    # silently would hide an attempted override from the admission check.
+    access_ref.setdefault("ssh_user", canonical_lease_account(settlement_identity))
     return BareMetalLeaseCreate(
         capacity_reservation_id=capacity_reservation_id,
         escrow_uid=materialization.escrow_uid,

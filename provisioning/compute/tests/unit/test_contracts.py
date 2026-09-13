@@ -363,8 +363,9 @@ def test_every_bound_mutation_contract_is_reachable(contract):
     )
     path = path.replace("(?P<trust_role>admin|seller)", "admin").replace(
         "/?",
-        "",
+        "/",
     )
+    path = path.removesuffix("$")
     body = (
         {contract.body_resource: "resource-1"}
         if contract.body_resource is not None

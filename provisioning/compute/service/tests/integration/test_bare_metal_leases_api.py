@@ -14,7 +14,11 @@ import pytest
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
 
-from arkhai_bare_metal import NODE_GRANT_ACCESS_ACTION, NODE_RECLAIM_ACCESS_ACTION
+from arkhai_bare_metal import (
+    NODE_GRANT_ACCESS_ACTION,
+    NODE_RECLAIM_ACCESS_ACTION,
+    canonical_lease_account,
+)
 from market_site.ledger import ALLOCATION_MODE_EXCLUSIVE
 from compute_provisioning_service.db.models import AnsibleJob
 from vm_provisioning_adapter.services.ansible_service import AnsibleResult
@@ -178,13 +182,14 @@ async def test_register_bare_metal_lease_uses_bare_metal_endpoint_and_view(
 ):
     _ensure_bare_metal_host()
     reserved = _reserve_bare_metal("escrow-bm-api-1")
+    lease_account = canonical_lease_account("escrow-bm-api-1")
 
     lease = await bare_metal_client.register_lease(
         capacity_reservation_id=reserved["capacity_reservation_id"],
         escrow_uid="escrow-bm-api-1",
         machine_id="bm-node-1",
         physical_host_id="host-physical-1",
-        access_ref={"ssh_user": "tenant-a"},
+        access_ref={"ssh_user": lease_account},
         lease_end_utc=_future_dt(),
     )
 
@@ -193,7 +198,7 @@ async def test_register_bare_metal_lease_uses_bare_metal_endpoint_and_view(
     assert lease["machine_id"] == "bm-node-1"
     assert lease["physical_host_id"] == "host-physical-1"
     assert lease["state"] == "leased"
-    assert lease["access_ref"] == {"ssh_user": "tenant-a"}
+    assert lease["access_ref"] == {"ssh_user": lease_account}
 
     ledger = _container_module.resolved_capacity_ledger_service
     reservation = ledger.get_reservation(lease["capacity_reservation_id"])
@@ -201,7 +206,7 @@ async def test_register_bare_metal_lease_uses_bare_metal_endpoint_and_view(
     assert reservation["executor_target"] == "bm-node-1"
     assert reservation["executor_ref"] == {
         "physical_host_id": "host-physical-1",
-        "ssh_user": "tenant-a",
+        "ssh_user": lease_account,
     }
     assert reservation["create_job_id"]
     assert reservation["vm_target"] is None
@@ -228,6 +233,7 @@ async def test_list_and_get_bare_metal_leases_exclude_vm_leases(
         escrow_uid="escrow-bm-api-2",
         machine_id="bm-node-1",
         physical_host_id="host-physical-1",
+        access_ref={"ssh_user": canonical_lease_account("escrow-bm-api-2")},
         lease_end_utc=_future_dt(),
     )
 
@@ -256,7 +262,7 @@ async def test_generic_market_lease_terminate_dispatches_bare_metal_reclaim(
         escrow_uid="escrow-bm-api-reclaim",
         machine_id="bm-node-1",
         physical_host_id="host-physical-1",
-        access_ref={"ssh_user": "tenant-a"},
+        access_ref={"ssh_user": canonical_lease_account("escrow-bm-api-reclaim")},
         lease_end_utc=_future_dt(),
     )
 
@@ -306,7 +312,7 @@ async def test_bare_metal_grant_and_reclaim_jobs_succeed_with_executor_playbook(
             machine_id="bm-node-1",
             physical_host_id="host-physical-1",
             access_ref={
-                "ssh_user": "tenant-a",
+                "ssh_user": canonical_lease_account("escrow-bm-api-smoke"),
                 "ssh_public_key": "ssh-ed25519 AAAA tenant-a",
             },
             lease_end_utc=_future_dt(),

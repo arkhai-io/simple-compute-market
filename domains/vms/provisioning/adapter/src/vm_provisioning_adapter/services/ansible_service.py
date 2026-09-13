@@ -46,6 +46,8 @@ from vm_provisioning_adapter.models.ansible import (
 from vm_provisioning_adapter.models.jobs_model import AnsibleJobParams, AnsibleRunResult
 from market_config import decrypt_secret
 
+from vm_provisioning_adapter.services.host_service import _tenant_segments
+
 logger = logging.getLogger(__name__)
 
 
@@ -366,13 +368,10 @@ class AnsibleService:
                 companion_key_paths.append(key_file)
                 key_ref = str(key_file)
 
-            # public_host is the tenant-facing address; emit it as a host var
-            # so the playbook can use it for the connection strings it returns.
-            public_seg = (
-                f"  public_host={host.public_host}"
-                if getattr(host, "public_host", None)
-                else ""
-            )
+            # The tenant-facing address and port are emitted as host vars so
+            # the playbook can return connection details a buyer can reach,
+            # which need not be the endpoint the provisioner arrived through.
+            public_seg = _tenant_segments(host)
             # ansible_port is emitted for every host, matching
             # HostService.render_inventory_ini. These are two renderings of
             # the same registry row and must not drift: a host that connects

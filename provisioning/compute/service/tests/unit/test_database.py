@@ -434,6 +434,7 @@ def test_run_migrations_applies_versioned_migrations_to_old_sqlite_schema():
     assert migration_ids == {
         "20260603_001_ansible_jobs_escrow_uid",
         "20260603_002_hosts_public_host",
+        "20260906_001_hosts_public_port",
         "20260603_003_vm_leases_table",
         "20260603_004_vm_leases_allocation_id",
         "20260707_001_site_allocations_executor_fields",
@@ -507,7 +508,7 @@ def test_run_migrations_is_idempotent():
         migration_count = connection.execute(
             text("SELECT COUNT(*) FROM schema_migrations")
         ).scalar_one()
-    assert migration_count == 16
+    assert migration_count == 17
 
 
 # ---------------------------------------------------------------------------

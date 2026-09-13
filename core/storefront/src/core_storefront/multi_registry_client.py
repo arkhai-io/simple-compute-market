@@ -32,9 +32,10 @@ import asyncio
 import logging
 from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import Any, TypedDict
+from typing import Any, NotRequired, TypedDict
 
-from market_identity import Signer, TrustedIdentitySet
+from market_config.registry_url import lookup_registry_auth, normalize_registry_url
+from market_identity import Identity, Signer, TrustedIdentitySet
 
 
 from registry_client import (
@@ -65,6 +66,16 @@ class RegistryAuthorityTrust:
             raise TypeError("registry authority principals must be a TrustedIdentitySet")
 
 
+@dataclass(frozen=True, slots=True)
+class RegistryTargetIdentity:
+    """Public identity metadata for one configured registry target."""
+
+    configured_url: str
+    normalized_url: str
+    authority: str
+    principals: TrustedIdentitySet
+
+
 class PublishResult(TypedDict):
     """Per-registry outcome of a fan-out write.
 
@@ -79,6 +90,8 @@ class PublishResult(TypedDict):
     error: str | None
     payload: dict | None
     registry_assigned_id: str | None
+    error_type: NotRequired[str | None]
+    status_code: NotRequired[int | None]
 
 
 class MultiRegistryClient:
@@ -112,7 +125,6 @@ class MultiRegistryClient:
         self._signer = signer
         if caller_role != "seller":
             raise ValueError("storefront registry caller_role must be 'seller'")
-        from market_config.registry_url import normalize_registry_url
         if any(not isinstance(url, str) or not url.strip() for url in self._urls):
             raise ValueError("configured registry URLs must be non-empty text")
         normalized_urls = [normalize_registry_url(url) for url in self._urls]
@@ -149,11 +161,26 @@ class MultiRegistryClient:
     def urls(self) -> list[str]:
         return list(self._urls)
 
-    async def __aenter__(self) -> "MultiRegistryClient":
-        from market_config.registry_url import (
-            lookup_registry_auth,
-            normalize_registry_url,
+    @property
+    def publisher_identity(self) -> Identity:
+        """Return the public identity used to authenticate registry requests."""
+        return self._signer.identity
+
+    @property
+    def registry_targets(self) -> tuple[RegistryTargetIdentity, ...]:
+        """Return ordered public trust metadata without transport credentials."""
+        return tuple(
+            RegistryTargetIdentity(
+                configured_url=url,
+                normalized_url=normalized_url,
+                authority=self._expected_registries[normalized_url].authority,
+                principals=self._expected_registries[normalized_url].principals,
+            )
+            for url in self._urls
+            for normalized_url in (normalize_registry_url(url),)
         )
+
+    async def __aenter__(self) -> "MultiRegistryClient":
         for url in self._urls:
             trust = self._expected_registries[normalize_registry_url(url)]
             client = RegistryClient(
@@ -262,6 +289,30 @@ class MultiRegistryClient:
         raise RegistryClientError(
             "GET", f"/listings/{listing_id}", 500,
             "all registries failed without a response",
+        )
+
+    async def get_listing_from_registry(
+        self,
+        *,
+        registry_url: str,
+        listing_id: str,
+    ) -> ListingSummary:
+        """Read from one configured registry without cross-registry fallback."""
+        normalized_target = normalize_registry_url(registry_url)
+        target_index = next(
+            (
+                index
+                for index, configured_url in enumerate(self._urls)
+                if normalize_registry_url(configured_url) == normalized_target
+            ),
+            None,
+        )
+        if target_index is None:
+            raise ValueError("registry URL is not configured")
+        if target_index >= len(self._clients):
+            raise RuntimeError("MultiRegistryClient must be entered before use")
+        return await self._bound(
+            self._clients[target_index].get_listing(listing_id)
         )
 
     # ------------------------------------------------------------------
@@ -384,6 +435,8 @@ class MultiRegistryClient:
                     error="registry not configured",
                     payload=payload_dict,
                     registry_assigned_id=None,
+                    error_type="ConfigurationError",
+                    status_code=None,
                 ))
                 continue
             results.append(PublishResult(
@@ -393,6 +446,8 @@ class MultiRegistryClient:
                 error=None,
                 payload=payload_dict,
                 registry_assigned_id=None,
+                error_type=None,
+                status_code=None,
             ))
             coro_indices.append(len(results) - 1)
             coros.append(self._bound(call(client, payload)))
@@ -402,8 +457,15 @@ class MultiRegistryClient:
             for idx, outcome in zip(coro_indices, outcomes):
                 url = results[idx]["registry_url"]
                 if isinstance(outcome, BaseException):
+                    status_code = getattr(outcome, "status_code", None)
+                    if not isinstance(status_code, int):
+                        status_code = None
                     logger.warning(
-                        "[MULTI_REGISTRY] %s %s failed: %s", url, op_name, outcome,
+                        "[MULTI_REGISTRY] %s %s failed (%s%s)",
+                        url,
+                        op_name,
+                        type(outcome).__name__,
+                        f", HTTP {status_code}" if status_code is not None else "",
                     )
                     results[idx] = PublishResult(
                         registry_url=url,
@@ -412,6 +474,8 @@ class MultiRegistryClient:
                         error=str(outcome),
                         payload=results[idx]["payload"],
                         registry_assigned_id=None,
+                        error_type=type(outcome).__name__,
+                        status_code=status_code,
                     )
                 else:
                     response = outcome if isinstance(outcome, dict) else None
@@ -429,6 +493,8 @@ class MultiRegistryClient:
                         error=None,
                         payload=results[idx]["payload"],
                         registry_assigned_id=assigned_id,
+                        error_type=None,
+                        status_code=None,
                     )
 
         return results

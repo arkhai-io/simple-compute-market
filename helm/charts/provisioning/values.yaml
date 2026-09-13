@@ -71,6 +71,26 @@ sshDecryptionKey:
   createSecret: false
   secretName: arkhai-provisioning-runtime
 
+# ---------------------------------------------------------------------------
+# Ansible SSH host trust.
+#
+# The IaC tree ships an ansible.cfg with host_key_checking disabled, and a
+# configuration file is outranked by the environment, so strict trust is
+# delivered as environment plus a mounted known_hosts rather than by editing
+# that file. The referenced Secret is operator-managed and must expose `key`
+# holding one known_hosts line per endpoint Ansible connects to — the endpoint
+# as the inventory names it, including a non-default port in the
+# `[host]:port` form.
+#
+# Disabled by default: a deployment with no pinned file has nothing to mount,
+# and enabling this without one would refuse every host.
+# ---------------------------------------------------------------------------
+hostKeyPins:
+  enabled: false
+  secretName: ""
+  key: known_hosts
+  mountPath: /etc/arkhai/ssh
+
 # Marketplace service identity is public configuration; only the matching
 # signer credential is read from the referenced Kubernetes Secret.
 identity:
