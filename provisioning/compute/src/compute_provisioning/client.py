@@ -336,6 +336,16 @@ DUAL_ROLE_PROVISIONING_OPERATIONS = frozenset(
         "capacity_reservations_list",
         "capacity_reservation_get",
         "capacity_truncate_lease",
+        # Reads of a fulfillment's state, for the same reason the capacity
+        # reads above are shared: the seller owns the fulfillment and the
+        # operator administers the service that runs it, and both have a
+        # legitimate question to ask of its status. An operator asking got
+        # `403 Marketplace role is not authorized` while every neighbouring
+        # job-level read (`provisioning_job_status`) was already admin.
+        # The mutating fulfillment routes -- schedule, begin, teardown --
+        # stay seller-only.
+        "provisioning_fulfillment_status",
+        "provisioning_fulfillment_result",
     }
 )
 

@@ -671,9 +671,14 @@ class TestStageB5_SellerAndLease:
 
         lease = DealLease(provisioning_client, deal_state.real_escrow_uid).refresh()
         assert lease.get("escrow_uid") == deal_state.real_escrow_uid
-        assert lease.get("resource_id") == BUY_RESOURCE_ID, (
-            f"Lease bound to unexpected resource {lease.get('resource_id')!r}; "
-            f"expected {BUY_RESOURCE_ID!r}. Lease: {lease}"
+        # Not `resource_id`: the lease reports the executor it placed the deal
+        # on, and physical identity is reported nowhere the commercial side
+        # can read it -- the same strip that retired `resource_id` from the
+        # reservation response. The host is what the authority does report,
+        # and it is what an operator needs to find the VM.
+        assert lease.get("vm_host") == E2E_BUY_HOST, (
+            f"Lease bound to unexpected executor {lease.get('vm_host')!r}; "
+            f"expected {E2E_BUY_HOST!r}. Lease: {lease}"
         )
         assert lease.get("status") in ("active", "pending"), (
             f"Expected active/pending lease, got {lease.get('status')!r}: {lease}"

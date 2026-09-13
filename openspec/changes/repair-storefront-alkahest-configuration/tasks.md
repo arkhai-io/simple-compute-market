@@ -1925,6 +1925,47 @@ failures.
       change adds one more of those before the pattern is revisited, which is
       the wrong order but the smaller step.
 
+## 3as. 91 passing; the frontier is the authority boundary
+
+- [x] 3as.1 `B4c` passes: projections then capacity events closes the
+      listing, and the dry run named the four events first. `07b` and `08i`
+      pass -- the verify body's wire form and the settle-resume event field
+      were both it. Four failures left, and two of them are the same subject.
+
+- [x] 3as.2 **08b in both deal scenarios: `403 Marketplace role is not
+      authorized` reading a fulfillment's status.**
+      `provisioning_fulfillment_status` is neither in the admin operation set
+      nor dual-role, so it resolves to seller-only, and the e2e asks as the
+      operator. Newly reached: 08b has failed earlier every previous run.
+
+      Added the two fulfillment *reads* to the dual-role set, which is where
+      the capacity reads already sit for the same reason: the seller owns the
+      fulfillment, the operator administers the service that runs it, and
+      both have a legitimate question to ask of its state. Every
+      neighbouring job-level read (`provisioning_job_status`) was already
+      admin, so seller-only for the fulfillment view was the outlier. The
+      mutating routes -- schedule, begin, teardown -- stay seller-only.
+
+      One edit covers both ends: the route contracts live in the shared
+      `compute_provisioning.client` module that the service's auth
+      middleware resolves through.
+
+- [x] 3as.3 **B5's lease assertion wanted physical identity again.** The
+      lease reports `resource_id: None` with `vm_host` populated -- the same
+      strip that retired `resource_id` from the reservation response, one
+      surface further on. The assertion now checks the executor the authority
+      does report, which is also what an operator needs in order to find the
+      VM.
+
+- [ ] 3as.4 Left as a product question rather than changed: whether a lease
+      *should* carry its backing resource. The lease lives in the service
+      that owns physical identity and is built from a reservation row that
+      knows it, so unlike the commercial-side responses there is nothing
+      stopping it from reporting one. An operator reading a lease with a null
+      resource has to join through the host to find out what was leased. That
+      is the authority's own surface to decide about, and it belongs with the
+      `pools-9-retire-local-physical-authority` items rather than here.
+
 ## 4. Closeout
 
 - [ ] 4.1 **Comment hygiene.** `make check-comment-hygiene`.
