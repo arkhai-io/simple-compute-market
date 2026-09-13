@@ -93,9 +93,11 @@ from src.settings import settings
 from tests.e2e.roles.scenarios.vms.conftest import (
     DealLease,
     DealState,
+    _signer,
     capacity_source_for,
     delete_mock_rules_if_present,
     require_state,
+    signed_listing_read_headers,
 )
 
 log = logging.getLogger(__name__)
@@ -598,7 +600,9 @@ class TestStage04a_PrimaryRegistryPublish:
         listing_id = deal_state.seller_listing_id
         for url in (_REGISTRY_A,):
             resp = httpx.get(
-                f"{url}/listings/{listing_id}", timeout=5.0,
+                f"{url}/listings/{listing_id}",
+                timeout=5.0,
+                headers=signed_listing_read_headers(listing_id),
             )
             assert resp.status_code == 200, (
                 f"{url} returned {resp.status_code} for listing "
@@ -641,7 +645,14 @@ class TestStage05a_EvaluateNegotiate:
                 "expiration_unix": 2_000_000_000,
             },
             requested_duration_seconds=DURATION_HOURS * 3600,
-            buyer_address=buyer_config["wallet_address"],
+            # The evaluation identifies the buyer by marketplace principal, not
+            # by EVM wallet: the strategy is asked what it would do for this
+            # caller, and the caller is the signing identity.
+            buyer_principal=_signer(
+                "eip191",
+                settings.BUYER.MARKETPLACE_CREDENTIAL,
+                "BUYER.MARKETPLACE_CREDENTIAL",
+            ).identity,
         )
         assert result.would_negotiate, (
             f"Strategy would exit at round 0 for BUYER_INITIAL_PRICE={BUYER_INITIAL_PRICE}.\n"

@@ -42,56 +42,41 @@ confirms settlement becomes ready has not happened yet.
 - [ ] 3.4 `make test` stays green. No production Python changed, so nothing is
       expected here; run it rather than assume.
 
-## 3c. Registry response-body authentication (production)
+## 3d. Remaining authenticated-read drift
 
-Round result: **9 failed, 50 passed, 42 skipped** from 10/47/44. All three
-3b fixes landed — `max_skew` gone, the repoint took effect, and the signed
-reads verify (`bob_in_a` and `alice_in_a` both true where both were 401).
+Round result: **9 failed, 54 passed, 38 skipped** from 9/50/42. The registry
+body-hash fix landed (`unsupported_version` gone) and `market buy` now reaches
+`rc=0` instead of refusing to start.
 
-- [x] 3c.1 **The registry verified proofs against a re-serialized model.**
-      `validate_publish` hashed `ValidatePublishRequest.model_validate(body)
-      .model_dump(mode="json")`, which materializes every defaulted field. A
-      caller that omits an optional one — `demands`, here — signs a different
-      document and is refused `401`. The refusal is unsigned, so the client
-      cannot verify it and reports `unsupported_version` wrapped as `502`,
-      naming nothing about the cause.
+- [x] 3d.1 **Swept the reads properly this time.** 3c fixed the sites the
+      errors named; two more failed the moment the earlier ones passed. The
+      first sweep matched call text containing "registry", so
+      `httpx.get(f"{url}/listings/{listing_id}")` — where the host is behind a
+      variable — was invisible. Re-swept on the request *path* instead, which
+      is the property that determines whether a route authenticates.
+- [x] 3d.2 Signing helper moved from `test_multi_registry` into the vms
+      conftest so every module reads through one implementation, and applied
+      to the two reads in `test_full_deal` and `test_full_deal_buyer_cli`.
+- [x] 3d.3 **Fan-in enumeration goes through the canonical client.** The
+      per-URL helper hand-built a `urllib` request with a query string.
+      Discovery is authenticated and the proof binds the query, so signing it
+      by hand would be a second canonicalization to keep in step with the
+      registry's — the same shape of mismatch as 3c.1. Added `registry_b` pins
+      to configuration so a client can be constructed per registry; an
+      unpinned URL is refused rather than read unsigned, which the dead-registry
+      resilience case already treats as a per-URL error.
+- [x] 3d.4 `evaluate_negotiate` takes `buyer_principal: Identity`, not
+      `buyer_address`. The evaluation asks what the strategy would do for a
+      caller, and the caller is a marketplace principal rather than an EVM
+      wallet.
 
-      Added `wire_body` and authenticated against the bytes received; the
-      parsed model still serves validation. Only this route was affected:
-      `publish_listing` and `update_listing` take `body: dict` and so already
-      hashed what arrived.
-
-- [x] 3c.2 **The test suite had encoded the defect.** `_ValidationAuth` signed
-      `ValidatePublishRequest.model_validate(json.loads(request.content))
-      .model_dump(mode="json")` — the same transformation the server applied —
-      so the pair agreed while every real client failed. Corrected to sign the
-      wire bytes, and added a guard asserting that a payload omitting optional
-      fields authenticates.
-
-      Evidence the corrected tests exercise the fix: against pristine
-      production code **all 10 fail**; with the fix the registry integration
-      suite is **112 passed**. Every one of those ten was previously green only
-      because the test reproduced the server's serialization.
-
-- [x] 3c.3 **Buyer CLI config carried no authority pins.** `market buy` exited
-      1 with `Missing required [registry.authorities] identity pins`. The
-      fixture wrote only `[registry] urls`. Now emits one pin per registry with
-      `authority` and `identities`, the exact key set the loader requires, and
-      rejects a mapping that does not cover every configured URL — the loader
-      demands an exact match, so partial pins are an error rather than a
-      narrower trust set.
-
-- [x] 3c.4 **The private registry's bearer token was stale.** The test
-      hardcoded `test-buyer-token`; the stack seeds its bootstrap key
-      (`development-registry-bootstrap-key`). Sourced from configuration, and
-      the module docstring that asserted the old token corrected.
-
-- [ ] 3c.5 **Finding: the committed buyer config is stale the same way.**
-      `dev-env/identities/buyer.config.toml` spells the pin key `principals`
-      where the loader requires `identities`, so it would fail with
-      "contains an invalid authority" rather than the missing-pins error.
-      Not repaired here: it is not on the e2e path, and it belongs with the
-      inherited API-credits pin questions.
+- [ ] 3d.5 **Findings unchanged**, all downstream of a publishing listing:
+      `409 No available compute VM` (2), `500 UNIQUE constraint failed:
+      storefront_listing_bindings.derivation_key` (1), `market credits buy`
+      `rc=2` (1). New this round: `market buy` exits **rc=0 without writing a
+      run-log**, which the 4a reporter change makes legible — the command now
+      starts and succeeds but produces no run evidence, so the run-log path or
+      its trigger is the next thing to look at.
 
 ## 4. Closeout
 

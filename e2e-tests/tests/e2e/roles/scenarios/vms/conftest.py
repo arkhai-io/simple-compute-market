@@ -27,7 +27,18 @@ from typing import Any, Optional
 
 import pytest
 
-from market_identity import Identity, TrustedIdentitySet, create_signer
+import uuid
+from datetime import datetime, timezone
+
+from market_identity import (
+    EMPTY_BODY,
+    Identity,
+    RequestEnvelope,
+    TrustedIdentitySet,
+    canonical_body_hash,
+    create_signer,
+    sign_request,
+)
 from src.settings import settings
 from src.provisioning_test_client import ProvisioningTestClient
 from tests.e2e.roles.helpers.domain_deal import DomainDealState, require_state
@@ -150,6 +161,45 @@ def _require_setting(value: Any, name: str) -> str:
 
 
 
+
+def signed_listing_read_headers(listing_id: str) -> dict[str, str]:
+    """v2 headers for a registry `GET /listings/{id}` as the buyer.
+
+    The route authenticates and admits `buyer`, `seller`, or `service`; an
+    unsigned read is refused with `context_mismatch` rather than answered. The
+    reads below stay raw rather than going through the typed client because
+    they assert on the status code itself — 200 against 404 is what
+    distinguishes "published here" from "not published here", and the client
+    raises instead of reporting it.
+
+    The signed body must match what the route hashes, which for a query-less
+    GET is an empty query list rather than an empty body.
+    """
+    signer = _signer(
+        "eip191", settings.BUYER.MARKETPLACE_CREDENTIAL, "BUYER.MARKETPLACE_CREDENTIAL"
+    )
+    authenticated = sign_request(
+        signer=signer,
+        envelope=RequestEnvelope(
+            role="buyer",
+            principal=signer.identity,
+            method="GET",
+            operation="listing.get",
+            resource=listing_id,
+            request_id=uuid.uuid4().hex,
+            timestamp=int(datetime.now(timezone.utc).timestamp()),
+            body_hash=canonical_body_hash({"query": []}),
+        ),
+    )
+    return {
+        "X-Market-Signature-Version": authenticated.protocol,
+        "X-Market-Identity-Scheme": authenticated.principal.scheme.value,
+        "X-Market-Identity-Identifier": authenticated.principal.identifier,
+        "X-Market-Role": authenticated.role,
+        "X-Market-Request-ID": authenticated.request_id,
+        "X-Market-Timestamp": str(authenticated.timestamp),
+        "X-Market-Signature": authenticated.proof.value,
+    }
 
 def capacity_source_for(resource: dict[str, Any], *, site_id: str | None = None) -> dict[str, Any]:
     """Capacity provenance bound to the listing resource being published.

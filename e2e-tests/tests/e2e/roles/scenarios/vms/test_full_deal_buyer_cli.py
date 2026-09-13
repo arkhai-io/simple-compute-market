@@ -98,6 +98,7 @@ from tests.e2e.roles.scenarios.vms.conftest import (
     capacity_source_for,
     delete_mock_rules_if_present,
     require_state,
+    signed_listing_read_headers,
 )
 
 log = logging.getLogger(__name__)
@@ -593,6 +594,7 @@ class TestStage04a_PrimaryRegistryPublish:
             resp = httpx.get(
                 f"{url}/listings/{listing_id}",
                 timeout=5.0,
+                headers=signed_listing_read_headers(listing_id),
             )
             assert resp.status_code == 200, (
                 f"{url} returned {resp.status_code} for listing "

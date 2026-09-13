@@ -67,3 +67,9 @@ alice:
   wallet_address:
   admin_scheme:     ""
   admin_credential: ""
+
+# Access-gated second registry (multi-registry scenario).
+registry_b:
+  api_url: ""
+  authority_id: ""
+  identifier: ""

@@ -25,6 +25,12 @@ identifier         = ""   # the registry's own signing principal
 # write-scoped key at startup; this must be the key it seeded.
 bootstrap_api_key  = ""
 
+# Second, access-gated registry in the multi-registry scenario.
+[default.registry_b]
+api_url            = ""
+authority_id       = ""
+identifier         = ""
+
 # ---------------------------------------------------------------------------
 # Buyer wallet
 # ---------------------------------------------------------------------------
