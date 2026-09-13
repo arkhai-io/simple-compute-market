@@ -655,7 +655,14 @@ class ReserveCapacityResponse:
     capacity_reservation_id: str = ""
     pool_id: str | None = None
     member_id: str | None = None
-    resource_id: str = ""
+    #: No physical resource identity. The capacity boundary strips
+    #: `resource_id`, `backing_resource_id`, `capacity_bucket_id` and `vm_host`
+    #: from every reservation response, because which physical resource backs a
+    #: reservation is the provisioning service's fact and not a commercial
+    #: one. This response carried a `resource_id` from before that strip, so it
+    #: was unsatisfiable for every reservation rather than only for pooled
+    #: ones -- a caller reading it got `""` and could not tell that apart from
+    #: an answer. `pool_id` and `member_id` are what the boundary does report.
     gpu_count: int = 0
     resource_state: str | None = None
     closed_listing_ids: list[str] = field(default_factory=list)
@@ -667,7 +674,6 @@ class ReserveCapacityResponse:
             "capacity_reservation_id",
             "pool_id",
             "member_id",
-            "resource_id",
             "gpu_count",
             "resource_state",
             "closed_listing_ids",
@@ -676,7 +682,6 @@ class ReserveCapacityResponse:
             capacity_reservation_id=str(d.get("capacity_reservation_id") or ""),
             pool_id=d.get("pool_id"),
             member_id=d.get("member_id"),
-            resource_id=str(d.get("resource_id") or ""),
             gpu_count=int(d.get("gpu_count") or 0),
             resource_state=d.get("resource_state"),
             closed_listing_ids=list(d.get("closed_listing_ids") or []),

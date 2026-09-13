@@ -96,7 +96,11 @@ router = APIRouter(prefix="/api/v1/admin", tags=["admin"])
 #: agree by construction, which is the drift that let `claims` outlive the
 #: claims engine.
 #: Fields `ReserveCapacityResponse` cannot be built without.
-_REQUIRED_RESERVATION_FIELDS = ("capacity_reservation_id", "resource_id")
+#:
+#: Deliberately not `resource_id`: `kit/site`'s reserve route strips physical
+#: identity from every reservation response, so requiring it asked the site
+#: authority for something it is designed never to return.
+_REQUIRED_RESERVATION_FIELDS = ("capacity_reservation_id",)
 
 
 def require_reservation_fields(
@@ -1288,7 +1292,6 @@ class AdminController:
             capacity_reservation_id=str(reserved["capacity_reservation_id"]),
             pool_id=str(pool_id) if pool_id else None,
             member_id=str(reserved["member_id"]) if reserved.get("member_id") else None,
-            resource_id=str(reserved["resource_id"]),
             gpu_count=int(reserved.get("allocated_gpu_count") or 1),
             resource_state=reserved.get("state") or "available",
             closed_listing_ids=closed_listing_ids,

@@ -121,64 +121,41 @@ not in this head.
 - [ ] 3t.5 Unchanged: `market negotiate` exits 2, `market credits buy` exits 2,
       `market buy` exits 0 with no run-log.
 
-## 3v. The admin reserve `500`, and what `resource_id` means for a pool
+## 3y. The buyer CLI had no settlement mechanism enabled
 
-Run: **6 failed, 80 passed**. The gate-cadence fix cleared the four pause
-failures.
+- [x] 3y.1 **`market negotiate` exited 2 on "listing has no installed,
+      enabled, compatible settlement option".** Three conditions, and the
+      failing one was `enabled`: the fixture's generated buyer config carried
+      no `[Settlement]` section at all, and `AlkahestSettlementConfig.enabled`
+      defaults to `false`, so every advertised option was incompatible.
 
-- [x] 3v.1 **The `500` is `KeyError: 'resource_id'`** at
-      `admin_controller.py:1254` in `reserve_capacity`. My earlier
-      double-body-read hypothesis was wrong: the `EndOfStream` frames are
-      starlette unwinding *after* an inner exception, and the three middleware
-      frames are the chain the request passes through rather than where it
-      fails. The loudest thing in the trace was the least informative.
+      A mechanism the buyer has *installed* is not one it will *use*. That is
+      the point of `unify-settlement-mechanism-configuration` (2026-08-12):
+      the buyer's own configuration decides what is selectable. August's
+      config had no `[Settlement]` either and was green, so this is drift from
+      that change rather than a fixture mistake.
 
-- [x] 3v.2 **Discovery: what `resource_id` means per cardinality mode.**
-      Settled from `openspec/specs/storefront-publication/spec.md`:
+- [x] 3y.2 Added `[Settlement]` with `schema_version`, `priority`, and
+      `[Settlement.alkahest] enabled = true`, modelled on the storefront's own
+      working section rather than assembled from the field list. Note the
+      section is capitalised -- lowercase `[settlement]` is explicitly refused
+      as legacy, with a migration command named, so a near-miss here fails
+      loudly rather than silently disabling the mechanism.
 
-      | Mode | Candidate identity | `resource_id` |
-      |---|---|---|
-      | `specific_resource` | one per enabled member, each naming a physical resource; derivation key is resource-keyed | the node |
-      | `fungible` | one pooled candidate, sized to what a single member can satisfy | absent -- pool-keyed |
+      `address_config_path` is set on the mechanism section as well as the
+      chain entry: alkahest resolves contract addresses through the mechanism
+      section, and the chain entry does not serve that lookup.
 
-      `resource-pool-management/spec.md` corroborates the optionality
-      directly: every durable reference to a pool keys on
-      `(site_id, pool_id[, resource_id])`. There is no `resource_id`-as-shape
-      anywhere; a fungible candidate's shape is structural -- pool, slice size,
-      and projected attributes. A named compute shape would come from ROADMAP
-      Goal 2, whose dimensions Goal 1 records as not yet expressible, so it is
-      a plausible future design rather than a current one.
+- [x] 3y.3 Verified against the buyer's own resolver rather than by shape.
+      With the section, `ordered_registrations()` yields `['alkahest']`;
+      with no `[Settlement]`, it yields `[]` -- reproducing the reported
+      failure exactly. E2e collection 140; pyflakes clean apart from one
+      pre-existing unused local.
 
-      A fungible *reservation* is the separate question: the ledger does choose
-      a member at reserve time, and records it as `member_id` plus a backing
-      resource. So the likely contract answer is
-      `ReserveCapacityResponse.resource_id: str | None` -- which is how the
-      controller already treats `pool_id` two lines above, under the comment
-      that pools are the aggregator's concept and not the ledger's.
-
-- [x] 3v.3 **Root cause not settled statically, and the failure now says so.**
-      Traced the payload through ledger, HTTP, site client and aggregator.
-      Both ledger builders (`_match_payload`,
-      `_reservation_payload_for_reserve`) always include `resource_id`, the
-      transport is a passthrough `dict` that would carry a `None` rather than
-      drop a key, and the only `exclude_none` in the path is on the *request*
-      body. So a genuinely absent key is unexplained, and changing the response
-      type on that basis would paper over a payload that should be complete.
-
-      Extracted `require_reservation_fields`, which refuses such a payload with
-      a `502` naming the missing field, the authority, and the keys the payload
-      *did* carry. Absent and null stay distinct: a null `resource_id` is the
-      authority saying there is no single backing resource, an absent key is
-      the two sides disagreeing about shape, and collapsing them would turn the
-      contract question into a silent empty string.
-
-      Five tests against the extracted function -- not a copy of the guard,
-      which is what my first draft did and is the antipattern this suite has
-      already been caught by twice.
-
-- [ ] 3v.4 The next run's failure text should name the actual shape and settle
-      3v.2's contract question. Remaining: settle `409` for provision terms
-      carrying no SSH key, and the three buyer-CLI exits.
+- [ ] 3y.4 `market credits buy` exits 2 and `market buy` exits 0 with no
+      run-log. The credits scenario drives a different storefront and its own
+      buyer profile, so whether it needs the same section is not assumed --
+      the next run's error text decides.
 
 ## 4. Closeout
 

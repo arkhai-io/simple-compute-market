@@ -589,6 +589,27 @@ def buyer_cli(buyer_cli_binary: Path, tmp_path_factory) -> BuyerCli:
         "[negotiation]",
         'policies = ["buyer_escrow_shape_guard", "bisection"]',
         "",
+        # A mechanism the buyer has installed is not one it will use: the
+        # section's `enabled` defaults to false, so an absent [Settlement]
+        # leaves every advertised option incompatible and the CLI refuses with
+        # "listing has no installed, enabled, compatible settlement option".
+        # The buyer's own configuration is what makes a mechanism selectable,
+        # which is the point of configuring them explicitly.
+        "[Settlement]",
+        "schema_version = 1",
+        'priority = ["alkahest.v1"]',
+        "",
+        "[Settlement.alkahest]",
+        "enabled = true",
+        # The same addresses file the chain section names. Alkahest resolves
+        # contract addresses through the mechanism section here, not through
+        # the chain entry, so both have to point at it.
+        f"address_config_path = {_toml_quote(alkahest_path)}",
+        "oracle_gated = false",
+        "trusted_oracle_addresses = []",
+        "interruptible = false",
+        "interruptible_oracle_addresses = []",
+        "",
     )
     yield create_profiled_buyer_cli(
         binary=buyer_cli_binary,

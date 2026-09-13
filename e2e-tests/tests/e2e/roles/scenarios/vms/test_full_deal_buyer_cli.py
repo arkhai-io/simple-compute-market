@@ -1427,14 +1427,21 @@ class TestStage11b_TeardownCompletion:
             required_attributes={"resource_id": deal_state.reserved_resource_id, "gpu_count": 1},
             escrow_uid=f"{deal_state.real_escrow_uid}-reuse",
         )
-        assert reserved_again.resource_id == deal_state.reserved_resource_id
+        # The claim pinned the resource, so a reservation coming back *is*
+        # the match: the capacity boundary strips physical identity from
+        # every reservation response, and asserting it here was only ever
+        # possible while that identity leaked.
+        assert reserved_again.capacity_reservation_id, (
+            "re-reserving the released resource returned no reservation, so "
+            "the capacity did not become available again"
+        )
+        assert reserved_again.gpu_count == 1
         # Released per reservation through the peer callback, which is how
         # provisioning releases one in production. `admin_release_reservations`
         # is fleet-wide and would clear other scenarios' holds.
         storefront_service_client.notify_capacity_released(
             reserved_again.capacity_reservation_id,
             site_id=capacity_site_id(),
-            resource_id=reserved_again.resource_id,
         )
         deal_state.lease_status = "released"
         provisioning_client.resume_lease_watchdog()

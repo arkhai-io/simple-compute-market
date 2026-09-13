@@ -845,7 +845,11 @@ class TestStage06a_NegotiateWithBob:
                     "version": 1,
                     "payload": {
                         "duration_seconds": DURATION_HOURS * 3600,
-                        "ssh_public_key": "",
+                        # The key is a negotiated term, not a settle-time input:
+                        # settle reads it from the accepted terms and refuses to
+                        # substitute the caller's, so an empty value here cannot
+                        # be supplied later.
+                        "ssh_public_key": buyer_config["ssh_public_key"],
                     },
                 },
                 token=DEMAND_RESOURCE["token"]["contract_address"],
@@ -898,7 +902,11 @@ class TestStage06b_NegotiateWithAlice:
                     "version": 1,
                     "payload": {
                         "duration_seconds": DURATION_HOURS * 3600,
-                        "ssh_public_key": "",
+                        # The key is a negotiated term, not a settle-time input:
+                        # settle reads it from the accepted terms and refuses to
+                        # substitute the caller's, so an empty value here cannot
+                        # be supplied later.
+                        "ssh_public_key": buyer_config["ssh_public_key"],
                     },
                 },
                 token=DEMAND_RESOURCE["token"]["contract_address"],

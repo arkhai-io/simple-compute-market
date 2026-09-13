@@ -242,7 +242,10 @@ class TestComputeDynamicListings:
         )
 
         assert result.capacity_reservation_id
-        assert result.resource_id == DYNAMIC_RESOURCE_ID
+        # `pool_id` rather than a resource: the boundary reports pool membership
+        # and withholds physical identity, and the claim below already pinned
+        # the resource it had to match.
+        assert result.pool_id == DYNAMIC_POOL_ID
         assert result.gpu_count == 2
         expected_closed = {
             dynamic_state.listing_ids_by_gpu_count[3],

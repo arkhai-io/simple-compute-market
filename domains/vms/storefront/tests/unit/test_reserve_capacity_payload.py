@@ -43,18 +43,47 @@ class TestACompletePayloadIsAccepted:
     def test_present_but_none_is_not_missing(self):
         """Absent and null are different answers and must stay so.
 
-        A null `resource_id` is the authority saying "this reservation has no
-        single backing resource"; an absent key is the two sides disagreeing
-        about the payload's shape. Collapsing them would turn a contract
-        question into a silent empty string.
+        A null value is the authority answering; an absent key is the two sides
+        disagreeing about the payload's shape. Collapsing them would turn a
+        contract question into a silent default.
         """
         require_reservation_fields(
-            {**_COMPLETE, "resource_id": None}, site_id="default"
+            {**_COMPLETE, "member_id": None}, site_id="default"
+        )
+
+
+class TestPhysicalIdentityIsNotRequired:
+    """The capacity boundary strips it, so requiring it asks for the impossible.
+
+    `kit/site`'s reserve route removes `resource_id`, `backing_resource_id`,
+    `capacity_bucket_id` and `vm_host` from every reservation response: which
+    physical resource backs a reservation is the provisioning service's fact,
+    not a commercial one. This response required `resource_id` from before that
+    strip, so it was unsatisfiable for every reservation rather than only for
+    pooled ones -- and the `KeyError` surfaced as a 500 naming a column.
+    """
+
+    def test_a_payload_without_any_physical_identity_is_accepted(self):
+        stripped = {
+            k: v
+            for k, v in _COMPLETE.items()
+            if k not in {"resource_id", "backing_resource_id", "vm_host"}
+        }
+        require_reservation_fields(stripped, site_id="default")
+
+    def test_resource_id_is_not_among_the_required_fields(self):
+        from market_storefront.controllers.admin_controller import (
+            _REQUIRED_RESERVATION_FIELDS,
+        )
+
+        assert "resource_id" not in _REQUIRED_RESERVATION_FIELDS, (
+            "requiring a field the boundary strips reintroduces a failure no "
+            "authority can avoid"
         )
 
 
 class TestAMissingFieldIsNamed:
-    @pytest.mark.parametrize("absent", ["resource_id", "capacity_reservation_id"])
+    @pytest.mark.parametrize("absent", ["capacity_reservation_id"])
     def test_the_message_names_the_field_and_the_authority(self, absent):
         payload = {k: v for k, v in _COMPLETE.items() if k != absent}
 
@@ -75,9 +104,10 @@ class TestAMissingFieldIsNamed:
             "which is a bad gateway rather than this service faulting"
         )
 
-    def test_both_missing_are_reported_together(self):
+    def test_every_missing_field_is_reported_together(self):
         """One round trip per diagnosis, not one per field."""
         with pytest.raises(HTTPException) as raised:
             require_reservation_fields({"state": "available"}, site_id="default")
         detail = str(raised.value.detail)
-        assert "capacity_reservation_id" in detail and "resource_id" in detail
+        for field in ("capacity_reservation_id",):
+            assert field in detail
