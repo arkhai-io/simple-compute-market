@@ -363,13 +363,10 @@ def _list_listings(
         api_key=api_key,
     ) as client:
         response = client.list_listings(status="open", limit=200)
-    items = getattr(response, "items", None)
-    if items is None:
-        items = getattr(response, "listings", None) or []
-    return [
-        item if isinstance(item, dict) else item.model_dump(mode="json")
-        for item in items
-    ]
+    # `ListingListResponse.listings` holds `ListingSummary` records, which are
+    # dataclasses with `to_dict`, not pydantic models. The dict form is what
+    # the callers below index by `listing_id`.
+    return [summary.to_dict() for summary in response.listings]
 
 
 def _registry_pins(url: str) -> dict[str, str]:

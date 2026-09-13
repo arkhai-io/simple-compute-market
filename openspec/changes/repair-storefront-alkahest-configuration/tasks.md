@@ -42,41 +42,36 @@ confirms settlement becomes ready has not happened yet.
 - [ ] 3.4 `make test` stays green. No production Python changed, so nothing is
       expected here; run it rather than assume.
 
-## 3d. Remaining authenticated-read drift
+## 3e. Fan-in conversion and a misleading assertion
 
-Round result: **9 failed, 54 passed, 38 skipped** from 9/50/42. The registry
-body-hash fix landed (`unsupported_version` gone) and `market buy` now reaches
-`rc=0` instead of refusing to start.
+Round result: **8 failed, 55 passed, 38 skipped** from 9/54/38.
 
-- [x] 3d.1 **Swept the reads properly this time.** 3c fixed the sites the
-      errors named; two more failed the moment the earlier ones passed. The
-      first sweep matched call text containing "registry", so
-      `httpx.get(f"{url}/listings/{listing_id}")` — where the host is behind a
-      variable — was invisible. Re-swept on the request *path* instead, which
-      is the property that determines whether a route authenticates.
-- [x] 3d.2 Signing helper moved from `test_multi_registry` into the vms
-      conftest so every module reads through one implementation, and applied
-      to the two reads in `test_full_deal` and `test_full_deal_buyer_cli`.
-- [x] 3d.3 **Fan-in enumeration goes through the canonical client.** The
-      per-URL helper hand-built a `urllib` request with a query string.
-      Discovery is authenticated and the proof binds the query, so signing it
-      by hand would be a second canonicalization to keep in step with the
-      registry's — the same shape of mismatch as 3c.1. Added `registry_b` pins
-      to configuration so a client can be constructed per registry; an
-      unpinned URL is refused rather than read unsigned, which the dead-registry
-      resilience case already treats as a per-URL error.
-- [x] 3d.4 `evaluate_negotiate` takes `buyer_principal: Identity`, not
-      `buyer_address`. The evaluation asks what the strategy would do for a
-      caller, and the caller is a marketplace principal rather than an EVM
-      wallet.
+- [x] 3e.1 **The fan-in signing worked; my conversion did not.** The typed
+      client returned results and I then called `model_dump` on them.
+      `ListingListResponse.listings` holds `ListingSummary` dataclasses whose
+      serializer is `to_dict`, so every URL failed with
+      `'ListingSummary' object has no attribute 'model_dump'` — after the
+      request had already succeeded. Replaced the defensive `getattr` chain
+      with the two names the class actually has. This is the branch's own
+      lesson landing on me: `ListingListResponse` is exactly the type that
+      taught it, and I modelled it instead of reading it.
+- [x] 3e.2 **An assertion that gave inverted guidance.** Stage 05a's
+      evaluate-negotiate check now reaches a real decision (`200 OK`), and got
+      `reject`. Its failure message was written for `accept` only: it reported
+      "Strategy accepted at round 0", told the reader to *lower* the opening
+      price, and printed neither the decision nor the reason. Following it
+      would have moved the price the wrong way. Now reports the actual
+      decision, reason, and both reference amounts, and separates the guidance
+      for `accept` from `reject` while warning that a guard can decline for
+      reasons unrelated to price.
 
-- [ ] 3d.5 **Findings unchanged**, all downstream of a publishing listing:
-      `409 No available compute VM` (2), `500 UNIQUE constraint failed:
-      storefront_listing_bindings.derivation_key` (1), `market credits buy`
-      `rc=2` (1). New this round: `market buy` exits **rc=0 without writing a
-      run-log**, which the 4a reporter change makes legible — the command now
-      starts and succeeds but produces no run evidence, so the run-log path or
-      its trigger is the next thing to look at.
+      Deliberately not tuned `BUYER_INITIAL_PRICE`: the reason is not yet
+      known, and choosing a price to make a red test green without it would be
+      guessing at the scenario's intent.
+
+- [ ] 3e.3 **Findings unchanged:** `409 No available compute VM` (2),
+      `500 UNIQUE constraint failed: ...derivation_key` (1), `market credits
+      buy` `rc=2` (1), and `market buy` exiting `rc=0` without a run-log (1).
 
 ## 4. Closeout
 

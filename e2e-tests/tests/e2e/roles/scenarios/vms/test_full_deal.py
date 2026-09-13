@@ -664,10 +664,18 @@ class TestStage05a_EvaluateNegotiate:
             f"{result.our_reference_amount} (seller floor)."
         )
         assert result.decision == "counter", (
-            f"Strategy accepted at round 0 for BUYER_INITIAL_PRICE={BUYER_INITIAL_PRICE}. "
-            "This means BUYER_INITIAL_PRICE >= seller floor. Lower it so the strategy "
-            "counters at round 0 — otherwise force_accept in 06b will 409 on an "
-            "already-terminal negotiation."
+            f"Strategy returned decision={result.decision!r} "
+            f"reason={result.decision_reason!r} at round 0 for "
+            f"BUYER_INITIAL_PRICE={BUYER_INITIAL_PRICE} "
+            f"(our_reference_amount={result.our_reference_amount}, "
+            f"their_proposed_amount={result.their_proposed_amount}).\n"
+            "A terminal decision here means 06b's force_accept will 409 on an "
+            "already-closed negotiation.\n"
+            "If 'accept': the opening price is at or above the seller floor — "
+            "lower BUYER_INITIAL_PRICE so the strategy counters instead.\n"
+            "If 'reject': raise BUYER_INITIAL_PRICE toward our_reference_amount "
+            "— but read the reason first, since a guard can decline for causes "
+            "that have nothing to do with price."
         )
         deal_state._evaluate_negotiate_passed = True
         log.info("[05a] Evaluate-negotiate: decision=%s reason=%s strategy=%s",
