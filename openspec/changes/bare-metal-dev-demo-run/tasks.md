@@ -116,10 +116,11 @@
       begin-is-not-delivery in
       `openspec/specs/settlement-configuration/spec.md`.
 
-Not implemented, and not claimed: any live crypto run, buyer reclaim of an
-expired escrow, and hosted-lane live qualification. Host-side proof that the
-lease account was created unprivileged is the executing authority's, not this
-buyer's; the scenario evidences only what the granted session reports.
+The product code and offline scenario do not themselves claim live evidence.
+The later controlled campaign outcome is recorded in task 12.3. Hosted-lane live
+qualification remains unperformed. Host-side proof that a lease account was
+created unprivileged is the executing authority's; the scenario evidences only
+what the granted session reports.
 
 ## 5. Seller crypto acceptance
 
@@ -460,11 +461,21 @@ isolation, destructive reclaim policies, and end-to-end demonstration evidence.
       actual-host script path is added merely to test publication consolidation.
       The configuration and test audit found no host mutation in default
       package or offline E2E execution.
-- [ ] 12.3 Run the authorized actual-host campaign only after its own review
+- [x] 12.3 Run the authorized actual-host campaign only after its own review
       gate, with exact source/artifact provenance, retained-resource declaration,
-      and cleanup evidence.
-- [ ] 12.4 Keep vLLM, model-cache lifecycle, GPU allocation/qualification, and
+      and cleanup evidence. The historical run completed the assertion-backed
+      physical scenario without proving seller payment. A separately identified
+      replacement reached delivery but failed seller collection before its
+      positive SSH, unprivileged-session, and occupied-capacity assertions. Its
+      exact escrow was refunded, physical release converged, exact-key rejection,
+      management preservation, full capacity, and a current signed open listing
+      were read back, and cleanup preserved the retained volumes and history.
+      This is failed-payment physical closeout, not seller-payment or a complete
+      replacement-run E2E success.
+- [x] 12.4 Keep vLLM, model-cache lifecycle, GPU allocation/qualification, and
       GPU-specific host configuration deferred to a separately proposed change.
+      None entered this campaign or its revised failed-payment closeout, and none
+      is a prerequisite for that closeout.
 
 ## 13. Integrated bare-metal seller collection
 
@@ -484,15 +495,18 @@ isolation, destructive reclaim policies, and end-to-end demonstration evidence.
       then require exact successful transaction and ERC-20 seller-transfer
       readback after codec collection. Preserve unknown acknowledgements for
       explicit reconciliation without a second chain write.
-- [ ] 13.5 Rebuild changed internal wheels and run the owning bare-metal,
+- [x] 13.5 Rebuild changed internal wheels and run the owning bare-metal,
       Alkahest, settlement-runtime, hosted compatibility, buyer/E2E and installed
       qualification suites. The reviewed fourth-generation rebuild and installed
       runs passed settlement-runtime (97), hosted compatibility (189), bare-metal
       storefront (215), and Alkahest (220). The buyer locked reinstall and suite
       passed 76 tests without changing its lockfile, and the offline E2E closeout
-      passed 38 tests. Retain this item until the changed dependency closure is
-      rebuilt and qualified from the exact committed generation; these precommit
-      installed and offline results do not qualify a committed artifact or image.
+      passed 38 tests. The three deployed service images are byte-qualified and
+      bound to committed source `8308c8701e447781818e4d2d76d7adf3f9c1c23f`;
+      the later buyer-only scenario changes are installed without editable
+      dependencies and qualified from committed source
+      `11f295fedd5c01904f5e64633110b740c98b860c`. The buyer-only commit is not
+      claimed as a rebuilt seller image.
 - [x] 13.6 Promote the implemented offline behavior and recipient-only trust
       limitation to settlement servicing, physical provisioning, repository
       architecture, and an exact active delta. Live StringObligation contract
@@ -516,6 +530,28 @@ isolation, destructive reclaim policies, and end-to-end demonstration evidence.
       storefront, and Alkahest suites passed 97, 189, 215, and 220 tests. The
       buyer locked reinstall and suite passed 76 tests with no lockfile change,
       the offline E2E closeout passed 38 tests, and pinned OpenSpec 1.13.0 strict
-      validation and comment hygiene passed. This closeout does not satisfy the
-      committed-generation requirement in 13.5 or any actual-host, contract,
-      funding, collection-transfer, cleanup, or financial gate.
+      validation and comment hygiene passed. Subsequent committed-artifact and
+      actual-host evidence is recorded in tasks 13.5 and 12.3. Seller collection
+      was not proved; the replacement instead completed exact refund, physical
+      release, and owned cleanup.
+
+## 14. Final campaign disposition
+
+- [x] 14.1 Reconcile the public record without importing private infrastructure
+      identifiers or evidence: separate the historical physical pass from the
+      replacement collection failure, preserve its unavailable assertions, and
+      describe refund/release/cleanup without claiming seller payment or a full
+      relist transition.
+- [x] 14.2 Copy the exact ephemeral proof, recovery, cleanup, review, and runtime
+      provenance needed for audit into owner-controlled durable evidence. Verify
+      its manifest and retain the originals; do not ingest credential payloads,
+      runtime environments, or container images merely because they exist. The
+      credential-excluding archive retained the selected execution controls,
+      their recursively verified implementation and evidence dependencies, and
+      detailed source-to-artifact qualification records. Independent verification
+      passed its exact inventory, hashes, dependency closure, and artifact
+      bindings without replaying any live operation.
+- [ ] 14.3 Reconcile the application and deployment-configuration branch heads,
+      reviewed image pins, and existing pull requests. Commit and publish only
+      after the scoped documentation/configuration diffs and remote destinations
+      receive their normal independent review.

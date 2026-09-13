@@ -2,12 +2,18 @@
 
 The whole-host lifecycle needs one coherent, reviewable path from publication
 through accepted settlement, fulfillment, unprivileged access, teardown, and
-same-identifier republication. The controlled actual-host demonstration proved
-that path on one reserved development host and exposed two pieces of follow-up
-work: bare metal still owns publication sequencing that belongs in the shared
-capacity-publication module, and accepted settlement is constructed and checked
-at several seams that should share one mechanism-owned derivation without
-weakening domain-owned physical validation.
+same-identifier republication. The implementation now has that composed path,
+but controlled actual-host evidence remains narrower: one historical run proved
+the physical scenario without proving seller payment, while a later replacement
+reached delivery and then failed seller collection before its positive access
+and occupied-capacity assertions. The replacement was refunded, physically
+released, and cleaned up without being relabeled as a successful paid rental.
+
+The work also resolves two ownership problems exposed along the way: bare metal
+owned publication sequencing that belongs in the shared capacity-publication
+module, and accepted settlement was constructed and checked at several seams
+that now share one mechanism-owned derivation without weakening domain-owned
+physical validation.
 
 ## What Changes
 
@@ -80,6 +86,11 @@ requires at least one confirmed readback, every target's result remains visible,
 and partial convergence remains an operator-visible candidate failure. Whether
 recovery is invoked only by an explicit operator action or by a later
 reconciliation loop remains a separate policy decision.
+
+Actual-host evidence is outcome-specific. It does not turn a refunded failed
+payment into seller collection, attribute a historical session to a replacement
+run, or treat a current signed open listing as proof that a complete close →
+reopen transition was observed.
 
 vLLM serving, model-cache preparation or persistence, GPU allocation or
 qualification, and GPU-specific host configuration are deferred. They are not

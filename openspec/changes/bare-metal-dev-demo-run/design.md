@@ -542,8 +542,8 @@ archival provenance.
 | Optional-status omission, exact-target preflight/readback, immutable intent recovery, safe partial results, and local commit ordering | `openspec/specs/storefront-publication/spec.md` | Promoted for publication milestone review |
 | Core transport, kit lifecycle, and explicit domain-adapter ownership | `openspec/specs/storefront-publication/architecture.md` | Promoted for publication milestone review |
 | Repository-wide capacity-publication ownership | `docs/development/ARCHITECTURE.md` | Updated for publication milestone review |
-| Roadmap currency | `docs/development/ROADMAP.md` | Updated the current physical-authority state with the authoritative buyer-ready access gate; the remaining live campaign does not complete the goal |
-| Campaign index currency | `openspec/changes/README.md` | Updated for offline closeout review; strict validation/review and separately gated live work remain explicit |
+| Roadmap currency | `docs/development/ROADMAP.md` | Updated with the implemented delivery boundary and the controlled campaign's narrower failed-payment outcome; no seller collection is claimed |
+| Campaign index currency | `openspec/changes/README.md` | Updated for final closeout review with committed-artifact qualification, failed seller collection, verified refund/release/cleanup, and remaining repository disposition explicit |
 | Accepted Alkahest decoding, whole-payload re-materialization, and retained domain physical authority | `openspec/specs/settlement-configuration/spec.md`; `openspec/specs/settlement-configuration/architecture.md`; existing `openspec/specs/negotiation-protocol/spec.md` physical-authority requirement | Promoted for settlement milestone review |
 | Lock-stable same-version wheel refresh for the three affected targets | `docs/development/ARCHITECTURE.md` | Promoted for offline qualification review; explicitly not repository-wide |
 | Offline production-scenario orchestration test placement | `docs/development/TESTING.md` | Promoted for offline qualification review |
@@ -551,17 +551,45 @@ archival provenance.
 | Active delta provenance for the five modified capabilities | `openspec/changes/bare-metal-dev-demo-run/specs/` | Reconstructed exactly from already-promoted normative blocks; scoped OpenSpec 1.13.0 strict validation passes |
 | Bare-metal Alkahest access evidence, atomic seller-recipient attestation, exact seller-transfer readback, and shared scheduling/reclaim fencing | `openspec/specs/settlement-servicing/spec.md`; `openspec/specs/settlement-servicing/architecture.md`; `openspec/specs/physical-provisioning/spec.md`; `docs/development/ARCHITECTURE.md`; `docs/development/ROADMAP.md` | Promoted after the final bounded Spec and Standards reviews each reported no remaining findings; committed-artifact and live qualification remain gated |
 
-The final offline seller-collection implementation generation passed parent-installed
-settlement-runtime, hosted compatibility, bare-metal storefront, and Alkahest
-suites with 97, 189, 215, and 220 tests respectively. Earlier independent review
-rounds found blockers that were corrected; the final bounded Spec and Standards
-reviews each reported no remaining findings. The buyer locked reinstall and suite
-passed 76 tests without a lockfile change, the offline E2E closeout passed 38
-tests, and pinned OpenSpec 1.13.0 strict validation and comment hygiene passed.
-These are precommit installed and offline results, not qualification of an exact
-committed artifact or image, so task 13.5 remains open. Selected contract code
-and identity, committed images, actual-host access, funding, seller transfer,
-teardown, and financial closeout remain live gates.
+The final offline seller-collection implementation generation passed
+parent-installed settlement-runtime, hosted compatibility, bare-metal storefront,
+and Alkahest suites with 97, 189, 215, and 220 tests respectively. Earlier
+independent review rounds found blockers that were corrected; the final bounded
+Spec and Standards reviews each reported no remaining findings. The buyer locked
+reinstall and suite passed 76 tests without a lockfile change, the offline E2E
+closeout passed 38 tests, and pinned OpenSpec 1.13.0 strict validation and comment
+hygiene passed.
+
+Committed-artifact qualification is deliberately split at the actual producer
+boundary. The deployed registry, provisioning, and storefront images are bound
+to `8308c8701e447781818e4d2d76d7adf3f9c1c23f`; their exact image bytes were
+qualified before publication and deployment. Buyer-only scenario and waiting
+changes are bound to `11f295fedd5c01904f5e64633110b740c98b860c`; a fresh
+non-editable installed runtime from that commit passed its qualification. The
+later buyer commit is not represented as a rebuilt seller image.
+
+## Controlled actual-host outcome
+
+The actual-host work produced two distinct outcomes that must not be spliced.
+The historical run completed the assertion-backed physical scenario, including
+buyer access, unprivileged-session checks, teardown, key rejection, and relisting,
+but did not prove seller payment. The replacement reached authoritative delivery
+and then failed while seller collection remained unresolved. It ended before
+that run's positive SSH, unprivileged-session, and occupied-capacity assertions.
+
+The replacement's exact expired escrow was refunded to its buyer, its supported
+teardown converged to released/torn-down state, and later readback proved exact-key
+rejection, management preservation, whole-resource availability with historical
+debits retained, and a current authenticated signed open listing equal to seller
+local state. That current listing required no publication and is not evidence of
+an observed close → reopen transition. Final cleanup removed only owned releases,
+Secrets, forwards, host objects, and the temporary account while preserving the
+retained volumes, database history, and management access.
+
+The campaign therefore proves a reviewed failed-payment recovery and physical
+closeout, not seller collection or a payment-independent successful E2E. The
+installed collection SDK and deployed escrow expose incompatible collection
+entrypoints; no active change currently owns that compatibility repair.
 
 ## Seller collection from authoritative bare-metal delivery
 

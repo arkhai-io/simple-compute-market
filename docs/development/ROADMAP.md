@@ -33,8 +33,13 @@ The boundary this goal draws is between *physical* and *commercial* authority, n
 The bare-metal settlement adapter also consumes the provisioning-owned active
 access result as its delivery authority: buyer-usable coordinates and exact
 lease identities are checked before credential-free evidence is published and
-seller collection can proceed. This does not close the separately gated live
-host, contract, payment, and cleanup evidence for the rental campaign.
+seller collection can proceed. A controlled campaign proved the historical
+physical scenario and later proved failed-payment refund, physical release,
+post-release key rejection, capacity restoration, and owned cleanup for a
+replacement. It did not prove seller collection or the replacement's positive
+access and occupied-capacity assertions. The installed collection client and
+deployed escrow expose incompatible collection entrypoints; no active change
+currently owns that compatibility repair.
 
 The VM storefront still holds physical state the projection has superseded. It retains `resources`, `hosts`, `compute_pool_members`, and `resource_transition_events`, a local-table listing-derivation path behind a configuration flag, and CSV import as the operator path for seeding inventory — including a startup seeding step and Helm and compose wiring, so retiring it is an operator-facing contract change rather than only a code deletion. It also retains surfaces whose callers are already gone: `compute_allocations`, an execution ledger that `kit/site`'s `CapacityReservation` supersedes and that no production code writes to; admin endpoints for reading and patching resource state whose documented caller no longer makes that call; and a physical-host identifier threaded across the storefront-to-provisioning boundary that the capacity boundary strips, so it is always absent.
 
