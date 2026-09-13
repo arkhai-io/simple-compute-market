@@ -9,7 +9,14 @@ import asyncio
 import logging
 from functools import partial
 
-from core_storefront.loop_lifecycle import loops_paused, register_loop
+from market_storefront.lifecycle import (
+    FULFILLMENT_RESUME,
+    NEGOTIATION_WATCHDOG,
+    SETTLEMENT_SERVICING,
+    SITE_PROJECTION_POLLER,
+    loop_gate,
+    start_registered_loop,
+)
 from typing import Any
 
 from core_storefront.app_startup import (
@@ -163,15 +170,16 @@ def _negotiation_watchdog_policy() -> NegotiationWatchdogPolicy:
 
 def _start_negotiation_watchdog(sqlite_client: Any) -> None:
     policy = _negotiation_watchdog_policy()
-    start_storefront_background_task(
+    start_registered_loop(
         StorefrontBackgroundTask(
-            name="negotiation_watchdog",
+            name=NEGOTIATION_WATCHDOG,
             task_factory=partial(
                 run_negotiation_watchdog,
                 sqlite_client,
                 policy,
                 emit_stage_event=stage_event,
                 logger=logger,
+                paused=loop_gate(NEGOTIATION_WATCHDOG),
             ),
             log_message=(
                 "[STARTUP] Negotiation watchdog started (interval=%ds, timeout=%ds)"
@@ -222,10 +230,12 @@ def _start_settlement_servicing() -> None:
     composition = _container.resolved_settlement_composition
     if composition is None:
         raise RuntimeError("settlement composition was not initialized")
-    start_storefront_background_task(
+    start_registered_loop(
         StorefrontBackgroundTask(
-            name="settlement_servicing",
-            task_factory=partial(composition.worker.run, paused=loops_paused),
+            name=SETTLEMENT_SERVICING,
+            task_factory=partial(
+                composition.worker.run, paused=loop_gate(SETTLEMENT_SERVICING)
+            ),
             log_message="[STARTUP] Settlement servicing started (interval=%ss)",
             log_args=(getattr(settings, "claims_sweep_interval", 30),),
         ),
@@ -238,9 +248,9 @@ def _start_fulfillment_resume(sqlite_client: Any) -> None:
         fulfillment_resume_loop,
     )
 
-    start_storefront_background_task(
+    start_registered_loop(
         StorefrontBackgroundTask(
-            name="fulfillment_resume",
+            name=FULFILLMENT_RESUME,
             task_factory=partial(fulfillment_resume_loop, sqlite_client),
             log_message="[STARTUP] Fulfillment resume worker started (interval=%ss)",
             log_args=(getattr(settings, "fulfillment_resume_sweep_interval", 30),),
@@ -273,9 +283,9 @@ def _start_site_projection_poller(sqlite_client: Any) -> None:
         site_projection_poller_loop,
     )
 
-    start_storefront_background_task(
+    start_registered_loop(
         StorefrontBackgroundTask(
-            name="site_projection_poller",
+            name=SITE_PROJECTION_POLLER,
             task_factory=partial(site_projection_poller_loop, sqlite_client),
         ),
         logger=logger,

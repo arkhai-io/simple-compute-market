@@ -59,8 +59,7 @@ from market_storefront.models.capacity_admin_models import (
     ResourcePatchResponse,
     UsageStartedEventRequest,
 )
-from core_storefront.loop_lifecycle import loop_states, set_loops_paused
-from market_storefront.server import _set_globally_paused
+from market_storefront.server import _set_globally_paused, _set_loops_paused
 from market_capacity_publication import (
     CapacityBinding,
     CapacityBindingError,
@@ -330,7 +329,7 @@ class AdminController:
         cut part-way, and a poller keeps its feed position. Each loop's work
         stays reachable through its own run-cycle route while held.
         """
-        loops = set_loops_paused(True)
+        loops = await _set_loops_paused(True)
         logger.info("[ADMIN] Timer loops paused: %s", loops)
         return {"paused": True, "loops": loops}
 
@@ -340,7 +339,7 @@ class AdminController:
     )
     async def resume_lifecycle_loops(self) -> dict:
         """Return the loops to work; each performs its next cycle."""
-        loops = set_loops_paused(False)
+        loops = await _set_loops_paused(False)
         logger.info("[ADMIN] Timer loops resumed: %s", loops)
         return {"paused": False, "loops": loops}
 

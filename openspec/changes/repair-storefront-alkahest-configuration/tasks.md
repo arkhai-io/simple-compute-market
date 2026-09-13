@@ -42,46 +42,50 @@ confirms settlement becomes ready has not happened yet.
 - [ ] 3.4 `make test` stays green. No production Python changed, so nothing is
       expected here; run it rather than assume.
 
-## 3j. Two pauses, and pools that declare what they deliver
+## 3k. The lifecycle module I was reinventing
 
-Run: **7 failed, 69 passed, 38 skipped** from 14/61/39. Capacity declaration
-worked: `no_matching_inventory` and the strategy's terminal `reject` are gone,
-and the two reservation refusals moved from "no VM matched" to a mode
-declaration — further down the same path.
+Run: **10 failed, 72 passed, 32 skipped** from 7/69/38. Six previously-skipped
+stages now run, which is why passes and failures both rose.
 
-- [x] 3j.1 **I conflated the two pause controls.** `negotiate/new` refused with
-      `503 {"error":"paused","reason":"global"}` because I wired
-      `set_loops_paused` into `admin_pause`, which also stops trading. August
-      kept them separate and its docstring said why: *"a scenario needs
-      deterministic reconciliation and a deal to agree."* A single control
-      makes the second impossible.
+- [x] 3k.1 **My pause assertion asserted what I had documented it could not.**
+      `set_loops_paused` returned a snapshot, and my own docstring said so: *"a
+      loop mid-cycle when the request arrives is still `running` ... a caller
+      that needs the stronger property waits."* `pause_storefront` then
+      asserted every loop was already `paused`. Two rounds running I wrote the
+      correct reasoning in a comment and contradicted it in code.
 
-      Restored `/lifecycle/pause` and `/lifecycle/resume` as loop-only
-      controls with their own contracts and client methods; `/admin/pause`
-      returns to trading only. My own gate module docstring claimed the two
-      were "deliberately separate" while the controller wired them together —
-      the test caught what the comment asserted.
+- [x] 3k.2 **An eighth deleted module: `market_storefront/lifecycle.py`**, 350
+      lines, which is the designed version of the gate I hand-rolled. It has
+      what mine lacked: a per-loop acknowledgement event, `await_quiescence`
+      with a bounded wait so pausing returns only once loops sit at their
+      gates, `pausing` distinguished from `paused`, and a warning when a loop
+      gates under an unregistered name. Its comments also record the exact
+      trap I fell into: *"conflating the two made the second impossible to ask
+      for."*
 
-      A gain from separating them: the loop-only response carries per-loop gate
-      state, so `pause_storefront` again asserts that each loop reached its
-      gate rather than that a pause was merely requested. That closes the
-      weakening recorded in 3g.6.
+      Restored it and tombstoned my `core_storefront/loop_lifecycle.py`.
+      `server._set_loops_paused` awaits quiescence before reporting.
+      `CLAIMS_ENGINE` becomes `SETTLEMENT_SERVICING`, the same periodic sweep
+      under the name the neutrality redesign gave it.
 
-- [x] 3j.2 **Pools must declare the offering modes they deliver.** Reservation
-      refused with `offering mode 'vm' is not declared by matching pool(s)`.
-      The August `register_e2e_pool` predates `pool-declared-offering-modes`
-      (2026-09-04) and set only `listing_mode`. It now writes the
-      `deliverable_modes` policy tag, and reconciles it on an existing pool the
-      same way the listing mode already was. Verified against the server's own
-      `pool_delivers_offering_mode` predicate, including that the old tag shape
-      fails it.
+- [x] 3k.3 Restored `test_lifecycle_registry.py` and
+      `test_lifecycle_client_parity.py`, also deleted. Storefront suite
+      **1128 passed** (from 1107), with the 4 pre-existing failures.
 
-- [ ] 3j.3 **Remaining.** Findings: `500 UNIQUE ...derivation_key` (1),
-      `market credits buy` `rc=2` (1), `market buy` `rc=0` with no run-log (1).
-      Out of scope: alice's `offer_unfulfillable` (1) — provisioning serves one
-      storefront, so her capacity view cannot load; to be deprecated with that
-      reason recorded. Expected to clear next run: the two reservation
-      refusals (2).
+- [ ] 3k.4 **`test_loop_gate_wiring.py` is held back, and is the next task.**
+      Restoring it fails 10 tests, which is the correct answer: it asserts that
+      *every* production loop acknowledges its gate, and my rewiring covers
+      four of five. The capacity-events poller is ungated and registers one
+      loop per site, which the test also checks. Not shipped only because
+      landing a red suite is worse than landing a precise specification of the
+      remaining wiring; it goes in next round with the wiring that satisfies
+      it, and must not be weakened to fit.
+
+- [ ] 3k.5 **New, needs diagnosis.** Reservations moved from `502` to
+      `500` and a `settle/{escrow}` call now fails — both further along the
+      capacity path than before, both first-time-reached. Findings unchanged:
+      `500 UNIQUE ...derivation_key`, credits `rc=2`, `market buy` `rc=0`.
+      Out of scope: alice `offer_unfulfillable`.
 
 ## 4. Closeout
 

@@ -180,15 +180,16 @@ async def load_site_projections(sqlite_client: Any) -> None:
 
 
 async def site_projection_poller_loop(sqlite_client: Any) -> None:
-    from core_storefront.loop_lifecycle import gate, register_loop
+    from market_storefront.lifecycle import SITE_PROJECTION_POLLER, gate
     from market_storefront.utils import config
 
     interval = float(
         getattr(getattr(config.settings, "capacity", None), "poll_interval", 5) or 5
     )
-    register_loop("site_projection_poller")
     while True:
-        await gate("site_projection_poller")
+        if gate(SITE_PROJECTION_POLLER):
+            await asyncio.sleep(0.05)
+            continue
         try:
             if not _caches:
                 await load_site_projections(sqlite_client)

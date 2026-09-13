@@ -741,15 +741,20 @@ async def resume_incomplete_fulfillments_once(
     return progressed
 
 
+#: Cadence for re-reading a held gate; idle work only.
+_PAUSED_POLL_SECONDS = 0.05
+
+
 async def fulfillment_resume_loop(sqlite_client: SQLiteClient) -> None:
     """Periodically sweep unfinished accepted VM escrows."""
-    from core_storefront.loop_lifecycle import gate, register_loop
+    from market_storefront.lifecycle import FULFILLMENT_RESUME, gate
     from market_storefront.utils.config import settings
 
     interval = float(getattr(settings, "fulfillment_resume_sweep_interval", 30))
     db = sqlite_client
-    register_loop("fulfillment_resume")
     while True:
-        await gate("fulfillment_resume")
+        if gate(FULFILLMENT_RESUME):
+            await asyncio.sleep(_PAUSED_POLL_SECONDS)
+            continue
         await resume_incomplete_fulfillments_once(sqlite_client=db)
         await asyncio.sleep(interval)
