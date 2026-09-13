@@ -1830,6 +1830,101 @@ failures.
       change -- it needs the service to hold a site-authority credential and
       sign its responses, not a configuration line.
 
+## 3aq. `make test` caught what the e2e could not
+
+- [x] 3aq.1 **Fifteen unit failures from the uint256 wire form, all in
+      assertions rather than behaviour.** The e2e exercises the running stack
+      and said nothing about them; `make test` is where a changed wire shape
+      shows up. Three shapes of fix:
+
+      - `test_vm_negotiation_strategy`'s twelve failures went through one
+        helper, `_decision_amount`, which read `fields["amount"]` raw. It now
+        parses through `parse_wire_amount` -- the same function the policies
+        and the seller use -- so the assertions stay about the arithmetic
+        they were written for instead of restating the encoding twelve times.
+        `parse_wire_amount` is re-exported from the domain policy shim the
+        test already imports from.
+      - Two assertions are *about* the canonical shape, so they now state the
+        wire form: the seller's canonicalized buyer counter, and the credits
+        buyer's round-0 body.
+      - `test_fulfillment_keeps_private_delivery_out_of_public_runtime_result`
+        passed `mechanism_client=object()` into the evidence path that now
+        resolves a chain client from the adapter. Same stub the prepare test
+        in that file already uses one screen above.
+
+- [x] 3aq.2 Swept the repository for the same shape rather than fixing only
+      what failed: every other `fields["amount"]` assertion is either a
+      fixture input, an obligation built by a kit that already serialized
+      uint256 amounts, or a seller artifact written through
+      `kit/alkahest.proposals` -- none of them written by the scalar policy.
+      The one live hit outside the reported set was the credits buyer's,
+      fixed above.
+
+- [x] 3aq.3 Ran what this container can: 76 passing across the VM
+      storefront's negotiation, RL, escrow-field and negotiation-service
+      suites, 34 in the strategy suite, 4 in the credits buyer flow, and the
+      moved capacity-cycle suite. `test_settlement_composition.py` and
+      `test_selection_dispatch.py` cannot run here -- they import
+      `hosted_settlement_client`, which is not in this repository -- so the
+      stub substitution in the first was made to match the pattern already
+      present in the same file and needs the real suite to confirm.
+
+## 3ar. Credits site authority — accepted into this change
+
+- [ ] 3ar.1 **The gap is the kit's, not the credits service's.** `kit/site`
+      ships the site-authority *routes*; `kit/site-client` ships a client
+      that always signs its requests and requires signed responses. The
+      server half of that contract exists once, hand-rolled inside the
+      provisioning service and entangled with a SQLAlchemy replay store and
+      durable principal rotation. Any second service mounting the kit router
+      therefore gets a surface the kit's own client refuses to talk to --
+      which is what the credits service is: `X-Admin-Key` gating, `401` to a
+      marketplace-signed request, and the `401` itself unsigned.
+
+- [ ] 3ar.2 Planned shape. `kit/site` gains the server side of its own wire
+      contract: a route-contract table (method and path to operation,
+      resource, allowed roles) beside the router that defines those paths,
+      and a site-authority auth middleware parameterised by a signer, a
+      per-role expected-principal resolver, a replay-store port with an
+      in-memory default, and a max skew. Every response signed, refusals
+      included -- an unauthenticated refusal is what
+      `authenticate-every-refusal` was about. Scoped to the router's own path
+      prefix, because the credits service's keys and issuance routes keep
+      their admin-key gate.
+
+- [ ] 3ar.3 The credits service composes that middleware with its own
+      credential and expects the credits storefront's principal in the
+      `seller` role.
+
+- [ ] 3ar.4 **Closes an inherited open question with an answer.**
+      `provide-e2e-development-identities` and `repair-e2e-fixture-drift`
+      (6.1) both recorded the `ed25519 My6-jSfLc...` pin in
+      `storefront.credits.toml` as undecidable, on the premise that the
+      `default` capacity site is the provisioning service, which signs
+      eip191. That premise is checkable and wrong: the credits storefront's
+      site URL is `http://credits-service:8082`. The site is the credits
+      service, so it should hold an ed25519 credential and the pin should
+      name it. No private half exists for the current value, so the pin is
+      replaced either way.
+
+      A new committed dev identity for it, alongside
+      `api-credits-registry.ed25519`, mounted in
+      `domains/apicredits/compose.yml`.
+
+- [ ] 3ar.5 Not retrofitted: the provisioning service keeps its own
+      middleware. It carries durable rotation and a SQL replay store the kit
+      default will not cover, and its auth sits behind roughly six hundred
+      tests. Recorded as the convergence target rather than attempted
+      alongside.
+
+- [ ] 3ar.6 **Deferred, and asked for explicitly:** revisit how the compose
+      stack manages these identities. Every dev principal is currently a
+      committed file plus a hardcoded pin in a service's TOML and a mount in
+      a compose file, so adding an authority means editing three places and
+      any drift between them fails at runtime rather than at load. This
+      change adds one more of those before the pattern is revisited, which is
+      the wrong order but the smaller step.
+
 ## 4. Closeout
 
 - [ ] 4.1 **Comment hygiene.** `make check-comment-hygiene`.

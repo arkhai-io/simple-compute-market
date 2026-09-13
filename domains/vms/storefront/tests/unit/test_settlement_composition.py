@@ -525,7 +525,10 @@ async def test_fulfillment_keeps_private_delivery_out_of_public_runtime_result(
     outcome = await fulfill_vm_settlement(
         domain,
         prepared,
-        mechanism_client=object(),
+        # Peer evidence publication resolves the chain client from the
+        # mechanism adapter, so a bare object() is nothing the production
+        # path can use.
+        mechanism_client=SimpleNamespace(chain_client=lambda chain: object()),
         sqlite_client=db,
     )
 

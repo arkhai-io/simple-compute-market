@@ -17,6 +17,7 @@ from domains.vms.negotiation.policies import (
     amount_bisection_middleware,
     bisection_middleware,
     make_escrow_kind_dispatch_middleware,
+    parse_wire_amount,
 )
 
 
@@ -62,9 +63,16 @@ def _erc1155_proposal_with_amount(amount: int | float) -> dict:
 
 
 def _decision_amount(d: NegotiationDecision) -> int | None:
+    """The decided amount as an integer, read the way production reads it.
+
+    Amounts travel as decimal-digit strings -- a uint256 has no JSON number
+    form -- so this parses through the same helper the policies and the
+    seller use rather than restating the shape. The assertions below stay
+    about the arithmetic, which is what they are for.
+    """
     if d.proposal is None:
         return None
-    return d.proposal.get("fields", {}).get("amount")
+    return parse_wire_amount(d.proposal.get("fields", {}).get("amount"))
 
 
 def _decide_minimize(their, our_amount=100, history=None, max_rounds=10):
