@@ -83,6 +83,7 @@ Phase 11 — Fulfillment convergence and resource release
 from __future__ import annotations
 
 import logging
+import time
 from datetime import datetime, timedelta, timezone
 import os
 from importlib import resources
@@ -182,6 +183,8 @@ def _recipient_demands(seller_wallet: str) -> list[dict]:
 
 
 DURATION_HOURS = 1
+#: Escrow deadline, pinned at negotiation and written on chain unchanged.
+ESCROW_TTL_SECONDS = 3600
 # Base units of an 18-decimal asset, so past the JSON safe-integer range:
 # these amounts ride the wire as decimal-digit strings, which is the shape
 # canonical JSON can sign. 10 tokens/hour asking price, so the opening bid
@@ -797,9 +800,16 @@ class TestStage05b_NegotiationStartsAndVisible:
         """
         require_state(deal_state, "seller_listing_id", "_evaluate_negotiate_passed")
 
+        # Pin the escrow deadline here and reuse it when the escrow is
+        # created on chain. Left to the client's default, each side computes
+        # "now + an hour" at a different moment and settlement verification
+        # refuses the attestation over a one-second difference.
+        deal_state._escrow_expiration_unix = int(time.time()) + ESCROW_TTL_SECONDS
+
         resp = storefront_client.negotiate_new(
             listing_id=deal_state.seller_listing_id,
             initial_amount=BUYER_INITIAL_PRICE,
+            escrow_expiration_unix=deal_state._escrow_expiration_unix,
             provision_terms={
                 "kind": "compute.v1",
                 "version": 1,
@@ -945,7 +955,7 @@ class TestStage07_OnChainEscrowAndProvGate:
         queued/running before stage 09a releases it.
         """
         require_state(deal_state, "negotiation_terminal_state", "agreed_amount",
-                      "_provisioning_mock_mode")
+                      "_provisioning_mock_mode", "_escrow_expiration_unix")
 
         from tests.e2e.roles.scenarios.vms.escrow_helper import create_buyer_escrow
 
@@ -956,6 +966,7 @@ class TestStage07_OnChainEscrowAndProvGate:
             duration_seconds=DURATION_HOURS * 3600,
             token_contract_address=DEMAND_RESOURCE["token"]["contract_address"],
             rpc_url=buyer_config["rpc_url"],
+            expiration_unix=deal_state._escrow_expiration_unix,
         )
         deal_state.real_escrow_uid = escrow_uid
         log.info("[07] Created on-chain escrow %s for negotiation %s",
@@ -1236,6 +1247,20 @@ class TestStage09a2_CapacityEventCycle:
             "the deal reserved capacity, so its authority has events waiting; "
             f"the feed reports none (cursor={pending['cursor']!r} "
             f"head={pending['feed_head']!r})"
+        )
+
+        # Projections before deltas. With `use_site_projection_for_listings`
+        # on (the shipped default) the close path decides from the
+        # storefront's own projection cache, and only the site-projections
+        # loop refills it -- held here like every other loop. Applying the
+        # deltas against a pre-deal projection closes nothing however many of
+        # them there are, which is exactly what the previous run showed: four
+        # events applied, listing still open.
+        projections = advance_storefront(storefront_admin_client, "site-projections")
+        assert projections.get("sites"), (
+            "the site-projections advance reported no site state, so the "
+            "projection the close path reads was not refreshed and the "
+            "capacity cycle below would decide from stale availability"
         )
 
         applied_total = 0

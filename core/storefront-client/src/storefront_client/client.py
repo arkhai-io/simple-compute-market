@@ -1663,7 +1663,7 @@ class StorefrontClient(_StorefrontClientBase):
         escrow_uid: str,
         *,
         seller_wallet: str,
-        agreed_price: float,
+        agreed_price: int,
         agreed_duration_seconds: int,
         listing_id: str,
         chain_name: str = "anvil",
@@ -1673,11 +1673,16 @@ class StorefrontClient(_StorefrontClientBase):
 
         Reads the escrow from chain on ``chain_name`` and confirms it
         matches the supplied terms. Returns dict with valid=True/False
-        and reason on failure. No DB writes. Used by e2e stage 7b.
+        and reason on failure. No DB writes.
+
+        ``agreed_price`` is base units in the uint256 domain, sent as a
+        decimal-digit string: this body is canonicalized for signing and an
+        18-decimal amount has no JSON number form. It was typed ``float``,
+        which no amount in this protocol is.
         """
         body = {
             "seller_wallet": seller_wallet,
-            "agreed_price": agreed_price,
+            "agreed_price": str(int(agreed_price)),
             "agreed_duration_seconds": agreed_duration_seconds,
             "listing_id": listing_id,
             "chain_name": chain_name,
@@ -3031,7 +3036,7 @@ class SyncStorefrontClient(_StorefrontClientBase):
         escrow_uid: str,
         *,
         seller_wallet: str,
-        agreed_price: float,
+        agreed_price: int,
         agreed_duration_seconds: int,
         listing_id: str,
         chain_name: str = "anvil",
@@ -3041,11 +3046,16 @@ class SyncStorefrontClient(_StorefrontClientBase):
 
         Reads the escrow from chain on ``chain_name`` and confirms it
         matches the supplied terms. Returns dict with valid=True/False
-        and reason on failure. No DB writes. Used by e2e stage 7b.
+        and reason on failure. No DB writes.
+
+        ``agreed_price`` is base units in the uint256 domain, sent as a
+        decimal-digit string: this body is canonicalized for signing and an
+        18-decimal amount has no JSON number form. It was typed ``float``,
+        which no amount in this protocol is.
         """
         body = {
             "seller_wallet": seller_wallet,
-            "agreed_price": agreed_price,
+            "agreed_price": str(int(agreed_price)),
             "agreed_duration_seconds": agreed_duration_seconds,
             "listing_id": listing_id,
             "chain_name": chain_name,

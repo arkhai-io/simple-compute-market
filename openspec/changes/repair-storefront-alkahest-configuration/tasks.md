@@ -1690,9 +1690,9 @@ failures.
       function, and route-alias coverage extended so a dry-run route must
       name a declared loop.
 
-- [ ] 3an.8 Unverified until the stack runs: whether one cycle is enough for
-      the listing to close, or whether the reserve and the usage-start deltas
-      arrive as separate pages. The stages step until the feed reports no
+- [x] 3an.8 Answered: one page, four events (`released`, `reserved`,
+      `committed`, `committed`), no truncation -- and the listing still open,
+      because applying deltas is not the whole of the close. See 3ap.2. The stages step until the feed reports no
       truncation, so several pages are handled -- but if the close needs a
       delta the deal emits later, the stage will say so by failing on the
       status after a drained feed rather than on a timeout.
@@ -1757,6 +1757,78 @@ failures.
       they are another change's narrative, not permanent documentation, and
       editing them would rewrite history this change did not make. Whoever
       picks either up will find the module one package over.
+
+## 3ap. Five failures, and the new stage did its job
+
+- [x] 3ap.1 **87 passing.** `05b` and `06b` now pass: the selection-echo
+      narrowing and the force-accept wire form were right. The frontier moved
+      to `07b`, `08b` and `08i` -- stages this change has never reached
+      before -- plus the new `B4c` and the unchanged credits blocker.
+
+- [x] 3ap.2 **B4c reported exactly what it was built to report.** The dry run
+      named four pending events for the deal's resource, twice identically,
+      with the listing still open; the advance applied all four and moved the
+      cursor 0 -> 4; the listing stayed open. So the deltas were not the
+      missing piece.
+
+      Cause: with `use_site_projection_for_listings = true` (the shipped
+      default) the close path decides from the storefront's *projection
+      cache*, and only the site-projections loop refills it -- held, like
+      every other loop. Four deltas applied against a pre-deal projection
+      close nothing, and would have closed nothing at forty.
+
+      So the stages now step projections first, then capacity events, each
+      asked for explicitly. Worth noting what the stage bought: without the
+      dry run this would have read as "advancing the loop does not work",
+      and the fix would have been looked for in the feed.
+
+      Added after the drain: a dry run reporting zero pending, which is the
+      cheap confirmation that the cursor moved rather than the events being
+      re-read.
+
+- [x] 3ap.3 **07b: the verify body carried a JSON-number amount.** Third
+      client method with the same omission after `negotiate_new` (already
+      correct) and force-accept (fixed last round): `verify_settle` sent
+      `agreed_price` unconverted, and its parameter was typed `float`, which
+      no amount in this protocol is. Now `int` in, decimal string out.
+
+- [x] 3ap.4 **08b: the escrow deadline was computed twice.** Settlement
+      verification matches the attestation's `expirationTime` against the
+      deadline the accepted proposal pinned. The scenario let the client
+      default it at negotiation ("now + an hour") and then let the escrow
+      helper default it again at creation, so the two disagreed by however
+      long the intervening stages took -- one second in this run, and a race
+      in every run.
+
+      The scenario now pins it once and passes it to both, and the helper
+      takes an absolute `expiration_unix` with the reason stated. A timing
+      failure that reports as a terms mismatch is worth removing even though
+      it would sometimes pass.
+
+- [x] 3ap.5 **08i: `market settle --from` could not write its first event.**
+      `log.event("settle_resumed", run_id=run_id)` -- `run_id` is run-log
+      metadata and the writer refuses a field that would replace it, so the
+      command raised `RunLogError` before doing anything. Categorically
+      broken, not a fixture problem; newly reachable because `05b` now
+      produces a run to settle from. Renamed to `resumed_from`, which is what
+      the negotiate CLI already records for the same relationship.
+
+- [ ] 3ap.6 **Credits: the service is not a site authority, and its refusal
+      is unsigned.** Unchanged from last round in effect (`credits buy` exits
+      0 having discovered nothing, because the seed never registers), but the
+      cause is now precise. `credits-service` mounts `kit/site`'s capacity
+      router while gating every request behind a shared `X-Admin-Key`; it has
+      no marketplace identity, so a storefront request signed as the seller
+      gets `401`, and the `401` itself carries no
+      `X-Market-Identity-Scheme` -- which is why the site client reports
+      "missing or malformed site-authority response authentication" rather
+      than the status.
+
+      Two defects, one of them general: a refusal that cannot be
+      authenticated is the thing `authenticate-every-refusal` was about. The
+      composition gap belongs to the credits domain stack rather than this
+      change -- it needs the service to hold a site-authority credential and
+      sign its responses, not a configuration line.
 
 ## 4. Closeout
 

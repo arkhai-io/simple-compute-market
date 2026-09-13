@@ -192,7 +192,12 @@ def run_settle_from_log(
         signer=signer,
         profile_id=identity.profile_id,
     )
-    log.event("settle_resumed", run_id=run_id)
+    # Not `run_id=`: every run-log record already carries the run id as
+    # metadata and the writer refuses a field that would replace it, so this
+    # call raised `RunLogError` before the first event was ever written --
+    # `market settle --from` could not start. `resumed_from` is what the
+    # negotiate CLI records for the same relationship.
+    log.event("settle_resumed", resumed_from=run_id)
 
     try:
         accepted_mechanism = accepted_settlement_mechanism(deal)

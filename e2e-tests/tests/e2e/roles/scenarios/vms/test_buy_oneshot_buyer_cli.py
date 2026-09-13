@@ -555,6 +555,20 @@ class TestStageB4c_CapacityEventCycle:
             "which are supposed to emit nothing and reconcile nothing"
         )
 
+        # Projections before deltas. With `use_site_projection_for_listings`
+        # on (the shipped default) the close path decides from the
+        # storefront's own projection cache, and only the site-projections
+        # loop refills it -- held here like every other loop. Applying the
+        # deltas against a pre-deal projection closes nothing however many of
+        # them there are, which is exactly what the previous run showed: four
+        # events applied, listing still open.
+        projections = advance_storefront(storefront_admin_client, "site-projections")
+        assert projections.get("sites"), (
+            "the site-projections advance reported no site state, so the "
+            "projection the close path reads was not refreshed and the "
+            "capacity cycle below would decide from stale availability"
+        )
+
         # One cycle per call, so a truncated page is stepped rather than
         # drained behind the caller's back. Bounded: a feed that never
         # reaches its head is a failure to report, not a loop to keep running.
@@ -580,6 +594,12 @@ class TestStageB4c_CapacityEventCycle:
         assert cycle["cursor"] == cycle["feed_head"], (
             f"cursor {cycle['cursor']!r} did not reach the feed head "
             f"{cycle['feed_head']!r} after draining"
+        )
+
+        drained = one_site(dry_run_storefront(storefront_admin_client, "capacity-events"))
+        assert drained["pending_count"] == 0, (
+            "the feed still reports pending events after draining, so the "
+            f"cursor did not advance: {drained!r}"
         )
 
         closed = storefront_admin_client.get_listing(deal_state.seller_listing_id)
