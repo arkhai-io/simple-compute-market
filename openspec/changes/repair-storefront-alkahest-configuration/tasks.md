@@ -42,44 +42,46 @@ confirms settlement becomes ready has not happened yet.
 - [ ] 3.4 `make test` stays green. No production Python changed, so nothing is
       expected here; run it rather than assume.
 
-## 3i. Faults in the restored stages
+## 3j. Two pauses, and pools that declare what they deliver
 
-Run: **14 failed, 61 passed, 39 skipped** from 8/57/36. The rise is the 13
-restored stages running for the first time since August; 14 = the 8 carried
-failures plus 6 new, all in the restored code.
+Run: **7 failed, 69 passed, 38 skipped** from 14/61/39. Capacity declaration
+worked: `no_matching_inventory` and the strategy's terminal `reject` are gone,
+and the two reservation refusals moved from "no VM matched" to a mode
+declaration — further down the same path.
 
-- [x] 3i.1 **The capacity-admin client was signing as the wrong principal.**
-      Five failures, one per executor stage:
-      `SiteCapacityAdminClientError: Invalid marketplace authentication`.
-      `SiteCapacityAdminClient` asserts the `seller` role, and provisioning
-      binds that role to the storefront principal it serves
-      (`PROVISIONING_STOREFRONT_IDENTITY__IDENTIFIER`, Anvil 2). The fixture
-      signed as the provisioning administrator, which is trusted for `admin`
-      and refused here.
+- [x] 3j.1 **I conflated the two pause controls.** `negotiate/new` refused with
+      `503 {"error":"paused","reason":"global"}` because I wired
+      `set_loops_paused` into `admin_pause`, which also stops trading. August
+      kept them separate and its docstring said why: *"a scenario needs
+      deterministic reconciliation and a deal to agree."* A single control
+      makes the second impossible.
 
-      The August fixture passed a shared admin key, under which the caller's
-      identity did not matter; it does now. Declaring sellable capacity is a
-      seller's act, so the corrected principal agrees with what the call means
-      rather than merely satisfying the check. Verified the signer derives to
-      exactly the identifier provisioning pins.
+      Restored `/lifecycle/pause` and `/lifecycle/resume` as loop-only
+      controls with their own contracts and client methods; `/admin/pause`
+      returns to trading only. My own gate module docstring claimed the two
+      were "deliberately separate" while the controller wired them together —
+      the test caught what the comment asserted.
 
-- [x] 3i.2 **Two constants and a helper were left behind by the restoration.**
-      `DYNAMIC_POOL_ID`, and `E2E_LEASE_EXPIRY_BACKDATE` with
-      `_expired_lease_end()`. Inserting stage bodies moved the code that used
-      module-level names without the names themselves — the restoration was
-      scoped to functions and classes, and nothing checked what they referenced.
+      A gain from separating them: the loop-only response carries per-loop gate
+      state, so `pause_storefront` again asserts that each loop reached its
+      gate rather than that a pause was merely requested. That closes the
+      weakening recorded in 3g.6.
 
-      Swept the modules with pyflakes rather than fixing the one name the run
-      reported: that found the other two before they cost a round. Added to the
-      pre-handoff checks alongside the signature comparison, for the same
-      reason — a `NameError` in a stage that has not run yet is invisible to
-      both collection and the AST signature check.
+- [x] 3j.2 **Pools must declare the offering modes they deliver.** Reservation
+      refused with `offering mode 'vm' is not declared by matching pool(s)`.
+      The August `register_e2e_pool` predates `pool-declared-offering-modes`
+      (2026-09-04) and set only `listing_mode`. It now writes the
+      `deliverable_modes` policy tag, and reconciles it on an existing pool the
+      same way the listing mode already was. Verified against the server's own
+      `pool_delivers_offering_mode` predicate, including that the old tag shape
+      fails it.
 
-- [ ] 3i.3 Findings unchanged: `409 No available compute VM` (2),
-      `offer_unfulfillable` (2), `no_matching_inventory` (1),
-      `500 UNIQUE ...derivation_key` (1), `market credits buy` `rc=2` (1),
-      `market buy` `rc=0` with no run-log (1). The inventory cluster should
-      clear once the executor stages authenticate.
+- [ ] 3j.3 **Remaining.** Findings: `500 UNIQUE ...derivation_key` (1),
+      `market credits buy` `rc=2` (1), `market buy` `rc=0` with no run-log (1).
+      Out of scope: alice's `offer_unfulfillable` (1) — provisioning serves one
+      storefront, so her capacity view cannot load; to be deprecated with that
+      reason recorded. Expected to clear next run: the two reservation
+      refusals (2).
 
 ## 4. Closeout
 

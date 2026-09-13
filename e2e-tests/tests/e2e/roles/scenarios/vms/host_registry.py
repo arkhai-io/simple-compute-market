@@ -43,6 +43,7 @@ from __future__ import annotations
 import asyncio
 from typing import Any
 
+from market_resource_pools.hints import DELIVERABLE_MODES_POLICY_TAG
 from vm_provisioning_operator import PoolCreate, PoolUpdate
 from vm_provisioning_operator.client import ProvisioningError
 from vm_provisioning_operator.models import HostCreate, HostUpdate
@@ -88,6 +89,7 @@ def register_e2e_pool(
     *,
     pool_id: str,
     listing_mode: str,
+    deliverable_modes: tuple[str, ...] = ("vm",),
     label: str | None = None,
 ) -> Any:
     """Create the resource pool, idempotently, and return the pool row.
@@ -116,9 +118,14 @@ def register_e2e_pool(
         # Reconcile rather than accept, the same way the host helper does: a pool
         # surviving an earlier run may carry a different mode, and the mode decides
         # how this scenario's listings are published.
-        if (existing.policy_tags or {}).get("listing_mode") != listing_mode:
+        tags = dict(existing.policy_tags or {})
+        wanted = {
+            "listing_mode": listing_mode,
+            DELIVERABLE_MODES_POLICY_TAG: list(deliverable_modes),
+        }
+        if any(tags.get(k) != v for k, v in wanted.items()):
             provisioning_client.patch_pool(pool_id, PoolUpdate(
-                policy_tags={**(existing.policy_tags or {}), "listing_mode": listing_mode},
+                policy_tags={**tags, **wanted},
             ))
             return provisioning_client.get_pool(pool_id)
         return existing
@@ -127,7 +134,14 @@ def register_e2e_pool(
         id=pool_id,
         label=label or pool_id,
         provider="ansible",
-        policy_tags={"listing_mode": listing_mode},
+        policy_tags={
+            "listing_mode": listing_mode,
+            # A pool must declare the offering modes it delivers; reservation
+            # refuses a claim whose mode no matching pool declares. Stored as a
+            # list for stable ordering in exported pool documents, though its
+            # semantics are a set.
+            DELIVERABLE_MODES_POLICY_TAG: list(deliverable_modes),
+        },
         provider_config=_default_pool_provider_config(provisioning_client),
     ))
     return provisioning_client.get_pool(pool_id)
@@ -248,6 +262,7 @@ def provision_e2e_executor(
     pool_id: str,
     sellable_units: int,
     listing_mode: str = "specific_resource",
+    deliverable_modes: tuple[str, ...] = ("vm",),
     host_gpu_count: int = E2E_HOST_GPU_COUNT,
 ) -> Any:
     """Pool, executor host, and its one capacity declaration, in dependency order.
@@ -261,7 +276,10 @@ def provision_e2e_executor(
     so they call this rather than the three helpers individually.
     """
     register_e2e_pool(
-        provisioning_client, pool_id=pool_id, listing_mode=listing_mode,
+        provisioning_client,
+        pool_id=pool_id,
+        listing_mode=listing_mode,
+        deliverable_modes=deliverable_modes,
     )
     host_row = register_e2e_host(
         provisioning_client, name=host, pool_id=pool_id, gpu_count=host_gpu_count,

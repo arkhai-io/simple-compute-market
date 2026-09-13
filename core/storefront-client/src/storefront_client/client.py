@@ -812,6 +812,44 @@ class StorefrontClient(_StorefrontClientBase):
             )
         )
 
+    async def admin_pause_lifecycle_loops(
+        self,
+        *,
+        request_id: str | None = None,
+    ) -> dict[str, Any]:
+        """POST /api/v1/admin/lifecycle/pause.
+
+        Holds or releases the timer loops only. The storefront's trading pause
+        is a separate control on /admin/pause; neither implies the other.
+        """
+        return await self._authenticated_post(
+            "/api/v1/admin/lifecycle/pause",
+            {},
+            role="admin",
+            operation="admin_pause_lifecycle_loops",
+            resource="lifecycle",
+            request_id=request_id,
+        )
+
+    async def admin_resume_lifecycle_loops(
+        self,
+        *,
+        request_id: str | None = None,
+    ) -> dict[str, Any]:
+        """POST /api/v1/admin/lifecycle/resume.
+
+        Holds or releases the timer loops only. The storefront's trading pause
+        is a separate control on /admin/resume; neither implies the other.
+        """
+        return await self._authenticated_post(
+            "/api/v1/admin/lifecycle/resume",
+            {},
+            role="admin",
+            operation="admin_resume_lifecycle_loops",
+            resource="lifecycle",
+            request_id=request_id,
+        )
+
     async def admin_run_lifecycle_cycle(
         self,
         loop: str,
@@ -2129,6 +2167,44 @@ class SyncStorefrontClient(_StorefrontClientBase):
                 resource="",
                 request_id=request_id,
             )
+        )
+
+    def admin_pause_lifecycle_loops(
+        self,
+        *,
+        request_id: str | None = None,
+    ) -> dict[str, Any]:
+        """POST /api/v1/admin/lifecycle/pause.
+
+        Holds or releases the timer loops only. The storefront's trading pause
+        is a separate control on /admin/pause; neither implies the other.
+        """
+        return self._authenticated_post(
+            "/api/v1/admin/lifecycle/pause",
+            {},
+            role="admin",
+            operation="admin_pause_lifecycle_loops",
+            resource="lifecycle",
+            request_id=request_id,
+        )
+
+    def admin_resume_lifecycle_loops(
+        self,
+        *,
+        request_id: str | None = None,
+    ) -> dict[str, Any]:
+        """POST /api/v1/admin/lifecycle/resume.
+
+        Holds or releases the timer loops only. The storefront's trading pause
+        is a separate control on /admin/resume; neither implies the other.
+        """
+        return self._authenticated_post(
+            "/api/v1/admin/lifecycle/resume",
+            {},
+            role="admin",
+            operation="admin_resume_lifecycle_loops",
+            resource="lifecycle",
+            request_id=request_id,
         )
 
     def admin_run_lifecycle_cycle(

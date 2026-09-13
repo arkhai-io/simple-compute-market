@@ -347,22 +347,28 @@ def pause_storefront(storefront_admin_client) -> bool:
     `docs/development/TESTING.md` forbids, and it cannot establish ordering
     even when it passes.
 
-    The pause response reports a single aggregate state; it no longer names
-    each loop, so this asserts the storefront reports itself paused rather than
-    that every loop reached its gate individually. A scenario that needs the
-    finer guarantee has to observe the effect it cares about directly.
+    Trading is untouched: this holds the loops only, so a scenario can pause
+    at its readiness stage and still agree a deal. The response names each
+    loop's gate state, which is what lets this assert that the loop a scenario
+    depends on actually reached its gate rather than merely that a pause was
+    requested.
     """
-    result = storefront_admin_client.admin_pause()
-    assert getattr(result, "paused", False), (
-        f"storefront did not report itself paused: {result!r}. An assertion "
-        "made now would race the timer loops it was meant to hold."
+    result = storefront_admin_client.admin_pause_lifecycle_loops()
+    assert result.get("paused") is True, (
+        f"storefront did not report its loops paused: {result!r}. An "
+        "assertion made now would race the timer loops it was meant to hold."
     )
-    status = storefront_admin_client.get_system_status()
-    assert getattr(status, "paused", False), (
-        "storefront status does not report the pause the pause call "
-        "acknowledged, so the two disagree about whether the loops are held."
+    loops = result.get("loops") or {}
+    not_at_gate = {
+        name: state for name, state in loops.items() if state != "paused"
+    }
+    assert loops and not not_at_gate, (
+        f"these loops had not reached a gate when the pause returned: "
+        f"{not_at_gate or 'none registered'}. `running` means a cycle that "
+        "began before the request is still going, so an assertion made now "
+        "would race it."
     )
-    log.info("[lifecycle] storefront paused")
+    log.info("[lifecycle] storefront loops paused; loops=%s", loops)
     return True
 
 

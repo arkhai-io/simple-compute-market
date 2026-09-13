@@ -268,6 +268,12 @@ def _contract(request: Request, body: Any) -> AdminRouteContract | None:
             "admin_system_events", _system_events_resource(request), EMPTY_BODY
         )
 
+    if method == "POST" and path == "/api/v1/admin/lifecycle/pause":
+        return AdminRouteContract("admin_pause_lifecycle_loops", "lifecycle", body)
+
+    if method == "POST" and path == "/api/v1/admin/lifecycle/resume":
+        return AdminRouteContract("admin_resume_lifecycle_loops", "lifecycle", body)
+
     prefix = "/api/v1/admin/lifecycle/"
     if method == "POST" and path.startswith(prefix) and path.endswith("/run-cycle"):
         loop = path[len(prefix) : -len("/run-cycle")]

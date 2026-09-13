@@ -181,8 +181,6 @@ class AdminController:
         summary="Pause new negotiations globally (admin)",
     )
     async def pause(self) -> AdminPauseResponse:
-        loops = set_loops_paused(True)
-        logger.info("[ADMIN] Timer loops paused: %s", loops)
         _set_globally_paused(True)
         return AdminPauseResponse(
             paused=True, message="Storefront paused. New negotiations will receive 503."
@@ -194,8 +192,6 @@ class AdminController:
         summary="Resume new negotiations globally (admin)",
     )
     async def resume(self) -> AdminPauseResponse:
-        loops = set_loops_paused(False)
-        logger.info("[ADMIN] Timer loops resumed: %s", loops)
         _set_globally_paused(False)
         return AdminPauseResponse(paused=False, message="Storefront resumed.")
 
@@ -315,6 +311,38 @@ class AdminController:
     # behaved differently from the timer would prove nothing about production.
     # Running while paused is the entire purpose.
     # ------------------------------------------------------------------
+
+    @router.post(
+        "/lifecycle/pause",
+        summary="Hold every timer-driven loop idle (admin)",
+    )
+    async def pause_lifecycle_loops(self) -> dict:
+        """Hold the timer loops idle. Trading is unaffected.
+
+        Two controls, deliberately separate. `/admin/pause` stops the
+        storefront accepting new negotiations; this stops the loops
+        reconciling behind a caller's back. A scenario needs deterministic
+        reconciliation *and* a deal to agree, so anything that did both at once
+        would make the second impossible -- which is exactly what conflating
+        them produced: `negotiate/new` refused with `paused/global`.
+
+        Loops are held rather than stopped: nothing is torn down, no cycle is
+        cut part-way, and a poller keeps its feed position. Each loop's work
+        stays reachable through its own run-cycle route while held.
+        """
+        loops = set_loops_paused(True)
+        logger.info("[ADMIN] Timer loops paused: %s", loops)
+        return {"paused": True, "loops": loops}
+
+    @router.post(
+        "/lifecycle/resume",
+        summary="Return every timer-driven loop to work (admin)",
+    )
+    async def resume_lifecycle_loops(self) -> dict:
+        """Return the loops to work; each performs its next cycle."""
+        loops = set_loops_paused(False)
+        logger.info("[ADMIN] Timer loops resumed: %s", loops)
+        return {"paused": False, "loops": loops}
 
     @router.post(
         "/lifecycle/claims/run-cycle",
