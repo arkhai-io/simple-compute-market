@@ -184,7 +184,14 @@ async def run_negotiation_watchdog(
     # loop to be unobservable. Delaying before the first gate call made the
     # watchdog invisible for the whole window, and the first pause of an
     # end-to-end run lands inside it.
-    pending_initial_delay = float(policy.initial_delay_seconds or 0.0)
+    # A deadline, not a sleep. Sleeping the delay inside the loop still stops
+    # the loop cycling for its duration, so a pause requested in that window is
+    # not observed until it elapses -- the loop reaches its gate once and then
+    # disappears for 30 seconds. Comparing a deadline holds the sweep while the
+    # cycle, and therefore the gate, keeps its cadence.
+    sweep_not_before = (
+        asyncio.get_running_loop().time() + float(policy.initial_delay_seconds or 0.0)
+    )
     if policy.log_loop_start:
         active_logger.info(
             "negotiation_watchdog_loop: started (interval=%ds, timeout=%ds)",
@@ -196,10 +203,9 @@ async def run_negotiation_watchdog(
             if paused is not None and paused():
                 await asyncio.sleep(_PAUSED_POLL_SECONDS)
                 continue
-            if pending_initial_delay:
-                await asyncio.sleep(pending_initial_delay)
-                pending_initial_delay = 0.0
             await asyncio.sleep(policy.interval_seconds)
+            if asyncio.get_running_loop().time() < sweep_not_before:
+                continue
             abandoned = await sweep_stale_negotiations(
                 repository,
                 policy,

@@ -73,6 +73,19 @@ def _acknowledged(name: str) -> bool:
     return bool(lifecycle._GATE_CALLS.get(name))
 
 
+def _gate_calls(name: str) -> int:
+    """How many times this name reached its gate.
+
+    Reaching a gate once is enough to be acknowledged and not enough to ever
+    observe a pause: a loop that gates and then blocks forever inside a call
+    reports `running` and never comes back, so every pause reports it
+    `pausing` until the bounded wait expires. Both loops below did exactly
+    that -- one awaited a call that never returns, the other slept its startup
+    delay after gating.
+    """
+    return int(lifecycle._GATE_CALLS.get(name, 0))
+
+
 class TestRegisteredNamesAreTheGatedNames:
     def test_startup_registers_exactly_the_named_loops(self):
         """The constants are the contract between registration and gating.
@@ -165,6 +178,11 @@ class TestEachProductionLoopAcknowledges:
         assert _acknowledged(lifecycle.NEGOTIATION_WATCHDOG), (
             "the watchdog did not reach its gate during its startup delay, so "
             "a pause requested in that window cannot be observed"
+        )
+        assert _gate_calls(lifecycle.NEGOTIATION_WATCHDOG) > 1, (
+            "the watchdog reached its gate once and then stopped cycling for "
+            "the length of its startup delay; a pause requested after that "
+            "first gate call is not observed until the delay elapses"
         )
         assert not swept, "the startup delay no longer holds the sweep"
 
@@ -286,12 +304,20 @@ class TestEachProductionLoopAcknowledges:
 
         monkeypatch.setattr(cc, "build_capacity_runtime", lambda _f: _Runtime())
 
+        # Run past one aggregate cadence: the loop does no work, so its gate
+        # interval is longer than the other loops' and a shorter window would
+        # only ever see the first call.
         await _run_briefly(
             partial(cc.capacity_events_poller_loop, object()),
             lifecycle.CAPACITY_EVENTS_POLLER,
+            seconds=cc._AGGREGATE_GATE_SECONDS * 2.5,
         )
 
         assert _acknowledged(lifecycle.CAPACITY_EVENTS_POLLER)
+        assert _gate_calls(lifecycle.CAPACITY_EVENTS_POLLER) > 1, (
+            "the aggregate gated once and then sat inside poll_events, which "
+            "never returns; it must run the fan-out as a task and keep gating"
+        )
 
     async def test_capacity_events_poller_declares_a_gate_per_site(
         self, monkeypatch

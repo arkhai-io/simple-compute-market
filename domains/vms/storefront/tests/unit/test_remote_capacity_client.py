@@ -35,6 +35,15 @@ from tests.fake_site import (
 )
 
 
+import asyncio
+
+# Imported for its side effect: the capacity loop gates, and the gate reads
+# the pause flag from `market_storefront.server`. Loading it here means that
+# import is already cached when a test swaps in a minimal settings object,
+# which would otherwise fail the app build the first import performs.
+from market_storefront import server  # noqa: F401
+
+
 @pytest.fixture
 def site() -> FakeSite:
     fake = FakeSite(deliverable_modes={"vm"})
@@ -392,7 +401,18 @@ async def test_poller_loop_delegates_to_composed_kit_runtime():
         patch.object(cc, "build_capacity_runtime", return_value=runtime),
         patch("market_storefront.utils.config.settings", _settings()),
     ):
-        await cc.capacity_events_poller_loop(repository)
+        # The loop never returns: it runs the fan-out as a task and then gates
+        # and idles, so a pause is observed rather than the loop sitting inside
+        # a call that never comes back. Awaiting it here would hang.
+        task = asyncio.create_task(cc.capacity_events_poller_loop(repository))
+        try:
+            await asyncio.sleep(0.05)
+        finally:
+            task.cancel()
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
 
     # The gate factory is passed per site: the kit owns the fan-out, and one
     # shared predicate could only hold every site together. Asserted by shape

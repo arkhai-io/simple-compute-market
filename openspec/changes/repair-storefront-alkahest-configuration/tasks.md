@@ -121,6 +121,54 @@ not in this head.
 - [ ] 3t.5 Unchanged: `market negotiate` exits 2, `market credits buy` exits 2,
       `market buy` exits 0 with no run-log.
 
+## 3u. Two loops reached their gate once and never again
+
+Run: **10 failed, 76 passed, 28 skipped**. The restored intervals worked --
+every loop now reports `paused` except two, and both are mine.
+
+- [x] 3u.1 **The capacity aggregate gated once, then blocked forever.** It
+      awaited `poll_events`, which gathers the site pollers and never returns.
+      One gate call is enough to be *acknowledged* and not enough to ever
+      *observe a pause*, so every pause reported it `pausing` until the bounded
+      wait expired. It now runs the fan-out as a task and gates and idles,
+      which is also what keeps a storefront with no site configured reporting a
+      capacity loop at all. A completed fan-out is awaited rather than idled
+      over, so its failure surfaces instead of being hidden behind a healthy
+      aggregate.
+
+      Its idle cadence is its own constant, not the poll interval: the loop
+      does no work, so the only thing the interval controls is how soon a pause
+      is seen, and tying that to polling made observation as slow as the
+      slowest deployment's polling.
+
+- [x] 3u.2 **The watchdog's startup delay stopped it cycling.** In 3o.2 I moved
+      the delay inside the loop so the gate came first. That fixed
+      acknowledgement and not observability: the loop gated once, then slept 30
+      seconds, so a pause requested after that first call went unseen for the
+      whole window. Now a monotonic deadline holds the *sweep* while the cycle,
+      and therefore the gate, keeps its cadence -- which is what the August
+      implementation did, and what I should have copied rather than
+      approximated.
+
+- [x] 3u.3 **The tests could not have caught either.** Both asserted a loop
+      reached its gate *at least once*, which both loops did. They now assert
+      the gate is reached more than once, and the capacity case runs past one
+      aggregate cadence so the window can contain a second call.
+
+      Two consequences of the loop no longer returning:
+      `test_poller_loop_delegates_to_composed_kit_runtime` awaited it and hung
+      the suite, and its patched minimal settings then broke the app build that
+      the gate's first `server` import performs. Both fixed in the test --
+      driven as a task, with `server` imported up front.
+
+      `domains/vms/storefront` unit **1007 passed**, 1 pre-existing failure;
+      `kit/storefront` 7 passed with its pre-existing `test_composition`
+      failure; the lifecycle files 59 passed.
+
+- [ ] 3u.4 Unchanged: admin reservations `500` (traced to
+      `service_peer_auth.py:312`), settle `409` for provision terms carrying no
+      SSH key, and the three buyer-CLI exits.
+
 ## 4. Closeout
 
 - [ ] 4.1 **Comment hygiene.** `make check-comment-hygiene`.
