@@ -218,6 +218,17 @@ async def test_the_capacity_event_feed_is_served_to_the_storefront(client):
     Its poller drives derived-listing reconciliation, so a `401` here is a
     storefront that never learns its own inventory changed.
     """
+    # Signed over the canonical body, not over nothing. A GET carries no
+    # body, and this route's behavior is decided entirely by `after` and
+    # `limit`, so the authority folds those into the signed material --
+    # see `market_site.auth.canonical_site_request_body`, and
+    # `canonical_provisioning_request_body`'s matching entry for the same
+    # path. Signing `EMPTY_BODY` here asserted the feed was reachable by a
+    # caller that signs the way this test did; `market_site_client`, which
+    # is the only caller there is, signs the query.
+    from market_site.auth import canonical_site_request_body
+
+    query = {"after": 0, "limit": 1}
     response = await client.get(
         "/api/v1/capacity/events?after=0&limit=1",
         headers=_headers(
@@ -226,6 +237,9 @@ async def test_the_capacity_event_feed_is_served_to_the_storefront(client):
             method="GET",
             operation="capacity_events",
             resource="",
+            body=canonical_site_request_body(
+                "GET", "/api/v1/capacity/events", query=query
+            ),
         ),
     )
     assert response.status_code == 200, response.text

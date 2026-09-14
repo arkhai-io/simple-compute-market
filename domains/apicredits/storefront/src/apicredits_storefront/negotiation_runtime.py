@@ -30,6 +30,7 @@ from domains.apicredits.negotiation.terms import (
 from market_alkahest.proposals import accepted_escrow_artifacts_from_proposal
 from market_core import MarketDomainContract
 from market_core.schemas import (
+    ProvisionTerms,
     SettlementObligation,
     SettlementOption,
     SettlementPlan,
@@ -106,10 +107,40 @@ def _decode_terms(domain: MarketDomainContract, raw_terms: Any) -> NegotiationTe
         else raw_terms
     )
     decoded = domain.codecs.message(raw)
-    wire = (
-        decoded.model_dump(mode="json") if hasattr(decoded, "model_dump") else dict(raw)
-    )
+    wire = _provision_terms_wire(decoded, raw)
     return NegotiationTerms(decoded=decoded, wire=wire)
+
+
+#: `ProvisionTerms`' own field names, read off the model so a field added
+#: there is carried without editing this.
+_PROVISION_TERMS_FIELDS = frozenset(ProvisionTerms.model_fields)
+
+
+def _provision_terms_wire(decoded: Any, raw: Any) -> dict[str, Any]:
+    """The provision-terms wire form, narrowed to `ProvisionTerms`' own fields.
+
+    `ApiCreditsMessage` is a superset of `ProvisionTerms`: it also carries
+    `settlement_selection`, `buyer_principal` and `seller_principal`, which
+    are negotiation-envelope facts rather than a description of what is
+    being provisioned. Dumping the whole message here put those three keys
+    into what the runtime echoes back as `accepted_provision_terms`, and
+    `ProvisionTerms` forbids extras -- so `NegotiateNewResponse` rejected
+    every accepted round-0 result with three `extra_forbidden` errors.
+
+    Only `wire` is narrowed. `decoded` keeps the full message, which is
+    what the policies and guards read. The envelope fields are not lost
+    from the response either: `settlement_selection` travels in the
+    proposal carrier that `negotiate_controller._proposal_payload` builds,
+    and the principals are top-level response fields.
+    """
+    if not hasattr(decoded, "model_dump"):
+        return dict(raw)
+    dumped = decoded.model_dump(mode="json")
+    return {
+        key: value
+        for key, value in dumped.items()
+        if key in _PROVISION_TERMS_FIELDS
+    }
 
 
 def _validate_opening(
