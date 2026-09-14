@@ -820,3 +820,68 @@ async def test_settlement_coordinator_fails_closed_on_bad_escrow(
             request=_settlement_request(neg_id),
         )
     assert await db.load_escrow(escrow_uid="0xbad") is None
+
+
+def test_a_stored_listing_row_is_projected_before_the_domain_validates_it():
+    """The fulfillment input carries a domain listing, not a database row.
+
+    `prepare` reads the seller's order with `load_listing`, which returns
+    this storefront's own row: the domain payload plus its bookkeeping
+    columns. That row then reaches the domain's `normalize_listing` hook,
+    and `ApiCreditsListing` sets `extra="forbid"` -- so issuance failed
+    with eleven `extra_forbidden` errors before making a single call to the
+    credits service, and the only record was the reason persisted on the
+    escrow row.
+
+    Both halves are asserted. The raw row must still be refused: that
+    strictness is the wire contract for a listing arriving from a
+    registry, and narrowing the model instead of the caller would have
+    traded this bug for a weaker guard on untrusted input.
+    """
+    from apicredits_storefront.domain_runtime import _domain_order
+    from domains.apicredits.domain_runtime import _normalize_listing
+    from domains.apicredits.schema import ApiCreditsListing
+    from pydantic import ValidationError
+
+    resource = {
+        "service_name": "weather-api",
+        "resource_id": "weather-quota",
+        "price_per_token": "1",
+        "token": "0x9fe46736679d2d9a65f0992f2272de9f3c7fa6e0",
+        "chain": "anvil",
+        "base_url": "http://sample-app:8085",
+        "capacity_site_id": "default",
+    }
+    row = {
+        "kind": "api_credits.v1",
+        # Stored as JSON text, which the domain model's own before-validator
+        # already handles; this test is about the surrounding columns.
+        "listing_resource": json.dumps(resource),
+        "accepted_escrows": [{"chain_name": "anvil", "escrow_address": "0x1111"}],
+        "settlement_options": [],
+        "demands": [],
+        # The bookkeeping the model forbids, named by the e2e failure.
+        "listing_id": "d6f4e4dc-06de-4a2f-a4df-b2f1bf64abab",
+        "agent_url": "http://credits-storefront:8000/",
+        "oracle_address": None,
+        "paused": False,
+        "publication_clauses": None,
+        "seller_principal": {"scheme": "eip191", "identifier": "0x90f7"},
+        "status": "open",
+        "registry_status": "published",
+        "created_at": "2026-09-14T00:00:00+00:00",
+        "updated_at": "2026-09-14T00:00:00+00:00",
+        "max_duration_seconds": 3600,
+    }
+
+    with pytest.raises(ValidationError):
+        _normalize_listing(row)
+
+    projected = _domain_order(row)
+    assert set(projected) <= set(ApiCreditsListing.model_fields)
+
+    listing = _normalize_listing(projected)
+    assert listing.listing_resource.service_name == "weather-api"
+    assert listing.listing_resource.resource_id == "weather-quota"
+    # The payload the issuance call actually needs survives the projection.
+    assert listing.accepted_escrows == row["accepted_escrows"]
