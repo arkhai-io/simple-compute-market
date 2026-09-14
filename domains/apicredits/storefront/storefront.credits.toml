@@ -85,6 +85,23 @@ identities = [
   { scheme = "ed25519", identifier = "MheGyI4OZPRUijPSgdBucxha4zXw5mJ5hSELYon6x_c" },
 ]
 
+[credits.expected_authorities]
+# The credits service's own principal, for verifying the signed responses
+# to this storefront's issuance and key-administration calls. Same service
+# and same value as [capacity.sites.default.expected_authorities] above,
+# deliberately pinned separately: that key belongs to the
+# capacity-publication subsystem and is a merged list, so appending a
+# capacity authority there must not widen what the credits boundary
+# accepts. A unit test asserts the two agree while both exist.
+#
+# Public half of dev-env/identities/api-credits-service.ed25519. Setting
+# this is half of the signed-authentication flip; the other half is
+# APICREDITS_SITE_SIGNING_KEY_FILE on the service in
+# domains/apicredits/compose.yml.
+identities = [
+  { scheme = "ed25519", identifier = "MheGyI4OZPRUijPSgdBucxha4zXw5mJ5hSELYon6x_c" },
+]
+
 [negotiation]
 # Empty: the API-credits guards (api_credits_round_zero_guard,
 # buyer_counter_guard, credit_quota_guard, key_owned_by_buyer_principal,

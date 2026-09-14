@@ -276,6 +276,43 @@ def credits_admin_key() -> str:
     return value
 
 
+def credits_expected_authorities() -> TrustedIdentitySet | None:
+    """The authority principals whose signed responses this storefront accepts.
+
+    ``None`` when unset, which leaves the client on the shared-secret gate
+    -- matching the credits service, which enables signed authentication
+    only once its own signing credential is selected. The two are flipped
+    together.
+
+    Read from `[credits.expected_authorities]` rather than reusing
+    `[capacity.sites.default.expected_authorities]`, even though both name
+    the same service today. The capacity key belongs to the
+    capacity-publication subsystem, and a deployment may reconfigure or
+    drop that subsystem while credits issuance still needs an authority.
+    More importantly it is a dynaconf *list*: merged rather than replaced,
+    so whatever a deployment appends to the capacity site's authorities
+    would silently widen what the credits boundary trusts. Two privilege
+    surfaces should not share one knob. `test_credits_trust_pins.py`
+    asserts the two agree while both are present, so the duplication
+    cannot drift unnoticed.
+    """
+    raw = settings.get("credits.expected_authorities.identities", None)
+    if not raw:
+        return None
+    if not isinstance(raw, (list, tuple)):
+        raise RuntimeError(
+            "credits.expected_authorities.identities must be a list"
+        )
+    try:
+        return TrustedIdentitySet(
+            identities=tuple(Identity.model_validate(v) for v in raw),
+        )
+    except (TypeError, ValueError) as exc:
+        raise RuntimeError(
+            "invalid credits.expected_authorities pin"
+        ) from exc
+
+
 AGENT_ID: str = _validate_agent_id(settings.get("agent_id", ""))
 AGENT_NAME: str = str(settings.get("agent_name") or AGENT_ID)
 BASE_URL_OVERRIDE: str = str(settings.get("base_url", "http://localhost:8002"))

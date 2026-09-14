@@ -55,3 +55,30 @@ The reference harnesses (identical structure in each language):
 - Python — `python/tests/conformance_runner.py`
 - TypeScript — `typescript/test/conformanceRunner.ts`
 - Rust — `rust/tests/conformance.rs` (+ `rust/tests/common/mod.rs`)
+
+## Scope: this fixture does not cover service authentication
+
+`session.json` pins the gate's *inbound* contract — the end user's
+`Authorization` header, the allow/deny decision, the deny body, and the
+verify/consume call counts. It says nothing about how a middleware
+authenticates itself to the credits service on the way out.
+
+That matters, because the two are no longer the same across
+implementations. The credits service authenticates every non-health route
+against a signed marketplace identity v2 envelope and signs every
+response, including refusals. It accepts signed requests **or** the legacy
+`X-Admin-Key` shared secret, never both, chosen by its own configuration.
+
+- **Python** signs (`apicredits_middleware.signing`), gated behind the
+  `signed` extra. It works against either service configuration.
+- **TypeScript** and **Rust** send the shared secret only. They work
+  against a service that has not enabled signed authentication, and are
+  refused by one that has — including the compose topology in this
+  repository, where it is enabled.
+
+So all three still reproduce this fixture exactly, and are still
+behaviourally identical in everything it asserts. They are not
+interchangeable deployments. Closing that gap needs a validation path for
+the TS and Rust clients first — there is no e2e scenario exercising either
+— and is tracked as `3ax.10` in
+`openspec/changes/repair-storefront-alkahest-configuration/tasks.md`.

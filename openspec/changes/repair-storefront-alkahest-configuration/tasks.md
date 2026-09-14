@@ -2370,7 +2370,7 @@ failures.
       service, and pinning a service component's principal there would hand a
       component the role that exists for humans.
 
-- [ ] 3ax.8 **Remaining, and larger than "the sample app":** the gated side is
+- [x] 3ax.8 **Remaining, and larger than "the sample app":** the gated side is
       `apicredits_middleware`, a published client library with its own
       conformance suite, not the sample application. Its `client.py` builds one
       static `{"X-Admin-Key": …}` dict and posts through a single `_post`, so
@@ -2389,10 +2389,86 @@ failures.
       shared secret. Delivering and enabling are separated so neither blocks
       the other, and so the flip is one line when the two clients are ready.
 
+      **Done.** Both clients sign and the flip is set. What the estimate above
+      got wrong, and what it got right:
+
+      Right: the third table. `apicredits_middleware.client` now carries the
+      three operation names, signs `key_id` on the two keyed routes and the
+      empty resource on the batch route, and
+      `domains/apicredits/tests/test_credits_route_parity.py` asserts both
+      clients against `CREDITS_ROUTE_CONTRACTS` -- operations, admitted roles,
+      and where each resource comes from. Mutation-checked: renaming one
+      operation fails three assertions.
+
+      Right: "one line" for the flip, once both clients were ready. There is
+      no partial enablement to stage it with -- `main.py` composes
+      `SiteAuthMiddleware` *or* `AdminKeyAuthMiddleware`, never both, so the
+      two clients and the flip had to land in one change.
+
+      Wrong: "a published client library with its own conformance suite" read
+      as a blocker, and it is not. There are *three* implementations (Python,
+      TypeScript, Rust) replaying one `session.json`, but that fixture pins
+      the **inbound** `Authorization` header, the gate's decision, the deny
+      body and the verify/consume call counts. It says nothing about outbound
+      headers to the credits service. Signing is orthogonal to it, and the
+      Python suite including conformance still passes unchanged. The real
+      consequence is narrower and is recorded as 3ax.10.
+
+      Not in the original estimate: response verification. Signing the request
+      while accepting an unsigned answer would authenticate the question and
+      not the answer, so both clients verify every response including
+      refusals, and `CreditsServiceClient` refuses a signer supplied without a
+      trust set rather than silently doing half of it. The kit's own
+      `verify_authenticated_response` could not be reused: it fixes
+      `expected_role` to `seller` because it verifies storefronts, while the
+      authority signs its responses as `service`.
+
+      Also not in the estimate: `market_identity` becomes a dependency of a
+      library embedded in third-party seller applications. It is an optional
+      extra (`arkhai-apicredits-middleware[signed]`) behind a deferred import,
+      so an unsigned deployment keeps the httpx-only dependency set and a
+      missing install is reported as configuration rather than as an
+      `ImportError` from inside a request. The sample app requires the extra,
+      which is why `dist-apicredits-sample-app` now depends on the middleware
+      wheel.
+
+      Verified by round-trip rather than by inspection: the real
+      `TokensClient` and `CreditsServiceClient` drive `httpx.ASGITransport`
+      against a real `SiteAuthMiddleware` composed with the real contract
+      table and the committed dev seeds, with a negative control so the
+      acceptances are not vacuous. That is what caught
+      `expected_principals` being a `Callable[[str], TrustedIdentitySet]`
+      rather than a mapping -- passing a dict degraded silently to "no trusted
+      principals configured for role 'service'", which no table comparison
+      would have seen.
+
 - [ ] 3ax.9 Carried from 3ar.6 and now larger: this adds *two* dev identities
       to the committed-file-plus-hardcoded-pin-plus-compose-mount pattern
       rather than one. Confirmed as acceptable for now against a dedicated
       cleanup pass on the topic.
+
+- [ ] 3ax.10 **The TypeScript and Rust middlewares cannot authenticate to a
+      signed credits service.** Neither signs, and the service accepts signed
+      requests or the shared secret, never both, so with `3ax.8`'s flip in
+      place both are locked out of the deployed configuration. They still
+      satisfy `conformance/session.json`, which is why this is a deployment
+      compatibility gap rather than a conformance break.
+
+      Accepted deliberately rather than fixed here. Implementing ed25519, RFC
+      8785 canonical JSON and the request envelope in two more languages is
+      its own change, and the human's position is that neither
+      implementation is supportable until it has a full test layer consistent
+      with `TESTING.md` -- there is no e2e scenario exercising either one, so
+      a signing implementation in them could not be validated. The Python
+      middleware is the reference and the only one in the compose topology
+      (`arkhai:apicredits-sample-app`).
+
+      Two things this owes: a validation path (an e2e scenario per
+      implementation, or a shared harness that drives each against the real
+      service), and then signing itself. `README.md` under
+      `domains/apicredits/middleware/` should say plainly that the TS and Rust
+      clients require a shared-secret service until then, so a third-party
+      user discovers it from documentation rather than from a 401.
 
 ## 4. Closeout
 

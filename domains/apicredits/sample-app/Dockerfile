@@ -25,7 +25,8 @@ RUN --mount=type=cache,target=/home/appuser/.cache/uv,uid=1000 \
         --find-links /home/appuser/dist \
         --refresh-package arkhai-apicredits-sample-app \
         --refresh-package arkhai-apicredits-middleware \
-        arkhai-apicredits-sample-app arkhai-apicredits-middleware
+        --refresh-package arkhai-kit-identity \
+        arkhai-apicredits-sample-app "arkhai-apicredits-middleware[signed]"
 
 # Stage 2: lean runtime.
 FROM --platform=linux/amd64 python:${PYTHON_VERSION}-slim AS runtime

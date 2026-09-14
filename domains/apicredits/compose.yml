@@ -66,14 +66,19 @@ services:
       # credits but not mint or revoke them. `admin` is left unset: an
       # admin-role request is then refused naming the gap, which is the
       # right answer while no human holds a credential for this service.
+      # The flip. Selecting the mounted credential turns on signed
+      # authentication for every non-health route at once -- there is no
+      # per-role or per-route coexistence with the shared-secret gate
+      # (main.py chooses one middleware or the other), which is why this
+      # lands in the same change as both clients' signing.
+      - APICREDITS_SITE_SIGNING_KEY_FILE=/run/secrets/arkhai/api-credits-service/credential
       - APICREDITS_TRUSTED_PRINCIPALS=@json {"seller":[{"scheme":"eip191","identifier":"0x90f79bf6eb2c4f870365e785982e1f101e93b906"}],"service":[{"scheme":"ed25519","identifier":"w75DsOFODAFDR0gVcITNTSeEvG_SRQU9GyTulF2w7IM"}]}
     volumes:
       - ${APICREDITS_ADMIN_KEY_FILE:?set API-credits admin credential file}:/run/secrets/arkhai/api-credits-admin-key:ro
-      # The authority's own signing credential. Mounted but not yet selected
-      # by APICREDITS_SITE_SIGNING_KEY_FILE: setting that turns on signed
-      # authentication for every route, and the gated application still
-      # presents a shared secret. Delivering the credential and enabling it
-      # are separate steps so neither is blocked on the other.
+      # The authority's own signing credential, now selected by
+      # APICREDITS_SITE_SIGNING_KEY_FILE above. Both callers sign, so
+      # enabling it is safe: until they did, turning this on would have
+      # refused every request instead of only the unsigned ones.
       - ${APICREDITS_SERVICE_IDENTITY_CREDENTIAL_FILE:?set API-credits service signer credential file}:/run/secrets/arkhai/api-credits-service/credential:ro
       - api-credits-service-data:/app/data
     restart: unless-stopped
@@ -103,6 +108,13 @@ services:
       # The gated application's `service`-role credential, mounted for the
       # same reason and on the same terms as the authority's above.
       - APICREDITS_MIDDLEWARE_IDENTITY_CREDENTIAL_FILE=/run/secrets/arkhai/api-credits-gated-app/credential
+      # Whose signed responses the gate accepts: the authority's own
+      # principal, the public half of
+      # dev-env/identities/api-credits-service.ed25519. Required once the
+      # credential above is set -- signing requests without verifying
+      # responses would let anything on the path answer for the service,
+      # including denying or granting access.
+      - APICREDITS_MIDDLEWARE_AUTHORITY_PRINCIPALS=[{"scheme":"ed25519","identifier":"MheGyI4OZPRUijPSgdBucxha4zXw5mJ5hSELYon6x_c"}]
       - APICREDITS_MIDDLEWARE_AMOUNT_PER_REQUEST=1
       # Short verify cache so a re-purchase (top-up) becomes visible to
       # the gate quickly — the e2e polls through this window.

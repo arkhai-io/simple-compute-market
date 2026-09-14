@@ -47,6 +47,10 @@ class TokenGateMiddleware:
                 service_url=config.service_url,
                 admin_key=config.admin_key,
                 timeout=config.request_timeout_seconds,
+                # Resolved here, at construction, so a gated app configured
+                # to sign but unable to fails at startup rather than denying
+                # every metered request once traffic arrives.
+                signing=config.build_signing(),
             )
             gate = TokenGate(config, client)
         self.app = app

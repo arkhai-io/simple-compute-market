@@ -57,7 +57,7 @@ HOSTED_STRIPE_TEST_AUTHORITY_ENVIRONMENT ?=
 HOSTED_STRIPE_TEST_AUTHORITY_ENV_FILE ?=
 HOSTED_STRIPE_TEST_EVIDENCE ?= $(DIST_DIR)/hosted-stripe-test-evidence.json
 
-.PHONY: e2e-dev-identities e2e-dev-identities-env check-hosted-client-pin fix-hosted-client-pin review-wheelhouse review-wheelhouse-scope build build-dev build-seller build-apicredits-service build-apicredits-storefront build-apicredits-sample-app test test-core test-provisioning test-provisioning-iac test-registry test-storefront test-vms-buyer test-apicredits test-apicredits-middleware test-kits dist dist-release dist-ci dist-ci-kits dist-storefront-client dist-policy dist-compute-provisioning dist-compute-provisioning-service dist-kits verify-hosted-release dist-registry-client dist-registry dist-identity dist-core dist-arkhai-core-buyer dist-arkhai-core-storefront dist-bare-metal-storefront dist-alkahest dist-config dist-clean init init-prerequisites init-submodules init-zero-tier init-buyer init-storefront init-arkhai-core-registry push-runtime-artifacts push-images push-dev-image
+.PHONY: e2e-dev-identities e2e-dev-identities-env check-hosted-client-pin fix-hosted-client-pin review-wheelhouse review-wheelhouse-scope build build-dev build-seller build-apicredits-service build-apicredits-storefront build-apicredits-sample-app test test-core test-provisioning test-provisioning-iac test-registry test-storefront test-vms-buyer test-apicredits test-apicredits-middleware test-kits dist dist-release dist-ci dist-ci-kits dist-storefront-client dist-policy dist-compute-provisioning dist-compute-provisioning-service dist-kits verify-hosted-release dist-registry-client dist-registry dist-identity dist-core dist-arkhai-core-buyer dist-arkhai-core-storefront dist-bare-metal-storefront dist-apicredits-domain dist-apicredits-service dist-apicredits-storefront dist-apicredits-middleware dist-apicredits-sample-app dist-apicredits-buyer dist-alkahest dist-config dist-clean init init-prerequisites init-submodules init-zero-tier init-buyer init-storefront init-arkhai-core-registry push-runtime-artifacts push-images push-dev-image
 .PHONY: build-hosted-producer
 .PHONY: test-release-tooling test-deployment-packaging prepare-hosted-compose prepare-hosted-compose-local hosted-preflight hosted-preflight-local hosted-stripe-test-local hosted-compose-up hosted-compose-restart hosted-compose-clean hosted-stripe-test hosted-stripe-test-stop
 .PHONY: dist-arkhai-core-registry
@@ -159,6 +159,37 @@ dist-bare-metal-buyer: dist-core dist-arkhai-core-buyer dist-registry-client dis
 
 dist-bare-metal-storefront: dist-core dist-arkhai-core-storefront dist-kits ## Build the bare-metal storefront contribution wheel.
 	cd domains && $(MAKE) dist-bare-metal-storefront DIST_DIR=$(DIST_DIR)
+
+# API-credits wheels, forwarded to `domains/Makefile` the same way the
+# bare-metal ones above are. `dist-domains` already builds all of these
+# through the domain aggregate; these exist so one wheel can be rebuilt on
+# its own while iterating, which is what
+# `domains/apicredits/sample-app/Makefile` and
+# `domains/apicredits/middleware/python`'s workflow both tell you to do
+# from the repository root.
+#
+# Prerequisites are each wheel's own internal dependencies, so a target
+# invoked directly on a clean tree resolves instead of failing in
+# `uv build` on a missing `.dist` entry.
+dist-apicredits-domain: dist-core dist-identity dist-alkahest dist-policy ## Build arkhai-apicredits-domain wheel into .dist/
+	cd domains && $(MAKE) dist-apicredits-domain DIST_DIR=$(DIST_DIR)
+
+dist-apicredits-service: dist-identity dist-ci-kits ## Build arkhai-apicredits-service wheel into .dist/
+	cd domains && $(MAKE) dist-apicredits-service DIST_DIR=$(DIST_DIR)
+
+dist-apicredits-storefront: dist-apicredits-domain dist-arkhai-core-storefront dist-registry-client dist-ci-kits dist-config ## Build arkhai-apicredits-storefront wheel into .dist/
+	cd domains && $(MAKE) dist-apicredits-storefront DIST_DIR=$(DIST_DIR)
+
+dist-apicredits-middleware: dist-identity ## Build arkhai-apicredits-middleware wheel into .dist/
+	cd domains && $(MAKE) dist-apicredits-middleware DIST_DIR=$(DIST_DIR)
+
+# Depends on the middleware wheel because the sample app requires it with
+# the `signed` extra, which resolves arkhai-kit-identity out of .dist/.
+dist-apicredits-sample-app: dist-apicredits-middleware ## Build arkhai-apicredits-sample-app wheel into .dist/
+	cd domains && $(MAKE) dist-apicredits-sample-app DIST_DIR=$(DIST_DIR)
+
+dist-apicredits-buyer: dist-apicredits-domain dist-arkhai-core-buyer dist-ci-kits dist-config ## Build arkhai-apicredits-buyer wheel into .dist/
+	cd domains && $(MAKE) dist-apicredits-buyer DIST_DIR=$(DIST_DIR)
 
 verify-hosted-release: ## Verify the staged signed production release and exact client wheel.
 	$(VERIFY_HOSTED_RELEASE)
