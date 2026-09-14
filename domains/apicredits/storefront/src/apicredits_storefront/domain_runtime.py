@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 from dataclasses import dataclass, replace
 from typing import Any
 from market_identity import Identity
@@ -16,6 +17,8 @@ from market_core import (
     MarketDomainContract,
     validate_domain_contract,
 )
+
+logger = logging.getLogger(__name__)
 
 
 def _build_market_domain_contract() -> MarketDomainContract:
@@ -344,10 +347,23 @@ async def persist_api_credit_settlement_outcome(
             ),
         )
         return
+    reason = outcome.reason or "fulfillment failed"
+    # Logged as well as persisted. The reason reaches the buyer in the
+    # settle-status body, and nowhere else: a settlement that fails before
+    # its first call to the credits service left no trace in this
+    # storefront's own output, so an operator holding only the container
+    # log saw a `202` and then silence. `issuance_error:` prefixes carry a
+    # caught exception, which is the one case where the reason is the only
+    # record that it happened at all.
+    logger.warning(
+        "[SETTLE] settlement failed for escrow %s: %s",
+        prepared.mechanism_ref,
+        reason,
+    )
     await sqlite_client.update_escrow(
         escrow_uid=prepared.mechanism_ref,
         status="failed",
-        reason=outcome.reason or "fulfillment failed",
+        reason=reason,
     )
 
 

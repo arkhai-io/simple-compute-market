@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import re
 from dataclasses import dataclass, field
 from enum import Enum
@@ -157,7 +158,37 @@ def assert_market_run_succeeded(run: Any, *, command: str) -> None:
         )
     raise AssertionError(
         f"{command} failed rc={run.returncode}; {detail}.\n"
+        f"{_terminal_event_detail(events)}"
         f"stderr (redacted tail): {_redacted(run.stderr())}\n"
         "Full role-scoped process output is not copied into test evidence: it "
         "may contain a transient domain credential."
     )
+
+
+#: How many trailing run-log events to quote in full.
+_TERMINAL_EVENT_TAIL = 3
+
+
+def _terminal_event_detail(events: list[Any]) -> str:
+    """Quote the last few run-log events, not just their names.
+
+    The name list says which phase was reached and nothing about why it
+    stopped. Every field that answers "why" travels in the event *body*:
+    a `settlement_poll` carries the seller's terminal status, `run_ended`
+    carries the outcome and error, and a `*_failed` event carries its
+    reason. A poll that returns `failed` therefore looked identical in the
+    failure message to one that timed out, and identifying which cost a
+    run.
+
+    Deliberately domain-neutral -- no key is named, the trailing events are
+    quoted whatever they are -- and redacted on the same terms as stderr,
+    because a terminal settlement body can carry issued credentials.
+    """
+    if not events:
+        return ""
+    tail = events[-_TERMINAL_EVENT_TAIL:]
+    try:
+        rendered = json.dumps(tail, sort_keys=True, default=str)
+    except (TypeError, ValueError):
+        rendered = repr(tail)
+    return f"last events (redacted): {_redacted(rendered)}\n"
