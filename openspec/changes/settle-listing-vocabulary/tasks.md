@@ -498,8 +498,30 @@ effects; an assertion that changes for any other reason is the defect.
       together and a row must never be observable with one migrated and the other not.
       - **Status:** Done at the migration level for both databases, asserting the new column name **and** the settled inner key together, since the pair runs in one migration and a row must never be observable half-migrated.
       - **Correction:** **NARROWED by code review.** Migration-level only; "upgrade then serve listings" is not established. See task 11.6.
-- [ ] 9.12 **System.** Old-producer cardinality skew across deployable services. This
+- [x] 9.12 **System.** Old-producer cardinality skew across deployable services. This
       is system-level evidence for the alias, not a substitute for 9.8.
+      - **Status (2026-09-14).** Asserted in
+        `e2e-tests/.../vms/test_compute_dynamic_listings.py`'s
+        `test_00a_registers_executor_host_and_syncs_projection`. That
+        scenario's pool already declared its cardinality under
+        `listing_mode`, the deprecated ingestion spelling, so the skew was
+        already being exercised across the site authority, the projection
+        and the storefront's publication -- it was simply never asserted,
+        which made the concession an assumption rather than evidence.
+
+        Two assertions, because the alias owes two things. The listings the
+        scenario goes on to create are the declared cardinality being
+        honoured end to end. And the storefront's
+        `listing_cardinality_mode_explanations` must carry an
+        operator-visible notice naming the deprecated key for that pool: an
+        alias that silently worked forever would be its own defect.
+
+        Verified against the real resolver rather than only by reading it:
+        `{"listing_mode": "specific_resource"}` resolves to
+        `specific_resource` with the notice `pool declares 'listing_mode';
+        rename it to 'listing_cardinality_mode'`, and a pool carrying both
+        spellings resolves to the settled one with no notice. Needs one e2e
+        run to confirm the projection surfaces it over HTTP.
 - [ ] 9.13 **System.** The cutover gate rejects an incompatible peer before mutations
       resume, per the identity-contract pattern.
 - [x] 9.14 **Integration.** A buyer client declaring the new schema identity queries a

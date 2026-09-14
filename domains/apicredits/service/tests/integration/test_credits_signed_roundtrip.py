@@ -15,8 +15,6 @@ envelope is stubbed; only the handler bodies are.
 
 from __future__ import annotations
 
-import importlib.util
-import sys
 from pathlib import Path
 
 import httpx
@@ -25,29 +23,23 @@ from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from market_identity import Identity, TrustedIdentitySet, create_signer
 from market_site.auth import SiteAuthMiddleware
-
-_REPO = Path(__file__).resolve().parents[3]
-_MIDDLEWARE_SRC = _REPO / "domains/apicredits/middleware/python/src"
-_IDENTITIES = _REPO / "dev-env/identities"
-
-if str(_MIDDLEWARE_SRC) not in sys.path:
-    sys.path.insert(0, str(_MIDDLEWARE_SRC))
-
-from apicredits_middleware.client import TokensClient  # noqa: E402
-from apicredits_middleware.signing import (  # noqa: E402
+from middleware.route_contracts import CREDITS_ROUTE_CONTRACTS
+from apicredits_middleware.client import TokensClient
+from apicredits_middleware.signing import (
     AuthoritySigning,
     build_signer,
     build_trusted_authorities,
 )
 
+#: The monorepo root, five levels up from this file, for the committed dev
+#: identities. Nothing else is resolved by path: both clients and the
+#: authority's route table are installed or importable here.
+_REPO = Path(__file__).resolve().parents[5]
+_IDENTITIES = _REPO / "dev-env/identities"
+
 
 def _contracts():
-    path = _REPO / "domains/apicredits/service/src/middleware/route_contracts.py"
-    spec = importlib.util.spec_from_file_location("_rc_roundtrip", path)
-    assert spec and spec.loader
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module.CREDITS_ROUTE_CONTRACTS
+    return CREDITS_ROUTE_CONTRACTS
 
 
 def _only_role(role: str, identity: Identity):

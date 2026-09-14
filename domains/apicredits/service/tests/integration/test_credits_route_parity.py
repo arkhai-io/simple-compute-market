@@ -11,48 +11,27 @@ every call to that route. Three tables therefore have to stay identical:
 - `apicredits_middleware.client` (the gated app, `service` role),
 - `domains.apicredits.settlement.credits_client` (the storefront, `seller`).
 
-`route_contracts.py` is loaded from its path rather than imported: it lives
-in the service distribution under the package name `middleware`, which
-collides with the published `apicredits_middleware` this test also needs.
-It is a leaf module over `market_site.auth`, so loading it directly costs
-nothing and avoids installing the service to check a table.
+Lives in the service's own suite because the service owns the authoritative
+table, and because the two clients it compares against need `fastapi` and
+`market_site` -- which the service has and the domain package deliberately
+does not. `middleware.route_contracts` imports directly here; there is no
+name collision with the published `apicredits_middleware`.
 """
 
 from __future__ import annotations
 
-import importlib.util
-import sys
-from pathlib import Path
-
 import pytest
 
-_REPO = Path(__file__).resolve().parents[3]
-_CONTRACTS = (
-    _REPO
-    / "domains/apicredits/service/src/middleware/route_contracts.py"
-)
-_MIDDLEWARE_SRC = _REPO / "domains/apicredits/middleware/python/src"
-
-
-def _load_contracts():
-    spec = importlib.util.spec_from_file_location(
-        "_credits_route_contracts", _CONTRACTS
-    )
-    assert spec and spec.loader, _CONTRACTS
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module.CREDITS_ROUTE_CONTRACTS
+from middleware.route_contracts import CREDITS_ROUTE_CONTRACTS
 
 
 @pytest.fixture(scope="module")
 def contracts():
-    return {c.operation: c for c in _load_contracts()}
+    return {c.operation: c for c in CREDITS_ROUTE_CONTRACTS}
 
 
 @pytest.fixture(scope="module")
 def middleware_client():
-    if str(_MIDDLEWARE_SRC) not in sys.path:
-        sys.path.insert(0, str(_MIDDLEWARE_SRC))
     from apicredits_middleware import client
 
     return client

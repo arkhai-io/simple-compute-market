@@ -206,10 +206,42 @@ class TestComputeDynamicListings:
 
         sites = refresh_storefront_projections(storefront_admin_client)
 
+        # The cardinality hint above was declared under `listing_mode`, the
+        # deprecated ingestion spelling, which makes this pool an unupgraded
+        # producer: every other renamed boundary in the vocabulary cutover is
+        # loud on skew, and this one alone stays accepted so a site does not
+        # have to move in lockstep. Asserting it here is what makes the
+        # concession evidence rather than an assumption -- the listings this
+        # scenario goes on to create are the cardinality being honoured
+        # end to end, across the site authority, the projection, and the
+        # storefront's publication.
+        #
+        # The notice is the other half. A pool whose value arrived under the
+        # deprecated key earns an operator-visible entry naming what to
+        # change, so an alias that silently worked forever would be a defect
+        # of its own.
+        status = storefront_admin_client.get_system_status()
+        explanations = status.listing_cardinality_mode_explanations or {}
+        notices = {
+            pool_id: notice
+            for site_notices in explanations.values()
+            for pool_id, notice in (site_notices or {}).items()
+        }
+        assert DYNAMIC_POOL_ID in notices, (
+            f"pool {DYNAMIC_POOL_ID!r} declared its cardinality under the "
+            f"deprecated `listing_mode` key, so the storefront owes an "
+            f"operator notice naming it; got {notices!r}"
+        )
+        assert "listing_mode" in notices[DYNAMIC_POOL_ID], (
+            f"the notice for {DYNAMIC_POOL_ID!r} should name the deprecated "
+            f"key an operator must change: {notices[DYNAMIC_POOL_ID]!r}"
+        )
+
         dynamic_state.executor_host_registered = True
         log.info(
-            "[dynamic] executor host %s registered (gpus=%s); projections confirmed for %s",
-            E2E_DYNAMIC_HOST, host.gpu_count, sorted(sites),
+            "[dynamic] executor host %s registered (gpus=%s); projections "
+            "confirmed for %s; deprecated cardinality key reported for %s",
+            E2E_DYNAMIC_HOST, host.gpu_count, sorted(sites), DYNAMIC_POOL_ID,
         )
 
     def test_01_creates_slice_listings(

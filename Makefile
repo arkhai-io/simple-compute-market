@@ -174,7 +174,7 @@ dist-bare-metal-storefront: dist-core dist-arkhai-core-storefront dist-kits ## B
 dist-apicredits-domain: dist-core dist-identity dist-alkahest dist-policy ## Build arkhai-apicredits-domain wheel into .dist/
 	cd domains && $(MAKE) dist-apicredits-domain DIST_DIR=$(DIST_DIR)
 
-dist-apicredits-service: dist-identity dist-ci-kits ## Build arkhai-apicredits-service wheel into .dist/
+dist-apicredits-service: dist-identity dist-ci-kits dist-apicredits-domain dist-apicredits-middleware ## Build arkhai-apicredits-service wheel into .dist/
 	cd domains && $(MAKE) dist-apicredits-service DIST_DIR=$(DIST_DIR)
 
 dist-apicredits-storefront: dist-apicredits-domain dist-arkhai-core-storefront dist-registry-client dist-ci-kits dist-config ## Build arkhai-apicredits-storefront wheel into .dist/
