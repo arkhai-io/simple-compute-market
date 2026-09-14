@@ -108,14 +108,29 @@ class SqlAlchemyFulfillmentTransaction:
         service that dispatched the job -- which is why the field it fills
         stayed null.
 
+        Written through ``self.db`` -- the session this transaction already
+        holds -- and not through a ledger call that opens its own. The caller
+        reaches this from inside a transaction that has already written, so it
+        holds SQLite's single writer slot; a second session cannot acquire
+        that slot while this one owns it, and would instead wait out the
+        engine's busy timeout and raise ``database is locked``. Because the
+        failure is swallowed below, that cost surfaces only as the dispatch
+        call returning one busy timeout later than it should. Using the
+        caller's session is also what makes the same-transaction guarantee in
+        ``FulfillmentOrchestrator.begin_fulfillment`` true rather than
+        intended.
+
         Best-effort by construction. The fulfillment itself has already been
         acknowledged; failing it here would trade a working VM for a missing
-        cross-reference.
+        cross-reference. ``update_lease_fields_in_session`` validates before it
+        mutates, so a raise leaves this transaction's own writes intact and
+        committable.
         """
         if self._capacity_ledger is None:
             return
         try:
-            self._capacity_ledger.update_lease_fields(
+            self._capacity_ledger.update_lease_fields_in_session(
+                self.db,
                 capacity_reservation_id,
                 create_job_id=job_id,
             )

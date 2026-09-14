@@ -217,6 +217,60 @@ See `design.md`'s "Design-promotion record" table.
       A test of a duck-typed collaborator that only checks the call happened
       is not a test of the collaborator.
 
+- [x] 10.8 **The corrected method name then deadlocked against its own
+      caller.** `update_lease_fields` is the right name, but it is the
+      session-owning form: it opens a session of its own and commits.
+      `attach_executor_job` is called from inside the acknowledgement
+      transaction — by design, per 10.6 — and that session has already
+      written, so it holds SQLite's single writer slot. The ledger's second
+      session cannot take that slot while its own caller holds it, so it
+      waited out the provisioning service's 30s busy timeout and raised
+      `database is locked`.
+
+      The best-effort `except` absorbed it for the second run running, so
+      `create_job_id` was still null. The new symptom was the latency: the
+      30s stall sat inside `POST /fulfillment/begin`, which pushed the
+      `provision`/`job_submitted` stage event 30s past settlement submission
+      and timed out the e2e's 15s wait at stage `08b` in both VM scenarios —
+      failing *earlier* than 10.7 did, which turned nine passing downstream
+      stages into skips via `require_state`.
+
+      Fixed by splitting `update_lease_fields` the way
+      `assign_settlement_resource` was already split: a session-owning
+      wrapper that commits, delegating to `update_lease_fields_in_session`,
+      which neither commits nor takes the ledger lock.
+      `attach_executor_job` passes `self.db`, which is what makes 10.6's
+      same-transaction guarantee true rather than merely intended. The
+      sibling `SqlAlchemySchedulingTransaction` was already doing this
+      correctly for five ledger calls, including a write
+      (`assign_settlement_resource_in_session`) — the convention existed and
+      was one module away.
+
+      `db/database.py`'s busy timeout is documented as keeping contending
+      sessions waiting instead of erroring. That reasoning holds only for
+      *independent* writers; when the contender is inside the lock holder's
+      own call stack, waiting cannot succeed, so the timeout converts an
+      immediate error into a guaranteed 30s stall followed by the same error.
+      A busy timeout is not a defence against self-contention.
+
+      Neither existing test could see it, for two independent reasons: the
+      transaction was constructed with a `MagicMock()` session, which holds
+      no writer slot, and the ledger fixture used a `StaticPool` in-memory
+      engine, which shares one connection across every session so no two
+      connections ever contend. The regression test makes both halves real —
+      a file-backed engine and a genuinely held `BEGIN IMMEDIATE` — with a
+      1s busy timeout so a recurrence fails in a second rather than thirty.
+      It reproduces `database is locked` on the unpatched tree.
+
+      One of the two tests first written for this passed unpatched and had to
+      be rewritten: asserting that a caller's rollback discards the handle
+      held for the wrong reason, because unpatched the write never lands at
+      all. It now also asserts the value is visible inside the caller's
+      session before the rollback, which fails both unpatched and against a
+      ledger that committed independently. Same lesson as 10.4 and 10.7,
+      third occurrence: a new test that has not been run against the
+      unpatched tree is not yet evidence.
+
 - [ ] 6.8 **Roadmap currency** (added 2026-08-06 by `add-development-roadmap`, which extended `openspec/README.md#plan-closeout-requirements` from five parts to six). Update this change's rows in `docs/development/ROADMAP.md` — it currently appears as an open gap under both Goal 1 (stale physical-placement fields on the current fulfillment path) and Goal 2 (accepted VM shape not reaching the provisioning request) — and record the update in the design-promotion record. Appended rather than folded into 6.6, per `AGENTS.md`'s rule to amend rather than replace implementation history.
 - [ ] 6.9 **Campaign index currency** (part seven, added when `openspec/README.md#plan-closeout-requirements` was extended from six parts to seven). Appended rather than folded into an existing task, per `AGENTS.md`'s rule to amend rather than replace implementation history. Update this change's row, and its campaign's dependency graph, in `openspec/changes/README.md` to match its state at completion, or record the disposition here if its status and campaign placement are both unchanged.
 

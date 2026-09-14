@@ -1463,34 +1463,85 @@ class CapacityLedgerService:
         Returns ``None`` when the reservation does not exist or is already
         terminal.  Used by the operator PATCH endpoint to update expiry time,
         host coordinates, or job references without driving a state transition.
+
+        Opens and commits its own transaction. A caller that must land this
+        write inside a transaction it already holds open should use
+        ``update_lease_fields_in_session`` against that session, not this
+        method: on SQLite a second session cannot take the writer slot the
+        caller itself is holding, so this form would wait out the busy
+        timeout and then fail with ``database is locked``.
         """
         with self._lock, self._session_factory() as db:
-            reservation = db.get(CapacityReservation, capacity_reservation_id)
-            terminal = {
-                ReservationState.released.value,
-                ReservationState.force_released.value,
-                ReservationState.provisioning_failed.value,
-            }
-            if reservation is None or reservation.state in terminal:
-                return None
-            self._sync_executor_fields(
-                reservation,
+            result = self.update_lease_fields_in_session(
+                db,
+                capacity_reservation_id,
                 offering_mode=offering_mode,
                 executor_target=executor_target,
                 executor_ref=executor_ref,
+                lease_start_utc=lease_start_utc,
+                lease_end_utc=lease_end_utc,
+                vm_remove_job_id=vm_remove_job_id,
+                release_job_id=release_job_id,
+                create_job_id=create_job_id,
             )
-            if lease_start_utc is not None:
-                reservation.lease_start_utc = str(lease_start_utc)
-            if lease_end_utc is not None:
-                reservation.lease_end_utc = str(lease_end_utc)
-            self._sync_release_job_fields(
-                reservation,
-                release_job_id=release_job_id or vm_remove_job_id,
-            )
-            if create_job_id is not None:
-                reservation.create_job_id = create_job_id
             db.commit()
-            return self._reservation_payload(reservation)
+            return result
+
+    def update_lease_fields_in_session(
+        self,
+        db: Session,
+        capacity_reservation_id: str,
+        *,
+        offering_mode: str | None = None,
+        executor_target: str | None = None,
+        executor_ref: Mapping[str, Any] | None = None,
+        lease_start_utc: str | None = None,
+        lease_end_utc: str | None = None,
+        vm_remove_job_id: str | None = None,
+        release_job_id: str | None = None,
+        create_job_id: str | None = None,
+    ) -> dict[str, Any] | None:
+        """Session-scoped core of ``update_lease_fields``.
+
+        Does not commit and does not take the ledger lock: the caller owns the
+        transaction boundary and decides when this write lands relative to its
+        own. Exists so a caller that has already written on another
+        repository's behalf -- and therefore holds SQLite's single writer slot
+        -- can record lease-tail fields inside that same transaction instead of
+        contending with itself from a second session.
+
+        Validation precedes every mutation for all argument combinations:
+        ``_sync_executor_fields`` performs both of its raising checks before
+        either of its assignments, and nothing after it raises. A raise
+        therefore leaves ``db`` exactly as it was found, so a best-effort
+        caller may swallow the exception without rolling back its own writes
+        and without wrapping this in a savepoint.
+        """
+        reservation = db.get(CapacityReservation, capacity_reservation_id)
+        terminal = {
+            ReservationState.released.value,
+            ReservationState.force_released.value,
+            ReservationState.provisioning_failed.value,
+        }
+        if reservation is None or reservation.state in terminal:
+            return None
+        self._sync_executor_fields(
+            reservation,
+            offering_mode=offering_mode,
+            executor_target=executor_target,
+            executor_ref=executor_ref,
+        )
+        if lease_start_utc is not None:
+            reservation.lease_start_utc = str(lease_start_utc)
+        if lease_end_utc is not None:
+            reservation.lease_end_utc = str(lease_end_utc)
+        self._sync_release_job_fields(
+            reservation,
+            release_job_id=release_job_id or vm_remove_job_id,
+        )
+        if create_job_id is not None:
+            reservation.create_job_id = create_job_id
+        return self._reservation_payload(reservation)
 
     def find_active_lease_by_vm_target(
         self, vm_host: str, vm_target: str

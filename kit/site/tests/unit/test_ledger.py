@@ -1346,3 +1346,111 @@ def test_no_hook_configured_is_a_silent_no_op():
     ledger.release(capacity_reservation_id=result["capacity_reservation_id"])
 
 
+# ---------------------------------------------------------------------------
+# update_lease_fields: the session-owning form and its session-scoped core
+#
+# The two exist because a caller already holding a write transaction on this
+# database cannot use the session-owning form: on SQLite it would open a
+# second session and contend for the writer slot its own caller is holding,
+# waiting out the busy timeout before failing. Same split, same reason, as
+# assign_settlement_resource / assign_settlement_resource_in_session.
+# ---------------------------------------------------------------------------
+
+
+def _held(ledger: CapacityLedgerService) -> str:
+    ledger.register_resource(resource_id="lease-r1", total_units=4)
+    reservation = ledger.reserve(
+        claim={"offering_mode": "vm", "gpu_count": 1},
+        deal_ref={"market": "vms"},
+    )
+    assert reservation is not None
+    return reservation["capacity_reservation_id"]
+
+
+def test_update_lease_fields_in_session_applies_the_same_fields():
+    """The core is what the committing wrapper delegates to, so the two must
+    not be able to drift in what they write."""
+    ledger = _make_ledger()
+    capacity_reservation_id = _held(ledger)
+
+    with ledger._session_factory() as db:
+        payload = ledger.update_lease_fields_in_session(
+            db,
+            capacity_reservation_id,
+            executor_target="vm-7",
+            lease_end_utc="2026-01-01 00:00",
+            create_job_id="job-7",
+        )
+        db.commit()
+
+    assert payload is not None
+    reservation = ledger.get_reservation(capacity_reservation_id)
+    assert reservation["executor_target"] == "vm-7"
+    assert reservation["lease_end_utc"] == "2026-01-01 00:00"
+    assert reservation["create_job_id"] == "job-7"
+
+
+def test_update_lease_fields_in_session_leaves_the_commit_to_the_caller():
+    """The point of the split: the caller owns the transaction boundary, so a
+    caller that rolls back discards this write along with its own."""
+    ledger = _make_ledger()
+    capacity_reservation_id = _held(ledger)
+
+    with ledger._session_factory() as db:
+        ledger.update_lease_fields_in_session(
+            db, capacity_reservation_id, create_job_id="job-7"
+        )
+        db.rollback()
+
+    assert ledger.get_reservation(capacity_reservation_id)["create_job_id"] is None
+
+
+def test_update_lease_fields_still_commits_on_its_own():
+    """The operator PATCH endpoint calls the wrapper and expects it to be
+    durable without any transaction management of its own."""
+    ledger = _make_ledger()
+    capacity_reservation_id = _held(ledger)
+
+    ledger.update_lease_fields(capacity_reservation_id, create_job_id="job-7")
+
+    assert ledger.get_reservation(capacity_reservation_id)["create_job_id"] == "job-7"
+
+
+def test_update_lease_fields_in_session_validates_before_it_mutates():
+    """Asserted because a best-effort caller depends on it.
+
+    `SqlAlchemyFulfillmentTransaction.attach_executor_job` swallows a failure
+    from this method while holding its own uncommitted writes in the same
+    session, and does so without a savepoint. That is only safe if a raise
+    leaves the session clean -- so a rejected call must not have applied the
+    fields it was also passed.
+    """
+    ledger = _make_ledger()
+    capacity_reservation_id = _held(ledger)
+
+    with ledger._session_factory() as db:
+        with pytest.raises(CapacityConflictError):
+            ledger.update_lease_fields_in_session(
+                db,
+                capacity_reservation_id,
+                offering_mode="bare_metal",
+                executor_target="vm-7",
+                create_job_id="job-7",
+            )
+        db.commit()
+
+    reservation = ledger.get_reservation(capacity_reservation_id)
+    assert reservation["executor_target"] is None
+    assert reservation["create_job_id"] is None
+
+
+def test_update_lease_fields_in_session_returns_none_for_a_terminal_reservation():
+    """Same terminal guard as the wrapper -- it is the wrapper's own."""
+    ledger = _make_ledger()
+    capacity_reservation_id = _held(ledger)
+    ledger.release(capacity_reservation_id=capacity_reservation_id)
+
+    with ledger._session_factory() as db:
+        assert ledger.update_lease_fields_in_session(
+            db, capacity_reservation_id, create_job_id="job-7"
+        ) is None
