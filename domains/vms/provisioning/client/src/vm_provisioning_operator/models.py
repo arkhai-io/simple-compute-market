@@ -550,6 +550,16 @@ class LeaseResponse(BaseModel):
     lease_end_utc: datetime
     status: str
     create_job_id: Optional[str] = None
+    #: The reservation's canonical release handle. For a VM this is the
+    #: durable ``fulfillment_id`` of the teardown aggregate, which is what a
+    #: caller needs to read teardown status -- not an Ansible queue job id.
+    #:
+    #: ``vm_remove_job_id`` below is a VM-conditional mirror of this same
+    #: value, written only when the offering mode is VM and always to what
+    #: ``release_job_id`` already holds. It is retained for wire
+    #: compatibility and is slated for retirement (see task `10.5`);
+    #: ``release_job_id`` is the field to read.
+    release_job_id: Optional[str] = None
     vm_remove_job_id: Optional[str] = None
     created_at: datetime
     updated_at: datetime

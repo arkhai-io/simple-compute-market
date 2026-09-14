@@ -22,6 +22,7 @@ Settings access uses the ``settings.SECTION.KEY`` attribute pattern
 from __future__ import annotations
 
 import logging
+import time
 from dataclasses import dataclass
 from typing import Any, Optional
 
@@ -764,6 +765,46 @@ def release_reserved_resources(storefront_admin_client):
             )
     except Exception as exc:
         log.warning("[teardown] Could not release reserved resources: %s", exc)
+
+
+# ---------------------------------------------------------------------------
+# wait_for_fulfillment_state helper — bounded convergence-driven wait
+# ---------------------------------------------------------------------------
+
+def wait_for_fulfillment_state(
+    provisioning_client,
+    fulfillment_id: str,
+    expected: str,
+    *,
+    max_cycles: int = 6,
+    interval: float = 0.5,
+) -> dict:
+    """Run convergence cycles until a fulfillment reaches ``expected``.
+
+    Teardown completion is not something a single cycle can be relied on to
+    observe. ``run_cycle`` dispatches and then converges in one pass, so one
+    cycle is *usually* enough once the provider has finished -- but the
+    record is claimed per pass, and whether a given cycle both dispatches
+    and observes a just-completed provider result is a timing property of
+    the worker, not a guarantee of the contract. Asserting after exactly one
+    cycle encodes that timing as a requirement.
+
+    Bounded and reported rather than open-ended: a teardown that genuinely
+    stalls still fails, and the message names the state it stalled in, so
+    this cannot turn a real stall into a pass.
+    """
+    last: dict = {}
+    for _ in range(max_cycles):
+        provisioning_client.run_fulfillment_convergence_cycle()
+        last = provisioning_client.get_fulfillment_status(fulfillment_id)
+        if last.get("state") == expected:
+            return last
+        time.sleep(interval)
+    pytest.fail(
+        f"fulfillment {fulfillment_id} did not reach {expected!r} within "
+        f"{max_cycles} convergence cycles; last state "
+        f"{last.get('state')!r}: {last}"
+    )
 
 
 # ---------------------------------------------------------------------------

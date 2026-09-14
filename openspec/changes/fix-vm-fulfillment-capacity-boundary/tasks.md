@@ -148,6 +148,29 @@ See `design.md`'s "Design-promotion record" table.
       deliberately left alone -- those are domain-shaped projections beside
       the generic `executor_ref`/`executor_target`, not duplicated storage.
 
+      **Partial groundwork since (2026-09-14).** `LeaseResponse`
+      (`vm_provisioning_operator.models`) now also publishes
+      `release_job_id`, and the VM adapter's lease view fills both from the
+      one ledger field. Additive and wire-compatible -- no consumer had to
+      change -- and it removes the reason a caller would reach for
+      `vm_remove_job_id`: the canonical name is now readable from the VM
+      lease endpoint, which it previously was not.
+
+      That gap was the defect behind e2e stage `10b`. The ledger held
+      `release_job_id` correctly and the *compute contract* endpoint
+      (`/api/v1/contract/leases/{id}`) published it, but the VM adapter's
+      `/api/v1/leases/{id}` -- which is the endpoint
+      `SyncProvisioningClient.get_lease` calls, and therefore the one the
+      e2e's `DealLease` view reads -- published only `vm_remove_job_id`. A
+      caller asking for the documented name got `None` from a lease that
+      was demonstrably releasing. Two lease contracts for one reservation,
+      disagreeing about which names they expose, is the cost of the mirror
+      this task exists to retire.
+
+      The existing coverage asserted the handle on the *ledger*, which is
+      why this survived: asserting the ledger is not asserting the
+      contract. `test_leases_api.py` now asserts it on the API response.
+
 - [x] 10.6 **`create_job_id` is populated by the service that dispatches the
       job.** The field was plumbed end to end with a `None` default at every
       hop and no VM supplier, so the VM path left it null while bare metal

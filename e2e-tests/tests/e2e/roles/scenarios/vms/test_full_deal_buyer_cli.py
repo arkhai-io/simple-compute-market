@@ -67,9 +67,11 @@ Phase 9 — Provisioning completion
   09c  Lease registered:
          GET provisioning /api/v1/leases/by-escrow/{uid} -> active/pending lease
 
-Phase 10 — Explicit interruption and durable teardown
+Phase 10 — Lease expiry and durable teardown
   10a  Pause automatic lease servicing, arm the provider teardown gate, and
-       interrupt the deal through the storefront admin control plane.
+       back-date the lease end so the watchdog reads it as expired. Expiry is
+       what ends a lease in production; admin interruption is an escape hatch
+       for a deal sold as interruptible and is covered elsewhere.
   10b  Run one lease cycle → reservation releasing, fulfillment id recorded,
        fulfillment teardown_dispatch_pending, capacity still held.
 
@@ -1384,33 +1386,8 @@ class TestStage09c_LeaseRegistered:
 
 
 # ===========================================================================
-# Phase 10 — Explicit interruption enters durable teardown
+# Phase 10 — Lease expiry enters durable teardown
 # ===========================================================================
-
-
-class TestStage10a_ExplicitInterruptionSetup:
-    def test_10a_interrupt_deal_and_arm_teardown_gate(
-        self,
-        provisioning_client,
-        provisioning_test_client,
-        storefront_admin_client,
-        deal_state: DealState,
-    ):
-        """Request external interruption and hold provider teardown at its gate."""
-        require_state(deal_state, "lease_id", "real_escrow_uid", "reserved_resource_id")
-        assert provisioning_client.pause_lease_watchdog().get("paused") is True
-        delete_mock_rules_if_present(provisioning_test_client, REMOVE_RULE_ID)
-        provisioning_test_client.add_mock_rule(
-            rule_id=REMOVE_RULE_ID,
-            match={"vm_action": "vm_remove"},
-            pause_before_result=True,
-        )
-        interrupted = storefront_admin_client.admin_interrupt_deal(
-            deal_state.real_escrow_uid, reason="e2e_external_interruption"
-        )
-        assert interrupted.get("status") == "interrupted", interrupted
-        assert interrupted.get("capacity_reservation_id") == deal_state.lease_id
-        deal_state._termination_requested = True
 
 
 #: How far back to move a lease end so the watchdog treats it as expired.
@@ -1538,9 +1515,15 @@ class TestStage11b_TeardownCompletion:
 
         provisioning_test_client.resume_rule(REMOVE_RULE_ID)
         provisioning_test_client.drain(timeout=30)
-        provisioning_client.run_fulfillment_convergence_cycle()
-        fulfillment = provisioning_client.get_fulfillment_status(deal_state.fulfillment_id)
-        assert fulfillment.get("state") == "torn_down", fulfillment
+        # Convergence-driven, not one-shot: `drain` returns when the provider
+        # job is no longer gated, which is not the same instant its outcome is
+        # durably readable by `converge_teardowns`.
+        from tests.e2e.roles.scenarios.vms.conftest import (
+            wait_for_fulfillment_state as _wait_state,
+        )
+        fulfillment = _wait_state(
+            provisioning_client, deal_state.fulfillment_id, "torn_down",
+        )
 
         release_summary = provisioning_client.check_leases()
         assert release_summary.get("released", 0) >= 1, release_summary
