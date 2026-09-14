@@ -33,7 +33,7 @@ import logging
 import re
 import threading
 import time
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any, Protocol
 
@@ -619,19 +619,79 @@ def _required_header(request: Request, name: str) -> str:
     return value
 
 
+def canonical_site_request_body(
+    method: str,
+    path: str,
+    body: Any = EMPTY_BODY,
+    *,
+    query: Mapping[str, Any] | None = None,
+) -> Any:
+    """Build the canonical signed body, including query input that changes behavior.
+
+    A GET carries no body, so without this a caller could alter the
+    parameters that decide *what* it reads -- a feed cursor, a reservation
+    filter -- and the signature would still verify over an empty body.
+    `kit/site-client` already signs the query for exactly these routes;
+    this is the authority side of that agreement, which was missing. The
+    symptom was `invalid_proof` on `GET /api/v1/capacity/events` from a
+    caller whose signer, principal and role were correct and who succeeded
+    on every route without a query.
+
+    Typed on purpose. `request.query_params` yields strings, while the
+    client signs `after`/`limit` as the integers it holds, so echoing the
+    raw query back would reproduce the mismatch in the other direction.
+    The coercion and the defaults are the contract, and they match
+    `canonical_provisioning_request_body`'s entries for the same two paths
+    -- two site authorities disagreeing about the canonical form of one
+    route is a debugging cost paid by whoever holds both logs.
+
+    Routes without query input are unchanged: the body is the body.
+    """
+
+    values = dict(query or {})
+    if method.upper() == "GET" and path == "/api/v1/capacity/reservations":
+        return {
+            name: values[name]
+            for name in ("state", "escrow_uid")
+            if name in values and values[name] is not None
+        }
+    if method.upper() == "GET" and path == "/api/v1/capacity/events":
+        return {
+            "after": int(values.get("after", 0)),
+            "limit": int(values.get("limit", 500)),
+        }
+    return body
+
+
 async def _request_body(request: Request) -> tuple[Any, str | None]:
     raw = await request.body()
     content_type = (
         request.headers.get("content-type", "").split(";", 1)[0].strip().lower()
     )
+    body: Any
     if raw and (content_type == "application/json" or content_type.endswith("+json")):
         try:
-            return json.loads(raw), None
+            body = json.loads(raw)
         except (UnicodeDecodeError, json.JSONDecodeError):
             return EMPTY_BODY, "Authenticated site bodies must be valid JSON"
-    if raw:
+    elif raw:
         return EMPTY_BODY, "Authenticated site bodies must be JSON"
-    return EMPTY_BODY, None
+    else:
+        body = EMPTY_BODY
+
+    query: dict[str, Any] = {}
+    for key in sorted(set(request.query_params.keys())):
+        query_values = request.query_params.getlist(key)
+        query[key] = query_values[0] if len(query_values) == 1 else query_values
+    try:
+        return canonical_site_request_body(
+            request.method,
+            request.url.path,
+            body,
+            query=query,
+        ), None
+    except (TypeError, ValueError):
+        return EMPTY_BODY, "Authenticated site query values are invalid"
 
 
 def _response_body(response: Response, raw: bytes) -> Any:

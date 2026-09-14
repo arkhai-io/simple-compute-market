@@ -10,6 +10,17 @@ package inversion that outlives this change. What it buys is that a route added
 to one table and not the other fails here, at the cheapest point, rather than
 as a 403 from a live authority against a client that signed a different
 operation name.
+
+Scope: this covers the *route table* -- method, path, operation, roles and
+resource binding. What gets signed has a second dimension the table says
+nothing about, the canonical body, and the two halves disagreed there for the
+query-bearing routes while every assertion here passed. A GET's parameters are
+signed by the client and were not canonicalized by the authority, which is the
+same failure this docstring anticipates arriving as a different value rather
+than a different operation name. That half is asserted behaviorally, by driving
+the real client against the real middleware, in
+`tests/integration/test_site_auth_middleware.py`; see
+`market_site.auth.canonical_site_request_body`.
 """
 
 from __future__ import annotations

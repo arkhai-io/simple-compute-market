@@ -439,3 +439,95 @@ async def test_a_role_with_no_configured_principals_is_refused(client):
         )
     assert response.status_code == 403
     _assert_signed_by_authority(response)
+
+
+# ---------------------------------------------------------------------------
+# The real client against the real middleware, for the query routes
+#
+# Every test above signs with this module's own `_signed_headers`, which
+# builds the envelope the way the *server* expects. That is the right shape
+# for testing the middleware's own branches, and it is exactly why a
+# client/server disagreement about the canonical form was invisible here:
+# both sides of the assertion were the server's view.
+#
+# `GET /api/v1/capacity/events` carries no body and two parameters that
+# decide what it returns. `market_site_client` signs those parameters;
+# the authority did not canonicalize them, so the proof verified over a
+# different envelope than the one signed and every call was refused with
+# `invalid_proof` -- from a caller whose signer, principal and role were
+# all correct, and which succeeded on every route without a query.
+#
+# So these drive the actual `SiteCapacityClient`. Nothing about the
+# envelope is reconstructed locally.
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def query_app() -> FastAPI:
+    """The two capacity routes whose behavior is decided by query input."""
+    application = FastAPI()
+
+    @application.get("/api/v1/capacity/events")
+    def events(after: int = 0, limit: int = 500) -> dict[str, Any]:
+        return {"events": [], "latest_version": after + limit}
+
+    @application.get("/api/v1/capacity/reservations")
+    def reservations(
+        state: str | None = None, escrow_uid: str | None = None
+    ) -> dict[str, Any]:
+        return {"reservations": [{"state": state, "escrow_uid": escrow_uid}]}
+
+    application.add_middleware(
+        SiteAuthMiddleware,
+        signer_provider=lambda: AUTHORITY_SIGNER,
+        expected_principals=_expected_principals,
+        contracts=CAPACITY_ROUTE_CONTRACTS,
+    )
+    return application
+
+
+def _real_client(query_app: FastAPI):
+    from market_site_client import SiteCapacityClient
+
+    return SiteCapacityClient(
+        "http://authority",
+        signer=SELLER_SIGNER,
+        expected_authorities=TrustedIdentitySet(
+            identities=(AUTHORITY_SIGNER.identity,),
+        ),
+        transport=httpx.ASGITransport(app=query_app),
+    )
+
+
+@pytest.mark.asyncio
+async def test_the_real_client_can_read_the_event_feed(query_app):
+    """`after`/`limit` are signed as integers on both sides.
+
+    The client holds them as ints; `request.query_params` yields strings.
+    Echoing the raw query back on the authority side would reproduce the
+    mismatch in the other direction, so the coercion is the contract.
+    """
+    client = _real_client(query_app)
+    events, head = await client.events_after(0, limit=1)
+    assert events == []
+    assert head == 1
+
+
+@pytest.mark.asyncio
+async def test_the_real_client_can_list_reservations_with_a_filter(query_app):
+    client = _real_client(query_app)
+    rows = await client.list_reservations(escrow_uid="0xabc")
+    assert rows == [{"state": None, "escrow_uid": "0xabc"}]
+
+
+@pytest.mark.asyncio
+async def test_the_real_client_can_list_reservations_with_no_filter(query_app):
+    """No filters is an empty query dict, not an absent one.
+
+    `list_reservations()` signs `{}` while a bodyless request hashes as
+    `EMPTY_BODY`, so this is a distinct case from the filtered call above
+    and not covered by it.
+    """
+    client = _real_client(query_app)
+    rows = await client.list_reservations()
+    assert rows == [{"state": None, "escrow_uid": None}]
