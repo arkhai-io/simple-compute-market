@@ -125,3 +125,18 @@ services:
     env_file:
       - ${APICREDITS_IDENTITY_ENV_FILE:?set API-credits signer credential environment file}
       - ${APICREDITS_EVM_WALLET_ENV_FILE:?set API-credits EVM wallet environment file}
+    environment:
+    # Same gap as `bob-storefront` above, and the same fix. The wallet env
+    # file carries `AGENT_PRIV_KEY`, which the buyer-side loader in
+    # `kit/config` understands; this service resolves its EVM credential
+    # through Dynaconf under the `APICREDITS_STOREFRONT` prefix, so that
+    # name never reaches it and the Alkahest mechanism builds no clients.
+    # The symptom is not a startup failure: the storefront publishes,
+    # negotiates and accepts, then refuses `POST /api/v1/settle/...` with
+    # `chain 'anvil' not configured — available chains: []`.
+    #
+    # Anvil account 3, matching `AGENT_WALLET_ADDRESS` in that env file and
+    # `[wallet].address` in `storefront.credits.toml`. `@str` for the reason
+    # given under `provisioning` below: a bare `0x...` is a valid TOML
+    # integer literal and would arrive as a decimal.
+      - APICREDITS_STOREFRONT_WALLET__PRIVATE_KEY=@str 0x7c852118294e51e653712a81e05800f419141751be58f605c371e15141b007a6
