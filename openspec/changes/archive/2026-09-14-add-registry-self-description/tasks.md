@@ -21,7 +21,17 @@
 
 - [x] 4.1 Promote descriptor behavior and the possession-versus-endorsement boundary to `openspec/specs/registry-discovery/{spec,architecture}.md`.
 - [x] 4.2 Update `docs/development/ARCHITECTURE.md` and `docs/development/DEPLOYMENT_AND_CONFIG.md` with the current ownership and configuration model.
-- [ ] 4.3 Add the active change to the roadmap and active-change index, then remove those temporary entries at closeout.
+- [x] 4.3 Add the active change to the roadmap and active-change index, then remove those temporary entries at closeout.
+
+      **Done (2026-09-14).** The active-change row was removed from
+      `openspec/changes/README.md`'s independent-changes table and the change
+      recorded in the archived-and-superseded section instead, matching how
+      the five rows removed on 2026-09-04 were handled.
+
+      No roadmap entry existed to remove. Recording that explicitly rather
+      than silently: registry self-description was never mapped to a roadmap
+      goal gap, so there was nothing to reflect at completion and nothing to
+      withdraw at closeout.
 
 ## 5. Validation
 
@@ -35,8 +45,23 @@
 - [x] 6.3 **Documentation compliance.** Confirm every material decision is present in permanent current-state documentation.
 - [x] 6.4 **Narrative compression.** Reduce completed tasks to final behavior, evidence, and promotion destinations.
 - [x] 6.5 **Roadmap currency.** Remove the implemented gap from the roadmap current-state boundary.
-- [ ] 6.6 **Promotion.** Complete the design-promotion record and archive the change after review.
-- [ ] 6.7 **Campaign index currency** (part seven, added when `openspec/README.md#plan-closeout-requirements` was extended from six parts to seven). Appended rather than folded into an existing task, per `AGENTS.md`'s rule to amend rather than replace implementation history. Update this change's row, and its campaign's dependency graph, in `openspec/changes/README.md` to match its state at completion, or record the disposition here if its status and campaign placement are both unchanged.
+- [x] 6.6 **Promotion.** Complete the design-promotion record and archive the change after review.
+
+      **Done (2026-09-14).** The spec delta in
+      `specs/registry-discovery/spec.md` was already promoted into
+      `openspec/specs/registry-discovery/spec.md` -- the requirement
+      "Registry self-description is authority-authenticated" and all four of
+      its scenarios are present there -- so archival carries no unpromoted
+      material. The delta is retained in the archived directory, as
+      `2026-09-04-pool-declared-offering-modes` retains its own.
+
+      Archived to `openspec/changes/archive/2026-09-14-add-registry-self-description/`.
+- [x] 6.7 **Campaign index currency** (part seven, added when `openspec/README.md#plan-closeout-requirements` was extended from six parts to seven). Appended rather than folded into an existing task, per `AGENTS.md`'s rule to amend rather than replace implementation history. Update this change's row, and its campaign's dependency graph, in `openspec/changes/README.md` to match its state at completion, or record the disposition here if its status and campaign placement are both unchanged.
+      **Done (2026-09-14).** This change has no campaign, so there is no
+      dependency graph to reconcile -- recorded explicitly rather than
+      omitted. Its row left the independent-active-changes table and the
+      archived-and-superseded section names it, so the index no longer
+      offers it as work a reader may start next.
 
 ## Design promotion record
 

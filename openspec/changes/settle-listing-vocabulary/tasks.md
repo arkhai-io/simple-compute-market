@@ -701,7 +701,7 @@ Both established by inspection against an unmodified checkout, so neither is
 this change's defect — but the first blocks 9.12/9.13 and must not be recorded
 as a validation failure of this change.
 
-- [ ] 11.13 Record that `make -C e2e-tests test-e2e` cannot reach the test
+- [x] 11.13 Record that `make -C e2e-tests test-e2e` cannot reach the test
       phase in CI for a reason unrelated to this change. Its
       `docker compose up -d --wait` loads the root `docker-compose.yml`, which
       mounts `${APICREDITS_REGISTRY_IDENTITY_CREDENTIAL_FILE:?...}`. The `:?`
@@ -713,6 +713,19 @@ as a validation failure of this change.
       byte-identical to the unmodified checkout. Raise it as its own issue
       rather than folding a harness gap into this change's scope; 9.12 and 9.13
       stay unrun until it is resolved.
+
+      **Resolved (2026-09-14), not by this change.** `Makefile` now emits
+      `APICREDITS_REGISTRY_IDENTITY_CREDENTIAL_FILE` from the e2e identity
+      directory alongside the `VMS_*` equivalents, so the `:?` mount no
+      longer hard-fails with nothing set. That came from
+      `provide-e2e-development-identities`, archived 2026-09-12, which is
+      the change this one correctly declined to absorb.
+
+      The suite has since reached the test phase and reported a full green
+      run, so the harness gap recorded here is closed. 9.12 and 9.13 are
+      therefore no longer blocked -- they remain open because each is a
+      specific system-level assertion that still needs deliberate
+      verification, which a green suite does not supply on its own.
 - [ ] 11.14 Confirm the two `[tool.uv] find-links` entries added to
       `domains/vms/domain` and `domains/bare_metal` never enter a Docker build
       context. The e2e build log warns
