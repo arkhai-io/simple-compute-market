@@ -466,6 +466,31 @@ class SettlementRepository:
             db.expunge(record)
         return candidates
 
+    def release_worker_claims(self, db: Session, *, worker_id: str) -> int:
+        """Release every claim currently held by ``worker_id``.
+
+        The bulk form of ``clear_claim``, for a worker that wants its next
+        cycle to see rows it is itself holding under an unexpired lease.
+        Scoped to one worker on purpose: another worker's lease may be
+        covering a provider call still in flight, and clearing that would
+        let two cycles act on one operation.
+
+        Returns the number of claims released, so a caller can log whether
+        an explicit advance actually needed to reclaim anything.
+        """
+
+        begin_sqlite_write_transaction(db)
+        held = (
+            db.query(SettlementRecord)
+            .filter(SettlementRecord.claimed_by == worker_id)
+            .all()
+        )
+        for record in held:
+            record.claimed_by = None
+            record.claim_expires_at = None
+        db.flush()
+        return len(held)
+
     def clear_claim(
         self,
         db: Session,

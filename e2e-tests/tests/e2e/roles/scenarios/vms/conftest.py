@@ -22,7 +22,6 @@ Settings access uses the ``settings.SECTION.KEY`` attribute pattern
 from __future__ import annotations
 
 import logging
-import time
 from dataclasses import dataclass
 from typing import Any, Optional
 
@@ -723,6 +722,47 @@ def ensure_storefront_resumed(storefront_admin_client):
         log.warning("[teardown] Could not verify/clear global pause: %s", exc)
 
 
+@pytest.fixture(scope="module")
+def convergence_advanced_explicitly(provisioning_client):
+    """This module drives fulfillment convergence; the timer does not.
+
+    Opt-in, via ``pytest.mark.usefixtures`` on the modules that actually
+    drive convergence. Deliberately *not* autouse: other scenarios in this
+    directory reach ``active`` on the timer without ever asking for a cycle
+    (``test_buy_oneshot_buyer_cli`` arms an ungated create rule and waits
+    for the lease), and pausing it for them would stall their fulfillment
+    instead of making it deterministic. A module takes this fixture when it
+    has taken responsibility for advancing convergence itself.
+
+    Every convergence transition this scenario asserts is triggered by an
+    explicit advance (09a for the create half, 11a/11b for teardown), so
+    the 30s timer is stopped for the duration. Leaving it running made
+    those stages races rather than steps: a timer cycle that claimed a row
+    while its provider call was still gated would hold the claim lease,
+    and the stage's own cycle would then reach nothing at all.
+
+    Paused here rather than in a stage so the whole module is covered
+    including setup, and resumed in the finaliser so it is restored even
+    when a stage fails. That matters because the provisioning service is
+    shared across scenario modules and the create half of convergence
+    (`dispatching` -> `active`) still relies on the timer elsewhere --
+    leaving it paused would stall the next module's fulfillment rather
+    than this one's.
+    """
+    try:
+        paused = provisioning_client.pause_fulfillment_convergence()
+        log.info("[setup] Fulfillment convergence timer paused: %s", paused)
+    except Exception as exc:
+        log.warning("[setup] Could not pause fulfillment convergence: %s", exc)
+    yield
+    try:
+        provisioning_client.resume_fulfillment_convergence()
+    except Exception as exc:
+        log.warning(
+            "[teardown] Could not resume fulfillment convergence: %s", exc
+        )
+
+
 @pytest.fixture(scope="module", autouse=True)
 def reap_buyer_settle_subprocess(deal_state: DealState):
     """Stop the buyer-CLI ``market settle`` subprocess if it outlived the test.
@@ -771,40 +811,50 @@ def release_reserved_resources(storefront_admin_client):
 # wait_for_fulfillment_state helper — bounded convergence-driven wait
 # ---------------------------------------------------------------------------
 
-def wait_for_fulfillment_state(
+def advance_fulfillment_to(
     provisioning_client,
     fulfillment_id: str,
     expected: str,
     *,
-    max_cycles: int = 6,
-    interval: float = 0.5,
+    max_advances: int = 4,
 ) -> dict:
-    """Run convergence cycles until a fulfillment reaches ``expected``.
+    """Advance convergence until a fulfillment reaches ``expected``.
 
-    Teardown completion is not something a single cycle can be relied on to
-    observe. ``run_cycle`` dispatches and then converges in one pass, so one
-    cycle is *usually* enough once the provider has finished -- but the
-    record is claimed per pass, and whether a given cycle both dispatches
-    and observes a just-completed provider result is a timing property of
-    the worker, not a guarantee of the contract. Asserting after exactly one
-    cycle encodes that timing as a requirement.
+    No sleeps, per `docs/development/TESTING.md`'s async test discipline:
+    each iteration is one *explicit* advance, and the only thing between
+    iterations is a request the test made.
 
-    Bounded and reported rather than open-ended: a teardown that genuinely
-    stalls still fails, and the message names the state it stalled in, so
-    this cannot turn a real stall into a pass.
+    `advance-cycle` rather than `run-cycle` because `run-cycle` is an
+    advance attempt, not an advance. The pending branches of the
+    convergence watchdog deliberately leave their claim in place so the
+    claim lease spaces the next provider poll, and `claim_pending` skips a
+    row whose lease has not lapsed -- 5s for the first claim, doubling
+    after. So a `run-cycle` issued straight after a pending poll cannot
+    touch the row, and any number of them in that window is still zero
+    advances. `advance-cycle` releases the watchdog's own claims first.
+
+    Requires the convergence watchdog to be paused (see
+    `pause_fulfillment_convergence`), which is also what stops the 30s
+    timer from claiming the same rows mid-scenario.
+
+    ``max_advances`` is small deliberately: with the timer stopped and the
+    provider gate released, each transition needs exactly one advance, so
+    needing several means something is wrong and the failure names the
+    state it stalled in.
     """
-    last: dict = {}
-    for _ in range(max_cycles):
-        provisioning_client.run_fulfillment_convergence_cycle()
-        last = provisioning_client.get_fulfillment_status(fulfillment_id)
+    last: dict = provisioning_client.get_fulfillment_status(fulfillment_id)
+    for _ in range(max_advances):
         if last.get("state") == expected:
             return last
-        time.sleep(interval)
-    pytest.fail(
-        f"fulfillment {fulfillment_id} did not reach {expected!r} within "
-        f"{max_cycles} convergence cycles; last state "
-        f"{last.get('state')!r}: {last}"
-    )
+        provisioning_client.advance_fulfillment_convergence_cycle()
+        last = provisioning_client.get_fulfillment_status(fulfillment_id)
+    if last.get("state") != expected:
+        pytest.fail(
+            f"fulfillment {fulfillment_id} did not reach {expected!r} within "
+            f"{max_advances} explicit convergence advances; last state "
+            f"{last.get('state')!r}: {last}"
+        )
+    return last
 
 
 # ---------------------------------------------------------------------------

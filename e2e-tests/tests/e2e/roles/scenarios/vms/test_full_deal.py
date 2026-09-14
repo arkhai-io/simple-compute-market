@@ -118,7 +118,14 @@ from tests.e2e.roles.scenarios.vms.conftest import (
 
 log = logging.getLogger(__name__)
 
-pytestmark = pytest.mark.e2e_deal
+pytestmark = [
+    pytest.mark.e2e_deal,
+    # This module advances fulfillment convergence itself, so the
+    # 30s timer is stopped for its duration -- otherwise a timer
+    # cycle can claim a row mid-provider-call and the module's own
+    # explicit cycle reaches nothing.
+    pytest.mark.usefixtures("convergence_advanced_explicitly"),
+]
 
 # ---------------------------------------------------------------------------
 # Offer / demand spec — constants shared across all stages
@@ -1198,15 +1205,25 @@ class TestStage09a_ProvisioningCompletes:
            once the convergence watchdog observes the provider's terminal
            status (openspec/specs/fulfillment/spec.md's fulfillment
            convergence worker requirement) -- job completion alone doesn't
-           advance it. ``run_fulfillment_convergence_cycle()`` triggers
-           that deterministically instead of sleeping against its real
-           background interval.
+           advance it. ``advance_fulfillment_convergence_cycle()``
+           triggers that deterministically instead of sleeping against
+           its real background interval.
+
+        ``advance`` rather than ``run``: a plain cycle is an advance
+        *attempt*. The watchdog keeps its claim on a row whose provider
+        answered "pending", so the claim lease spaces the next poll and a
+        further cycle inside that lease reaches nothing. Here that is a
+        race -- the 30s timer could have claimed this row while the job
+        above was still gated -- and it is the same defect that stalled
+        stage 11b. The advance releases the watchdog's own claims first;
+        the timer is paused for this module by
+        ``convergence_advanced_explicitly``.
         """
         require_state(deal_state, "fulfillment_id")
 
         provisioning_test_client.resume_rule(PROV_RULE_ID)
         provisioning_test_client.drain(timeout=30)
-        provisioning_client.run_fulfillment_convergence_cycle()
+        provisioning_client.advance_fulfillment_convergence_cycle()
 
         status = provisioning_client.get_fulfillment_status(deal_state.fulfillment_id)
         assert status.get("state") == "active", (
@@ -1598,7 +1615,7 @@ class TestStage11a_TeardownDispatch:
         self, provisioning_client, storefront_admin_client, deal_state: DealState,
     ):
         require_state(deal_state, "fulfillment_id", "reserved_resource_id")
-        diagnostics = provisioning_client.run_fulfillment_convergence_cycle()
+        diagnostics = provisioning_client.advance_fulfillment_convergence_cycle()
         assert "before" in diagnostics and "after" in diagnostics
         fulfillment = provisioning_client.get_fulfillment_status(deal_state.fulfillment_id)
         assert fulfillment.get("state") == "tearing_down", fulfillment
@@ -1624,9 +1641,9 @@ class TestStage11b_TeardownCompletion:
         # job is no longer gated, which is not the same instant its outcome is
         # durably readable by `converge_teardowns`.
         from tests.e2e.roles.scenarios.vms.conftest import (
-            wait_for_fulfillment_state as _wait_state,
+            advance_fulfillment_to as _advance_to,
         )
-        fulfillment = _wait_state(
+        fulfillment = _advance_to(
             provisioning_client, deal_state.fulfillment_id, "torn_down",
         )
 

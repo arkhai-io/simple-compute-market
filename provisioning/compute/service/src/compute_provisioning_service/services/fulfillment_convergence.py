@@ -60,6 +60,65 @@ class FulfillmentConvergenceWatchdog:
                 getattr(settings, "fulfillment_convergence_backoff_jitter_fraction", 0.1)
             ),
         )
+        # Timer gate, mirroring `LeaseLifecycleService`. Without one this
+        # watchdog was the only lifecycle loop a caller could not stop, so a
+        # test driving convergence explicitly still had a 30s timer claiming
+        # the same rows underneath it.
+        self._resume_event = asyncio.Event()
+        self._resume_event.set()
+
+    def pause(self) -> None:
+        """Stop timer-driven cycles; explicit cycles still run."""
+        self._resume_event.clear()
+        logger.info(
+            "[FULFILLMENT_CONVERGENCE] Watchdog paused — timer cycles will block"
+        )
+
+    def resume(self) -> None:
+        self._resume_event.set()
+        logger.info("[FULFILLMENT_CONVERGENCE] Watchdog resumed")
+
+    @property
+    def is_paused(self) -> bool:
+        return not self._resume_event.is_set()
+
+    async def advance_cycle(self) -> dict[str, object]:
+        """Run one cycle guaranteed to reach this worker's own claimed rows.
+
+        `run_cycle` alone is an advance *attempt*, not an advance. A row this
+        worker claimed and left claimed -- which is what the `pending`
+        branches deliberately do, so that the claim lease acts as the
+        inter-poll backoff -- is invisible to `claim_pending` until that lease
+        lapses. The first lease is
+        `fulfillment_convergence_backoff_initial_seconds` (5s) and doubles per
+        claim, so a caller asking for "one more cycle" straight after a
+        pending poll got a cycle that could not touch the row at all.
+
+        Releasing this worker's own claims first makes the cycle deterministic
+        for a caller that has already stopped the timer. Refused while the
+        timer is live: the lease also keeps a second cycle off a row whose
+        provider call is still in flight, and this worker's own timer loop
+        shares its `worker_id`, so bypassing it unpaused could dispatch one
+        operation twice.
+        """
+        if not self.is_paused:
+            raise RuntimeError(
+                "advance_cycle requires the convergence watchdog to be paused: "
+                "releasing claim leases while timer cycles are live risks "
+                "acting twice on one in-flight operation"
+            )
+        with self._session_factory() as db:
+            released = self._repository.release_worker_claims(
+                db, worker_id=self._worker_id
+            )
+            db.commit()
+        if released:
+            logger.info(
+                "[FULFILLMENT_CONVERGENCE] Released %d own claim(s) for an "
+                "explicit advance",
+                released,
+            )
+        return await self.run_cycle()
 
     async def run(self) -> None:
         interval = float(
@@ -72,6 +131,11 @@ class FulfillmentConvergenceWatchdog:
         logger.info("[FULFILLMENT_CONVERGENCE] Started (interval=%ss)", interval)
         while True:
             try:
+                if not self._resume_event.is_set():
+                    logger.debug(
+                        "[FULFILLMENT_CONVERGENCE] Cycle blocked — watchdog is paused"
+                    )
+                    await self._resume_event.wait()
                 await self.run_cycle()
                 await asyncio.sleep(interval)
             except asyncio.CancelledError:

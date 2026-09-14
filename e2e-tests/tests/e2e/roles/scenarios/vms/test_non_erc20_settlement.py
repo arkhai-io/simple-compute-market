@@ -33,7 +33,14 @@ from tests.e2e.roles.scenarios.vms.escrow_helper import _ensure_ws_rpc_url
 
 log = logging.getLogger(__name__)
 
-pytestmark = pytest.mark.e2e_non_erc20_settlement
+pytestmark = [
+    pytest.mark.e2e_non_erc20_settlement,
+    # This module advances fulfillment convergence itself, so the
+    # 30s timer is stopped for its duration -- otherwise a timer
+    # cycle can claim a row mid-provider-call and the module's own
+    # explicit cycle reaches nothing.
+    pytest.mark.usefixtures("convergence_advanced_explicitly"),
+]
 
 _CHAIN_NAME = "anvil"
 _ALKAHEST_ADDRESSES_PATH = str(
@@ -460,7 +467,10 @@ def test_scalar_non_erc20_settlement_reaches_ready(
 
     provisioning_test_client.resume_rule(case.rule_id)
     provisioning_test_client.drain(timeout=30)
-    provisioning_client.run_fulfillment_convergence_cycle()
+    # `advance` rather than `run`: a plain cycle cannot reach a row whose
+    # claim lease is still live, which is the case straight after a pending
+    # poll. See test_full_deal.py's stage 09a.
+    provisioning_client.advance_fulfillment_convergence_cycle()
     fulfillment_status = provisioning_client.get_fulfillment_status(fulfillment_id)
     assert fulfillment_status.get("state") == "active", fulfillment_status
 

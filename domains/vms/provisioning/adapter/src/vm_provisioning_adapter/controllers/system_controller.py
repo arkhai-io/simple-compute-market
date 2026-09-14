@@ -217,6 +217,50 @@ class SystemController:
         return result
 
     @_system_router.post(
+        "/fulfillment-convergence/advance-cycle",
+        summary="Advance fulfillment convergence by one cycle (admin)",
+    )
+    async def advance_fulfillment_convergence_cycle(self) -> dict:
+        """Run one cycle that is guaranteed to reach this worker's own rows.
+
+        `run-cycle` runs the production cycle as-is, which means a row the
+        watchdog claimed and left claimed -- what a `pending` provider poll
+        deliberately does, so the claim lease spaces the next poll -- stays
+        invisible to it until that lease lapses (5s, doubling per claim).
+        This releases the watchdog's own claims first, so one call is one
+        observable advance.
+
+        Requires the convergence watchdog to be paused, and returns 409 if
+        it is not: releasing leases while timer cycles are live could act
+        twice on one in-flight operation. Pair it with
+        `/fulfillment-convergence/pause`, the same way `check-leases` is
+        paired with `/lease-watchdog/pause`.
+        """
+        result = await self._system_service.advance_fulfillment_convergence()
+        if "error" in result:
+            raise HTTPException(status_code=409, detail=result["error"])
+        return result
+
+    @_system_router.post(
+        "/fulfillment-convergence/pause",
+        summary="Pause timer-driven fulfillment convergence cycles (admin)",
+    )
+    async def pause_fulfillment_convergence(self) -> dict:
+        """Pause the convergence timer.
+
+        Explicit cycles (`run-cycle`, `advance-cycle`) still run. Primary
+        use: e2e tests that need convergence to advance only when asked.
+        """
+        return self._system_service.pause_fulfillment_convergence()
+
+    @_system_router.post(
+        "/fulfillment-convergence/resume",
+        summary="Resume timer-driven fulfillment convergence cycles (admin)",
+    )
+    async def resume_fulfillment_convergence(self) -> dict:
+        return self._system_service.resume_fulfillment_convergence()
+
+    @_system_router.post(
         "/lease-watchdog/pause",
         summary="Pause timer-driven lease watchdog cycles (admin)",
     )

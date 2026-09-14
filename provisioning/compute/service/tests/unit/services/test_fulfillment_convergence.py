@@ -380,6 +380,159 @@ async def test_converge_teardowns_success_updates_resources_and_transitions_to_t
         assert resources[0].status == "torn_down"
 
 
+async def test_converge_teardowns_leaves_claim_intact_while_status_is_pending(
+    session_factory, repo
+):
+    """The teardown twin of the create-path pending test above.
+
+    That one existed; this one did not, and the asymmetry cost an e2e
+    cycle. Stage 11b gates a provider teardown at a mock rule, lets a
+    convergence cycle observe it as pending, then releases the gate and
+    runs further cycles -- and those cycles could not advance the
+    aggregate, because the pending poll deliberately leaves the claim in
+    place and `claim_pending` excludes a row whose lease has not lapsed.
+
+    Pinned here because it is the behaviour that makes a burst of
+    convergence cycles useless and correctly-spaced ones necessary. Both
+    halves are asserted: the claim survives the pending poll, and a fresh
+    cycle inside the lease is a no-op rather than a second poll.
+    """
+    _active_row_ready_for_teardown(repo, session_factory)
+    with session_factory() as db:
+        repo.transition(
+            db,
+            "cr-1",
+            SettlementRecordState.tearing_down.value,
+            teardown_provider_metadata={"teardown_job": "1"},
+        )
+        db.commit()
+
+    provider = _StubProvider(
+        status=ProviderStatus(state=ProviderOperationState.pending)
+    )
+    watchdog = FulfillmentConvergenceWatchdog(
+        session_factory=session_factory,
+        repository=repo,
+        provider_registry=ProviderRegistry({"ansible": provider}),
+        settings=_settings(),
+    )
+    await watchdog.converge_teardowns()
+
+    with session_factory() as db:
+        record = repo.get(db, "cr-1")
+        assert record.state == SettlementRecordState.tearing_down.value
+        assert record.claimed_by == watchdog._worker_id
+        assert record.claim_expires_at is not None
+        held_until = record.claim_expires_at
+        attempts_after_first_poll = record.attempt_count
+
+    # The provider has since succeeded, but the lease has not lapsed, so
+    # another cycle must not even reach it -- no new attempt is recorded.
+    provider._status = ProviderStatus(state=ProviderOperationState.succeeded)
+    await watchdog.converge_teardowns()
+
+    with session_factory() as db:
+        record = repo.get(db, "cr-1")
+        assert record.state == SettlementRecordState.tearing_down.value, (
+            "a cycle inside the claim lease advanced the aggregate; the "
+            "lease is what spaces provider polls"
+        )
+        assert record.attempt_count == attempts_after_first_poll
+        assert record.claim_expires_at == held_until
+
+    # Once the lease lapses the very next cycle converges it, with no
+    # operator action and no change other than the passage of time.
+    with session_factory() as db:
+        repo.get(db, "cr-1").claim_expires_at = datetime.now(
+            timezone.utc
+        ) - timedelta(seconds=1)
+        db.commit()
+
+    await watchdog.converge_teardowns()
+
+    with session_factory() as db:
+        record = repo.get(db, "cr-1")
+        assert record.state == SettlementRecordState.torn_down.value, (
+            "a cycle after the lease lapsed should observe the completed "
+            f"teardown, got {record.state}"
+        )
+
+
+async def test_advance_cycle_reaches_a_row_this_worker_still_holds(
+    session_factory, repo
+):
+    """The seam that makes an explicit advance actually advance.
+
+    `run_cycle` on its own cannot: the pending poll above leaves the claim
+    in place so the lease spaces the next poll, and `claim_pending` skips a
+    row whose lease is live. Asserted as the pair -- a plain cycle is a
+    no-op here, the advance is not -- because the difference between them
+    is the whole point of the endpoint.
+    """
+    _active_row_ready_for_teardown(repo, session_factory)
+    with session_factory() as db:
+        repo.transition(
+            db,
+            "cr-1",
+            SettlementRecordState.tearing_down.value,
+            teardown_provider_metadata={"teardown_job": "1"},
+        )
+        db.commit()
+
+    provider = _StubProvider(
+        status=ProviderStatus(state=ProviderOperationState.pending)
+    )
+    watchdog = FulfillmentConvergenceWatchdog(
+        session_factory=session_factory,
+        repository=repo,
+        provider_registry=ProviderRegistry({"ansible": provider}),
+        settings=_settings(),
+    )
+    watchdog.pause()
+    await watchdog.converge_teardowns()
+
+    provider._status = ProviderStatus(state=ProviderOperationState.succeeded)
+
+    # The plain cycle is blocked by the lease this worker itself holds.
+    await watchdog.run_cycle()
+    with session_factory() as db:
+        assert (
+            repo.get(db, "cr-1").state
+            == SettlementRecordState.tearing_down.value
+        )
+
+    # The advance releases that claim first and converges in one call.
+    await watchdog.advance_cycle()
+    with session_factory() as db:
+        record = repo.get(db, "cr-1")
+        assert record.state == SettlementRecordState.torn_down.value, record.state
+        assert record.claimed_by is None
+
+
+async def test_advance_cycle_is_refused_while_the_timer_is_live(
+    session_factory, repo
+):
+    """Bypassing a lease unpaused could act twice on one in-flight call.
+
+    The timer loop shares this worker's id, so the ownership check in
+    `_with_owned_record` would not catch it. Refusing is the honest answer
+    rather than silently doing the unsafe thing.
+    """
+    watchdog = FulfillmentConvergenceWatchdog(
+        session_factory=session_factory,
+        repository=repo,
+        provider_registry=ProviderRegistry({"ansible": _StubProvider()}),
+        settings=_settings(),
+    )
+    assert watchdog.is_paused is False
+    with pytest.raises(RuntimeError, match="paused"):
+        await watchdog.advance_cycle()
+
+    watchdog.pause()
+    assert watchdog.is_paused is True
+    await watchdog.advance_cycle()  # now permitted
+
+
 async def test_converge_teardowns_provider_failure_is_not_terminal(session_factory, repo):
     """teardown_failed remains eligible for dispatch_pending_teardowns
     recovery again -- it is not a dead end, per the existing db.py state

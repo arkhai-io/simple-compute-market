@@ -415,6 +415,39 @@ class SystemService:
             return {"error": "fulfillment_convergence_watchdog not initialised"}
         return await self._fulfillment_convergence_watchdog.run_cycle()
 
+    def pause_fulfillment_convergence(self) -> dict:
+        """Pause timer-driven convergence cycles.
+
+        The counterpart to `pause_lease_watchdog`. Convergence was the one
+        lifecycle loop with no gate, so a caller driving it explicitly was
+        still racing a 30s timer for the same claims.
+        """
+        if self._fulfillment_convergence_watchdog is None:
+            return {
+                "error": "fulfillment_convergence_watchdog not initialised",
+                "paused": False,
+            }
+        self._fulfillment_convergence_watchdog.pause()
+        return {"paused": True}
+
+    def resume_fulfillment_convergence(self) -> dict:
+        if self._fulfillment_convergence_watchdog is None:
+            return {
+                "error": "fulfillment_convergence_watchdog not initialised",
+                "paused": False,
+            }
+        self._fulfillment_convergence_watchdog.resume()
+        return {"paused": False}
+
+    async def advance_fulfillment_convergence(self) -> dict:
+        """Run one convergence cycle that reaches the worker's own claims."""
+        if self._fulfillment_convergence_watchdog is None:
+            return {"error": "fulfillment_convergence_watchdog not initialised"}
+        try:
+            return await self._fulfillment_convergence_watchdog.advance_cycle()
+        except RuntimeError as exc:
+            return {"error": str(exc)}
+
     async def force_check_leases(self) -> dict:
         """Run one lease lifecycle cycle, bypassing the pause gate."""
         if self._lease_lifecycle_service is None:

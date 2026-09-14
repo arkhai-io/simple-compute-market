@@ -119,7 +119,14 @@ from tests.e2e.roles.scenarios.vms.conftest import (
 
 log = logging.getLogger(__name__)
 
-pytestmark = pytest.mark.e2e_deal_buyer_cli
+pytestmark = [
+    pytest.mark.e2e_deal_buyer_cli,
+    # This module advances fulfillment convergence itself, so the
+    # 30s timer is stopped for its duration -- otherwise a timer
+    # cycle can claim a row mid-provider-call and the module's own
+    # explicit cycle reaches nothing.
+    pytest.mark.usefixtures("convergence_advanced_explicitly"),
+]
 
 # ---------------------------------------------------------------------------
 # Offer / demand spec — constants shared across all stages
@@ -1135,7 +1142,7 @@ class TestStage09a_ProvisioningCompletes:
 
         provisioning_test_client.resume_rule(PROV_RULE_ID)
         provisioning_test_client.drain(timeout=30)
-        provisioning_client.run_fulfillment_convergence_cycle()
+        provisioning_client.advance_fulfillment_convergence_cycle()
 
         status = provisioning_client.get_fulfillment_status(deal_state.fulfillment_id)
         assert status.get("state") == "active", (
@@ -1491,7 +1498,7 @@ class TestStage11a_TeardownDispatch:
         deal_state: DealState,
     ):
         require_state(deal_state, "fulfillment_id", "reserved_resource_id")
-        diagnostics = provisioning_client.run_fulfillment_convergence_cycle()
+        diagnostics = provisioning_client.advance_fulfillment_convergence_cycle()
         assert "before" in diagnostics and "after" in diagnostics
         fulfillment = provisioning_client.get_fulfillment_status(deal_state.fulfillment_id)
         assert fulfillment.get("state") == "tearing_down", fulfillment
@@ -1519,9 +1526,9 @@ class TestStage11b_TeardownCompletion:
         # job is no longer gated, which is not the same instant its outcome is
         # durably readable by `converge_teardowns`.
         from tests.e2e.roles.scenarios.vms.conftest import (
-            wait_for_fulfillment_state as _wait_state,
+            advance_fulfillment_to as _advance_to,
         )
-        fulfillment = _wait_state(
+        fulfillment = _advance_to(
             provisioning_client, deal_state.fulfillment_id, "torn_down",
         )
 
