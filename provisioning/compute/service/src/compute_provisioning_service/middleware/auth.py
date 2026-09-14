@@ -286,6 +286,23 @@ class ProvisioningAuthMiddleware(BaseHTTPMiddleware):
             existing_replay=existing,
         )
         if not verification.verified or verification.reservation is None:
+            # Same reasoning as `market_site.auth`: the `detail` withholds
+            # what would have passed, the operator's log should not. Two
+            # site authorities refusing the same caller in different
+            # language is a cost paid by whoever holds both logs, so the
+            # wording matches deliberately.
+            logger.warning(
+                "Marketplace authentication refused: code=%s role=%r "
+                "principal=%s:%s operation=%r resource=%r %s %s",
+                verification.code.value,
+                authenticated.role,
+                authenticated.principal.scheme.value,
+                authenticated.principal.identifier,
+                operation,
+                resource,
+                request.method,
+                request.url.path,
+            )
             return _signed_rejection(
                 identity,
                 request=request,

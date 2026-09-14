@@ -399,6 +399,25 @@ class SiteAuthMiddleware(BaseHTTPMiddleware):
             ),
         )
         if not verification.verified or verification.reservation is None:
+            # The `detail` sent back is deliberately vague -- it says which
+            # check refused without saying what would have passed it. The
+            # *operator's* log has no such constraint, and without the code
+            # here a 403 is indistinguishable from the role-gap 403 above,
+            # which does log. That gap cost a debugging cycle on a caller
+            # that was refused on one capacity route while succeeding on
+            # every other one with the same signer and role.
+            logger.warning(
+                "Marketplace authentication refused: code=%s role=%r "
+                "principal=%s:%s operation=%r resource=%r %s %s",
+                verification.code.value,
+                authenticated.role,
+                authenticated.principal.scheme.value,
+                authenticated.principal.identifier,
+                operation,
+                resource,
+                request.method,
+                request.url.path,
+            )
             return self._signed_rejection(
                 signer,
                 request=request,

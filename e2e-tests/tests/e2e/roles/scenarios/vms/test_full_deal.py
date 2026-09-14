@@ -1661,6 +1661,14 @@ class TestStage11b_TeardownCompletion:
 
         reserved_again = storefront_admin_client.admin_reserve_capacity(
             required_attributes={"resource_id": deal_state.reserved_resource_id, "gpu_count": 1},
+            # The endpoint reserves *through a listing's durable capacity
+            # binding*, not against a bare site, so the listing is required
+            # rather than incidental -- it is what resolves which site the
+            # hold lands in. This deal's own listing is closed by now, which
+            # is fine: closing never removes the binding, and the endpoint
+            # reads open/closed state only to report which listings its
+            # reservation closed.
+            listing_id=deal_state.seller_listing_id,
             escrow_uid=f"{deal_state.real_escrow_uid}-reuse",
         )
         # The claim pinned the resource, so a reservation coming back *is*
