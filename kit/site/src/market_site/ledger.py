@@ -739,6 +739,19 @@ class CapacityLedgerService:
         """
         requested = _requested_dimensions(claim, unit_claim_keys=self._unit_claim_keys)
         requested_mode = _requested_offering_mode(claim, required=True)
+        # The same split `_find_candidate` matches on, recorded rather than
+        # left to be recomputed. Admission already evaluates these; scheduling
+        # later needs the same constraints and has no way to re-derive them,
+        # because the claim is gone by then and the reservation kept only its
+        # `dimensions`.
+        #
+        # A resource-pinned claim comes along for free: `resource_feasibility_view`
+        # normalizes `resource_id` into the matched attribute mapping, so a
+        # listing that named one resource is carried here as an ordinary
+        # categorical constraint rather than needing a second mechanism.
+        _, claim_attributes = _split_claim_requirement(
+            claim, unit_claim_keys=self._unit_claim_keys
+        )
         deal = dict(deal_ref or {})
         escrow_uid = deal.get("escrow_uid")
         window_start, window_end = _lease_window(
@@ -769,6 +782,7 @@ class CapacityLedgerService:
                 capacity_reservation_id=str(uuid.uuid4()),
                 units=mirrored_units,
                 dimensions=_serialize_dimensions(requested),
+                claim_attributes=dict(claim_attributes),
                 state=ReservationState.reserved.value,
                 deal_ref=deal,
                 escrow_uid=deal.get("escrow_uid"),
@@ -1253,6 +1267,15 @@ class CapacityLedgerService:
                 capacity_reservation_id=str(uuid.uuid4()),
                 units=mirrored_units,
                 dimensions=_serialize_dimensions(requested),
+                # Carried from the reservation being superseded, not re-split
+                # from this call's claim. A resize changes how much was
+                # committed; what kind of resource was sold was settled at
+                # admission, and a resize is not an occasion to renegotiate it.
+                claim_attributes=(
+                    dict(old_reservation.claim_attributes)
+                    if old_reservation.claim_attributes is not None
+                    else None
+                ),
                 state=ReservationState.reserved.value,
                 deal_ref=deal,
                 escrow_uid=deal.get("escrow_uid"),
@@ -2097,6 +2120,11 @@ class CapacityLedgerService:
             "lease_end_utc": reservation.lease_end_utc,
             "create_job_id": reservation.create_job_id,
             "vm_remove_job_id": reservation.vm_remove_job_id,
+            "claim_attributes": (
+                dict(reservation.claim_attributes)
+                if reservation.claim_attributes is not None
+                else None
+            ),
             "failure_reason": reservation.failure_reason,
             "failure_message": reservation.failure_message,
             "released_at": reservation.released_at,

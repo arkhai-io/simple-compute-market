@@ -56,6 +56,71 @@
 - [x] 6.5 Remove temporary, migration-oriented, speculative, and change-history comments from production code. Production comments describe current invariants and may reference only stable permanent documentation. **Verified:** the new delegate implementation uses present-tense contract documentation and contains no active-change references or speculative unit commentary.
 - [x] 6.6 Complete the design-promotion record below with exact headings after promotion and verify production code contains no `openspec/changes` references. **Verified:** repository production sources contain no reference to `openspec/changes/fix-vm-fulfillment-capacity-boundary`.
 - [x] 6.7 Update all task checkboxes to reflect actual implementation and validation status; preserve already-completed work and amend tasks whose delivered behavior changed during review.
+## 7. Amendment: the claim's categorical half (see `design.md`)
+
+- [x] 7.1 Persist the categorical half of the admitted claim on the
+      reservation: a ledger-owned `claim_attributes` JSON column on
+      `CapacityReservation`, written in `reserve()` from the same
+      `_split_claim_requirement` call `_find_candidate` matches on. Additive
+      and not backfilled -- the information is unrecoverable for existing
+      rows, which is the gap being closed, so `NULL` means "admitted before
+      this was recorded" rather than "no constraint".
+
+- [x] 7.2 `resize_reservation` carries the superseded reservation's
+      `claim_attributes` onto its replacement rather than re-splitting the
+      resize call's claim. A resize changes how much was committed; what kind
+      of resource was sold was settled at admission.
+
+- [x] 7.3 `PhysicalSettlementScheduler._requirement` takes categorical
+      constraints from the reservation, on the same precedence rule as the
+      dimensions beside it: the reservation governs, a request may narrow by
+      adding a key the reservation does not govern, and a request
+      contradicting a governed key raises `SettlementRequestMismatchError`.
+      Only a `NULL` column falls back to the request.
+
+- [x] 7.4 Four scheduler tests, each verified to fail against the unpatched
+      scheduler: a categorical claim excluding an otherwise-eligible
+      resource; a resource-pinned claim surviving a cursor pointing
+      elsewhere; an unsatisfiable claim refused rather than reassigned; and
+      narrowing permitted where contradiction is refused.
+
+      The first two needed a deliberate adversarial setup, and did not have
+      one at first. A fresh round-robin cursor selects the first pool in
+      sorted order, which was also the correct answer, so both passed against
+      the unpatched scheduler until a warm-up placement was added to walk the
+      cursor onto the *wrong* pool first. Each now asserts that warm-up's
+      outcome too, so the test states the cursor position it is beating
+      rather than depending on it silently.
+
+- [ ] 7.5 **Not in this change:** retire `capacity_reservations.vm_remove_job_id`.
+      It holds a VM-conditional mirror of `release_job_id`, written only when
+      `offering_mode` is the VM mode and always to the value `release_job_id`
+      already has, and it is the one domain-prefixed field on a reservation
+      table bare-metal pools share. Attempted here and withdrawn: the name is
+      also a field on three packages' public wire models
+      (`vm_provisioning_operator.models`, the storefront's
+      `capacity_admin_models`, the VM and bare-metal lease controllers) and
+      appears in a legacy-backfill path, so it is a wire-contract change
+      across 22 files rather than a column drop. Its own change, with the
+      `vm_host`/`vm_target` column drops on this table as precedent for the
+      rebuild migration.
+
+      `_reservation_payload`'s derived `vm_host`/`vm_target` keys are
+      deliberately left alone -- those are domain-shaped projections beside
+      the generic `executor_ref`/`executor_target`, not duplicated storage.
+
+- [ ] 7.6 **Not in this change:** populate `create_job_id` on VM lease
+      registration. The field is plumbed end to end with a `None` default at
+      every hop and no VM supplier, so the VM path leaves it null while the
+      bare-metal path fills it. The id to use is the Ansible job id, not the
+      durable fulfillment id -- the fulfillment id is already reachable from
+      the settle-status response and the buyer's run-log, whereas the Ansible
+      job id is visible nowhere outside the provisioning service and is the
+      only one of the two a site admin can act on. That places the fix in the
+      provisioning service, which is where the id already exists
+      (`AnsibleFulfillmentProvider`), not in the storefront, which does not
+      have it.
+
 - [ ] 6.8 **Roadmap currency** (added 2026-08-06 by `add-development-roadmap`, which extended `openspec/README.md#plan-closeout-requirements` from five parts to six). Update this change's rows in `docs/development/ROADMAP.md` — it currently appears as an open gap under both Goal 1 (stale physical-placement fields on the current fulfillment path) and Goal 2 (accepted VM shape not reaching the provisioning request) — and record the update in the design-promotion record. Appended rather than folded into 6.6, per `AGENTS.md`'s rule to amend rather than replace implementation history.
 - [ ] 6.9 **Campaign index currency** (part seven, added when `openspec/README.md#plan-closeout-requirements` was extended from six parts to seven). Appended rather than folded into an existing task, per `AGENTS.md`'s rule to amend rather than replace implementation history. Update this change's row, and its campaign's dependency graph, in `openspec/changes/README.md` to match its state at completion, or record the disposition here if its status and campaign placement are both unchanged.
 

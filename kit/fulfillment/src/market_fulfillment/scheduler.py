@@ -203,7 +203,33 @@ class PhysicalSettlementScheduler:
                 "no resource_kind on the capacity reservation, the request, or this "
                 "scheduler's configured default_resource_kind"
             )
-        attributes = dict(request.requirements.get("attributes") or {})
+        # Categorical constraints come from the reservation, on the same
+        # precedence rule the dimensions below follow: what admission accepted
+        # governs what scheduling may place. The request may add a constraint
+        # the reservation does not govern (narrowing), but never relax or
+        # contradict one it does -- a caller able to drop `gpu_model` here
+        # could re-place a deal on hardware admission never matched.
+        #
+        # NULL (not `{}`) means a reservation written before the ledger
+        # recorded this, and only then is the request the sole source: an
+        # in-flight deal from before the column existed still schedules.
+        reserved_attributes = reservation.get("claim_attributes")
+        requested_attributes = dict(request.requirements.get("attributes") or {})
+        if reserved_attributes is None:
+            attributes = requested_attributes
+        else:
+            attributes = dict(reserved_attributes)
+            contradicted = {
+                key: (value, attributes[key])
+                for key, value in requested_attributes.items()
+                if key in attributes and attributes[key] != value
+            }
+            if contradicted:
+                raise SettlementRequestMismatchError(
+                    "requested attributes contradict the capacity reservation: "
+                    f"{contradicted} (requested, reserved)"
+                )
+            attributes.update(requested_attributes)
         # dimensions is authoritative when the reservation carries one.
         # Otherwise fall back to the reservation's own dimensions, which
         # reservation_payload_in_session() always populates -- even for a

@@ -975,6 +975,24 @@ def _migrate_capacity_reservations_settlement_resource_id(engine: Engine) -> Non
         )
 
 
+def _migrate_capacity_reservations_claim_attributes(engine: Engine) -> None:
+    """Add ``capacity_reservations.claim_attributes``.
+
+    Additive and deliberately not backfilled. The column records the
+    categorical half of the claim a reservation was admitted against, and
+    for a pre-existing row that information is not recoverable -- the claim
+    was never persisted anywhere, which is the gap this column closes.
+
+    NULL therefore means "admitted before this was recorded" and is read as
+    such by the scheduler, which falls back to the request for those rows
+    only. Backfilling ``{}`` instead would assert that those deals carried no
+    categorical constraint, which is a claim about them nothing supports.
+    """
+    _add_column_if_missing(
+        engine, "capacity_reservations", "claim_attributes", "JSON",
+    )
+
+
 def _migrate_site_resources_pool_id(engine: Engine) -> None:
     """Add ``site_resources.pool_id`` and backfill it from the existing
     ``attributes`` JSON, where the storefront's old sync push put it.
@@ -1120,6 +1138,7 @@ def _migrate_capacity_model_cutover(engine: Engine) -> None:
     """
     _migrate_rename_site_allocations_to_capacity_reservations(engine)
     _migrate_capacity_reservations_settlement_resource_id(engine)
+    _migrate_capacity_reservations_claim_attributes(engine)
     _migrate_site_resources_pool_id(engine)
     _migrate_capacity_buckets_and_current_debits(engine)
     _migrate_retire_site_resources(engine)
