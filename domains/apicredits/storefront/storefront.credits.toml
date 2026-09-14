@@ -29,6 +29,34 @@ identities = [
 address     = "0x90F79bf6EB2c4f870365E785982E1f101E93b906"
 private_key = "" # APICREDITS_STOREFRONT_WALLET__PRIVATE_KEY secret environment input
 
+# Which settlement mechanisms this seller will actually service. Without
+# this section `mechanism_config("alkahest")` is None, `alkahest_enabled`
+# is false, and `_build_alkahest_clients()` is never called -- so the
+# storefront starts cleanly, publishes, negotiates and accepts, and then
+# refuses `POST /api/v1/settle/...` with
+# `chain 'anvil' not configured on this storefront — available chains: []`.
+# The chain table below is read only when these clients are built, so
+# configuring one without the other leaves it inert.
+#
+# The absence produced no startup warning: the "no chains configured" and
+# "required EVM settings are missing" warnings both live inside the
+# builder, and the builder was the thing being skipped.
+[settlement]
+schema_version = 1
+priority = ["alkahest.v1"]
+
+[settlement.alkahest]
+enabled = true
+# The same address book `[chains.anvil]` below points at. Read separately:
+# this one by the settlement readiness preflight, that one per chain when
+# the clients are built.
+address_config_path = "/app/alkahest_anvil_addresses.json"
+oracle_gated = false
+trusted_oracle_addresses = []
+# `interruptible`/`interruptible_oracle_addresses` are deliberately absent.
+# They configure VM spot interruption, which this domain does not sell, and
+# `AlkahestSettlementConfig` defaults both to off.
+
 [chains.anvil]
 rpc_url  = "ws://anvil:8545"
 chain_id = 31337
