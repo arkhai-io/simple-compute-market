@@ -102,3 +102,48 @@ Its public identifier `_NUDENxVX6u4cMd0xzoYyQAt10QDI47bfnYnu2lTVho` is pinned in
 `docker-compose.yml`, `compose.apicredits.yml`, and
 `domains/apicredits/storefront/storefront.credits.toml`. All three must agree or
 the registry fails startup on the identity assertion.
+
+## The API-credits site authority and its gated application
+
+`api-credits-service.ed25519` and `api-credits-gated-app.ed25519` are the two
+identities the API-credits service's signed boundary needs. Derived the same
+deterministic way as the registry credential above, so any reader can
+reproduce them and confirm no secret is involved:
+
+    python -c "import hashlib,base64; \
+      print(base64.urlsafe_b64encode( \
+        hashlib.sha256(b'arkhai-development-api-credits-service-v2').digest() \
+      ).rstrip(b'=').decode())"
+
+    python -c "import hashlib,base64; \
+      print(base64.urlsafe_b64encode( \
+        hashlib.sha256(b'arkhai-development-api-credits-gated-app-v2').digest() \
+      ).rstrip(b'=').decode())"
+
+Their public identifiers:
+
+| Credential | Public identifier | Role |
+|---|---|---|
+| `api-credits-service.ed25519` | `MheGyI4OZPRUijPSgdBucxha4zXw5mJ5hSELYon6x_c` | the authority itself — signs every response |
+| `api-credits-gated-app.ed25519` | `w75DsOFODAFDR0gVcITNTSeEvG_SRQU9GyTulF2w7IM` | `service` — consumes and verifies credits |
+
+`-v2`, not `-v1`, for a mundane reason worth recording: the `-v1` labels derive
+a seed and a public identifier beginning with `-`, which shells, `getopt` and
+compose variable expansion all read as the start of an option. A credential
+that cannot be passed on a command line without quoting gymnastics is a
+credential that will eventually be passed wrong.
+
+The authority's identifier is pinned in `domains/apicredits/compose.yml` and in
+`domains/apicredits/storefront/storefront.credits.toml`'s
+`[capacity.sites.default.expected_authorities]`. Both must agree or the
+storefront refuses the responses it receives.
+
+The `service` role is narrow on purpose: it may spend credits and check them,
+and may not mint or revoke. The storefront holds `seller` and does the
+converse. That distinction is the reason there are two identities here rather
+than one shared secret — `api-credits-admin-key` could not express it, and
+every caller holding it could do everything.
+
+Note the storefront's own principal is **eip191**, not ed25519: it signs with
+`ARKHAI_IDENTITY_CREDENTIAL` from `api-credits.identity.env`, and the
+authority's trust set names it with an explicit scheme for that reason.

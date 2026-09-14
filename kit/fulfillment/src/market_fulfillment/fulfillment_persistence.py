@@ -115,7 +115,7 @@ class SqlAlchemyFulfillmentTransaction:
         if self._capacity_ledger is None:
             return
         try:
-            self._capacity_ledger.update_reservation_fields(
+            self._capacity_ledger.update_lease_fields(
                 capacity_reservation_id,
                 create_job_id=job_id,
             )

@@ -11,8 +11,19 @@ import container as _container_module
 from config import settings
 from controllers.keys_controller import make_keys_router
 from controllers.system_controller import make_health_router, make_system_router
+from identity import (
+    expected_principals,
+    require_signer,
+    signed_authentication_enabled,
+)
+from market_site.auth import (
+    CAPACITY_ROUTE_CONTRACTS,
+    EXCLUDED_PATHS,
+    SiteAuthMiddleware,
+)
 from market_site.router import make_capacity_router
 from middleware.auth import AdminKeyAuthMiddleware
+from middleware.route_contracts import CREDITS_ROUTE_CONTRACTS
 
 
 logging.basicConfig(
@@ -39,9 +50,13 @@ app = FastAPI(
         "token-gated services sold on the marketplace, plus this site's "
         "quota ledger.\n\n"
         "## Authentication\n\n"
-        "The service is an internal dependency of one seller. When an "
-        "admin key is configured, every non-health request must present "
-        "it:\n\n```\nX-Admin-Key: <admin_api_key>\n```\n\n"
+        "Every non-health request carries a marketplace signature, and "
+        "every response is signed in return -- refusals included. Callers "
+        "are authorised by role: `seller` for the storefront selling these "
+        "credits, `service` for the gated application spending them, and "
+        "`admin` for manual operation.\n\n"
+        "A deployment with no identity provisioned falls back to the "
+        "`X-Admin-Key` shared-secret gate.\n\n"
         "Callers are the seller's storefront (issuance, guard lookups, "
         "capacity) and the gated service's middlewares (consume/verify). "
         "`/health`, `/docs`, and `/redoc` bypass authentication."
@@ -66,11 +81,44 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+# Paths served without a signature: liveness and documentation only.
+# `/docs/oauth2-redirect` is loaded by the docs page itself, and the versioned
+# health/version pair exists so an orchestrator can probe this service without
+# holding a marketplace credential.
+_UNSIGNED_PATHS = EXCLUDED_PATHS | {
+    "/docs/oauth2-redirect",
+    "/api/v1/system/health",
+    "/api/v1/system/version",
+}
+
 # Middleware (outermost applied last)
-app.add_middleware(
-    AdminKeyAuthMiddleware,
-    admin_key=str(settings.storefront_admin_key or ""),
-)
+if signed_authentication_enabled():
+    # Both route tables under one middleware. `kit/site` owns the capacity
+    # contracts because it defines those paths; this service owns its own.
+    # Anything mounted without a contract is refused rather than waved
+    # through, so adding a route without one fails loudly.
+    app.add_middleware(
+        SiteAuthMiddleware,
+        signer_provider=require_signer,
+        expected_principals=expected_principals,
+        contracts=CREDITS_ROUTE_CONTRACTS + CAPACITY_ROUTE_CONTRACTS,
+        max_timestamp_skew=int(settings.get("max_timestamp_skew", 300)),
+        excluded_paths=_UNSIGNED_PATHS,
+    )
+else:
+    # No identity provisioned. Keeping the shared-secret gate is the honest
+    # fallback: the alternative is an open service, and half-enabling signed
+    # authentication would verify callers and then answer them unsigned --
+    # the one failure the kit's client cannot read at all.
+    logger.warning(
+        "No site signing credential or trusted principals configured; "
+        "falling back to the X-Admin-Key gate. Marketplace-signed callers "
+        "will be refused."
+    )
+    app.add_middleware(
+        AdminKeyAuthMiddleware,
+        admin_key=str(settings.storefront_admin_key or ""),
+    )
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],

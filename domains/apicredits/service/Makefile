@@ -18,7 +18,7 @@ reinit: ## Force-reinstall internal wheels without bumping versions. Run make di
 		--upgrade-package arkhai-kit-resource-pools --reinstall-package arkhai-kit-resource-pools
 
 test: reinit ## Run the test suite
-	PYTHONPATH=src uv run --find-links $(DIST_DIR) pytest src/tests -q
+	PYTHONPATH=src uv run --find-links $(DIST_DIR) pytest tests -q
 
 serve: ## Run the service locally (reload)
 	PYTHONPATH=src uv run --find-links $(DIST_DIR) python src/main.py

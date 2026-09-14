@@ -479,6 +479,8 @@ e2e-dev-identities-env: ## Print VAR=value lines for `docker compose --env-file`
 	@echo 'APICREDITS_IDENTITY_ENV_FILE=$(E2E_IDENTITY_DIR)/api-credits.identity.env'
 	@echo 'APICREDITS_EVM_WALLET_ENV_FILE=$(E2E_IDENTITY_DIR)/api-credits.wallet.env'
 	@echo 'APICREDITS_ADMIN_KEY_FILE=$(E2E_IDENTITY_DIR)/api-credits-admin-key'
+	@echo 'APICREDITS_SERVICE_IDENTITY_CREDENTIAL_FILE=$(E2E_IDENTITY_DIR)/api-credits-service.ed25519'
+	@echo 'APICREDITS_GATED_APP_IDENTITY_CREDENTIAL_FILE=$(E2E_IDENTITY_DIR)/api-credits-gated-app.ed25519'
 	@echo 'VMS_BOB_STOREFRONT_SECRETS_FILE=$(E2E_IDENTITY_DIR)/bob.storefront.secrets.toml'
 	@# registry-b gates read and write behind bearer tokens. The bootstrap
 	@# value must stay byte-equal to the [registry.auth] entries in

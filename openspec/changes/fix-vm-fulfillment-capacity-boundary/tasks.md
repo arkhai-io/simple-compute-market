@@ -56,9 +56,48 @@
 - [x] 6.5 Remove temporary, migration-oriented, speculative, and change-history comments from production code. Production comments describe current invariants and may reference only stable permanent documentation. **Verified:** the new delegate implementation uses present-tense contract documentation and contains no active-change references or speculative unit commentary.
 - [x] 6.6 Complete the design-promotion record below with exact headings after promotion and verify production code contains no `openspec/changes` references. **Verified:** repository production sources contain no reference to `openspec/changes/fix-vm-fulfillment-capacity-boundary`.
 - [x] 6.7 Update all task checkboxes to reflect actual implementation and validation status; preserve already-completed work and amend tasks whose delivered behavior changed during review.
-## 7. Amendment: the claim's categorical half (see `design.md`)
+## 7. Post-provision opaque-boundary correction
 
-- [x] 7.1 Persist the categorical half of the admitted claim on the
+- [x] 7.1 Fix `fulfill_vm_obligation`'s post-provision `capacity.commit(...)` gate: key on `reserved_capacity_reservation_id` instead of `reserved_resource_id`, which is legitimately absent on the real opaque reservation response and was silently skipping the lease-window refresh.
+- [x] 7.2 Fix `fulfill_vm_obligation`'s post-provision `register_lease(...)` gate the same way: key on `reserved_capacity_reservation_id`/`vm_target`/`escrow_uid`, not `reserved_resource_id`/`reserved_vm_host` -- the latter was silently skipping lease registration, which the watchdog's auto-release depends on.
+- [x] 7.3 Make `_register_vm_lease_with_settings`'s `resource_id`/`vm_host` parameters optional (`| None = None`), matching that its `LeaseRegistration` call never reads them.
+- [x] 7.4 Add a regression test using the real opaque-reservation shape (no `resource_id`/`vm_host` in the `reserve()` result) asserting both post-provision calls still fire. Confirm it fails against the pre-fix gates and passes after.
+- [x] 7.5 Re-run the full touched-file test suite; confirm no regressions.
+- [x] 7.6 Record the correction and its promotion status in `design.md`'s "Post-implementation correction" section.
+
+### Section 7 design-promotion record
+
+See `design.md`'s "Design-promotion record" table.
+
+## 8. Correct scheduled-vs-committed dimensions authority
+
+- [x] 8.1 Discuss phase: confirm via test whether `SettlementResource.dimensions` reflects the reservation's full committed dimensions or the (possibly narrower) scheduled request. Confirmed: the latter, and this is correct -- see `design.md`'s "Discuss phase" and "Resolution" sections for the negotiation-conversation context that settles this.
+- [x] 8.2 No scheduler code change required -- `_resource_from_record` already reports the scheduled (reservation-bounded) dimensions, which is the correct behavior once negotiation-driven narrowing is understood as intended.
+- [x] 8.3 Correct `openspec/specs/site-capacity/spec.md`'s "Committed dimensions remain authoritative through scheduling" requirement to state the scheduled shape, bounded by but not necessarily equal to the reservation, is authoritative.
+- [x] 8.4 Correct `openspec/specs/physical-provisioning/spec.md`'s "Provisioning shape comes from committed capacity" requirement to match.
+- [x] 8.5 Add the repository-wide negotiation/capacity premise to `docs/development/ARCHITECTURE.md`: pooled-capacity negotiation, not physical-resource pinning; `resize_reservation` as the mechanism for a persisted shape change; explicit note that `resize_reservation` has no negotiation-side caller yet.
+- [x] 8.6 Update `kit/fulfillment/tests/unit/test_scheduler.py::test_scheduled_dimensions_reflect_narrowed_request_not_full_reservation`'s docstring to describe pinned intended behavior rather than an open gap.
+- [x] 8.7 Re-run `kit/fulfillment` test suite; confirm no regressions.
+
+### Section 8 design-promotion record
+
+See `design.md`'s "Design-promotion record" table.
+
+## 9. Verification pass on prior fixes
+
+- [x] 9.1 Re-verify prior fixes in this change against current code, not against task checkmarks alone.
+- [x] 9.2 `vm_host` stripping from `/reservations`: confirmed still not done; decision needed (recorded in `design.md`, not yet made).
+- [x] 9.3 Adapter lockfile: root-caused the actual regeneration bug (`test-domain-dist-reinit` propagating an absolute `DIST_DIR`), fixed the root `Makefile`, regenerated `domains/vms/provisioning/adapter/uv.lock` cleanly (verified no absolute paths), confirmed the adapter's own test target still passes (25/25).
+- [x] 9.4 CI workflow: reviewed `.github/workflows/tests.yml`; confirmed gaps broader than initially reported (missing several packages from the matrix entirely, not just the staging-only trigger). Left unresolved pending a decision on priority.
+- [x] 9.5 Cross-service test strengthening: confirmed the specific test originally flagged is unchanged, but found its substance already satisfied by `test_ansible_fulfillment_provider.py::test_request_supplied_sizing_is_ignored_even_when_present` (this change's own task 3.10). Recommend treating as resolved.
+
+### Section 9 design-promotion record
+
+See `design.md`'s "Design-promotion record" table.
+
+## 10. Amendment: the claim's categorical half (see the design document)
+
+- [x] 10.1 Persist the categorical half of the admitted claim on the
       reservation: a ledger-owned `claim_attributes` JSON column on
       `CapacityReservation`, written in `reserve()` from the same
       `_split_claim_requirement` call `_find_candidate` matches on. Additive
@@ -66,19 +105,19 @@
       rows, which is the gap being closed, so `NULL` means "admitted before
       this was recorded" rather than "no constraint".
 
-- [x] 7.2 `resize_reservation` carries the superseded reservation's
+- [x] 10.2 `resize_reservation` carries the superseded reservation's
       `claim_attributes` onto its replacement rather than re-splitting the
       resize call's claim. A resize changes how much was committed; what kind
       of resource was sold was settled at admission.
 
-- [x] 7.3 `PhysicalSettlementScheduler._requirement` takes categorical
+- [x] 10.3 `PhysicalSettlementScheduler._requirement` takes categorical
       constraints from the reservation, on the same precedence rule as the
       dimensions beside it: the reservation governs, a request may narrow by
       adding a key the reservation does not govern, and a request
       contradicting a governed key raises `SettlementRequestMismatchError`.
       Only a `NULL` column falls back to the request.
 
-- [x] 7.4 Four scheduler tests, each verified to fail against the unpatched
+- [x] 10.4 Four scheduler tests, each verified to fail against the unpatched
       scheduler: a categorical claim excluding an otherwise-eligible
       resource; a resource-pinned claim surviving a cursor pointing
       elsewhere; an unsatisfiable claim refused rather than reassigned; and
@@ -92,7 +131,7 @@
       outcome too, so the test states the cursor position it is beating
       rather than depending on it silently.
 
-- [ ] 7.5 **Not in this change:** retire `capacity_reservations.vm_remove_job_id`.
+- [ ] 10.5 **Not in this change:** retire `capacity_reservations.vm_remove_job_id`.
       It holds a VM-conditional mirror of `release_job_id`, written only when
       `offering_mode` is the VM mode and always to the value `release_job_id`
       already has, and it is the one domain-prefixed field on a reservation
@@ -109,7 +148,7 @@
       deliberately left alone -- those are domain-shaped projections beside
       the generic `executor_ref`/`executor_target`, not duplicated storage.
 
-- [x] 7.6 **`create_job_id` is populated by the service that dispatches the
+- [x] 10.6 **`create_job_id` is populated by the service that dispatches the
       job.** The field was plumbed end to end with a `None` default at every
       hop and no VM supplier, so the VM path left it null while bare metal
       filled it -- invisible to tests of either side.
@@ -155,6 +194,29 @@
       existing tests. The fake now returns `None` explicitly, which is also
       the honest default for a provider fake.
 
+- [x] 10.7 **The first implementation called a method that does not exist.**
+      `CapacityLedgerService.update_reservation_fields` -- the real name is
+      `update_lease_fields`. It shipped, and the e2e run showed
+      `create_job_id` still null with an `AttributeError` logged from inside
+      `attach_executor_job`.
+
+      Three things had to line up for that to reach a run. The signature was
+      read from partway into the method and the *name* inferred rather than
+      checked. `capacity_ledger` is typed as `Any | None`, which is what let a
+      compile and lint pass say nothing. And the orchestrator-level tests used
+      a fake transaction, so they asserted the call was *made* and never that
+      it lands -- the one assertion that would have failed.
+
+      The best-effort `except` is the fourth: it is deliberate, because a
+      missing diagnostic handle must not fail a working fulfillment, but it
+      also means the only signal was a warning line in a container log.
+
+      Now exercised against a real `CapacityLedgerService` over a real SQLite
+      ledger, reading the value back off the reservation rather than trusting
+      the call. Two of the three new tests fail against the shipped version.
+      A test of a duck-typed collaborator that only checks the call happened
+      is not a test of the collaborator.
+
 - [ ] 6.8 **Roadmap currency** (added 2026-08-06 by `add-development-roadmap`, which extended `openspec/README.md#plan-closeout-requirements` from five parts to six). Update this change's rows in `docs/development/ROADMAP.md` — it currently appears as an open gap under both Goal 1 (stale physical-placement fields on the current fulfillment path) and Goal 2 (accepted VM shape not reaching the provisioning request) — and record the update in the design-promotion record. Appended rather than folded into 6.6, per `AGENTS.md`'s rule to amend rather than replace implementation history.
 - [ ] 6.9 **Campaign index currency** (part seven, added when `openspec/README.md#plan-closeout-requirements` was extended from six parts to seven). Appended rather than folded into an existing task, per `AGENTS.md`'s rule to amend rather than replace implementation history. Update this change's row, and its campaign's dependency graph, in `openspec/changes/README.md` to match its state at completion, or record the disposition here if its status and campaign placement are both unchanged.
 
@@ -167,45 +229,3 @@
 | Delegate identifier, registry validation, and provider-config snapshot semantics | `openspec/specs/resource-pool-management/spec.md` — “Registered requirement delegates” |
 | Internal packages are consumed from `.dist` wheels rather than relative editable sibling paths | Existing `docs/development/ARCHITECTURE.md` packaging/dependency section; amend only if the current text is insufficient |
 | Root build composition delegates domain artifact ownership to `domains/Makefile` | Existing repository build guidance in `AGENTS.md`/`ARCHITECTURE.md`; no new permanent rule unless implementation finds a gap |
-
-## 7. Post-provision opaque-boundary correction
-
-- [x] 7.1 Fix `fulfill_vm_obligation`'s post-provision `capacity.commit(...)` gate: key on `reserved_capacity_reservation_id` instead of `reserved_resource_id`, which is legitimately absent on the real opaque reservation response and was silently skipping the lease-window refresh.
-- [x] 7.2 Fix `fulfill_vm_obligation`'s post-provision `register_lease(...)` gate the same way: key on `reserved_capacity_reservation_id`/`vm_target`/`escrow_uid`, not `reserved_resource_id`/`reserved_vm_host` -- the latter was silently skipping lease registration, which the watchdog's auto-release depends on.
-- [x] 7.3 Make `_register_vm_lease_with_settings`'s `resource_id`/`vm_host` parameters optional (`| None = None`), matching that its `LeaseRegistration` call never reads them.
-- [x] 7.4 Add a regression test using the real opaque-reservation shape (no `resource_id`/`vm_host` in the `reserve()` result) asserting both post-provision calls still fire. Confirm it fails against the pre-fix gates and passes after.
-- [x] 7.5 Re-run the full touched-file test suite; confirm no regressions.
-- [x] 7.6 Record the correction and its promotion status in `design.md`'s "Post-implementation correction" section.
-
-### Section 7 design-promotion record
-
-See `design.md`'s "Design-promotion record" table.
-
-## 8. Correct scheduled-vs-committed dimensions authority
-
-- [x] 8.1 Discuss phase: confirm via test whether `SettlementResource.dimensions` reflects the reservation's full committed dimensions or the (possibly narrower) scheduled request. Confirmed: the latter, and this is correct -- see `design.md`'s "Discuss phase" and "Resolution" sections for the negotiation-conversation context that settles this.
-- [x] 8.2 No scheduler code change required -- `_resource_from_record` already reports the scheduled (reservation-bounded) dimensions, which is the correct behavior once negotiation-driven narrowing is understood as intended.
-- [x] 8.3 Correct `openspec/specs/site-capacity/spec.md`'s "Committed dimensions remain authoritative through scheduling" requirement to state the scheduled shape, bounded by but not necessarily equal to the reservation, is authoritative.
-- [x] 8.4 Correct `openspec/specs/physical-provisioning/spec.md`'s "Provisioning shape comes from committed capacity" requirement to match.
-- [x] 8.5 Add the repository-wide negotiation/capacity premise to `docs/development/ARCHITECTURE.md`: pooled-capacity negotiation, not physical-resource pinning; `resize_reservation` as the mechanism for a persisted shape change; explicit note that `resize_reservation` has no negotiation-side caller yet.
-- [x] 8.6 Update `kit/fulfillment/tests/unit/test_scheduler.py::test_scheduled_dimensions_reflect_narrowed_request_not_full_reservation`'s docstring to describe pinned intended behavior rather than an open gap.
-- [x] 8.7 Re-run `kit/fulfillment` test suite; confirm no regressions.
-
-### Section 8 design-promotion record
-
-See `design.md`'s "Design-promotion record" table.
-
-## 9. Verification pass on prior fixes
-
-- [x] 9.1 Re-verify prior fixes in this change against current code, not against task checkmarks alone.
-- [x] 9.2 `vm_host` stripping from `/reservations`: confirmed still not done; decision needed (recorded in `design.md`, not yet made).
-- [x] 9.3 Adapter lockfile: root-caused the actual regeneration bug (`test-domain-dist-reinit` propagating an absolute `DIST_DIR`), fixed the root `Makefile`, regenerated `domains/vms/provisioning/adapter/uv.lock` cleanly (verified no absolute paths), confirmed the adapter's own test target still passes (25/25).
-- [x] 9.4 CI workflow: reviewed `.github/workflows/tests.yml`; confirmed gaps broader than initially reported (missing several packages from the matrix entirely, not just the staging-only trigger). Left unresolved pending a decision on priority.
-- [x] 9.5 Cross-service test strengthening: confirmed the specific test originally flagged is unchanged, but found its substance already satisfied by `test_ansible_fulfillment_provider.py::test_request_supplied_sizing_is_ignored_even_when_present` (this change's own task 3.10). Recommend treating as resolved.
-
-### Section 9 design-promotion record
-
-See `design.md`'s "Design-promotion record" table.
-
-
-

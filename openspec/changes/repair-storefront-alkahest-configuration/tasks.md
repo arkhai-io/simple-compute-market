@@ -2122,32 +2122,6 @@ failures.
       `test_settlement_composition.py` and `test_selection_dispatch.py`, and
       the stub substitution recorded there as unverified can now be executed.
 
-## 3aw. The same stage fix, in the twin that was skipping
-
-- [x] 3aw.1 **Stage `09c`'s `resource_id` assertion was fixed in one of the
-      two scenarios that carry it.** `test_full_deal.py` got the fix; its twin
-      `test_full_deal_buyer_cli.py` did not, and the miss was invisible
-      because that scenario's `09c` had been *skipped* on every prior run --
-      `09b` failed ahead of it and `require_state` gated the rest. Fixing
-      `09b` is what surfaced it.
-
-      A skipped stage is not a passing one, and a stage fix's blast radius is
-      the other scenarios carrying that stage. The earlier pass checked
-      `test_buy_oneshot_buyer_cli`'s `B5` only because a note named it, and
-      never asked which other files had a `09c`.
-
-- [x] 3aw.2 Swept all scenarios rather than fixing the one the log named.
-      Exactly three carry a `DealLease` lease-registration stage
-      (`test_full_deal`, `test_full_deal_buyer_cli`,
-      `test_buy_oneshot_buyer_cli`); the remaining vms scenarios, the
-      bare-metal scenario, the credits scenario and the `hosted/` helpers
-      carry none. The sweep is therefore complete and bounded, not a sample.
-
-      The twin now asserts `vm_host == E2E_DEAL_CLI_HOST` and sources
-      `reserved_resource_id` from the scenario constant, matching what
-      `test_full_deal` and `B5` already do. Its docstring claimed resource
-      identity was confirmed there, and was corrected.
-
 ## 3av. Credits site authority — widened, and the server half built
 
 - [x] 3av.1 **Amends 3ar.2's scope.** That task confined the signed
@@ -2204,20 +2178,218 @@ failures.
       the mount prefix there rather than on the child route. It now walks both
       shapes and asserts it found routes at all.
 
-- [ ] 3av.5 **Remaining, and deliberately not half-landed:** composing the
-      middleware in the credits service's `main.py`, resolving its ed25519
-      credential and per-role trust sets from config, the new committed dev
-      identities for the credits service and the gated sample app, their
-      compose mounts, the storefront's `[credits] admin_key_file` removal, the
-      sample app's switch to signed `service`-role calls, and the e2e suite's
-      own admin identity.
+- [x] 3av.5 **Integration-tested over a live client, which I had wrongly
+      called untestable.** The credits service shipped with no `tests/`
+      directory at all, and the provisioning service's integration suite
+      mounts its real app with its real auth middleware, real signers and
+      `httpx.ASGITransport` -- an available precedent that was not looked for
+      before deferring.
 
-      Adding the middleware without the credential and trust sets in place
-      would refuse every request with no way to authenticate one — strictly
-      worse than the present `401`. So nothing in this fileset changes
-      runtime behaviour: the module and tables are additive until composed.
+      Thirteen tests now drive the composed surface: a signed `seller`
+      request served and its response signed; an unsigned request refused
+      *with a signed refusal*, which is the exact half of the original defect
+      a route-table unit test cannot see; an untrusted principal refused; a
+      role the route does not admit refused; `admin` reaching a
+      `seller`-only route; a signature over the wrong operation refused; the
+      path resource proven to be part of the signed context, so a signature
+      for one resource does not verify for another; a stale timestamp
+      refused; a reused request id with changed content answered `409`; an
+      excluded liveness path served unsigned; and an unknown route refused
+      before any handler.
 
-- [ ] 3av.6 Carried from 3ar.6 and now larger: this adds *two* dev identities
+      Signing is reproduced in the test rather than driven through
+      `SiteCapacityClient`, because the client verifies responses and raises
+      on anything it cannot read -- which would turn "the refusal was
+      unsigned" into an exception about headers rather than an assertion
+      about the refusal.
+
+- [x] 3av.6 **The test found a real gap in the middleware.**
+      `TrustedIdentitySet` refuses to be empty, so a per-role
+      expected-principal resolver has no value meaning "this deployment
+      trusts nobody for this role" and must raise. Unhandled, that escaped as
+      a `500` from inside authentication -- telling a caller nothing and
+      logging as a bug in the authority rather than a gap in its
+      configuration. Now a signed `403` naming the missing configuration.
+      Verified to fail against the pre-fix middleware.
+
+- [x] 3av.7 `kit/fulfillment`'s `reinit` target refreshes `arkhai-kit-identity`
+      alongside `arkhai-kit-site`. It was the only reinit target refreshing
+      the site kit without the identity kit, so a reinstall there could
+      resolve a stale identity wheel against a site wheel that now requires
+      it. The root `dist`/`dist-ci` lists already build `dist-identity`
+      before `dist-kits`, so the build order itself needed nothing.
+
+- [x] 3av.8 **Composed, and integration-tested against the real app.** The
+      credits service now resolves an Ed25519 credential and per-role trust
+      sets from configuration (`identity.py`, kept out of both `config.py`,
+      which resolves raw values, and `container.py`, which wires services to a
+      database) and mounts one `SiteAuthMiddleware` over both route tables.
+
+      Resolved at import, deliberately: a credential that cannot be read is a
+      startup failure while an operator is watching, not a `500` on a request
+      hours later. The seed file accepts raw or base64url and refuses anything
+      that is not 32 bytes by name -- a credential silently resolving to
+      something unexpected is worse here than a shared secret, because every
+      response the service signs would verify against a principal nobody
+      pinned.
+
+      **The admin-key gate survives as a fallback, and only as one.** Signed
+      authentication engages only when *both* a credential and at least one
+      trust set are present. A service holding trust sets but no credential
+      could verify a caller and answer it unsigned, which is the one failure
+      the kit's client cannot read at all -- so half-configured falls back
+      rather than half-enabling.
+
+      Nine integration tests against the real `main.app` over
+      `httpx.ASGITransport`, eight of which fail against the previous
+      composition. They include the two exact requests the e2e run showed
+      failing -- `PUT /capacity/resources/weather-quota` and
+      `GET /capacity/events` -- plus the role split asserted in both
+      directions, an untrusted principal in a valid role, `admin` reaching a
+      seller route, liveness reachable without a credential, and the fallback
+      itself.
+
+      This is a composition test, not a middleware test, because the defect
+      was a composition defect: the kit's router was mounted correctly and the
+      kit's client signed correctly, and what was wrong was the gate in front
+      of them. A test of either half in isolation passed throughout.
+
+- [x] 3av.9 **The service's configured test path pointed at a directory that
+      does not exist.** `testpaths = ["src/tests"]`, and the Makefile ran
+      `pytest src/tests`, against a service whose only tests now live in
+      `tests/`. That is why this service had no tests: not that the work
+      resisted testing, but that a green `make test` was collecting nothing.
+      Repointed, with `pytest-asyncio` added.
+
+## 3aw. The same stage fix, in the twin that was skipping
+
+- [x] 3aw.1 **Stage `09c`'s `resource_id` assertion was fixed in one of the
+      two scenarios that carry it.** `test_full_deal.py` got the fix; its twin
+      `test_full_deal_buyer_cli.py` did not, and the miss was invisible
+      because that scenario's `09c` had been *skipped* on every prior run --
+      `09b` failed ahead of it and `require_state` gated the rest. Fixing
+      `09b` is what surfaced it.
+
+      A skipped stage is not a passing one, and a stage fix's blast radius is
+      the other scenarios carrying that stage. The earlier pass checked
+      `test_buy_oneshot_buyer_cli`'s `B5` only because a note named it, and
+      never asked which other files had a `09c`.
+
+- [x] 3aw.2 Swept all scenarios rather than fixing the one the log named.
+      Exactly three carry a `DealLease` lease-registration stage
+      (`test_full_deal`, `test_full_deal_buyer_cli`,
+      `test_buy_oneshot_buyer_cli`); the remaining vms scenarios, the
+      bare-metal scenario, the credits scenario and the `hosted/` helpers
+      carry none. The sweep is therefore complete and bounded, not a sample.
+
+      The twin now asserts `vm_host == E2E_DEAL_CLI_HOST` and sources
+      `reserved_resource_id` from the scenario constant, matching what
+      `test_full_deal` and `B5` already do. Its docstring claimed resource
+      identity was confirmed there, and was corrected.
+
+## 3ax. Identity resolution belongs to the kit, and the credentials it needs
+
+- [x] 3ax.1 **Moved out of the domain.** Nothing in the identity resolution was
+      specific to selling API calls: a site authority verifies signed requests
+      and signs its responses whether its inventory is virtual machines, bare
+      metal or prepaid credits. `market_site.identity` now owns it and takes
+      plain values rather than a settings object, because each service resolves
+      configuration differently and a kit knowing about one would force the
+      others to satisfy it. The service keeps a shim that only knows where its
+      own dynaconf keys live.
+
+- [x] 3ax.2 **The moved code had reimplemented three kit primitives, each
+      worse than the original.** `market_identity`'s
+      `SecretFileCredentialProvider` already reads credentials no-follow,
+      owner-only and size-bounded; the hand-rolled version used `lstat` plus
+      `read_bytes` with neither check. `create_signer` already accepts raw
+      32-byte and *canonical unpadded* base64url secrets and rejects
+      non-canonical encodings; the hand-rolled base64 decode was laxer. And
+      `core_storefront.resolve_storefront_signer` fails closed unless the
+      credential owns the configured principal -- a check omitted entirely,
+      while the omitting docstring worried in prose about exactly the failure
+      it prevents. A `site_principal` pin now carries it.
+
+- [x] 3ax.3 **Trailing newlines.** The scheme's secret parser requires
+      canonical unpadded base64url, which a newline-terminated file is not.
+      Committed credential files usually have one. Raw, unpadded, `\n`- and
+      `\r\n`-terminated forms all load now; the two newline cases failed
+      before. The committed files here deliberately carry no newline -- their
+      entire contents are the secret -- but a mounted credential from
+      elsewhere will.
+
+- [x] 3ax.4 **File permissions, which would have refused every dev identity in
+      the repository.** Committed identities are `0644`, because git carries
+      only the executable bit, and the owner-only provider refuses anything
+      group- or world-readable. Checked what other services do rather than
+      assuming: none uses that provider for a mounted credential; the
+      convention is a read-only bind mount of a committed file, and only the
+      buyer's self-generated profile store takes the owner-only path, where
+      permissions are under the tool's control. `resolve_site_signer` now
+      accepts supplied material *or* a locator, and the kit picks no delivery
+      mechanism.
+
+      The integration fixture writes its credential unpadded,
+      newline-terminated and `0644` for this reason. A tidier fixture passes
+      while the real thing fails.
+
+- [x] 3ax.5 The two committed dev identities, derived the same deterministic,
+      reproducible way as the registry credential:
+
+      | Credential | Public identifier | Role |
+      |---|---|---|
+      | `api-credits-service.ed25519` | `MheGyI4O…` | the authority itself |
+      | `api-credits-gated-app.ed25519` | `w75DsOFO…` | `service` |
+
+      Labelled `-v2`, not `-v1`, for a mundane reason worth recording: the
+      `-v1` labels derive a seed and identifier beginning with `-`, which
+      shells, `getopt` and compose expansion all read as an option. A
+      credential that needs quoting gymnastics is one that will eventually be
+      passed wrong.
+
+- [x] 3ax.6 Exported by `e2e-dev-identities`, mounted into both containers,
+      and the credits storefront's site pin replaced. That closes 3ar.4's
+      inherited open question with a value that has a committed private half:
+      the previous pin assumed the `default` site was the provisioning
+      service, which signs eip191, and the site URL says otherwise.
+
+- [x] 3ax.7 **Trust sets live in the deployment, not in committed defaults.**
+      Placed in `settings.toml` first, and the integration suite caught it:
+      dynaconf merges rather than replaces, so a committed principal is
+      *added* to whatever a deployment configures and cannot be narrowed away
+      by overriding. A committed trust entry would be un-removable in every
+      environment. They now come from compose, and `settings.toml` documents
+      the shape with empty lists.
+
+      Also learned there: `TrustedIdentitySet` admits at most two principals
+      per role -- enough for a rotation and no more -- which is now written
+      down where someone configuring a third would look.
+
+      `admin` is left unconfigured, so an admin-role request is refused naming
+      the gap. Nothing in the repository holds an operator credential for this
+      service, and pinning a service component's principal there would hand a
+      component the role that exists for humans.
+
+- [ ] 3ax.8 **Remaining, and larger than "the sample app":** the gated side is
+      `apicredits_middleware`, a published client library with its own
+      conformance suite, not the sample application. Its `client.py` builds one
+      static `{"X-Admin-Key": …}` dict and posts through a single `_post`, so
+      per-request signing is contained -- but it needs the three operation
+      names and their resource extraction to agree with
+      `CREDITS_ROUTE_CONTRACTS` (`credits_key_consume` and
+      `credits_key_verify` keyed by `key_id`, `credits_key_consume_batch` by
+      nothing), which is a third table to keep honest.
+
+      The storefront's own `credits_service_client` needs the same treatment
+      for `seller`.
+
+      `APICREDITS_SITE_SIGNING_KEY_FILE` is therefore **not yet set**: the
+      credential is delivered and mountable, but selecting it turns on signed
+      authentication for every route at once and both callers still present a
+      shared secret. Delivering and enabling are separated so neither blocks
+      the other, and so the flip is one line when the two clients are ready.
+
+- [ ] 3ax.9 Carried from 3ar.6 and now larger: this adds *two* dev identities
       to the committed-file-plus-hardcoded-pin-plus-compose-mount pattern
       rather than one. Confirmed as acceptable for now against a dedicated
       cleanup pass on the topic.

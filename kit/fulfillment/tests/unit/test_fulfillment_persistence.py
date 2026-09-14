@@ -165,3 +165,143 @@ def test_begin_teardown_unknown_fulfillment_id_raises_lookup_error():
             "no-such-fulfillment",
             VersionedEnvelope(kind="teardown-test", schema_version=1, payload={}),
         )
+
+
+# ---------------------------------------------------------------------------
+# attach_executor_job, against a real ledger
+#
+# The orchestrator-level tests for this used a fake transaction, so they
+# asserted that the call was made and never that it lands. The method name on
+# the real service was wrong -- `update_reservation_fields` does not exist --
+# and nothing caught it: the fake never ran, `capacity_ledger` is typed loosely
+# enough that no checker objected, and the failure is swallowed by design
+# because a missing diagnostic handle must not fail a working fulfillment.
+#
+# So the write is exercised end to end here, through a real
+# `CapacityLedgerService` against a real SQLite ledger.
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def ledger_services(tmp_path):
+    from market_resource_pools import PoolCreate, ResourcePoolService
+    from market_resource_pools.db import Base as PoolsBase
+    from market_site.db import Base as SiteBase
+    from market_site.ledger import CapacityLedgerService
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import sessionmaker
+    from sqlalchemy.pool import StaticPool
+
+    engine = create_engine(
+        "sqlite:///:memory:",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    PoolsBase.metadata.create_all(bind=engine)
+    SiteBase.metadata.create_all(bind=engine)
+    factory = sessionmaker(bind=engine)
+    ledger = CapacityLedgerService(
+        factory, unit_claim_keys=("units", "gpu_count")
+    )
+
+    class _Handler:
+        provider = "ansible"
+
+        def validate_config(self, config):
+            return dict(config)
+
+        def validate_config_problems(self, config):
+            return dict(config), ()
+
+        def read_config(self, db, pool_id):
+            return {}
+
+        def read_config_for_execution(self, db, pool_id):
+            return {}
+
+        def replace_config(self, db, pool_id, config):
+            pass
+
+        def delete_config(self, db, pool_id):
+            pass
+
+    pools = ResourcePoolService(factory, {"ansible": _Handler()})
+    # Declared, because admission refuses a claim whose offering mode no
+    # matching pool delivers -- the reservation this test attaches to has to
+    # be one the ledger would really have created.
+    pools.create_pool(PoolCreate(
+        id="pool-a",
+        label="pool-a",
+        provider="ansible",
+        enabled=True,
+        policy_tags={"deliverable_modes": ["vm"]},
+        provider_config={},
+    ))
+    return ledger, factory
+
+
+def _reserved(ledger):
+    ledger.register_resource(
+        resource_id="resource-1",
+        resource_type="compute.gpu",
+        total_units=4,
+        pool_id="pool-a",
+    )
+    reservation = ledger.reserve(
+        claim={"offering_mode": "vm", "gpu_count": 1},
+        deal_ref={"escrow_uid": "0xabc"},
+    )
+    assert reservation is not None
+    return reservation["capacity_reservation_id"]
+
+
+def test_attach_executor_job_lands_on_the_reservation(ledger_services):
+    """The assertion the fake transaction could not make.
+
+    Reads the value back off the ledger rather than trusting the call, because
+    the defect this covers was a wrong method name on a duck-typed
+    collaborator -- invisible to any test that only checks the call happened.
+    """
+    ledger, factory = ledger_services
+    capacity_reservation_id = _reserved(ledger)
+    tx = SqlAlchemyFulfillmentTransaction(
+        MagicMock(), MagicMock(), MagicMock(), ledger
+    )
+
+    tx.attach_executor_job(capacity_reservation_id, "ansible-job-7")
+
+    reservation = ledger.get_reservation(capacity_reservation_id)
+    assert reservation["create_job_id"] == "ansible-job-7"
+
+
+def test_attach_executor_job_is_a_no_op_without_a_ledger(ledger_services):
+    """A transaction composed without a ledger must not raise.
+
+    The settlement-record half of this transaction is used standalone, and a
+    fulfillment that otherwise succeeded should not fail for want of a
+    cross-reference.
+    """
+    tx = SqlAlchemyFulfillmentTransaction(
+        MagicMock(), MagicMock(), MagicMock(), None
+    )
+
+    tx.attach_executor_job("reservation-1", "ansible-job-7")
+
+
+def test_attach_executor_job_swallows_a_ledger_failure(ledger_services):
+    """Best-effort, and asserted to stay that way.
+
+    Deliberate: the fulfillment is already acknowledged by the time this runs.
+    It is also what hid the wrong method name from the e2e run for a cycle, so
+    the warning it logs is the only signal -- worth knowing that is the trade.
+    """
+    ledger, _ = ledger_services
+    broken = MagicMock()
+    broken.update_lease_fields.side_effect = RuntimeError("ledger unavailable")
+    tx = SqlAlchemyFulfillmentTransaction(
+        MagicMock(), MagicMock(), MagicMock(), broken
+    )
+
+    tx.attach_executor_job("reservation-1", "ansible-job-7")
+
+    broken.update_lease_fields.assert_called_once()

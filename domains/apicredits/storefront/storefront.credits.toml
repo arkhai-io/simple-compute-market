@@ -72,8 +72,17 @@ hold_ttl_seconds = 900
 url = "http://credits-service:8082"
 
 [capacity.sites.default.expected_authorities]
+# The credits service, which is this storefront's `default` capacity site --
+# `[capacity.sites.default].url` above points at it. The previous value here
+# had no committed private half and could not be recovered; it was recorded as
+# undecidable on the premise that this site was the provisioning service, which
+# signs eip191. That premise was checkable and wrong.
+#
+# Public half of dev-env/identities/api-credits-service.ed25519. It must match
+# what that service resolves as its own principal, or this storefront rejects
+# every response it gets from its own site.
 identities = [
-  { scheme = "ed25519", identifier = "My6-jSfLcyOzpAHBwTtd1kvMwOEOzaHCtdEaA3eaheU" },
+  { scheme = "ed25519", identifier = "MheGyI4OZPRUijPSgdBucxha4zXw5mJ5hSELYon6x_c" },
 ]
 
 [negotiation]

@@ -14,8 +14,10 @@ reinit: ## Reinstall internal kit dependencies from the shared wheel directory
 	uv sync --dev --python $(PYTHON_VERSION) --find-links $(DIST_DIR) \
 		--upgrade-package arkhai-kit-site \
 		--upgrade-package arkhai-kit-resource-pools \
+		--upgrade-package arkhai-kit-identity \
 		--reinstall-package arkhai-kit-site \
-		--reinstall-package arkhai-kit-resource-pools
+		--reinstall-package arkhai-kit-resource-pools \
+		--reinstall-package arkhai-kit-identity
 
 test: reinit ## Run the test suite against current internal wheels
 	uv run --find-links $(DIST_DIR) pytest tests/unit -q

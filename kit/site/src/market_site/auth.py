@@ -357,6 +357,32 @@ class SiteAuthMiddleware(BaseHTTPMiddleware):
                 request_id=authenticated.request_id,
             )
 
+        try:
+            expected_principals = self._expected_principals(authenticated.role)
+        except Exception:
+            # A deployment that trusts nobody for this role.
+            # `TrustedIdentitySet` cannot be empty, so a resolver has no value
+            # meaning "nobody" and raising is its only honest answer -- which
+            # makes this a configuration gap to report, not an exception to
+            # escape as a 500 from inside authentication.
+            logger.warning(
+                "No trusted principals configured for role %r; refusing %s %s",
+                authenticated.role,
+                request.method,
+                request.url.path,
+            )
+            return self._signed_rejection(
+                signer,
+                request=request,
+                operation=operation,
+                resource=resource,
+                body={
+                    "detail": "No trusted principal is configured for this role"
+                },
+                status_code=status.HTTP_403_FORBIDDEN,
+                request_id=authenticated.request_id,
+            )
+
         replay_store = self._replay_store_provider()
         verification = verify_request(
             authenticated,
@@ -367,7 +393,7 @@ class SiteAuthMiddleware(BaseHTTPMiddleware):
             expected_method=request.method,
             expected_operation=operation,
             expected_resource=resource,
-            expected_principals=self._expected_principals(authenticated.role),
+            expected_principals=expected_principals,
             existing_replay=replay_store.get(
                 authenticated.principal, authenticated.request_id
             ),
