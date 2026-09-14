@@ -174,7 +174,7 @@ dispositions.
       of need and is not persisted into storefront-local storage. The rename must not
       become an occasion to cache it.
       - **Status:** Confirmed. The hint is still read live from `projection_caches()` at each point of need; nothing was persisted.
-- [ ] 4.5 Stop emitting the old key from the producer once consumers accept both. Do
+- [x] 4.5 Stop emitting the old key from the producer once consumers accept both. Do
       not remove consumer-side alias acceptance in this change; its removal is an open
       question in `design.md` with no owner yet.
       - **Status:** **Superseded by the 4.1 decision.** Projection is verbatim, so there is no producer emission to stop. What remains binding is the instruction not to remove consumer-side alias acceptance, which is retained in `raw_listing_cardinality_mode` and required normatively. The superseded new-producer/old-consumer argument is recorded in `design.md`.
@@ -226,9 +226,16 @@ dispositions.
 - [x] 5.4 Update the comments in every filter-spec that refers to `vms.compute` by
       name.
       - **Status:** Done in the API-credits spec's two comments naming the compute registry.
-- [ ] 5.5 **Integration.** An API-credits listing and an introduction listing each
+- [x] 5.5 **Integration.** An API-credits listing and an introduction listing each
       publish and are queried successfully under the renamed envelope, through the
       canonical `RegistryClient` against the real registry app.
+      - **Closed by 11.7b (verified 2026-09-14).** Re-run rather than taken
+        on trust: `test_settled_listing_vocabulary.py` and
+        `test_settled_envelope_across_specs.py` report 18 passed, the
+        9 + 9 that task recorded, and the four tests it appended to
+        `test_compute_contract_api.py` are present and pass inside the
+        provisioning suite's 874. The remediation section did this work
+        and these rows were never ticked.
 - [x] 5.6 Bump the minor version of every client distribution whose public surface
       moves: `arkhai-core-registry-client` (renamed attributes, removed alias, dropped
       field), `arkhai-core-storefront-client` (renamed status field), and
@@ -441,13 +448,34 @@ effects; an assertion that changes for any other reason is the defect.
       the real site app and its canonical client; a claim carrying the retired key is
       rejected. The rejection is intended behaviour, not a regression.
       - **Status:** Done. Three tests in `provisioning/compute/service/tests/integration/test_capacity_api.py`: a claim carrying `offering_mode` reserves through the real app via the canonical `SiteCapacityClient` and the value is persisted on the reservation; a claim omitting the mode is refused; and a claim naming it under the retired key is refused. The site authority has no app of its own -- `kit/site` is a library and the HTTP surface lives in the provisioning service -- so this is where the boundary test belongs.
-- [ ] 9.5 **Integration.** A compute listing publishes and is queried through the
+- [x] 9.5 **Integration.** A compute listing publishes and is queried through the
       canonical `RegistryClient` under `listing_resource` and `offering_mode`; a
       submission using a retired spelling is rejected.
-- [ ] 9.6 **Integration.** An API-credits listing and an introduction listing each
+      - **Closed by 11.7b (verified 2026-09-14).** Re-run rather than taken
+        on trust: `test_settled_listing_vocabulary.py` and
+        `test_settled_envelope_across_specs.py` report 18 passed, the
+        9 + 9 that task recorded, and the four tests it appended to
+        `test_compute_contract_api.py` are present and pass inside the
+        provisioning suite's 874. The remediation section did this work
+        and these rows were never ticked.
+- [x] 9.6 **Integration.** An API-credits listing and an introduction listing each
       publish and query successfully under the renamed envelope.
-- [ ] 9.7 **Integration.** The compute action adapter registry composes and dispatches
+      - **Closed by 11.7b (verified 2026-09-14).** Re-run rather than taken
+        on trust: `test_settled_listing_vocabulary.py` and
+        `test_settled_envelope_across_specs.py` report 18 passed, the
+        9 + 9 that task recorded, and the four tests it appended to
+        `test_compute_contract_api.py` are present and pass inside the
+        provisioning suite's 874. The remediation section did this work
+        and these rows were never ticked.
+- [x] 9.7 **Integration.** The compute action adapter registry composes and dispatches
       correctly end to end after the selector rename.
+      - **Closed by 11.7b (verified 2026-09-14).** Re-run rather than taken
+        on trust: `test_settled_listing_vocabulary.py` and
+        `test_settled_envelope_across_specs.py` report 18 passed, the
+        9 + 9 that task recorded, and the four tests it appended to
+        `test_compute_contract_api.py` are present and pass inside the
+        provisioning suite's 874. The remediation section did this work
+        and these rows were never ticked.
 - [x] 9.8 **Integration.** The producer serializes `listing_cardinality_mode` through
       the real projection API, read back through the canonical site client, and the
       storefront resolves cardinality from it.
@@ -474,8 +502,15 @@ effects; an assertion that changes for any other reason is the defect.
       is system-level evidence for the alias, not a substitute for 9.8.
 - [ ] 9.13 **System.** The cutover gate rejects an incompatible peer before mutations
       resume, per the identity-contract pattern.
-- [ ] 9.14 **Integration.** A buyer client declaring the new schema identity queries a
+- [x] 9.14 **Integration.** A buyer client declaring the new schema identity queries a
       bumped registry successfully; one declaring the retired identity does not.
+      - **Closed by 11.7b (verified 2026-09-14).** Re-run rather than taken
+        on trust: `test_settled_listing_vocabulary.py` and
+        `test_settled_envelope_across_specs.py` report 18 passed, the
+        9 + 9 that task recorded, and the four tests it appended to
+        `test_compute_contract_api.py` are present and pass inside the
+        provisioning suite's 874. The remediation section did this work
+        and these rows were never ticked.
 - [x] 9.15 **Boundary-change validation.** Follow `docs/development/TESTING.md`'s
       boundary-change procedure: package build and type checks, and confirm every
       renamed package still exposes its expected public surface. Four package
@@ -492,12 +527,19 @@ effects; an assertion that changes for any other reason is the defect.
       - **Status:** Done under the same narrowing as 8.6. Zero hits outside archived change documents, the three migrations that must read retired names, their two test fixtures, and the specification prohibitions. The retained `executor_` compounds are correct by rule per 1.6 and were not counted.
       - **Correction:** **REOPENED by code review.** The audit asserted zero hits for a curated list of retired spellings, which cannot find a concept under a name nobody enumerated. `ExecutorKind`, `MissingExecutorKindError`, and the listing-sense uses of bare `offer` all survived it. See task 11.4.
       - **Status:** Closed by 11.4's semantic predicate rather than by the blocklist grep this task originally described. Every surviving occurrence of a retired term is classified with its reason; nothing is dismissed for being noisy.
-- [ ] 9.17 **Integration.** An action submitted through the provisioning contract
+- [x] 9.17 **Integration.** An action submitted through the provisioning contract
       carrying `offering_mode` dispatches to the registered adapter; one carrying the
       retired key is rejected as carrying no offering mode; and a caller pinned to the
       previous `contract_version` is refused with actionable version information
       rather than coerced. The lease path retains `executor_target` alongside the
       renamed mode field in the same registration.
+      - **Closed by 11.7b (verified 2026-09-14).** Re-run rather than taken
+        on trust: `test_settled_listing_vocabulary.py` and
+        `test_settled_envelope_across_specs.py` report 18 passed, the
+        9 + 9 that task recorded, and the four tests it appended to
+        `test_compute_contract_api.py` are present and pass inside the
+        provisioning suite's 874. The remediation section did this work
+        and these rows were never ticked.
 - [x] 9.18 **Integration.** The admin-gated status route returns
       `listing_cardinality_mode_explanations`, read back through
       `core/storefront-client`'s status model, with the fallback explanation still
@@ -536,7 +578,7 @@ effects; an assertion that changes for any other reason is the defect.
       removal question. Remove this file's "Plan revisions" note once its content is
       reflected in the promotion record below.
       - **Status:** Done. Debugging narratives moved to `design.md`'s "Defects found during implementation"; validation evidence consolidated into one section; per-task notes shortened to final behaviour, evidence, and deferred work. One stale note was found and removed in the process: 5.6 carried an "Owed, not done" line contradicting the completion note directly below it.
-- [ ] 10.5 **Roadmap currency.** Update `docs/development/ROADMAP.md`, whose Goal 1
+- [x] 10.5 **Roadmap currency.** Update `docs/development/ROADMAP.md`, whose Goal 1
       names the published field and whose Goal 7 current-state prose names
       `offer_resource`, `listing_mode`, `offering_type`, and the projection's
       "executor host inventory". Goal 7's gap row for this change also needs its
@@ -544,12 +586,32 @@ effects; an assertion that changes for any other reason is the defect.
       - **Status:** Partially done. `ROADMAP.md` Goal 7's cardinality-hint paragraph now describes the settled name as current. Goal 7's gap row for this change is **deliberately unchanged** -- it cites the offering-mode and `offer` renames, which have not landed. The four `executor` uses are also cleared.
       - **Status:** Extended. `ROADMAP.md` Goal 7's cardinality paragraph describes the settled name as current, the four `executor` uses are cleared, and the `structured-capacity-requirements` gap row no longer names `offering_type` as a live proposal. Goal 7's gap row for this change is **deliberately unchanged**: it describes the vocabulary problem this change closes, and belongs with archival rather than completion.
       - **Correction:** **REOPENED by code review.** `openspec/README.md` states roadmap currency is owed at change *completion*, not archival. Goal 7's gap row for this change was left deliberately on a reading of that rule that the rule does not support. See task 11.9.
-- [ ] 10.6 **Campaign index currency.** Update this change's row and Goal 7's
+      - **Resolution (2026-09-14).** The review was right about the rule and
+        11.9 already carried out the remedy, so this task was stale-open
+        rather than unresolved. Verified against the files rather than
+        11.9's note: Goal 7's gap row in `docs/development/ROADMAP.md` is
+        struck through and annotated with what closed it, naming
+        `offering_mode`, `listing_resource` and `offer`'s restored meaning.
+
+        The original objection the deferral rested on -- that the row also
+        cited renames which had not landed -- is answered by striking the
+        row and saying what closed it, rather than by deleting it or by
+        leaving it untouched. Both of those were the options considered; the
+        third was the correct one.
+- [x] 10.6 **Campaign index currency.** Update this change's row and Goal 7's
       dependency graph in `openspec/changes/README.md`. The row's acceptance-boundary
       summary predates design review and mentions neither the provisioning contract
       nor the persisted-state shape.
       - **Status:** Done. The row's status now reads implemented-with-closeout-outstanding, and its acceptance boundary names the persisted-state shape and links `cutover.md`. Campaign placement is unchanged -- still Goal 7, still independent -- and Goal 7's dependency graph needed no edit.
       - **Correction:** **REOPENED by code review.** The index row still reads "implemented; cutover sequencing and closeout outstanding", which is now both stale and, given the findings, understated. See task 11.9.
+      - **Resolution (2026-09-14).** Also superseded by 11.9, which rewrote
+        the row. One clause had gone stale again since: it read that a live
+        multi-service scenario "remains blocked on an unrelated e2e harness
+        gap", which was true when written and is not now -- 11.13's blocker
+        is resolved and the suite reports a full green run. A row that tells
+        a reader a change cannot proceed when it can is the exact
+        misdirection part six exists to prevent, so the status was corrected
+        in the same step.
 - [x] 10.7 **Promotion.** Complete the design-promotion record below.
 
       - **Status:** Done. The record below names a permanent destination per accepted decision, plus a second table classifying what was deliberately not promoted.
@@ -655,7 +717,7 @@ database, and the canonical typed client over `ASGITransport`. Only 9.12 and
 9.13 need a live multi-service environment. Task 9.18 already demonstrates the
 pattern; these tasks follow it.
 
-- [ ] 11.7a **Superseded by 11.0**, which promotes the same work ahead of the
+- [x] 11.7a **Superseded by 11.0**, which promotes the same work ahead of the
       boundary tasks because a wheel-based `make test` is red on it.
 - [x] 11.7b One typed-client-over-ASGI integration test per changed boundary,
       closing 9.4 (retired-key rejection), 9.5, 9.6, 9.7 (version cutover),
