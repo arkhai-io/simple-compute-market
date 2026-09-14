@@ -346,8 +346,8 @@ class TestUpdateLease:
         this key, and asserting the ledger is not asserting the contract.
 
         `vm_remove_job_id` is checked alongside it because it is retained
-        for wire compatibility until `10.5` retires it, and the two must
-        carry the same value rather than diverge.
+        for wire compatibility only, and the two must carry the same value
+        rather than diverge.
         """
         client, _ = client_and_queue
         lease = await _register(client, "escrow-release-job-id-on-api")

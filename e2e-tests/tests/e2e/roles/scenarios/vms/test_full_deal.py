@@ -1311,10 +1311,14 @@ class TestStage09a2_CapacityEventCycle:
 
 
 class TestStage09b_SettlementReadyAndCredentials:
-    def test_09b_settlement_ready_credentials_and_listing_open(
+    def test_09b_settlement_ready_credentials_and_listing_closed(
         self, storefront_client, storefront_admin_client, buyer_config, deal_state: DealState
     ):
-        """Settlement status=ready, tenant credentials present, listing still open.
+        """Settlement status=ready, tenant credentials present, listing closed.
+
+        The listing closes because its capacity is held by this deal, which
+        is what step 3 has always asserted; the name and this line said
+        "open" and were the last trace of the pre-capacity behaviour.
 
         Combined observation of all post-provisioning state:
           1. wait_for_settlement — server-side long-poll until job terminal (no client polling)

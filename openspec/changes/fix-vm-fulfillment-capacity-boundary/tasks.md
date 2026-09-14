@@ -131,7 +131,7 @@ See `design.md`'s "Design-promotion record" table.
       outcome too, so the test states the cursor position it is beating
       rather than depending on it silently.
 
-- [ ] 10.5 **Not in this change:** retire `capacity_reservations.vm_remove_job_id`.
+- [x] 10.5 **Not in this change:** retire `capacity_reservations.vm_remove_job_id`.
       It holds a VM-conditional mirror of `release_job_id`, written only when
       `offering_mode` is the VM mode and always to the value `release_job_id`
       already has, and it is the one domain-prefixed field on a reservation
@@ -147,6 +147,23 @@ See `design.md`'s "Design-promotion record" table.
       `_reservation_payload`'s derived `vm_host`/`vm_target` keys are
       deliberately left alone -- those are domain-shaped projections beside
       the generic `executor_ref`/`executor_target`, not duplicated storage.
+
+      **Closed as deferred (2026-09-14):** tracked by
+      `openspec/changes/retire-vm-remove-job-id/`, which this task named as
+      its home. Scoping it there corrected this note in one material way:
+      the "22 files" figure conflates two different columns. A grep for the
+      identifier also finds `vm_leases.vm_remove_job_id`, the legacy table
+      the backfill reads from -- `db/migrations.py` `SELECT`s
+      `vl.vm_remove_job_id` and joins to `capacity_reservations`, so it
+      reads the legacy source and never writes the mirror -- plus the
+      storefront's own column in `market_storefront/utils/sqlite_client.py`.
+      Neither is in scope for retiring the mirror, which makes the real
+      change roughly ten production files rather than twenty-two.
+
+      The wire-compatibility argument for keeping the mirror also went away
+      with the groundwork recorded above: `release_job_id` is now published
+      on the VM adapter's lease contract, so no caller has to read
+      `vm_remove_job_id` to get the handle.
 
       **Partial groundwork since (2026-09-14).** `LeaseResponse`
       (`vm_provisioning_operator.models`) now also publishes
@@ -294,8 +311,29 @@ See `design.md`'s "Design-promotion record" table.
       third occurrence: a new test that has not been run against the
       unpatched tree is not yet evidence.
 
-- [ ] 6.8 **Roadmap currency** (added 2026-08-06 by `add-development-roadmap`, which extended `openspec/README.md#plan-closeout-requirements` from five parts to six). Update this change's rows in `docs/development/ROADMAP.md` — it currently appears as an open gap under both Goal 1 (stale physical-placement fields on the current fulfillment path) and Goal 2 (accepted VM shape not reaching the provisioning request) — and record the update in the design-promotion record. Appended rather than folded into 6.6, per `AGENTS.md`'s rule to amend rather than replace implementation history.
-- [ ] 6.9 **Campaign index currency** (part seven, added when `openspec/README.md#plan-closeout-requirements` was extended from six parts to seven). Appended rather than folded into an existing task, per `AGENTS.md`'s rule to amend rather than replace implementation history. Update this change's row, and its campaign's dependency graph, in `openspec/changes/README.md` to match its state at completion, or record the disposition here if its status and campaign placement are both unchanged.
+- [x] 6.8 **Roadmap currency** (added 2026-08-06 by `add-development-roadmap`, which extended `openspec/README.md#plan-closeout-requirements` from five parts to six). Update this change's rows in `docs/development/ROADMAP.md` — it currently appears as an open gap under both Goal 1 (stale physical-placement fields on the current fulfillment path) and Goal 2 (accepted VM shape not reaching the provisioning request) — and record the update in the design-promotion record. Appended rather than folded into 6.6, per `AGENTS.md`'s rule to amend rather than replace implementation history.
+      **Done (2026-09-14).** Both rows removed from `docs/development/ROADMAP.md`:
+      the goal-1 row under physical-resource authority and the goal-2 row under
+      negotiating full compute capability. A closed gap is not marked closed in
+      place -- the convention is that each goal carries a present-tense current
+      state and a table of *open* gaps only -- so the delivered behaviour was
+      folded into both current-state texts instead: that the committed claim now
+      governs the fulfillment request, and that what is agreed reaches the
+      provisioning request even though publication still loses the shape. The
+      goal-1 text also names the one outstanding cleanup and its owner, so the
+      `vm_remove_job_id` mirror is not silently dropped from the roadmap along
+      with the gap that carried it.
+- [x] 6.9 **Campaign index currency** (part seven, added when `openspec/README.md#plan-closeout-requirements` was extended from six parts to seven). Appended rather than folded into an existing task, per `AGENTS.md`'s rule to amend rather than replace implementation history. Update this change's row, and its campaign's dependency graph, in `openspec/changes/README.md` to match its state at completion, or record the disposition here if its status and campaign placement are both unchanged.
+      **Done (2026-09-14).** Row updated to `complete; awaiting archival` with
+      the green e2e run named as its proof, and the campaign's dependency graph
+      changed from `fix-vm-fulfillment-capacity-boundary (independent)` to point
+      at its successor. Two change directories were created in this step, so
+      their rows and links were reconciled in the same edit per part six's rule
+      that a link to a directory that does not exist is a blocking defect:
+      `retire-vm-remove-job-id` in this goal's table, and
+      `sign-multi-language-credits-middleware` under the local end-to-end stack
+      campaign that opened it. Every `](<dir>/)` link in the index was checked
+      to resolve to a real directory.
 
 ### Design-promotion record
 
@@ -304,5 +342,8 @@ See `design.md`'s "Design-promotion record" table.
 | Committed reservation dimensions are authoritative for fulfillment shape | `openspec/specs/site-capacity/spec.md` — “Committed dimensions remain authoritative through scheduling” |
 | Physical providers translate canonical dimensions through a pool-selected registered requirement delegate | `openspec/specs/physical-provisioning/spec.md` — “Provisioning shape comes from committed capacity” and “Ansible fulfillment adapter” |
 | Delegate identifier, registry validation, and provider-config snapshot semantics | `openspec/specs/resource-pool-management/spec.md` — “Registered requirement delegates” |
+| A lease's release handle is `release_job_id` on both lease contracts; `vm_remove_job_id` is a retired mirror | `openspec/specs/site-capacity/spec.md` — carried into [`retire-vm-remove-job-id`](../retire-vm-remove-job-id/), which owns the removal |
+| An explicit convergence cycle must be able to reach rows the worker itself claimed, or "run one cycle" is not a step | `docs/development/TESTING.md` — “Pause the loop, then advance it explicitly” |
+| A best-effort write inside a caller's transaction uses the caller's session, never a second one | Code docstring: `market_site.ledger.update_lease_fields_in_session` |
 | Internal packages are consumed from `.dist` wheels rather than relative editable sibling paths | Existing `docs/development/ARCHITECTURE.md` packaging/dependency section; amend only if the current text is insufficient |
 | Root build composition delegates domain artifact ownership to `domains/Makefile` | Existing repository build guidance in `AGENTS.md`/`ARCHITECTURE.md`; no new permanent rule unless implementation finds a gap |

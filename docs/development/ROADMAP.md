@@ -34,13 +34,14 @@ The VM storefront still holds physical state the projection has superseded. It r
 
 Buyer-access infrastructure is provisioning-owned. A tunnel relay is a resource in the provisioning service, referenced by the pools whose hosts dial it, holding its own rendezvous address, port window, and admission token. The VM storefront names no relay and holds no relay credential: which relay serves a host is a physical fact about where that host is, and a storefront selecting one per request would make a fleet-wide property depend on a commercial caller's configuration.
 
+The committed claim now governs the fulfillment request. A reservation carries its admitted claim -- dimensions and categorical constraints both -- and the scheduler reads it back rather than trusting the request, so a GPU-reserving listing can no longer fulfill without a GPU, and the durable create handle is written by the service that dispatches it. One cleanup is outstanding from that work: `capacity_reservations.vm_remove_job_id` is still a VM-conditional mirror of `release_job_id` on a table bare-metal pools share, retired by [`retire-vm-remove-job-id`](../../openspec/changes/retire-vm-remove-job-id/).
+
 Capacity declaration is the one place the provisioning service is not yet the fuller authority. Host inventory carries GPU count and model only, so the projection's host-derived fallback cannot express vCPU, RAM, or disk. The retiring storefront CSV has been the system's only operator-facing expression of multi-dimensional capacity — which is why capacity administration is a prerequisite of the retirement rather than a parallel improvement.
 
 | Open gap | Owned by |
 |---|---|
 | Sellable capacity has no authoritative multi-dimensional declaration or operator path in the provisioning service | [`capacity-resource-administration`](../../openspec/changes/capacity-resource-administration/) |
 | The VM storefront retains local physical tables, the local-table derivation path, CSV import and its deployment contract, the dead execution ledger, the orphaned physical admin surface, and dead physical-identity plumbing | [`pools-9-retire-local-physical-authority`](../../openspec/changes/pools-9-retire-local-physical-authority/) |
-| Stale physical-placement fields on the current fulfillment path, and VM shape not reaching the provisioning request | [`fix-vm-fulfillment-capacity-boundary`](../../openspec/changes/fix-vm-fulfillment-capacity-boundary/) |
 | Buyer VM tunnels coordinated through a relay's management dashboard, with relay location and credential held in storefront configuration | [`relay-vm-access-without-a-dashboard`](../../openspec/changes/relay-vm-access-without-a-dashboard/) |
 | One SSH key reaches every host in an environment, so a host prepared by another party cannot be registered with its own credential | [`contain-embedded-host-key-material`](../../openspec/changes/contain-embedded-host-key-material/) |
 | The provisioning service serves one storefront: its storefront principal and site binding are single values, so a second commercial front-end over the same hardware is not a configuration | [`repair-multi-storefront-scenario`](../../openspec/changes/repair-multi-storefront-scenario/) |
@@ -61,6 +62,8 @@ The top of the stack does not. A buyer that names a resource shape disagreeing w
 
 Publication is where the shape is first lost. A listing's `listing_resource` carries GPU model, count, SLA, region, and pool identity only — vCPU, RAM, and disk are never published, though the projection's capacity map reaches the storefront and the listing model declares all three as optional fields. Because the registry's dimension filters fail closed on a missing field, a buyer filtering on RAM matches nothing at all today, despite the registry schema and buyer CLI both supporting it.
 
+What is agreed does now reach the provisioning request. The shape lost at publication is a publication defect rather than a fulfillment one: once a claim is admitted, the reservation is authoritative for it through scheduling and dispatch.
+
 Pricing is the binding constraint on negotiating the shape. Commercial resolution produces a single price per GPU model through a three-tier chain of storefront override, pool hint, and configured default; rates scale by duration only. Negotiation carries exactly one degree of freedom, a scalar amount moved by the concession middleware, so no seller policy can evaluate a counter-offer that changes RAM or disk — which is why a buyer naming any shape is rejected at round zero, deliberately and with the reason recorded in the guard itself. The seller's own feasibility check compares region and GPU model by equality and no quantitative dimension. Nothing consults the authoritative site until a hold is placed at terms acceptance, so an unservable shape surfaces after both parties have committed.
 
 | Open gap | Owned by |
@@ -71,7 +74,6 @@ Pricing is the binding constraint on negotiating the shape. Commercial resolutio
 | The authoritative site is not consulted until terms are already agreed, so an unservable shape fails after both parties commit | [`negotiation-capacity-feasibility-probe`](../../openspec/changes/negotiation-capacity-feasibility-probe/) |
 | Buyer-facing requirement shape is flat and ambiguous; the offering mode is conflated with the site-inventory `resource_type` discriminator | [`structured-capacity-requirements`](../../openspec/changes/structured-capacity-requirements/) |
 | No negotiation round after the first can express a shape change, and reservation resizing has no caller | [`negotiation-driven-capacity-resize`](../../openspec/changes/negotiation-driven-capacity-resize/) |
-| The accepted VM shape does not reach the provisioning request, so a GPU-reserving listing can fulfill without a GPU | [`fix-vm-fulfillment-capacity-boundary`](../../openspec/changes/fix-vm-fulfillment-capacity-boundary/) |
 | Buyer-negotiated VM connectivity terms, currently operator-configured only | [`add-buyer-vm-connectivity-terms`](../../openspec/changes/add-buyer-vm-connectivity-terms/) |
 
 `negotiation-capacity-feasibility-probe` is a shared prerequisite rather than exclusively this goal's: charging for a held reservation also requires a buyer to learn feasibility before any hold, and therefore any charge, exists. Not every change belongs to a roadmap goal, and this one is listed here because this goal consumes it, not because it is owned by it.

@@ -2447,7 +2447,7 @@ failures.
       rather than one. Confirmed as acceptable for now against a dedicated
       cleanup pass on the topic.
 
-- [ ] 3ax.10 **The TypeScript and Rust middlewares cannot authenticate to a
+- [x] 3ax.10 **The TypeScript and Rust middlewares cannot authenticate to a
       signed credits service.** Neither signs, and the service accepts signed
       requests or the shared secret, never both, so with `3ax.8`'s flip in
       place both are locked out of the deployed configuration. They still
@@ -2469,6 +2469,20 @@ failures.
       `domains/apicredits/middleware/` should say plainly that the TS and Rust
       clients require a shared-secret service until then, so a third-party
       user discovers it from documentation rather than from a 401.
+
+      **Closed as deferred (2026-09-14):** tracked by
+      `openspec/changes/sign-multi-language-credits-middleware/`. The interim
+      note landed in `conformance/README.md` rather than a new file, next to
+      the fixture whose cross-language equivalence claim is what misleads a
+      reader here.
+
+      That change is ordered validation-first, deliberately. Signing code for
+      those two clients could be merged, pass its own language's unit tests,
+      satisfy `session.json`, and still be refused by a real service -- the
+      precise failure the shared fixture cannot see, and the one the Python
+      client hit when the authority did not canonicalize the query input it
+      was signing. So the scenario per implementation is owed before the
+      signing, not after.
 
 ## 4. Closeout
 

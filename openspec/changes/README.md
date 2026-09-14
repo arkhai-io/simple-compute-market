@@ -22,14 +22,15 @@ A change appears exactly once, in its primary home. Where a change serves more t
 
 ```text
 capacity-resource-administration ──► pools-9-retire-local-physical-authority
-fix-vm-fulfillment-capacity-boundary (independent)
+fix-vm-fulfillment-capacity-boundary ──► retire-vm-remove-job-id
 ```
 
 | Change | Status | Acceptance boundary |
 |---|---|---|
 | [`capacity-resource-administration`](capacity-resource-administration/) | active; no blocking dependency | Site capacity resources become the single authoritative declaration of sellable capacity across every dimension, with a startup import, an operator administration surface, and a migration deriving declarations from legacy host GPU columns |
 | [`pools-9-retire-local-physical-authority`](pools-9-retire-local-physical-authority/) | planned; blocked on `capacity-resource-administration` | Retires every remaining physical-resource concern from the VM storefront: local physical-authority tables, `compute_allocations`, CSV import and its deployment contract, the orphaned physical admin surface, and the always-`None` `vm_host` plumbing. The deployment-bake trigger for its own start remains undefined by design; the dependency is a necessary gate, not a sufficient one |
-| [`fix-vm-fulfillment-capacity-boundary`](fix-vm-fulfillment-capacity-boundary/) | active | Removes stale physical-placement fields from the current fulfillment path and derives fulfillment shape from committed reservation dimensions. Also serves Goal 2 |
+| [`fix-vm-fulfillment-capacity-boundary`](fix-vm-fulfillment-capacity-boundary/) | complete; awaiting archival | Removes stale physical-placement fields from the current fulfillment path and derives fulfillment shape from committed reservation dimensions. Also serves Goal 2 | Proven by a green e2e run on 2026-09-14. Its one deferral, retiring the `vm_remove_job_id` mirror, is owned by `retire-vm-remove-job-id` below |
+| [`retire-vm-remove-job-id`](retire-vm-remove-job-id/) | planned; depends on `fix-vm-fulfillment-capacity-boundary` | Retires `capacity_reservations.vm_remove_job_id`, a VM-conditional mirror of `release_job_id` and the one domain-prefixed column on a reservation table bare-metal pools share. Scoped to the mirror only: the legacy `vm_leases` column the backfill reads and the storefront's own column are out of scope. Carries a wire decision, since the field is on a published lease model |
 
 ## Roadmap goal — Negotiate full compute capability, not GPU count alone
 
@@ -121,6 +122,9 @@ provide-e2e-development-identities (archived) ──► repair-e2e-fixture-drift
                                                           │
                                                           ▼
                                           repair-storefront-alkahest-configuration
+                                                          │
+                                                          ▼
+                                       sign-multi-language-credits-middleware
 ```
 
 The stack starts and the e2e suite reports results rather than setup errors.
@@ -134,6 +138,7 @@ remaining failures.
 | [`repair-e2e-fixture-drift`](archive/2026-09-13-repair-e2e-fixture-drift/) | **archived** 2026-09-13 | The e2e suite reached pytest reporting 12 passed and 88 fixture errors. The drift was wider than two signature mismatches: six construction sites and three payload shapes, four of them masked because pytest reports only the first fixture to raise. Rebuilt the fixtures as one client per role, corrected a misfiled route role in the storefront (system status is an administrator operation also readable by a service peer), and separated storefront administrators from their sellers in development configuration. The suite now reports **0 errors, 38 passed, 11 failed**, and every failure is classified |
 | [`repair-storefront-alkahest-configuration`](repair-storefront-alkahest-configuration/) | active; depends on nothing further | Alkahest is the VM storefronts' only enabled settlement mechanism and never becomes ready, so composition refuses every listing. Three configuration gaps: the storefront never receives its EVM credential because the wallet env files use a name only the buyer-side loader resolves, and both Alkahest address-config paths point into a source tree the image does not contain. Settles the stack so the on-chain escrow phases run for the first time since mid-August |
 | [`repair-multi-storefront-scenario`](repair-multi-storefront-scenario/) | active; opened by the change above | The VM suite's two-storefront scenario has four stages that cannot pass: provisioning's storefront principal is a single identity, so Alice is never a trusted caller and never loads capacity. Not a regression -- the Aug 15 green run skipped every Alice stage, incidentally, for want of configuration. Those stages are now skipped with the reason declared; this change owns letting provisioning serve more than one storefront |
+| [`sign-multi-language-credits-middleware`](sign-multi-language-credits-middleware/) | planned; opened by `repair-storefront-alkahest-configuration` task `3ax.10` | The TypeScript and Rust API-credits middlewares authenticate to a credits service with signed authentication enabled, which they cannot today: both send only the legacy shared secret, and the service accepts signed requests or the secret and never both. Owes its validation layer first -- neither client has an e2e scenario, so signing code for them cannot currently be proven against a real service |
 
 ### Unowned work left by this campaign
 

@@ -557,7 +557,7 @@ class LeaseResponse(BaseModel):
     #: ``vm_remove_job_id`` below is a VM-conditional mirror of this same
     #: value, written only when the offering mode is VM and always to what
     #: ``release_job_id`` already holds. It is retained for wire
-    #: compatibility and is slated for retirement (see task `10.5`);
+    #: compatibility only and carries nothing this field does not;
     #: ``release_job_id`` is the field to read.
     release_job_id: Optional[str] = None
     vm_remove_job_id: Optional[str] = None
