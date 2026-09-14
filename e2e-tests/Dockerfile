@@ -28,7 +28,20 @@ COPY .dist/ /dist/
 
 COPY e2e-tests/src ./src
 COPY e2e-tests/tests ./tests
-COPY e2e-tests/pyproject.toml ./
+# The lock travels with the manifest. Without it `uv sync` re-resolves every
+# dependency from the index at build time, so the image's third-party
+# versions were whatever PyPI happened to be serving -- which is how a
+# greenlet release carrying only macOS and Windows wheels broke a build that
+# had changed nothing. The committed lock pins a version with an sdist.
+#
+# Same pattern as `domains/apicredits/storefront/Dockerfile` and the other
+# service images, including the registry rewrite below.
+COPY e2e-tests/pyproject.toml e2e-tests/uv.lock ./
+
+# The lock records the monorepo wheel registry as a path relative to the
+# project directory on the host (`../.dist`), which does not exist at this
+# layout. Point it at the copied wheels instead.
+RUN sed -E -i 's|registry = "[^"]*\.dist"|registry = "/dist"|' uv.lock || true
 
 # --refresh-package the monorepo workspace wheels: they are rebuilt into
 # .dist/ without a version bump, so a cached same-version wheel in the uv
