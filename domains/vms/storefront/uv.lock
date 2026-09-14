@@ -447,6 +447,7 @@ name = "arkhai-kit-site"
 version = "0.3.0"
 source = { registry = "../../../.dist" }
 dependencies = [
+    { name = "arkhai-kit-identity" },
     { name = "arkhai-kit-resource-pools" },
     { name = "fastapi" },
     { name = "pydantic" },
