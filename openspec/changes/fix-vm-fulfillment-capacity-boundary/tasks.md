@@ -109,17 +109,51 @@
       deliberately left alone -- those are domain-shaped projections beside
       the generic `executor_ref`/`executor_target`, not duplicated storage.
 
-- [ ] 7.6 **Not in this change:** populate `create_job_id` on VM lease
-      registration. The field is plumbed end to end with a `None` default at
-      every hop and no VM supplier, so the VM path leaves it null while the
-      bare-metal path fills it. The id to use is the Ansible job id, not the
-      durable fulfillment id -- the fulfillment id is already reachable from
-      the settle-status response and the buyer's run-log, whereas the Ansible
-      job id is visible nowhere outside the provisioning service and is the
-      only one of the two a site admin can act on. That places the fix in the
-      provisioning service, which is where the id already exists
-      (`AnsibleFulfillmentProvider`), not in the storefront, which does not
-      have it.
+- [x] 7.6 **`create_job_id` is populated by the service that dispatches the
+      job.** The field was plumbed end to end with a `None` default at every
+      hop and no VM supplier, so the VM path left it null while bare metal
+      filled it -- invisible to tests of either side.
+
+      The id is the Ansible job id, not the durable fulfillment id: the
+      fulfillment id is already reachable from settle status and the buyer's
+      run-log, whereas a provider's own job handle is visible nowhere outside
+      the service that dispatched it and is the only one of the two a site
+      admin can act on. The lease should carry the reference that otherwise
+      dead-ends.
+
+      That places the write in the provisioning service, not the storefront,
+      which registers the lease but never sees the value. Implemented as four
+      layers, each owning only what it knows:
+
+      - `FulfillmentProvider.resolve_executor_job_id(provider_metadata)`,
+        concrete and returning `None` rather than abstract -- a provider with
+        no addressable job handle is legitimate, and forcing every existing
+        provider to declare that would be churn. Shared orchestration never
+        learns which metadata key holds it.
+      - The Ansible provider overrides it, reading defensively rather than
+        through `AnsibleFulfillmentMetadata`: a teardown-phase row has the
+        same shape with a different `operation`, and a partially-written row
+        from a failed dispatch should yield no id rather than raise inside a
+        transaction that is only surfacing a diagnostic handle.
+      - `SqlAlchemyFulfillmentTransaction` gains the capacity ledger the
+        scheduling unit of work already held, and `attach_executor_job`.
+        Best-effort by construction: the fulfillment is already acknowledged
+        and failing it here would trade a working VM for a missing
+        cross-reference.
+      - The orchestrator attaches inside the acknowledgement transaction, so a
+        reservation never references a create the settlement row does not also
+        record, and skips a falsy answer -- an empty job reference is worse
+        than none, because it reads as a handle an operator can look up.
+
+      Two tests. The attaching one was verified to fail against the unpatched
+      orchestrator; the `None` one passes either way and is a guard against a
+      future falsy placeholder rather than a discriminating test.
+
+      Found while wiring it: the shared fake provider is a bare `MagicMock`,
+      so `resolve_executor_job_id` returned a truthy `Mock` and the
+      orchestrator tried to attach that object as a job id, breaking two
+      existing tests. The fake now returns `None` explicitly, which is also
+      the honest default for a provider fake.
 
 - [ ] 6.8 **Roadmap currency** (added 2026-08-06 by `add-development-roadmap`, which extended `openspec/README.md#plan-closeout-requirements` from five parts to six). Update this change's rows in `docs/development/ROADMAP.md` — it currently appears as an open gap under both Goal 1 (stale physical-placement fields on the current fulfillment path) and Goal 2 (accepted VM shape not reaching the provisioning request) — and record the update in the design-promotion record. Appended rather than folded into 6.6, per `AGENTS.md`'s rule to amend rather than replace implementation history.
 - [ ] 6.9 **Campaign index currency** (part seven, added when `openspec/README.md#plan-closeout-requirements` was extended from six parts to seven). Appended rather than folded into an existing task, per `AGENTS.md`'s rule to amend rather than replace implementation history. Update this change's row, and its campaign's dependency graph, in `openspec/changes/README.md` to match its state at completion, or record the disposition here if its status and campaign placement are both unchanged.

@@ -323,6 +323,20 @@ class AnsibleFulfillmentProvider(FulfillmentProvider):
         except Exception as exc:
             raise FulfillmentCreateFailedError(str(exc)) from exc
 
+    def resolve_executor_job_id(
+        self, provider_metadata: dict[str, Any]
+    ) -> str | None:
+        """The Ansible queue job id for the create this fulfillment dispatched.
+
+        Read defensively rather than through ``AnsibleFulfillmentMetadata``:
+        a teardown-phase row carries the same shape with a different
+        ``operation``, and a partially-written row from a failed dispatch
+        should yield no job id rather than a validation error inside a
+        transaction that is only surfacing a diagnostic handle.
+        """
+        job_id = (provider_metadata or {}).get("create_job_id")
+        return str(job_id) if job_id else None
+
     def prepare_teardown(
         self,
         settlement_result: SettlementResult,

@@ -2122,6 +2122,106 @@ failures.
       `test_settlement_composition.py` and `test_selection_dispatch.py`, and
       the stub substitution recorded there as unverified can now be executed.
 
+## 3aw. The same stage fix, in the twin that was skipping
+
+- [x] 3aw.1 **Stage `09c`'s `resource_id` assertion was fixed in one of the
+      two scenarios that carry it.** `test_full_deal.py` got the fix; its twin
+      `test_full_deal_buyer_cli.py` did not, and the miss was invisible
+      because that scenario's `09c` had been *skipped* on every prior run --
+      `09b` failed ahead of it and `require_state` gated the rest. Fixing
+      `09b` is what surfaced it.
+
+      A skipped stage is not a passing one, and a stage fix's blast radius is
+      the other scenarios carrying that stage. The earlier pass checked
+      `test_buy_oneshot_buyer_cli`'s `B5` only because a note named it, and
+      never asked which other files had a `09c`.
+
+- [x] 3aw.2 Swept all scenarios rather than fixing the one the log named.
+      Exactly three carry a `DealLease` lease-registration stage
+      (`test_full_deal`, `test_full_deal_buyer_cli`,
+      `test_buy_oneshot_buyer_cli`); the remaining vms scenarios, the
+      bare-metal scenario, the credits scenario and the `hosted/` helpers
+      carry none. The sweep is therefore complete and bounded, not a sample.
+
+      The twin now asserts `vm_host == E2E_DEAL_CLI_HOST` and sources
+      `reserved_resource_id` from the scenario constant, matching what
+      `test_full_deal` and `B5` already do. Its docstring claimed resource
+      identity was confirmed there, and was corrected.
+
+## 3av. Credits site authority — widened, and the server half built
+
+- [x] 3av.1 **Amends 3ar.2's scope.** That task confined the signed
+      middleware to the capacity router's prefix and left "the credits
+      service's keys and issuance routes keep their admin-key gate". But the
+      storefront's normal flow *uses* those routes, so that scoping would have
+      left it holding an admin token — which is the thing the role model says
+      must not happen. Widened, on instruction: every non-health route on the
+      credits service is signed, and the storefront surrenders its admin key.
+
+      `admin` is now admitted on every contract by `SiteRouteContract.permits`
+      rather than enumerated route by route. A role able to read a site's whole
+      ledger but not one named route is a gate that only obstructs the operator
+      holding it. It is for manual operation, debugging and intervention, held
+      by an operator and the e2e suite; neither service component holds it.
+
+- [x] 3av.2 `kit/site/auth.py`: the route-contract table with roles beside the
+      router that defines the paths, a signed-auth middleware parameterised by
+      a signer provider, a per-role expected-principal resolver, a replay-store
+      port with an in-memory default, and a max skew. Every response signed,
+      refusals included — the unsigned `401` was the second half of the
+      original defect, and the reason the client died on a missing header
+      instead of reporting the refusal it was sent.
+
+      Two refusals are deliberately *unsigned*: a route with no contract, and
+      a request carrying no request id. There is nothing to sign over in
+      either case, and signing an invented operation or request id would put a
+      signature on a claim about a request nobody made.
+
+      `kit/site` gains `arkhai-kit-identity` as a runtime dependency, per
+      3ar.7. The client is added test-only, for the parity test; it must never
+      become a runtime dependency, since the parity test exists precisely so
+      the two tables can stay separate.
+
+- [x] 3av.3 The credits service's own table (`middleware/route_contracts.py`)
+      for its 11 issuance/keys/consume-verify routes, composed alongside the
+      capacity table into one middleware. Two caller roles rather than one
+      shared secret: `seller` for the storefront (issuance, key
+      administration) and `service` for the gated application (consume,
+      verify). A compromised sample app can now spend credits but not mint or
+      revoke them — a distinction a single `X-Admin-Key` could not express.
+
+- [x] 3av.4 Coverage asserted against the routes FastAPI actually registered,
+      not against a reading of the controller. This found three things a
+      hand-transcribed table had wrong: an invented `POST /api/v1/keys` that
+      does not exist, and two unsigned paths the middleware would otherwise
+      have refused — FastAPI's `/docs/oauth2-redirect` and the versioned
+      `system/health`/`system/version` pair that exists so an orchestrator can
+      probe liveness without a credential.
+
+      The first version of that test silently enumerated only the four
+      auto-generated docs routes and passed while checking nothing, because
+      this FastAPI version keeps included routers behind a wrapper and carries
+      the mount prefix there rather than on the child route. It now walks both
+      shapes and asserts it found routes at all.
+
+- [ ] 3av.5 **Remaining, and deliberately not half-landed:** composing the
+      middleware in the credits service's `main.py`, resolving its ed25519
+      credential and per-role trust sets from config, the new committed dev
+      identities for the credits service and the gated sample app, their
+      compose mounts, the storefront's `[credits] admin_key_file` removal, the
+      sample app's switch to signed `service`-role calls, and the e2e suite's
+      own admin identity.
+
+      Adding the middleware without the credential and trust sets in place
+      would refuse every request with no way to authenticate one — strictly
+      worse than the present `401`. So nothing in this fileset changes
+      runtime behaviour: the module and tables are additive until composed.
+
+- [ ] 3av.6 Carried from 3ar.6 and now larger: this adds *two* dev identities
+      to the committed-file-plus-hardcoded-pin-plus-compose-mount pattern
+      rather than one. Confirmed as acceptable for now against a dedicated
+      cleanup pass on the topic.
+
 ## 4. Closeout
 
 - [ ] 4.1 **Comment hygiene.** `make check-comment-hygiene`.

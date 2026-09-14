@@ -1331,9 +1331,14 @@ class TestStage09c_LeaseRegistered:
     def test_09c_provisioning_lease_registered(self, provisioning_client, deal_state: DealState):
         """Provisioning owns the happy-path lease row after fulfillment.
 
-        Resource identity is confirmed here, not at stage 08b -- see
+        Placement is confirmed here, not at stage 08b -- see
         ``test_full_deal.py``'s stage 09c docstring for why (opaque
         buyer-facing boundary vs. legitimate admin introspection).
+
+        Placement, not physical identity: the lease reports a null
+        ``resource_id``, the same strip that retired the field from the
+        reservation response one surface earlier. The executor is what the
+        authority reports and what an operator needs to find the VM.
         """
         require_state(
             deal_state,
@@ -1347,10 +1352,10 @@ class TestStage09c_LeaseRegistered:
         lease_view = DealLease(provisioning_client, deal_state.real_escrow_uid)
         lease = lease_view.refresh()
         assert lease.get("escrow_uid") == deal_state.real_escrow_uid
-        assert lease.get("resource_id") == E2E_RESOURCE_ID
         vm_host = lease.get("vm_host")
-        assert vm_host, (
-            f"Lease missing vm_host; required for stage 10a provider teardown operation: {lease!r}"
+        assert vm_host == E2E_DEAL_CLI_HOST, (
+            f"lease bound to executor {vm_host!r}; this scenario's deal was "
+            f"admitted against {E2E_DEAL_CLI_HOST!r}. Lease: {lease!r}"
         )
         assert lease.get("create_job_id"), (
             f"Expected a tracked Ansible create job on the admin lease view, got: {lease}"
@@ -1360,7 +1365,11 @@ class TestStage09c_LeaseRegistered:
         )
 
         deal_state.deal_lease = lease_view
-        deal_state.reserved_resource_id = lease.get("resource_id")
+        # This scenario's own constant, not the lease's null field. The later
+        # stages that consume this address the *storefront's* resource row by
+        # id, so the value they need is the one 00f imported -- the lease never
+        # reported it.
+        deal_state.reserved_resource_id = E2E_RESOURCE_ID
         deal_state.lease_id = lease.get("id")
         deal_state.lease_status = lease.get("status")
         deal_state.vm_host = vm_host

@@ -91,6 +91,27 @@ class FulfillmentProvider(ABC):
         contents, only the returned tuple of opaque reference strings.
         """
         ...
+    def resolve_executor_job_id(
+        self, provider_metadata: dict[str, Any]
+    ) -> str | None:
+        """Return this provider's own handle for the create it dispatched.
+
+        Pure and synchronous. Surfaced onto the capacity reservation so an
+        operator holding a lease can reach the execution that produced it --
+        the durable fulfillment id is already reachable from settle status and
+        the buyer's run-log, whereas a provider's own job handle is visible
+        nowhere outside the service that dispatched it, and is the one an
+        operator can actually act on.
+
+        Concrete rather than abstract, returning ``None``: a provider with no
+        addressable job handle is a legitimate implementation, and forcing
+        every existing provider to declare that it has none would be churn
+        that says nothing. Shared orchestration does not interpret the value,
+        and does not know which metadata key holds it.
+        """
+        del provider_metadata
+        return None
+
     @abstractmethod
     async def get_status(self, capacity_reservation_id:str, resource:'SettlementResource', provider_metadata:dict[str,Any])->ProviderStatus: ...
     @abstractmethod

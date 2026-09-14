@@ -5,6 +5,10 @@ license = "MIT"
 description = "Site-authority scaffold: capacity ledger, tables, and HTTP surface"
 requires-python = ">=3.12"
 dependencies = [
+    # The site authority signs its own responses and verifies its callers'
+    # requests, so the identity primitives are a runtime dependency of the
+    # router package, not only of its clients.
+    "arkhai-kit-identity>=0.3.0",
     "arkhai-kit-resource-pools>=0.2.0",
     "fastapi>=0.115.0",
     "pydantic>=2.7",
@@ -27,6 +31,10 @@ testpaths = ["tests/unit"]
 
 [dependency-groups]
 dev = [
+    # Test-only, for the capacity route-table parity test. The client is the
+    # router's caller, so this must never become a runtime dependency: the
+    # parity test exists precisely so the two tables can stay separate.
+    "arkhai-kit-site-client",
     "httpx2",
     "pytest>=8.3.4,<9.0.0",
 ]

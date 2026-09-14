@@ -63,6 +63,7 @@ class FakeTransaction:
         self.dispatch_required = dispatch_required
         self.persisted = []
         self.acknowledged = []
+        self.attached_jobs = []
         self.provisioned_resources = provisioned_resources or []
 
     def accept(self, **kwargs):
@@ -85,6 +86,9 @@ class FakeTransaction:
         self.record.provider_metadata = provider_metadata
         self.record.state = SettlementRecordState.dispatching.value
         return self.record
+
+    def attach_executor_job(self, capacity_reservation_id, job_id):
+        self.attached_jobs.append((capacity_reservation_id, job_id))
 
     def begin_teardown(self, fulfillment_id, prepared):
         self.teardown_prepared = prepared
@@ -127,6 +131,11 @@ class FakeUnitOfWork:
 
 def _provider():
     provider = MagicMock()
+    # Explicit, because a bare MagicMock returns a truthy Mock for any
+    # attribute: the orchestrator would then try to attach that object as a
+    # job id. Providers without an addressable job handle return None, and
+    # that is the default this fake should represent.
+    provider.resolve_executor_job_id.return_value = None
     provider.prepare_create.return_value = VersionedEnvelope(
         kind="vm.ansible.create.v1",
         schema_version=1,
@@ -979,3 +988,57 @@ async def test_fresh_service_composition_reads_status_and_result_from_same_file_
     ]
     provider.fetch_credentials.assert_awaited_once()
     second_engine.dispose()
+
+
+# ---------------------------------------------------------------------------
+# The provider's create-job handle reaches the reservation
+#
+# The field was plumbed end to end with a `None` default at every hop and no
+# VM supplier, so the VM path left it null while bare metal filled it -- a
+# parameter with a default and no caller is invisible to tests of either side.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_dispatch_attaches_the_providers_create_job_handle():
+    acceptance_tx = FakeTransaction(_record())
+    acknowledgement_tx = FakeTransaction(acceptance_tx.record)
+    provider = _provider()
+    provider.resolve_executor_job_id.return_value = "ansible-job-7"
+
+    await _orchestrator(
+        FakeUnitOfWork(acceptance_tx, acknowledgement_tx), provider
+    ).begin_fulfillment("reservation-1", "compute", _request())
+
+    # Same transaction as the acknowledgement: a reservation must not
+    # reference a create the settlement row does not also record.
+    assert acknowledgement_tx.attached_jobs == [
+        ("reservation-1", "ansible-job-7")
+    ]
+    # Resolved from the metadata the provider returned at dispatch.
+    provider.resolve_executor_job_id.assert_called_once_with(
+        acknowledgement_tx.acknowledged[0]
+    )
+
+
+@pytest.mark.asyncio
+async def test_a_provider_without_a_job_handle_attaches_nothing():
+    """`None` is a legitimate answer, not a missing implementation.
+
+    Asserted so the orchestrator never attaches a falsy placeholder: a
+    reservation carrying an empty job reference is worse than one carrying
+    none, because it reads as a handle an operator can look up.
+    """
+    acceptance_tx = FakeTransaction(_record())
+    acknowledgement_tx = FakeTransaction(acceptance_tx.record)
+    provider = _provider()
+    provider.resolve_executor_job_id.return_value = None
+
+    await _orchestrator(
+        FakeUnitOfWork(acceptance_tx, acknowledgement_tx), provider
+    ).begin_fulfillment("reservation-1", "compute", _request())
+
+    assert acknowledgement_tx.acknowledged, (
+        "dispatch did not complete, so this proves nothing"
+    )
+    assert acknowledgement_tx.attached_jobs == []

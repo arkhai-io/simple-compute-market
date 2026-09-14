@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from contextlib import contextmanager
 from dataclasses import dataclass
 from typing import Any, Iterator, Protocol
@@ -21,6 +22,9 @@ class FulfillmentAcceptanceDecision:
     record: Any
     newly_accepted: bool
     dispatch_required: bool
+
+
+logger = logging.getLogger(__name__)
 
 
 class FulfillmentTransaction(Protocol):
@@ -48,6 +52,12 @@ class FulfillmentTransaction(Protocol):
         provider_metadata: dict[str, Any],
     ) -> Any: ...
 
+    def attach_executor_job(
+        self,
+        capacity_reservation_id: str,
+        job_id: str,
+    ) -> None: ...
+
     def begin_teardown(
         self,
         fulfillment_id: str,
@@ -73,10 +83,49 @@ class SqlAlchemyFulfillmentTransaction:
         db: Session,
         pool_service: ResourcePoolService,
         repository: SettlementRepository,
+        capacity_ledger: Any | None = None,
     ) -> None:
         self.db = db
         self._pool_service = pool_service
         self._repository = repository
+        # Optional so a caller composing only the settlement-record half of
+        # this transaction keeps working; `attach_executor_job` is then a
+        # no-op rather than a failure, because a missing diagnostic handle
+        # must not fail a fulfillment that otherwise succeeded.
+        self._capacity_ledger = capacity_ledger
+
+    def attach_executor_job(
+        self,
+        capacity_reservation_id: str,
+        job_id: str,
+    ) -> None:
+        """Record the provider's create-job handle on the capacity reservation.
+
+        Written here because this is the first point where the handle is both
+        known and durable: the provider returns it from dispatch, and the
+        reservation is what an operator reads back as a lease. The storefront
+        registers the lease but never sees this value -- it belongs to the
+        service that dispatched the job -- which is why the field it fills
+        stayed null.
+
+        Best-effort by construction. The fulfillment itself has already been
+        acknowledged; failing it here would trade a working VM for a missing
+        cross-reference.
+        """
+        if self._capacity_ledger is None:
+            return
+        try:
+            self._capacity_ledger.update_reservation_fields(
+                capacity_reservation_id,
+                create_job_id=job_id,
+            )
+        except Exception:
+            logger.warning(
+                "Could not attach executor job %s to reservation %s",
+                job_id,
+                capacity_reservation_id,
+                exc_info=True,
+            )
 
     def accept(
         self,
@@ -198,6 +247,7 @@ class SqlAlchemyFulfillmentUnitOfWork:
         session_factory: Any,
         pool_service: ResourcePoolService,
         repository: SettlementRepository | None = None,
+        capacity_ledger: Any | None = None,
         transaction_type: type[SqlAlchemyFulfillmentTransaction] = (
             SqlAlchemyFulfillmentTransaction
         ),
@@ -205,6 +255,7 @@ class SqlAlchemyFulfillmentUnitOfWork:
         self.session_factory = session_factory
         self.pool_service = pool_service
         self.repository = repository or SettlementRepository()
+        self.capacity_ledger = capacity_ledger
         self.transaction_type = transaction_type
 
     @contextmanager
@@ -220,7 +271,9 @@ class SqlAlchemyFulfillmentUnitOfWork:
         ``BEGIN IMMEDIATE`` on the same session, which SQLite rejects.
         """
         with self.session_factory() as db:
-            tx = self.transaction_type(db, self.pool_service, self.repository)
+            tx = self.transaction_type(
+                db, self.pool_service, self.repository, self.capacity_ledger
+            )
             try:
                 yield tx
                 db.commit()
@@ -232,7 +285,9 @@ class SqlAlchemyFulfillmentUnitOfWork:
     def read_transaction(self) -> Iterator[FulfillmentTransaction]:
         """Provide consistent reads without reserving SQLite's writer slot."""
         with self.session_factory() as db:
-            tx = self.transaction_type(db, self.pool_service, self.repository)
+            tx = self.transaction_type(
+                db, self.pool_service, self.repository, self.capacity_ledger
+            )
             try:
                 yield tx
             finally:

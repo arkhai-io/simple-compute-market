@@ -389,6 +389,10 @@ class Container(containers.DeclarativeContainer):
         session_factory=session_factory,
         pool_service=resource_pool_service,
         repository=settlement_repository,
+        # So dispatch acknowledgement can record the provider's create-job
+        # handle on the reservation, the same ledger the scheduling unit of
+        # work above already holds.
+        capacity_ledger=capacity_ledger_service,
     )
 
     fulfillment_service = providers.Singleton(

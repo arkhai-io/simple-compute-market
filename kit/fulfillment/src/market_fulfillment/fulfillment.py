@@ -250,6 +250,13 @@ class FulfillmentOrchestrator:
                 capacity_reservation_id,
                 result.provider_metadata,
             )
+            # Same transaction as the acknowledgement, so a reservation never
+            # references a create this row does not also record. The key is
+            # the provider's to name; this layer only forwards what it is
+            # handed and skips a provider that has no job handle.
+            job_id = provider.resolve_executor_job_id(result.provider_metadata)
+            if job_id:
+                tx.attach_executor_job(capacity_reservation_id, job_id)
             return self._view(acknowledged)
 
     async def begin_fulfillment_teardown(self, fulfillment_id: str) -> FulfillmentAcceptance:
