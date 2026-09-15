@@ -110,6 +110,11 @@ services:
       # override $VMS_BOB_STOREFRONT_CONFIG to point at a different chain's
       # TOML (the default is the dev/anvil seller config).
       - ${VMS_BOB_STOREFRONT_CONFIG:-./storefront/storefront.bob.toml}:/etc/arkhai/storefront.toml:ro
+      # Alkahest resolves contract addresses from this file at runtime. The
+      # image contains only installed wheels -- no repository source tree --
+      # so it is bind-mounted to a fixed path rather than referenced in place.
+      # Same convention as the API-credits storefront.
+      - ./storefront/src/market_storefront/data/alkahest_anvil_addresses.json:/app/alkahest_anvil_addresses.json:ro
       - ${VMS_BOB_STOREFRONT_SECRETS_FILE:?set VMS_BOB_STOREFRONT_SECRETS_FILE}:/etc/arkhai/storefront.secrets.toml:ro
       # Compute inventory seed CSV — storefront.bob.toml's
       # seller.resources_csv_path expects this at /app/resources.csv.
@@ -154,6 +159,7 @@ services:
       - PYTHONPATH=/app:/app/src
     volumes:
       - ${VMS_ALICE_STOREFRONT_CONFIG:-./storefront/storefront.alice.toml}:/etc/arkhai/storefront.toml:ro
+      - ./storefront/src/market_storefront/data/alkahest_anvil_addresses.json:/app/alkahest_anvil_addresses.json:ro
       # Reuses Bob's seed CSV — the multi-registry test seeds inventory
       # at runtime via admin_import_resources anyway, so the on-disk CSV
       # content is irrelevant. Bind-mounted to satisfy the config's

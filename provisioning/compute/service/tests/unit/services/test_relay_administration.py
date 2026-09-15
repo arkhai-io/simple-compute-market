@@ -617,7 +617,7 @@ class TestExecutionTimeTokenResolution:
     def _params(self, **overrides):
         from vm_provisioning_adapter.models.jobs_model import AnsibleJobParams
 
-        fields = {"vm_host": "kvm1", "vm_action": "create", "executor_kind": "vm"}
+        fields = {"vm_host": "kvm1", "vm_action": "create", "offering_mode": "vm"}
         fields.update(overrides)
         return AnsibleJobParams(**fields)
 
@@ -658,7 +658,7 @@ class TestExecutionTimeTokenResolution:
         params = AnsibleJobParams(
             vm_host="kvm1",
             vm_action="create",
-            executor_kind="vm",
+            offering_mode="vm",
             relay_id="site-a",
             vm_remote_port=6100,
         )

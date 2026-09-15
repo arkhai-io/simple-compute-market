@@ -14,7 +14,7 @@ def _listing(pool_id=None, resource_id=None):
             "scheme": "eip191",
             "identifier": "0x2222222222222222222222222222222222222222",
         },
-        "offer_resource": {
+        "listing_resource": {
             "resource_type": "compute",
             "gpu_model": "H200",
             "gpu_count": 1,
@@ -38,10 +38,10 @@ def test_compute_listing_rejects_missing_blank_or_malformed_identity(pool_id, re
 
 def test_compute_listing_normalizes_capacity_identity_whitespace():
     listing = Listing.model_validate(_listing(pool_id="  pool-A  "))
-    assert listing.offer_resource.pool_id == "pool-A"
+    assert listing.listing_resource.pool_id == "pool-A"
 
 
 def test_compute_listing_allows_both_capacity_identities():
     listing = Listing.model_validate(_listing(pool_id="pool-A", resource_id="res-1"))
-    assert listing.offer_resource.pool_id == "pool-A"
-    assert listing.offer_resource.resource_id == "res-1"
+    assert listing.listing_resource.pool_id == "pool-A"
+    assert listing.listing_resource.resource_id == "res-1"

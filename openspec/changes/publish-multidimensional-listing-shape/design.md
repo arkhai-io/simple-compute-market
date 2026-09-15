@@ -4,8 +4,8 @@
 
 Verified by inspection 2026-08-06; re-verify before implementing.
 
-- `vm_offer_resource_for_listing` (`domains/vms/domain/src/arkhai_vms/storefront_adapter.py`)
-  constructs `offer_resource` from `pool_id`, `gpu_model`, `gpu_count`, `sla`,
+- `vm_listing_resource_for_listing` (`domains/vms/domain/src/arkhai_vms/storefront_adapter.py`)
+  constructs `listing_resource` from `pool_id`, `gpu_model`, `gpu_count`, `sla`,
   `region`, plus optional `resource_id`, `interruptible`, and `preemption_notice_seconds`.
 - `ComputeResource` (`domains/vms/listings/models.py`) requires `gpu_model`,
   `gpu_count`, `sla`, `region` and declares `vcpu_count`, `ram_gb`, `disk_gb` as
@@ -13,7 +13,7 @@ Verified by inspection 2026-08-06; re-verify before implementing.
 - `domains/vms/listings/reconciler.py` reads `resource.get("capacity")` from the
   projection and takes only `gpu_count` from it. The other dimensions are present in
   the source data and dropped in the read.
-- `core/registry/filter-spec.yaml` accepts all three fields on `offer_resource` and
+- `core/registry/filter-spec.yaml` accepts all three fields on `listing_resource` and
   defines `vcpu_count_min`, `ram_gb_min`, `disk_gb_min` with `on_missing: fail`.
 - `domains/vms/buyer/buy_cli.py` exposes `--vcpu-min`, `--ram-gb-min`, `--disk-gb-min`.
 

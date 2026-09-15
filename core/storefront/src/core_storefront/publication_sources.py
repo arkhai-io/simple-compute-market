@@ -21,7 +21,7 @@ class PublicationSource:
     close_stale: Callable[[str, str], list[str]]
     available_candidates: Callable[[str], list[dict[str, Any]]]
     skip_keys: Callable[[dict[str, Any]], set[str]]
-    offer_resource: Callable[[dict[str, Any]], dict[str, Any]]
+    listing_resource: Callable[[dict[str, Any]], dict[str, Any]]
     record_published: Callable[[str, dict[str, Any], str], None]
     reopen_existing: Callable[..., dict[str, Any] | None]
     reopen_error_label: str

@@ -7,7 +7,11 @@ requires-python = ">=3.12,<3.14"
 dependencies = [
   "fastapi>=0.115.0",
   "uvicorn[standard]>=0.30.0",
-  "arkhai-apicredits-middleware",
+  # The `signed` extra pulls in arkhai-kit-identity, which the gate needs
+  # to sign its calls to the credits service. Required because that service
+  # now authenticates every route against a signed envelope; without the
+  # extra the gate raises a configuration error naming the missing install.
+  "arkhai-apicredits-middleware[signed]",
 ]
 
 [project.scripts]

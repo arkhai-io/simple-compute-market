@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+import json
 
 import pytest
 from pydantic import ValidationError
@@ -121,6 +122,61 @@ def test_trusted_identity_set_rejects_empty_duplicate_and_more_than_overlap(
     with pytest.raises(ValidationError):
         TrustedIdentitySet(
             identities=(ed25519_signer.identity, eip191_signer.identity, third)
+        )
+
+
+def test_trusted_identity_set_parses_its_own_decoded_wire_form(
+    eip191_signer: Eip191Signer,
+) -> None:
+    """A decoded registry payload is a dict of lists, and parses as one.
+
+    Strict validation accepts an array for this field when the payload is
+    handed over as JSON; a payload something else already decoded arrives as
+    a list and used to be refused, which made the same listing parseable or
+    not depending on who had parsed it first. Callers reading a listing's
+    publisher principals are always on the decoded path.
+    """
+    wire = {
+        "identities": [
+            {
+                "scheme": "eip191",
+                "identifier": eip191_signer.identity.identifier,
+            }
+        ]
+    }
+
+    parsed = TrustedIdentitySet.model_validate(wire)
+
+    assert parsed.identities == (eip191_signer.identity,)
+    assert parsed == TrustedIdentitySet.model_validate_json(json.dumps(wire))
+    assert parsed.allows(eip191_signer.identity)
+
+
+def test_trusted_identity_set_constraints_survive_the_wire_form(
+    ed25519_signer: Ed25519Signer,
+    eip191_signer: Eip191Signer,
+) -> None:
+    """Accepting the array is a shape conversion, not a relaxation."""
+    duplicate = {
+        "scheme": "eip191",
+        "identifier": eip191_signer.identity.identifier,
+    }
+    with pytest.raises(ValidationError, match="unique"):
+        TrustedIdentitySet.model_validate({"identities": [duplicate, duplicate]})
+    with pytest.raises(ValidationError):
+        TrustedIdentitySet.model_validate({"identities": []})
+    with pytest.raises(ValidationError):
+        TrustedIdentitySet.model_validate(
+            {"identities": [duplicate, duplicate, duplicate]}
+        )
+    with pytest.raises(ValidationError):
+        TrustedIdentitySet.model_validate(
+            {"identities": [{"scheme": "eip191", "identifier": "not-an-address"}]}
+        )
+    # An unordered collection would decide the order of an ordered contract.
+    with pytest.raises(ValidationError):
+        TrustedIdentitySet.model_validate(
+            {"identities": {ed25519_signer.identity, eip191_signer.identity}}
         )
 
 

@@ -49,7 +49,7 @@ def bare_metal_listing_candidates(
                     "pool_id": resource.pool_id,
                     "machine_id": listing.machine_id,
                     "physical_host_id": listing.physical_host_id,
-                    "offer_resource": listing.model_dump(
+                    "listing_resource": listing.model_dump(
                         mode="json",
                         exclude_none=True,
                     ),
@@ -253,7 +253,7 @@ def reopen_derived_bare_metal_listing_if_present(
     db_path: str,
     base_url: str,
     candidate: dict[str, Any],
-    offer: dict[str, Any],
+    listing_resource: dict[str, Any],
     accepted_escrows: list[dict[str, Any]],
     demands: list[dict[str, Any]],
     max_duration_seconds: int | None,
@@ -279,13 +279,13 @@ def reopen_derived_bare_metal_listing_if_present(
             UPDATE listings
             SET status = 'open', paused = 0,
                 updated_at = STRFTIME('%Y-%m-%dT%H:%M:%fZ', 'now'),
-                offer_resource = ?, accepted_escrows = ?,
+                listing_resource = ?, accepted_escrows = ?,
                 settlement_options = ?, publication_clauses = ?, demands = ?,
                 max_duration_seconds = ?, storefront_url = ?
             WHERE listing_id = ?
             """,
             (
-                json.dumps(offer),
+                json.dumps(listing_resource),
                 json.dumps(accepted_escrows),
                 json.dumps(settlement_options or []),
                 json.dumps(publication_clauses or []),
@@ -307,7 +307,7 @@ def reopen_derived_bare_metal_listing_if_present(
     )
     return publish_existing_listing(
         listing_id=listing_id,
-        offer=offer,
+        listing_resource=listing_resource,
         accepted_escrows=accepted_escrows,
         settlement_options=settlement_options or [],
         publication_clauses=publication_clauses or [],

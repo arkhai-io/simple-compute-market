@@ -82,13 +82,13 @@ async def _persist_terminal_negotiation(
         status="closed",
         created_at=now,
         updated_at=now,
-        offer_resource={
+        listing_resource={
             "resource_id": pool_id,
             "gpu_model": "H200",
             "gpu_count": 1,
             "sla": 99.9,
             "region": "California, US",
-            "virtualization_type": "vm",
+            "offering_mode": "vm",
         },
         accepted_escrows=[
             {
@@ -185,7 +185,7 @@ async def test_truncates_the_ledger_lease_to_now(db):
         )
         reserved = await capacity.reserve(
             binding,
-            claim={"executor_kind": "vm"},
+            claim={"offering_mode": "vm"},
             deal_ref={
                 "listing_id": listing_id,
                 "negotiation_id": agreement_ref,

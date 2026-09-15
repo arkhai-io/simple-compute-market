@@ -32,7 +32,7 @@ from typing import Annotated, Any
 import typer
 from arkhai_vms.storefront_adapter import (
     vm_candidate_skip_keys,
-    vm_offer_resource_for_listing,
+    vm_listing_resource_for_listing,
 )
 from core_storefront.publication_command import (
     StorefrontPublicationCommandCallbacks,
@@ -438,13 +438,13 @@ def _open_order_resource_ids(db_path: str) -> set[str]:
     """Return the set of resource_ids that currently have an open sell order.
 
     Used in `--watch` mode to avoid re-publishing a resource that's already
-    offered on the market. Inspects the offer_resource JSON for each open
+    offered on the market. Inspects the listing_resource JSON for each open
     order and extracts its `resource_id` field.
     """
     conn = sqlite3.connect(f"file:{db_path}?mode=ro&nolock=1", uri=True, timeout=5)
     try:
         rows = conn.execute(
-            "SELECT offer_resource FROM listings WHERE status = 'open'",
+            "SELECT listing_resource FROM listings WHERE status = 'open'",
         ).fetchall()
     finally:
         conn.close()
@@ -463,9 +463,9 @@ def _open_order_resource_ids(db_path: str) -> set[str]:
     return covered
 
 
-def _publish_offer(
+def _publish_listing(
     agent_url: str,
-    offer: dict,
+    listing_resource: dict,
     capacity_source: dict[str, Any],
     accepted_escrows: list[dict],
     demands: list[dict],
@@ -485,7 +485,7 @@ def _publish_offer(
     ) as client:
         try:
             resp = client.create_listing(
-                offer=offer,
+                listing_resource=listing_resource,
                 capacity_source=capacity_source,
                 accepted_escrows=accepted_escrows,
                 settlements=settlements,
@@ -520,7 +520,7 @@ def _registry_auth_token(registry_url: str) -> str | None:
 def _publish_existing_listing_to_registries(
     *,
     listing_id: str,
-    offer: dict,
+    listing_resource: dict,
     accepted_escrows: list[dict],
     demands: list[dict],
     max_duration_seconds: int | None,
@@ -544,7 +544,7 @@ def _publish_existing_listing_to_registries(
     any_ok = False
     request = ListingRequest(
         listing_id=listing_id,
-        offer=offer,
+        listing_resource=listing_resource,
         accepted_escrows=accepted_escrows,
         demands=demands,
         max_duration_seconds=max_duration_seconds,
@@ -553,7 +553,7 @@ def _publish_existing_listing_to_registries(
     update = UpdateListingRequest(
         updates={
             "status": "open",
-            "offer_resource": offer,
+            "listing_resource": listing_resource,
             "accepted_escrows": accepted_escrows,
             "demands": demands,
             "max_duration_seconds": max_duration_seconds,
@@ -589,7 +589,7 @@ def _reopen_derived_listing_if_present(
     db_path: str,
     base_url: str,
     resource: dict,
-    offer: dict,
+    listing_resource: dict,
     accepted_escrows: list[dict],
     demands: list[dict],
     max_duration_seconds: int | None,
@@ -621,7 +621,7 @@ def _reopen_derived_listing_if_present(
         if resource.get("resource_id")
         else None,
         gpu_count=int(resource["gpu_count"]),
-        offer_resource=offer,
+        listing_resource=listing_resource,
         accepted_escrows=accepted_escrows,
         demands=demands,
         max_duration_seconds=max_duration_seconds,
@@ -630,7 +630,7 @@ def _reopen_derived_listing_if_present(
     )
     return _publish_existing_listing_to_registries(
         listing_id=listing_id,
-        offer=offer,
+        listing_resource=listing_resource,
         accepted_escrows=accepted_escrows,
         demands=demands,
         max_duration_seconds=max_duration_seconds,
@@ -719,7 +719,7 @@ def _reopen_vm_listing_if_present(
     db_path: str,
     base_url: str,
     candidate: dict[str, Any],
-    offer: dict[str, Any],
+    listing_resource: dict[str, Any],
     accepted_escrows: list[dict],
     demands: list[dict],
     max_duration_seconds: int | None,
@@ -728,7 +728,7 @@ def _reopen_vm_listing_if_present(
         db_path=db_path,
         base_url=base_url,
         resource=candidate,
-        offer=offer,
+        listing_resource=listing_resource,
         accepted_escrows=accepted_escrows,
         demands=demands,
         max_duration_seconds=max_duration_seconds,
@@ -748,7 +748,7 @@ def _vm_publication_source_callbacks(
             db_path,
             command_settlements,
         ),
-        offer_resource=_offer_resource_for_listing,
+        listing_resource=_listing_resource_for_listing,
         record_published=_record_published_vm_listing,
         reopen_existing=_reopen_vm_listing_if_present,
     )
@@ -910,16 +910,16 @@ def _demands_for_chains(
     return _recipient_demands_for_chains(chains, chain_names, wallet_address)
 
 
-def _offer_resource_for_listing(res: dict[str, Any]) -> dict[str, Any]:
+def _listing_resource_for_listing(res: dict[str, Any]) -> dict[str, Any]:
     from market_storefront.utils.config import settlement_config_mapping
 
     alkahest = settlement_config_mapping().get("alkahest", {})
     interruptible = isinstance(alkahest, dict) and bool(
         alkahest.get("interruptible", False)
     )
-    offer = vm_offer_resource_for_listing(res, interruptible=interruptible)
-    offer["virtualization_type"] = "vm"
-    return offer
+    listing_resource = vm_listing_resource_for_listing(res, interruptible=interruptible)
+    listing_resource["offering_mode"] = "vm"
+    return listing_resource
 
 
 def _compile_publication_clauses(
@@ -985,9 +985,9 @@ def _publish_command_round(
     def build_payload(
         adapter: PublicationSource,
         candidate: dict[str, Any],
-        offer: dict[str, Any],
+        listing_resource: dict[str, Any],
     ) -> tuple[list[dict], list[dict], int | None] | str:
-        pricing_resource = adapter.pricing_resource(candidate, offer)
+        pricing_resource = adapter.pricing_resource(candidate, listing_resource)
         raw_clauses = pricing_resource.get("settlements")
         if raw_clauses is None:
             from .utils.config import settlement_publication_defaults
@@ -1014,10 +1014,10 @@ def _publish_command_round(
             )
         except (TypeError, ValueError) as exc:
             return str(exc)
-        listing_clauses[id(offer)] = [
+        listing_clauses[id(listing_resource)] = [
             clause.model_dump(mode="json", exclude_defaults=True) for clause in clauses
         ]
-        listing_capacity_sources[id(offer)] = {
+        listing_capacity_sources[id(listing_resource)] = {
             "site_id": candidate.get("site_id"),
             "pool_id": candidate.get("pool_id"),
             "resource_id": candidate.get("resource_id"),
@@ -1030,21 +1030,21 @@ def _publish_command_round(
         )
         return [], demands, _normalize_max_duration_seconds(raw_max_duration)
 
-    def publish_offer(
-        offer: dict[str, Any],
+    def publish_listing(
+        listing_resource: dict[str, Any],
         accepted_escrows: list[dict],
         demands: list[dict],
         max_duration_seconds: int | None,
     ) -> dict[str, Any]:
         try:
-            return _publish_offer(
+            return _publish_listing(
                 base_url,
-                offer,
-                listing_capacity_sources.pop(id(offer)),
+                listing_resource,
+                listing_capacity_sources.pop(id(listing_resource)),
                 accepted_escrows,
                 demands,
                 max_duration_seconds,
-                settlements=listing_clauses.pop(id(offer), None),
+                settlements=listing_clauses.pop(id(listing_resource), None),
             )
         except typer.Exit as exc:
             raise RuntimeError("HTTP error (see above)") from exc
@@ -1059,7 +1059,7 @@ def _publish_command_round(
         ),
         callbacks=StorefrontPublicationCommandCallbacks(
             build_payload=build_payload,
-            publish_offer=publish_offer,
+            publish_listing=publish_listing,
         ),
         skip_ids=skip_ids,
     )
@@ -1168,53 +1168,53 @@ def _print_publish_table(
         first_escrow = (entry["accepted_escrows"] or [{}])[0]
         price = primary_rate_value(first_escrow)
         token = accepted_token_address(first_escrow) or "-"
-        offer = (
-            res.get("offer_resource")
-            if isinstance(res.get("offer_resource"), dict)
+        listing_resource = (
+            res.get("listing_resource")
+            if isinstance(res.get("listing_resource"), dict)
             else res
         )
         resource_label = (
             res.get("pool_id") or res.get("resource_id") or res.get("machine_id") or "-"
         )
-        gpu_model = offer.get("gpu_model") or offer.get("capabilities", {}).get(
+        gpu_model = listing_resource.get("gpu_model") or listing_resource.get("capabilities", {}).get(
             "gpu_model"
         )
-        gpu_count = offer.get("gpu_count")
+        gpu_count = listing_resource.get("gpu_count")
         gpu_label = (
             f"{gpu_model} x{gpu_count}"
             if gpu_count is not None
-            else str(gpu_model or offer.get("kind") or "-")
+            else str(gpu_model or listing_resource.get("kind") or "-")
         )
         summary.add_row(
             str(resource_label),
             gpu_label,
-            str(offer.get("region") or offer.get("site", {}).get("region") or "-"),
+            str(listing_resource.get("region") or listing_resource.get("site", {}).get("region") or "-"),
             f"{price if price is not None else 'hidden'} {token}",
             str(resp.get("listing_id", "-")),
             str(resp.get("status", "-")),
         )
     for res, reason in failed:
-        offer = (
-            res.get("offer_resource")
-            if isinstance(res.get("offer_resource"), dict)
+        listing_resource = (
+            res.get("listing_resource")
+            if isinstance(res.get("listing_resource"), dict)
             else res
         )
         resource_label = (
             res.get("pool_id") or res.get("resource_id") or res.get("machine_id") or "-"
         )
-        gpu_model = offer.get("gpu_model") or offer.get("capabilities", {}).get(
+        gpu_model = listing_resource.get("gpu_model") or listing_resource.get("capabilities", {}).get(
             "gpu_model"
         )
-        gpu_count = offer.get("gpu_count")
+        gpu_count = listing_resource.get("gpu_count")
         gpu_label = (
             f"{gpu_model} x{gpu_count}"
             if gpu_count is not None
-            else str(gpu_model or offer.get("kind") or "-")
+            else str(gpu_model or listing_resource.get("kind") or "-")
         )
         summary.add_row(
             str(resource_label),
             gpu_label,
-            str(offer.get("region") or offer.get("site", {}).get("region") or "-"),
+            str(listing_resource.get("region") or listing_resource.get("site", {}).get("region") or "-"),
             "-",
             "-",
             f"[red]failed: {reason}[/red]",

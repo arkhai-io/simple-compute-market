@@ -412,7 +412,7 @@ Settlement verification, plan construction, materialization, condition/effect se
 #### Scenario: Teardown repeats after restart
 
 - **WHEN** recovery repeats teardown for a recorded fulfillment/reservation
-- **THEN** it addresses the same site and durable identities while the provisioning authority dispatches its recorded executor kind; no current publication mode or VM default is consulted
+- **THEN** it addresses the same site and durable identities while the provisioning authority dispatches its recorded offering mode; no current publication mode or VM default is consulted
 
 #### Scenario: Contract is unavailable after acceptance
 

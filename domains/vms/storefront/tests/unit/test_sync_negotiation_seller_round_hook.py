@@ -145,13 +145,13 @@ async def db(tmp_path, monkeypatch):
         status="open",
         created_at=datetime.now().isoformat(),
         updated_at=datetime.now().isoformat(),
-        offer_resource={
+        listing_resource={
             "gpu_model": "H200",
             "gpu_count": 1,
             "sla": 99.9,
             "region": "California, US",
             "resource_id": "resource-hook",
-            "virtualization_type": "vm",
+            "offering_mode": "vm",
         },
         accepted_escrows=[
             {
@@ -466,13 +466,13 @@ async def test_hosted_selection_is_persisted_and_materialized_as_plan(db):
         status="open",
         created_at=datetime.now().isoformat(),
         updated_at=datetime.now().isoformat(),
-        offer_resource={
+        listing_resource={
             "gpu_model": "H200",
             "gpu_count": 1,
             "sla": 99.9,
             "region": "California, US",
             "resource_id": "resource-hosted",
-            "virtualization_type": "vm",
+            "offering_mode": "vm",
         },
         accepted_escrows=[],
         settlement_options=[option.model_dump(mode="json")],
@@ -555,7 +555,7 @@ async def test_hosted_selection_is_persisted_and_materialized_as_plan(db):
     assert obligation["claimant_principal"] == _SELLER.model_dump(mode="json")
     vm_state = response["settlement_plan"]["service_terms"]["vm.v1"]
     assert vm_state["listing_id"] == "L-hosted"
-    assert vm_state["order"]["offer_resource"]["resource_id"] == "resource-hosted"
+    assert vm_state["order"]["listing_resource"]["resource_id"] == "resource-hosted"
     assert vm_state["provision"]["ssh_public_key"] == "ssh-rsa AAAA"
     thread = await db.load_negotiation_thread_row(
         negotiation_id=response["negotiation_id"]

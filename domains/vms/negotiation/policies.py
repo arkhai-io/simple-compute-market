@@ -40,6 +40,8 @@ from market_policy.scalar_policies import (  # noqa: F401 — re-exports
     _peer_proposal,
     _proposal_requires_exact_amount,
     _set_proposal_amount,
+    format_wire_amount,
+    parse_wire_amount,
     accept_exact_listing_middleware,
     amount_bisection_middleware,
     bisection_middleware,
@@ -219,13 +221,13 @@ def has_matching_inventory_guard(
     context: NegotiationContext,
 ) -> NegotiationStep:
     """Veto when no available VM inventory resource matches the listing."""
-    offer = _coerce_resource_dict(context.listing.get("offer_resource"))
-    if "gpu_model" not in offer:
+    listing_resource = _coerce_resource_dict(context.listing.get("listing_resource"))
+    if "gpu_model" not in listing_resource:
         return None, context
 
     required: dict[str, Any] = {}
     for key in ("region", "gpu_model"):
-        v = offer.get(key)
+        v = listing_resource.get(key)
         if v is not None:
             required[key] = v
 
@@ -255,6 +257,8 @@ def has_matching_inventory_guard(
 
 __all__ = [
     "_amount_from_proposal",
+    "format_wire_amount",
+    "parse_wire_amount",
     "accept_exact_listing_middleware",
     "amount_bisection_middleware",
     "bisection_middleware",

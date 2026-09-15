@@ -619,9 +619,40 @@ def _negotiate_matches(
             # Reraise so policies that don't catch see the actual error —
             # surface state, don't paper over network failures.
             raise
+        except Exception as exc:
+            # The handler above narrows to RuntimeError, which is what the
+            # transport raises. Anything else left no record of how this
+            # negotiation ended: the run-log held an opening and nothing
+            # after it, so the reason had to be reconstructed from an
+            # absence. Named here, then reraised unchanged.
+            _emit_neg(
+                "negotiation_failed",
+                error=f"{type(exc).__name__}: {exc}",
+            )
+            attempts.append(
+                {
+                    "seller_url": seller_url,
+                    "listing_id": listing_id,
+                    "error": f"negotiation_raised: {type(exc).__name__}: {exc}",
+                }
+            )
+            raise
 
         if outcome.negotiation_id and "negotiation_id" not in neg_ctx:
             neg_ctx["negotiation_id"] = outcome.negotiation_id
+
+        # Scalars only, emitted before the outcome is serialized below. That
+        # serialization can refuse a payload of its own accord, and when it
+        # does the run shows an opening, no completion and no error — one
+        # silence covering several explanations. This event separates what
+        # the seller answered from whether it could be written down.
+        _emit_neg(
+            "negotiation_returned",
+            status=outcome.status,
+            reason=outcome.reason,
+            rounds=outcome.rounds,
+            agreed_amount=outcome.agreed_amount,
+        )
 
         # Note: the buyer-side ``buyer_escrow_shape_guard`` middleware
         # (default in the buyer's chain) handles seller-pin-mutation

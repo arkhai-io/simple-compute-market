@@ -47,14 +47,14 @@ class MissingResourceKindError(SettlementRequestMismatchError):
     scheduler's configured ``default_resource_kind``."""
 
 
-class MissingExecutorKindError(SettlementRequestMismatchError):
+class MissingOfferingModeError(SettlementRequestMismatchError):
     """The reservation does not carry its explicitly requested offering mode."""
 
 def _resource_from_record(record: Any) -> SettlementResource:
     return SettlementResource(
         settlement_resource_id=record.settlement_resource_id,
         pool_id=record.pool_id,
-        executor_kind=record.scheduling_requirements.get("executor_kind"),
+        offering_mode=record.scheduling_requirements.get("offering_mode"),
         resource_kind=record.scheduling_requirements.get("resource_kind"),
         provider=record.provider,
         attributes=dict(record.resource_attributes or {}),
@@ -103,11 +103,11 @@ class PhysicalSettlementScheduler:
             if existing is not None:
                 pool = enabled_pools.get(existing.pool_id)
                 if pool is None or not pool_delivers_offering_mode(
-                    pool.policy_tags, requirement.executor_kind
+                    pool.policy_tags, requirement.offering_mode
                 ):
                     raise NoEligibleSettlementResourceError(
                         f"pool {existing.pool_id!r} does not declare offering mode "
-                        f"{requirement.executor_kind!r}"
+                        f"{requirement.offering_mode!r}"
                     )
                 record = tx.schedule_assignment(
                     capacity_reservation_id=request.capacity_reservation_id,
@@ -147,7 +147,7 @@ class PhysicalSettlementScheduler:
             resource = SettlementResource(
                 settlement_resource_id=selected.resource_id,
                 pool_id=selected.pool_id,
-                executor_kind=requirement.executor_kind,
+                offering_mode=requirement.offering_mode,
                 resource_kind=selected.resource_kind,
                 provider=selected.provider,
                 attributes=selected.attributes,
@@ -188,10 +188,10 @@ class PhysicalSettlementScheduler:
         self, reservation: dict[str, Any], request: PhysicalSettlementRequest
     ) -> SettlementRequirement:
         deal_ref = reservation.get("deal_ref") or {}
-        executor_kind = reservation.get("executor_kind")
-        if not executor_kind:
-            raise MissingExecutorKindError(
-                "capacity reservation has no explicit executor_kind"
+        offering_mode = reservation.get("offering_mode")
+        if not offering_mode:
+            raise MissingOfferingModeError(
+                "capacity reservation has no explicit offering_mode"
             )
         resource_kind = (
             deal_ref.get("resource_kind")
@@ -203,7 +203,33 @@ class PhysicalSettlementScheduler:
                 "no resource_kind on the capacity reservation, the request, or this "
                 "scheduler's configured default_resource_kind"
             )
-        attributes = dict(request.requirements.get("attributes") or {})
+        # Categorical constraints come from the reservation, on the same
+        # precedence rule the dimensions below follow: what admission accepted
+        # governs what scheduling may place. The request may add a constraint
+        # the reservation does not govern (narrowing), but never relax or
+        # contradict one it does -- a caller able to drop `gpu_model` here
+        # could re-place a deal on hardware admission never matched.
+        #
+        # NULL (not `{}`) means a reservation written before the ledger
+        # recorded this, and only then is the request the sole source: an
+        # in-flight deal from before the column existed still schedules.
+        reserved_attributes = reservation.get("claim_attributes")
+        requested_attributes = dict(request.requirements.get("attributes") or {})
+        if reserved_attributes is None:
+            attributes = requested_attributes
+        else:
+            attributes = dict(reserved_attributes)
+            contradicted = {
+                key: (value, attributes[key])
+                for key, value in requested_attributes.items()
+                if key in attributes and attributes[key] != value
+            }
+            if contradicted:
+                raise SettlementRequestMismatchError(
+                    "requested attributes contradict the capacity reservation: "
+                    f"{contradicted} (requested, reserved)"
+                )
+            attributes.update(requested_attributes)
         # dimensions is authoritative when the reservation carries one.
         # Otherwise fall back to the reservation's own dimensions, which
         # reservation_payload_in_session() always populates -- even for a
@@ -239,7 +265,7 @@ class PhysicalSettlementScheduler:
             dimensions = reservation_dimensions
         return SettlementRequirement(
             resource_kind=resource_kind,
-            executor_kind=executor_kind,
+            offering_mode=offering_mode,
             dimensions=dimensions,
             attributes=attributes,
         )
@@ -259,7 +285,7 @@ class PhysicalSettlementScheduler:
             if pool is None:
                 continue
             if not pool_delivers_offering_mode(
-                pool.policy_tags, requirement.executor_kind
+                pool.policy_tags, requirement.offering_mode
             ):
                 continue
             if not resource_satisfies_requirement(

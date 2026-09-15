@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 from dataclasses import dataclass, replace
 from typing import Any
 from market_identity import Identity
@@ -16,6 +17,8 @@ from market_core import (
     MarketDomainContract,
     validate_domain_contract,
 )
+
+logger = logging.getLogger(__name__)
 
 
 def _build_market_domain_contract() -> MarketDomainContract:
@@ -216,7 +219,7 @@ async def prepare_api_credit_settlement(
         mechanism_receipt={"escrow_uid": escrow_uid},
         fulfillment_input=ApiCreditsFulfillmentInput(
             chain_name=proposal_chain or chain_name,
-            order=dict(order),
+            order=_domain_order(order),
             quantity=int(terms["quantity"]),
             key_mode=str(terms.get("key_mode") or "new"),
             key_id=terms.get("key_id"),
@@ -276,6 +279,33 @@ async def reserve_api_credit_settlement(
         )
         await wake_servicing(obligation_ref)
     return None if inserted else row
+
+
+def _domain_order(row: Any) -> dict[str, Any]:
+    """Project a stored listing row onto the domain listing's own fields.
+
+    `order` here is whatever `load_listing` returned -- this storefront's
+    own database row, carrying its bookkeeping columns (`paused`,
+    `publication_clauses`, `seller_principal`, `oracle_address`, the agent
+    URL, and so on). The fulfillment path hands it to the domain's
+    `normalize_listing` hook, which validates it against
+    `ApiCreditsListing`, and that model sets `extra="forbid"` -- so
+    issuance failed with eleven `extra_forbidden` errors before it made a
+    single call to the credits service.
+
+    Narrowed here rather than by relaxing the model. `ApiCreditsListing`
+    describes the domain payload *carried by a registry listing*, which is
+    untrusted wire input, and forbidding extras there is the guard that
+    makes it a contract. The defect is a local row being passed where a
+    wire payload belongs, so the projection is the local side's job.
+
+    Field names are read off the model, so a field added to the domain
+    listing is carried without editing this.
+    """
+    from domains.apicredits.schema import ApiCreditsListing
+
+    fields = frozenset(ApiCreditsListing.model_fields)
+    return {key: value for key, value in dict(row).items() if key in fields}
 
 
 async def fulfill_api_credit_settlement(
@@ -344,10 +374,23 @@ async def persist_api_credit_settlement_outcome(
             ),
         )
         return
+    reason = outcome.reason or "fulfillment failed"
+    # Logged as well as persisted. The reason reaches the buyer in the
+    # settle-status body, and nowhere else: a settlement that fails before
+    # its first call to the credits service left no trace in this
+    # storefront's own output, so an operator holding only the container
+    # log saw a `202` and then silence. `issuance_error:` prefixes carry a
+    # caught exception, which is the one case where the reason is the only
+    # record that it happened at all.
+    logger.warning(
+        "[SETTLE] settlement failed for escrow %s: %s",
+        prepared.mechanism_ref,
+        reason,
+    )
     await sqlite_client.update_escrow(
         escrow_uid=prepared.mechanism_ref,
         status="failed",
-        reason=outcome.reason or "fulfillment failed",
+        reason=reason,
     )
 
 

@@ -198,7 +198,7 @@ and applies only where a pool was selected. Publication,
 reservation, commit, release, and restart recovery reload and compare that
 exact binding. An unknown site, missing mode, changed binding, or incomplete
 candidate fails closed; the runtime never invents a home site, scans other
-authorities after restart, or defaults an executor mode. VM and API-credit
+authorities after restart, or defaults an offering mode. VM and API-credit
 contributions inject their candidate derivation and binding codecs into this
 same runtime. The kit imports no VM, API-credit, bare-metal, provider, or
 deployed-service package.
@@ -335,7 +335,7 @@ credential as settlement evidence.
                                                 │
                                       ┌─────────▼──────────┐
                                       │ VM / bare-metal /  │
-                                      │ future executors   │
+                                      │ future domains     │
                                       └────────────────────┘
 ```
 
@@ -378,7 +378,7 @@ A site authority owns resources, allocations, reservation expiry, capacity versi
 
 Capacity claims name their requested offering mode explicitly. The authority
 records that value on the reservation and never derives it from host
-attributes, resource type, or a default executor. Admission refuses a matching
+attributes, resource type, or a default offering mode. Admission refuses a matching
 resource when its pool does not authorize the mode; durable legacy rows are
 backfilled only from single-valued evidence and otherwise quarantined from
 execution.
@@ -436,6 +436,37 @@ Authenticated service-to-service calls use the scheme-neutral version 2 request 
 | **Settlement Record** | Durable lifecycle record linking reservation, resource, provider snapshot, operations, and results | Compute provisioning lifecycle |
 
 Avoid `SettlementTarget` as a noun. Use `SettlementResource`; method names may use `select_target_resource` only where it improves call-site clarity.
+
+### One name per concept
+
+Four concepts sit close enough together to have been conflated, and each has
+exactly one name.
+
+| Concept | Name |
+|---|---|
+| What the seller is offering: `vm`, `bare_metal`, `container`, `api_credits` | `offering_mode` |
+| The machine and its connection identity | `host` |
+| The fulfillment implementation selected for a pool | `provider` |
+| The component that validates, submits, and polls an execution action | `executor` |
+
+The offering mode carries one name on every surface that names it: the capacity
+claim, the Resource Pool's deliverable and advertisable declarations, the durable
+listing binding, and the published listing. It is a separate axis from the
+site-inventory `resource_kind`/`resource_type` discriminator, and naming it
+consistently does not merge the two.
+
+A seller's published shape is a **listing**, never an offer. `offer` names a
+negotiation message either party sends. How many listing candidates a pool yields
+is its `listing_cardinality_mode`, which carries cardinality only — not what is
+offered, how a deal settles, or whether an admission authority backs the listing.
+
+`executor` names the action-dispatch abstraction **as a head noun** and nothing
+else: not the offering mode, not the machine, not the delivery handler.
+`executor_`-prefixed compounds naming that abstraction's own targets, references,
+or actions do keep the name, because `executor` carries its action-dispatch sense
+in them — `executor_ref` is the executor's reference and `executor_target` is the
+target of an executor action. The prohibition is on the head noun, not the prefix.
+See [physical provisioning](../../openspec/specs/physical-provisioning/spec.md).
 
 ### Identifiers
 
@@ -521,7 +552,7 @@ Which physical resource ultimately serves a deal is decided up to three separate
 
 | Decision | Owned by | When | Mechanism |
 |---|---|---|---|
-| Which pool/resource a listing represents | Storefront | Publish time | Baked into the listing's `offer_resource` at creation |
+| Which pool/resource a listing represents | Storefront | Publish time | Baked into the listing's `listing_resource` at creation |
 | Which site to route a reserve/probe call to | Storefront (`AggregateCapacityClient`) | Reserve/negotiate time | `fill_first`/`most_available` ranking policies over a live per-request snapshot |
 | Which concrete host within that pool fulfills the reservation | Provisioning service (`PhysicalSettlementScheduler`) | Schedule time | Deterministic round-robin (or a replaceable fairness policy) |
 
@@ -563,7 +594,7 @@ Push-based result delivery (provisioning notifying the storefront rather than th
 
 Physical release is proof-driven and split across two cooperating state machines with distinct retry ownership. Lease lifecycle (site/provisioning-lease layer) owns `releasing`/`released` and the final capacity-return decision; it never dispatches a second teardown operation itself. Fulfillment convergence (see "Recovery workers" below) owns dispatch, requeue, and recovery of the teardown states themselves (`teardown_dispatch_pending` → `tearing_down` → `torn_down`/`teardown_failed`). Lease-side retry re-observes the same fulfillment aggregate by its durable `fulfillment_id` rather than resubmitting a teardown.
 
-A kind-routed `ReleaseJobPort` connects the two: for VM-backed reservations it reads the fulfillment aggregate's teardown state (`torn_down` → succeeded, `teardown_failed` → failed, otherwise pending); other executor kinds continue to resolve through the shared job queue unchanged. Capacity is never returned to scheduling until the aggregate reaches `torn_down` or an operator explicitly force-releases after external verification; the audit state distinguishes forced release from proven teardown.
+A kind-routed `ReleaseJobPort` connects the two: for VM-backed reservations it reads the fulfillment aggregate's teardown state (`torn_down` → succeeded, `teardown_failed` → failed, otherwise pending); other offering modes continue to resolve through the shared job queue unchanged. Capacity is never returned to scheduling until the aggregate reaches `torn_down` or an operator explicitly force-releases after external verification; the audit state distinguishes forced release from proven teardown.
 
 `begin_fulfillment_teardown(fulfillment_id)` is the whole-fulfillment teardown entrypoint: it resolves the aggregate, reuses an already-prepared teardown operation when present (as legacy-backfilled rows carry) or prepares one via the provider when a native row reaches teardown for the first time, then hands off to convergence for dispatch — it never dispatches to the provider inline.
 

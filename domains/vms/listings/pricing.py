@@ -21,16 +21,16 @@ def resource_is_compute(resource: Any) -> bool:
 
 
 def extract_compute_from_order(order: dict[str, Any]) -> dict[str, Any]:
-    """Return the compute dict from an order's ``offer_resource``."""
-    offer_resource = order.get("offer_resource", {})
-    if isinstance(offer_resource, str):
-        offer_resource = json.loads(offer_resource)
-    if not resource_is_compute(offer_resource):
+    """Return the compute dict from an order's ``listing_resource``."""
+    listing_resource = order.get("listing_resource", {})
+    if isinstance(listing_resource, str):
+        listing_resource = json.loads(listing_resource)
+    if not resource_is_compute(listing_resource):
         raise ValueError(
-            f"Order offer_resource is not compute: "
+            f"Order listing_resource is not compute: "
             f"listing_id={order.get('listing_id')}"
         )
-    return offer_resource
+    return listing_resource
 
 
 def extract_initial_price_from_order(

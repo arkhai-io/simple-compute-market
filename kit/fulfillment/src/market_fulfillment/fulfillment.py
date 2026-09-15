@@ -90,8 +90,8 @@ class FulfillmentOrchestrator:
         return SettlementResource(
             settlement_resource_id=record.settlement_resource_id,
             pool_id=record.pool_id,
-            executor_kind=(record.scheduling_requirements or {}).get(
-                "executor_kind"
+            offering_mode=(record.scheduling_requirements or {}).get(
+                "offering_mode"
             ),
             resource_kind=(record.scheduling_requirements or {}).get(
                 "resource_kind", "unknown"
@@ -116,15 +116,15 @@ class FulfillmentOrchestrator:
         pool = tx.get_pool(record.pool_id)
         if pool is None:
             raise LookupError(f"pool {record.pool_id!r} not found")
-        executor_kind = (record.scheduling_requirements or {}).get("executor_kind")
-        if not executor_kind:
+        offering_mode = (record.scheduling_requirements or {}).get("offering_mode")
+        if not offering_mode:
             raise FulfillmentConflictError(
-                "scheduled settlement has no explicit executor_kind"
+                "scheduled settlement has no explicit offering_mode"
             )
-        if not pool_delivers_offering_mode(pool.policy_tags, executor_kind):
+        if not pool_delivers_offering_mode(pool.policy_tags, offering_mode):
             raise FulfillmentConflictError(
                 f"pool {record.pool_id!r} does not declare offering mode "
-                f"{executor_kind!r}"
+                f"{offering_mode!r}"
             )
         return pool
 
@@ -250,6 +250,13 @@ class FulfillmentOrchestrator:
                 capacity_reservation_id,
                 result.provider_metadata,
             )
+            # Same transaction as the acknowledgement, so a reservation never
+            # references a create this row does not also record. The key is
+            # the provider's to name; this layer only forwards what it is
+            # handed and skips a provider that has no job handle.
+            job_id = provider.resolve_executor_job_id(result.provider_metadata)
+            if job_id:
+                tx.attach_executor_job(capacity_reservation_id, job_id)
             return self._view(acknowledged)
 
     async def begin_fulfillment_teardown(self, fulfillment_id: str) -> FulfillmentAcceptance:

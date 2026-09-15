@@ -61,7 +61,7 @@ def db(tmp_path):
               status TEXT NOT NULL,
               paused INTEGER NOT NULL DEFAULT 0,
               updated_at TEXT,
-              offer_resource TEXT,
+              listing_resource TEXT,
               accepted_escrows TEXT,
               demands TEXT,
               max_duration_seconds INTEGER,
@@ -109,7 +109,7 @@ def test_candidates_preserve_projection_provenance_and_site_scoped_key():
     assert first["site_id"] == "site-a"
     assert first["physical_resource_id"] == "resource-1"
     assert first["machine_id"] == "machine-1"
-    assert first["offer_resource"]["capabilities"] == {
+    assert first["listing_resource"]["capabilities"] == {
         "gpu_count": 8,
         "gpu_model": "H200",
     }

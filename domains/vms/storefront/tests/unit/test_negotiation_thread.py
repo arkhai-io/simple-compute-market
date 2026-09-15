@@ -77,8 +77,8 @@ async def _seed_owned_threads(client: SQLiteClient) -> None:
         status="open",
         created_at="2026-08-15T00:00:00Z",
         updated_at="2026-08-15T00:00:00Z",
-        offer_resource={
-            "virtualization_type": "vm",
+        listing_resource={
+            "offering_mode": "vm",
             "pool_id": "pool-1",
             "gpu_count": 1,
         },
@@ -482,12 +482,12 @@ class TestSQLiteClientNegotiationMethods:
                   status TEXT NOT NULL,
                   created_at TEXT NOT NULL,
                   updated_at TEXT NOT NULL,
-                  offer_resource TEXT NOT NULL,
+                  listing_resource TEXT NOT NULL,
                   seller TEXT NOT NULL
                 );
                 INSERT INTO listings (
                   listing_id, status, created_at, updated_at,
-                  offer_resource, seller
+                  listing_resource, seller
                 ) VALUES (
                   'legacy-listing', 'open', '2025-01-01T00:00:00',
                   '2025-01-01T00:00:00', '{{}}', 'http://seller'

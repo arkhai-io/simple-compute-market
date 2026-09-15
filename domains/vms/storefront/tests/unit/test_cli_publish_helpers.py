@@ -100,7 +100,7 @@ def _init_db(path: str) -> None:
             CREATE TABLE listings (
                 listing_id TEXT PRIMARY KEY,
                 status TEXT NOT NULL,
-                offer_resource TEXT,
+                listing_resource TEXT,
                 demand_resource TEXT,
                 created_at TEXT DEFAULT CURRENT_TIMESTAMP,
                 updated_at TEXT DEFAULT CURRENT_TIMESTAMP
@@ -188,14 +188,14 @@ def _insert_order(
     *,
     gpu_count: int = 1,
 ) -> None:
-    offer = {
+    listing_resource = {
         "gpu_model": "RTX 4090",
         "gpu_count": gpu_count,
         "sla": 95.0,
         "region": "New York, US",
     }
     if resource_id:
-        offer["resource_id"] = resource_id
+        listing_resource["resource_id"] = resource_id
     source = {
         "kind": "compute.listing_source",
         "schema_version": 1,
@@ -224,8 +224,8 @@ def _insert_order(
     try:
         conn.execute("PRAGMA foreign_keys = ON")
         conn.execute(
-            "INSERT INTO listings (listing_id, status, offer_resource) VALUES (?, ?, ?)",
-            (order_id, status, json.dumps(offer)),
+            "INSERT INTO listings (listing_id, status, listing_resource) VALUES (?, ?, ?)",
+            (order_id, status, json.dumps(listing_resource)),
         )
         conn.execute(
             """

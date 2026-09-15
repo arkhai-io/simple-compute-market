@@ -99,6 +99,7 @@ def create_buyer_escrow(
     rpc_url: str = "ws://localhost:8545",
     chain_name: str = "anvil",
     expiration_seconds: int = 3600,
+    expiration_unix: int | None = None,
 ) -> str:
     """Create an ERC20EscrowObligation under RecipientArbiter for the
     seller, returning the EAS attestation uid (0x-prefixed 32 bytes).
@@ -107,6 +108,15 @@ def create_buyer_escrow(
     ``token_contract_address`` — already multiplied out from any
     per-hour rate during negotiation. The middleware chain owns price
     math; this helper just escrows the agreed total.
+
+    ``expiration_unix`` is the exact deadline to write on chain. Pass the one
+    the accepted escrow proposal pinned: settlement verification matches the
+    attestation's ``expirationTime`` against that value, so a deadline
+    recomputed here as "now + an hour" disagrees with the negotiated one by
+    however many seconds the intervening stages took -- a race that fails the
+    deal for a reason that has nothing to do with the terms. Omitted, the
+    relative ``expiration_seconds`` is used, which is only safe where nothing
+    verifies against a pinned proposal.
 
     ``rpc_url`` must use the ``ws://`` or ``wss://`` scheme for alkahest-py.
     ``http://`` / ``https://`` URLs are coerced automatically with a warning;
@@ -128,7 +138,11 @@ def create_buyer_escrow(
 
     price_data = {"address": token_contract_address, "value": int(agreed_amount)}
     arbiter_data = {"arbiter": arbiter_address, "demand": demand_bytes}
-    expiration = int(time.time()) + int(expiration_seconds)
+    expiration = (
+        int(expiration_unix)
+        if expiration_unix is not None
+        else int(time.time()) + int(expiration_seconds)
+    )
 
     client = AlkahestClient(
         private_key=buyer_private_key,

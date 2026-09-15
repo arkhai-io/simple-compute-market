@@ -18,7 +18,7 @@ from domains.vms.listings.models import (
     Listing,
     Region,
     TokenResource,
-    VirtualizationType,
+    OfferingMode,
 )
 from domains.vms.listings.host_csv_importer import (
     HostImportReport,
@@ -127,5 +127,5 @@ __all__ = [
     "upsert_hosts_from_csv",
     "upsert_resources_from_csv",
     "upsert_resources_from_csv_content",
-    "VirtualizationType",
+    "OfferingMode",
 ]

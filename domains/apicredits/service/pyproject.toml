@@ -28,11 +28,26 @@ where = ["src"]
 [dependency-groups]
 dev = [
     "pytest>=8.3.4,<9.0.0",
+    "pytest-asyncio>=0.23.8,<1.0.0",
     "httpx>=0.28.1",
+    # Test-only, and deliberately in this direction. This service's signed
+    # boundary is worth proving against the clients that actually call it
+    # rather than against a signer hand-rolled in the test: a test that
+    # builds the envelope the way the server expects cannot see the two
+    # sides disagreeing, which is exactly how the query-canonicalization
+    # defect survived. Neither package is a runtime dependency.
+    "arkhai-apicredits-middleware[signed]",
+    "arkhai-apicredits-domain",
+    # The capacity half of this service's own boundary. Credits are backed by
+    # declared capacity, so the canonical-client test has to register a quota
+    # resource before an issuance can succeed -- and registering it through
+    # the client a seller actually uses is the point of that test.
+    "arkhai-kit-site-client",
 ]
 
 [tool.pytest.ini_options]
-testpaths = ["src/tests"]
+testpaths = ["tests"]
+asyncio_mode = "auto"
 python_files = ["test_*.py"]
 python_classes = ["Test*"]
 python_functions = ["test_*"]

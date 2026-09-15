@@ -22,14 +22,15 @@ A change appears exactly once, in its primary home. Where a change serves more t
 
 ```text
 capacity-resource-administration ──► pools-9-retire-local-physical-authority
-fix-vm-fulfillment-capacity-boundary (independent)
+fix-vm-fulfillment-capacity-boundary ──► retire-vm-remove-job-id
 ```
 
 | Change | Status | Acceptance boundary |
 |---|---|---|
 | [`capacity-resource-administration`](capacity-resource-administration/) | active; no blocking dependency | Site capacity resources become the single authoritative declaration of sellable capacity across every dimension, with a startup import, an operator administration surface, and a migration deriving declarations from legacy host GPU columns |
 | [`pools-9-retire-local-physical-authority`](pools-9-retire-local-physical-authority/) | planned; blocked on `capacity-resource-administration` | Retires every remaining physical-resource concern from the VM storefront: local physical-authority tables, `compute_allocations`, CSV import and its deployment contract, the orphaned physical admin surface, and the always-`None` `vm_host` plumbing. The deployment-bake trigger for its own start remains undefined by design; the dependency is a necessary gate, not a sufficient one |
-| [`fix-vm-fulfillment-capacity-boundary`](fix-vm-fulfillment-capacity-boundary/) | active | Removes stale physical-placement fields from the current fulfillment path and derives fulfillment shape from committed reservation dimensions. Also serves Goal 2 |
+| [`fix-vm-fulfillment-capacity-boundary`](fix-vm-fulfillment-capacity-boundary/) | complete; awaiting archival | Removes stale physical-placement fields from the current fulfillment path and derives fulfillment shape from committed reservation dimensions. Also serves Goal 2 | Proven by a green e2e run on 2026-09-14. Its one deferral, retiring the `vm_remove_job_id` mirror, is owned by `retire-vm-remove-job-id` below |
+| [`retire-vm-remove-job-id`](retire-vm-remove-job-id/) | planned; depends on `fix-vm-fulfillment-capacity-boundary` | Retires `capacity_reservations.vm_remove_job_id`, a VM-conditional mirror of `release_job_id` and the one domain-prefixed column on a reservation table bare-metal pools share. Scoped to the mirror only: the legacy `vm_leases` column the backfill reads and the storefront's own column are out of scope. Carries a wire decision, since the field is on a published lease model |
 
 ## Roadmap goal — Negotiate full compute capability, not GPU count alone
 
@@ -114,11 +115,51 @@ contact-payload-retention ──► compose-contact-exchange-across-compute
 | [`contact-payload-retention`](contact-payload-retention/) | active; no blocking dependency; design-complete | Makes the existing bounded-PII retention requirement executable: a 30-day-default window applied as an aggregate policy read live, one deletion handler shared by a scheduled sweep and an operator-invoked path, and disclosure of the window both before a buyer commits contact data and again at reveal. The deletion primitive already exists in the mechanism kit with no caller |
 | [`compose-contact-exchange-across-compute`](compose-contact-exchange-across-compute/) | blocked on `contact-payload-retention`; design-complete | Promotes the domain-neutral introduction composition glue out of bare metal so accepted-state interpretation has one implementation, composes the mechanism in the VM storefront — the one remaining compute-family domain — extends delivery to it, and resolves the seller's contact payload per listing origin rather than per storefront. Goal 7's multi-seller introduction value depends on that last part |
 
+## Unblocking work — the local end-to-end stack
+
+```text
+provide-e2e-development-identities (archived) ──► repair-e2e-fixture-drift (archived)
+                                                          │
+                                                          ▼
+                                          repair-storefront-alkahest-configuration
+                                                          │
+                                                          ▼
+                                       sign-multi-language-credits-middleware
+```
+
+The stack starts and the e2e suite reports results rather than setup errors.
+The active change addresses the larger of the two findings that repair left:
+the VM storefronts cannot settle, which accounts for ten of the eleven
+remaining failures.
+
+| Change | Status | Acceptance boundary |
+|---|---|---|
+| [`provide-e2e-development-identities`](archive/2026-09-12-provide-e2e-development-identities/) | **archived** 2026-09-12 | `docker compose up` had been unable to start since mid-August. Committed the development signer, wallet, admin-key, and buyer-config values; split the compose overrides out of the `include` files; and repaired five pre-existing defects the startup path had been masking. The stack now comes up healthy with no repository secrets, so a contributor or a fork can run it |
+| [`repair-e2e-fixture-drift`](archive/2026-09-13-repair-e2e-fixture-drift/) | **archived** 2026-09-13 | The e2e suite reached pytest reporting 12 passed and 88 fixture errors. The drift was wider than two signature mismatches: six construction sites and three payload shapes, four of them masked because pytest reports only the first fixture to raise. Rebuilt the fixtures as one client per role, corrected a misfiled route role in the storefront (system status is an administrator operation also readable by a service peer), and separated storefront administrators from their sellers in development configuration. The suite now reports **0 errors, 38 passed, 11 failed**, and every failure is classified |
+| [`repair-storefront-alkahest-configuration`](repair-storefront-alkahest-configuration/) | active; depends on nothing further | Alkahest is the VM storefronts' only enabled settlement mechanism and never becomes ready, so composition refuses every listing. Three configuration gaps: the storefront never receives its EVM credential because the wallet env files use a name only the buyer-side loader resolves, and both Alkahest address-config paths point into a source tree the image does not contain. Settles the stack so the on-chain escrow phases run for the first time since mid-August |
+| [`repair-multi-storefront-scenario`](repair-multi-storefront-scenario/) | active; opened by the change above | The VM suite's two-storefront scenario has four stages that cannot pass: provisioning's storefront principal is a single identity, so Alice is never a trusted caller and never loads capacity. Not a regression -- the Aug 15 green run skipped every Alice stage, incidentally, for want of configuration. Those stages are now skipped with the reason declared; this change owns letting provisioning serve more than one storefront |
+| [`sign-multi-language-credits-middleware`](sign-multi-language-credits-middleware/) | planned; opened by `repair-storefront-alkahest-configuration` task `3ax.10` | The TypeScript and Rust API-credits middlewares authenticate to a credits service with signed authentication enabled, which they cannot today: both send only the legacy shared secret, and the service accepts signed requests or the secret and never both. Owes its validation layer first -- neither client has an e2e scenario, so signing code for them cannot currently be proven against a real service |
+| [`retain-authenticated-request-outcomes`](retain-authenticated-request-outcomes/) | planned; opened by `repair-storefront-alkahest-configuration` | `SiteAuthMiddleware` reserves `(principal, request_id)` and rejects changed reuse, but keeps no outcomes, so an exact retry cannot resolve to the recorded one. Conformance is currently delegated to handlers and declared per route by `exact_retry_safe`; this retains outcomes so the middleware can honour the requirement itself, with a durable provider for services that must survive an authority restart |
+
+### Unowned work left by this campaign
+
+No change owns these yet. Recorded here so the next reader sees them rather
+than rediscovering them. The storefront settlement fault that this table also
+held is now owned by `repair-storefront-alkahest-configuration` above.
+
+| Item | Origin |
+|---|---|
+| `market credits buy` exits `rc=2` before writing a run-log, indicating its argument interface has moved | `repair-e2e-fixture-drift` finding |
+| A run-id seam for tailing a live buyer-CLI run, so the streaming case can synchronize on a transition rather than a bounded sample | `repair-e2e-fixture-drift`, deferred (changes `core/buyer`) |
+| Compose configuration is assembled by hand across a root file, domain files, an identity overlay, and legacy env files, with duplicated paths and per-value TOML workarounds; the Helm charts express the same deployment more coherently. Converging compose onto one source shared with the tests | accepted as follow-up during `repair-storefront-alkahest-configuration` |
+| `domains/vms/storefront/.env.{bob,alice}.docker` carry configuration for a layout that no longer exists, including a stale Alkahest address path | `repair-storefront-alkahest-configuration`, left in place because compose still references them |
+| Four questions about the API-credits capacity topology: a stale ed25519 authority pin, a capacity-site table where the loader expects a string, an `include`-plus-override compose shape, and `kit/config` TOML-parsing `0x` values into integers | inherited from `provide-e2e-development-identities`, carried through `repair-e2e-fixture-drift` |
+
 ## Roadmap goal — Sell capacity the marketplace cannot admit against
 
 ```text
 capacity-resource-administration ──► project-capacity-resources-without-hosts ──┐
-settle-listing-vocabulary ────────────────────────────────────────────────┤
+settle-listing-vocabulary (archived) ─────────────────────────────────────┤
 pool-declared-advertisement-and-backing ────────────────────────────────────────┴──► unbacked-listing-publication ──► publish-indicative-listing-rates
 ```
 
@@ -150,7 +191,7 @@ advertisement change's subset rule depend on a concept its own dependent owned.
 
 | Change | Status | Acceptance boundary |
 |---|---|---|
-| [`settle-listing-vocabulary`](settle-listing-vocabulary/) | active; independent | One name for the offering mode across the claim wire, pool declarations, the durable binding, and the published listing — retiring `executor_kind`, `virtualization_type`, and the proposed `offering_type`. `offer_resource` becomes `listing_resource` and `offer` returns to meaning a negotiation message. The compute schema identity names its family. `executor` keeps only its action-dispatch meaning; its uses as a synonym for the machine, the handler, or the mode are retired. The cardinality hint keeps its deprecated ingestion alias; the wire renames get none |
+| [`settle-listing-vocabulary`](archive/2026-09-15-settle-listing-vocabulary/) | **archived** 2026-09-15 | One name for the offering mode across the claim wire, pool declarations, the durable binding, and the published listing. Provisioning contract on 2.0 with majors {2}; the registry refuses the retired spellings at the publish boundary, not only in its dry run; the deprecated `listing_mode` cardinality alias is retained one-way and proven across deployed services. Closed on a green end-to-end run of 113 passed following the `filter-spec` v6 bump |
 | [`pool-declared-advertisement-and-backing`](pool-declared-advertisement-and-backing/) | active; no blocking dependency | Two pool declarations: what a pool's listings may advertise, separate from what its provider proves it can deliver; and whether the pool can be admitted against. A backed pool's advertisable set is constrained to a subset of its deliverable set, a malformed backing value fails closed, and both are derived for every existing pool on upgrade. Leaves `deliverable_modes` and every execution recheck untouched. Observable to operators only — no listing behaviour changes until `unbacked-listing-publication` reads the tags |
 | [`project-capacity-resources-without-hosts`](project-capacity-resources-without-hosts/) | blocked on `capacity-resource-administration` | Inverts the resource-pool projection to iterate declared capacity resources and correlate host rows in, so a declaration with no executor host reaches storefronts instead of succeeding into a void. Also serves Goal 1 |
 | [`unbacked-listing-publication`](unbacked-listing-publication/) | blocked on the three above, plus a completion dependency on `pools-9-retire-local-physical-authority` | Backing as an explicit declared listing property: a tagged union over admission provenance, a binding discriminator distinct from the listing's origin site, pool advertise-authorization separated from execute-authorization, capacity-availability reconciliation scoped to backed listings while source-publication reconciliation applies to all, and an exact backing filter in the compute registry schema |
@@ -339,10 +380,13 @@ Changes with no campaign; each stands alone.
 | [`pools-6-fair-scheduling-policy`](pools-6-fair-scheduling-policy/) | design-gated; POOLS-7 blocker cleared 2026-08-06 | Fairness policy over contended capacity. Its stated blocker — transactional assignment state — has landed, but its design inputs changed: negotiable shapes and negotiation-time holds alter what contention means, so the fairness subject should be chosen against those rather than against July's inputs |
 | [`fix-golden-image-config`](fix-golden-image-config/) | active | Align generated and consumed keys and deliver secrets through the provisioning Secret profile |
 | [`deduplicate-dynaconf-bootstrap`](deduplicate-dynaconf-bootstrap/) | active | Parameterized kit/config construction with exact provisioning and e2e parity; storefront loader excluded. Useful precedent for the kit-composition extractions |
-| [`add-registry-self-description`](add-registry-self-description/) | active; no blocking dependency | Publishes one strict operator-authored registry descriptor through the existing signed registry exchange, with schema, access posture, and authority pins derived from their active sources |
 
 ## Archived and superseded
 
 `prune-storefront-database` was archived because dead policy tables are already gone and the remaining candidates carry continuation, idempotency, or observability state. `complete-development-documentation` was synchronized and archived after audience-owned documentation became permanent planning governance. `add-storefront-principal-authentication` and `provisioning-result-push-delivery` were superseded on 2026-08-06 by `service-identity-signing` and `replace-polling-with-authenticated-push` respectively.
+
+`settle-listing-vocabulary` was archived on 2026-09-15. The offering mode is `offering_mode` and a seller's published shape is `listing_resource` on every surface, the provisioning contract is on 2.0 admitting major 2 only, and the requirements it added are live across [`openspec/specs/`](../specs/) -- site-capacity, registry-discovery, storefront-publication, compute-provisioning-contract, resource-pool-management, physical-provisioning and deployment-state. Its directory is [`archive/2026-09-15-settle-listing-vocabulary`](archive/2026-09-15-settle-listing-vocabulary/).
+
+`add-registry-self-description` was archived on 2026-09-14 and its row removed from the independent-changes table: a registry now publishes one strict operator-authored descriptor through the existing signed-response path, and the requirement it added is live in [`openspec/specs/registry-discovery/spec.md`](../specs/registry-discovery/spec.md). Its directory is [`archive/2026-09-14-add-registry-self-description`](archive/2026-09-14-add-registry-self-description/).
 
 Five changes this index still listed as active had in fact been archived, and their rows were removed on 2026-09-04: `add-settlement-plan-shapes`, `finish-buyer-cli-residue`, and `kit-owned-settlement-runtime` (all 2026-08-10), and `finish-settlement-mechanism-neutrality` and `contact-exchange-settlement-mechanism` (both 2026-08-19). Each is under [`archive/`](archive/) with its completion date. [`add-development-roadmap`](archive/2026-09-04-add-development-roadmap/) was archived 2026-09-04, synchronizing the two `planning-governance` requirements that authorize `docs/development/ROADMAP.md` and make roadmap currency owed — neither had reached the permanent spec before archival. [`resolve-hosted-client-from-an-index`](archive/2026-09-04-resolve-hosted-client-from-an-index/) was archived the same day, promoting three `deployment-state` requirements: that an externally produced dependency resolves from a declared index, that release verification is a publication-time activity gating no build or test, and that deployment documentation states how such a dependency is obtained. [`add-host-ssh-port`](archive/2026-09-04-add-host-ssh-port/) and [`pool-declared-offering-modes`](archive/2026-09-04-pool-declared-offering-modes/) were archived the same day; their delta requirements had been promoted early but had since diverged from the change's accepted text, so the four affected requirements in `physical-provisioning`, `resource-pool-management`, and `site-capacity` were brought up to it first — recovering the repository's official capacity vocabulary and one missing scenario. Three hosted-settlement changes were archived the same day once their closeouts were worked: [`bind-one-hosted-release-coordinate`](archive/2026-09-04-bind-one-hosted-release-coordinate/), [`carry-the-payer-return-address`](archive/2026-09-04-carry-the-payer-return-address/), and [`name-a-refusal-that-will-not-converge`](archive/2026-09-04-name-a-refusal-that-will-not-converge/). The last two modify the same `test-compatibility` requirement from diverged bases, so the permanent spec carries the union of both rather than whichever archived last. They persisted here because campaign-index currency was owed by no closeout step until `openspec/README.md#plan-closeout-requirements` gained part 6.

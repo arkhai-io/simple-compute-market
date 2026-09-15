@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Any, Mapping
 
 from arkhai_bare_metal import (
-    BARE_METAL_EXECUTOR_KIND,
+    BARE_METAL_OFFERING_MODE,
     NODE_GRANT_ACCESS_ACTION,
     BareMetalLeaseCreate,
 )
@@ -26,7 +26,7 @@ from bare_metal_provisioning_adapter.services.bare_metal_operations_service impo
 
 
 class BareMetalComputeAdapter:
-    executor_kind = BARE_METAL_EXECUTOR_KIND
+    offering_mode = BARE_METAL_OFFERING_MODE
 
     def __init__(
         self,
@@ -74,7 +74,7 @@ class BareMetalComputeAdapter:
         self, action_kind: str, result: Mapping[str, Any]
     ) -> ResultEnvelope:
         return ResultEnvelope(
-            executor_kind=self.executor_kind,
+            offering_mode=self.offering_mode,
             result_kind="bare_metal_access",
             value=dict(result),
         )
@@ -86,7 +86,7 @@ class BareMetalComputeAdapter:
     ) -> list[CredentialEnvelope]:
         return [
             CredentialEnvelope(
-                executor_kind=self.executor_kind,
+                offering_mode=self.offering_mode,
                 credential_kind=str(item.get("role") or "access"),
                 value={
                     key: value

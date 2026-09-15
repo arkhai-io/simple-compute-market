@@ -57,7 +57,7 @@ class SettlementRequirement(BaseModel):
     ``dimensions`` At least one positive dimension is required.
     """
 
-    executor_kind: str = Field(
+    offering_mode: str = Field(
         min_length=1,
         description="Explicit offering mode requested by the capacity reservation.",
     )
@@ -99,7 +99,7 @@ class SettlementCandidate(BaseModel):
 class SettlementResource(BaseModel):
     """The selected physical resource in a Capacity Settlement Assignment."""
 
-    executor_kind: str = Field(
+    offering_mode: str = Field(
         min_length=1,
         description="Explicit offering mode authorized by the selected pool.",
     )

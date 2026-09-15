@@ -256,11 +256,39 @@ def _contract(request: Request, body: Any) -> AdminRouteContract | None:
     if matched is not None:
         return AdminRouteContract(*matched, body)
 
+    if method == "GET" and path == "/api/v1/system/status":
+        return AdminRouteContract(
+            "admin_system_status", "system/status", EMPTY_BODY
+        )
+
     if method == "GET" and path == "/api/v1/system/events":
         if request.headers.get("last-event-id") is not None:
             raise AuthError("Last-Event-ID is not an authenticated query alias")
         return AdminRouteContract(
             "admin_system_events", _system_events_resource(request), EMPTY_BODY
+        )
+
+    if method == "POST" and path == "/api/v1/admin/lifecycle/pause":
+        return AdminRouteContract("admin_pause_lifecycle_loops", "lifecycle", body)
+
+    if method == "POST" and path == "/api/v1/admin/lifecycle/resume":
+        return AdminRouteContract("admin_resume_lifecycle_loops", "lifecycle", body)
+
+    prefix = "/api/v1/admin/lifecycle/"
+    if method == "POST" and path.startswith(prefix) and path.endswith("/run-cycle"):
+        loop = path[len(prefix) : -len("/run-cycle")]
+        return AdminRouteContract("admin_run_lifecycle_cycle", loop, body)
+
+    if method == "POST" and path.startswith(prefix) and path.endswith("/dry-run"):
+        # Its own operation name rather than the advance's: the two differ in
+        # whether they change anything, and a replayed request is answered
+        # from the recorded outcome of the operation it names.
+        loop = path[len(prefix) : -len("/dry-run")]
+        return AdminRouteContract("admin_dry_run_lifecycle_cycle", loop, body)
+
+    if method == "POST" and path == "/api/v1/admin/capacity/projections/refresh":
+        return AdminRouteContract(
+            "admin_refresh_site_projections", "capacity/projections", body
         )
 
     if method == "POST" and path == "/api/v1/admin/portfolio/resources/import":

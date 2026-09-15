@@ -672,6 +672,28 @@ class ProvisioningClient(_ProvisioningClientBase):
             "/api/v1/system/fulfillment-convergence/run-cycle", {}
         )
 
+    async def advance_fulfillment_convergence_cycle(self) -> dict:
+        """POST /api/v1/system/fulfillment-convergence/advance-cycle.
+
+        One call is one observable advance: the watchdog releases its own
+        claim leases first. Requires the convergence watchdog to be paused.
+        """
+        return await self._post(
+            "/api/v1/system/fulfillment-convergence/advance-cycle", {}
+        )
+
+    async def pause_fulfillment_convergence(self) -> dict:
+        """POST /api/v1/system/fulfillment-convergence/pause."""
+        return await self._post(
+            "/api/v1/system/fulfillment-convergence/pause", {}
+        )
+
+    async def resume_fulfillment_convergence(self) -> dict:
+        """POST /api/v1/system/fulfillment-convergence/resume."""
+        return await self._post(
+            "/api/v1/system/fulfillment-convergence/resume", {}
+        )
+
     async def pause_lease_watchdog(self) -> dict:
         """POST /api/v1/system/lease-watchdog/pause — pause timer-driven cycles."""
         return await self._post("/api/v1/system/lease-watchdog/pause", {})
@@ -1162,6 +1184,24 @@ class SyncProvisioningClient(_ProvisioningClientBase):
     def run_fulfillment_convergence_cycle(self) -> dict:
         """POST /api/v1/system/fulfillment-convergence/run-cycle."""
         return self._post("/api/v1/system/fulfillment-convergence/run-cycle", {})
+
+    def advance_fulfillment_convergence_cycle(self) -> dict:
+        """POST /api/v1/system/fulfillment-convergence/advance-cycle.
+
+        One call is one observable advance: the watchdog releases its own
+        claim leases first. Requires the convergence watchdog to be paused.
+        """
+        return self._post(
+            "/api/v1/system/fulfillment-convergence/advance-cycle", {}
+        )
+
+    def pause_fulfillment_convergence(self) -> dict:
+        """POST /api/v1/system/fulfillment-convergence/pause."""
+        return self._post("/api/v1/system/fulfillment-convergence/pause", {})
+
+    def resume_fulfillment_convergence(self) -> dict:
+        """POST /api/v1/system/fulfillment-convergence/resume."""
+        return self._post("/api/v1/system/fulfillment-convergence/resume", {})
 
     def pause_lease_watchdog(self) -> dict:
         """POST /api/v1/system/lease-watchdog/pause — pause timer-driven cycles."""

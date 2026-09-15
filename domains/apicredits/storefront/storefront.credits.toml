@@ -10,6 +10,12 @@ port          = 8000
 base_url      = "http://credits-storefront:8000/"
 db_path       = "/app/data/storefront.db"
 
+# Registry discovery (seller-side). Matches the shipped default in
+# apicredits_storefront/settings.toml, stated explicitly because this
+# deployment profile replaces those defaults rather than layering over
+# them, and `server.py` reads the key unconditionally.
+enable_registry_discovery = true
+
 [identity]
 scheme     = "eip191"
 identifier = "0x90f79bf6eb2c4f870365e785982e1f101e93b906"
@@ -22,6 +28,34 @@ identities = [
 [wallet]
 address     = "0x90F79bf6EB2c4f870365E785982E1f101E93b906"
 private_key = "" # APICREDITS_STOREFRONT_WALLET__PRIVATE_KEY secret environment input
+
+# Which settlement mechanisms this seller will actually service. Without
+# this section `mechanism_config("alkahest")` is None, `alkahest_enabled`
+# is false, and `_build_alkahest_clients()` is never called -- so the
+# storefront starts cleanly, publishes, negotiates and accepts, and then
+# refuses `POST /api/v1/settle/...` with
+# `chain 'anvil' not configured on this storefront — available chains: []`.
+# The chain table below is read only when these clients are built, so
+# configuring one without the other leaves it inert.
+#
+# The absence produced no startup warning: the "no chains configured" and
+# "required EVM settings are missing" warnings both live inside the
+# builder, and the builder was the thing being skipped.
+[settlement]
+schema_version = 1
+priority = ["alkahest.v1"]
+
+[settlement.alkahest]
+enabled = true
+# The same address book `[chains.anvil]` below points at. Read separately:
+# this one by the settlement readiness preflight, that one per chain when
+# the clients are built.
+address_config_path = "/app/alkahest_anvil_addresses.json"
+oracle_gated = false
+trusted_oracle_addresses = []
+# `interruptible`/`interruptible_oracle_addresses` are deliberately absent.
+# They configure VM spot interruption, which this domain does not sell, and
+# `AlkahestSettlementConfig` defaults both to off.
 
 [chains.anvil]
 rpc_url  = "ws://anvil:8545"
@@ -42,7 +76,7 @@ discovery_timeout = 5.0
 [registry.authorities."http://api-credits-registry:8080"]
 authority = "api-credits-registry"
 identities = [
-  { scheme = "ed25519", identifier = "skkdlQKuKGMKK6yy4MdFEP_N0yjDNP8-E5PnWy0x59w" },
+  { scheme = "ed25519", identifier = "_NUDENxVX6u4cMd0xzoYyQAt10QDI47bfnYnu2lTVho" },
 ]
 
 [credits]
@@ -66,8 +100,34 @@ hold_ttl_seconds = 900
 url = "http://credits-service:8082"
 
 [capacity.sites.default.expected_authorities]
+# The credits service, which is this storefront's `default` capacity site --
+# `[capacity.sites.default].url` above points at it. The previous value here
+# had no committed private half and could not be recovered; it was recorded as
+# undecidable on the premise that this site was the provisioning service, which
+# signs eip191. That premise was checkable and wrong.
+#
+# Public half of dev-env/identities/api-credits-service.ed25519. It must match
+# what that service resolves as its own principal, or this storefront rejects
+# every response it gets from its own site.
 identities = [
-  { scheme = "ed25519", identifier = "My6-jSfLcyOzpAHBwTtd1kvMwOEOzaHCtdEaA3eaheU" },
+  { scheme = "ed25519", identifier = "MheGyI4OZPRUijPSgdBucxha4zXw5mJ5hSELYon6x_c" },
+]
+
+[credits.expected_authorities]
+# The credits service's own principal, for verifying the signed responses
+# to this storefront's issuance and key-administration calls. Same service
+# and same value as [capacity.sites.default.expected_authorities] above,
+# deliberately pinned separately: that key belongs to the
+# capacity-publication subsystem and is a merged list, so appending a
+# capacity authority there must not widen what the credits boundary
+# accepts. A unit test asserts the two agree while both exist.
+#
+# Public half of dev-env/identities/api-credits-service.ed25519. Setting
+# this is half of the signed-authentication flip; the other half is
+# APICREDITS_SITE_SIGNING_KEY_FILE on the service in
+# domains/apicredits/compose.yml.
+identities = [
+  { scheme = "ed25519", identifier = "MheGyI4OZPRUijPSgdBucxha4zXw5mJ5hSELYon6x_c" },
 ]
 
 [negotiation]

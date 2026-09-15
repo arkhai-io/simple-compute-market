@@ -10,8 +10,13 @@ from pydantic import BaseModel, Field, model_validator
 
 from market_fulfillment import VersionedEnvelope
 
-COMPUTE_PROVISIONING_CONTRACT_VERSION = "1.0"
-SUPPORTED_COMPUTE_PROVISIONING_MAJOR_VERSIONS = frozenset({1})
+# Major 1 named the required selector on every model below differently, so a
+# 1.x caller sends a field this contract does not accept. It is refused rather
+# than coerced: honouring it would mean accepting a second name for the
+# offering mode, which is what this contract's one-name rule forbids.
+# See openspec/specs/compute-provisioning-contract/spec.md.
+COMPUTE_PROVISIONING_CONTRACT_VERSION = "2.0"
+SUPPORTED_COMPUTE_PROVISIONING_MAJOR_VERSIONS = frozenset({2})
 
 
 def contract_major(version: str) -> int:
@@ -35,11 +40,6 @@ class VersionedContractModel(BaseModel):
     def _validate_contract_version(self) -> "VersionedContractModel":
         contract_major(self.contract_version)
         return self
-
-
-class ExecutorKind(str, Enum):
-    VM = "vm"
-    BARE_METAL = "bare_metal"
 
 
 class JobState(str, Enum):
@@ -86,7 +86,7 @@ def lease_state_for_reservation_state(state: str) -> LeaseState:
 class ExecutorActionEnvelope(VersionedContractModel):
     capacity_reservation_id: str = Field(min_length=1)
     deal_ref: dict[str, Any]
-    executor_kind: str = Field(min_length=1)
+    offering_mode: str = Field(min_length=1)
     action_kind: str = Field(min_length=1)
     idempotency_key: str = Field(min_length=1)
     parameters: dict[str, Any]
@@ -98,7 +98,7 @@ class JobAccepted(VersionedContractModel):
     status: JobState = JobState.QUEUED
     capacity_reservation_id: str
     deal_ref: dict[str, Any]
-    executor_kind: str
+    offering_mode: str
     action_kind: str
     idempotency_key: str
 
@@ -116,13 +116,13 @@ class LogsReference(BaseModel):
 
 
 class CredentialEnvelope(BaseModel):
-    executor_kind: str
+    offering_mode: str
     credential_kind: str
     value: dict[str, Any]
 
 
 class ResultEnvelope(BaseModel):
-    executor_kind: str
+    offering_mode: str
     result_kind: str
     value: dict[str, Any]
 
@@ -132,7 +132,7 @@ class ProvisioningJob(VersionedContractModel):
     status: JobState
     capacity_reservation_id: str
     deal_ref: dict[str, Any]
-    executor_kind: str
+    offering_mode: str
     action_kind: str
     idempotency_key: str
     result: ResultEnvelope | None = None
@@ -148,7 +148,7 @@ class ProvisioningJob(VersionedContractModel):
 class LeaseRegistration(VersionedContractModel):
     capacity_reservation_id: str
     deal_ref: dict[str, Any]
-    executor_kind: str
+    offering_mode: str
     executor_target: str
     lease_start_utc: datetime | None = None
     lease_end_utc: datetime
@@ -181,7 +181,7 @@ class LifecycleEvent(VersionedContractModel):
     event_id: str = Field(min_length=1)
     capacity_reservation_id: str = Field(min_length=1)
     deal_ref: dict[str, Any]
-    executor_kind: str = Field(min_length=1)
+    offering_mode: str = Field(min_length=1)
     event_kind: str = Field(min_length=1)
     payload: dict[str, Any]
     occurred_at: datetime

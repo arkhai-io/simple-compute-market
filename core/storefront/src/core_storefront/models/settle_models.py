@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from typing import Any
+from market_core.schemas import Uint256Amount
 from market_identity import Identity
 
 
@@ -71,7 +72,7 @@ class VerifyEscrowRequest(BaseModel):
     seller_wallet: str = Field(
         description="Expected seller wallet address (recipient on-chain)"
     )
-    agreed_price: int = Field(
+    agreed_price: Uint256Amount = Field(
         description=(
             "Expected absolute payment amount in base units of the payment "
             "token (the field name is retained from before the per-hour → "

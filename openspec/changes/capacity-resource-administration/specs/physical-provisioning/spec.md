@@ -1,9 +1,9 @@
 ## ADDED Requirements
 
-### Requirement: Host inventory is executor identity
+### Requirement: Host inventory is connection identity
 
 Host inventory records MUST describe how to reach and dispatch work to a machine —
-addressing, credentials, executor alias, pool membership, and enabled state — and
+addressing, credentials, machine alias, pool membership, and enabled state — and
 MUST NOT be the authoritative source of a Physical Resource's sellable capacity.
 Capacity projection MUST read declared capacity resources rather than host inventory
 columns.

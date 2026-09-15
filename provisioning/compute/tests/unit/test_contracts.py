@@ -42,7 +42,7 @@ def _action(**overrides):
     values = {
         "capacity_reservation_id": "alloc-1",
         "deal_ref": {"escrow_uid": "escrow-1"},
-        "executor_kind": "vm",
+        "offering_mode": "vm",
         "action_kind": "create",
         "idempotency_key": "request-1",
         "parameters": {"vm_target": "tenant-1"},
@@ -51,9 +51,16 @@ def _action(**overrides):
     return ExecutorActionEnvelope(**values)
 
 
-def test_contract_rejects_unsupported_major_version():
-    with pytest.raises(ValidationError, match="supported majors: 1"):
-        _action(contract_version="2.0")
+def test_contract_rejects_the_retired_major_version():
+    """A 1.x caller carries the retired offering-mode spelling, so the
+    contract refuses it rather than coercing it."""
+    with pytest.raises(ValidationError, match="supported majors: 2"):
+        _action(contract_version="1.0")
+
+
+def test_contract_rejects_an_unsupported_future_major_version():
+    with pytest.raises(ValidationError, match="supported majors: 2"):
+        _action(contract_version="3.0")
 
 
 @pytest.mark.asyncio
@@ -65,10 +72,10 @@ async def test_registry_validates_without_generic_field_inspection():
         return "job-1"
 
     adapter = FunctionalExecutorAdapter(
-        executor_kind="vm",
+        offering_mode="vm",
         parameter_validators={"create": lambda payload: payload["vm_target"]},
         submit_action=submit,
-        result_validators={"create": lambda payload: ResultEnvelope(executor_kind="vm", result_kind="created", value=dict(payload))},
+        result_validators={"create": lambda payload: ResultEnvelope(offering_mode="vm", result_kind="created", value=dict(payload))},
         credential_validators={},
     )
     registry = ExecutorAdapterRegistry([adapter])
@@ -88,7 +95,7 @@ async def test_event_sink_deduplicates_only_after_successful_delivery():
         event_id="event-1",
         capacity_reservation_id="alloc-1",
         deal_ref={"escrow_uid": "escrow-1"},
-        executor_kind="vm",
+        offering_mode="vm",
         event_kind="usage_ready",
         payload={},
         occurred_at=datetime.now(timezone.utc),

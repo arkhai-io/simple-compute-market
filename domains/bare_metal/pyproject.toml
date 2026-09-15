@@ -11,7 +11,7 @@ dependencies = [
 
 [project.optional-dependencies]
 storefront = [
-    "arkhai-core-storefront>=0.3.0",
+    "arkhai-core-storefront>=0.4.0",
 ]
 
 [project.entry-points."market.storefront_domains"]
@@ -24,12 +24,21 @@ build-backend = "hatchling.build"
 [tool.hatch.build.targets.wheel]
 packages = ["src/arkhai_bare_metal"]
 
+[tool.uv]
+# Internal wheels resolve from the repository's .dist/ rather than a
+# published index. Declared here rather than only passed as --find-links
+# so `uv lock` records the local registry: a lock resolved against the
+# index pins whatever version is published, which cannot satisfy a
+# constraint on an internal package built in this tree but not yet
+# released.
+find-links = ["../../.dist"]
+
 [tool.pytest.ini_options]
 pythonpath = ["src"]
 testpaths = ["tests"]
 
 [dependency-groups]
 dev = [
-    "arkhai-core-storefront>=0.3.0",
+    "arkhai-core-storefront>=0.4.0",
     "pytest>=8.0",
 ]

@@ -36,7 +36,7 @@ from vm_provisioning_adapter.models.fulfillment_model import (
 from vm_provisioning_adapter.models.jobs_model import AnsibleJobParams
 from vm_provisioning_adapter.requirement_delegates import resolve_requirement_delegate
 
-_VM_EXECUTOR_KIND = "vm"
+_VM_OFFERING_MODE = "vm"
 
 if TYPE_CHECKING:
     from compute_provisioning_service.services.async_job_queue import AsyncJobQueue
@@ -212,10 +212,10 @@ class AnsibleFulfillmentProvider(FulfillmentProvider):
                 f"invalid VM fulfillment requirements: {exc}"
             ) from exc
 
-        if resource.executor_kind != _VM_EXECUTOR_KIND:
+        if resource.offering_mode != _VM_OFFERING_MODE:
             raise ProviderConfigInvalidError(
                 f"VM provider cannot execute offering mode "
-                f"{resource.executor_kind!r}"
+                f"{resource.offering_mode!r}"
             )
         config = self._pool_config(pool_config)
         derived = resolve_requirement_delegate(
@@ -247,7 +247,7 @@ class AnsibleFulfillmentProvider(FulfillmentProvider):
         params = AnsibleJobParams(
             vm_host=vm_host,
             vm_action="create",
-            executor_kind=resource.executor_kind,
+            offering_mode=resource.offering_mode,
             vm_target=requirements.vm_target,
             image_setup_type=requirements.image_setup_type,
             vm_ram=derived.get("vm_ram", config.default_vm_ram),
@@ -300,7 +300,7 @@ class AnsibleFulfillmentProvider(FulfillmentProvider):
             contract = ExecutorActionEnvelope(
                 capacity_reservation_id=operation.capacity_reservation_id,
                 deal_ref={},
-                executor_kind=params.executor_kind,
+                offering_mode=params.offering_mode,
                 action_kind="create",
                 idempotency_key=f"{operation.capacity_reservation_id}:create",
                 parameters=operation.parameters.model_dump(mode="json"),
@@ -322,6 +322,20 @@ class AnsibleFulfillmentProvider(FulfillmentProvider):
             raise
         except Exception as exc:
             raise FulfillmentCreateFailedError(str(exc)) from exc
+
+    def resolve_executor_job_id(
+        self, provider_metadata: dict[str, Any]
+    ) -> str | None:
+        """The Ansible queue job id for the create this fulfillment dispatched.
+
+        Read defensively rather than through ``AnsibleFulfillmentMetadata``:
+        a teardown-phase row carries the same shape with a different
+        ``operation``, and a partially-written row from a failed dispatch
+        should yield no job id rather than a validation error inside a
+        transaction that is only surfacing a diagnostic handle.
+        """
+        job_id = (provider_metadata or {}).get("create_job_id")
+        return str(job_id) if job_id else None
 
     def prepare_teardown(
         self,
@@ -347,7 +361,7 @@ class AnsibleFulfillmentProvider(FulfillmentProvider):
         params = AnsibleJobParams(
             vm_host=metadata.vm_host,
             vm_action="vm_remove",
-            executor_kind=settlement_result.resource.executor_kind,
+            offering_mode=settlement_result.resource.offering_mode,
             vm_target=metadata.vm_target,
             escrow_uid=settlement_result.capacity_reservation_id,
             playbook_path=config.playbook_path,
@@ -385,7 +399,7 @@ class AnsibleFulfillmentProvider(FulfillmentProvider):
             contract = ExecutorActionEnvelope(
                 capacity_reservation_id=operation.capacity_reservation_id,
                 deal_ref={},
-                executor_kind=params.executor_kind,
+                offering_mode=params.offering_mode,
                 action_kind="teardown",
                 idempotency_key=f"{operation.capacity_reservation_id}:teardown",
                 parameters=operation.parameters.model_dump(mode="json"),

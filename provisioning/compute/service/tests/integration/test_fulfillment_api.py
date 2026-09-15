@@ -214,7 +214,7 @@ async def _reserved_capacity(pool_id: str, *, claim: dict[str, Any] | None = Non
         attributes={"vm_host": "kvm-fulfillment-1"},
         capacity={"gpu_count": 4, "vcpu_count": 32, "ram_gb": 256, "disk_gb": 2000},
     )
-    reservation_claim = {"executor_kind": "vm", **(claim or {"gpu_count": 1})}
+    reservation_claim = {"offering_mode": "vm", **(claim or {"gpu_count": 1})}
     reserved = capacity_ledger_service.reserve(
         claim=reservation_claim,
         deal_ref={"agreement_id": f"agreement-{pool_id}", "market": "vms"},
@@ -429,7 +429,7 @@ class TestTeardownPreparation:
             fulfillment_id=begin_result["fulfillment_id"],
             resource=SettlementResource(
                 settlement_resource_id=settlement_resource_id,
-                executor_kind="vm",
+                offering_mode="vm",
                 pool_id=pool_id,
                 resource_kind="compute.gpu",
                 provider="ansible",

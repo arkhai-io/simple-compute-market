@@ -121,7 +121,7 @@ only the selected contract.
 Fulfillment contexts persist the exact binding and site. Restart, result
 retrieval, failure handling, and teardown compare those values before any call;
 they do not consult current listings or payload kinds. Provisioning remains the
-executor authority and dispatches teardown from its durable executor kind, so
+executor authority and dispatches teardown from its durable offering mode, so
 the storefront never derives VM versus bare-metal teardown locally.
 
 ## Bare-metal hosted servicing

@@ -14,7 +14,7 @@ class FakeSiteAuthority:
         self.reservations = {
             "alloc-1": {
                 "capacity_reservation_id": "alloc-1",
-                "executor_kind": "vm",
+                "offering_mode": "vm",
                 "state": "leased",
                 "lease_end_utc": datetime.now(timezone.utc).isoformat(),
             }

@@ -149,7 +149,7 @@ def _accepted_plan(funding_profile: str) -> tuple[dict[str, Any], dict[str, Any]
     ).model_dump(mode="json")
     listing = {
         "listing_id": "listing-1",
-        "offer_resource": {"gpu_model": "H100", "gpu_count": 1},
+        "listing_resource": {"gpu_model": "H100", "gpu_count": 1},
         "settlement_options": [option.model_dump(mode="json")],
     }
     plan = SettlementPlan(

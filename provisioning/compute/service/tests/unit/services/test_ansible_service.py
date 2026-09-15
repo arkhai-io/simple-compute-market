@@ -47,7 +47,7 @@ def _base_params(**overrides) -> AnsibleJobParams:
         vm_host="kvm1",
         vm_target="test-vm",
         vm_action="create",
-        executor_kind="vm",
+        offering_mode="vm",
     )
     defaults.update(overrides)
     return AnsibleJobParams(**defaults)
@@ -93,7 +93,7 @@ class TestBuildVmVarsRequired:
                 vm_host="kvm1",
                 vm_target=None,
                 vm_action="list",
-                executor_kind="vm",
+                offering_mode="vm",
             )
         )
         assert "vm_target" not in yaml
@@ -219,13 +219,13 @@ class TestBuildVmVarsCreate:
             svc,
             vm_host="bm-node-1",
             vm_action=NODE_GRANT_ACCESS_ACTION,
-            executor_kind="bare_metal",
+            offering_mode="bare_metal",
             executor_action=NODE_GRANT_ACCESS_ACTION,
             executor_target="bm-node-1",
             executor_ref={"physical_host_id": "host-physical-1"},
         )
 
-        assert "executor_kind: bare_metal" in yaml
+        assert "offering_mode: bare_metal" in yaml
         assert f"executor_action: {NODE_GRANT_ACCESS_ACTION}" in yaml
         assert "executor_target: bm-node-1" in yaml
         assert 'executor_ref: {"physical_host_id": "host-physical-1"}' in yaml

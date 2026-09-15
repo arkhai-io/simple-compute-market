@@ -150,7 +150,30 @@ class NegotiateController:
         except Exception as exc:
             logger.error("[NEGOTIATE/new] %s", exc, exc_info=True)
             raise HTTPException(status_code=500, detail=str(exc))
-        return NegotiateNewResponse(**result)
+
+        # Building the response has its own handler, deliberately not the
+        # one above. It was previously outside every `except`, so a
+        # `ValidationError` here escaped to FastAPI, which answered 500
+        # through `uvicorn.error` -- a logger the storefront does not route
+        # to stdout. A wire-shape mismatch between the runtime and this
+        # model therefore produced a 500 with no traceback anywhere in the
+        # container logs.
+        #
+        # Not folded into the block above, because that one maps
+        # `ValidationError` to a 400 `incompatible_provision_terms`: that
+        # classification is about the *buyer's* terms, and reusing it for
+        # the seller's own response would blame the caller for a defect on
+        # this side.
+        try:
+            return NegotiateNewResponse(**result)
+        except Exception as exc:
+            logger.error(
+                "[NEGOTIATE/new] response does not satisfy "
+                "NegotiateNewResponse: %s",
+                exc,
+                exc_info=True,
+            )
+            raise HTTPException(status_code=500, detail=str(exc))
 
     @router.post(
         "/{neg_id}",

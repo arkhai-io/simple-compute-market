@@ -26,7 +26,7 @@ class TestUpsertPublication:
         await client.upsert_publication(
             listing_id="L1",
             registry_url="http://r1",
-            payload={"listing_id": "L1", "offer": {"gpu_model": "H200"}},
+            payload={"listing_id": "L1", "listing_resource": {"gpu_model": "H200"}},
             status="published",
             registry_assigned_id="r1-listing-id",
         )
@@ -36,7 +36,7 @@ class TestUpsertPublication:
         assert row is not None
         assert row["status"] == "published"
         assert row["registry_assigned_id"] == "r1-listing-id"
-        assert row["payload"] == {"listing_id": "L1", "offer": {"gpu_model": "H200"}}
+        assert row["payload"] == {"listing_id": "L1", "listing_resource": {"gpu_model": "H200"}}
         # published_at is auto-filled when not supplied
         assert isinstance(row["published_at"], int) and row["published_at"] > 0
 

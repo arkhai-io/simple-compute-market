@@ -14,7 +14,7 @@ from .hosted_contract import (
     bare_metal_digest,
     bind_bare_metal_hosted_option,
 )
-from .schema import BARE_METAL_EXECUTOR_KIND, BareMetalListing, SSH_ACCESS_METHOD
+from .schema import BARE_METAL_OFFERING_MODE, BareMetalListing, SSH_ACCESS_METHOD
 
 _SUPPORTED_PROFILES = frozenset({"card.v1", "us_bank_transfer.v1", "us_ach_debit.v1"})
 
@@ -29,7 +29,7 @@ class BareMetalHostedPublicationPolicy(BaseModel):
         "us_bank_transfer.v1",
         "us_ach_debit.v1",
     )
-    executor_kind: str = Field(default=BARE_METAL_EXECUTOR_KIND, min_length=1)
+    offering_mode: str = Field(default=BARE_METAL_OFFERING_MODE, min_length=1)
     access_method: str = Field(default=SSH_ACCESS_METHOD, min_length=1)
     min_funding_window_seconds: int = Field(default=60, gt=0)
     min_fulfillment_window_seconds: int = Field(default=60, gt=0)
@@ -73,7 +73,7 @@ def build_ready_bare_metal_hosted_options(
     candidate: Mapping[str, Any],
     base_hosted_options: Iterable[SettlementOption | Mapping[str, Any]],
     policy: BareMetalHostedPublicationPolicy,
-    offer_expires_at: datetime,
+    option_expires_at: datetime,
     funding_deadlines: Mapping[str, datetime],
     fulfillment_deadline: datetime,
     now: datetime | None = None,
@@ -83,7 +83,7 @@ def build_ready_bare_metal_hosted_options(
     current = now or datetime.now(timezone.utc)
     if (
         current.tzinfo is None
-        or offer_expires_at.tzinfo is None
+        or option_expires_at.tzinfo is None
         or fulfillment_deadline.tzinfo is None
     ):
         raise ValueError("publication deadlines must be timezone-aware")
@@ -118,10 +118,10 @@ def build_ready_bare_metal_hosted_options(
                 profile: ("unsupported_access",) for profile in policy.enabled_profiles
             }
         )
-    if offer_expires_at <= current or fulfillment_deadline <= current:
+    if option_expires_at <= current or fulfillment_deadline <= current:
         return BareMetalHostedPublicationResult(
             blockers={
-                profile: ("expired_offer",) for profile in policy.enabled_profiles
+                profile: ("expired_option",) for profile in policy.enabled_profiles
             }
         )
 
@@ -148,8 +148,8 @@ def build_ready_bare_metal_hosted_options(
         if funding_deadline is None or funding_deadline.tzinfo is None:
             blockers[profile] = ("funding_deadline_unavailable",)
             continue
-        if funding_deadline > offer_expires_at:
-            blockers[profile] = ("funding_exceeds_offer",)
+        if funding_deadline > option_expires_at:
+            blockers[profile] = ("funding_exceeds_option",)
             continue
         funding_window = (funding_deadline - current).total_seconds()
         fulfillment_window = (fulfillment_deadline - funding_deadline).total_seconds()
@@ -168,13 +168,13 @@ def build_ready_bare_metal_hosted_options(
                 }
             ),
             site_id=str(candidate["site_id"]),
-            executor_kind=policy.executor_kind,
+            offering_mode=policy.offering_mode,
             resource_selection="specific",
             physical_resource_id=str(candidate["physical_resource_id"]),
             physical_host_id=listing.physical_host_id,
             pool_id=(str(candidate["pool_id"]) if candidate.get("pool_id") else None),
             access_method=policy.access_method,
-            offer_expires_at=offer_expires_at,
+            option_expires_at=option_expires_at,
             funding_deadline=funding_deadline,
             fulfillment_deadline=fulfillment_deadline,
         )

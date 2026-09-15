@@ -1,7 +1,7 @@
 """Typed request and response models for the Arkhai provisioning service REST API.
 
 These models are the direct VM operator HTTP contract. They intentionally live
-outside the executor-neutral ``compute_provisioning`` caller contract.
+outside the offering-mode-neutral ``compute_provisioning`` caller contract.
 
 Internal server-only types (``AnsibleJobParams``, ``AnsibleRunResult``,
 ``build_simple_params``, ``EvaluateJobRequest``, ``EvaluateJobResponse``) remain
@@ -550,6 +550,16 @@ class LeaseResponse(BaseModel):
     lease_end_utc: datetime
     status: str
     create_job_id: Optional[str] = None
+    #: The reservation's canonical release handle. For a VM this is the
+    #: durable ``fulfillment_id`` of the teardown aggregate, which is what a
+    #: caller needs to read teardown status -- not an Ansible queue job id.
+    #:
+    #: ``vm_remove_job_id`` below is a VM-conditional mirror of this same
+    #: value, written only when the offering mode is VM and always to what
+    #: ``release_job_id`` already holds. It is retained for wire
+    #: compatibility only and carries nothing this field does not;
+    #: ``release_job_id`` is the field to read.
+    release_job_id: Optional[str] = None
     vm_remove_job_id: Optional[str] = None
     created_at: datetime
     updated_at: datetime
@@ -572,6 +582,23 @@ class LeaseListResponse(BaseModel):
 class HealthResponse(BaseModel):
     status: str = Field(description="'ok' when all checks pass, 'degraded' otherwise")
     checks: dict[str, str] = Field(description="Per-subsystem status strings")
+    #: The storefront-to-provisioning contract major this service speaks, and
+    #: the majors it admits. A cutover requires every participant to report
+    #: its pin before mutations resume, and this is the only way to ask a
+    #: running service for it.
+    #:
+    #: Declared here because this model governs what the route emits: a field
+    #: the service puts in its status dict but this model does not name is
+    #: dropped before any caller sees it. Optional so `GET /health`, which
+    #: shares the model and reports neither, stays valid.
+    provisioning_contract_version: str | None = Field(
+        default=None,
+        description="Contract major.minor this service speaks (status only)",
+    )
+    provisioning_contract_supported_majors: list[int] | None = Field(
+        default=None,
+        description="Contract majors this service admits (status only)",
+    )
 
 
 class VersionResponse(BaseModel):

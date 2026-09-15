@@ -512,6 +512,19 @@ class StorefrontClient(_StorefrontClientBase):
         """GET /health"""
         return HealthResponse.from_dict(await self._get("/health"))
 
+    def _system_status_role(self) -> str:
+        """Role to assert for system status, which two callers may read.
+
+        The storefront dispatches this route on the asserted role: the
+        administrator middleware handles it and passes a request asserting
+        `service` to the service-peer middleware. A client therefore asserts
+        whichever of the two roles it holds. Anything else falls through to
+        `admin` so the refusal names the role an operator would need.
+        """
+        if self._caller_role in ("admin", "service"):
+            return self._caller_role
+        return "admin"
+
     async def get_system_status(
         self,
         *,
@@ -521,7 +534,7 @@ class StorefrontClient(_StorefrontClientBase):
         return HealthResponse.from_dict(
             await self._authenticated_get(
                 "/api/v1/system/status",
-                role="service",
+                role=self._system_status_role(),
                 operation="admin_system_status",
                 resource="system/status",
                 request_id=request_id,
@@ -770,7 +783,10 @@ class StorefrontClient(_StorefrontClientBase):
         return NegotiationActionResponse.from_dict(
             await self._authenticated_post(
                 f"/api/v1/listings/{listing_id}/negotiations/{neg_id}/force-accept",
-                {"amount": int(amount)},
+                # Decimal-digit string: this body is canonicalized for
+                # signing, and an 18-decimal amount has no JSON number
+                # form. The route parses either.
+                {"amount": str(int(amount))},
                 role="admin",
                 operation="admin_force_accept_negotiation",
                 resource=f"{listing_id}/{neg_id}",
@@ -797,6 +813,114 @@ class StorefrontClient(_StorefrontClientBase):
                 resource="",
                 request_id=request_id,
             )
+        )
+
+    async def admin_pause_lifecycle_loops(
+        self,
+        *,
+        request_id: str | None = None,
+    ) -> dict[str, Any]:
+        """POST /api/v1/admin/lifecycle/pause.
+
+        Holds or releases the timer loops only. The storefront's trading pause
+        is a separate control on /admin/pause; neither implies the other.
+        """
+        return await self._authenticated_post(
+            "/api/v1/admin/lifecycle/pause",
+            {},
+            role="admin",
+            operation="admin_pause_lifecycle_loops",
+            resource="lifecycle",
+            request_id=request_id,
+        )
+
+    async def admin_resume_lifecycle_loops(
+        self,
+        *,
+        request_id: str | None = None,
+    ) -> dict[str, Any]:
+        """POST /api/v1/admin/lifecycle/resume.
+
+        Holds or releases the timer loops only. The storefront's trading pause
+        is a separate control on /admin/resume; neither implies the other.
+        """
+        return await self._authenticated_post(
+            "/api/v1/admin/lifecycle/resume",
+            {},
+            role="admin",
+            operation="admin_resume_lifecycle_loops",
+            resource="lifecycle",
+            request_id=request_id,
+        )
+
+    async def admin_run_lifecycle_cycle(
+        self,
+        loop: str,
+        *,
+        request_id: str | None = None,
+    ) -> dict[str, Any]:
+        """POST /api/v1/admin/lifecycle/{loop}/run-cycle.
+
+        Run one cycle of a paused loop and return what that cycle reports.
+        `loop` is the loop's route name -- `settlement-servicing`,
+        `fulfillment-resume`, `site-projections`, `capacity-events`. The route
+        calls the operation the timer was already invoking, so a caller
+        advances production behaviour rather than a test-only path.
+
+        `admin_dry_run_lifecycle_cycle` reports what a cycle would do for the
+        loops that support it, so a caller can assert the cause before
+        committing to the effect.
+        """
+        return await self._authenticated_post(
+            f"/api/v1/admin/lifecycle/{loop}/run-cycle",
+            {},
+            role="admin",
+            operation="admin_run_lifecycle_cycle",
+            resource=loop,
+            request_id=request_id,
+        )
+
+    async def admin_dry_run_lifecycle_cycle(
+        self,
+        loop: str,
+        *,
+        request_id: str | None = None,
+    ) -> dict[str, Any]:
+        """POST /api/v1/admin/lifecycle/{loop}/dry-run.
+
+        Report what one cycle of a paused loop would do, without doing any of
+        it. Supported by `capacity-events`, whose deltas close and reopen
+        derived listings: the dry run names the pending events so a caller can
+        check the cause before advancing.
+        """
+        return await self._authenticated_post(
+            f"/api/v1/admin/lifecycle/{loop}/dry-run",
+            {},
+            role="admin",
+            operation="admin_dry_run_lifecycle_cycle",
+            resource=loop,
+            request_id=request_id,
+        )
+
+    async def admin_refresh_site_projections(
+        self,
+        *,
+        request_id: str | None = None,
+    ) -> dict[str, Any]:
+        """POST /api/v1/admin/capacity/projections/refresh.
+
+        Pull every site-authority projection now instead of waiting out the
+        poller interval, and return the per-site load state. A caller that has
+        just declared capacity at the site authority uses this rather than
+        sleeping: the response says whether the pull actually landed.
+        """
+        return await self._authenticated_post(
+            "/api/v1/admin/capacity/projections/refresh",
+            {},
+            role="admin",
+            operation="admin_refresh_site_projections",
+            resource="capacity/projections",
+            request_id=request_id,
         )
 
     async def admin_resume(
@@ -1244,7 +1368,7 @@ class StorefrontClient(_StorefrontClientBase):
     async def create_listing(
         self,
         *,
-        offer: dict[str, Any],
+        listing_resource: dict[str, Any],
         capacity_source: dict[str, Any],
         accepted_escrows: list[dict[str, Any]] | None = None,
         settlements: list[dict[str, Any]] | None = None,
@@ -1257,7 +1381,7 @@ class StorefrontClient(_StorefrontClientBase):
     ) -> StorefrontListingCreateResponse:
         """Create a listing through the seller-authenticated v2 contract."""
         body = {
-            "offer": offer,
+            "listing_resource": listing_resource,
             "capacity_source": capacity_source,
             "accepted_escrows": accepted_escrows or [],
             "settlements": settlements or [],
@@ -1433,7 +1557,7 @@ class StorefrontClient(_StorefrontClientBase):
 
         ``proposal`` is the full EscrowProposal-shaped dict for ``counter``;
         omitted for ``accept`` / ``exit``. ``fields["amount"]`` carries the
-        buyer's absolute new offer in base units.
+        buyer's absolute new listing_resource in base units.
         """
         body: dict[str, Any] = {
             "action": action,
@@ -1539,7 +1663,7 @@ class StorefrontClient(_StorefrontClientBase):
         escrow_uid: str,
         *,
         seller_wallet: str,
-        agreed_price: float,
+        agreed_price: int,
         agreed_duration_seconds: int,
         listing_id: str,
         chain_name: str = "anvil",
@@ -1549,11 +1673,16 @@ class StorefrontClient(_StorefrontClientBase):
 
         Reads the escrow from chain on ``chain_name`` and confirms it
         matches the supplied terms. Returns dict with valid=True/False
-        and reason on failure. No DB writes. Used by e2e stage 7b.
+        and reason on failure. No DB writes.
+
+        ``agreed_price`` is base units in the uint256 domain, sent as a
+        decimal-digit string: this body is canonicalized for signing and an
+        18-decimal amount has no JSON number form. It was typed ``float``,
+        which no amount in this protocol is.
         """
         body = {
             "seller_wallet": seller_wallet,
-            "agreed_price": agreed_price,
+            "agreed_price": str(int(agreed_price)),
             "agreed_duration_seconds": agreed_duration_seconds,
             "listing_id": listing_id,
             "chain_name": chain_name,
@@ -1783,6 +1912,19 @@ class SyncStorefrontClient(_StorefrontClientBase):
         """GET /health"""
         return HealthResponse.from_dict(self._get("/health"))
 
+    def _system_status_role(self) -> str:
+        """Role to assert for system status, which two callers may read.
+
+        The storefront dispatches this route on the asserted role: the
+        administrator middleware handles it and passes a request asserting
+        `service` to the service-peer middleware. A client therefore asserts
+        whichever of the two roles it holds. Anything else falls through to
+        `admin` so the refusal names the role an operator would need.
+        """
+        if self._caller_role in ("admin", "service"):
+            return self._caller_role
+        return "admin"
+
     def get_system_status(
         self,
         *,
@@ -1792,7 +1934,7 @@ class SyncStorefrontClient(_StorefrontClientBase):
         return HealthResponse.from_dict(
             self._authenticated_get(
                 "/api/v1/system/status",
-                role="service",
+                role=self._system_status_role(),
                 operation="admin_system_status",
                 resource="system/status",
                 request_id=request_id,
@@ -2032,7 +2174,10 @@ class SyncStorefrontClient(_StorefrontClientBase):
         return NegotiationActionResponse.from_dict(
             self._authenticated_post(
                 f"/api/v1/listings/{listing_id}/negotiations/{neg_id}/force-accept",
-                {"amount": int(amount)},
+                # Decimal-digit string: this body is canonicalized for
+                # signing, and an 18-decimal amount has no JSON number
+                # form. The route parses either.
+                {"amount": str(int(amount))},
                 role="admin",
                 operation="admin_force_accept_negotiation",
                 resource=f"{listing_id}/{neg_id}",
@@ -2059,6 +2204,114 @@ class SyncStorefrontClient(_StorefrontClientBase):
                 resource="",
                 request_id=request_id,
             )
+        )
+
+    def admin_pause_lifecycle_loops(
+        self,
+        *,
+        request_id: str | None = None,
+    ) -> dict[str, Any]:
+        """POST /api/v1/admin/lifecycle/pause.
+
+        Holds or releases the timer loops only. The storefront's trading pause
+        is a separate control on /admin/pause; neither implies the other.
+        """
+        return self._authenticated_post(
+            "/api/v1/admin/lifecycle/pause",
+            {},
+            role="admin",
+            operation="admin_pause_lifecycle_loops",
+            resource="lifecycle",
+            request_id=request_id,
+        )
+
+    def admin_resume_lifecycle_loops(
+        self,
+        *,
+        request_id: str | None = None,
+    ) -> dict[str, Any]:
+        """POST /api/v1/admin/lifecycle/resume.
+
+        Holds or releases the timer loops only. The storefront's trading pause
+        is a separate control on /admin/resume; neither implies the other.
+        """
+        return self._authenticated_post(
+            "/api/v1/admin/lifecycle/resume",
+            {},
+            role="admin",
+            operation="admin_resume_lifecycle_loops",
+            resource="lifecycle",
+            request_id=request_id,
+        )
+
+    def admin_run_lifecycle_cycle(
+        self,
+        loop: str,
+        *,
+        request_id: str | None = None,
+    ) -> dict[str, Any]:
+        """POST /api/v1/admin/lifecycle/{loop}/run-cycle.
+
+        Run one cycle of a paused loop and return what that cycle reports.
+        `loop` is the loop's route name -- `settlement-servicing`,
+        `fulfillment-resume`, `site-projections`, `capacity-events`. The route
+        calls the operation the timer was already invoking, so a caller
+        advances production behaviour rather than a test-only path.
+
+        `admin_dry_run_lifecycle_cycle` reports what a cycle would do for the
+        loops that support it, so a caller can assert the cause before
+        committing to the effect.
+        """
+        return self._authenticated_post(
+            f"/api/v1/admin/lifecycle/{loop}/run-cycle",
+            {},
+            role="admin",
+            operation="admin_run_lifecycle_cycle",
+            resource=loop,
+            request_id=request_id,
+        )
+
+    def admin_dry_run_lifecycle_cycle(
+        self,
+        loop: str,
+        *,
+        request_id: str | None = None,
+    ) -> dict[str, Any]:
+        """POST /api/v1/admin/lifecycle/{loop}/dry-run.
+
+        Report what one cycle of a paused loop would do, without doing any of
+        it. Supported by `capacity-events`, whose deltas close and reopen
+        derived listings: the dry run names the pending events so a caller can
+        check the cause before advancing.
+        """
+        return self._authenticated_post(
+            f"/api/v1/admin/lifecycle/{loop}/dry-run",
+            {},
+            role="admin",
+            operation="admin_dry_run_lifecycle_cycle",
+            resource=loop,
+            request_id=request_id,
+        )
+
+    def admin_refresh_site_projections(
+        self,
+        *,
+        request_id: str | None = None,
+    ) -> dict[str, Any]:
+        """POST /api/v1/admin/capacity/projections/refresh.
+
+        Pull every site-authority projection now instead of waiting out the
+        poller interval, and return the per-site load state. A caller that has
+        just declared capacity at the site authority uses this rather than
+        sleeping: the response says whether the pull actually landed.
+        """
+        return self._authenticated_post(
+            "/api/v1/admin/capacity/projections/refresh",
+            {},
+            role="admin",
+            operation="admin_refresh_site_projections",
+            resource="capacity/projections",
+            request_id=request_id,
         )
 
     def admin_resume(
@@ -2491,7 +2744,7 @@ class SyncStorefrontClient(_StorefrontClientBase):
     def create_listing(
         self,
         *,
-        offer: dict[str, Any],
+        listing_resource: dict[str, Any],
         capacity_source: dict[str, Any],
         accepted_escrows: list[dict[str, Any]] | None = None,
         settlements: list[dict[str, Any]] | None = None,
@@ -2504,7 +2757,7 @@ class SyncStorefrontClient(_StorefrontClientBase):
     ) -> StorefrontListingCreateResponse:
         """Create a listing through the seller-authenticated v2 contract."""
         body = {
-            "offer": offer,
+            "listing_resource": listing_resource,
             "capacity_source": capacity_source,
             "accepted_escrows": accepted_escrows or [],
             "settlements": settlements or [],
@@ -2677,7 +2930,7 @@ class SyncStorefrontClient(_StorefrontClientBase):
 
         ``proposal`` is the full EscrowProposal-shaped dict for ``counter``;
         omitted for ``accept`` / ``exit``. ``fields["amount"]`` carries the
-        buyer's absolute new offer in base units.
+        buyer's absolute new listing_resource in base units.
         """
         body: dict[str, Any] = {
             "action": action,
@@ -2783,7 +3036,7 @@ class SyncStorefrontClient(_StorefrontClientBase):
         escrow_uid: str,
         *,
         seller_wallet: str,
-        agreed_price: float,
+        agreed_price: int,
         agreed_duration_seconds: int,
         listing_id: str,
         chain_name: str = "anvil",
@@ -2793,11 +3046,16 @@ class SyncStorefrontClient(_StorefrontClientBase):
 
         Reads the escrow from chain on ``chain_name`` and confirms it
         matches the supplied terms. Returns dict with valid=True/False
-        and reason on failure. No DB writes. Used by e2e stage 7b.
+        and reason on failure. No DB writes.
+
+        ``agreed_price`` is base units in the uint256 domain, sent as a
+        decimal-digit string: this body is canonicalized for signing and an
+        18-decimal amount has no JSON number form. It was typed ``float``,
+        which no amount in this protocol is.
         """
         body = {
             "seller_wallet": seller_wallet,
-            "agreed_price": agreed_price,
+            "agreed_price": str(int(agreed_price)),
             "agreed_duration_seconds": agreed_duration_seconds,
             "listing_id": listing_id,
             "chain_name": chain_name,

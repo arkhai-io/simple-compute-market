@@ -58,7 +58,7 @@ async def test_failure_policy_releases_capacity_and_runs_webhook(tmp_path, monke
     reserved = await capacity.reserve(
         binding,
         claim={
-            "executor_kind": "vm",
+            "offering_mode": "vm",
             "resource_id": "gpu-host-1",
             "gpu_count": 1,
         },

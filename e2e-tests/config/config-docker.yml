@@ -10,6 +10,9 @@ rpc:
 
 registry:
   api_url: "http://registry:8080"
+  authority_id: "registry-a"
+  identifier: "0x90f79bf6eb2c4f870365e785982e1f101e93b906"
+  bootstrap_api_key: "development-registry-bootstrap-key"
 
 buyer:
   marketplace_credential: "0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d"
@@ -22,12 +25,56 @@ seller:
   base_url_override: "http://bob-storefront:8001/"
   private_key:       "0x5de4111afa1a4b94908f83103eb1f1706367c2e68ca870fc3fb9a804cdab365a"
   wallet_address:    "0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC"
-  admin_api_key:     "test-api-key"  # set to match [seller].admin_api_key in config.toml
+  # The storefront administrator is a separate principal from the seller
+  # above; it is pinned as Identity.administrators.operator in the
+  # storefront config. Anvil 6 for bob, Anvil 7 for alice. Well-known
+  # deterministic development values; not secret.
+  admin_scheme:     "eip191"
+  admin_credential: "0x92db14e403b83dfe3df233f83dfa3a0d7096f21ca9b0d6d6b8d88b2b4ec1564e"
 
 provisioning:
   api_url: "http://provisioning:8081"
+  # Well-known deterministic development values (standard Anvil accounts), as
+  # with the keys above. Not secret, and MUST NOT be used on a public network.
+  # `admin_credential` is Anvil 5, the principal the compose stack pins as the
+  # provisioning admin identity; `authority_identifier` is Anvil 0, the
+  # service's own signer. The compose stack pins both, so they are not
+  # interchangeable and a swap fails as an authorisation error.
+  admin_scheme:         "eip191"
+  admin_credential:     "0x8b3a350cf5c34c9194ca85829a2df0ec3153be0318b5e2d3348e872092edffba"
+  authority_scheme:     "eip191"
+  authority_identifier: "0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266"
+  # Anvil 0 — the provisioning service's own signer, pinned as the
+  # storefront's service peer. Not interchangeable with the admin
+  # credential; the two are trusted for different roles.
+  service_scheme:     "eip191"
+  service_credential: "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80"
 
 api_credits:
   registry_url:   "http://api-credits-registry:8080"
   service_url:    "http://credits-service:8082"
   storefront_url: "http://credits-storefront:8000"
+  # The credits registry's own signing principal, pinned by the buyer: a
+  # registry read is authenticated in both directions, and the buyer refuses
+  # to discover through an index it cannot pin. Matches
+  # REGISTRY_AUTHORITY_ID / _IDENTIFIER in compose.apicredits.yml.
+  registry_authority_id: "api-credits-registry"
+  registry_scheme:       "ed25519"
+  registry_identifier:   "_NUDENxVX6u4cMd0xzoYyQAt10QDI47bfnYnu2lTVho"
+
+# Second storefront (multi-registry scenario)
+alice:
+  # Second storefront in the multi-registry scenario; runs as
+  # alice-storefront in the compose stack. Seller principal is Anvil 4,
+  # matching Identity.principal in storefront.alice.toml.
+  api_url:        "http://alice-storefront:8002"
+  private_key:    "0x47e179ec197488593b187f80a00eb0da91f1b9d0b13f8733639f19c30a34926a"
+  wallet_address: "0x15d34AAf54267DB7D7c367839AAf71A00a2C6A65"
+  admin_scheme:     "eip191"
+  admin_credential: "0x4bbbf85ce3377467afe5d46f804f221813b2bb87f24d81f60f1fcdbf7cbf4356"
+
+# Access-gated second registry (multi-registry scenario).
+registry_b:
+  api_url: "http://registry-b:8080"
+  authority_id: "registry-b"
+  identifier: "0x15d34aaf54267db7d7c367839aaf71a00a2c6a65"

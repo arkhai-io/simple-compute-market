@@ -259,6 +259,9 @@ PROVISIONING_ROUTE_CONTRACTS = (
     ProvisioningRouteContract("GET", re.compile(r"/api/v1/system/ansible/readiness"), "provisioning_ansible_readiness"),
     ProvisioningRouteContract("POST", re.compile(r"/api/v1/system/check-leases"), "provisioning_check_leases"),
     ProvisioningRouteContract("POST", re.compile(r"/api/v1/system/fulfillment-convergence/run-cycle"), "provisioning_fulfillment_convergence"),
+    ProvisioningRouteContract("POST", re.compile(r"/api/v1/system/fulfillment-convergence/advance-cycle"), "provisioning_fulfillment_convergence_advance"),
+    ProvisioningRouteContract("POST", re.compile(r"/api/v1/system/fulfillment-convergence/pause"), "provisioning_fulfillment_convergence_pause"),
+    ProvisioningRouteContract("POST", re.compile(r"/api/v1/system/fulfillment-convergence/resume"), "provisioning_fulfillment_convergence_resume"),
     ProvisioningRouteContract("POST", re.compile(r"/api/v1/system/lease-watchdog/pause"), "provisioning_lease_watchdog_pause"),
     ProvisioningRouteContract("POST", re.compile(r"/api/v1/system/lease-watchdog/resume"), "provisioning_lease_watchdog_resume"),
     ProvisioningRouteContract("GET", re.compile(r"/api/v1/jobs/?"), "provisioning_jobs_list"),
@@ -336,6 +339,16 @@ DUAL_ROLE_PROVISIONING_OPERATIONS = frozenset(
         "capacity_reservations_list",
         "capacity_reservation_get",
         "capacity_truncate_lease",
+        # Reads of a fulfillment's state, for the same reason the capacity
+        # reads above are shared: the seller owns the fulfillment and the
+        # operator administers the service that runs it, and both have a
+        # legitimate question to ask of its status. An operator asking got
+        # `403 Marketplace role is not authorized` while every neighbouring
+        # job-level read (`provisioning_job_status`) was already admin.
+        # The mutating fulfillment routes -- schedule, begin, teardown --
+        # stay seller-only.
+        "provisioning_fulfillment_status",
+        "provisioning_fulfillment_result",
     }
 )
 
@@ -348,6 +361,9 @@ ADMIN_PROVISIONING_OPERATIONS = frozenset(
         "provisioning_ansible_readiness",
         "provisioning_check_leases",
         "provisioning_fulfillment_convergence",
+        "provisioning_fulfillment_convergence_advance",
+        "provisioning_fulfillment_convergence_pause",
+        "provisioning_fulfillment_convergence_resume",
         "provisioning_lease_watchdog_pause",
         "provisioning_identity_rotate",
         "provisioning_lease_watchdog_resume",

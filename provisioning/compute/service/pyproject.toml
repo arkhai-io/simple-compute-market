@@ -10,7 +10,7 @@ dependencies = [
     "arkhai-kit-resource-pools>=0.2.0",
     "arkhai-kit-fulfillment>=0.2.0",
     "arkhai-compute-provisioning>=0.6.0",
-    "arkhai-core-storefront-client==0.17.0",
+    "arkhai-core-storefront-client==0.18.0",
     "arkhai-kit-identity==0.3.0",
     "dynaconf>=3.0.0",
     "fastapi>=0.115.0",

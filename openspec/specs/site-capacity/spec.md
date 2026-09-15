@@ -52,14 +52,23 @@ Claim construction MUST reject a missing, empty, or malformed settlement order a
 
 ### Requirement: Requested offering mode is explicit and bounded by the pool
 
-Every capacity probe and reservation claim MUST carry a non-empty canonical `executor_kind` naming the requested offering mode. The site authority MUST persist that exact value on the Capacity Reservation and MUST NOT infer it from `vm_host`, `physical_host_id`, resource kind, market name, matched-resource attributes, or any default executor. A matching Resource Pool MUST currently declare the requested mode before a new hold is created.
+Every capacity probe and reservation claim MUST carry a non-empty canonical `offering_mode` naming the requested offering mode, and that key MUST be required. It is the same value a Resource Pool declares as deliverable, the same value the durable listing binding records, and the same value the published listing carries; no surface may name it `executor_kind`, `offering_type`, or `virtualization_type`. The site authority MUST persist that exact value on the Capacity Reservation and MUST NOT infer it from `vm_host`, `physical_host_id`, resource kind, market name, matched-resource attributes, or any default. A matching Resource Pool MUST currently declare the requested mode before a new hold is created.
 
-Legacy reservations, settlement assignments, and executor jobs that predate the field MUST be backfilled only when durable request, settlement, provider-input, or executor-reference evidence proves exactly one mode. An active row with no proof or conflicting proof MUST be quarantined from execution; a completed row keeps its terminal lifecycle state while recording the quarantine. A settlement or request identity that conflicts with an already explicit reservation identity is schema drift, not a precedence choice.
+The claim's site-inventory discriminator remains a separate field and a separate axis. Naming the offering mode consistently MUST NOT merge the two.
+
+`executor` MUST NOT be used as vocabulary for the offering mode, for the machine, or for the delivery handler. The machine is a host, the handler is a provider, and the mode is an offering mode.
+
+Legacy reservations, settlement assignments, and executor jobs that predate the field MUST be backfilled only when durable request, settlement, provider-input, or executor-reference evidence proves exactly one mode. A reservation persisted under the retired key MUST be migrated to the settled one rather than read through a compatibility mapping, so that a search for the retired name is trustworthy evidence no surface still produces it. An active row with no proof or conflicting proof MUST be quarantined from execution; a completed row keeps its terminal lifecycle state while recording the quarantine. A settlement or request identity that conflicts with an already explicit reservation identity is schema drift, not a precedence choice.
 
 #### Scenario: Claim omits the requested mode
 
-- **WHEN** a capacity probe or reservation claim omits `executor_kind`
+- **WHEN** a capacity probe or reservation claim omits `offering_mode`
 - **THEN** the site authority rejects it before matching resources and does not infer `vm` from a matched resource
+
+#### Scenario: Claim names the requested mode under a retired key
+
+- **WHEN** a capacity probe or reservation claim carries the requested mode under `executor_kind`
+- **THEN** the claim is treated as carrying no offering mode and is refused
 
 #### Scenario: Pool does not declare the requested mode
 
@@ -68,7 +77,7 @@ Legacy reservations, settlement assignments, and executor jobs that predate the 
 
 #### Scenario: Legacy identity has one durable proof
 
-- **WHEN** a legacy reservation has no executor kind and durable provider or placement fields prove exactly one mode
+- **WHEN** a legacy reservation has no recorded offering mode and durable provider or placement fields prove exactly one mode
 - **THEN** migration records that mode on the reservation and propagates it to its settlement and executor job
 
 #### Scenario: Legacy identity is unproved or conflicting
@@ -170,7 +179,7 @@ The site authority MUST own Physical Resources, settlement-relevant Resource Poo
 
 #### Scenario: Allocation is committed
 - **WHEN** a valid Capacity Reservation is committed for executor work
-- **THEN** the site authority records its allocation identity, physical accounting mode, executor kind, and deal ownership while leaving execution policy to the compute lifecycle
+- **THEN** the site authority records its allocation identity, physical accounting mode, offering mode, and deal ownership while leaving execution policy to the compute lifecycle
 
 #### Scenario: Generic site package is installed alone
 - **WHEN** site authority modules are imported without VM or bare-metal provisioning packages

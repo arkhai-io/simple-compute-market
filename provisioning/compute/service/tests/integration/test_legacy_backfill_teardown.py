@@ -35,7 +35,7 @@ from market_resource_pools import ResourcePoolService
 from market_site.authority import LedgerSiteAuthority
 from market_site.ledger import CapacityLedgerService
 from vm_provisioning_adapter.release import (
-    VM_EXECUTOR_KIND,
+    VM_OFFERING_MODE,
     FulfillmentServiceTeardownPort,
     VmFulfillmentReleaseJobPort,
     VmReleaseExecutor,
@@ -153,14 +153,14 @@ def test_pre_cutover_vm_lease_backfills_and_tears_down_to_release():
     )
     ledger = CapacityLedgerService(session_factory=session_factory)
     executor_release = ExecutorReleaseDispatcher({
-        VM_EXECUTOR_KIND: VmReleaseExecutor(
+        VM_OFFERING_MODE: VmReleaseExecutor(
             settlement_repository=settlement_repository,
             session_factory=session_factory,
             teardown_port=FulfillmentServiceTeardownPort(lambda: fulfillment_service),
         ),
     })
     release_jobs = ReleaseJobDispatcher({
-        VM_EXECUTOR_KIND: VmFulfillmentReleaseJobPort(
+        VM_OFFERING_MODE: VmFulfillmentReleaseJobPort(
             teardown_port=FulfillmentServiceTeardownPort(lambda: fulfillment_service),
         ),
     })

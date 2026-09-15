@@ -33,7 +33,7 @@ the extracted service and adapter entry points.
    the whole fulfillment flow — the storefront already carries
    `allocation_id` end to end today. That part is not new work.
 3. `provisioning_orchestration_service.create_vm_and_wait_with_credentials`
-   submits `ExecutorActionEnvelope(allocation_id=..., executor_kind="vm",
+   submits `ExecutorActionEnvelope(allocation_id=..., offering_mode="vm",
    action_kind="create", ...)` directly via `ComputeProvisioningClient`,
    then polls `client.poll_until_complete(...)` and fetches credentials
    itself. This is a complete, working, **already-async, caller-polls**
@@ -47,13 +47,13 @@ None of this touches `PhysicalSettlementScheduler` or any
 `pools-2`/`pools-3` and the path the storefront actually uses are two
 parallel systems today.
 
-## `executor_kind` vs. `provider` — confirmed orthogonal, not layered
+## `offering_mode` vs. `provider` — confirmed orthogonal, not layered
 
 Raised and resolved during the `pools-3` design review: these are
 different axes, and neither should be collapsed into the other by this
 cutover.
 
-- `executor_kind` (`"vm"` / `"bare_metal"`) is a **domain allocation
+- `offering_mode` (`"vm"` / `"bare_metal"`) is a **domain allocation
   semantics** distinction — VM allocations are shareable (many VMs per
   physical host), bare-metal allocations are exclusive (one allocation
   locks the whole host). It also selects which wire/request models and
@@ -77,7 +77,7 @@ cutover.
 
 Implication for this change: when it wires release through
 `ProviderRegistry`, that wiring is additive to (not a replacement for)
-`ExecutorReleaseDispatcher`'s existing `executor_kind` routing — a
+`ExecutorReleaseDispatcher`'s existing `offering_mode` routing — a
 `SettlementRecord`-backed allocation resolves its provider via the
 registry; an allocation with no `SettlementRecord` (not yet migrated to
 the settlement path, or never will be) keeps using today's direct
@@ -784,7 +784,7 @@ two different processes, must not be conflated:
 
 | Decision | Owned by | When | Mechanism |
 |---|---|---|---|
-| Which pool/resource a listing represents | Storefront | **Publish time** | Listing-mode hint (point 4) + `CapacityProjection`, baked into the listing's `offer_resource.pool_id`/`resource_id` at creation (POOLS-4) |
+| Which pool/resource a listing represents | Storefront | **Publish time** | Listing-mode hint (point 4) + `CapacityProjection`, baked into the listing's `listing_resource.pool_id`/`resource_id` at creation (POOLS-4) |
 | Which site to route a reserve/probe call to | Storefront (`AggregateCapacityClient`) | **Reserve/negotiate time** | `fill_first`/`most_available`, live `_snapshots()` |
 | Which concrete host within that pool fulfills the reservation | Provisioning service (`PhysicalSettlementScheduler`) | **Schedule time** | Deterministic round-robin (or later, a `pools-6` policy) |
 
@@ -2965,7 +2965,7 @@ exercised.
      `compute_provisioning/contracts.py` (`ExecutorActionEnvelope` through
      `LifecycleEvent`) is free of dimension/shape coupling (`ram_gb`,
      `vcpu_count`, `gpu_count`, `dimensions` do not appear anywhere in that
-     file; `deal_ref`/`parameters` are opaque dicts, `executor_kind`/
+     file; `deal_ref`/`parameters` are opaque dicts, `offering_mode`/
      `action_kind` are plain strings). `openspec/specs/physical-provisioning/spec.md`'s
      "Compute-owned caller contract" requirement already documents
      `fulfillment` as one of the generic, executor-neutral surfaces this
@@ -2983,7 +2983,7 @@ exercised.
 
 5. **`register_lease` removal timing — corrected, not safe for 9.2/9.6:**
    traced further than the original proposal. `register_lease` does not
-   write a separate, superseded table — it attaches `executor_kind`/
+   write a separate, superseded table — it attaches `offering_mode`/
    `executor_target`/`executor_ref` directly onto the *same*
    `CapacityReservation` row via `attach_lease_reservation`. Today's legacy
    teardown path reads exactly those fields:
@@ -3384,7 +3384,7 @@ Repository inspection (not assumption) establishes the actual starting point for
 - The full durable teardown state machine already exists and already runs every cycle: `transitions.py` defines `teardown_dispatch_pending → tearing_down → torn_down/teardown_failed`, and `FulfillmentConvergenceWatchdog` (`provisioning/compute/service`) already implements `dispatch_pending_teardowns`, `converge_teardowns`, and `requeue_teardown_failures`, domain-neutral, alongside its create-side passes.
 - Nothing calls any of it. No `begin_fulfillment_teardown` (or equivalent) exists anywhere in the repository. This is the actual gap task 10.1 closes, not a formality.
 - Section 7's backfill compiler (`legacy_backfill.py`) already produces backfilled rows in these same teardown states with `prepared_teardown_operation`/`teardown_provider_metadata` pre-populated where a live target exists, so backfilled and native rows are already uniform once a native-row preparation path exists (10.2 is materially smaller than the proposal implied).
-- VM release today is driven entirely by `LeaseLifecycleService`/`LeaseWatchdog` (`provisioning/compute/src/compute_provisioning`), a generic, domain-neutral component shared with bare-metal through `ExecutorReleaseDispatcher`, keyed by `executor_kind`. It performs expiry detection (`list_time_bounded_reservations_due` against the site reservation ledger's `lease_end_utc`), submits one job through `ExecutorReleasePort.submit_release` (VM's implementation is `VmReleaseExecutor`, submitting an Ansible `vm_remove` job directly), polls that job through a single shared `ReleaseJobPort` (`job_service`/`AsyncJobQueue`, also genuinely exercised by bare-metal's `reclaim_access_for_reservation`, not just a `"direct-release"` sentinel), and on confirmed completion calls `_finish_release` → `record_release_success` (→ `CapacityLedgerService.release`, which is itself the authoritative capacity-table update — releasing a reservation from `HELD_RESERVATION_STATES` is what excludes it from committed pool capacity going forward) plus a best-effort, non-durable push (`StorefrontLifecycleEventSink.notify_capacity_released`) that cannot currently authenticate to the storefront.
+- VM release today is driven entirely by `LeaseLifecycleService`/`LeaseWatchdog` (`provisioning/compute/src/compute_provisioning`), a generic, domain-neutral component shared with bare-metal through `ExecutorReleaseDispatcher`, keyed by `offering_mode`. It performs expiry detection (`list_time_bounded_reservations_due` against the site reservation ledger's `lease_end_utc`), submits one job through `ExecutorReleasePort.submit_release` (VM's implementation is `VmReleaseExecutor`, submitting an Ansible `vm_remove` job directly), polls that job through a single shared `ReleaseJobPort` (`job_service`/`AsyncJobQueue`, also genuinely exercised by bare-metal's `reclaim_access_for_reservation`, not just a `"direct-release"` sentinel), and on confirmed completion calls `_finish_release` → `record_release_success` (→ `CapacityLedgerService.release`, which is itself the authoritative capacity-table update — releasing a reservation from `HELD_RESERVATION_STATES` is what excludes it from committed pool capacity going forward) plus a best-effort, non-durable push (`StorefrontLifecycleEventSink.notify_capacity_released`) that cannot currently authenticate to the storefront.
 - `POST /api/v1/contract/leases/{capacity_reservation_id}/terminate` already exists on `ComputeContractController` and is already client-wrapped on `ComputeProvisioningClient.terminate_lease` — the exact client `_register_vm_lease_with_settings` already uses for `register_lease` today. (A second, VM-domain-branded surface, `POST /leases/{lease_id}/terminate` on `LeasesController`, also exists and calls the identical `LeaseLifecycleService.terminate_lease`; the storefront is not currently wired to that client, so the generic contract surface is the one this section uses.) Both already validate the reservation is `leased`, already call the same `submit_release` seam as the expiry sweep, and already document "capacity is released only after the delegated release job succeeds." Nothing in the VM storefront calls either yet.
 
 ### Accepted decision: keep `LeaseLifecycleService` as the sole trigger and capacity-release owner
@@ -3394,7 +3394,7 @@ An earlier draft of this design considered moving VM off `LeaseLifecycleService`
 What changes is narrow, confined to the release-submission/completion seam:
 
 1. **Submission.** `VmReleaseExecutor.submit_release` stops submitting an Ansible `vm_remove` job directly. It resolves the durable `fulfillment_id` for the reservation's `capacity_reservation_id` and calls the new `begin_fulfillment_teardown(fulfillment_id)`, which durably prepares the teardown envelope and transitions `active → teardown_dispatch_pending` — no provider I/O inline, mirroring how `begin_fulfillment` separates durable acceptance from dispatch. It returns `fulfillment_id` as the tracked "job id." `FulfillmentConvergenceWatchdog` — already implemented, already running — owns dispatch, retry, and status convergence through to `torn_down`/`teardown_failed`, entirely independently of `LeaseLifecycleService`'s own polling cadence. This is what "entirely from provisioning-owned watchdog handlers" (task 10.3, as originally drafted) actually refers to: the convergence watchdog already is that owner; it needed a caller, not new mechanics.
-2. **Completion.** `LeaseLifecycleService`'s `_process_releasing_reservation` calls one shared `ReleaseJobPort.get_job(job_id)`. Bare-metal genuinely needs this to keep resolving real, polled Ansible job status (confirmed: `reclaim_access_for_reservation` submits a real job, not only a `"direct-release"` sentinel), so the shared port cannot simply be repointed at fulfillment state. Instead, `release_jobs` becomes a small kind-routed dispatcher — the same shape as the existing `ExecutorReleaseDispatcher` for submission — routing `get_job` by the reservation's `executor_kind`: bare-metal's route is byte-for-byte unchanged (`job_service`/`AsyncJobQueue`); VM's route answers by reading the `SettlementRecord`'s teardown state for the given `fulfillment_id` (`torn_down` → `succeeded`, `teardown_failed` → `failed`, anything else → `pending`), via a thin adapter over `FulfillmentOrchestrator.get_fulfillment_status` or the settlement repository directly.
+2. **Completion.** `LeaseLifecycleService`'s `_process_releasing_reservation` calls one shared `ReleaseJobPort.get_job(job_id)`. Bare-metal genuinely needs this to keep resolving real, polled Ansible job status (confirmed: `reclaim_access_for_reservation` submits a real job, not only a `"direct-release"` sentinel), so the shared port cannot simply be repointed at fulfillment state. Instead, `release_jobs` becomes a small kind-routed dispatcher — the same shape as the existing `ExecutorReleaseDispatcher` for submission — routing `get_job` by the reservation's `offering_mode`: bare-metal's route is byte-for-byte unchanged (`job_service`/`AsyncJobQueue`); VM's route answers by reading the `SettlementRecord`'s teardown state for the given `fulfillment_id` (`torn_down` → `succeeded`, `teardown_failed` → `failed`, anything else → `pending`), via a thin adapter over `FulfillmentOrchestrator.get_fulfillment_status` or the settlement repository directly.
 3. **Capacity release.** `_finish_release` is unchanged. It already performs the authoritative capacity-table update (`record_release_success` → `CapacityLedgerService.release`). The only actual gap it had was a trustworthy completion signal for the VM case, which (2) now supplies. The non-durable `notify_storefront_capacity_released` push stays as a best-effort nicety, unchanged — it already fails safe (logs and returns `False`) when it cannot reach or authenticate to the storefront, which is the expected outcome until `replace-polling-with-authenticated-push` lands. The storefront's authoritative view of freed capacity remains its own projection poll (POOLS-8), not this push.
 
 ### Accepted decision: no new API for early termination
@@ -3408,14 +3408,14 @@ The only new work is VM-domain storefront-side: call `terminate_lease` from what
 
 ### `register_lease` field scope (resolves task 9.2's/10.5's deferred note)
 
-Fully traced, not assumed. `_register_vm_lease_with_settings` keeps writing `executor_kind` and `lease_end_utc` — both remain load-bearing: `LeaseLifecycleService` needs `executor_kind` to route submission/completion through the correct dispatcher entry, and `lease_end_utc` to find reservations due for release (`CapacityLedgerService.list_lease_due` filters on `state == leased` and `lease_end_utc IS NOT NULL`). Calling `register_lease`/`attach_lease` at all also remains mandatory regardless of which fields it carries, since `attach_lease` is what transitions the reservation into `leased` state in the first place — the state `list_lease_due` filters on.
+Fully traced, not assumed. `_register_vm_lease_with_settings` keeps writing `offering_mode` and `lease_end_utc` — both remain load-bearing: `LeaseLifecycleService` needs `offering_mode` to route submission/completion through the correct dispatcher entry, and `lease_end_utc` to find reservations due for release (`CapacityLedgerService.list_lease_due` filters on `state == leased` and `lease_end_utc IS NOT NULL`). Calling `register_lease`/`attach_lease` at all also remains mandatory regardless of which fields it carries, since `attach_lease` is what transitions the reservation into `leased` state in the first place — the state `list_lease_due` filters on.
 
 `executor_target` and `executor_ref` do not behave the same way and were investigated separately:
 
 - **`executor_target` (backs `CapacityReservation.vm_target`) is retained.** `vm_target` has exactly one write path in `kit/site/src/market_site/ledger.py`: `attach_lease`/`update_lease_fields`, both only from an explicitly supplied `vm_target`/`executor_target` argument. Nothing else ever populates it — unlike `vm_host`, there is no independent commit-time write. `LeasesController._lease_view` (the VM-domain lease API's list/get/terminate response shape) reads `reservation.get("vm_target")` directly with no fallback; dropping the write would silently empty that field for every future VM lease. The generic, bare-metal-shared `compute_contract_controller._lease_view` also depends on it indirectly: its `executor_target` resolution checks `vm_target` before falling back to `vm_host`, and since `vm_host` identifies the physical KVM host (which can run multiple VMs) rather than the specific VM, an empty `vm_target` would make that view silently report the wrong, host-level identity rather than merely a less specific one.
 - **`executor_ref` (backs `CapacityReservation.executor_ref`, `{"vm_host": ...}`) is dropped.** `reservation.vm_host` is already written independently of `register_lease`, at capacity-commit/rebind time, from the scheduled resource's own attributes (`ledger.py`'s `commit`/`rebind_capacity`: `reservation.vm_host = (resource.attributes or {}).get("vm_host")`) — this happens at `schedule_resource` time, before `register_lease` is ever called. `_sync_executor_fields`, already invoked by both `attach_lease` and `update_lease_fields`, already self-heals `executor_ref` from that independently-set `vm_host` whenever the explicit argument is omitted (`elif reservation.vm_host and not reservation.executor_ref: reservation.executor_ref = {"vm_host": reservation.vm_host}`). No reader observes any difference between an explicitly-passed and a self-healed `executor_ref`.
 
-Task 10.7 is therefore not a "confirm before dropping" placeholder: `_register_vm_lease_with_settings` stops passing `executor_ref` to `register_lease`, and continues passing `executor_target=vm_target`, `executor_kind`, and `lease_end_utc` exactly as today.
+Task 10.7 is therefore not a "confirm before dropping" placeholder: `_register_vm_lease_with_settings` stops passing `executor_ref` to `register_lease`, and continues passing `executor_target=vm_target`, `offering_mode`, and `lease_end_utc` exactly as today.
 
 ### Permanent documentation destinations
 
@@ -3426,7 +3426,7 @@ Task 10.7 is therefore not a "confirm before dropping" placeholder: `_register_v
 | Kind-routed `ReleaseJobPort` dispatch (bare-metal via job queue, VM via fulfillment aggregate state) | `openspec/specs/physical-provisioning/spec.md` |
 | `POST /api/v1/contract/leases/{capacity_reservation_id}/terminate` (`ComputeProvisioningClient.terminate_lease`) as the storefront-facing early-termination call; no new endpoint | `openspec/specs/physical-provisioning/spec.md`; `openspec/specs/vm-storefront-fulfillment/spec.md` for the storefront-side call site |
 | Authoritative capacity release remains `CapacityLedgerService.release`, gated on confirmed fulfillment teardown for VM; storefront-facing notification remains poll-based (POOLS-8) until `replace-polling-with-authenticated-push` | `openspec/specs/physical-provisioning/spec.md`; `openspec/specs/site-capacity/spec.md` if reservation-ledger release semantics need a stated precondition update |
-| `register_lease` field scope: `executor_kind`/`executor_target`/`lease_end_utc` retained (no independent write path exists for `vm_target`); `executor_ref` dropped (self-heals from the independently-written `vm_host`) | `openspec/specs/physical-provisioning/spec.md` |
+| `register_lease` field scope: `offering_mode`/`executor_target`/`lease_end_utc` retained (no independent write path exists for `vm_target`); `executor_ref` dropped (self-heals from the independently-written `vm_host`) | `openspec/specs/physical-provisioning/spec.md` |
 
 Implementation must confirm or correct each destination above against the actual accepted code shape before promotion; this table records intent, not a substitute for the design-promotion record task 12 requires at closure.
 
@@ -3443,7 +3443,7 @@ Fixed by giving `_lease_view` the same `reserved→pending, provisioning→pendi
 | `begin_fulfillment_teardown` as the whole-fulfillment teardown entrypoint: valid only from `active`, idempotent across every already-tearing-down state including terminal `torn_down` and retryable `teardown_failed`, no inline dispatch, reuses an already-prepared operation (backfilled or retried) rather than re-preparing | `openspec/specs/fulfillment/spec.md` — new paragraph and two scenarios in "Durable settlement persistence", plus its `POST /fulfillment/{fulfillment_id}/begin-teardown` HTTP exposure |
 | `LeaseLifecycleService` retained, unchanged, as the sole release trigger and capacity-release owner for both VM and bare-metal; only the submission leaf (`VmReleaseExecutor`) and a new kind-routed completion-read seam (`ReleaseJobDispatcher`) cross into the fulfillment aggregate | `openspec/specs/physical-provisioning/spec.md` — new paragraph and three scenarios after "Site-backed release lifecycle" |
 | Explicit early lease termination reuses the existing `terminate_lease` release mechanism rather than adding a second termination code path; no lease-management migration to the storefront | `openspec/specs/physical-provisioning/spec.md` — new "Explicit early lease termination" requirement; `openspec/specs/vm-storefront-fulfillment/spec.md` — plumbing note on "Full settlement convergence ownership", explicit that no caller exists yet |
-| `register_lease` field scope: `executor_ref` was never sent on the storefront's actual call path in the first place (traced, not assumed); `executor_target`/`vm_target` has no independent write path and is retained; `executor_kind`/`lease_end_utc` remain load-bearing | `openspec/specs/physical-provisioning/spec.md` — new "Lease registration tolerates omitted identity hints" requirement, stated generically (not VM/`executor_ref`-specific) since the property — registration need not resupply what committed resource attributes already carry — is domain-neutral |
+| `register_lease` field scope: `executor_ref` was never sent on the storefront's actual call path in the first place (traced, not assumed); `executor_target`/`vm_target` has no independent write path and is retained; `offering_mode`/`lease_end_utc` remain load-bearing | `openspec/specs/physical-provisioning/spec.md` — new "Lease registration tolerates omitted identity hints" requirement, stated generically (not VM/`executor_ref`-specific) since the property — registration need not resupply what committed resource attributes already carry — is domain-neutral |
 | Kind-routed `ReleaseJobPort`/`ReleaseJobDispatcher`, mirroring the existing submission-side `ExecutorReleaseDispatcher` pattern; the `"direct-release"` sentinel is a per-executor "nothing to poll" signal, not a global on/off switch | `openspec/specs/physical-provisioning/spec.md` — same new paragraph/scenarios as the `LeaseLifecycleService` row above |
 | Circular-dependency break for `VmReleaseExecutor`/`VmFulfillmentReleaseJobPort` (`FulfillmentOrchestrator` needs `provider_registry` → `composed_adapters` → the VM adapter bundle these two classes live inside): a lazy module-level accessor (`_resolved_fulfillment_service()`) mirroring the container's existing `_resolved_job_queue()` pattern, passed via `providers.Object` rather than a DI dependency | `compute_provisioning_service/container.py` docstring on `_resolved_fulfillment_service`; not promoted to a subsystem spec — this is a composition-root wiring technique already established by precedent in the same file, not new cross-cutting design |
 | Pre-existing `LeaseState` serialization bug (missing `"leased"`, `"provisioning_failed"`, `"force_released"` members) found and fixed in the same pass, by agreement, rather than filed separately | `compute_provisioning/contracts.py` (`LeaseState` enum, now complete); `compute_contract_controller.py` (`_lease_view`'s translation table) — checked `openspec/specs/compute-provisioning-contract/spec.md` for existing `LeaseState` documentation to correct; found none, so no spec text needed updating |
@@ -3902,7 +3902,7 @@ an actual removal condition this change satisfies:
   other four in Section 5's note.
 - `ExecutorActionEnvelope`/`JobAccepted`/`ProvisioningJob.deal_ref` are
   VM-retired but not repository-retired — `submit_action`/`ExecutorActionEnvelope`
-  remains the live, generic, `executor_kind`-routed contract
+  remains the live, generic, `offering_mode`-routed contract
   `BareMetalComputeAdapter.submit` still depends on, and bare-metal's own
   fulfillment cutover is explicit non-goal scope for this change.
 - `LifecycleEvent.deal_ref` was already flagged as out of scope by Section
@@ -3995,7 +3995,7 @@ from the task's own candidate sketch:
 
 - **Write sites**, all in `ledger.py`: `reserve()` (sets `vm_host` from the
   matched resource's `attributes.get("vm_host")` at reservation time, and
-  separately re-derives `executor_kind` from the same attribute lookup — two
+  separately re-derives `offering_mode` from the same attribute lookup — two
   copies of the same check), the settlement-resource reassignment/rebind
   path (same attribute-derived write against the *new* resource), and
   `attach_lease`/`update_lease_fields` (accept an explicit `vm_host`
@@ -4014,7 +4014,7 @@ from the task's own candidate sketch:
   produces.
 - **The self-heal direction is already backwards from what the column
   implies.** `_sync_executor_fields` treats `vm_host` as the *source* the
-  generic `executor_kind`/`executor_ref` fields heal from
+  generic `offering_mode`/`executor_ref` fields heal from
   (`elif reservation.vm_host and not reservation.executor_ref:
   reservation.executor_ref = {"vm_host": reservation.vm_host}`) — but
   `kit/site/authority.py`'s `SiteAuthorityAdapter` (the domain-neutral port
@@ -4036,7 +4036,7 @@ Section 11 is planned:
 
 - `reserve()` and the reassignment/rebind path stop writing
   `reservation.vm_host`; they write `executor_ref={"vm_host": ...}`
-  directly (mirroring how `executor_kind` is already derived from the same
+  directly (mirroring how `offering_mode` is already derived from the same
   resource attribute at the same call sites).
 - `attach_lease`/`update_lease_fields` drop their `vm_host=` parameter.
   `authority.py`'s `_legacy_vm_fields` and its two call sites
@@ -4634,7 +4634,7 @@ column shared by every domain (bare-metal populates it too), so an
 unscoped alias would leak a bare-metal reservation's target under a
 VM-flavored key where it used to correctly read `None`. Caught by
 `test_register_bare_metal_lease_attaches_executor_metadata` failing;
-fixed by scoping the payload key to `executor_kind == "vm"`.
+fixed by scoping the payload key to `offering_mode == "vm"`.
 
 **Migration consolidation:** `_migrate_remove_provisioned_resource_domain_ref`,
 `_migrate_ansible_pool_requirement_delegate`, the `vm_host` migration, and

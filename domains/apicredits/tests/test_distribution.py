@@ -26,11 +26,12 @@ __all__ = ["wheels"]
 
 
 def test_no_apicredits_project_declares_an_internal_editable_source() -> None:
-    """Scoped to the API-credit domain only. The repository-wide version
-    of this check -- covering every consumable project, not just this
-    domain -- belongs to `remove-relative-uv-sources`, an existing,
-    separate change already scoped to exactly that; this test does not
-    duplicate it.
+    """Scoped to the API-credit domain only.
+
+    Deliberately narrow: the repository-wide equivalent -- covering every
+    consumable project rather than this domain -- is owned elsewhere, and
+    duplicating it here would give two places an opinion about the same
+    rule.
     """
     apicredits_pyprojects = sorted(APICREDITS.glob("**/pyproject.toml"))
     assert apicredits_pyprojects, "expected to find at least one pyproject.toml"
@@ -88,7 +89,7 @@ def test_role_wheels_require_shared_domain_and_versioned_core(
     assert "Requires-Dist: arkhai-core-buyer>=0.3.0" in buyer_metadata
     assert "Requires-Dist: arkhai-apicredits-domain>=0.1.0" in storefront_metadata
     assert "Requires-Dist: arkhai-core>=0.2.0" in storefront_metadata
-    assert "Requires-Dist: arkhai-core-storefront>=0.3.0" in storefront_metadata
+    assert "Requires-Dist: arkhai-core-storefront>=0.4.0" in storefront_metadata
 
 
 def test_storefront_wheels_require_settlement_runtime(

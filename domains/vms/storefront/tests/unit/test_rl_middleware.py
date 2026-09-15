@@ -227,7 +227,7 @@ class TestSellerDecisions:
 
         assert decision.action == "counter"
         assert decision.proposal is not None
-        assert decision.proposal["fields"]["amount"] == 10500
+        assert decision.proposal["fields"]["amount"] == "10500"
         # Peer skeleton echoed verbatim except amount
         assert decision.proposal["chain_name"] == _PEER_SKELETON["chain_name"]
         assert decision.proposal["escrow_address"] == _PEER_SKELETON["escrow_address"]
@@ -244,7 +244,7 @@ class TestSellerDecisions:
 
         assert decision.action == "accept"
         assert decision.reason == "convergence"
-        assert decision.proposal["fields"]["amount"] == 10400
+        assert decision.proposal["fields"]["amount"] == "10400"
 
     def test_exits_when_peer_below_reasonable_threshold(self, stub_strategy):
         """``their < our / reasonable`` → exit price_unreasonable.
@@ -277,7 +277,7 @@ class TestBuyerDecisions:
 
         assert decision.action == "accept"
         assert decision.reason == "convergence"
-        assert decision.proposal["fields"]["amount"] == 9500
+        assert decision.proposal["fields"]["amount"] == "9500"
 
     def test_counter_clamped_at_our_reference_ceiling(self, stub_strategy):
         """When the model's proposed amount exceeds our ceiling, the
@@ -295,7 +295,7 @@ class TestBuyerDecisions:
         decision = run_negotiation_chain(chain, history, ctx)
 
         assert decision.action == "counter"
-        assert decision.proposal["fields"]["amount"] == 10_000
+        assert decision.proposal["fields"]["amount"] == "10000"
 
     def test_exits_when_peer_above_reasonable_threshold(self, stub_strategy):
         """``their > our * reasonable`` → exit price_unreasonable.

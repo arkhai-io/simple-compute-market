@@ -161,17 +161,37 @@ async def sweep_stale_negotiations(
     return len(stale)
 
 
+#: Cadence for re-checking a held gate. Short enough that an advance
+#: request is not delayed behind a sweep interval, and idle work only.
+_PAUSED_POLL_SECONDS = 0.05
+
+
 async def run_negotiation_watchdog(
     repository: NegotiationRepository,
     policy: NegotiationWatchdogPolicy,
     *,
     emit_stage_event: Callable[..., None] | None = None,
     logger: LoggerLike | None = None,
+    paused: Callable[[], bool] | None = None,
 ) -> None:
     """Continuously run the shared sweep until the task is cancelled."""
 
     active_logger = logger or logging.getLogger(__name__)
-    await asyncio.sleep(policy.initial_delay_seconds)
+    # The initial delay is applied inside the loop, after the gate, so it holds
+    # the first sweep and not the acknowledgement. Its purpose is to avoid
+    # measuring freshly created threads against a clock that has not caught up,
+    # which constrains when a sweep may run -- nothing about it requires the
+    # loop to be unobservable. Delaying before the first gate call made the
+    # watchdog invisible for the whole window, and the first pause of an
+    # end-to-end run lands inside it.
+    # A deadline, not a sleep. Sleeping the delay inside the loop still stops
+    # the loop cycling for its duration, so a pause requested in that window is
+    # not observed until it elapses -- the loop reaches its gate once and then
+    # disappears for 30 seconds. Comparing a deadline holds the sweep while the
+    # cycle, and therefore the gate, keeps its cadence.
+    sweep_not_before = (
+        asyncio.get_running_loop().time() + float(policy.initial_delay_seconds or 0.0)
+    )
     if policy.log_loop_start:
         active_logger.info(
             "negotiation_watchdog_loop: started (interval=%ds, timeout=%ds)",
@@ -180,7 +200,12 @@ async def run_negotiation_watchdog(
         )
     while True:
         try:
+            if paused is not None and paused():
+                await asyncio.sleep(_PAUSED_POLL_SECONDS)
+                continue
             await asyncio.sleep(policy.interval_seconds)
+            if asyncio.get_running_loop().time() < sweep_not_before:
+                continue
             abandoned = await sweep_stale_negotiations(
                 repository,
                 policy,

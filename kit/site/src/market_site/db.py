@@ -119,13 +119,25 @@ class CapacityReservation(Base):
     # units mirrors dimensions["gpu_count"] for payload/caller compatibility.
     # May be null when the multidimensional map is absent, in which case dimensions is {"gpu_count": units}.
     dimensions = Column(JSON, nullable=True)
+    # The categorical half of the claim this reservation was admitted
+    # against, as matched at reserve time. Ledger-owned, never
+    # caller-supplied: `deal_ref` is the caller's dict, and a caller that
+    # could restate its own constraints here could also relax them.
+    #
+    # `dimensions` records how much was committed; this records what kind
+    # of resource was sold. Without it, scheduling can re-place a deal on
+    # any resource with room, because the only constraints surviving
+    # admission were the quantitative ones. NULL means a row predating
+    # this column, which is a different answer from `{}` ("admitted
+    # against no categorical constraint").
+    claim_attributes = Column(JSON, nullable=True)
     state = Column(
         String, nullable=False, default=ReservationState.reserved.value, index=True
     )
     deal_ref = Column(JSON, nullable=True)
     escrow_uid = Column(String, nullable=True, index=True)  # lifted from deal_ref
     hold_expires_at = Column(String, nullable=True)  # TTL soft hold (two-phase reserve)
-    executor_kind = Column(String, nullable=True)
+    offering_mode = Column(String, nullable=True)
     executor_target = Column(String, nullable=True)
     release_job_id = Column(String, nullable=True)
     executor_ref = Column(JSON, nullable=True)
@@ -188,4 +200,16 @@ class CapacityEvent(Base):
     # Null for events that don't change held capacity (e.g. "committed",
     # "lease_truncated") or when no dimensional delta is recorded.
     dimensions = Column(JSON, nullable=True)
+    # The categorical half of the claim this reservation was admitted
+    # against, as matched at reserve time. Ledger-owned, never
+    # caller-supplied: `deal_ref` is the caller's dict, and a caller that
+    # could restate its own constraints here could also relax them.
+    #
+    # `dimensions` records how much was committed; this records what kind
+    # of resource was sold. Without it, scheduling can re-place a deal on
+    # any resource with room, because the only constraints surviving
+    # admission were the quantitative ones. NULL means a row predating
+    # this column, which is a different answer from `{}` ("admitted
+    # against no categorical constraint").
+    claim_attributes = Column(JSON, nullable=True)
     occurred_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)

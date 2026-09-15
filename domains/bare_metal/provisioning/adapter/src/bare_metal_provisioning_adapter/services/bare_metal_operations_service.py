@@ -13,7 +13,7 @@ from collections.abc import Callable
 from typing import Any, TYPE_CHECKING
 
 from arkhai_bare_metal import (
-    BARE_METAL_EXECUTOR_KIND,
+    BARE_METAL_OFFERING_MODE,
     BareMetalLeaseCreate,
     NODE_GRANT_ACCESS_ACTION,
     NODE_RECLAIM_ACCESS_ACTION,
@@ -91,7 +91,7 @@ class BareMetalOperationsService:
                 vm_host=body.machine_id,
                 vm_action=NODE_GRANT_ACCESS_ACTION,
                 vm_target=body.machine_id,
-                executor_kind=BARE_METAL_EXECUTOR_KIND,
+                offering_mode=BARE_METAL_OFFERING_MODE,
                 executor_action=NODE_GRANT_ACCESS_ACTION,
                 executor_target=body.machine_id,
                 executor_ref=bare_metal_executor_ref(
@@ -151,7 +151,7 @@ class BareMetalOperationsService:
                 vm_host=machine_id,
                 vm_action=NODE_RECLAIM_ACCESS_ACTION,
                 vm_target=machine_id,
-                executor_kind=BARE_METAL_EXECUTOR_KIND,
+                offering_mode=BARE_METAL_OFFERING_MODE,
                 executor_action=NODE_RECLAIM_ACCESS_ACTION,
                 executor_target=machine_id,
                 executor_ref=reservation.get("executor_ref"),

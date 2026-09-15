@@ -10,7 +10,7 @@ The topology (docker-compose.yml): a second registry speaking the
 (self-seeds one quota-backed listing pointing at the sample app), and
 the sample app gated by the Python middleware. The buyer runs the same
 `market` binary as the VM tests — its schema filter routes discovery to
-the api-credits registry while leaving the vms.compute registry alone.
+the api-credits registry while leaving the compute.market registry alone.
 
 Consuming runs against the gated sample app directly with the issued
 bearer secret, exactly as a real client of that API would.
@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import logging
 import time
+from typing import Any
 
 import httpx
 from market_identity import IdentityScheme
@@ -82,6 +83,46 @@ def credits_buyer_cli(buyer_cli_binary, tmp_path_factory) -> BuyerCli:
         pytest.skip("Could not locate alkahest_anvil_addresses.json")
 
     registries = tuple(url for url in (vms_registry, credits_registry) if url)
+    # Every registry the buyer reads has to be pinned: discovery is
+    # authenticated in both directions and the CLI refuses outright ("Missing
+    # required [registry.authorities] identity pins") rather than reading an
+    # index whose responses it cannot attribute. Two registries here, because
+    # the schema filter routing to the credits one is what this scenario
+    # exercises — so the compute registry must be pinned as well, even though
+    # nothing in this scenario discovers through it.
+    authorities: dict[str, dict[str, Any]] = {
+        vms_registry.rstrip("/"): {
+            "authority": str(settings.REGISTRY.get("authority_id", "") or ""),
+            "identities": [
+                {
+                    "scheme": "eip191",
+                    "identifier": str(settings.REGISTRY.get("identifier", "") or ""),
+                }
+            ],
+        },
+        credits_registry.rstrip("/"): {
+            "authority": str(
+                settings.get("API_CREDITS.REGISTRY_AUTHORITY_ID", "") or ""
+            ),
+            "identities": [
+                {
+                    "scheme": str(
+                        settings.get("API_CREDITS.REGISTRY_SCHEME", "") or "ed25519"
+                    ),
+                    "identifier": str(
+                        settings.get("API_CREDITS.REGISTRY_IDENTIFIER", "") or ""
+                    ),
+                }
+            ],
+        },
+    }
+    missing = sorted(
+        url
+        for url, pin in authorities.items()
+        if not pin["authority"] or not pin["identities"][0]["identifier"]
+    )
+    if missing:
+        pytest.skip(f"registry authority pins not configured for {missing}")
     log.info("[credits_buyer_cli] registries=%s rpc=%s", registries, rpc_url)
     yield create_profiled_buyer_cli(
         binary=buyer_cli_binary,
@@ -90,6 +131,7 @@ def credits_buyer_cli(buyer_cli_binary, tmp_path_factory) -> BuyerCli:
         marketplace_scheme=IdentityScheme.EIP191,
         marketplace_credential=marketplace_credential,
         registries=registries,
+        registry_authorities=authorities,
         credential_variable="ARKHAI_E2E_BUYER_MARKETPLACE_CREDENTIAL",
         toml_sections=(
             "[wallet]",
@@ -99,6 +141,28 @@ def credits_buyer_cli(buyer_cli_binary, tmp_path_factory) -> BuyerCli:
             "[chains.anvil]",
             f"rpc_url = {_toml_quote(rpc_url)}",
             f"alkahest_address_config_path = {_toml_quote(alkahest_path)}",
+            "",
+            # Same reason as the VM buyer's section: a mechanism the buyer
+            # has installed is not one it will use, `enabled` defaults to
+            # false, and with no [Settlement] at all `credits buy` refuses
+            # with "no buyer settlement mechanism is enabled" before it
+            # writes its first run-log event. The credits seller prices its
+            # seeded listing in an anvil ERC-20, so alkahest is the
+            # mechanism to select here; the section is capitalised because
+            # lowercase is refused as legacy.
+            "[Settlement]",
+            "schema_version = 1",
+            'priority = ["alkahest.v1"]',
+            "",
+            "[Settlement.alkahest]",
+            "enabled = true",
+            # Alkahest resolves contract addresses through the mechanism
+            # section, not through the chain entry, so both name the file.
+            f"address_config_path = {_toml_quote(alkahest_path)}",
+            "oracle_gated = false",
+            "trusted_oracle_addresses = []",
+            "interruptible = false",
+            "interruptible_oracle_addresses = []",
             "",
         ),
     )
@@ -126,7 +190,10 @@ def test_credits_full_deal(
         "credits", "buy",
         "--quantity", "3",
         "--new-key",
-        "--service-name", "weather-api",
+        # `market credits buy` has no --service-name; service selection
+        # goes through the typed resource query, the same surface the
+        # VM buyer filters on.
+        "--resource", 'service_name="weather-api"',
         "--chain", "anvil",
         "--max-matches", "5",
         "--max-rounds", "10",
@@ -197,7 +264,10 @@ def test_credits_full_deal(
         "credits", "buy",
         "--quantity", "2",
         "--key-id", key_id,
-        "--service-name", "weather-api",
+        # `market credits buy` has no --service-name; service selection
+        # goes through the typed resource query, the same surface the
+        # VM buyer filters on.
+        "--resource", 'service_name="weather-api"',
         "--chain", "anvil",
         "--max-matches", "5",
         "--max-rounds", "10",

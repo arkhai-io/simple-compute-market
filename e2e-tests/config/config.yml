@@ -16,6 +16,11 @@ rpc:
 
 registry: # injected from environment profile file
   api_url:
+  # The registry's own signing principal, pinned so the client verifies
+  # signed responses, and the authority id it publishes under.
+  identifier:
+  authority_id:
+  bootstrap_api_key: ""
 
 buyer:
   # Marketplace signing is resolved only through the selected persistent
@@ -34,6 +39,8 @@ seller:
   base_url_override: "" # agent's seller.base_url in config.toml; used as resource_id in create_order auth. Defaults to api_url if unset.
   private_key:       "" # injected from secret profile file
   wallet_address:    ""
+  admin_scheme:     ""
+  admin_credential: ""
 
 tests:
   minimum_eth_balance: "0.01"
@@ -45,3 +52,26 @@ tests:
 
 provisioning:
   api_url: ""          # injected from environment profile file or ARKHAI_PROVISIONING__API_URL
+  # Caller credential for the provisioning admin principal, and the trust pin
+  # for the service's own signing principal. Both are injected per environment;
+  # provisioning authenticates each caller and signs its responses.
+  admin_scheme: "eip191"
+  admin_credential: ""
+  authority_scheme: "eip191"
+  authority_identifier: ""
+  service_scheme:     "eip191"
+  service_credential: ""
+
+# Second storefront (multi-registry scenario)
+alice:
+  api_url:
+  private_key:
+  wallet_address:
+  admin_scheme:     ""
+  admin_credential: ""
+
+# Access-gated second registry (multi-registry scenario).
+registry_b:
+  api_url: ""
+  authority_id: ""
+  identifier: ""

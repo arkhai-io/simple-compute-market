@@ -64,7 +64,7 @@ class TestBuildParams:
         svc = _make_service()
         params = svc._build_params({
             "vm_host": "ww2",
-            "executor_kind": "vm",
+            "offering_mode": "vm",
             "vm_target": "my-vm",
             "vm_action": "shutdown",
         })
@@ -74,7 +74,7 @@ class TestBuildParams:
 
     def test_defaults_applied_for_missing_keys(self):
         svc = _make_service()
-        params = svc._build_params({"executor_kind": "vm"})
+        params = svc._build_params({"offering_mode": "vm"})
         assert params.vm_host == "kvm1"  # from settings.default_vm_host
         assert params.vm_action == "create"
         assert params.image_setup_type == "scratch"
@@ -82,7 +82,7 @@ class TestBuildParams:
     def test_optional_fields_are_none_when_absent(self):
         svc = _make_service()
         params = svc._build_params({
-            "executor_kind": "vm",
+            "offering_mode": "vm",
             "vm_host": "kvm1",
             "vm_action": "list",
         })
@@ -97,7 +97,7 @@ class TestBuildParams:
             "vm_host": "kvm1",
             "vm_target": "test-vm",
             "vm_action": "create",
-            "executor_kind": "vm",
+            "offering_mode": "vm",
             "image_setup_type": "golden",
             "vm_ram": 8192,
             "vm_vcpus": 8,
@@ -143,7 +143,7 @@ class TestBuildParams:
         or it is absent."""
         svc = _make_service()
         params = svc._build_params(
-            {"vm_host": "kvm1", "vm_action": "create", "executor_kind": "vm"}
+            {"vm_host": "kvm1", "vm_action": "create", "offering_mode": "vm"}
         )
         assert params.relay_id is None
         assert params.vm_remote_port is None
@@ -152,7 +152,7 @@ class TestBuildParams:
 
     def test_returns_ansible_job_params_instance(self):
         svc = _make_service()
-        params = svc._build_params({"executor_kind": "vm"})
+        params = svc._build_params({"offering_mode": "vm"})
         assert isinstance(params, AnsibleJobParams)
 
     def test_bare_metal_fields_mapped(self):
@@ -161,7 +161,7 @@ class TestBuildParams:
             "vm_host": "bm-node-1",
             "vm_target": "bm-node-1",
             "vm_action": NODE_GRANT_ACCESS_ACTION,
-            "executor_kind": "bare_metal",
+            "offering_mode": "bare_metal",
             "executor_action": NODE_GRANT_ACCESS_ACTION,
             "executor_target": "bm-node-1",
             "executor_ref": {
@@ -177,7 +177,7 @@ class TestBuildParams:
         })
 
         assert params.escrow_uid == "0xbm"
-        assert params.executor_kind == "bare_metal"
+        assert params.offering_mode == "bare_metal"
         assert params.executor_action == NODE_GRANT_ACCESS_ACTION
         assert params.executor_target == "bm-node-1"
         assert params.executor_ref == {
@@ -193,20 +193,20 @@ class TestBuildParams:
     def test_explicit_vm_identity_maps_legacy_vm_action_fields(self):
         svc = _make_service()
         params = svc._build_params({
-            "executor_kind": "vm",
+            "offering_mode": "vm",
             "vm_host": "kvm1",
             "vm_target": "test-vm",
             "vm_action": "shutdown",
         })
 
-        assert params.executor_kind == "vm"
+        assert params.offering_mode == "vm"
         assert params.executor_action == "shutdown"
         assert params.executor_target == "test-vm"
 
-    def test_missing_executor_kind_fails_closed(self):
+    def test_missing_offering_mode_fails_closed(self):
         svc = _make_service()
 
-        with pytest.raises(KeyError, match="executor_kind"):
+        with pytest.raises(KeyError, match="offering_mode"):
             svc._build_params({
                 "vm_host": "kvm1",
                 "vm_target": "test-vm",
@@ -218,7 +218,7 @@ class TestBuildParams:
         params = svc._build_params({
             "vm_host": "kvm1",
             "vm_action": "list",
-            "executor_kind": "vm",
+            "offering_mode": "vm",
             "executor_action": "list",
             "executor_target": "kvm1",
         })
@@ -231,7 +231,7 @@ class TestPlaybookSelection:
     def test_vm_actions_use_vm_playbook(self):
         svc = _make_service()
         params = AnsibleJobParams(
-            vm_host="kvm1", vm_action="create", executor_kind="vm"
+            vm_host="kvm1", vm_action="create", offering_mode="vm"
         )
 
         assert svc._playbook_path_for_params(params) == Path("/playbooks/vm-operations.yaml")
@@ -241,17 +241,17 @@ class TestPlaybookSelection:
         params = AnsibleJobParams(
             vm_host="bm-node-1",
             vm_action=NODE_RECLAIM_ACCESS_ACTION,
-            executor_kind="bare_metal",
+            offering_mode="bare_metal",
         )
 
         assert svc._playbook_path_for_params(params) == Path("/playbooks/node-access.yaml")
 
-    def test_bare_metal_executor_kind_uses_bare_metal_playbook(self):
+    def test_bare_metal_offering_mode_uses_bare_metal_playbook(self):
         svc = _make_service()
         params = AnsibleJobParams(
             vm_host="bm-node-1",
             vm_action="grant_access",
-            executor_kind="bare_metal",
+            offering_mode="bare_metal",
             executor_action="grant_access",
         )
 

@@ -86,13 +86,13 @@ async def make_vm_lifecycle_fixture(
         status="open",
         created_at="2026-01-01T00:00:00Z",
         updated_at="2026-01-01T00:00:00Z",
-        offer_resource={
+        listing_resource={
             "pool_id": pool_id,
             "gpu_model": "A100",
             "gpu_count": 1,
             "sla": 99.0,
             "region": "test-region",
-            "virtualization_type": "vm",
+            "offering_mode": "vm",
             "interruptible": interruptible,
         },
         fulfillment_resource=None,

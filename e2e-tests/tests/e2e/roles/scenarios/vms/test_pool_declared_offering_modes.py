@@ -29,7 +29,7 @@ def test_undeclared_mode_is_refused_before_a_reservation_exists(
             "/api/v1/capacity/reservations",
             {
                 "claim": {
-                    "executor_kind": "e2e_unsupported_mode",
+                    "offering_mode": "e2e_unsupported_mode",
                     "resource_id": resource_id,
                     "units": 1,
                 },

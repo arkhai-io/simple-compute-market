@@ -17,7 +17,7 @@ from __future__ import annotations
 from functools import lru_cache
 from typing import Any
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
 from jsonschema import Draft202012Validator
 from jsonschema.exceptions import ValidationError
 
@@ -30,6 +30,7 @@ from src.api.publisher_auth import (
     complete_authenticated_request,
     registry_authority_signer,
     signed_response,
+    wire_body,
 )
 from src.db.database import get_db
 from sqlalchemy.orm import Session
@@ -48,6 +49,73 @@ def _reset_cache() -> None:
     _validator.cache_clear()
 
 
+def reject_retired_listing_shape(body: Any) -> None:
+    """Refuse a listing whose shape uses a retired spelling.
+
+    The same `listing_shape` schema the dry-run route validates against and
+    `GET /filter-spec` serves, applied at the mutation boundary so that a
+    publisher cannot be told `valid=false` by the dry run and still publish
+    successfully. A shape opinion that only the dry run holds is advisory.
+
+    Scoped to the retired spellings rather than enforcing the whole schema
+    here. Full enforcement at publish would reject listings this registry has
+    accepted for as long as it has existed -- a different and larger decision
+    than closing the cutover. `additionalProperties` stays open, so a seller
+    may carry any attribute the schema does not name; what is refused is
+    exactly `offer`, `offer_resource`, and `listing_resource.virtualization_type`.
+
+    Refused rather than ignored because this boundary's skew is invisible: the
+    offering-mode field is optional, so a listing carrying the retired
+    spelling publishes, stores, and then matches nothing a buyer filters on,
+    with no signal to the seller. Naming the field and its replacement is safe
+    disclosure -- the prohibition is already public in the served spec.
+    """
+
+    shape = get_loaded_spec().listing_shape
+    retired: list[str] = []
+    for key in ("offer", "offer_resource"):
+        if _forbids_property(shape, key) and isinstance(body, dict) and key in body:
+            retired.append(key)
+    resource = body.get("listing_resource") if isinstance(body, dict) else None
+    nested = shape.get("properties", {}).get("listing_resource", {})
+    for key in _forbidden_properties(nested):
+        if isinstance(resource, dict) and key in resource:
+            retired.append(f"listing_resource.{key}")
+    if retired:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "error": "retired_listing_shape",
+                "retired_fields": sorted(retired),
+                "message": (
+                    "The published listing shape is named `listing_resource` "
+                    "and its offering-mode field `offering_mode`. See "
+                    "GET /filter-spec."
+                ),
+            },
+        )
+
+
+def _forbidden_properties(schema: dict[str, Any]) -> list[str]:
+    """Property names a schema's ``not`` clause forbids by requiring them."""
+
+    prohibition = schema.get("not")
+    if not isinstance(prohibition, dict):
+        return []
+    clauses = prohibition.get("anyOf")
+    if not isinstance(clauses, list):
+        clauses = [prohibition]
+    names: list[str] = []
+    for clause in clauses:
+        if isinstance(clause, dict):
+            names.extend(clause.get("required", []) or [])
+    return names
+
+
+def _forbids_property(schema: dict[str, Any], key: str) -> bool:
+    return key in _forbidden_properties(schema)
+
+
 def _format_path(err: ValidationError) -> str:
     """Render a jsonschema error's absolute_path as a JSONPath-ish string."""
     if not err.absolute_path:
@@ -59,23 +127,6 @@ def _format_path(err: ValidationError) -> str:
         else:
             parts.append("." + p if parts else p)
     return "".join(parts)
-
-
-def _derive_offer_resource_type(offer_resource: dict[str, Any]) -> str | None:
-    """Best-effort resource-type tag for the response body.
-
-    Cosmetic — the actual accept/reject decision is the schema's, not
-    this function's.  Kept for back-compat with registry-client's
-    ``ValidatePublishResponse.offer_resource_type``; will be dropped
-    when the client updates in a1b-4.
-    """
-    if not offer_resource:
-        return None
-    if "gpu_model" in offer_resource or "region" in offer_resource:
-        return "compute"
-    if "token" in offer_resource:
-        return "token"
-    return None
 
 
 @router.post(
@@ -95,14 +146,16 @@ async def validate_publish(
     body: ValidatePublishRequest,
     db: Session = Depends(get_db),
 ):
-    request_body = body.model_dump(mode="json")
+    # Authenticate against the bytes the caller signed. `body` stays the parsed
+    # model for the validation below, but its `model_dump` materializes every
+    # defaulted field, which is a different document from the one hashed.
     authenticated = authenticate_publisher_request(
         request=request,
         db=db,
         method="POST",
         operation="listing.validate",
         resource="listings",
-        body=request_body,
+        body=wire_body(await request.body()),
         allowed_roles=frozenset({"buyer", "seller", "service"}),
     )
     require_read_access(request, db)
@@ -113,7 +166,7 @@ async def validate_publish(
     candidate: dict[str, Any] = {
         "listing_id": body.listing_id,
         "storefront_url": body.storefront_url,
-        "offer_resource": body.offer_resource,
+        "listing_resource": body.listing_resource,
         "accepted_escrows": body.accepted_escrows,
         "settlement_options": body.settlement_options,
         "demands": body.demands,
@@ -130,7 +183,6 @@ async def validate_publish(
     response_body = ValidatePublishResponse(
         valid=not errors,
         listing_id=body.listing_id,
-        offer_resource_type=_derive_offer_resource_type(body.offer_resource),
         accepted_escrows_count=len(body.accepted_escrows),
         settlement_options_count=len(body.settlement_options),
         errors=errors,

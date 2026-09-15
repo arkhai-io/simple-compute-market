@@ -97,7 +97,7 @@ def _resource(ledger, resource_id: str, pool_id: str, *, units: int = 4, enabled
 
 def _reserve(ledger, agreement="agreement-1", **deal):
     ref = {"agreement_id": agreement, "market": "vms", **deal}
-    result = ledger.reserve(claim={"executor_kind": "vm", **{"gpu_count": 1}}, deal_ref=ref)
+    result = ledger.reserve(claim={"offering_mode": "vm", **{"gpu_count": 1}}, deal_ref=ref)
     assert result is not None
     return result["capacity_reservation_id"]
 
@@ -120,7 +120,7 @@ def test_expired_reservation_is_rejected(services):
     pools, ledger, scheduler = services
     _pool(pools, "pool-a")
     _resource(ledger, "r1", "pool-a")
-    result = ledger.reserve(claim={"executor_kind": "vm", **{"gpu_count": 1}}, deal_ref={"agreement_id": "agreement-1", "market": "vms"},
+    result = ledger.reserve(claim={"offering_mode": "vm", **{"gpu_count": 1}}, deal_ref={"agreement_id": "agreement-1", "market": "vms"},
     ttl_seconds=-1,)
     with pytest.raises((CapacityReservationExpiredError, SettlementRequestMismatchError)):
         scheduler.schedule_resource(_request(result["capacity_reservation_id"]))
@@ -256,7 +256,7 @@ def _resource_with_capacity(ledger, resource_id: str, pool_id: str, *, capacity:
 
 def _reserve_with_dimensions(ledger, dimensions: dict, agreement="agreement-1", **deal):
     ref = {"agreement_id": agreement, "market": "vms", "requirements": {"dimensions": dimensions}, **deal}
-    result = ledger.reserve(claim={"executor_kind": "vm", **{"dimensions": dimensions}}, deal_ref=ref)
+    result = ledger.reserve(claim={"offering_mode": "vm", **{"dimensions": dimensions}}, deal_ref=ref)
     assert result is not None
     return result["capacity_reservation_id"]
 
@@ -326,7 +326,7 @@ def test_scheduler_credit_back_covers_full_capacity_legacy_reservation(services)
     pools, ledger, scheduler = services
     _pool(pools, "pool-a")
     _resource(ledger, "r1", "pool-a", units=4)
-    result = ledger.reserve(claim={"executor_kind": "vm", **{"gpu_count": 4}}, deal_ref={
+    result = ledger.reserve(claim={"offering_mode": "vm", **{"gpu_count": 4}}, deal_ref={
         "agreement_id": "agreement-1", "market": "vms",
     })
     assert result is not None
@@ -345,7 +345,7 @@ def _reserve_multi(ledger, dimensions: dict, agreement="agreement-1"):
     the reservation declares) doesn't itself reject a deliberately
     *different*, narrower schedule-time request before the exceeds-check
     below ever runs."""
-    result = ledger.reserve(claim={"executor_kind": "vm", **{"dimensions": dimensions}}, deal_ref={"agreement_id": agreement, "market": "vms"},)
+    result = ledger.reserve(claim={"offering_mode": "vm", **{"dimensions": dimensions}}, deal_ref={"agreement_id": agreement, "market": "vms"},)
     assert result is not None
     return result["capacity_reservation_id"]
 
@@ -370,7 +370,7 @@ def test_scheduled_dimensions_reflect_narrowed_request_not_full_reservation(serv
 
     A negotiation may narrow a scheduling request without (yet) resizing the
     underlying reservation -- e.g. a placement/pricing check against a
-    candidate counter-offer shape. What gets provisioned if that shape is
+    candidate counter-listing_resource shape. What gets provisioned if that shape is
     accepted is the narrower, scheduled shape, not the original reservation's
     full amount. `_resource_from_record` (scheduler.py) correctly populates
     `SettlementResource.dimensions` from `record.scheduling_requirements`
@@ -543,7 +543,7 @@ def test_cursor_is_isolated_per_resource_kind(services):
     )
 
     def _reserve_kind(resource_type: str, agreement: str) -> str:
-        result = ledger.reserve(claim={"executor_kind": "vm", **{"resource_type": resource_type, "gpu_count": 1}}, deal_ref={"agreement_id": agreement, "market": "vms"},)
+        result = ledger.reserve(claim={"offering_mode": "vm", **{"resource_type": resource_type, "gpu_count": 1}}, deal_ref={"agreement_id": agreement, "market": "vms"},)
         assert result is not None
         return result["capacity_reservation_id"]
 
@@ -879,3 +879,133 @@ def test_interleaved_independent_sessions_do_not_perturb_other_resource_kind_cur
         cpu_row = repo.get_cursor_in_session(db, "compute.cpu")
         assert gpu_row.last_pool_id == "pool-a"
         assert cpu_row.last_pool_id == "pool-b"
+
+
+# ---------------------------------------------------------------------------
+# Categorical constraints survive admission
+#
+# Round-robin placement is deliberate: a site admin may back a deal with any
+# resource that satisfies it, and spreading load across pools is the point.
+# What these cover is the boundary on that freedom -- the constraints the deal
+# was actually admitted against. `dimensions` always survived into scheduling;
+# the categorical half of the claim did not, so every resource with room was
+# eligible for every deal and which one won came down to a site-wide cursor.
+# ---------------------------------------------------------------------------
+
+
+def _reserve_claiming(ledger, claim, agreement="agreement-1"):
+    result = ledger.reserve(
+        claim={"offering_mode": "vm", "gpu_count": 1, **claim},
+        deal_ref={"agreement_id": agreement, "market": "vms"},
+    )
+    assert result is not None
+    return result["capacity_reservation_id"]
+
+
+def _attributed_resource(ledger, resource_id, pool_id, *, units=4, **attributes):
+    ledger.register_resource(
+        resource_id=resource_id,
+        resource_type="compute.gpu",
+        total_units=units,
+        pool_id=pool_id,
+        attributes=dict(attributes),
+    )
+
+
+def test_categorical_claim_excludes_a_resource_the_deal_was_not_admitted_against(
+    services,
+):
+    """A deal sold as one GPU model does not settle on another.
+
+    Both candidates have room and both pools deliver the mode, so before the
+    reservation carried its claim this was decided by the round-robin cursor
+    alone -- an H200 was a legal placement for an RTX-5080 deal.
+    """
+    pools, ledger, scheduler = services
+    _pool(pools, "pool-a")
+    _pool(pools, "pool-b")
+    _attributed_resource(ledger, "a1", "pool-a", gpu_model="RTX 5080", units=10)
+    _attributed_resource(ledger, "b1", "pool-b", gpu_model="H200", units=10)
+
+    # Walk the shared cursor onto pool-a so the *next* unconstrained placement
+    # is pool-b. Without this the fresh cursor picks pool-a first and the
+    # assertion below passes whether or not the claim is enforced.
+    control = scheduler.schedule_resource(_request(_reserve(ledger, agreement="warm")))
+    assert control.settlement_resource_id == "a1"
+
+    reservation_id = _reserve_claiming(ledger, {"gpu_model": "RTX 5080"})
+    resource = scheduler.schedule_resource(_request(reservation_id))
+
+    assert resource.settlement_resource_id == "a1"
+
+
+def test_a_resource_pinned_claim_is_not_reassigned_by_the_cursor(services):
+    """A listing that named its resource keeps it through scheduling.
+
+    The pin needs no separate mechanism: `resource_feasibility_view`
+    normalizes `resource_id` into the attribute mapping claims are matched
+    against, so a resource-specific claim is carried and enforced as an
+    ordinary categorical constraint.
+
+    The warm-up placement is what makes this a real test: it leaves the
+    shared cursor on `pool-a`, so the next unpinned deal would land in
+    `pool-b`. The pin has to beat the cursor, not agree with it.
+    """
+    pools, ledger, scheduler = services
+    _pool(pools, "pool-a")
+    _pool(pools, "pool-b")
+    _attributed_resource(ledger, "a1", "pool-a", units=10)
+    _attributed_resource(ledger, "b1", "pool-b", units=10)
+    # One warm-up, not two: the cursor must end up pointing at pool-a so an
+    # unpinned deal would be placed in pool-b. An even number would return it
+    # to pool-a and the pin would be indistinguishable from the cursor.
+    control = scheduler.schedule_resource(_request(_reserve(ledger, agreement="warm")))
+    assert control.settlement_resource_id == "a1"
+
+    pinned = _reserve_claiming(ledger, {"resource_id": "a1"}, agreement="pinned")
+    resource = scheduler.schedule_resource(_request(pinned))
+
+    assert resource.settlement_resource_id == "a1"
+
+
+def test_scheduling_a_categorical_claim_with_no_match_is_refused_not_reassigned(
+    services,
+):
+    """Nothing satisfies the claim, so nothing is placed.
+
+    The failure mode worth pinning: a claim whose categorical constraint no
+    resource meets must not fall back to whatever had capacity.
+    """
+    pools, ledger, scheduler = services
+    _pool(pools, "pool-a")
+    _attributed_resource(ledger, "a1", "pool-a", gpu_model="RTX 5080")
+    reservation_id = _reserve_claiming(ledger, {"gpu_model": "RTX 5080"})
+    # Re-register the only resource as a different model after admission.
+    _attributed_resource(ledger, "a1", "pool-a", gpu_model="H200")
+
+    with pytest.raises(NoEligibleSettlementResourceError):
+        scheduler.schedule_resource(_request(reservation_id))
+
+
+def test_a_request_may_narrow_the_claim_but_not_contradict_it(services):
+    """Same precedence rule the dimensions below it already follow.
+
+    A caller adding a constraint the reservation does not govern is narrowing
+    and allowed; a caller restating one with a different value is relaxing what
+    admission accepted and is refused.
+    """
+    pools, ledger, scheduler = services
+    _pool(pools, "pool-a")
+    _attributed_resource(ledger, "a1", "pool-a", gpu_model="RTX 5080", region="us-west")
+    reservation_id = _reserve_claiming(ledger, {"gpu_model": "RTX 5080"})
+
+    narrowed = scheduler.schedule_resource(
+        _request(reservation_id, requirements={"attributes": {"region": "us-west"}})
+    )
+    assert narrowed.settlement_resource_id == "a1"
+
+    other = _reserve_claiming(ledger, {"gpu_model": "RTX 5080"}, agreement="other")
+    with pytest.raises(SettlementRequestMismatchError, match="contradict"):
+        scheduler.schedule_resource(
+            _request(other, requirements={"attributes": {"gpu_model": "H200"}})
+        )

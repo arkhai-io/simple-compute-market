@@ -195,7 +195,7 @@ def test_sqlite_migration_accepts_pre_compute_inventory_schema(tmp_path):
             CREATE TABLE listings (
               listing_id TEXT PRIMARY KEY,
               status TEXT NOT NULL,
-              offer_resource TEXT,
+              listing_resource TEXT,
               seller TEXT
             )
             """

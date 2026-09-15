@@ -8,7 +8,7 @@ See `proposal.md` for motivation. The implementation must start from these obser
 - VM publication records site/pool/resource/slice state in `derived_compute_listings`. Bare-metal persistence has a different `derived_bare_metal_listings` shape and a separate `bare_metal_agreement_payloads` table. The VM database also creates an older, incomplete bare-metal mapping shape. Request-time lookup of one of those tables would require exactly the VM-versus-bare-metal branching this change forbids.
 - The trusted capacity aggregator already routes `reserve(site=...)` to exactly one configured site. Its commit/release paths and `AggregateFulfillmentClient` use a process-local reservation-to-site cache and fan out on a cold cache after restart. That is unacceptable once an accepted record already owns a trusted site; this change must add an exact site-addressed route for every subsequent capacity/fulfillment call.
 - VM uses domain kind `compute.v1` but pool/executor offering mode `vm`; bare metal uses domain kind `bare_metal.v1` and mode `bare_metal`. These namespaces are related by explicit registration, not by string conversion.
-- The registry filter already admits `offer_resource.virtualization_type` values `vm`, `bare_metal`, and `container`. Current VM publication does not emit it. `publish-multidimensional-listing-shape` owns capacity-dimension projection but its current artifacts do not specify mode routing.
+- The registry filter already admits `listing_resource.offering_mode` values `vm`, `bare_metal`, and `container`. Current VM publication does not emit it. `publish-multidimensional-listing-shape` owns capacity-dimension projection but its current artifacts do not specify mode routing.
 - `pool-declared-offering-modes` owns the deliverable-mode tag, explicit requested mode, removal of VM defaults, legacy reservation policy, and independent reservation/scheduling/provisioning enforcement. `pools-7-storefront-fulfillment-cutover` and the bare-metal seller composition own real scheduling, result, recovery, and teardown ports. This change consumes those boundaries and must stop rather than fake one that is absent.
 
 ## Goals / Non-Goals
@@ -70,7 +70,7 @@ The check records exact promoted headings, package APIs, and focused evidence in
   one-process live bare-metal proof remains a parent-run prerequisite. No fake,
   no-op, payload inference, or default substitutes for that producer.
 - The canonical public discriminator was already
-  `offer_resource.virtualization_type`; this change persists its exact value in
+  `listing_resource.offering_mode`; this change persists its exact value in
   `StorefrontDomainBinding` and rejects any normalized-public disagreement.
   Existing registry filters/builders remain the only public schema owner; no
   alternate discriminator was added.
@@ -106,7 +106,7 @@ The serializable binding contains no callable, URL, provider field, or secret. `
 
 Resolution compares all binding fields and returns the already registered object. It never calls an entry point during a request and never constructs a contract from stored strings. A stable domain identity is unique in the current core contract, so simultaneously registering two API versions of that identity remains invalid; accepting an old durable version requires installing that exact version as the sole registration for the identity during recovery or completing an explicit domain migration.
 
-Alternative considered: use artifact `kind` or `virtualization_type` as the only key. Rejected because each is caller/public payload, neither pins the core plugin API version, and VM's domain identity is not its pool mode.
+Alternative considered: use artifact `kind` or `offering_mode` as the only key. Rejected because each is caller/public payload, neither pins the core plugin API version, and VM's domain identity is not its pool mode.
 
 Alternative considered: ordered registrations with a default. Rejected because order changes across configuration renders and a one-element registry would silently recreate the VM fallback.
 
@@ -152,14 +152,14 @@ Domain artifacts that are not already universal thread/settlement fields use one
 
 The selector sequence is fixed:
 
-1. **Publication:** iterate frozen registrations; get that registration's publication source; require the source candidate's pool to declare `registration.offering_mode`; normalize the listing; persist listing + common binding; publish `offer_resource.virtualization_type` from the binding.
+1. **Publication:** iterate frozen registrations; get that registration's publication source; require the source candidate's pool to declare `registration.offering_mode`; normalize the listing; persist listing + common binding; publish `listing_resource.offering_mode` from the binding.
 2. **New negotiation:** load listing binding; reject closed/withdrawn mode; resolve exact contract; compare provision envelope kind/version; transactionally copy the binding; invoke the selected policy.
 3. **Continuation/acceptance:** load thread binding, not the listing or request; normalize messages/Terms and build the accepted plan through that contract.
 4. **Settlement/materialization:** load the accepted thread; resolve its contract; verify/build/adopt the immutable plan; write binding/site into safe fulfillment context.
 5. **Capacity:** pass the recorded offering mode as the explicit requested mode and the recorded trusted site as a targeted call. Pool declaration enforcement remains authority-owned and is rechecked there.
 6. **Scheduling/fulfillment:** call the recorded site's client directly; pass the existing generic `market` namespace and a versioned domain fulfillment envelope prepared by the selected contract. The provisioning service retains its own immutable market/request and recorded executor identity.
 7. **Status/result:** address the recorded site and fulfillment ID; validate the generic result envelope; decode `domain_result` only with the accepted contract's result codec. A mismatched kind is data-integrity failure, never a dispatch hint.
-8. **Teardown/recovery:** use the same thread binding, site, reservation/fulfillment IDs, and operation journal. The provisioning authority dispatches by its recorded executor kind; the storefront does not recalculate it from the current pool or listing.
+8. **Teardown/recovery:** use the same thread binding, site, reservation/fulfillment IDs, and operation journal. The provisioning authority dispatches by its recorded offering mode; the storefront does not recalculate it from the current pool or listing.
 
 A registration or pool mode can disappear for new work, but accepted binding identity never changes. Startup fails readiness when a nonterminal/recoverable record cannot resolve. Terminal history with an unavailable old codec remains inspectable as safe opaque status; any operation requesting domain decoding reports the missing exact binding rather than guessing.
 
@@ -202,9 +202,9 @@ A database with no discriminator never infers VM from missing values, one instal
 
 Rollback before activation restores the backup plus prior package/config together. Once a new bound negotiation/reservation/fulfillment exists, rollback is forward recovery under the recorded schema and exact contributions.
 
-### 9. Treat `virtualization_type` as the one public offering-mode field
+### 9. Treat `offering_mode` as the one public offering-mode field
 
-The registry already validates and filters `offer_resource.virtualization_type`; no second `offering_mode`, `domain`, or executor field is added to the public listing. The public field is a projection of the durable binding and cannot select a contract on ingress. The domain provision envelope remains the buyer's assertion checked against the server record.
+The registry already validates and filters `listing_resource.offering_mode`; no second `offering_mode`, `domain`, or executor field is added to the public listing. The public field is a projection of the durable binding and cannot select a contract on ingress. The domain provision envelope remains the buyer's assertion checked against the server record.
 
 If `publish-multidimensional-listing-shape` publishes this field before implementation, reuse its builder and fixtures. That change continues to own capacity-dimension projection; this change owns binding equality and lifecycle routing.
 

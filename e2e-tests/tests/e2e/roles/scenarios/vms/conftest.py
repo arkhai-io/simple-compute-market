@@ -11,7 +11,8 @@ Clients
 * ``storefront_client``        — canonical ``SyncStorefrontClient``, buyer key
 * ``storefront_admin_client``  — same, seller key + admin key
 * ``registry_client``          — ``SyncRegistryClient`` from the registry-client wheel
-* ``provisioning_client``      — canonical ``SyncProvisioningClient``
+* ``provisioning_client``      — ``SyncProvisioningClient`` signing as the
+  provisioning admin principal
 * ``provisioning_test_client`` — thin sync wrapper over ``/test/*`` endpoints
 
 Settings access uses the ``settings.SECTION.KEY`` attribute pattern
@@ -26,6 +27,18 @@ from typing import Any, Optional
 
 import pytest
 
+import uuid
+from datetime import datetime, timezone
+
+from market_identity import (
+    EMPTY_BODY,
+    Identity,
+    RequestEnvelope,
+    TrustedIdentitySet,
+    canonical_body_hash,
+    create_signer,
+    sign_request,
+)
 from src.settings import settings
 from src.provisioning_test_client import ProvisioningTestClient
 from tests.e2e.roles.helpers.domain_deal import DomainDealState, require_state
@@ -45,6 +58,10 @@ class DealState(DomainDealState):
     _storefront_healthy: bool = False
     _registry_reachable: bool = False
     _provisioning_healthy: bool = False
+    #: Both ends of the storefront-to-provisioning wire reported an
+    #: agreeing contract major. Gated before any mutating stage so a
+    #: later failure cannot be explained away as version skew.
+    _contract_pins_agree: bool = False
     _provisioning_mock_mode: bool = False
     _negotiation_strategy_viable: bool = False
     _resources_seeded: bool = False
@@ -116,6 +133,16 @@ class DealState(DomainDealState):
     # row in embedded-capacity mode, a site-ledger reservation in remote
     # mode. Phases 10-11 drive the expiry lifecycle through it.
     deal_lease: Optional[Any] = None
+    # Set by whichever stage steps the capacity-event loop (`B4c`, `09a2`),
+    # and required by the stage that asserts a derived listing closed.
+    #
+    # Declared rather than attached ad hoc by those stages. `require_state`
+    # reads through `getattr(..., None)`, so an undeclared sentinel skips its
+    # dependents identically whether the producing stage failed or the name
+    # was simply misspelled on one of the two sides -- a scenario that silently
+    # skips forever looks like a passing run. A declared default of False makes
+    # the absent case a stated precondition instead of a typo's side effect.
+    _capacity_events_advanced: bool = False
 
 
 
@@ -147,6 +174,260 @@ def _require_setting(value: Any, name: str) -> str:
     return str(value)
 
 
+
+
+def signed_listing_read_headers(listing_id: str) -> dict[str, str]:
+    """v2 headers for a registry `GET /listings/{id}` as the buyer.
+
+    The route authenticates and admits `buyer`, `seller`, or `service`; an
+    unsigned read is refused with `context_mismatch` rather than answered. The
+    reads below stay raw rather than going through the typed client because
+    they assert on the status code itself — 200 against 404 is what
+    distinguishes "published here" from "not published here", and the client
+    raises instead of reporting it.
+
+    The signed body must match what the route hashes, which for a query-less
+    GET is an empty query list rather than an empty body.
+    """
+    signer = _signer(
+        "eip191", settings.BUYER.MARKETPLACE_CREDENTIAL, "BUYER.MARKETPLACE_CREDENTIAL"
+    )
+    authenticated = sign_request(
+        signer=signer,
+        envelope=RequestEnvelope(
+            role="buyer",
+            principal=signer.identity,
+            method="GET",
+            operation="listing.get",
+            resource=listing_id,
+            request_id=uuid.uuid4().hex,
+            timestamp=int(datetime.now(timezone.utc).timestamp()),
+            body_hash=canonical_body_hash({"query": []}),
+        ),
+    )
+    return {
+        "X-Market-Signature-Version": authenticated.protocol,
+        "X-Market-Identity-Scheme": authenticated.principal.scheme.value,
+        "X-Market-Identity-Identifier": authenticated.principal.identifier,
+        "X-Market-Role": authenticated.role,
+        "X-Market-Request-ID": authenticated.request_id,
+        "X-Market-Timestamp": str(authenticated.timestamp),
+        "X-Market-Signature": authenticated.proof.value,
+    }
+
+def capacity_site_id() -> str:
+    """The site the storefront publishes capacity against.
+
+    Fulfillment callbacks are scoped to a site, and the value matches
+    `[capacity.sites]` in the storefront config.
+    """
+    return str(settings.SELLER.get("site_id", "default") or "default")
+
+
+def capacity_source_for(resource: dict[str, Any], *, site_id: str | None = None) -> dict[str, Any]:
+    """Capacity provenance bound to the listing resource being published.
+
+    The storefront refuses a listing whose declared source disagrees with its
+    resource on pool, resource, or GPU count, so this is derived from the
+    resource rather than restated alongside it — a hand-written copy is a
+    second place that has to stay in sync.
+    """
+    source: dict[str, Any] = {
+        "site_id": site_id or str(settings.SELLER.get("site_id", "default") or "default"),
+        "gpu_count": resource.get("gpu_count", 1),
+    }
+    # Both when the resource declares both: a `specific_resource` member is
+    # pool-bound *and* resource-keyed, and the storefront compares the two
+    # fields independently, so an either/or copy disagrees with the resource
+    # it was derived from.
+    if resource.get("pool_id"):
+        source["pool_id"] = resource["pool_id"]
+    if resource.get("resource_id"):
+        source["resource_id"] = resource["resource_id"]
+    return source
+
+
+# ---------------------------------------------------------------------------
+# Identity helpers
+#
+# Every authenticated route resolves the caller's principal against the trust
+# set bound to the role the request asserts, so a client carries exactly one
+# role and the credential of the principal authorized to hold it. One client
+# per role, named for the role, keeps that visible at the call site and in the
+# service's request logs.
+# ---------------------------------------------------------------------------
+
+def _signer(scheme: Any, credential: Any, name: str):
+    return create_signer(
+        str(scheme or "eip191"),
+        _require_setting(credential, name),
+    )
+
+
+def _trust(*identifiers: str, scheme: str = "eip191"):
+    return TrustedIdentitySet(
+        identities=tuple(
+            Identity(scheme=scheme, identifier=str(i)) for i in identifiers
+        )
+    )
+
+
+def _publisher_trust():
+    """The storefront's publishing principal, pinned for response verification."""
+
+    return _trust(
+        _signer(
+            settings.SELLER.get("admin_scheme", "eip191"),
+            settings.SELLER.PRIVATE_KEY,
+            "SELLER.PRIVATE_KEY",
+        ).identity.identifier
+    )
+
+
+
+def _provisioning_admin_signer():
+    """Signer for the principal pinned as the provisioning admin identity."""
+
+    return _signer(
+        settings.PROVISIONING.get("admin_scheme", "eip191"),
+        settings.PROVISIONING.get("admin_credential", ""),
+        "PROVISIONING.ADMIN_CREDENTIAL",
+    )
+
+
+def _provisioning_authority_trust():
+    """The provisioning service's own signing principal, for response checks."""
+
+    return _trust(
+        _require_setting(
+            settings.PROVISIONING.get("authority_identifier", ""),
+            "PROVISIONING.AUTHORITY_IDENTIFIER",
+        ),
+        scheme=str(settings.PROVISIONING.get("authority_scheme", "eip191") or "eip191"),
+    )
+
+
+@pytest.fixture(scope="module")
+def site_capacity_admin_client():
+    """Capacity-admin client for the provisioning site authority.
+
+    The site ledger is a separate store from the host registry: `probe` and
+    `reserve` match `CapacityBucket` rows, which only `register_resource`
+    creates, and nothing derives one from a registered host. A scenario that
+    reserves capacity has to put a resource there.
+
+    Signs as the **storefront** principal, not the provisioning administrator.
+    `SiteCapacityAdminClient` asserts the `seller` role, and provisioning binds
+    that role to the storefront principal it is configured to serve; the
+    administrator is trusted for `admin` and is refused here with
+    `Invalid marketplace authentication`. Declaring sellable capacity is a
+    seller's act, so the role and the principal agree with what the call means.
+
+    The August fixture passed a shared admin key, under which the caller's
+    identity did not matter. It does now, and the two principals are not
+    interchangeable.
+    """
+    from market_site_client import SiteCapacityAdminClient
+
+    url = _require_setting(settings.PROVISIONING.API_URL, "PROVISIONING.API_URL")
+    return SiteCapacityAdminClient(
+        url,
+        _signer("eip191", settings.SELLER.PRIVATE_KEY, "SELLER.PRIVATE_KEY"),
+        _provisioning_authority_trust(),
+    )
+
+
+def advance_storefront(storefront_admin_client, loop: str) -> dict:
+    """Run one cycle of a paused storefront loop and return what it reports.
+
+    `loop` is the loop's route name: `claims`, `fulfillment-resume`, or
+    `site-projections`. Each calls the operation the timer was already
+    invoking, so a stage advances production behaviour rather than a test-only
+    path.
+
+    This is the other half of `pause_storefront`. Pausing without advancing
+    just stops the system; the pair is what makes ordering assertable -- a
+    stage asks for the work it is about to assert on, instead of racing a timer
+    that may or may not have run.
+    """
+    result = storefront_admin_client.admin_run_lifecycle_cycle(loop)
+    log.info("[lifecycle] advanced %s: %s", loop, result)
+    return result
+
+
+def dry_run_storefront(storefront_admin_client, loop: str) -> dict:
+    """Report what one cycle of a paused loop would do, without doing it.
+
+    The read half of `advance_storefront`. A capacity-event cycle closes and
+    reopens derived listings, so advancing changes what buyers can discover;
+    asking first is what lets a stage assert the cause (the pending events)
+    separately from the effect (the listing's status), instead of asserting
+    the effect and inferring the cause.
+    """
+    result = storefront_admin_client.admin_dry_run_lifecycle_cycle(loop)
+    log.info("[lifecycle] dry-run %s: %s", loop, result)
+    return result
+
+
+def one_site(report: dict) -> dict:
+    """The single site in a lifecycle report, refusing an ambiguous one.
+
+    These scenarios drive a storefront with one configured site. Picking the
+    first of several would make an assertion about whichever site happened to
+    be enumerated first.
+    """
+    sites = report.get("sites") or []
+    assert len(sites) == 1, (
+        f"expected exactly one configured capacity site, got "
+        f"{[site.get('site') for site in sites]!r}"
+    )
+    return sites[0]
+
+
+def pause_storefront(storefront_admin_client) -> bool:
+    """Hold the storefront's timer loops idle, and prove they are.
+
+    Pauses the loops only -- trading stays open, so a scenario can pause at its
+    readiness stage and still agree a deal.
+
+    Called from a scenario's own stage rather than an autouse fixture: a
+    scenario should name the state it depends on, and pausing a service is a
+    dependency as much as registering a host is. It also keeps the pause with
+    the scenario that wants it -- the API-credits scenario shares this module
+    and drives a different storefront, which has no such control.
+
+    Every side effect a scenario asserts on should be one the scenario asked
+    for. While the timer loops run, a stage's observation races them: a listing
+    reconciled a second later reads differently than one reconciled a second
+    earlier. Waiting for the system to settle instead is what
+    `docs/development/TESTING.md` forbids, and it cannot establish ordering
+    even when it passes.
+
+    Trading is untouched: this holds the loops only, so a scenario can pause
+    at its readiness stage and still agree a deal. The response names each
+    loop's gate state, which is what lets this assert that the loop a scenario
+    depends on actually reached its gate rather than merely that a pause was
+    requested.
+    """
+    result = storefront_admin_client.admin_pause_lifecycle_loops()
+    assert result.get("paused") is True, (
+        f"storefront did not report its loops paused: {result!r}. An "
+        "assertion made now would race the timer loops it was meant to hold."
+    )
+    loops = result.get("loops") or {}
+    not_at_gate = {
+        name: state for name, state in loops.items() if state != "paused"
+    }
+    assert loops and not not_at_gate, (
+        f"these loops had not reached a gate when the pause returned: "
+        f"{not_at_gate or 'none registered'}. `running` means a cycle that "
+        "began before the request is still going, so an assertion made now "
+        "would race it."
+    )
+    log.info("[lifecycle] storefront loops paused; loops=%s", loops)
+    return True
+
+
 # ---------------------------------------------------------------------------
 # Module-scoped fixtures
 # ---------------------------------------------------------------------------
@@ -158,12 +439,35 @@ def deal_state() -> DealState:
 
 @pytest.fixture(scope="module")
 def storefront_client():
-    """Buyer-signed SyncStorefrontClient (no admin key)."""
+    """Buyer-role storefront client: the buyer settling its own deal."""
     from storefront_client import SyncStorefrontClient
+
     url = _require_setting(settings.SELLER.API_URL, "SELLER.API_URL")
     client = SyncStorefrontClient(
-        base_url=url,
-        private_key=str(settings.BUYER.PRIVATE_KEY),
+        url,
+        _signer("eip191", settings.BUYER.MARKETPLACE_CREDENTIAL, "BUYER.MARKETPLACE_CREDENTIAL"),
+        caller_role="buyer",
+        expected_publishers=_publisher_trust(),
+    )
+    yield client
+    client.close()
+
+
+@pytest.fixture(scope="module")
+def storefront_seller_client():
+    """Seller-role storefront client: the principal that publishes listings.
+
+    Separate from the administrator below. The seller signer must itself be a
+    pinned publisher, which the client enforces at construction.
+    """
+    from storefront_client import SyncStorefrontClient
+
+    url = _require_setting(settings.SELLER.API_URL, "SELLER.API_URL")
+    client = SyncStorefrontClient(
+        url,
+        _signer("eip191", settings.SELLER.PRIVATE_KEY, "SELLER.PRIVATE_KEY"),
+        caller_role="seller",
+        expected_publishers=_publisher_trust(),
     )
     yield client
     client.close()
@@ -171,20 +475,57 @@ def storefront_client():
 
 @pytest.fixture(scope="module")
 def storefront_admin_client():
-    """Seller-signed SyncStorefrontClient with admin key.
+    """Admin-role storefront client: system controls outside a normal deal.
 
-    Uses the seller's private key because /orders/create and similar
-    seller-owned endpoints verify EIP-191 signatures against the seller's
-    configured wallet address (CONFIG.agent_wallet_address).
-    The admin_key is a separate X-Admin-Key header that gates /admin/* routes.
+    The administrator is a distinct principal from the seller, pinned as
+    ``Identity.administrators.operator`` in the storefront config. Signing
+    these calls as the seller would authenticate as the wrong caller.
     """
     from storefront_client import SyncStorefrontClient
+
     url = _require_setting(settings.SELLER.API_URL, "SELLER.API_URL")
-    admin_key = _require_setting(settings.SELLER.ADMIN_API_KEY, "SELLER.ADMIN_API_KEY")
     client = SyncStorefrontClient(
-        base_url=url,
-        private_key=str(settings.SELLER.PRIVATE_KEY),
-        admin_key=admin_key,
+        url,
+        _signer(
+            settings.SELLER.get("admin_scheme", "eip191"),
+            settings.SELLER.get("admin_credential", ""),
+            "SELLER.ADMIN_CREDENTIAL",
+        ),
+        caller_role="admin",
+        expected_publishers=_publisher_trust(),
+    )
+    yield client
+    client.close()
+
+
+@pytest.fixture(scope="module")
+def storefront_service_client():
+    """Service-role storefront client: the provisioning peer's callbacks.
+
+    Fulfillment events -- usage started, capacity released, fulfillment failed
+    -- are delivered by the provisioning service, not by an operator. The
+    storefront authenticates them against its one configured service peer, so
+    this signs as the provisioning service's own principal rather than as the
+    administrator.
+
+    A scenario that needs to drive one of those events stands in for the peer,
+    and does it through the public typed methods. Reaching into the client's
+    private `_post` and `_admin_headers` instead — which is what these
+    scenarios used to do — bypasses the signed-request construction the client
+    exists to own, so the call keeps working while the real path is broken.
+    """
+    from storefront_client import SyncStorefrontClient
+
+    url = _require_setting(settings.SELLER.API_URL, "SELLER.API_URL")
+    client = SyncStorefrontClient(
+        url,
+        _signer(
+            settings.PROVISIONING.get("service_scheme", "eip191"),
+            settings.PROVISIONING.get("service_credential", ""),
+            "PROVISIONING.SERVICE_CREDENTIAL",
+        ),
+        caller_role="service",
+        expected_publishers=_publisher_trust(),
     )
     yield client
     client.close()
@@ -192,28 +533,74 @@ def storefront_admin_client():
 
 @pytest.fixture(scope="module")
 def registry_client():
-    """SyncRegistryClient from the canonical registry-client wheel."""
+    """Buyer-role registry client: discovery reads, as a buyer performs them.
+
+    The registry's vocabulary is ``buyer``, ``seller``, or ``service``; it has
+    no administrator. Its reads here are unauthenticated, so the role does not
+    gate them — it attributes them, which is why discovery is a buyer.
+    """
     from registry_client import SyncRegistryClient
+
     url = _require_setting(settings.REGISTRY.API_URL, "REGISTRY.API_URL")
-    client = SyncRegistryClient(base_url=url)
+    client = SyncRegistryClient(
+        url,
+        signer=_signer("eip191", settings.BUYER.MARKETPLACE_CREDENTIAL, "BUYER.MARKETPLACE_CREDENTIAL"),
+        caller_role="buyer",
+        expected_registries=_trust(_require_setting(
+            settings.REGISTRY.get("identifier", ""), "REGISTRY.IDENTIFIER"
+        )),
+        registry_authority=_require_setting(
+            settings.REGISTRY.get("authority_id", ""), "REGISTRY.AUTHORITY_ID"
+        ),
+    )
+    yield client
+    client.close()
+
+
+@pytest.fixture(scope="module")
+def registry_seller_client():
+    """Seller-role registry client: validating a payload a seller would publish."""
+    from registry_client import SyncRegistryClient
+
+    url = _require_setting(settings.REGISTRY.API_URL, "REGISTRY.API_URL")
+    client = SyncRegistryClient(
+        url,
+        signer=_signer("eip191", settings.SELLER.PRIVATE_KEY, "SELLER.PRIVATE_KEY"),
+        caller_role="seller",
+        expected_registries=_trust(_require_setting(
+            settings.REGISTRY.get("identifier", ""), "REGISTRY.IDENTIFIER"
+        )),
+        registry_authority=_require_setting(
+            settings.REGISTRY.get("authority_id", ""), "REGISTRY.AUTHORITY_ID"
+        ),
+    )
     yield client
     client.close()
 
 
 @pytest.fixture(scope="module")
 def provisioning_client():
-    """Canonical SyncProvisioningClient.
+    """Admin-signed SyncProvisioningClient.
 
-    Provisioning is an internal dependency of the storefront. It gates
-    every non-health route on a single shared admin key (X-Admin-Key);
-    there is no per-agent identity.
+    Provisioning authenticates per caller: each request carries the caller's
+    marketplace signature plus an asserted role, and the service verifies the
+    principal against the durable trust set bound to that role.
+
+    This suite drives provisioning as the **admin** principal, and that is not
+    a preference. ``SyncProvisioningClient`` asserts ``admin`` on every request
+    and exposes no way to override it, while the service resolves the trust set
+    from the asserted role. Signing as the storefront principal would construct
+    successfully and then be refused on authorisation, so the credential here
+    must be the principal pinned as the provisioning admin identity.
+
+    ``expected_authorities`` pins the service's own signing principal, which is
+    a different identity again, so responses are verified as well as requests.
     """
     from vm_provisioning_operator import SyncProvisioningClient
+
     url = _require_setting(settings.PROVISIONING.API_URL, "PROVISIONING.API_URL")
-    admin_key = str(settings.SELLER.ADMIN_API_KEY or "") or None
     client = SyncProvisioningClient(
-        base_url=url,
-        admin_key=admin_key,
+        url, _provisioning_admin_signer(), _provisioning_authority_trust()
     )
     yield client
     client.close()
@@ -226,8 +613,12 @@ def provisioning_test_client():
     Only works when the provisioning service runs with ACTIVE_PROFILES=mock.
     """
     url = _require_setting(settings.PROVISIONING.API_URL, "PROVISIONING.API_URL")
-    admin_key = str(settings.SELLER.ADMIN_API_KEY or "") or None
-    with ProvisioningTestClient(base_url=url, timeout=20.0, admin_key=admin_key) as client:
+    with ProvisioningTestClient(
+        url,
+        signer=_provisioning_admin_signer(),
+        expected_authorities=_provisioning_authority_trust(),
+        timeout=20.0,
+    ) as client:
         yield client
 
 
@@ -335,6 +726,47 @@ def ensure_storefront_resumed(storefront_admin_client):
         log.warning("[teardown] Could not verify/clear global pause: %s", exc)
 
 
+@pytest.fixture(scope="module")
+def convergence_advanced_explicitly(provisioning_client):
+    """This module drives fulfillment convergence; the timer does not.
+
+    Opt-in, via ``pytest.mark.usefixtures`` on the modules that actually
+    drive convergence. Deliberately *not* autouse: other scenarios in this
+    directory reach ``active`` on the timer without ever asking for a cycle
+    (``test_buy_oneshot_buyer_cli`` arms an ungated create rule and waits
+    for the lease), and pausing it for them would stall their fulfillment
+    instead of making it deterministic. A module takes this fixture when it
+    has taken responsibility for advancing convergence itself.
+
+    Every convergence transition this scenario asserts is triggered by an
+    explicit advance (09a for the create half, 11a/11b for teardown), so
+    the 30s timer is stopped for the duration. Leaving it running made
+    those stages races rather than steps: a timer cycle that claimed a row
+    while its provider call was still gated would hold the claim lease,
+    and the stage's own cycle would then reach nothing at all.
+
+    Paused here rather than in a stage so the whole module is covered
+    including setup, and resumed in the finaliser so it is restored even
+    when a stage fails. That matters because the provisioning service is
+    shared across scenario modules and the create half of convergence
+    (`dispatching` -> `active`) still relies on the timer elsewhere --
+    leaving it paused would stall the next module's fulfillment rather
+    than this one's.
+    """
+    try:
+        paused = provisioning_client.pause_fulfillment_convergence()
+        log.info("[setup] Fulfillment convergence timer paused: %s", paused)
+    except Exception as exc:
+        log.warning("[setup] Could not pause fulfillment convergence: %s", exc)
+    yield
+    try:
+        provisioning_client.resume_fulfillment_convergence()
+    except Exception as exc:
+        log.warning(
+            "[teardown] Could not resume fulfillment convergence: %s", exc
+        )
+
+
 @pytest.fixture(scope="module", autouse=True)
 def reap_buyer_settle_subprocess(deal_state: DealState):
     """Stop the buyer-CLI ``market settle`` subprocess if it outlived the test.
@@ -380,6 +812,56 @@ def release_reserved_resources(storefront_admin_client):
 
 
 # ---------------------------------------------------------------------------
+# wait_for_fulfillment_state helper — bounded convergence-driven wait
+# ---------------------------------------------------------------------------
+
+def advance_fulfillment_to(
+    provisioning_client,
+    fulfillment_id: str,
+    expected: str,
+    *,
+    max_advances: int = 4,
+) -> dict:
+    """Advance convergence until a fulfillment reaches ``expected``.
+
+    No sleeps, per `docs/development/TESTING.md`'s async test discipline:
+    each iteration is one *explicit* advance, and the only thing between
+    iterations is a request the test made.
+
+    `advance-cycle` rather than `run-cycle` because `run-cycle` is an
+    advance attempt, not an advance. The pending branches of the
+    convergence watchdog deliberately leave their claim in place so the
+    claim lease spaces the next provider poll, and `claim_pending` skips a
+    row whose lease has not lapsed -- 5s for the first claim, doubling
+    after. So a `run-cycle` issued straight after a pending poll cannot
+    touch the row, and any number of them in that window is still zero
+    advances. `advance-cycle` releases the watchdog's own claims first.
+
+    Requires the convergence watchdog to be paused (see
+    `pause_fulfillment_convergence`), which is also what stops the 30s
+    timer from claiming the same rows mid-scenario.
+
+    ``max_advances`` is small deliberately: with the timer stopped and the
+    provider gate released, each transition needs exactly one advance, so
+    needing several means something is wrong and the failure names the
+    state it stalled in.
+    """
+    last: dict = provisioning_client.get_fulfillment_status(fulfillment_id)
+    for _ in range(max_advances):
+        if last.get("state") == expected:
+            return last
+        provisioning_client.advance_fulfillment_convergence_cycle()
+        last = provisioning_client.get_fulfillment_status(fulfillment_id)
+    if last.get("state") != expected:
+        pytest.fail(
+            f"fulfillment {fulfillment_id} did not reach {expected!r} within "
+            f"{max_advances} explicit convergence advances; last state "
+            f"{last.get('state')!r}: {last}"
+        )
+    return last
+
+
+# ---------------------------------------------------------------------------
 # wait_for_stage_event helper — wraps storefront_admin_client.wait_for_stage_event
 # ---------------------------------------------------------------------------
 
@@ -401,7 +883,7 @@ def wait_for_stage_event(
     Parameters
     ----------
     client:
-        A ``SyncStorefrontClient`` instance with admin_key configured.
+        A ``SyncStorefrontClient`` asserting the ``admin`` role.
     stage, event:
         Stage and event strings to match (e.g. ``"discovery"``, ``"order_published"``).
     listing_id, negotiation_id:

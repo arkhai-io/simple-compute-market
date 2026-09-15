@@ -21,6 +21,7 @@ import pytest
 import pytest_asyncio
 from fastapi import FastAPI
 from market_identity import Ed25519Signer, Identity, TrustedIdentitySet
+from core_storefront.models.system_models import STAGE_EVENT_PAGE_CAP
 
 import market_storefront.container as _container
 from market_storefront.middleware.admin_identity import (
@@ -161,6 +162,27 @@ async def unsigned_client(admin_app) -> AsyncIterator[httpx.AsyncClient]:
 
 
 @pytest_asyncio.fixture
+async def admin_client(admin_app) -> AsyncIterator[StorefrontClient]:
+    """Administrator-role client.
+
+    System status is an administrator operation: the operation it binds is
+    named for the administrator, and its sibling read on the same prefix
+    (GET /api/v1/system/events) is an administrator contract too. The
+    service-peer client below remains for the provisioning callbacks, which
+    are genuinely service-to-service.
+    """
+    transport = httpx.ASGITransport(app=admin_app)
+    async with StorefrontClient(
+        "http://test",
+        transport=transport,
+        signer=_ADMIN_SIGNER,
+        caller_role="admin",
+        expected_publishers=_MARKETPLACE_PUBLISHERS,
+    ) as c:
+        yield c
+
+
+@pytest_asyncio.fixture
 async def service_client(admin_app) -> AsyncIterator[StorefrontClient]:
     transport = httpx.ASGITransport(app=admin_app)
     async with StorefrontClient(
@@ -185,20 +207,32 @@ class TestHealthEndpoint:
         assert result.checks.get("database") == "ok"
         assert "registry" not in result.checks
 
-    async def test_system_status_includes_paused(self, service_client):
-        result = await service_client.get_system_status()
+    async def test_system_status_includes_paused(self, admin_client):
+        result = await admin_client.get_system_status()
         assert result.paused is False
 
-    async def test_system_status_includes_registry_check(self, service_client):
+    async def test_system_status_readable_by_service_peer(self, service_client):
+        """A service peer reads status to confirm its own signing path works.
+
+        This is the provisioning adapter's `storefront_auth` health check. It
+        is the only side-effect-free service operation available — every other
+        one is a fulfillment callback that mutates state — so if this route
+        stops accepting the `service` role, provisioning loses its only way to
+        verify the credential it uses for those callbacks.
+        """
         result = await service_client.get_system_status()
+        assert result.status in ("ok", "degraded")
+
+    async def test_system_status_includes_registry_check(self, admin_client):
+        result = await admin_client.get_system_status()
         registry_check = result.checks.get("registry")
         assert registry_check is not None
         assert isinstance(registry_check, str) and registry_check
 
     async def test_system_status_includes_negotiation_strategy_check(
-        self, service_client
+        self, admin_client
     ):
-        result = await service_client.get_system_status()
+        result = await admin_client.get_system_status()
         strat_check = result.checks.get("negotiation_strategy")
         assert strat_check is not None
         assert isinstance(strat_check, str) and strat_check
@@ -207,7 +241,7 @@ class TestHealthEndpoint:
         )
 
     async def test_system_status_surfaces_site_projection_state(
-        self, db, service_client
+        self, db, admin_client
     ):
         """End-to-end: a populated projection status summary must survive
         SystemService -> HealthResponse (server, pydantic) -> HTTP JSON ->
@@ -238,7 +272,7 @@ class TestHealthEndpoint:
             marketplace_signer=_MARKETPLACE_SIGNER,
             projection_status_provider=lambda: summary,
         )
-        result = await service_client.get_system_status()
+        result = await admin_client.get_system_status()
 
         assert result.site_projections == summary
         assert result.site_projections["site-a"]["resource_pool"]["state"] == "loaded"
@@ -255,8 +289,8 @@ class TestHealthEndpoint:
 
         assert result.site_projections is None
 
-    async def test_system_status_surfaces_listing_mode_explanations(
-        self, db, service_client
+    async def test_system_status_surfaces_listing_cardinality_mode_explanations(
+        self, db, admin_client
     ):
         """Same real end-to-end round trip as
         test_system_status_surfaces_site_projection_state (above), for the
@@ -267,29 +301,29 @@ class TestHealthEndpoint:
         SystemService-level unit test.
         """
         explanations = {
-            "site-a": {"gpu-pool": "unrecognized listing_mode 'bogus', using 'fungible'"},
+            "site-a": {"gpu-pool": "unrecognized listing_cardinality_mode 'bogus', using 'fungible'"},
         }
         _container.resolved_system_service = SystemService(
             sqlite_client=db,
             marketplace_signer=_MARKETPLACE_SIGNER,
-            listing_mode_explanation_provider=lambda: explanations,
+            listing_cardinality_mode_explanation_provider=lambda: explanations,
         )
-        result = await service_client.get_system_status()
+        result = await admin_client.get_system_status()
 
-        assert result.listing_mode_explanations == explanations
+        assert result.listing_cardinality_mode_explanations == explanations
 
-    async def test_health_omits_listing_mode_explanations(
+    async def test_health_omits_listing_cardinality_mode_explanations(
         self, db, service_client
     ):
         """The fast liveness probe (/health) must not carry this field either."""
         _container.resolved_system_service = SystemService(
             sqlite_client=db,
             marketplace_signer=_MARKETPLACE_SIGNER,
-            listing_mode_explanation_provider=lambda: {"site-a": {}},
+            listing_cardinality_mode_explanation_provider=lambda: {"site-a": {}},
         )
         result = await service_client.get_health()
 
-        assert result.listing_mode_explanations is None
+        assert result.listing_cardinality_mode_explanations is None
 
 
 # ---------------------------------------------------------------------------
@@ -312,10 +346,10 @@ class TestAdminPause:
         assert result.paused is True
         assert _server._GLOBALLY_PAUSED is True
 
-    async def test_pause_reflected_in_system_status(self, client, service_client):
+    async def test_pause_reflected_in_system_status(self, client, admin_client):
         c, _ = client
         await c.admin_pause()
-        status = await service_client.get_system_status()
+        status = await admin_client.get_system_status()
         assert status.paused is True
 
 
@@ -337,11 +371,11 @@ class TestAdminResume:
         assert result.paused is False
         assert _server._GLOBALLY_PAUSED is False
 
-    async def test_resume_reflected_in_system_status(self, client, service_client):
+    async def test_resume_reflected_in_system_status(self, client, admin_client):
         c, _ = client
         await c.admin_pause()
         await c.admin_resume()
-        status = await service_client.get_system_status()
+        status = await admin_client.get_system_status()
         assert status.paused is False
 
 # ---------------------------------------------------------------------------
@@ -434,7 +468,7 @@ async def _seed_dynamic_listing_pool_rows(
             "gpu_model": "H200",
             "region": "California, US",
             "vm_host": "host-1",
-            "virtualization_type": "vm",
+            "offering_mode": "vm",
         },
     )
     for gpu_count in range(1, 5):
@@ -444,13 +478,13 @@ async def _seed_dynamic_listing_pool_rows(
             status="open",
             created_at="2026-01-01T00:00:00",
             updated_at="2026-01-01T00:00:00",
-            offer_resource={
+            listing_resource={
                 "resource_id": "pool-h200-1",
                 "gpu_model": "H200",
                 "gpu_count": gpu_count,
                 "region": "California, US",
                 "sla": 99.0,
-                "virtualization_type": "vm",
+                "offering_mode": "vm",
             },
             accepted_escrows=[{
                 "chain_name": "anvil",
@@ -494,7 +528,7 @@ def _fake_pool_site():
             "gpu_model": "H200",
             "region": "California, US",
             "vm_host": "host-1",
-            "virtualization_type": "vm",
+            "offering_mode": "vm",
         },
     )
     return fake
@@ -503,7 +537,7 @@ def _fake_pool_site():
 async def _ledger_hold(capacity, *, gpu_count: int = 2) -> str:
     reserved = await capacity.reserve(
         claim={
-            "executor_kind": "vm",
+            "offering_mode": "vm",
             "resource_id": "pool-h200-1",
             "gpu_count": gpu_count,
         },
@@ -539,7 +573,11 @@ class TestFulfillmentEvents:
             )
 
         assert response.capacity_reservation_id
-        assert response.resource_id == "pool-h200-1"
+        # Pool membership, not physical identity: the capacity boundary
+        # strips `resource_id` from every reservation response, so the
+        # storefront reports the pool its own durable listing binding
+        # recorded at publication.
+        assert response.pool_id == "pool-h200-1"
         assert response.gpu_count == 2
         assert sorted(response.closed_listing_ids) == ["listing-3x", "listing-4x"]
         statuses = {
@@ -577,7 +615,10 @@ class TestFulfillmentEvents:
             )
 
         assert response.capacity_reservation_id
-        assert response.resource_id == "pool-h200-1"
+        # The site this listing is bound to, read back from the binding that
+        # pinned it -- the response carries no physical resource identity to
+        # assert on, by design of the capacity boundary.
+        assert response.pool_id == "pool-h200-1"
 
     async def test_admin_reserve_capacity_honors_a_live_refusal_over_a_cached_projection(
         self, client,
@@ -605,7 +646,7 @@ class TestFulfillmentEvents:
             attributes={
                 "gpu_model": "H200",
                 "vm_host": "host-1",
-                "virtualization_type": "vm",
+                "offering_mode": "vm",
             },
         )
 
@@ -1116,6 +1157,79 @@ class TestStreamEvents:
         neg_events = await c.get_events(stage="negotiation")
         assert neg_events.count == 1
         assert neg_events.events[0].stage == "negotiation"
+
+    @staticmethod
+    def _seed_events(db, count: int, *, stage: str = "discovery") -> None:
+        import json as _json
+        import sqlite3
+
+        conn = sqlite3.connect(db.db_path)
+        try:
+            conn.executemany(
+                "INSERT INTO stage_events (ts, stage, event, data) VALUES (?, ?, ?, ?)",
+                [
+                    ("2025-01-01T00:00:00Z", stage, f"event_{i}", _json.dumps({"seq": i}))
+                    for i in range(count)
+                ],
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+    async def test_reports_not_truncated_when_the_log_fits(self, client):
+        c, db = client
+        self._seed_events(db, 3)
+
+        result = await c.get_events(limit=10)
+        assert result.count == 3
+        assert result.truncated is False
+
+    async def test_reports_truncated_when_rows_remain_beyond_the_page(self, client):
+        c, db = client
+        self._seed_events(db, 5)
+
+        result = await c.get_events(limit=2)
+        assert result.count == 2
+        assert result.truncated is True
+
+    async def test_not_truncated_when_the_log_ends_on_the_page_boundary(self, client):
+        """A full page that exhausted the log is not truncated.
+
+        The case a caller cannot work out for itself, and the reason the flag
+        is served rather than derived: `count == limit` holds here and in the
+        test above, so anything inferring truncation from that comparison
+        reports this exact-fit log as incomplete and sends a reader looking
+        for a second page that does not exist.
+        """
+        c, db = client
+        self._seed_events(db, 2)
+
+        result = await c.get_events(limit=2)
+        assert result.count == 2
+        assert result.truncated is False
+
+    async def test_truncation_is_reported_at_the_page_cap(self, client):
+        """The cap is the boundary the e2e claims stage actually reads at.
+
+        `STAGE_EVENT_PAGE_CAP` is both the route's accepted maximum and the
+        store's internal clamp, so a page requested at the cap is the one case
+        where over-fetching from outside the store would be clamped back to
+        the cap and read as complete. Asserted at the cap, not just at a small
+        limit, because that is where a plausible implementation goes quiet.
+        """
+        c, db = client
+        self._seed_events(db, STAGE_EVENT_PAGE_CAP + 1)
+
+        result = await c.get_events(limit=STAGE_EVENT_PAGE_CAP)
+        assert result.count == STAGE_EVENT_PAGE_CAP
+        assert result.truncated is True
+
+        # And the tail beyond it is reachable and complete.
+        tail = await c.get_events(
+            since_id=result.events[-1].id, limit=STAGE_EVENT_PAGE_CAP
+        )
+        assert tail.count == 1
+        assert tail.truncated is False
 
 
 

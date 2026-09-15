@@ -1,6 +1,6 @@
 """VM provisioning operator client and direct VM administration models.
 
-This package is intentionally separate from the shared, executor-neutral
+This package is intentionally separate from the shared, offering-mode-neutral
 ``compute_provisioning`` contract used by storefront and domain callers.
 """
 

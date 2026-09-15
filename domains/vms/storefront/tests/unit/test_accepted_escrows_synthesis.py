@@ -218,8 +218,8 @@ def test_upsert_listing_stores_explicit_accepted_escrows(tmp_db_path):
     asyncio.run(db.upsert_listing_with_binding(
         binding=listing_binding, status="open",
         created_at="2026-01-01", updated_at="2026-01-01",
-        offer_resource={
-            "virtualization_type": "vm",
+        listing_resource={
+            "offering_mode": "vm",
             "pool_id": "pool-1",
             "gpu_model": "H200",
             "gpu_count": 1,
@@ -264,7 +264,7 @@ def test_backfill_runs_on_schema_init_and_drops_legacy_column(
               status TEXT NOT NULL,
               created_at TEXT NOT NULL,
               updated_at TEXT NOT NULL,
-              offer_resource TEXT NOT NULL,
+              listing_resource TEXT NOT NULL,
               demand_resource TEXT NOT NULL,
               fulfillment_resource TEXT,
               max_duration_seconds INTEGER,
@@ -281,7 +281,7 @@ def test_backfill_runs_on_schema_init_and_drops_legacy_column(
         )
         cur.execute(
             "INSERT INTO listings(listing_id, status, created_at, updated_at, "
-            "offer_resource, demand_resource, fulfillment_resource, "
+            "listing_resource, demand_resource, fulfillment_resource, "
             "max_duration_seconds, seller) "
             "VALUES (?, ?, ?, ?, ?, ?, NULL, ?, ?)",
             (

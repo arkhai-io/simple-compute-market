@@ -14,7 +14,7 @@ def _vm_callbacks() -> VmPublicationSourceCallbacks:
         open_keys=lambda _db: {"open"},
         close_stale=lambda _db, _url: ["closed"],
         available_candidates=lambda _db: [{"resource_id": "vm-1"}],
-        offer_resource=lambda candidate: {"resource_id": candidate["resource_id"]},
+        listing_resource=lambda candidate: {"resource_id": candidate["resource_id"]},
         record_published=lambda *_args: None,
         reopen_existing=lambda *_args: None,
     )
@@ -30,7 +30,7 @@ def test_build_vm_publication_source_kwargs_maps_callbacks() -> None:
     assert kwargs["open_keys"]("db") == {"open"}
     assert kwargs["close_stale"]("db", "url") == ["closed"]
     assert kwargs["available_candidates"]("db") == [{"resource_id": "vm-1"}]
-    assert kwargs["offer_resource"]({"resource_id": "vm-1"}) == {
+    assert kwargs["listing_resource"]({"resource_id": "vm-1"}) == {
         "resource_id": "vm-1",
     }
 

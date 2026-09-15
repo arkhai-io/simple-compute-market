@@ -228,14 +228,14 @@ wheels = [
 
 [[package]]
 name = "arkhai-core-storefront-client"
-version = "0.17.0"
+version = "0.18.0"
 source = { registry = "../../../../.dist" }
 dependencies = [
     { name = "arkhai-kit-identity" },
     { name = "httpx" },
 ]
 wheels = [
-    { path = "arkhai_core_storefront_client-0.17.0-py3-none-any.whl" },
+    { path = "arkhai_core_storefront_client-0.18.0-py3-none-any.whl" },
 ]
 
 [[package]]

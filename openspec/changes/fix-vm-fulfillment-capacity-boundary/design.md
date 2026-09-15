@@ -65,6 +65,59 @@ The initial registry contains the delegate for the repository's current VM-manag
 
 **Rejected alternative:** independently deriving shape on both sides and failing closed on disagreement. Rejected once the above trace showed there is currently nothing for the two derivations to disagree about — they are the same computation performed twice. Revisit if `resize_reservation` ever gets a caller that does not resize strictly before scheduling.
 
+### Amendment: the claim's categorical half had no home
+
+The decision above ("VM shape requirements are derived from the committed
+reservation, not re-transmitted") is correct for dimensions and was
+over-generalised to the whole claim. Its trace established that the
+storefront's `required_attributes` could not diverge from *the reservation's
+own committed dimensions*, and concluded the two were "by construction, always
+identical". They are not: `required_attributes` holds an entire claim,
+categorical constraints included, and `dimensions` is its quantitative subset.
+
+The consequence, found from an e2e run in which a deal's capacity was rebound
+onto another pool's resource: `CapacityReservation` has no column for the
+categorical half, so after this change those constraints were neither
+re-transmitted (this decision forbids it) nor persisted (nowhere to put them).
+They were evaluated once at admission by `_find_candidate` and discarded.
+`PhysicalSettlementScheduler._requirement` then read `attributes` only from
+the request, which the storefront leaves empty, so every resource of the right
+kind with enough room was eligible for every deal and the winner was decided
+by a site-wide round-robin cursor.
+
+Two things follow, and neither contradicts the promoted requirement, which is
+scoped to dimension shape and silent on attributes:
+
+1. **The reservation records what it was admitted against.** A ledger-owned
+   `claim_attributes` column, written at reserve from the same
+   `_split_claim_requirement` call `_find_candidate` matches on. Ledger-owned
+   rather than in `deal_ref`, which is the caller's dict: a caller able to
+   restate its own constraints there could also relax them, and this
+   decision's whole point is that admission governs scheduling.
+2. **Scheduling reads them from there**, on this decision's own precedence
+   rule extended to the other half of the claim: the reservation is
+   authoritative, a request may add a constraint the reservation does not
+   govern, and a request contradicting one it does is refused rather than
+   honoured. `NULL` distinguishes a row predating the column from one admitted
+   against no categorical constraint, and only the former falls back to the
+   request.
+
+**Resource pinning needs no separate mechanism.** `resource_feasibility_view`
+normalises `resource_id` into the attribute mapping claims are matched
+against, so a resource-specific claim -- already specified in
+`site-capacity/spec.md` and already honoured at reserve -- is carried and
+enforced by the same persistence. That closes the gap where a pinned listing
+was honoured at admission and then reassigned by the cursor. It does not
+address the recorded preemption gap below, which is about securing a resource
+against *other* holders rather than keeping the one a deal was admitted on.
+
+**Determinism was the symptom that surfaced this.** Scheduling outcomes
+depended on how many deals had been placed before, because the cursor's
+fairness scope is the whole site while the candidate set was unfiltered.
+Constraining candidates to what each deal was sold makes placement a property
+of the deal rather than of execution order; the cursor still spreads load
+among resources that genuinely satisfy a claim, which is what it is for.
+
 ### Forward-looking notes for the direct-physical-resource reservation path (not built by this change)
 
 Recorded here because tracing this change surfaced them; not part of this change's scope. Two accepted outcomes, and one open capability gap:

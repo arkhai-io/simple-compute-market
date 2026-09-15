@@ -97,12 +97,12 @@ async def _fulfill_vm_context(
     )
     result = dict(result or {})
     order = raw["order"] if isinstance(raw["order"], Mapping) else {}
-    offer_resource = order.get("offer_resource")
-    if not isinstance(offer_resource, Mapping):
-        offer_resource = {}
+    listing_resource = order.get("listing_resource")
+    if not isinstance(listing_resource, Mapping):
+        listing_resource = {}
     physical_resource_id = result.get("physical_resource_id")
     if physical_resource_id is None:
-        physical_resource_id = offer_resource.get("resource_id")
+        physical_resource_id = listing_resource.get("resource_id")
     return {
         "negotiation_id": context.negotiation_id,
         "escrow_uid": context.escrow_uid,

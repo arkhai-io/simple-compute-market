@@ -216,7 +216,7 @@ requires-dist = [
 
 [package.metadata.requires-dev]
 dev = [
-    { name = "arkhai-core-registry-client", specifier = ">=0.11.0" },
+    { name = "arkhai-core-registry-client", specifier = ">=0.12.0" },
     { name = "black", specifier = ">=23.11.0" },
     { name = "httpx", specifier = ">=0.27.0" },
     { name = "pytest", specifier = ">=7.4.0" },
@@ -226,7 +226,7 @@ dev = [
 
 [[package]]
 name = "arkhai-core-registry-client"
-version = "0.11.0"
+version = "0.12.0"
 source = { registry = "../../.dist" }
 dependencies = [
     { name = "arkhai-core" },
@@ -234,7 +234,7 @@ dependencies = [
     { name = "httpx" },
 ]
 wheels = [
-    { path = "arkhai_core_registry_client-0.11.0-py3-none-any.whl" },
+    { path = "arkhai_core_registry_client-0.12.0-py3-none-any.whl" },
 ]
 
 [[package]]

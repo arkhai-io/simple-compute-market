@@ -1,4 +1,4 @@
-# Design — project capacity resources that have no executor host
+# Design — project capacity resources that have no host
 
 ## Context
 
@@ -10,7 +10,7 @@ inventory rather than constructing one."
 
 GPU columns were added to that record, which is how a host-seeded deployment came
 to publish and sell. `capacity-resource-administration` is undoing that: it moves
-compute shape to the site-ledger capacity resource, makes `Host` executor
+compute shape to the site-ledger capacity resource, makes `Host` connection
 identity only, and retires the host-derived capacity fallback. Its stated
 reasoning — "Splitting capacity across two authorities inside one service — GPUs
 on `Host`, everything else on capacity resources — would relocate the duplication
@@ -29,12 +29,12 @@ exists for it.
 ## Goals / Non-Goals
 
 **Goals.** Make the projection's iteration match its stated authority model.
-Allow a capacity declaration with no executor host to reach storefronts. Keep
+Allow a capacity declaration with no host to reach storefronts. Keep
 every currently projected entry byte-identical.
 
 **Non-Goals.** No change to what a capacity resource declares or how it is
 administered. No commercial interpretation of hostless declarations. No relaxation
-of executor requirements anywhere an execution path runs.
+of host requirements anywhere an execution path runs.
 
 ## Decisions
 
@@ -52,23 +52,23 @@ after would be a poor trade.
 Iterating resources and correlating hosts in gives one producer, and it makes the
 correlation explicitly optional at the only place that needs to know.
 
-### Omit executor fields rather than emptying them
+### Omit host-correlated fields rather than emptying them
 
-A hostless entry has no executor identity. It must omit those fields, not carry
+A hostless entry has no connection identity. It must omit those fields, not carry
 empty strings.
 
 The precedent is load-bearing and already documented: a storefront reconciler
 distinguishes an absent projection from a loaded empty one under an "ignorance is
 not zero" rule, and `capacity-resource-administration` flags the `available`-key
 semantics change as the highest-risk item in its own change for the same reason.
-An empty executor identifier would be indistinguishable from a correlated host
+An empty connection identifier would be indistinguishable from a correlated host
 whose identifier failed to populate, which is a real failure worth surfacing.
 
-### Execution paths keep requiring executor correlation
+### Execution paths keep requiring host correlation
 
 Making a resource projectable without a host must not make it schedulable without
 one. Placement, provider dispatch, and inventory rendering continue to require
-executor correlation and fail closed without it.
+host correlation and fail closed without it.
 
 This is the boundary that keeps the change honest. The risk in relaxing a
 precondition is that the relaxation propagates to consumers who were relying on
@@ -85,7 +85,7 @@ and implying that something can be sold against it.
 A hostless resource still has a Physical Resource — that term means the real supply
 resource, "host, pod allocation, storage, power, or bandwidth", and this change's
 own delta has a hostless resource projecting its Physical Resource identity. What a
-missing `Host` removes is the executor connection record, not the supply the
+missing `Host` removes is the host connection record, not the supply the
 declaration describes. So the problem is not that there is nothing for the capacity
 to be *of*; it is that "sellable" carries an admission implication the declaration
 should not be making on its own, and downstream work needs a declaration

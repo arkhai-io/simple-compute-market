@@ -14,7 +14,7 @@ from core_storefront.registry_publication import (
 @dataclass
 class ListingRequest:
     listing_id: str
-    offer: dict[str, Any]
+    listing_resource: dict[str, Any]
     accepted_escrows: list[dict[str, Any]]
     settlement_options: list[dict[str, Any]]
     demands: list[dict[str, Any]]
@@ -91,7 +91,7 @@ def test_publish_listing_to_registries_builds_payload_and_records_results() -> N
         return await publish_listing_to_registries(
             {
                 "listing_id": "L1",
-                "offer_resource": '{"gpu_model": "H200"}',
+                "listing_resource": '{"gpu_model": "H200"}',
                 "accepted_escrows": "[]",
                 "demands": "[]",
                 "max_duration_seconds": 3600,
@@ -113,10 +113,10 @@ def test_publish_listing_to_registries_builds_payload_and_records_results() -> N
 
     assert result == {"status": "published", "listing_id": "L1"}
     assert client.published is not None
-    assert client.published["http://r1"].offer == {"gpu_model": "H200"}
+    assert client.published["http://r1"].listing_resource == {"gpu_model": "H200"}
     assert client.published["http://r1"].storefront_url == "http://seller"
     assert recorded[0][0] == "L1"
-    assert events[0]["offer_resource"] == {"gpu_model": "H200"}
+    assert events[0]["listing_resource"] == {"gpu_model": "H200"}
 
 
 def test_publish_listing_rejects_legacy_seller_locator() -> None:
@@ -127,7 +127,7 @@ def test_publish_listing_rejects_legacy_seller_locator() -> None:
             {
                 "listing_id": "L1",
                 "seller": "http://seller",
-                "offer_resource": {},
+                "listing_resource": {},
             },
             enabled=True,
             registry_client_factory=lambda: client,

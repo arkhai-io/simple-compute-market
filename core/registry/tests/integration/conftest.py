@@ -54,7 +54,7 @@ def registry_authority(monkeypatch):
             "baseUrl": "http://test",
             "displayName": "Test Registry",
             "operatorIdentity": "test-operator",
-            "schema": {"id": "vms.compute", "version": "1"},
+            "schema": {"id": "compute.market", "version": "1"},
         }
     )
     monkeypatch.setattr(
@@ -244,7 +244,7 @@ def open_order(db_session, maker_publisher):
     order = Listing(
         listing_id="integ-open-order-1",
         publisher_id=maker_publisher.publisher_id,
-        offer_resource={
+        listing_resource={
             "gpu_model": "A100",
             "region": "us-west",
             "quantity": 1,
@@ -273,7 +273,7 @@ def authenticated_open_order(db_session, maker_publisher):
     order = Listing(
         listing_id="integ-auth-order-1",
         publisher_id=maker_publisher.publisher_id,
-        offer_resource={
+        listing_resource={
             "gpu_model": "A100",
             "region": "us-west",
             "quantity": 1,

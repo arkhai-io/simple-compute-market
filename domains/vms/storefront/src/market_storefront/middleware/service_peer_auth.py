@@ -105,6 +105,11 @@ def _storefront_signer():
 
 def _callback(request: Request, body: Any) -> ServiceCallback | None:
     path = request.url.path.rstrip("/")
+    # System status is readable by two callers, and the middlewares dispatch on
+    # the asserted role: the administrator middleware hands a request asserting
+    # `service` straight through to this one. A service peer reads status to
+    # confirm its own signing path works, which is the only side-effect-free
+    # service operation there is — the rest are fulfillment callbacks.
     if request.method == "GET" and path == "/api/v1/system/status":
         configured = [
             (site_id, principal)

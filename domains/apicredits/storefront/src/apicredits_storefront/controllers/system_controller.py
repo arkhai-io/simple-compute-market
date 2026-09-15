@@ -15,6 +15,7 @@ import apicredits_storefront.container as _container
 from apicredits_storefront.middleware.admin_auth import require_admin_principal
 from apicredits_storefront.server import is_globally_paused
 from core_storefront.models.system_models import (
+    STAGE_EVENT_PAGE_CAP,
     HealthResponse,
     StageEventResponse,
 )
@@ -65,7 +66,7 @@ class SystemController:
         self,
         request: Request,
         since_id: Annotated[int, Query(ge=0)] = 0,
-        limit: Annotated[int, Query(ge=1, le=500)] = 100,
+        limit: Annotated[int, Query(ge=1, le=STAGE_EVENT_PAGE_CAP)] = 100,
         stream: Annotated[bool, Query()] = False,
         stage: Annotated[str | None, Query()] = None,
         listing_id: Annotated[str | None, Query()] = None,
@@ -79,14 +80,22 @@ class SystemController:
                 pass
 
         if not stream:
-            rows = await self._db.list_stage_events(
+            # The page and the fact that it is a page. A reader that
+            # filters these rows and concludes something about the whole log
+            # (the e2e claims stage does exactly that) needs to know whether
+            # it saw the whole log, and only the server knows -- `count` on
+            # its own cannot distinguish a log that ended on the boundary
+            # from one that continues past it.
+            rows, truncated = await self._db.list_stage_events_page(
                 after_id=since_id,
                 limit=limit,
                 stage=stage,
                 listing_id=listing_id,
                 negotiation_id=negotiation_id,
             )
-            return StageEventResponse(events=rows, count=len(rows))
+            return StageEventResponse(
+                events=rows, count=len(rows), truncated=truncated
+            )
 
         async def _generate():
             cursor = since_id

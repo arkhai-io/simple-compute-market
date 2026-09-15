@@ -133,3 +133,19 @@ Per `openspec/README.md#plan-closeout-requirements`.
 - [ ] 9.7 **Promotion.** Add a design-promotion record, mapping every accepted decision to
       its exact permanent heading, and verify no production source references
       `openspec/changes/disburse-a-settlement-disposition`.
+- [ ] 9.8 **Documentation citations.** Run
+      `make check-doc-citations CHANGE=disburse-a-settlement-disposition` and resolve every match.
+      An unresolvable citation is a blocking defect under `AGENTS.md`'s
+      cross-reference rule, and the target also rejects a citation whose
+      target is a *tombstone*: a tombstoned file still exists on disk while
+      its content is gone, so a plain existence test cannot fail on a
+      rename-to-tombstone.
+- [ ] 9.9 **End-to-end pipeline.** Confirm the end-to-end pipeline passes and
+      record the evidence: the run, its result, and the scenarios that
+      exercise this change's behaviour. Green unit and integration suites do
+      not substitute -- this is the tier that catches a wire contract whose
+      two sides disagree, a service that starts cleanly and cannot settle,
+      and a configuration gap no in-process test can see. If the pipeline
+      cannot run for a reason unrelated to this change, record that as an
+      explicit blocker naming the cause and the change that owns it, and
+      treat the validations it gates as unrun rather than passed.

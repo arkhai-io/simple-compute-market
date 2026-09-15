@@ -7,7 +7,7 @@ from collections.abc import Awaitable, Callable
 from typing import Any
 
 from arkhai_bare_metal import (
-    BARE_METAL_EXECUTOR_KIND,
+    BARE_METAL_OFFERING_MODE,
     PHYSICAL_HOST_ID_REF_KEY,
     bare_metal_executor_ref,
 )
@@ -43,7 +43,7 @@ class BareMetalReleaseExecutor:
 
 
 __all__ = [
-    "BARE_METAL_EXECUTOR_KIND",
+    "BARE_METAL_OFFERING_MODE",
     "BareMetalReleaseExecutor",
     "PHYSICAL_HOST_ID_REF_KEY",
     "bare_metal_executor_ref",

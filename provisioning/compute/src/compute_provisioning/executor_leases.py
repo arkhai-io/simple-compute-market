@@ -16,7 +16,7 @@ class ExecutorLeaseRegistration:
 
     capacity_reservation_id: str | None = None
     escrow_uid: str | None = None
-    executor_kind: str | None = None
+    offering_mode: str | None = None
     executor_target: str | None = None
     executor_ref: dict[str, Any] | None = None
     lease_start_utc: datetime | str | None = None
@@ -28,7 +28,7 @@ class ExecutorLeaseRegistration:
 class ExecutorLeaseUpdate:
     """Executor-neutral mutable lease-tail metadata."""
 
-    executor_kind: str | None = None
+    offering_mode: str | None = None
     executor_target: str | None = None
     executor_ref: dict[str, Any] | None = None
     lease_start_utc: datetime | str | None = None
@@ -54,11 +54,11 @@ class ExecutorLeaseService:
         self,
         site_authority: SiteAuthorityPort,
         *,
-        executor_kind: str | None = None,
+        offering_mode: str | None = None,
         not_found_label: str = "Lease",
     ) -> None:
         self._site_authority = site_authority
-        self._executor_kind = executor_kind
+        self._offering_mode = offering_mode
         self._not_found_label = not_found_label
 
     def list_leases(self) -> list[dict[str, Any]]:
@@ -66,7 +66,7 @@ class ExecutorLeaseService:
             reservation
             for reservation in self._site_authority.list_reservations()
             if reservation.get("lease_end_utc")
-            and self._matches_executor_kind(reservation)
+            and self._matches_offering_mode(reservation)
         ]
 
     def get_lease(self, lease_id: str) -> dict[str, Any]:
@@ -74,7 +74,7 @@ class ExecutorLeaseService:
         if (
             reservation is None
             or not reservation.get("lease_end_utc")
-            or not self._matches_executor_kind(reservation)
+            or not self._matches_offering_mode(reservation)
         ):
             raise LeaseNotFoundError(f"{self._not_found_label} '{lease_id}' not found")
         return reservation
@@ -84,7 +84,7 @@ class ExecutorLeaseService:
         if (
             reservation is None
             or not reservation.get("lease_end_utc")
-            or not self._matches_executor_kind(reservation)
+            or not self._matches_offering_mode(reservation)
         ):
             raise LeaseNotFoundError(
                 f"No {self._not_found_label.lower()} found for escrow_uid={escrow_uid!r}"
@@ -97,7 +97,7 @@ class ExecutorLeaseService:
             attached = self._attach_lease_reservation(
                 ExecutorLeaseRegistration(
                     escrow_uid=registration.escrow_uid,
-                    executor_kind=registration.executor_kind,
+                    offering_mode=registration.offering_mode,
                     executor_target=registration.executor_target,
                     executor_ref=registration.executor_ref,
                     lease_start_utc=registration.lease_start_utc,
@@ -117,20 +117,20 @@ class ExecutorLeaseService:
         lease_id: str,
         update: ExecutorLeaseUpdate,
     ) -> dict[str, Any]:
-        """Update generic lease-tail metadata for this executor kind."""
+        """Update generic lease-tail metadata for this offering mode."""
         self.get_lease(lease_id)
-        executor_kind = update.executor_kind
+        offering_mode = update.offering_mode
         if (
-            self._executor_kind is not None
-            and executor_kind is not None
-            and executor_kind != self._executor_kind
+            self._offering_mode is not None
+            and offering_mode is not None
+            and offering_mode != self._offering_mode
         ):
             raise LeaseNotFoundError(
                 f"{self._not_found_label} '{lease_id}' not found"
             )
         updated = self._site_authority.update_reservation_fields(
             lease_id,
-            executor_kind=executor_kind,
+            offering_mode=offering_mode,
             executor_target=update.executor_target,
             executor_ref=update.executor_ref,
             lease_start_utc=lease_datetime_value(update.lease_start_utc),
@@ -138,7 +138,7 @@ class ExecutorLeaseService:
             release_job_id=update.release_job_id,
             create_job_id=update.create_job_id,
         )
-        if updated is None or not self._matches_executor_kind(updated):
+        if updated is None or not self._matches_offering_mode(updated):
             raise LeaseNotFoundError(
                 f"{self._not_found_label} '{lease_id}' not found or terminal"
             )
@@ -151,7 +151,7 @@ class ExecutorLeaseService:
         return self._site_authority.attach_lease_reservation(
             capacity_reservation_id=registration.capacity_reservation_id,
             escrow_uid=registration.escrow_uid,
-            executor_kind=registration.executor_kind,
+            offering_mode=registration.offering_mode,
             executor_target=registration.executor_target,
             executor_ref=registration.executor_ref,
             lease_start_utc=lease_datetime_value(registration.lease_start_utc),
@@ -159,8 +159,8 @@ class ExecutorLeaseService:
             create_job_id=registration.create_job_id,
         )
 
-    def _matches_executor_kind(self, reservation: dict[str, Any]) -> bool:
+    def _matches_offering_mode(self, reservation: dict[str, Any]) -> bool:
         return (
-            self._executor_kind is None
-            or reservation.get("executor_kind") == self._executor_kind
+            self._offering_mode is None
+            or reservation.get("offering_mode") == self._offering_mode
         )

@@ -240,7 +240,7 @@ async def test_contact_options_publish_through_the_composition() -> None:
                 mechanism_input={"profile": "default"},
             )
         ],
-        offer_expires_at=now + timedelta(hours=2),
+        option_expires_at=now + timedelta(hours=2),
         funding_deadlines={},
         fulfillment_deadline=now + timedelta(hours=3),
     )

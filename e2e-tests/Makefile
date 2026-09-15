@@ -170,8 +170,53 @@ test-ci:
 # the buyer-machine scenarios from inside the compose network. This target is
 # intentionally heavier than test-module: it verifies the deployed images and
 # clears persisted compose state before each run.
+# Generated, never committed: the resolved paths of the committed development
+# identities, in the form `docker compose --env-file` wants.
+E2E_IDENTITY_ENV ?= $(CURDIR)/../.e2e-identities.env
+
+# The base stack is assembled by `include`, which resolves each included file's
+# relative paths against that file's own directory -- `domains/vms/compose.yml`
+# and `domains/apicredits/compose.yml` need that and sit in different
+# directories, so no single project directory could replace it. The development
+# bindings are layered with `-f` because `include` refuses to let an including
+# file redefine an imported service. See compose.local-identities.yml.
+E2E_COMPOSE_FILES := -f docker-compose.yml -f compose.local-identities.yml
+
 test-e2e:
-	cd .. && docker compose down -v --remove-orphans
+	@# Every signer, wallet, buyer-path, and bearer-token value in the compose
+	@# files is guarded with a required-variable form, so *any* compose
+	@# subcommand that reads the config -- down as much as up -- refuses to run
+	@# until all of them are set. They come from committed development values,
+	@# which is what lets this run without repository secrets; see
+	@# dev-env/identities/README.md.
+	@#
+	@# The env file is generated first and passed to every compose invocation
+	@# below. Passing it only to `up` left `down` able to fail on the same
+	@# interpolation, for a reason that has nothing to do with the run.
+	@#
+	@# The values reach compose through --env-file rather than an eval of
+	@# captured make output: a recursive make implies -w and would print
+	@# "Entering directory" into the capture, and compose reading the file
+	@# itself has nothing to quote wrong.
+	cd .. && $(MAKE) -s --no-print-directory e2e-dev-identities-env > "$(E2E_IDENTITY_ENV)"
+	cd .. && docker compose --env-file "$(E2E_IDENTITY_ENV)" $(E2E_COMPOSE_FILES) down -v --remove-orphans
 	cd .. && $(MAKE) build-dev
-	cd .. && docker compose up -d --wait
+	@# On failure, print the state and the container output *here*, in the
+	@# failing step. `up --wait` reports only which container went unhealthy,
+	@# never why: the reason is in that container's log. Leaving it to the
+	@# `always()` collection step means the answer lands in an uploaded
+	@# artifact that has to be downloaded separately, which is a slow loop for
+	@# something the job log can carry.
+	cd .. && docker compose --env-file "$(E2E_IDENTITY_ENV)" $(E2E_COMPOSE_FILES) up -d --wait \
+		|| { \
+		  echo "::group::compose ps"; \
+		  docker compose --env-file "$(E2E_IDENTITY_ENV)" $(E2E_COMPOSE_FILES) ps -a; \
+		  echo "::endgroup::"; \
+		  for svc in $$(docker compose --env-file "$(E2E_IDENTITY_ENV)" $(E2E_COMPOSE_FILES) ps -a --services); do \
+		    echo "::group::logs $$svc"; \
+		    docker compose --env-file "$(E2E_IDENTITY_ENV)" $(E2E_COMPOSE_FILES) logs --no-color --tail=120 "$$svc" || true; \
+		    echo "::endgroup::"; \
+		  done; \
+		  exit 1; \
+		}
 	$(MAKE) test-buyer-machine BUYER_MODULE="$(E2E_MODULE)"

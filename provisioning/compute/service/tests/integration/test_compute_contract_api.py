@@ -37,7 +37,7 @@ def _leased_vm_reservation() -> dict:
         attributes={"vm_host": "kvm1"},
     )
     reserved = ledger.reserve(
-        claim={"executor_kind": "vm"},
+        claim={"offering_mode": "vm"},
         deal_ref={"escrow_uid": "escrow-contract", "listing_id": "listing-1"},
         lease_duration_seconds=3600,
     )
@@ -61,7 +61,7 @@ def _leased_bare_metal_reservation() -> dict:
     )
     reserved = ledger.reserve(
         claim={
-            "executor_kind": "bare_metal",
+            "offering_mode": "bare_metal",
             "physical_host_id": "physical-contract-1",
             "allocation_mode": ALLOCATION_MODE_EXCLUSIVE,
         },
@@ -76,7 +76,7 @@ def _leased_bare_metal_reservation() -> dict:
     )
     return app.container.site_authority().update_reservation_fields(
         capacity_reservation_id=committed["capacity_reservation_id"],
-        executor_kind="bare_metal",
+        offering_mode="bare_metal",
         executor_target="bm-contract-1",
         executor_ref={"physical_host_id": "physical-contract-1"},
     )
@@ -88,7 +88,7 @@ def _vm_action(reservation: dict, **overrides) -> ExecutorActionEnvelope:
     values = {
         "capacity_reservation_id": reservation["capacity_reservation_id"],
         "deal_ref": reservation["deal_ref"],
-        "executor_kind": "vm",
+        "offering_mode": "vm",
         "action_kind": "create",
         "idempotency_key": "create-contract-vm",
         "parameters": {"vm_target": "tenant-contract", "ssh_pubkey": "ssh-ed25519 test"},
@@ -118,14 +118,14 @@ async def test_contract_submission_is_idempotent_and_correlated(client_and_queue
     assert duplicate.job_id == first.job_id
     assert job.capacity_reservation_id == reservation["capacity_reservation_id"]
     assert job.deal_ref["escrow_uid"] == "escrow-contract"
-    assert job.executor_kind == "vm"
+    assert job.offering_mode == "vm"
     assert job.action_kind == "create"
     assert job.result is not None and job.result.result_kind == "vm_create"
     assert {credential.credential_kind for credential in credentials} == {"root", "tenant"}
 
 
 @pytest.mark.asyncio
-async def test_bare_metal_uses_same_executor_neutral_client(client_and_queue):
+async def test_bare_metal_uses_same_offering_mode_neutral_client(client_and_queue):
     legacy_client, _ = client_and_queue
     await legacy_client.register_host(HostCreate(
         name="bm-contract-1",
@@ -138,7 +138,7 @@ async def test_bare_metal_uses_same_executor_neutral_client(client_and_queue):
     action = ExecutorActionEnvelope(
         capacity_reservation_id=reservation["capacity_reservation_id"],
         deal_ref=reservation["deal_ref"],
-        executor_kind="bare_metal",
+        offering_mode="bare_metal",
         action_kind=NODE_GRANT_ACCESS_ACTION,
         idempotency_key="grant-contract-bare-metal",
         parameters={"access_ref": {"ssh_user": "tenant"}},
@@ -151,7 +151,7 @@ async def test_bare_metal_uses_same_executor_neutral_client(client_and_queue):
         )
 
     assert job.capacity_reservation_id == reservation["capacity_reservation_id"]
-    assert job.executor_kind == "bare_metal"
+    assert job.offering_mode == "bare_metal"
     assert job.action_kind == NODE_GRANT_ACCESS_ACTION
     assert job.result is not None
     assert job.result.result_kind == "bare_metal_access"
@@ -162,9 +162,9 @@ async def test_executor_mismatch_fails_before_job_submission(client_and_queue):
     reservation = _leased_vm_reservation()
     async with _compute_provisioning_client("http://test", transport=ASGITransport(app=app)) as client:
         with pytest.raises(ComputeProvisioningError) as exc_info:
-            await client.submit_action(_vm_action(reservation, executor_kind="bare_metal"))
+            await client.submit_action(_vm_action(reservation, offering_mode="bare_metal"))
     assert exc_info.value.status_code == 409
-    assert "reservation executor is 'vm'" in str(exc_info.value)
+    assert "reservation offering mode is 'vm'" in str(exc_info.value)
 
 
 @pytest.mark.asyncio
@@ -205,7 +205,46 @@ async def test_terminal_executor_error_uses_structured_contract_envelope(
 
 
 @pytest.mark.asyncio
-async def test_unsupported_contract_major_reports_supported_version(client_and_queue):
+async def test_adapter_is_selected_by_the_offering_mode(client_and_queue):
+    """Closes 9.7: the adapter registry resolves by `offering_mode` end to end.
+
+    Both modes dispatch through the same generic endpoint and the same typed
+    client, and each is answered by its own adapter — which is what proves the
+    selector rename reaches composition rather than only the envelope.
+    """
+    legacy_client, _ = client_and_queue
+    await legacy_client.register_host(HostCreate(
+        name="kvm-sel",
+        kvm_host="127.0.0.1",
+        ssh_user="ubuntu",
+        ssh_key_type="path",
+        ssh_key_value="/tmp/test-key",
+    ))
+    vm_reservation = _leased_vm_reservation()
+
+    async with _compute_provisioning_client("http://test", transport=ASGITransport(app=app)) as client:
+        accepted = await client.submit_action(_vm_action(vm_reservation))
+        job = await client.poll_until_complete(
+            accepted.job_id, timeout=5, poll_interval=0.01
+        )
+
+    assert job.offering_mode == "vm"
+    assert job.result is not None and job.result.offering_mode == "vm"
+
+
+@pytest.mark.asyncio
+async def test_an_unknown_offering_mode_is_refused_before_any_work(
+    client_and_queue,
+):
+    """Closes the rejection half of 9.7.
+
+    The reservation's *recorded* mode gates first, so an unknown mode is
+    refused as a mismatch against the reservation rather than as a failed
+    adapter lookup. That ordering is the stronger guarantee — the mode is
+    checked against durable provenance before composition is consulted at all
+    — and it is why the contract declares no closed value set: an unknown mode
+    is a lookup or provenance failure, never an enum violation.
+    """
     reservation = _leased_vm_reservation()
     transport = ASGITransport(app=app)
     async with __import__("httpx").AsyncClient(transport=transport, base_url="http://test") as client:
@@ -213,11 +252,81 @@ async def test_unsupported_contract_major_reports_supported_version(client_and_q
             "/api/v1/actions",
             json={
                 **_vm_action(reservation).model_dump(mode="json"),
-                "contract_version": "2.0",
+                "offering_mode": "no-such-mode",
+            },
+        )
+    assert response.status_code == 409
+
+
+@pytest.mark.asyncio
+async def test_an_action_naming_the_mode_under_the_retired_key_is_refused(
+    client_and_queue,
+):
+    """Closes 9.17's rejection boundary. Raw HTTP because the typed envelope
+    will not carry the retired key; status only, per `TESTING.md`."""
+    reservation = _leased_vm_reservation()
+    envelope = _vm_action(reservation).model_dump(mode="json")
+    envelope.pop("offering_mode")
+    envelope["executor_kind"] = "vm"
+    transport = ASGITransport(app=app)
+    async with __import__("httpx").AsyncClient(transport=transport, base_url="http://test") as client:
+        response = await client.post("/api/v1/actions", json=envelope)
+    assert response.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_a_lease_retains_its_action_target_alongside_the_mode(
+    client_and_queue,
+):
+    """The `executor_` compounds are the abstraction's own target and
+    reference, so the selector rename must not have reached them. Asserted on
+    a committed reservation because a silent loss here would only surface at
+    release time."""
+    reservation = _leased_bare_metal_reservation()
+
+    assert reservation["offering_mode"] == "bare_metal"
+    assert reservation["executor_target"] == "bm-contract-1"
+    assert reservation["executor_ref"] == {
+        "physical_host_id": "physical-contract-1"
+    }
+
+
+@pytest.mark.asyncio
+async def test_retired_contract_major_is_refused(client_and_queue):
+    """Rejection boundary: a 1.x caller carries the retired offering-mode
+    spelling, so it must be refused rather than coerced.
+
+    Raw HTTP because the typed client will not construct a retired
+    `contract_version`, and the assertion is on status only -- the message text
+    is not part of the contract. See `docs/development/TESTING.md`.
+    """
+    reservation = _leased_vm_reservation()
+    transport = ASGITransport(app=app)
+    async with __import__("httpx").AsyncClient(transport=transport, base_url="http://test") as client:
+        response = await client.post(
+            "/api/v1/actions",
+            json={
+                **_vm_action(reservation).model_dump(mode="json"),
+                "contract_version": "1.0",
             },
         )
     assert response.status_code == 422
-    assert "supported majors: 1" in response.text
+
+
+@pytest.mark.asyncio
+async def test_unsupported_future_contract_major_is_refused(client_and_queue):
+    """Rejection boundary: an unknown future major is refused, not coerced."""
+    reservation = _leased_vm_reservation()
+    transport = ASGITransport(app=app)
+    async with __import__("httpx").AsyncClient(transport=transport, base_url="http://test") as client:
+        response = await client.post(
+            "/api/v1/actions",
+            json={
+                **_vm_action(reservation).model_dump(mode="json"),
+                "contract_version": "3.0",
+            },
+        )
+    assert response.status_code == 422
 
 
 async def test_contract_lease_view_serializes_every_reachable_reservation_state():
@@ -258,14 +367,14 @@ async def test_contract_lease_view_serializes_every_reachable_reservation_state(
     for raw_state, want in expected.items():
         view = _lease_view({
             "capacity_reservation_id": "reservation-1",
-            "executor_kind": "vm",
+            "offering_mode": "vm",
             "state": raw_state,
             "lease_end_utc": "2099-01-01T00:00:00Z",
         })
         assert view.status == want, f"{raw_state!r} should map to {want!r}"
         vm_view = _vm_lease_view({
             "capacity_reservation_id": "reservation-1",
-            "executor_kind": "vm",
+            "offering_mode": "vm",
             "resource_id": "resource-1",
             "state": raw_state,
             "lease_end_utc": "2099-01-01T00:00:00Z",
@@ -394,7 +503,7 @@ async def test_contract_register_lease_never_sends_executor_ref_and_it_self_heal
         registration = LeaseRegistration(
             capacity_reservation_id=reservation["capacity_reservation_id"],
             deal_ref={"escrow_uid": "escrow-contract"},
-            executor_kind="vm",
+            offering_mode="vm",
             executor_target="tenant-self-heal",
             lease_end_utc=datetime.now(timezone.utc) + timedelta(hours=1),
         )

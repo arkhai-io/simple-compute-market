@@ -211,8 +211,10 @@ def test_round0_payload_carries_quantity_key_and_scaled_amount():
         "version": 1,
         "payload": {"quantity": 100, "key": {"mode": "existing", "key_id": "ak_42"}},
     }
-    # listed_price opens at initial_price × quantity, absolute.
-    assert round0["proposal"]["fields"]["amount"] == 300
+    # listed_price opens at initial_price × quantity, absolute, and in the
+    # wire form every amount travels in: a decimal-digit string, since a
+    # uint256 has no JSON number form and this body is signed.
+    assert round0["proposal"]["fields"]["amount"] == "300"
 
 
 def test_seller_counter_above_scaled_ceiling_exits():

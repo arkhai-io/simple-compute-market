@@ -171,9 +171,12 @@ def test_buyer_counter_guard_records_amount_and_canonical_proposal():
     assert decision is None
     assert context.intermediate["uses_scalar_amount"] is True
     assert context.intermediate["buyer_amount"] == 750
+    # The canonical proposal carries the amount in its wire form: a
+    # decimal-digit string, since a uint256 has no JSON number form and this
+    # proposal is signed by both sides.
     assert context.intermediate["buyer_counter_proposal"]["fields"] == {
         "token": "0x" + "22" * 20,
-        "amount": 750,
+        "amount": "750",
     }
 
 

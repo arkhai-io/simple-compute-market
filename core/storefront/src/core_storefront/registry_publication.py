@@ -57,7 +57,7 @@ async def publish_listing_to_registries(
     if not enabled:
         return {"status": "disabled", "listing_id": listing_id}
 
-    offer_resource = ensure_json_obj(listing_dict.get("offer_resource"), {})
+    listing_resource = ensure_json_obj(listing_dict.get("listing_resource"), {})
     accepted_escrows = ensure_json_obj(listing_dict.get("accepted_escrows"), [])
     settlement_options = ensure_json_obj(listing_dict.get("settlement_options"), [])
     demands = ensure_json_obj(listing_dict.get("demands"), [])
@@ -74,7 +74,7 @@ async def publish_listing_to_registries(
         async with registry_client_factory() as registry_client:
             request = listing_request_factory(
                 listing_id=listing_id,
-                offer=offer_resource,
+                listing_resource=listing_resource,
                 accepted_escrows=accepted_escrows,
                 settlement_options=settlement_options,
                 demands=demands,
@@ -95,7 +95,7 @@ async def publish_listing_to_registries(
                         listing_id=listing_id,
                         storefront_url=listing_storefront_url,
                         seller_principal=listing_dict.get("seller_principal"),
-                        offer_resource=offer_resource,
+                        listing_resource=listing_resource,
                         accepted_escrows=accepted_escrows,
                         settlement_options=settlement_options,
                         demands=demands,

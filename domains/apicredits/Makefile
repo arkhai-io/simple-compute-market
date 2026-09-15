@@ -6,6 +6,7 @@ test: test-domain test-service test-storefront test-buyer test-sample-app test-m
 
 reinit: ## Force-reinstall internal wheels without bumping versions. Run make dist from the monorepo root first.
 	uv sync --dev --find-links $(DIST_DIR) \
+		--upgrade-package arkhai-apicredits-domain --reinstall-package arkhai-apicredits-domain \
 		--upgrade-package arkhai-core --reinstall-package arkhai-core \
 		--upgrade-package arkhai-kit-policy --reinstall-package arkhai-kit-policy \
 		--upgrade-package arkhai-kit-alkahest --reinstall-package arkhai-kit-alkahest \

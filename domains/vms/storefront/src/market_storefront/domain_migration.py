@@ -146,7 +146,7 @@ def _prepare_vm_bindings(
 
     listing_rows = conn.execute(
         """
-        SELECT l.listing_id, l.offer_resource,
+        SELECT l.listing_id, l.listing_resource,
                d.site_id, d.pool_id, d.resource_id, d.gpu_count,
                d.last_reconciled_at
         FROM listings l
@@ -174,20 +174,20 @@ def _prepare_vm_bindings(
             raise StorefrontDomainMigrationError(
                 f"listing {listing_id!r} has an invalid pool identifier"
             )
-        offer = _decode_object(
-            raw_row[1], field="offer_resource", owner=f"listing {listing_id!r}"
+        listing_resource = _decode_object(
+            raw_row[1], field="listing_resource", owner=f"listing {listing_id!r}"
         )
-        public_mode = offer.get("virtualization_type")
+        public_mode = listing_resource.get("offering_mode")
         if public_mode is not None and public_mode != selection.offering_mode:
             raise StorefrontDomainMigrationError(
                 f"listing {listing_id!r} declares public mode {public_mode!r}, "
                 f"not selected mode {selection.offering_mode!r}"
             )
         if public_mode is None:
-            offer["virtualization_type"] = selection.offering_mode
+            listing_resource["offering_mode"] = selection.offering_mode
             conn.execute(
-                "UPDATE listings SET offer_resource=? WHERE listing_id=?",
-                (_canonical_json(offer), listing_id),
+                "UPDATE listings SET listing_resource=? WHERE listing_id=?",
+                (_canonical_json(listing_resource), listing_id),
             )
         source = {
             "kind": "compute.listing_source",

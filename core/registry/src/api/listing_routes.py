@@ -14,6 +14,7 @@ from sqlalchemy.orm import Session
 from src.api.api_key_auth import require_read_access, require_write_access
 from src.api.filter_eval import FilterParamError, build_criteria, evaluate_all
 from src.api.filter_spec import compute_etag, get_loaded_spec
+from src.api.validate_routes import reject_retired_listing_shape
 from src.api.publisher_auth import (
     authenticate_publisher_request,
     cached_response,
@@ -54,6 +55,7 @@ async def publish_listing(
         body=body,
     )
     require_write_access(request, db)
+    reject_retired_listing_shape(body)
     signer = registry_authority_signer(request)
     replay = cached_response(authenticated, signer=signer)
     if replay is not None:
@@ -76,7 +78,7 @@ async def publish_listing(
                 detail="Listing is owned by another publisher",
             )
         update_fields = {
-            "offer_resource": body.get("offer_resource"),
+            "listing_resource": body.get("listing_resource"),
             "accepted_escrows": body.get("accepted_escrows"),
             "settlement_options": body.get("settlement_options"),
             "demands": body.get("demands"),
@@ -94,7 +96,7 @@ async def publish_listing(
         listing = Listing(
             listing_id=listing_id,
             publisher_id=publisher.publisher_id,
-            offer_resource=body.get("offer_resource", {}),
+            listing_resource=body.get("listing_resource", {}),
             accepted_escrows=body.get("accepted_escrows", []),
             settlement_options=body.get("settlement_options", []),
             demands=body.get("demands", []),

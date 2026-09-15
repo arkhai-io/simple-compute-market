@@ -216,7 +216,7 @@ def test_create_listing_settlement_config_sync_async_contract_is_byte_equivalent
     sync_transport = _SyncCreateTransport()
     settlement_config = {"mechanism_payload": {"opaque": ["shape"]}}
     kwargs = {
-        "offer": {"gpu_model": "H200", "gpu_count": 1},
+        "listing_resource": {"gpu_model": "H200", "gpu_count": 1},
         "capacity_source": {
             "site_id": "site-1",
             "resource_id": "resource-1",
@@ -262,7 +262,7 @@ def test_create_listing_settlement_config_sync_async_contract_is_byte_equivalent
         },
         "demands": [],
         "max_duration_seconds": None,
-        "offer": {"gpu_count": 1, "gpu_model": "H200"},
+        "listing_resource": {"gpu_count": 1, "gpu_model": "H200"},
         "paused": False,
         "settlement_config": settlement_config,
         "settlement_options": [],

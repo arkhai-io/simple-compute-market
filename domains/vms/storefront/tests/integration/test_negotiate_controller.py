@@ -117,13 +117,13 @@ async def _upsert_bound_listing(
         status="open",
         created_at=datetime.now().isoformat(),
         updated_at=datetime.now().isoformat(),
-        offer_resource={
+        listing_resource={
             "resource_id": f"res-{listing_id}",
             "gpu_model": gpu_model,
             "gpu_count": 1,
             "sla": 99.9,
             "region": "California, US",
-            "virtualization_type": "vm",
+            "offering_mode": "vm",
         },
         accepted_escrows=[
             {
@@ -535,7 +535,7 @@ class TestNegotiateNew:
             gpu_model="RTX 4090",
         )
         # The H200 resource seeded by _seed_listing doesn't match the
-        # RTX 4090 offer; the seller should refuse.
+        # RTX 4090 listing_resource; the seller should refuse.
         with pytest.raises(StorefrontClientError) as exc_info:
             await c.negotiate_new(
                 listing_id="neg-listing-rtx",

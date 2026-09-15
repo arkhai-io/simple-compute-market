@@ -68,8 +68,8 @@ ALLOCATION_MODE_ATTR = "allocation_mode"
 ALLOCATION_MODE_EXCLUSIVE = "exclusive"
 ALLOCATION_MODE_SHAREABLE = "shareable"
 PHYSICAL_HOST_ID_ATTR = "physical_host_id"
-VM_EXECUTOR_KIND = "vm"
-EXECUTOR_KIND_CLAIM_KEY = "executor_kind"
+VM_OFFERING_MODE = "vm"
+OFFERING_MODE_CLAIM_KEY = "offering_mode"
 
 
 def _executor_ref_for_resource(resource: CapacityBucket) -> dict[str, Any] | None:
@@ -167,21 +167,21 @@ _DIMENSIONS_CLAIM_KEY = "dimensions"
 # only this one dimension, so it's what they mirror into/out of.
 PRIMARY_DIMENSION = "gpu_count"
 
-def _requested_executor_kind(
+def _requested_offering_mode(
     claim: Mapping[str, Any] | None,
     *,
     required: bool,
 ) -> str | None:
-    raw = (claim or {}).get(EXECUTOR_KIND_CLAIM_KEY)
+    raw = (claim or {}).get(OFFERING_MODE_CLAIM_KEY)
     if raw is None:
         if required:
             raise ValueError(
-                f"capacity claim must include explicit {EXECUTOR_KIND_CLAIM_KEY}"
+                f"capacity claim must include explicit {OFFERING_MODE_CLAIM_KEY}"
             )
         return None
     if not isinstance(raw, str) or not raw.strip() or raw != raw.strip():
         raise ValueError(
-            f"{EXECUTOR_KIND_CLAIM_KEY} must be a non-empty canonical string"
+            f"{OFFERING_MODE_CLAIM_KEY} must be a non-empty canonical string"
         )
     return raw
 
@@ -508,7 +508,7 @@ def _split_claim_requirement(
         for key, expected in claim.items()
         if key not in unit_claim_keys
         and key != _DIMENSIONS_CLAIM_KEY
-        and key != EXECUTOR_KIND_CLAIM_KEY
+        and key != OFFERING_MODE_CLAIM_KEY
         and key != "resource_type"
     }
     return claim.get("resource_type"), attributes
@@ -519,7 +519,7 @@ class SettlementAbandonmentHook(Protocol):
 
     ``market_site`` must not import ``market_fulfillment`` (see
     ``openspec/specs/fulfillment/spec.md#dependency-boundary``), so this
-    protocol lets ``CapacityLedgerService`` offer every capacity-reclaiming
+    protocol lets ``CapacityLedgerService`` listing_resource every capacity-reclaiming
     site a chance to react without knowing what "settlement" or
     "fulfillment" mean. The concrete implementation is supplied by
     ``market_fulfillment`` at composition time and decides on its own
@@ -699,7 +699,7 @@ class CapacityLedgerService:
         lease_duration_seconds: int | None = None,
     ) -> dict[str, Any] | None:
         """Dry-run match for ``claim`` — consumes nothing."""
-        _requested_executor_kind(claim, required=True)
+        _requested_offering_mode(claim, required=True)
         requested = _requested_dimensions(claim, unit_claim_keys=self._unit_claim_keys)
         window_start, window_end = _lease_window(
             lease_start_utc=lease_start_utc,
@@ -738,7 +738,20 @@ class CapacityLedgerService:
         expiry still reserves fresh, correctly.
         """
         requested = _requested_dimensions(claim, unit_claim_keys=self._unit_claim_keys)
-        requested_mode = _requested_executor_kind(claim, required=True)
+        requested_mode = _requested_offering_mode(claim, required=True)
+        # The same split `_find_candidate` matches on, recorded rather than
+        # left to be recomputed. Admission already evaluates these; scheduling
+        # later needs the same constraints and has no way to re-derive them,
+        # because the claim is gone by then and the reservation kept only its
+        # `dimensions`.
+        #
+        # A resource-pinned claim comes along for free: `resource_feasibility_view`
+        # normalizes `resource_id` into the matched attribute mapping, so a
+        # listing that named one resource is carried here as an ordinary
+        # categorical constraint rather than needing a second mechanism.
+        _, claim_attributes = _split_claim_requirement(
+            claim, unit_claim_keys=self._unit_claim_keys
+        )
         deal = dict(deal_ref or {})
         escrow_uid = deal.get("escrow_uid")
         window_start, window_end = _lease_window(
@@ -750,9 +763,9 @@ class CapacityLedgerService:
             if escrow_uid:
                 existing = self._find_reservation(db, escrow_uid=escrow_uid)
                 if existing is not None:
-                    if existing.executor_kind != requested_mode:
+                    if existing.offering_mode != requested_mode:
                         raise CapacityConflictError(
-                            "executor_kind does not match the existing reservation"
+                            "offering_mode does not match the existing reservation"
                         )
                     return self._reservation_payload_for_reserve(db, existing)
             match = self._find_candidate(db, claim, requested, window_start, window_end)
@@ -769,12 +782,13 @@ class CapacityLedgerService:
                 capacity_reservation_id=str(uuid.uuid4()),
                 units=mirrored_units,
                 dimensions=_serialize_dimensions(requested),
+                claim_attributes=dict(claim_attributes),
                 state=ReservationState.reserved.value,
                 deal_ref=deal,
                 escrow_uid=deal.get("escrow_uid"),
                 hold_expires_at=hold_expires_at,
                 executor_ref=_executor_ref_for_resource(resource),
-                executor_kind=requested_mode,
+                offering_mode=requested_mode,
                 lease_start_utc=window_start.isoformat() if window_start else None,
                 lease_end_utc=window_end.isoformat() if window_end else None,
             )
@@ -805,7 +819,7 @@ class CapacityLedgerService:
             payload["capacity_reservation_id"] = reservation.capacity_reservation_id
             payload["settlement_resource_id"] = reservation.settlement_resource_id
             payload["hold_expires_at"] = hold_expires_at
-            payload["executor_kind"] = requested_mode
+            payload["offering_mode"] = requested_mode
             return payload
 
     def assign_settlement_resource(
@@ -858,7 +872,7 @@ class CapacityLedgerService:
             raise CapacityConflictError(
                 f"settlement resource {settlement_resource_id!r} is unavailable"
             )
-        requested_mode = reservation.executor_kind
+        requested_mode = reservation.offering_mode
         if not requested_mode:
             raise CapacityConflictError(
                 f"reservation {capacity_reservation_id} has no executor identity"
@@ -1203,7 +1217,7 @@ class CapacityLedgerService:
         requested = _requested_dimensions(
             new_claim, unit_claim_keys=self._unit_claim_keys
         )
-        requested_mode = _requested_executor_kind(new_claim, required=True)
+        requested_mode = _requested_offering_mode(new_claim, required=True)
         deal = dict(deal_ref or {})
         window_start, window_end = _lease_window(
             lease_start_utc=lease_start_utc,
@@ -1253,12 +1267,21 @@ class CapacityLedgerService:
                 capacity_reservation_id=str(uuid.uuid4()),
                 units=mirrored_units,
                 dimensions=_serialize_dimensions(requested),
+                # Carried from the reservation being superseded, not re-split
+                # from this call's claim. A resize changes how much was
+                # committed; what kind of resource was sold was settled at
+                # admission, and a resize is not an occasion to renegotiate it.
+                claim_attributes=(
+                    dict(old_reservation.claim_attributes)
+                    if old_reservation.claim_attributes is not None
+                    else None
+                ),
                 state=ReservationState.reserved.value,
                 deal_ref=deal,
                 escrow_uid=deal.get("escrow_uid"),
                 hold_expires_at=hold_expires_at,
                 executor_ref=_executor_ref_for_resource(resource),
-                executor_kind=requested_mode,
+                offering_mode=requested_mode,
                 lease_start_utc=window_start.isoformat() if window_start else None,
                 lease_end_utc=window_end.isoformat() if window_end else None,
             )
@@ -1334,7 +1357,7 @@ class CapacityLedgerService:
         *,
         capacity_reservation_id: str | None = None,
         escrow_uid: str | None = None,
-        executor_kind: str | None = None,
+        offering_mode: str | None = None,
         executor_target: str | None = None,
         executor_ref: Mapping[str, Any] | None = None,
         lease_start_utc: str | None = None,
@@ -1360,7 +1383,7 @@ class CapacityLedgerService:
                 return None
             self._sync_executor_fields(
                 reservation,
-                executor_kind=executor_kind,
+                offering_mode=offering_mode,
                 executor_target=executor_target,
                 executor_ref=executor_ref,
             )
@@ -1424,7 +1447,7 @@ class CapacityLedgerService:
         self,
         capacity_reservation_id: str,
         *,
-        executor_kind: str | None = None,
+        offering_mode: str | None = None,
         executor_target: str | None = None,
         executor_ref: Mapping[str, Any] | None = None,
         lease_start_utc: str | None = None,
@@ -1440,34 +1463,85 @@ class CapacityLedgerService:
         Returns ``None`` when the reservation does not exist or is already
         terminal.  Used by the operator PATCH endpoint to update expiry time,
         host coordinates, or job references without driving a state transition.
+
+        Opens and commits its own transaction. A caller that must land this
+        write inside a transaction it already holds open should use
+        ``update_lease_fields_in_session`` against that session, not this
+        method: on SQLite a second session cannot take the writer slot the
+        caller itself is holding, so this form would wait out the busy
+        timeout and then fail with ``database is locked``.
         """
         with self._lock, self._session_factory() as db:
-            reservation = db.get(CapacityReservation, capacity_reservation_id)
-            terminal = {
-                ReservationState.released.value,
-                ReservationState.force_released.value,
-                ReservationState.provisioning_failed.value,
-            }
-            if reservation is None or reservation.state in terminal:
-                return None
-            self._sync_executor_fields(
-                reservation,
-                executor_kind=executor_kind,
+            result = self.update_lease_fields_in_session(
+                db,
+                capacity_reservation_id,
+                offering_mode=offering_mode,
                 executor_target=executor_target,
                 executor_ref=executor_ref,
+                lease_start_utc=lease_start_utc,
+                lease_end_utc=lease_end_utc,
+                vm_remove_job_id=vm_remove_job_id,
+                release_job_id=release_job_id,
+                create_job_id=create_job_id,
             )
-            if lease_start_utc is not None:
-                reservation.lease_start_utc = str(lease_start_utc)
-            if lease_end_utc is not None:
-                reservation.lease_end_utc = str(lease_end_utc)
-            self._sync_release_job_fields(
-                reservation,
-                release_job_id=release_job_id or vm_remove_job_id,
-            )
-            if create_job_id is not None:
-                reservation.create_job_id = create_job_id
             db.commit()
-            return self._reservation_payload(reservation)
+            return result
+
+    def update_lease_fields_in_session(
+        self,
+        db: Session,
+        capacity_reservation_id: str,
+        *,
+        offering_mode: str | None = None,
+        executor_target: str | None = None,
+        executor_ref: Mapping[str, Any] | None = None,
+        lease_start_utc: str | None = None,
+        lease_end_utc: str | None = None,
+        vm_remove_job_id: str | None = None,
+        release_job_id: str | None = None,
+        create_job_id: str | None = None,
+    ) -> dict[str, Any] | None:
+        """Session-scoped core of ``update_lease_fields``.
+
+        Does not commit and does not take the ledger lock: the caller owns the
+        transaction boundary and decides when this write lands relative to its
+        own. Exists so a caller that has already written on another
+        repository's behalf -- and therefore holds SQLite's single writer slot
+        -- can record lease-tail fields inside that same transaction instead of
+        contending with itself from a second session.
+
+        Validation precedes every mutation for all argument combinations:
+        ``_sync_executor_fields`` performs both of its raising checks before
+        either of its assignments, and nothing after it raises. A raise
+        therefore leaves ``db`` exactly as it was found, so a best-effort
+        caller may swallow the exception without rolling back its own writes
+        and without wrapping this in a savepoint.
+        """
+        reservation = db.get(CapacityReservation, capacity_reservation_id)
+        terminal = {
+            ReservationState.released.value,
+            ReservationState.force_released.value,
+            ReservationState.provisioning_failed.value,
+        }
+        if reservation is None or reservation.state in terminal:
+            return None
+        self._sync_executor_fields(
+            reservation,
+            offering_mode=offering_mode,
+            executor_target=executor_target,
+            executor_ref=executor_ref,
+        )
+        if lease_start_utc is not None:
+            reservation.lease_start_utc = str(lease_start_utc)
+        if lease_end_utc is not None:
+            reservation.lease_end_utc = str(lease_end_utc)
+        self._sync_release_job_fields(
+            reservation,
+            release_job_id=release_job_id or vm_remove_job_id,
+        )
+        if create_job_id is not None:
+            reservation.create_job_id = create_job_id
+        return self._reservation_payload(reservation)
 
     def find_active_lease_by_vm_target(
         self, vm_host: str, vm_target: str
@@ -1805,7 +1879,7 @@ class CapacityLedgerService:
         required_resource_kind, required_attributes = _split_claim_requirement(
             claim, unit_claim_keys=self._unit_claim_keys
         )
-        requested_mode = _requested_executor_kind(claim, required=False)
+        requested_mode = _requested_offering_mode(claim, required=False)
         undeclared_pools: set[str] = set()
         pool_mode_decisions: dict[str, bool] = {}
         for resource in rows:
@@ -2083,20 +2157,25 @@ class CapacityLedgerService:
             "deal_ref": dict(reservation.deal_ref or {}),
             "escrow_uid": reservation.escrow_uid,
             "hold_expires_at": reservation.hold_expires_at,
-            "executor_kind": reservation.executor_kind,
+            "offering_mode": reservation.offering_mode,
             "executor_target": reservation.executor_target,
             "release_job_id": reservation.release_job_id,
             "executor_ref": dict(reservation.executor_ref or {}),
             "vm_host": (reservation.executor_ref or {}).get("vm_host"),
             "vm_target": (
                 reservation.executor_target
-                if reservation.executor_kind == VM_EXECUTOR_KIND
+                if reservation.offering_mode == VM_OFFERING_MODE
                 else None
             ),
             "lease_start_utc": reservation.lease_start_utc,
             "lease_end_utc": reservation.lease_end_utc,
             "create_job_id": reservation.create_job_id,
             "vm_remove_job_id": reservation.vm_remove_job_id,
+            "claim_attributes": (
+                dict(reservation.claim_attributes)
+                if reservation.claim_attributes is not None
+                else None
+            ),
             "failure_reason": reservation.failure_reason,
             "failure_message": reservation.failure_message,
             "released_at": reservation.released_at,
@@ -2128,21 +2207,21 @@ class CapacityLedgerService:
     def _sync_executor_fields(
         reservation: CapacityReservation,
         *,
-        executor_kind: str | None = None,
+        offering_mode: str | None = None,
         executor_target: str | None = None,
         executor_ref: Mapping[str, Any] | None = None,
     ) -> None:
-        if reservation.executor_kind is None:
+        if reservation.offering_mode is None:
             raise CapacityConflictError(
                 "reservation has no explicit requested executor identity"
             )
         if (
-            executor_kind is not None
-            and reservation.executor_kind != executor_kind
+            offering_mode is not None
+            and reservation.offering_mode != offering_mode
         ):
             raise CapacityConflictError(
-                f"reservation executor_kind is {reservation.executor_kind!r}, "
-                f"not {executor_kind!r}"
+                f"reservation offering_mode is {reservation.offering_mode!r}, "
+                f"not {offering_mode!r}"
             )
         if executor_target is not None:
             reservation.executor_target = executor_target
@@ -2158,5 +2237,5 @@ class CapacityLedgerService:
         if release_job_id is None:
             return
         reservation.release_job_id = release_job_id
-        if reservation.executor_kind == VM_EXECUTOR_KIND:
+        if reservation.offering_mode == VM_OFFERING_MODE:
             reservation.vm_remove_job_id = release_job_id

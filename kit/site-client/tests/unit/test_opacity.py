@@ -28,7 +28,7 @@ async def test_reserve_commit_send_no_placement_fields() -> None:
 
     reservation = await capacity.reserve(
         claim={
-            "executor_kind": "vm",
+            "offering_mode": "vm",
             "pool_id": "host-private",
             "gpu_count": 1,
         },

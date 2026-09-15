@@ -3,7 +3,7 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 import pytest
-from arkhai_bare_metal import BARE_METAL_EXECUTOR_KIND
+from arkhai_bare_metal import BARE_METAL_OFFERING_MODE
 from market_fulfillment import (
     ProviderConfigInvalidError,
     ProviderOperationState,
@@ -67,7 +67,7 @@ class FakeJobs:
 
 def _resource() -> SettlementResource:
     return SettlementResource(
-        executor_kind=BARE_METAL_EXECUTOR_KIND,
+        offering_mode=BARE_METAL_OFFERING_MODE,
         settlement_resource_id="resource-1",
         pool_id="pool-1",
         resource_kind="compute.bare-metal",

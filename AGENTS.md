@@ -19,7 +19,7 @@ Use a discuss → plan → implement workflow for non-trivial changes.
 - Name the files to touch and why.
 - Identify the permanent documentation destination for every accepted material design decision.
 - Include focused validation and relevant integration suites.
-- End the plan with the closeout task defined in `openspec/README.md#plan-closeout-requirements` — comment hygiene, import placement, documentation compliance, narrative compression, roadmap currency, campaign index currency, and promotion. Do not defer this to a later review round. Promotion happens post code-review to reduce file churn.
+- End the plan with the closeout task defined in `openspec/README.md#plan-closeout-requirements` — comment hygiene, import placement, documentation compliance, narrative compression, roadmap currency, campaign index currency, documentation citations, end-to-end pipeline evidence, and promotion. Do not defer this to a later review round. Promotion happens post code-review to reduce file churn.
 
 ### Implement
 
@@ -57,6 +57,15 @@ Do not reference:
 - the feature, migration, or review that introduced the code;
 - tombstones or generated-artifact instructions;
 - temporary implementation phases as though they were permanent rationale.
+
+`make check-comment-hygiene` enforces this on `.py`, `.toml`, `.yml` and
+`.yaml`: it rejects task-number and `tasks.md` references, and separately
+rejects any comment naming an OpenSpec change directory — including a change
+that has not landed yet, since a reader of the code cannot see either one and
+the name goes stale as soon as the change is archived. `docs/` is exempt,
+because naming the change that owns a gap is the roadmap's job. Say *why* the
+current invariant holds instead; if the reason is only "a change is coming",
+the comment is describing a plan rather than the system.
 
 Use comments for:
 

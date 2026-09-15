@@ -317,12 +317,12 @@ async def reclaim_hosted_settlement(
 def _listing_response(
     runtime: BareMetalStorefrontRuntime, row: dict[str, Any]
 ) -> dict[str, Any]:
-    raw = row.get("offer_resource")
+    raw = row.get("listing_resource")
     if isinstance(raw, str):
         raw = json.loads(raw)
     runtime.domain.codecs.listing(raw)
     normalized = dict(row)
-    normalized["offer_resource"] = raw
+    normalized["listing_resource"] = raw
     return normalized
 
 

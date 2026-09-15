@@ -433,7 +433,7 @@ def test_issue_requires_a_complete_canonical_owner(service):
 
 def test_issue_commits_negotiation_hold_instead_of_reserving(service, ledger):
     hold = ledger.reserve(
-        claim={"executor_kind": "api_credits", "units": 200},
+        claim={"offering_mode": "api_credits", "units": 200},
         deal_ref={"escrow_uid": "0xheld"},
         ttl_seconds=900,
     )

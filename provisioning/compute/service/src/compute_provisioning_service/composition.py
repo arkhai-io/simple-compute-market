@@ -45,12 +45,12 @@ class ComposedComputeAdapters:
 
 def _validate_executor(bundle_name: str, contribution: ExecutorAdapterContribution) -> str:
     adapter = contribution.adapter
-    executor_kind = str(getattr(adapter, "executor_kind", "") or "").strip()
-    if not executor_kind:
-        raise ValueError(f"adapter bundle {bundle_name!r} has an executor without executor_kind")
+    offering_mode = str(getattr(adapter, "offering_mode", "") or "").strip()
+    if not offering_mode:
+        raise ValueError(f"adapter bundle {bundle_name!r} has an executor without offering_mode")
     if not contribution.action_kinds:
         raise ValueError(
-            f"adapter bundle {bundle_name!r} executor {executor_kind!r} declares no action kinds"
+            f"adapter bundle {bundle_name!r} executor {offering_mode!r} declares no action kinds"
         )
     for hook in (
         "validate_parameters",
@@ -60,15 +60,15 @@ def _validate_executor(bundle_name: str, contribution: ExecutorAdapterContributi
     ):
         if not callable(getattr(adapter, hook, None)):
             raise ValueError(
-                f"adapter bundle {bundle_name!r} executor {executor_kind!r} "
+                f"adapter bundle {bundle_name!r} executor {offering_mode!r} "
                 f"is missing required hook {hook!r}"
             )
     if not callable(getattr(contribution.release_executor, "submit_release", None)):
         raise ValueError(
-            f"adapter bundle {bundle_name!r} executor {executor_kind!r} "
+            f"adapter bundle {bundle_name!r} executor {offering_mode!r} "
             "is missing required release hook 'submit_release'"
         )
-    return executor_kind
+    return offering_mode
 
 
 def _validate_provider_pairing(bundle: ExecutorAdapterBundle) -> None:
@@ -161,25 +161,25 @@ def compose_adapter_bundles(
         _validate_provider_pairing(bundle)
 
         for contribution in bundle.executors:
-            executor_kind = _validate_executor(bundle_name, contribution)
-            previous = executor_owners.get(executor_kind)
+            offering_mode = _validate_executor(bundle_name, contribution)
+            previous = executor_owners.get(offering_mode)
             if previous is not None:
                 raise ValueError(
-                    f"duplicate executor kind {executor_kind!r}: "
+                    f"duplicate offering mode {offering_mode!r}: "
                     f"bundles {previous!r} and {bundle_name!r}"
                 )
-            executor_owners[executor_kind] = bundle_name
+            executor_owners[offering_mode] = bundle_name
             for action_kind in contribution.action_kinds:
-                key = (executor_kind, action_kind)
+                key = (offering_mode, action_kind)
                 previous = action_owners.get(key)
                 if previous is not None:
                     raise ValueError(
-                        f"duplicate executor/action {executor_kind!r}/{action_kind!r}: "
+                        f"duplicate executor/action {offering_mode!r}/{action_kind!r}: "
                         f"bundles {previous!r} and {bundle_name!r}"
                     )
                 action_owners[key] = bundle_name
             adapters.append(contribution.adapter)
-            release_executors[executor_kind] = contribution.release_executor
+            release_executors[offering_mode] = contribution.release_executor
 
         for provider_name, provider in bundle.fulfillment_providers.items():
             name = provider_name.strip()

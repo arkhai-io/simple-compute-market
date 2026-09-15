@@ -42,7 +42,7 @@ def _resource(**overrides) -> SettlementResource:
     values = {
         "settlement_resource_id": "kvm1",
         "pool_id": "pool-1",
-        "executor_kind": "vm",
+        "offering_mode": "vm",
         "resource_kind": "vm",
         "provider": "ansible",
         "attributes": {"vm_host": "kvm1"},
@@ -485,12 +485,12 @@ class TestExtraVarsCollision:
             )
 
     def test_create_rejects_collision_on_a_dynamically_derived_builtin(self, provider):
-        with pytest.raises(ProviderConfigInvalidError, match="executor_kind"):
+        with pytest.raises(ProviderConfigInvalidError, match="offering_mode"):
             provider.prepare_create(
                 capacity_reservation_id="alloc-1",
                 request=_request(),
                 resource=_resource(),
-                pool_config=_pool_config(extra_vars={"executor_kind": "hijacked"}),
+                pool_config=_pool_config(extra_vars={"offering_mode": "hijacked"}),
             )
 
     def test_teardown_rejects_collision_too(self, provider):
@@ -514,15 +514,15 @@ class TestExtraVarsCollision:
     def test_reserved_var_keys_matches_what_build_vm_vars_actually_emits(self):
         ansible_service = AnsibleService(settings=MagicMock())
         params = AnsibleJobParams(
-            vm_host="kvm1", vm_action="create", executor_kind="vm"
+            vm_host="kvm1", vm_action="create", offering_mode="vm"
         )
         reserved = ansible_service.reserved_var_keys(params)
-        assert "executor_kind" in reserved
+        assert "offering_mode" in reserved
         assert "vm_host" in reserved
 
-        with pytest.raises(ValueError, match="executor_kind"):
+        with pytest.raises(ValueError, match="offering_mode"):
             ansible_service._build_vm_vars(
-                dataclasses.replace(params, provider_extra_vars={"executor_kind": "x"})
+                dataclasses.replace(params, provider_extra_vars={"offering_mode": "x"})
             )
 
 

@@ -172,7 +172,7 @@ class Listing(Base):
         ForeignKey("publishers.publisher_id", ondelete="CASCADE"),
         nullable=False,
     )
-    offer_resource = Column(
+    listing_resource = Column(
         JSON, nullable=False
     )  # registry-specific shape (e.g. ComputeResource)
     accepted_escrows = Column(

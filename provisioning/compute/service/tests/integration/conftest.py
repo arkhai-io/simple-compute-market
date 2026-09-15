@@ -569,30 +569,30 @@ async def client_and_queue(
 
     from compute_provisioning.release import ExecutorReleaseDispatcher, ReleaseJobDispatcher
     from vm_provisioning_adapter.release import (
-        VM_EXECUTOR_KIND,
+        VM_OFFERING_MODE,
         FulfillmentServiceTeardownPort,
         VmFulfillmentReleaseJobPort,
         VmReleaseExecutor,
     )
     from bare_metal_provisioning_adapter.release import (
-        BARE_METAL_EXECUTOR_KIND,
+        BARE_METAL_OFFERING_MODE,
         BareMetalReleaseExecutor,
     )
     release_dispatcher = ExecutorReleaseDispatcher({
-        BARE_METAL_EXECUTOR_KIND: BareMetalReleaseExecutor(
+        BARE_METAL_OFFERING_MODE: BareMetalReleaseExecutor(
             release_delegate=bare_metal_operations_service.reclaim_access_for_reservation,
         ),
-        VM_EXECUTOR_KIND: VmReleaseExecutor(
+        VM_OFFERING_MODE: VmReleaseExecutor(
             settlement_repository=SettlementRepository(),
             session_factory=session_factory,
             teardown_port=FulfillmentServiceTeardownPort(lambda: fulfillment_service),
         ),
     })
     release_job_dispatcher = ReleaseJobDispatcher({
-        VM_EXECUTOR_KIND: VmFulfillmentReleaseJobPort(
+        VM_OFFERING_MODE: VmFulfillmentReleaseJobPort(
             teardown_port=FulfillmentServiceTeardownPort(lambda: fulfillment_service),
         ),
-        BARE_METAL_EXECUTOR_KIND: job_service,
+        BARE_METAL_OFFERING_MODE: job_service,
     })
 
     from compute_provisioning.lease_lifecycle import LeaseLifecycleService

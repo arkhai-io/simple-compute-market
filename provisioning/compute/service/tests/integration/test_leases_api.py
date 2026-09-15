@@ -47,7 +47,7 @@ def _reserve(escrow_uid: str, *, gpu_count: int = 1) -> dict:
         )
     reserved = ledger.reserve(
         claim={
-            "executor_kind": "vm",
+            "offering_mode": "vm",
             "gpu_count": gpu_count,
             "vm_host": "kvm1",
         },
@@ -153,7 +153,7 @@ class TestCreateLease:
         reservation = ledger.get_reservation(lease["capacity_reservation_id"])
         assert reservation["state"] == "leased"
         assert reservation["vm_target"] == lease["vm_target"]
-        assert reservation["executor_kind"] == "vm"
+        assert reservation["offering_mode"] == "vm"
         assert reservation["executor_target"] == lease["vm_target"]
         assert reservation["executor_ref"] == {"vm_host": "kvm1"}
 
@@ -283,7 +283,7 @@ class TestUpdateLease:
     async def test_patch_through_generic_executor_lease_service(
         self, client_and_queue, monkeypatch,
     ):
-        """The VM controller can update through the executor-neutral service."""
+        """The VM controller can update through the offering-mode-neutral service."""
         from compute_provisioning.executor_leases import ExecutorLeaseService
         from market_site.authority import LedgerSiteAuthority
 
@@ -291,7 +291,7 @@ class TestUpdateLease:
         lease = await _register(client, "escrow-patch-generic")
         generic_leases = ExecutorLeaseService(
             LedgerSiteAuthority(_container_module.resolved_capacity_ledger_service),
-            executor_kind="vm",
+            offering_mode="vm",
         )
         monkeypatch.setattr(
             _container_module,
@@ -332,6 +332,49 @@ class TestUpdateLease:
         assert reservation["state"] in ("released", "releasing")
         if reservation["state"] == "releasing":
             assert reservation["release_job_id"] == reservation["vm_remove_job_id"]
+
+    async def test_releasing_lease_publishes_release_job_id_on_the_api(
+        self, client_and_queue
+    ):
+        """The release handle has to be readable from the lease response.
+
+        The test above asserts it on the ledger, which is why this gap
+        survived: the ledger held `release_job_id` correctly while
+        `GET /api/v1/leases/{id}` did not publish the field at all, so a
+        caller reading the documented name got `None` from a lease that was
+        demonstrably releasing. The e2e's `DealLease` view reads exactly
+        this key, and asserting the ledger is not asserting the contract.
+
+        `vm_remove_job_id` is checked alongside it because it is retained
+        for wire compatibility only, and the two must carry the same value
+        rather than diverge.
+        """
+        client, _ = client_and_queue
+        lease = await _register(client, "escrow-release-job-id-on-api")
+        _create_active_fulfillment(lease["capacity_reservation_id"])
+
+        await client.update_lease(lease["id"], lease_end_utc=_past_dt())
+        await client.check_leases()
+
+        ledger = _container_module.resolved_capacity_ledger_service
+        reservation = ledger.get_reservation(lease["capacity_reservation_id"])
+        if reservation["state"] != "releasing":
+            pytest.skip(
+                "lease released directly without a releasing step; this case "
+                "covers the releasing handle"
+            )
+
+        published = await client.get_lease(lease["id"])
+        assert published["status"] == "releasing", published
+        assert published["release_job_id"] == reservation["release_job_id"], (
+            "GET /api/v1/leases/{id} must publish the reservation's "
+            f"release handle: {published}"
+        )
+        assert published["release_job_id"], published
+        assert published["vm_remove_job_id"] == published["release_job_id"], (
+            "the retained VM-conditional mirror must not diverge from the "
+            f"canonical field: {published}"
+        )
 
 
 class TestReleaseOversight:

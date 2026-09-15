@@ -263,7 +263,7 @@ def register(app: typer.Typer) -> None:
         # Resolve and authenticate registry discovery separately from the
         # standalone negotiation's explicit Alkahest wallet.
         from .common import (
-            VMS_SCHEMA_ID,
+            COMPUTE_SCHEMA_ID,
             resolve_discovery_timeout,
             resolve_indexer_urls,
             resolve_indexer_urls_for_schema,
@@ -276,7 +276,7 @@ def register(app: typer.Typer) -> None:
             registry_authorities = resolve_registry_authorities(configured_reg_urls)
             deadline = resolve_discovery_timeout(override=discovery_timeout)
             reg_urls = resolve_indexer_urls_for_schema(
-                VMS_SCHEMA_ID,
+                COMPUTE_SCHEMA_ID,
                 signer=signer,
                 registry_authorities=registry_authorities,
                 override=registry_urls,
@@ -414,11 +414,21 @@ def register(app: typer.Typer) -> None:
                         raise typer.BadParameter(
                             "could not resolve selected Alkahest token decimals"
                         ) from exc
-                    scale = 10**decimals
-                    if _initial_explicit and initial_price is not None:
-                        initial_price = initial_price * scale
-                    if _max_explicit and max_price is not None:
-                        max_price = max_price * scale
+                    from core_buyer.negotiation_client import (
+                        display_to_base_units,
+                    )
+
+                    try:
+                        if _initial_explicit and initial_price is not None:
+                            initial_price = display_to_base_units(
+                                initial_price, decimals, field="--initial-price"
+                            )
+                        if _max_explicit and max_price is not None:
+                            max_price = display_to_base_units(
+                                max_price, decimals, field="--max-price"
+                            )
+                    except ValueError as exc:
+                        raise typer.BadParameter(str(exc)) from exc
 
             if initial_price is None or max_price is None:
                 pricing_params = dict(policy_params_all)

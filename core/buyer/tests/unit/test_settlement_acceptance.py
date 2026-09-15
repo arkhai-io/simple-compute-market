@@ -101,7 +101,7 @@ def test_accepts_seller_plan_with_domain_service_terms() -> None:
         service_terms={
             "vm.v1": {
                 "listing_id": "L-hosted",
-                "order": {"offer_resource": {"resource_id": "resource-hosted"}},
+                "order": {"listing_resource": {"resource_id": "resource-hosted"}},
                 "provision": {"ssh_public_key": "ssh-rsa AAAA"},
             }
         }

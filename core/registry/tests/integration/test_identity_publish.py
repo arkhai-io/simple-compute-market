@@ -52,7 +52,7 @@ def _listing(listing_id: str, *, region: str = "us") -> ListingRequest:
     return ListingRequest(
         listing_id=listing_id,
         storefront_url="http://seller.example/",
-        offer={"gpu_model": "H200", "region": region},
+        listing_resource={"gpu_model": "H200", "region": region},
         accepted_escrows=[],
         settlement_options=[
             {
@@ -109,6 +109,73 @@ async def test_eip191_publisher_remains_supported(registry_client, maker_signer)
     }
 
 
+async def test_the_publish_route_refuses_a_retired_listing_shape(
+    registry_client,
+    ed25519_signer,
+):
+    """The mutation boundary, which nothing covered.
+
+    The dry run has always had an opinion about the listing shape; `POST
+    /listings` had none. It stored `body.get("listing_resource", {})`
+    verbatim, so a correctly signed publisher could be told `valid=false` by
+    the dry run and publish successfully anyway -- the permanent requirement
+    that a registry MUST NOT accept a second spelling was unenforced where it
+    mattered.
+
+    Raw HTTP because the typed client cannot construct a retired key, and
+    signed properly because the point is that a *legitimate* publisher is
+    refused on shape rather than on authentication. A 401 here would mean the
+    test proved nothing.
+    """
+    body = _listing("retired-at-publish").to_dict()
+    body["listing_resource"] = {
+        "gpu_model": "H200",
+        "region": "us-west",
+        "virtualization_type": "vm",
+    }
+    headers = _signed_headers(
+        signer=ed25519_signer,
+        method="POST",
+        operation="listing.publish",
+        resource="listings",
+        body=body,
+    )
+    async with httpx.AsyncClient(
+        base_url="http://test",
+        transport=httpx.ASGITransport(app=app),
+    ) as raw:
+        response = await raw.post("/listings", json=body, headers=headers)
+
+    assert response.status_code == 422, response.text
+    detail = response.json()["detail"]
+    assert detail["error"] == "retired_listing_shape"
+    assert detail["retired_fields"] == ["listing_resource.virtualization_type"]
+
+
+async def test_the_publish_route_refuses_the_retired_shape_key(
+    registry_client,
+    ed25519_signer,
+):
+    """`offer_resource` at the top level, same boundary."""
+    body = _listing("retired-shape-at-publish").to_dict()
+    body["offer_resource"] = body["listing_resource"]
+    headers = _signed_headers(
+        signer=ed25519_signer,
+        method="POST",
+        operation="listing.publish",
+        resource="listings",
+        body=body,
+    )
+    async with httpx.AsyncClient(
+        base_url="http://test",
+        transport=httpx.ASGITransport(app=app),
+    ) as raw:
+        response = await raw.post("/listings", json=body, headers=headers)
+
+    assert response.status_code == 422, response.text
+    assert response.json()["detail"]["retired_fields"] == ["offer_resource"]
+
+
 async def test_body_mutation_after_signing_is_rejected(
     registry_client,
     ed25519_signer,
@@ -121,7 +188,7 @@ async def test_body_mutation_after_signing_is_rejected(
         resource="listings",
         body=original,
     )
-    mutated = {**original, "offer_resource": {"gpu_model": "H200", "region": "eu"}}
+    mutated = {**original, "listing_resource": {"gpu_model": "H200", "region": "eu"}}
     async with httpx.AsyncClient(
         base_url="http://test",
         transport=httpx.ASGITransport(app=app),

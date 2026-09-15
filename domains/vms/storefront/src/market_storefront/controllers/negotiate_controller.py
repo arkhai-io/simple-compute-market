@@ -23,6 +23,7 @@ from market_negotiation_runtime import (
     OfferUnfulfillableError,
     StorefrontPausedError,
 )
+from market_policy.scalar_policies import NegotiationAmountError
 from pydantic import ValidationError
 
 import market_storefront.container as _container
@@ -146,6 +147,19 @@ class NegotiateController:
                     "reason": str(exc),
                 },
             )
+        except NegotiationAmountError as exc:
+            # Before the generic ValueError below, which answers 404: a
+            # malformed amount is the buyer's body disagreeing with the
+            # uint256 contract, not a missing listing. Amounts travel as
+            # non-negative decimal-digit strings; a float, a negative, or a
+            # boolean is refused rather than rounded into a different deal.
+            raise HTTPException(
+                status_code=400,
+                detail={
+                    "error": "invalid_proposal_amount",
+                    "reason": str(exc),
+                },
+            )
         except ValueError as exc:
             raise HTTPException(status_code=404, detail=str(exc))
         except Exception as exc:
@@ -206,6 +220,19 @@ class NegotiateController:
                 buyer_principal=body.buyer_principal,
                 actor_principal=auth.principal,
                 actor_role="buyer",
+            )
+        except NegotiationAmountError as exc:
+            # Before the generic ValueError below, which answers 404: a
+            # malformed amount is the buyer's body disagreeing with the
+            # uint256 contract, not a missing listing. Amounts travel as
+            # non-negative decimal-digit strings; a float, a negative, or a
+            # boolean is refused rather than rounded into a different deal.
+            raise HTTPException(
+                status_code=400,
+                detail={
+                    "error": "invalid_proposal_amount",
+                    "reason": str(exc),
+                },
             )
         except ValueError as exc:
             raise HTTPException(status_code=404, detail=str(exc))

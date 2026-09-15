@@ -235,7 +235,7 @@ This bounds the change: Goal 1's terminal state for the storefront is no
 
 ### Out of scope, recorded so it is not double-claimed
 
-`deal_event_sink.py`'s `executor_kind=str(reservation.get("executor_kind") or "vm")`
+`deal_event_sink.py`'s `offering_mode=str(reservation.get("offering_mode") or "vm")`
 is the implicit VM executor fallback `market-platform-compute-40-multi-domain-proof`
 requires removing. It sits near this change's surfaces; it belongs to that
 change.

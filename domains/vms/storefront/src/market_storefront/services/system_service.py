@@ -13,6 +13,7 @@ from collections.abc import Callable
 from typing import Any
 
 import httpx
+from compute_provisioning import COMPUTE_PROVISIONING_CONTRACT_VERSION
 from market_identity import Signer
 
 import market_storefront.container as _container
@@ -46,16 +47,19 @@ def _default_projection_status_provider() -> dict[str, Any]:
     return projection_status_summary()
 
 
-def _default_listing_mode_explanation_provider() -> dict[str, dict[str, str]]:
-    """Real production source for per-site, per-pool listing_mode fallback
-    explanations. Same lazy-resolution and constructor-injection rationale
-    as `_default_projection_status_provider`, immediately above.
+def _default_listing_cardinality_mode_explanation_provider() -> (
+    dict[str, dict[str, str]]
+):
+    """Real production source for per-site, per-pool
+    listing_cardinality_mode operator notices. Same lazy-resolution and
+    constructor-injection rationale as `_default_projection_status_provider`,
+    immediately above.
     """
     from market_storefront.services.site_projection_cache import (
-        listing_mode_explanations,
+        listing_cardinality_mode_explanations,
     )
 
-    return listing_mode_explanations()
+    return listing_cardinality_mode_explanations()
 
 
 # ---------------------------------------------------------------------------
@@ -73,8 +77,9 @@ class SystemService:
         marketplace_signer: Signer,
         agent_id: str | None = None,
         projection_status_provider: Callable[[], dict[str, Any]] | None = None,
-        listing_mode_explanation_provider: Callable[[], dict[str, dict[str, str]]]
-        | None = None,
+        listing_cardinality_mode_explanation_provider: (
+            Callable[[], dict[str, dict[str, str]]] | None
+        ) = None,
     ) -> None:
         self._db = sqlite_client
         self._marketplace_signer = marketplace_signer
@@ -82,9 +87,9 @@ class SystemService:
         self._projection_status_provider = (
             projection_status_provider or _default_projection_status_provider
         )
-        self._listing_mode_explanation_provider = (
-            listing_mode_explanation_provider
-            or _default_listing_mode_explanation_provider
+        self._listing_cardinality_mode_explanation_provider = (
+            listing_cardinality_mode_explanation_provider
+            or _default_listing_cardinality_mode_explanation_provider
         )
 
     # ------------------------------------------------------------------
@@ -162,6 +167,20 @@ class SystemService:
                 }
                 for item in self._db.domain_registry.projection()
             )
+            # The provisioning contract major this storefront *speaks*, taken
+            # from its own installed `compute_provisioning` wheel rather than
+            # from anything the peer reports. Two deployments can disagree
+            # only if their wheels differ, which is exactly the skew a
+            # cutover has to rule out before mutations resume -- and until
+            # both sides reported this there was no way to check it against a
+            # live fleet.
+            #
+            # Distinct from `storefront_domains[].contract_version` above,
+            # which is a domain contribution's own version and a different
+            # axis entirely.
+            result["provisioning_contract_version"] = (
+                COMPUTE_PROVISIONING_CONTRACT_VERSION
+            )
             wallet = get_evm_wallet_address().lower() if CHAINS else ""
             result["evm_mechanisms"] = {
                 name: {
@@ -180,11 +199,11 @@ class SystemService:
             except Exception:
                 result["site_projections"] = None
             try:
-                result["listing_mode_explanations"] = (
-                    self._listing_mode_explanation_provider()
+                result["listing_cardinality_mode_explanations"] = (
+                    self._listing_cardinality_mode_explanation_provider()
                 )
             except Exception:
-                result["listing_mode_explanations"] = None
+                result["listing_cardinality_mode_explanations"] = None
 
         return result
 
@@ -359,7 +378,7 @@ class SystemService:
             ]
             context = NegotiationContext(
                 direction="maximize",
-                our_reference_amount=10_000.0,
+                our_reference_amount=10_000,
             )
             probe = run_negotiation_chain(chain, history, context)
             if probe.action in ("exit", "reject"):

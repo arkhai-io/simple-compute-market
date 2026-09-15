@@ -12,8 +12,14 @@ and an explicit empty list both mean that the pool declares no deliverable
 mode; neither is a permissive default.
 
 ``max_reservation_hold_seconds`` and ``sla`` have universally interpretable
-numeric values and are validated here. ``listing_mode``, ``region``, and
-``pricing`` remain domain-owned values exposed through raw readers.
+numeric values and are validated here. ``listing_cardinality_mode``, ``region``,
+and ``pricing`` remain domain-owned values exposed through raw readers.
+
+``listing_cardinality_mode`` carries how many listing candidates a pool yields
+and how each is independently identified -- not what is offered, how a deal
+settles, or whether an admission authority backs the listing. The reader below
+accepts one deprecated spelling of that key; see its docstring for why the
+concession is on the read path only.
 """
 
 from __future__ import annotations
@@ -22,7 +28,13 @@ from typing import Any, Mapping
 
 
 DELIVERABLE_MODES_POLICY_TAG = "deliverable_modes"
-LISTING_MODE_POLICY_TAG = "listing_mode"
+LISTING_CARDINALITY_MODE_POLICY_TAG = "listing_cardinality_mode"
+# Producers emit LISTING_CARDINALITY_MODE_POLICY_TAG. This spelling is accepted
+# on read so a pool written by an older producer resolves to the cardinality it
+# declared instead of falling through to a consumer's structural default: the
+# key is optional, so rejecting it would be indistinguishable from absence and
+# would silently reclassify the pool rather than refuse it.
+DEPRECATED_LISTING_MODE_POLICY_TAG = "listing_mode"
 MAX_RESERVATION_HOLD_SECONDS_POLICY_TAG = "max_reservation_hold_seconds"
 REGION_POLICY_TAG = "region"
 SLA_POLICY_TAG = "sla"
@@ -78,13 +90,34 @@ def validate_deliverable_modes(policy_tags: Mapping[str, Any]) -> list[str]:
 
 
 
-def raw_listing_mode(policy_tags: Mapping[str, Any]) -> Any:
-    """The unvalidated `listing_mode` value, or None if absent.
+def raw_listing_cardinality_mode(policy_tags: Mapping[str, Any]) -> Any:
+    """The unvalidated `listing_cardinality_mode` value, or None if absent.
 
     Returned as-is -- this package does not know which values a domain
     accepts. Callers resolve it through their own domain-owned resolver.
+
+    The deprecated spelling is read only when the settled key is absent, so a
+    pool carrying both resolves to the settled one. A caller that needs to tell
+    an operator the deprecated key was taken uses
+    `listing_cardinality_mode_source` rather than re-reading both keys.
     """
-    return policy_tags.get(LISTING_MODE_POLICY_TAG)
+    if LISTING_CARDINALITY_MODE_POLICY_TAG in policy_tags:
+        return policy_tags[LISTING_CARDINALITY_MODE_POLICY_TAG]
+    return policy_tags.get(DEPRECATED_LISTING_MODE_POLICY_TAG)
+
+
+def listing_cardinality_mode_source(policy_tags: Mapping[str, Any]) -> str | None:
+    """Which key supplied the cardinality value, or None when neither did.
+
+    Exists so a consumer can emit a deprecation notice without duplicating the
+    precedence rule above. Returning the key name rather than a boolean keeps
+    the notice able to name what an operator must change.
+    """
+    if LISTING_CARDINALITY_MODE_POLICY_TAG in policy_tags:
+        return LISTING_CARDINALITY_MODE_POLICY_TAG
+    if DEPRECATED_LISTING_MODE_POLICY_TAG in policy_tags:
+        return DEPRECATED_LISTING_MODE_POLICY_TAG
+    return None
 
 
 def raw_region(policy_tags: Mapping[str, Any]) -> Any:
@@ -92,7 +125,8 @@ def raw_region(policy_tags: Mapping[str, Any]) -> Any:
 
     A free-form descriptive value (e.g. "California, US") -- there is no
     universal validity rule for a region string this package can usefully
-    enforce, so this is a bare read, matching `raw_listing_mode`.
+    enforce, so this is a bare read, matching
+    `raw_listing_cardinality_mode`.
     """
     return policy_tags.get(REGION_POLICY_TAG)
 
@@ -103,7 +137,7 @@ def raw_pricing(policy_tags: Mapping[str, Any]) -> Any:
     Structured per resource family (e.g. `{"gpu": {"H100": {...}}}`) --
     the accepting domain owns both the family/dimension vocabulary and
     validating its contents, so this is a bare read, the same as
-    `raw_listing_mode` and `raw_region`.
+    `raw_listing_cardinality_mode` and `raw_region`.
     """
     return policy_tags.get(PRICING_POLICY_TAG)
 

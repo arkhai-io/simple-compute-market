@@ -9,10 +9,13 @@ from market_identity import Identity
 
 
 from market_core.schemas import (
+    EmbeddedWireRows,
     EscrowProposal,
+    OptionalUint256Amount,
     ProvisionTerms,
     SettlementPlan,
     SettlementSelection,
+    Uint256Amount,
 )
 
 
@@ -94,7 +97,7 @@ class NegotiationSummary(BaseModel):
     buyer_principal: Identity | None = None
     seller_principal: Identity | None = None
     terminal_state: str | None = None
-    agreed_amount: int | None = None
+    agreed_amount: OptionalUint256Amount = None
     round_count: int = 0
     created_at: str | None = None
     model_config = {"extra": "allow"}
@@ -102,7 +105,7 @@ class NegotiationSummary(BaseModel):
 
 class NegotiationListResponse(BaseModel):
     listing_id: str
-    negotiations: list[dict[str, Any]]
+    negotiations: EmbeddedWireRows
     count: int
     limit: int
     offset: int
@@ -113,7 +116,7 @@ class NegotiationMessage(BaseModel):
     sender_role: Literal["buyer", "seller", "admin", "service"]
     sender_principal: Identity
     action_taken: str
-    proposed_amount: int | None = None
+    proposed_amount: OptionalUint256Amount = None
     model_config = {"extra": "allow"}
 
 
@@ -124,11 +127,14 @@ class NegotiationDetailResponse(BaseModel):
     buyer_principal: Identity | None = None
     seller_principal: Identity | None = None
     terminal_state: str | None = None
-    agreed_amount: int | None = None
+    agreed_amount: OptionalUint256Amount = None
     round_count: int = 0
-    messages: list[dict[str, Any]] = Field(default_factory=list)
-    stage_events: list[dict[str, Any]] = Field(default_factory=list)
-    escrows: list[dict[str, Any]] = Field(default_factory=list)
+    # Persisted rows, not typed fields: an amount read back out of storage
+    # arrives as a Python int, and this response is signed over canonical
+    # JSON. Normalized on the way in rather than at each producer.
+    messages: EmbeddedWireRows = Field(default_factory=list)
+    stage_events: EmbeddedWireRows = Field(default_factory=list)
+    escrows: EmbeddedWireRows = Field(default_factory=list)
     model_config = {"extra": "allow"}
 
 
@@ -143,12 +149,12 @@ class AdvanceRequest(BaseModel):
 class ForceAcceptRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    amount: int
+    amount: Uint256Amount
 
 
 class ForceAcceptResponse(BaseModel):
     action: str
-    amount: int
+    amount: Uint256Amount
     source: str = "admin_force_accept"
 
 

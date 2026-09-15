@@ -109,10 +109,10 @@ def test_protected_listing_declares_vm_offering_mode() -> None:
     snapshot = marketplace.create_and_publish_listing()
 
     assert snapshot.listing_id == "listing-1"
-    assert captured["offer"] == {
+    assert captured["listing_resource"] == {
         **network._OFFER,
         "resource_id": "resource-1",
-        "virtualization_type": "vm",
+        "offering_mode": "vm",
     }
     assert captured["capacity_source"] == {
         "site_id": "default",

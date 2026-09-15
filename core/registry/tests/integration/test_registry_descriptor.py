@@ -21,7 +21,7 @@ async def test_typed_client_reads_authority_authenticated_descriptor(
 
     assert isinstance(descriptor, RegistryDescriptor)
     assert descriptor.base_url == "http://test"
-    assert descriptor.schema_identity.id == "vms.compute"
+    assert descriptor.schema_identity.id == "compute.market"
     assert descriptor.authority.name == "test-registry"
     assert descriptor.authority.principals[0].identifier == (
         registry_authority.identity.identifier
@@ -55,7 +55,7 @@ async def test_bootstrap_rejects_response_signer_outside_descriptor(
             "baseUrl": "http://test",
             "displayName": "Impersonated Registry",
             "operatorIdentity": "test-operator",
-            "schema": {"id": "vms.compute", "version": "1"},
+            "schema": {"id": "compute.market", "version": "1"},
         }
     )
 
@@ -104,7 +104,7 @@ async def test_descriptor_remains_readable_before_key_acquisition(
             "baseUrl": "https://registry.example",
             "displayName": "Private Registry",
             "operatorIdentity": "test-operator",
-            "schema": {"id": "vms.compute", "version": "1"},
+            "schema": {"id": "compute.market", "version": "1"},
         }
     )
 

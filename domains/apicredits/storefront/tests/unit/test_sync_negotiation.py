@@ -24,6 +24,7 @@ from market_core.schemas import (
     SettlementSelection,
     derive_settlement_option_id,
 )
+from core_storefront.models.negotiation_models import NegotiateNewResponse
 from market_negotiation_runtime import NegotiationStateError, OfferUnfulfillableError
 from market_identity import Ed25519Signer
 from market_policy.identity import Identity
@@ -163,7 +164,7 @@ async def db(tmp_path):
         status="open",
         created_at=datetime.now().isoformat(),
         updated_at=datetime.now().isoformat(),
-        offer_resource={
+        listing_resource={
             "kind": "api_credits.v1",
             "service_name": "Acme Inference",
             "openapi_url": "https://api.acme.example/openapi.json",
@@ -331,6 +332,36 @@ async def test_listed_price_accept_persists_terms_without_unfunded_hold(
 
     assert fake_capacity.reserved == []
     assert await db.load_capacity_hold(negotiation_id=neg_id) is None
+
+
+async def test_accept_result_satisfies_the_controllers_response_model(
+    db, fake_capacity, key_records
+):
+    """The assertion every test around this one was missing.
+
+    Each of them asserts on the runtime's raw dict, which is the right
+    subject for the negotiation logic -- and means none of them noticed
+    that the dict could not be loaded into the model the controller has to
+    return. `accepted_provision_terms` is typed `ProvisionTerms`, which
+    forbids extras, while the credits codec decodes into
+    `ApiCreditsMessage`: a superset carrying `settlement_selection`,
+    `buyer_principal` and `seller_principal`. Every accepted round 0 was
+    therefore a 500, and because the construction sat outside the
+    controller's `except`, one with no traceback logged anywhere.
+
+    Constructing the model is the whole assertion. Nothing about the
+    values is re-checked here; the tests above own those.
+    """
+    response = await _start(db, amount=300, quantity=3)
+    assert response["action"] == "accept"
+
+    model = NegotiateNewResponse(**response)
+
+    # The narrowing keeps what provision terms are *for*, rather than
+    # dropping the field to make the model load.
+    assert model.accepted_provision_terms is not None
+    assert model.accepted_provision_terms.kind == "api_credits.v1"
+    assert model.accepted_provision_terms.payload["quantity"] == 3
 
 
 async def test_quota_guard_rejects_uncovered_quantity(db, fake_capacity, key_records):

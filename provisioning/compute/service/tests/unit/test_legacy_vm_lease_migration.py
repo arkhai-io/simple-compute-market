@@ -77,17 +77,17 @@ def _insert_host(engine, *, name="kvm1", pool_id="default"):
 
 
 def _insert_capacity_reservation(
-    engine, *, reservation_id, state="reserved", executor_kind=None
+    engine, *, reservation_id, state="reserved", offering_mode=None
 ):
     with engine.begin() as connection:
         connection.execute(text(
             "INSERT INTO capacity_reservations "
-            "(capacity_reservation_id, units, state, executor_kind) "
-            "VALUES (:id, 1, :state, :executor_kind)"
+            "(capacity_reservation_id, units, state, offering_mode) "
+            "VALUES (:id, 1, :state, :offering_mode)"
         ), {
             "id": reservation_id,
             "state": state,
-            "executor_kind": executor_kind,
+            "offering_mode": offering_mode,
         })
 
 
@@ -133,8 +133,8 @@ def _settlement_state(engine, reservation_id):
 def _executor_identities(engine, reservation_id):
     with engine.begin() as connection:
         row = connection.execute(text(
-            "SELECT cr.executor_kind AS reservation_kind, "
-            "json_extract(sr.scheduling_requirements, '$.executor_kind') "
+            "SELECT cr.offering_mode AS reservation_kind, "
+            "json_extract(sr.scheduling_requirements, '$.offering_mode') "
             "AS settlement_kind "
             "FROM capacity_reservations cr "
             "LEFT JOIN settlement_records sr "
@@ -200,13 +200,13 @@ def test_backfill_persists_vm_identity_on_reservation_and_settlement():
     assert _executor_identities(engine, "reservation-active") == ("vm", "vm")
 
 
-def test_conflicting_reservation_executor_identity_is_rejected():
+def test_conflicting_reservation_offering_mode_is_rejected():
     engine = _bootstrap_engine()
     _insert_host(engine)
     _insert_capacity_reservation(
         engine,
         reservation_id="reservation-active",
-        executor_kind="bare_metal",
+        offering_mode="bare_metal",
     )
     _insert_vm_lease(
         engine,
@@ -217,7 +217,7 @@ def test_conflicting_reservation_executor_identity_is_rejected():
         create_job_id="job-1",
     )
 
-    with pytest.raises(SchemaDriftError, match="conflicts with reservation executor"):
+    with pytest.raises(SchemaDriftError, match="conflicts with reservation offering mode"):
         _apply_backfill(engine)
 
     assert _executor_identities(engine, "reservation-active") == ("bare_metal", None)

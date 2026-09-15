@@ -19,7 +19,7 @@ from domains.vms.listings.models import (
     GPUModel,
     GpuInterconnect,
     Region,
-    VirtualizationType,
+    OfferingMode,
 )
 from market_storefront.domain_runtime import build_vm_storefront_domain, build_vm_storefront_registry
 from market_storefront.utils.sqlite_client import SQLiteClient
@@ -274,7 +274,7 @@ class TestAdapterHostJoin:
                 "vcpu_count": 32,
                 "ram_gb": 256,
                 "disk_gb": 4000,
-                "virtualization_type": "vm",
+                "offering_mode": "vm",
             },
         }
         host_row = {
@@ -300,7 +300,7 @@ class TestAdapterHostJoin:
         assert result.vcpu_count == 32
         assert result.ram_gb == 256
         assert result.disk_gb == 4000
-        assert result.virtualization_type == VirtualizationType.VM
+        assert result.offering_mode == OfferingMode.VM
 
         assert result.cpu_type == "AMD EPYC 9654"
         assert result.host_cpu_cores == 192
@@ -347,7 +347,7 @@ class TestAdapterHostJoin:
             vcpu_count=32,
             ram_gb=256,
             disk_gb=4000,
-            virtualization_type=VirtualizationType.VM,
+            offering_mode=OfferingMode.VM,
             # Host context — these should NOT end up in attributes
             cpu_type="AMD EPYC 9654",
             host_cpu_cores=192,
@@ -360,7 +360,7 @@ class TestAdapterHostJoin:
         assert attrs["vcpu_count"] == 32
         assert attrs["ram_gb"] == 256
         assert attrs["disk_gb"] == 4000
-        assert attrs["virtualization_type"] == "vm"
+        assert attrs["offering_mode"] == "vm"
         assert attrs["vm_host"] == "h-01"
 
         # Host context fields absent

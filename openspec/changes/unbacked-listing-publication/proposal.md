@@ -56,7 +56,7 @@ migration that unwinds a fabricated site.
 - Keep source-publication reconciliation for every listing. A removed, disabled,
   or changed source declaration must close or update its published listing
   whether or not the listing was backed.
-- Publish backing in `offer_resource` and add an exact, fail-on-missing registry
+- Publish backing in `listing_resource` and add an exact, fail-on-missing registry
   filter for it, republishing existing listings as explicitly backed so no listing
   relies on an absent field to be classified.
 - Refuse a source declaration carrying no quantity where derivation needs one,

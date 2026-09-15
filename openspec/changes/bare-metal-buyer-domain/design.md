@@ -8,7 +8,7 @@ See `proposal.md` for motivation. The current code establishes several useful se
 - VM and API-credit buyer distributions demonstrate entry-point composition, but both retain domain-local orchestration and packaging history that must not be copied wholesale. API credits separates a domain wheel from its buyer wheel; that package split is the closer precedent. The VM wheel's bundled PyInstaller app is not authority to create a second buyer executable.
 - `arkhai_bare_metal` currently supplies strict `BareMetalProvisionTerms` (`kind="bare_metal.v1"`, `version=1`, closed SSH payload), listing/message/terms/materialization/receipt models, and a publication-only domain contract. The current storefront rejects buyer-supplied `access_ref`, which is the correct authority boundary.
 - The current bare-metal storefront truthfully stops at `fulfillment_available=false`; its stored `BareMetalAccessResult` is an executor-facing shape with an arbitrary `details` field, not an accepted portable buyer result/access contract. A buyer must not build against that shell or read its database/provisioner.
-- The multi-domain proposal selects `offer_resource.virtualization_type="bare_metal"` from an immutable offering-mode/domain binding and prohibits domain/site fallback. That accepted field and binding are prerequisites for exact discovery.
+- The multi-domain proposal selects `listing_resource.offering_mode="bare_metal"` from an immutable offering-mode/domain binding and prohibits domain/site fallback. That accepted field and binding are prerequisites for exact discovery.
 - Persistent profiles and expanded hosted funding are active changes. Planning files and checked task boxes are not shipped contracts. The first implementation section therefore proves accepted permanent headings, installed distribution/API versions, producer tests, and integration evidence before buyer code starts.
 
 ## Goals / Non-Goals
@@ -38,7 +38,7 @@ Before creating the package, implementation records one row for each required se
 | Required seam | Acceptance needed |
 |---|---|
 | Buyer identity | Permanent `core.resolved-buyer-identity.v1` and version-3 run recovery requirements; installed core/identity wheels; create/rotate/resume evidence |
-| Storefront domain routing | Permanent immutable listing/negotiation domain binding; `offer_resource.virtualization_type`; no domain/site fallback; installed storefront client/domain wheels |
+| Storefront domain routing | Permanent immutable listing/negotiation domain binding; `listing_resource.offering_mode`; no domain/site fallback; installed storefront client/domain wheels |
 | Bare-metal seller lifecycle | Runnable seller with authority-authenticated agreement status, strict portable result/evidence, buyer-only access, and teardown calls; no `fulfillment_available=false` placeholder |
 | Physical lifecycle | POOLS-7 selected-site durable scheduling, fulfillment result/recovery, access revocation, and teardown evidence |
 | Settlement | Shared buyer selection/recovery and Alkahest registration; expanded hosted client/adapter, transient actions, and exact funding-profile operation |
@@ -105,7 +105,7 @@ A duplicate namespace or incompatible identity/version fails during core assembl
 
 ### 4. Compile exact discovery from the accepted compute-family schema
 
-The listing commands reuse authenticated registry fan-in and filter-spec ETags. They always include the schema-declared predicate `offer_resource.virtualization_type = bare_metal` and validate the returned listing's immutable `bare_metal.v1` domain binding before rendering or negotiation. User resource predicates remain compiled through the registry filter spec; the plugin does not invent aliases or weaken missing-value behavior.
+The listing commands reuse authenticated registry fan-in and filter-spec ETags. They always include the schema-declared predicate `listing_resource.offering_mode = bare_metal` and validate the returned listing's immutable `bare_metal.v1` domain binding before rendering or negotiation. User resource predicates remain compiled through the registry filter spec; the plugin does not invent aliases or weaken missing-value behavior.
 
 If the registry does not declare the canonical virtualization predicate, the command reports an incompatible prerequisite instead of broad-querying and post-filtering. A returned VM/unknown-domain record, mismatched payload kind, unsigned/untrusted registry result, duplicate listing identity with conflicting contents, or stale filter-spec ETag fails closed. This ensures multi-domain discovery does not rely on payload guessing.
 
@@ -185,7 +185,7 @@ sequenceDiagram
     participant F as Site/fulfillment authorities
 
     U->>M: bare-metal buy(demand, settlement policy)
-    M->>R: authenticated query virtualization_type=bare_metal
+    M->>R: authenticated query offering_mode=bare_metal
     R-->>M: signed listing + exact domain binding
     M->>S: signed versioned demand / negotiation rounds
     S-->>M: signed accepted terms + exact settlement plan

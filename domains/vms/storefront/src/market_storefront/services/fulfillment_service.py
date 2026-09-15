@@ -371,7 +371,7 @@ async def _register_vm_lease_with_settings(
             LeaseRegistration(
                 capacity_reservation_id=capacity_reservation_id or resource_id,
                 deal_ref={"escrow_uid": escrow_uid},
-                executor_kind="vm",
+                offering_mode="vm",
                 executor_target=vm_target,
                 lease_start_utc=(
                     datetime.fromisoformat(lease_start_utc.replace("Z", "+00:00"))

@@ -45,7 +45,7 @@ def _make_listing(*, demand_amount: int | None) -> Listing:
     )
     return Listing(
         listing_id="lst-1",
-        offer_resource=compute,
+        listing_resource=compute,
         accepted_escrows=[{
             "chain_name": "test_chain",
             "escrow_address": "0x" + "11" * 20,

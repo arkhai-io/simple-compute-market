@@ -57,7 +57,7 @@ HOSTED_STRIPE_TEST_AUTHORITY_ENVIRONMENT ?=
 HOSTED_STRIPE_TEST_AUTHORITY_ENV_FILE ?=
 HOSTED_STRIPE_TEST_EVIDENCE ?= $(DIST_DIR)/hosted-stripe-test-evidence.json
 
-.PHONY: check-hosted-client-pin fix-hosted-client-pin review-wheelhouse review-wheelhouse-scope build build-dev build-seller build-apicredits-service build-apicredits-storefront build-apicredits-sample-app test test-core test-provisioning test-provisioning-iac test-registry test-storefront test-vms-buyer test-apicredits test-apicredits-middleware test-kits dist dist-release dist-ci dist-ci-kits dist-storefront-client dist-policy dist-compute-provisioning dist-compute-provisioning-service dist-kits verify-hosted-release dist-registry-client dist-registry dist-identity dist-core dist-arkhai-core-buyer dist-arkhai-core-storefront dist-bare-metal-storefront dist-alkahest dist-config dist-clean init init-prerequisites init-submodules init-zero-tier init-buyer init-storefront init-arkhai-core-registry push-runtime-artifacts push-images push-dev-image
+.PHONY: e2e-dev-identities e2e-dev-identities-env check-hosted-client-pin fix-hosted-client-pin review-wheelhouse review-wheelhouse-scope build build-dev build-seller build-apicredits-service build-apicredits-storefront build-apicredits-sample-app test test-core test-provisioning test-provisioning-iac test-registry test-storefront test-vms-buyer test-apicredits test-apicredits-middleware test-kits dist dist-release dist-ci dist-ci-kits dist-storefront-client dist-policy dist-compute-provisioning dist-compute-provisioning-service dist-kits verify-hosted-release dist-registry-client dist-registry dist-identity dist-core dist-arkhai-core-buyer dist-arkhai-core-storefront dist-bare-metal-storefront dist-apicredits-domain dist-apicredits-service dist-apicredits-storefront dist-apicredits-middleware dist-apicredits-sample-app dist-apicredits-buyer dist-alkahest dist-config dist-clean init init-prerequisites init-submodules init-zero-tier init-buyer init-storefront init-arkhai-core-registry push-runtime-artifacts push-images push-dev-image
 .PHONY: build-hosted-producer
 .PHONY: test-release-tooling test-deployment-packaging prepare-hosted-compose prepare-hosted-compose-local hosted-preflight hosted-preflight-local hosted-stripe-test-local hosted-compose-up hosted-compose-restart hosted-compose-clean hosted-stripe-test hosted-stripe-test-stop
 .PHONY: dist-arkhai-core-registry
@@ -159,6 +159,37 @@ dist-bare-metal-buyer: dist-core dist-arkhai-core-buyer dist-registry-client dis
 
 dist-bare-metal-storefront: dist-core dist-arkhai-core-storefront dist-kits ## Build the bare-metal storefront contribution wheel.
 	cd domains && $(MAKE) dist-bare-metal-storefront DIST_DIR=$(DIST_DIR)
+
+# API-credits wheels, forwarded to `domains/Makefile` the same way the
+# bare-metal ones above are. `dist-domains` already builds all of these
+# through the domain aggregate; these exist so one wheel can be rebuilt on
+# its own while iterating, which is what
+# `domains/apicredits/sample-app/Makefile` and
+# `domains/apicredits/middleware/python`'s workflow both tell you to do
+# from the repository root.
+#
+# Prerequisites are each wheel's own internal dependencies, so a target
+# invoked directly on a clean tree resolves instead of failing in
+# `uv build` on a missing `.dist` entry.
+dist-apicredits-domain: dist-core dist-identity dist-alkahest dist-policy ## Build arkhai-apicredits-domain wheel into .dist/
+	cd domains && $(MAKE) dist-apicredits-domain DIST_DIR=$(DIST_DIR)
+
+dist-apicredits-service: dist-identity dist-ci-kits dist-apicredits-domain dist-apicredits-middleware ## Build arkhai-apicredits-service wheel into .dist/
+	cd domains && $(MAKE) dist-apicredits-service DIST_DIR=$(DIST_DIR)
+
+dist-apicredits-storefront: dist-apicredits-domain dist-arkhai-core-storefront dist-registry-client dist-ci-kits dist-config ## Build arkhai-apicredits-storefront wheel into .dist/
+	cd domains && $(MAKE) dist-apicredits-storefront DIST_DIR=$(DIST_DIR)
+
+dist-apicredits-middleware: dist-identity ## Build arkhai-apicredits-middleware wheel into .dist/
+	cd domains && $(MAKE) dist-apicredits-middleware DIST_DIR=$(DIST_DIR)
+
+# Depends on the middleware wheel because the sample app requires it with
+# the `signed` extra, which resolves arkhai-kit-identity out of .dist/.
+dist-apicredits-sample-app: dist-apicredits-middleware ## Build arkhai-apicredits-sample-app wheel into .dist/
+	cd domains && $(MAKE) dist-apicredits-sample-app DIST_DIR=$(DIST_DIR)
+
+dist-apicredits-buyer: dist-apicredits-domain dist-arkhai-core-buyer dist-ci-kits dist-config ## Build arkhai-apicredits-buyer wheel into .dist/
+	cd domains && $(MAKE) dist-apicredits-buyer DIST_DIR=$(DIST_DIR)
 
 verify-hosted-release: ## Verify the staged signed production release and exact client wheel.
 	$(VERIFY_HOSTED_RELEASE)
@@ -429,6 +460,66 @@ build: init-prerequisites dist build-buyer
 	$(MAKE) -j4 build-registry build-storefront build-bare-metal-storefront build-provisioning
 	$(MAKE) -j3 build-apicredits-service build-apicredits-storefront build-apicredits-sample-app
 
+# ---------------------------------------------------------------------------
+# e2e-dev-identities — export the compose stack's signer, wallet, and buyer
+# paths from the committed development values in dev-env/identities.
+#
+# `docker-compose.yml`, `compose.vms.yml`, and `domains/apicredits/compose.yml`
+# guard every one of these mounts with `${VAR:?...}`, so `docker compose up`
+# refuses to start until all fifteen are set. Exporting them from committed
+# fixtures is what lets a contributor, a fork, or a CI job holding no
+# repository secrets run the stack. Every value is a well-known deterministic
+# development value; see dev-env/identities/README.md.
+#
+# Two forms, deliberately. `e2e-dev-identities` prints `export` lines for a
+# human to eval. `e2e-dev-identities-env` prints bare `VAR=value` lines for
+# `docker compose --env-file`, which is what the e2e target uses: compose reads
+# the file itself, so nothing has to survive a shell round-trip. Capturing a
+# sub-make's stdout is fragile — a recursive make implies `-w` and prints
+# `Entering directory` into the capture — so the recipe writes a file instead
+# of eval'ing, and both targets pass `--no-print-directory` when recursing.
+#
+#     eval "$(make -s --no-print-directory e2e-dev-identities)"
+# ---------------------------------------------------------------------------
+E2E_IDENTITY_DIR := $(CURDIR)/dev-env/identities
+E2E_BUYER_RUNTIME_DIR ?= $(CURDIR)/.e2e-buyer
+# Development bearer tokens for registry-b, which gates read and write.
+# Not secret; the same values are committed in the storefront secret
+# overlay and the buyer config, and all three must agree.
+E2E_REGISTRY_ADMIN_KEY ?= development-registry-admin-key
+E2E_REGISTRY_BOOTSTRAP_KEY ?= development-registry-bootstrap-key
+
+e2e-dev-identities: ## Print shell exports pointing compose at committed development identities
+	@$(MAKE) -s --no-print-directory e2e-dev-identities-env \
+		| sed 's/^/export /; s/=\(.*\)$$/="\1"/'
+
+e2e-dev-identities-env: ## Print VAR=value lines for `docker compose --env-file`
+	@mkdir -p "$(E2E_BUYER_RUNTIME_DIR)/profile" "$(E2E_BUYER_RUNTIME_DIR)/state"
+	@echo 'VMS_REGISTRY_IDENTITY_CREDENTIAL_FILE=$(E2E_IDENTITY_DIR)/registry-a.eip191'
+	@echo 'VMS_REGISTRY_B_IDENTITY_CREDENTIAL_FILE=$(E2E_IDENTITY_DIR)/registry-b.eip191'
+	@echo 'VMS_PROVISIONING_IDENTITY_ENV_FILE=$(E2E_IDENTITY_DIR)/provisioning.identity.env'
+	@echo 'VMS_BOB_IDENTITY_ENV_FILE=$(E2E_IDENTITY_DIR)/bob.identity.env'
+	@echo 'VMS_ALICE_IDENTITY_ENV_FILE=$(E2E_IDENTITY_DIR)/alice.identity.env'
+	@echo 'VMS_BOB_EVM_WALLET_ENV_FILE=$(CURDIR)/domains/vms/storefront/.env.bob.docker'
+	@echo 'VMS_ALICE_EVM_WALLET_ENV_FILE=$(CURDIR)/domains/vms/storefront/.env.alice.docker'
+	@echo 'VMS_BUYER_CONFIG_PATH=$(E2E_IDENTITY_DIR)/buyer.config.toml'
+	@echo 'VMS_BUYER_CREDENTIAL_FILE=$(E2E_IDENTITY_DIR)/buyer.eip191'
+	@echo 'VMS_BUYER_PROFILE_DIR=$(E2E_BUYER_RUNTIME_DIR)/profile'
+	@echo 'VMS_BUYER_STATE_DIR=$(E2E_BUYER_RUNTIME_DIR)/state'
+	@echo 'APICREDITS_REGISTRY_IDENTITY_CREDENTIAL_FILE=$(E2E_IDENTITY_DIR)/api-credits-registry.ed25519'
+	@echo 'APICREDITS_IDENTITY_ENV_FILE=$(E2E_IDENTITY_DIR)/api-credits.identity.env'
+	@echo 'APICREDITS_EVM_WALLET_ENV_FILE=$(E2E_IDENTITY_DIR)/api-credits.wallet.env'
+	@echo 'APICREDITS_ADMIN_KEY_FILE=$(E2E_IDENTITY_DIR)/api-credits-admin-key'
+	@echo 'APICREDITS_SERVICE_IDENTITY_CREDENTIAL_FILE=$(E2E_IDENTITY_DIR)/api-credits-service.ed25519'
+	@echo 'APICREDITS_GATED_APP_IDENTITY_CREDENTIAL_FILE=$(E2E_IDENTITY_DIR)/api-credits-gated-app.ed25519'
+	@echo 'VMS_BOB_STOREFRONT_SECRETS_FILE=$(E2E_IDENTITY_DIR)/bob.storefront.secrets.toml'
+	@# registry-b gates read and write behind bearer tokens. The bootstrap
+	@# value must stay byte-equal to the [registry.auth] entries in
+	@# bob.storefront.secrets.toml and buyer.config.toml, so all three come
+	@# from this one constant.
+	@echo 'VMS_REGISTRY_ADMIN_API_KEY=$(E2E_REGISTRY_ADMIN_KEY)'
+	@echo 'VMS_REGISTRY_BOOTSTRAP_API_KEY=$(E2E_REGISTRY_BOOTSTRAP_KEY)'
+
 build-dev: build build-dev-env build-test-image
 
 # Seller-only build: the two runtime images a seller actually needs
@@ -679,7 +770,7 @@ clobber-wheels: _require-ar-project
 # Reviw and agent targets
 
 # ---------------------------------------------------------------------------
-# check-comment-hygiene — mechanical sweep for AGENTS.md's "Python comments
+# check-comment-hygiene check-doc-citations — mechanical sweep for AGENTS.md's "Python comments
 # and docstrings" rule: change IDs, section/task numbers, and change-document
 # filenames must never appear in comments or docstrings outside openspec/.
 # This catches the reliably-mechanical subset of that rule (not the fuzzier
@@ -708,6 +799,54 @@ check-comment-hygiene: ## Fail if change-ID/task-number references leak outside 
 		exit 1; \
 	fi
 	@echo "OK: no change-ID/task-number references found outside openspec/."
+	@echo "Scanning for OpenSpec change directory names in code..."
+	@ids=$$(ls -d openspec/changes/*/ 2>/dev/null | grep -v archive | xargs -n1 basename; \
+		ls -d openspec/changes/archive/*/ 2>/dev/null | xargs -n1 basename \
+			| sed -E 's/^[0-9]{4}-[0-9]{2}-[0-9]{2}-//'); \
+	if [ -n "$$ids" ]; then \
+		matches=$$(echo "$$ids" | sort -u | grep -v '^$$' \
+			| grep -Ff /dev/stdin -rn \
+				--include="*.py" --include="*.toml" --include="*.yml" --include="*.yaml" \
+				--exclude-dir="openspec" --exclude-dir="docs" --exclude-dir=".git" \
+				--exclude-dir="__pycache__" --exclude-dir=".venv" --exclude-dir=".dist" \
+				--exclude-dir="node_modules" --exclude-dir="build" --exclude-dir=".claude" \
+				. 2>/dev/null || true); \
+		if [ -n "$$matches" ]; then \
+			echo "$$matches"; \
+			echo ""; \
+			echo "FAIL: code names an OpenSpec change. A comment must describe the"; \
+			echo "current system, not the change that produced it or the change that"; \
+			echo "will alter it next -- a reader of the code cannot see either, and"; \
+			echo "the name goes stale the moment the change is archived."; \
+			echo "docs/ is exempt: the roadmap's job is to name the change owning a gap."; \
+			exit 1; \
+		fi; \
+	fi
+	@echo "OK: no OpenSpec change names found in code."
+
+# ---------------------------------------------------------------------------
+# check-doc-citations — AGENTS.md's cross-reference rule: every openspec/,
+# docs/, tools/, scripts/, and e2e-tests/ path cited by a document must
+# resolve on this branch, and an unresolvable one is a blocking defect rather
+# than a stale link.
+#
+# Rejects a tombstoned target as well as an absent one. The existence test
+# this replaces could not fail on a rename-to-tombstone -- the likeliest
+# broken citation in a renaming change -- because a tombstoned file still
+# exists on disk while its content is gone. The predicate is imported from
+# scripts/tombstones.py rather than reimplemented, so this check and the
+# prune utility cannot disagree about what a tombstone is.
+#
+# Archived changes are excluded: they record what was true when archived. A
+# change runs this during its own closeout, while its citations are still
+# expected to hold.
+# ---------------------------------------------------------------------------
+# Pass CHANGE=<name> to scope to one unarchived change's own documents, which
+# is what a closeout gates on: a change owes the citations it wrote, and
+# gating it on the whole repository's documentation debt would let one stale
+# runbook block everyone else's archival.
+check-doc-citations: ## Fail if a document cites a path that is absent or tombstoned (CHANGE=<name> to scope)
+	@python3 scripts/check_doc_citations.py "$(CHANGE)"
 
 code-snapshot: ## Zip all git-tracked files for sharing (excludes gitignored artifacts).
 	@mkdir -p .snapshot

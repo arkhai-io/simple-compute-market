@@ -12,12 +12,20 @@ install: ## Install dependencies using uv
 	uv sync --dev --find-links $(DIST_DIR)
 
 reinit: ## Force-reinstall internal wheels without bumping versions. Run make dist-* from the monorepo root first.
+# The two client packages are dev-only but are refreshed here for the same
+# reason as the kits: they are built into $(DIST_DIR) without a version bump,
+# so a cached same-version wheel would shadow fresh content and the
+# boundary tests would prove yesterday's clients against today's authority.
 	uv sync --dev --find-links $(DIST_DIR) \
 		--upgrade-package arkhai-kit-identity --reinstall-package arkhai-kit-identity \
-		--upgrade-package arkhai-kit-site --reinstall-package arkhai-kit-site
+		--upgrade-package arkhai-kit-site --reinstall-package arkhai-kit-site \
+		--upgrade-package arkhai-kit-resource-pools --reinstall-package arkhai-kit-resource-pools \
+		--upgrade-package arkhai-apicredits-middleware --reinstall-package arkhai-apicredits-middleware \
+		--upgrade-package arkhai-apicredits-domain --reinstall-package arkhai-apicredits-domain \
+		--upgrade-package arkhai-kit-site-client --reinstall-package arkhai-kit-site-client
 
 test: reinit ## Run the test suite
-	PYTHONPATH=src uv run --find-links $(DIST_DIR) pytest src/tests -q
+	PYTHONPATH=src uv run --find-links $(DIST_DIR) pytest tests -q
 
 serve: ## Run the service locally (reload)
 	PYTHONPATH=src uv run --find-links $(DIST_DIR) python src/main.py

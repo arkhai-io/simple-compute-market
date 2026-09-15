@@ -27,7 +27,9 @@ reinit: ## Reinstall the local package environment
 		--upgrade-package arkhai-kit-identity \
 		--reinstall-package arkhai-kit-identity \
 		--upgrade-package arkhai-kit-settlement-runtime \
-		--reinstall-package arkhai-kit-settlement-runtime
+		--reinstall-package arkhai-kit-settlement-runtime \
+		--upgrade-package arkhai-core \
+		--reinstall-package arkhai-core
 
 test: reinit ## Run the focused unit suite
 	uv run pytest tests/unit -q

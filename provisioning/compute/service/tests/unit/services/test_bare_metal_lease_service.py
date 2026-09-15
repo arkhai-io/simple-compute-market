@@ -63,7 +63,7 @@ def test_register_bare_metal_lease_attaches_executor_metadata(
 ):
     reserved = ledger.reserve(
         claim={
-            "executor_kind": "bare_metal",
+            "offering_mode": "bare_metal",
             "allocation_mode": ALLOCATION_MODE_EXCLUSIVE,
         },
         deal_ref={"escrow_uid": "0xbm"},
@@ -90,7 +90,7 @@ def test_register_bare_metal_lease_attaches_executor_metadata(
     )
 
     assert lease["state"] == "leased"
-    assert lease["executor_kind"] == "bare_metal"
+    assert lease["offering_mode"] == "bare_metal"
     assert lease["executor_target"] == "bm-node-1"
     assert lease["executor_ref"] == {
         "physical_host_id": "host-physical-1",
@@ -106,7 +106,7 @@ def test_register_bare_metal_lease_by_escrow_when_capacity_reservation_id_omitte
 ):
     reserved = ledger.reserve(
         claim={
-            "executor_kind": "bare_metal",
+            "offering_mode": "bare_metal",
             "allocation_mode": ALLOCATION_MODE_EXCLUSIVE,
         },
         deal_ref={"escrow_uid": "0xbm"},
@@ -129,7 +129,7 @@ def test_register_bare_metal_lease_by_escrow_when_capacity_reservation_id_omitte
     )
 
     assert lease["capacity_reservation_id"] == reserved["capacity_reservation_id"]
-    assert lease["executor_kind"] == "bare_metal"
+    assert lease["offering_mode"] == "bare_metal"
     assert lease["executor_target"] == "bm-node-1"
 
 

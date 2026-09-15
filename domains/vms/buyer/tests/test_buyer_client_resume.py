@@ -216,7 +216,9 @@ def test_resume_buyer_counters_then_seller_accepts(mock_urlopen):
     assert outcome.agreed_amount == 70
     assert outcome.negotiation_id == "neg-2"
     assert seen[0]["body"]["action"] == "counter"
-    assert seen[0]["body"]["proposal"]["fields"]["amount"] == 70
+    # The body the buyer signed: amounts are decimal-digit strings, so a
+    # uint256 counter can be canonicalized at all.
+    assert seen[0]["body"]["proposal"]["fields"]["amount"] == "70"
 
 
 @patch("core_buyer.negotiation_client.urllib.request.urlopen")

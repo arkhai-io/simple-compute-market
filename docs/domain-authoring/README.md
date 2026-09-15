@@ -80,14 +80,14 @@ shared helpers; others may need dedicated packages and services.
 
 ### Listing resource schema
 
-The listing's `offer_resource` is domain-defined. The registry stores it as
+The listing's `listing_resource` is domain-defined. The registry stores it as
 JSON and treats it as opaque except where the registry operator has enabled
 domain-specific validation and filtering.
 
 Define:
 
 - a stable resource kind, usually versioned, such as `api_credits.v1`
-- a typed model for the `offer_resource` payload
+- a typed model for the `listing_resource` payload
 - coercion helpers for JSON loaded from registry/storefront storage
 - filterable fields and their validation rules
 
@@ -104,7 +104,7 @@ to reject malformed listings and expose useful discovery queries.
 
 Define:
 
-- required fields for `offer_resource`
+- required fields for `listing_resource`
 - allowed field types and operators
 - any local vocabulary constraints, such as regions or service kinds
 - migration/deprecation rules for old listing schemas
@@ -277,7 +277,7 @@ Recommended practices:
 
 - Put a version in resource and provision-term kinds, such as
   `my_domain.v1`.
-- Treat `offer_resource`, `ProvisionTerms.payload`, fulfillment results,
+- Treat `listing_resource`, `ProvisionTerms.payload`, fulfillment results,
   and settlement demand data as independently versioned if they may evolve
   separately.
 - Add deprecation notes in code and docs before removing fields.

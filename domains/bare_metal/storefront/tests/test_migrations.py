@@ -33,7 +33,7 @@ async def test_bare_metal_migration_upgrades_existing_core_database(tmp_path) ->
         status="open",
         created_at="now",
         updated_at="now",
-        offer_resource={"kind": "legacy"},
+        listing_resource={"kind": "legacy"},
         fulfillment_resource=None,
         max_duration_seconds=None,
         storefront_url="http://seller:8000",

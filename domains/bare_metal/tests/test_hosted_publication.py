@@ -63,7 +63,7 @@ def test_partial_profile_readiness_omits_only_unready_profile() -> None:
         candidate=_candidate(),
         base_hosted_options=[_base("card.v1"), _base("us_ach_debit.v1")],
         policy=BareMetalHostedPublicationPolicy(),
-        offer_expires_at=OFFER,
+        option_expires_at=OFFER,
         funding_deadlines={
             "card.v1": datetime(2099, 1, 1, 1, tzinfo=timezone.utc),
             "us_ach_debit.v1": datetime(2099, 1, 1, 1, 30, tzinfo=timezone.utc),
@@ -83,7 +83,7 @@ def test_unsupported_access_omits_every_hosted_option() -> None:
         candidate=_candidate(["serial"]),
         base_hosted_options=[_base("card.v1")],
         policy=BareMetalHostedPublicationPolicy(),
-        offer_expires_at=OFFER,
+        option_expires_at=OFFER,
         funding_deadlines={"card.v1": datetime(2099, 1, 1, 1, tzinfo=timezone.utc)},
         fulfillment_deadline=FULFILL,
         now=NOW,
@@ -98,7 +98,7 @@ def test_profile_deadline_cannot_outlive_signed_offer() -> None:
         candidate=_candidate(),
         base_hosted_options=[_base("us_bank_transfer.v1")],
         policy=BareMetalHostedPublicationPolicy(),
-        offer_expires_at=OFFER,
+        option_expires_at=OFFER,
         funding_deadlines={
             "us_bank_transfer.v1": datetime(2099, 1, 1, 2, 1, tzinfo=timezone.utc)
         },
@@ -107,4 +107,4 @@ def test_profile_deadline_cannot_outlive_signed_offer() -> None:
     )
 
     assert result.settlement_options == ()
-    assert result.blockers["us_bank_transfer.v1"] == ("funding_exceeds_offer",)
+    assert result.blockers["us_bank_transfer.v1"] == ("funding_exceeds_option",)

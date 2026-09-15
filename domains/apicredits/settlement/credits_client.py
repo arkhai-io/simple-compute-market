@@ -5,10 +5,24 @@ from __future__ import annotations
 import hashlib
 import logging
 import re
+import time
+import uuid
+from collections.abc import Mapping
 from typing import Any, Literal, Self
 
 import httpx
-from market_identity import Identity, canonical_json
+from market_identity import (
+    EMPTY_BODY,
+    RESPONSE_PROTOCOL,
+    AuthenticatedResponse,
+    Identity,
+    RequestEnvelope,
+    SignatureProof,
+    canonical_body_hash,
+    canonical_json,
+    sign_request,
+    verify_response,
+)
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 logger = logging.getLogger(__name__)
@@ -228,8 +242,86 @@ def _service_error(response: httpx.Response) -> CreditsServiceError:
     )
 
 
+SIGNATURE_VERSION_HEADER = "X-Market-Signature-Version"
+IDENTITY_SCHEME_HEADER = "X-Market-Identity-Scheme"
+IDENTITY_IDENTIFIER_HEADER = "X-Market-Identity-Identifier"
+ROLE_HEADER = "X-Market-Role"
+REQUEST_ID_HEADER = "X-Market-Request-ID"
+TIMESTAMP_HEADER = "X-Market-Timestamp"
+SIGNATURE_HEADER = "X-Market-Signature"
+
+
+class CreditsServiceAuthenticationError(CreditsServiceError):
+    """Something answered, but not verifiably the credits authority.
+
+    A subclass of `CreditsServiceError` so existing callers that already
+    handle a failed credits call keep working, and a distinct type so an
+    operator can tell "the authority refused" from "the authority did not
+    answer this" -- including on refusals, which are signed too.
+    """
+
+
+def _required_header(headers: Mapping[str, str], name: str) -> str:
+    value = headers.get(name)
+    if value is None:
+        raise KeyError(name)
+    return str(value)
+
+
+def _signed_response_body(response: httpx.Response) -> Any:
+    """The body as the signature covers it.
+
+    A bodyless response hashes as `EMPTY_BODY`, matching how the service
+    signs one. Non-JSON text is passed through so a malformed answer fails
+    verification rather than raising while being parsed.
+    """
+    if not response.content:
+        return EMPTY_BODY
+    try:
+        return response.json()
+    except ValueError:
+        return response.text
+
+
+#: This client's operations as the credits service names them. Must agree
+#: exactly with `CREDITS_ROUTE_CONTRACTS` in
+#: `domains/apicredits/service/src/middleware/route_contracts.py`: the
+#: service recomputes the operation and resource from the route it matched
+#: and verifies the signature over its own values, so a mismatch here is a
+#: signature that cannot verify rather than a cosmetic drift. Asserted by
+#: `tests/unit/test_credits_route_parity.py`.
+#:
+#: `credits_issue` signs the `fulfillment_id` carried in the request body
+#: (`body_resource`, optional): unlike the others the resource is not in the
+#: path, and an issuance without one signs the empty resource.
+ISSUE_OPERATION = "credits_issue"
+ISSUANCE_GET_OPERATION = "credits_issuance_get"
+KEY_GET_OPERATION = "credits_key_get"
+KEY_REVOKE_OPERATION = "credits_key_revoke"
+KEY_ADJUST_OPERATION = "credits_key_adjust"
+
+#: The role the storefront presents: it issues grants against settled deals
+#: and administers keys. Distinct from the gated application's `service`,
+#: which may only spend and check.
+STOREFRONT_ROLE = "seller"
+
+#: The role the authority signs its responses with.
+AUTHORITY_RESPONSE_ROLE = "service"
+
+
 class CreditsServiceClient:
-    """Configured typed client for one credits authority."""
+    """Configured typed client for one credits authority.
+
+    ``signer`` and ``expected_authorities`` select signed authentication:
+    each request carries a marketplace identity v2 envelope signed in the
+    ``seller`` role, and every response -- refusals included -- is verified
+    as coming from a trusted authority principal. Omitting them falls back
+    to the legacy ``X-Admin-Key`` shared secret.
+
+    Both are kept because the service accepts exactly one of them at a
+    time, chosen by its own configuration, so the two sides are flipped
+    together and a deployment mid-flip must still be describable.
+    """
 
     def __init__(
         self,
@@ -237,16 +329,186 @@ class CreditsServiceClient:
         admin_key: str = "",
         *,
         transport: httpx.AsyncBaseTransport | None = None,
+        signer: Any | None = None,
+        expected_authorities: Any | None = None,
+        max_response_skew: int = 300,
     ) -> None:
+        if (signer is None) != (expected_authorities is None):
+            raise ValueError(
+                "signer and expected_authorities must be supplied together: "
+                "signing requests without verifying responses would accept "
+                "an unauthenticated answer to an authenticated question"
+            )
         self._service_url = service_url.rstrip("/")
         self._admin_key = admin_key
         self._transport = transport  # test seam (httpx.MockTransport)
+        self._signer = signer
+        self._expected_authorities = expected_authorities
+        self._max_response_skew = max_response_skew
+
+    @property
+    def signing_enabled(self) -> bool:
+        return self._signer is not None
 
     def _headers(self) -> dict[str, str]:
         return {"X-Admin-Key": self._admin_key} if self._admin_key else {}
 
     def _http(self, timeout: float) -> httpx.AsyncClient:
         return httpx.AsyncClient(timeout=timeout, transport=self._transport)
+
+    async def _call(
+        self,
+        method: str,
+        path: str,
+        *,
+        operation: str,
+        resource: str,
+        body: Any | None = None,
+        timeout: float,
+    ) -> httpx.Response:
+        """Issue one request, signed when this client is configured to.
+
+        On the signed path the RFC 8785 canonical bytes that were hashed are
+        the bytes sent, because the service recomputes the body hash from
+        what it receives.
+        """
+        url = f"{self._service_url}{path}"
+        if self._signer is None:
+            async with self._http(timeout) as http:
+                return await http.request(
+                    method,
+                    url,
+                    json=body,
+                    headers=self._headers(),
+                )
+
+        envelope_body = EMPTY_BODY if body is None else body
+        request_id = uuid.uuid4().hex
+        authenticated = sign_request(
+            signer=self._signer,
+            envelope=RequestEnvelope(
+                role=STOREFRONT_ROLE,
+                principal=self._signer.identity,
+                method=method,
+                operation=operation,
+                resource=resource,
+                request_id=request_id,
+                timestamp=int(time.time()),
+                body_hash=canonical_body_hash(envelope_body),
+            ),
+        )
+        headers = {
+            "Accept": "application/json",
+            SIGNATURE_VERSION_HEADER: authenticated.protocol,
+            IDENTITY_SCHEME_HEADER: authenticated.principal.scheme.value,
+            IDENTITY_IDENTIFIER_HEADER: authenticated.principal.identifier,
+            ROLE_HEADER: authenticated.role,
+            REQUEST_ID_HEADER: authenticated.request_id,
+            TIMESTAMP_HEADER: str(authenticated.timestamp),
+            SIGNATURE_HEADER: authenticated.proof.value,
+        }
+        content = None if body is None else canonical_json(body)
+        if content is not None:
+            headers["Content-Type"] = "application/json"
+        async with self._http(timeout) as http:
+            response = await http.request(
+                method, url, content=content, headers=headers,
+            )
+        self._verify_authority_response(
+            response,
+            method=method,
+            operation=operation,
+            resource=resource,
+            request_id=request_id,
+        )
+        return response
+
+    def _verify_authority_response(
+        self,
+        response: httpx.Response,
+        *,
+        method: str,
+        operation: str,
+        resource: str,
+        request_id: str,
+    ) -> None:
+        """Establish that a trusted authority produced this response.
+
+        Verified against the operation, resource and request id that were
+        *signed*, not values recovered from the response, so a substituted
+        answer cannot nominate the question it is answering.
+
+        `expected_role` is `service`: the authority signs its responses in
+        the service role even though this client signs its requests as
+        `seller`. The kit's own `verify_authenticated_response` fixes that
+        expectation to `seller` because it verifies storefronts, which is
+        why it is not reused here.
+        """
+        body = _signed_response_body(response)
+        try:
+            scheme = _required_header(response.headers, IDENTITY_SCHEME_HEADER)
+            protocol = _required_header(
+                response.headers, SIGNATURE_VERSION_HEADER
+            )
+            if protocol != RESPONSE_PROTOCOL:
+                raise CreditsServiceAuthenticationError(
+                    "unsupported_response_signature_version",
+                    protocol,
+                    status_code=response.status_code,
+                )
+            principal = Identity(
+                scheme=scheme,
+                identifier=_required_header(
+                    response.headers, IDENTITY_IDENTIFIER_HEADER
+                ),
+            )
+            authenticated = AuthenticatedResponse(
+                protocol=protocol,
+                role=_required_header(response.headers, ROLE_HEADER),
+                principal=principal,
+                method=method,
+                operation=operation,
+                resource=resource,
+                request_id=_required_header(
+                    response.headers, REQUEST_ID_HEADER
+                ),
+                timestamp=int(
+                    _required_header(response.headers, TIMESTAMP_HEADER)
+                ),
+                status=response.status_code,
+                body_hash=canonical_body_hash(body),
+                proof=SignatureProof(
+                    scheme=scheme,
+                    value=_required_header(response.headers, SIGNATURE_HEADER),
+                ),
+            )
+        except CreditsServiceAuthenticationError:
+            raise
+        except (KeyError, TypeError, ValueError) as exc:
+            raise CreditsServiceAuthenticationError(
+                "missing_or_malformed_response_authentication",
+                f"HTTP {response.status_code}",
+                status_code=response.status_code,
+            ) from exc
+
+        result = verify_response(
+            authenticated,
+            body=body,
+            now=int(time.time()),
+            max_skew=self._max_response_skew,
+            expected_role=AUTHORITY_RESPONSE_ROLE,
+            expected_principals=self._expected_authorities,
+            expected_method=method,
+            expected_operation=operation,
+            expected_resource=resource,
+            expected_request_id=request_id,
+        )
+        if not result.verified:
+            raise CreditsServiceAuthenticationError(
+                "response_authentication_failed",
+                result.code.value,
+                status_code=response.status_code,
+            )
 
     async def submit_credit_issuance(
         self,
@@ -256,12 +518,18 @@ class CreditsServiceClient:
     ) -> CreditIssuanceResult:
         """Commit or retrieve exactly the immutable issuance request."""
 
-        async with self._http(timeout) as http:
-            response = await http.post(
-                f"{self._service_url}/api/v1/issuance",
-                json=request.model_dump(mode="json", exclude_none=True),
-                headers=self._headers(),
-            )
+        payload = request.model_dump(mode="json", exclude_none=True)
+        response = await self._call(
+            "POST",
+            "/api/v1/issuance",
+            operation=ISSUE_OPERATION,
+            # `credits_issue` declares an optional `body_resource` of
+            # `fulfillment_id`; the service signs the empty resource when the
+            # body carries none, so this mirrors that exactly.
+            resource=str(payload.get("fulfillment_id") or ""),
+            body=payload,
+            timeout=timeout,
+        )
         if response.status_code == 200:
             return CreditIssuanceResult.model_validate(response.json())
         raise _service_error(response)
@@ -274,11 +542,13 @@ class CreditsServiceClient:
     ) -> CreditIssuanceResult | None:
         """Resolve one committed grant without rotating or returning its secret."""
 
-        async with self._http(timeout) as http:
-            response = await http.get(
-                f"{self._service_url}/api/v1/issuance/{fulfillment_id}",
-                headers=self._headers(),
-            )
+        response = await self._call(
+            "GET",
+            f"/api/v1/issuance/{fulfillment_id}",
+            operation=ISSUANCE_GET_OPERATION,
+            resource=fulfillment_id,
+            timeout=timeout,
+        )
         if response.status_code == 404:
             return None
         if response.status_code == 200:
@@ -292,11 +562,13 @@ class CreditsServiceClient:
         timeout: float = 10.0,
     ) -> dict[str, Any] | None:
         """The key's ownership claim + status, or None when unknown."""
-        async with self._http(timeout) as http:
-            resp = await http.get(
-                f"{self._service_url}/api/v1/keys/{key_id}",
-                headers=self._headers(),
-            )
+        resp = await self._call(
+            "GET",
+            f"/api/v1/keys/{key_id}",
+            operation=KEY_GET_OPERATION,
+            resource=key_id,
+            timeout=timeout,
+        )
         if resp.status_code == 404:
             return None
         resp.raise_for_status()
@@ -308,11 +580,13 @@ class CreditsServiceClient:
         *,
         timeout: float = 10.0,
     ) -> dict[str, Any]:
-        async with self._http(timeout) as http:
-            resp = await http.post(
-                f"{self._service_url}/api/v1/keys/{key_id}/revoke",
-                headers=self._headers(),
-            )
+        resp = await self._call(
+            "POST",
+            f"/api/v1/keys/{key_id}/revoke",
+            operation=KEY_REVOKE_OPERATION,
+            resource=key_id,
+            timeout=timeout,
+        )
         resp.raise_for_status()
         return resp.json()
 
@@ -324,12 +598,14 @@ class CreditsServiceClient:
         reason: str,
         timeout: float = 10.0,
     ) -> dict[str, Any]:
-        async with self._http(timeout) as http:
-            resp = await http.post(
-                f"{self._service_url}/api/v1/keys/{key_id}/adjust",
-                json={"delta": int(delta), "reason": reason},
-                headers=self._headers(),
-            )
+        resp = await self._call(
+            "POST",
+            f"/api/v1/keys/{key_id}/adjust",
+            operation=KEY_ADJUST_OPERATION,
+            resource=key_id,
+            body={"delta": int(delta), "reason": reason},
+            timeout=timeout,
+        )
         resp.raise_for_status()
         return resp.json()
 

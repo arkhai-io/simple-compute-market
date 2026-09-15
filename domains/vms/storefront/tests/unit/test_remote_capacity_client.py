@@ -35,6 +35,15 @@ from tests.fake_site import (
 )
 
 
+import asyncio
+
+# Imported for its side effect: the capacity loop gates, and the gate reads
+# the pause flag from `market_storefront.server`. Loading it here means that
+# import is already cached when a test swaps in a minimal settings object,
+# which would otherwise fail the app build the first import performs.
+from market_storefront import server  # noqa: F401
+
+
 @pytest.fixture
 def site() -> FakeSite:
     fake = FakeSite(deliverable_modes={"vm"})
@@ -125,7 +134,7 @@ async def test_exact_site_availability_reflects_consumption(
     client: cc.SiteCapacityClient,
 ):
     await client.reserve(
-        claim={"executor_kind": "vm", "gpu_count": 3},
+        claim={"offering_mode": "vm", "gpu_count": 3},
         deal_ref={},
     )
     aggregate = cc.AggregateCapacityClient({"default": client})
@@ -247,7 +256,7 @@ async def test_most_available_ranks_by_legacy_gpu_count_claim_through_the_real_a
         transport=big_site.transport(),
     )
 
-    match = await built.probe(claim={"executor_kind": "vm", "gpu_count": 2})
+    match = await built.probe(claim={"offering_mode": "vm", "gpu_count": 2})
 
     assert match is not None
     assert match["resource_id"] == "big-res"
@@ -287,7 +296,7 @@ async def test_most_available_excludes_a_resource_type_mismatch_through_the_real
 
     match = await built.probe(
         claim={
-            "executor_kind": "vm",
+            "offering_mode": "vm",
             "resource_type": "compute.cpu",
             "gpu_count": 1,
         }
@@ -392,9 +401,31 @@ async def test_poller_loop_delegates_to_composed_kit_runtime():
         patch.object(cc, "build_capacity_runtime", return_value=runtime),
         patch("market_storefront.utils.config.settings", _settings()),
     ):
-        await cc.capacity_events_poller_loop(repository)
+        # The loop never returns: it runs the fan-out as a task and then gates
+        # and idles, so a pause is observed rather than the loop sitting inside
+        # a call that never comes back. Awaiting it here would hang.
+        task = asyncio.create_task(cc.capacity_events_poller_loop(repository))
+        try:
+            await asyncio.sleep(0.05)
+        finally:
+            task.cancel()
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
 
-    runtime.poll_events.assert_awaited_once_with(interval_seconds=0.01)
+    # The gate factory is passed per site: the kit owns the fan-out, and one
+    # shared predicate could only hold every site together. Asserted by shape
+    # rather than identity -- it is a closure bound to the loop's own name.
+    runtime.poll_events.assert_awaited_once()
+    kwargs = runtime.poll_events.await_args.kwargs
+    assert kwargs["interval_seconds"] == 0.01
+    site_gate = kwargs["paused"]("default")
+    assert callable(site_gate), (
+        "poll_events must receive a factory returning one site's gate, so a "
+        "held site does not hold the others"
+    )
+    assert site_gate() is False, "no pause was requested, so the gate is open"
 
 
 # ---------------------------------------------------------------------------

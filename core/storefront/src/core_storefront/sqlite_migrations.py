@@ -1531,6 +1531,96 @@ def _migrate_marketplace_principals(
                 f"{table_name}.{old_column} could not be removed during identity cutover"
             )
 
+def migrate_listing_resource_column(conn: sqlite3.Connection) -> None:
+    """Rename ``listings.offer_resource`` to ``listings.listing_resource`` and
+    move the offering mode onto its settled key inside the stored payload.
+
+    Both halves run here because a row must never be observable with the column
+    migrated and its payload not: the payload's mode is read back as the
+    listing's offering mode, so a half-migrated row would publish a listing
+    whose mode looks absent.
+
+    The column is renamed rather than mapped at the read boundary because a
+    search for the retired name across the codebase is this rename's
+    verification strategy, and a surviving column keeps producing hits an
+    auditor has to dismiss one at a time.
+    """
+    if not _table_exists(conn, "listings"):
+        return
+
+    if _column_exists(conn, "listings", "offer_resource") and not _column_exists(
+        conn, "listings", "listing_resource"
+    ):
+        # SQLite has supported RENAME COLUMN since 3.25; this repository
+        # supports SQLite only, so there is no reason to rebuild the table.
+        conn.execute(
+            "ALTER TABLE listings RENAME COLUMN offer_resource TO listing_resource"
+        )
+
+    if not _column_exists(conn, "listings", "listing_resource"):
+        return
+
+    rows = conn.execute(
+        "SELECT listing_id, listing_resource FROM listings"
+    ).fetchall()
+    for row in rows:
+        raw = row[1]
+        if raw is None:
+            continue
+        try:
+            payload = json.loads(raw) if isinstance(raw, str) else raw
+        except (TypeError, ValueError):
+            # An unparseable payload is left exactly as stored rather than
+            # discarded: it is the seller's published shape, and this migration
+            # has no basis for rewriting something it cannot read.
+            continue
+        if not isinstance(payload, dict) or "virtualization_type" not in payload:
+            continue
+        # A payload already carrying the settled key keeps it: that value is the
+        # one a live publication wrote, and the retired key is the stale copy.
+        payload.setdefault("offering_mode", payload["virtualization_type"])
+        del payload["virtualization_type"]
+        conn.execute(
+            "UPDATE listings SET listing_resource=? WHERE listing_id=?",
+            (json.dumps(payload, sort_keys=True, separators=(",", ":")), row[0]),
+        )
+
+
+def count_listings_carrying_retired_offering_mode_key(
+    conn: sqlite3.Connection,
+) -> int:
+    """Listing rows whose stored payload still names the retired mode key.
+
+    A cutover gate rather than a migration step. The payload is JSON, so a row
+    the backfill missed is not a type error and would surface only when a buyer
+    filters on the offering mode and the listing silently fails to match.
+    """
+    if not _table_exists(conn, "listings"):
+        return 0
+    # Reads whichever shape column is present, so the count is meaningful both
+    # before and after the rename. Checking only the settled column would
+    # report zero on a database that has not been migrated at all -- the exact
+    # state the gate exists to catch.
+    for column in ("listing_resource", "offer_resource"):
+        if _column_exists(conn, "listings", column):
+            shape_column = column
+            break
+    else:
+        return 0
+    stale = 0
+    for row in conn.execute(f"SELECT {shape_column} FROM listings"):
+        raw = row[0]
+        if raw is None:
+            continue
+        try:
+            payload = json.loads(raw) if isinstance(raw, str) else raw
+        except (TypeError, ValueError):
+            continue
+        if isinstance(payload, dict) and "virtualization_type" in payload:
+            stale += 1
+    return stale
+
+
 def migrate_storefront_domain_bindings_schema(conn: sqlite3.Connection) -> None:
     """Create immutable listing, negotiation, and domain-artifact bindings."""
 
@@ -1829,5 +1919,10 @@ _MIGRATIONS: tuple[Migration, ...] = (
         "20260815_001_storefront_domain_bindings",
         migrate_storefront_domain_bindings_schema,
         required_tables=("listings", "negotiation_threads"),
+    ),
+    Migration(
+        "20260911_001_listing_resource_column",
+        migrate_listing_resource_column,
+        required_tables=("listings",),
     ),
 )

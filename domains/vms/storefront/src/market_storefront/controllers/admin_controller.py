@@ -12,6 +12,7 @@ import json
 import logging
 import time
 import uuid
+from collections.abc import Mapping
 from datetime import datetime, timezone
 from typing import Any
 
@@ -59,7 +60,13 @@ from market_storefront.models.capacity_admin_models import (
     ResourcePatchResponse,
     UsageStartedEventRequest,
 )
-from market_storefront.server import _set_globally_paused
+from market_storefront.lifecycle import (
+    CAPACITY_EVENTS_POLLER,
+    FULFILLMENT_RESUME,
+    SETTLEMENT_SERVICING,
+    SITE_PROJECTION_POLLER,
+)
+from market_storefront.server import _set_globally_paused, _set_loops_paused
 from market_capacity_publication import (
     CapacityBinding,
     CapacityBindingError,
@@ -82,6 +89,60 @@ _INTERRUPTIBLE_HELD_STATES = frozenset(
 )
 
 router = APIRouter(prefix="/api/v1/admin", tags=["admin"])
+
+
+#: Route alias -> the loop's registered name. Aliases are hyphenated where loop
+#: names are underscored, and `site-projections` does not transform into
+#: `site_projection_poller` by any rule -- so the mapping is declared rather
+#: than inferred. Declaring it makes the route's spelling and the registry's
+#: agree by construction, which is the drift that let `claims` outlive the
+#: claims engine.
+#: Fields `ReserveCapacityResponse` cannot be built without.
+#:
+#: Deliberately not `resource_id`: `kit/site`'s reserve route strips physical
+#: identity from every reservation response, so requiring it asked the site
+#: authority for something it is designed never to return.
+_REQUIRED_RESERVATION_FIELDS = ("capacity_reservation_id",)
+
+
+def require_reservation_fields(
+    reserved: Mapping[str, Any], *, site_id: str
+) -> None:
+    """Refuse a reservation payload this response cannot be built from.
+
+    These fields were subscripted directly, two lines after the sibling stage
+    event read the same payload with `.get`. When one was absent the `KeyError`
+    reached the caller as `500 Storefront administrator request failed`, naming
+    neither the field nor the authority that returned it -- a message that cost
+    several rounds to trace back to one subscript.
+
+    A `502`, not a `500`: the site authority returned something this storefront
+    cannot use, which is a bad gateway rather than this service faulting. The
+    payload's keys are reported because the useful question is what the
+    authority *did* send -- a fungible pool reservation legitimately has no
+    resource of its own to name, and whether it should carry one is a contract
+    question this error surfaces instead of hiding.
+    """
+    missing = [f for f in _REQUIRED_RESERVATION_FIELDS if f not in reserved]
+    if not missing:
+        return
+    raise HTTPException(
+        status_code=502,
+        detail=(
+            f"site {site_id!r} returned a reservation without "
+            f"{', '.join(missing)}; payload carried {sorted(reserved)}. This "
+            "response requires those fields, so either the authority omitted "
+            "them or the two disagree on the reservation shape."
+        ),
+    )
+
+
+ADVANCE_LOOP_NAMES = {
+    "settlement-servicing": SETTLEMENT_SERVICING,
+    "fulfillment-resume": FULFILLMENT_RESUME,
+    "site-projections": SITE_PROJECTION_POLLER,
+    "capacity-events": CAPACITY_EVENTS_POLLER,
+}
 
 
 @cbv(router)
@@ -300,6 +361,198 @@ class AdminController:
             refund_amount=body.refund_amount,
             reservation=truncated or reservation,
         )
+
+    # ------------------------------------------------------------------
+    # One cycle of one loop, while the timers are held.
+    #
+    # Each route reports the loop's registered name from `lifecycle` rather
+    # than a literal. A literal is a third place a loop's name is spelled --
+    # after the registration and the gate call -- and this one had already
+    # drifted: the route was still called `claims` and a caller still expected
+    # `claims_engine` after the claims engine became settlement servicing.
+    #
+    # Each route calls the operation the timer was already invoking and returns
+    # what that operation returns. None drives an iteration of the loop itself,
+    # and none implements a transition the loop does not: a manual cycle that
+    # behaved differently from the timer would prove nothing about production.
+    # Running while paused is the entire purpose.
+    # ------------------------------------------------------------------
+
+    @router.post(
+        "/lifecycle/pause",
+        summary="Hold every timer-driven loop idle (admin)",
+    )
+    async def pause_lifecycle_loops(self) -> dict:
+        """Hold the timer loops idle. Trading is unaffected.
+
+        Two controls, deliberately separate. `/admin/pause` stops the
+        storefront accepting new negotiations; this stops the loops
+        reconciling behind a caller's back. A scenario needs deterministic
+        reconciliation *and* a deal to agree, so anything that did both at once
+        would make the second impossible -- which is exactly what conflating
+        them produced: `negotiate/new` refused with `paused/global`.
+
+        Loops are held rather than stopped: nothing is torn down, no cycle is
+        cut part-way, and a poller keeps its feed position. Each loop's work
+        stays reachable through its own run-cycle route while held.
+        """
+        loops = await _set_loops_paused(True)
+        logger.info("[ADMIN] Timer loops paused: %s", loops)
+        return {"paused": True, "loops": loops}
+
+    @router.post(
+        "/lifecycle/resume",
+        summary="Return every timer-driven loop to work (admin)",
+    )
+    async def resume_lifecycle_loops(self) -> dict:
+        """Return the loops to work; each performs its next cycle."""
+        loops = await _set_loops_paused(False)
+        logger.info("[ADMIN] Timer loops resumed: %s", loops)
+        return {"paused": False, "loops": loops}
+
+    @router.post(
+        "/lifecycle/settlement-servicing/run-cycle",
+        summary="Run one settlement-servicing sweep now (admin)",
+    )
+    async def run_settlement_servicing_cycle(self) -> dict:
+        import market_storefront.container as _container
+
+        composition = _container.resolved_settlement_composition
+        if composition is None:
+            raise HTTPException(
+                status_code=503, detail="settlement composition is not initialized"
+            )
+        processed = await composition.worker.run_once()
+        return {
+            "loop": ADVANCE_LOOP_NAMES["settlement-servicing"],
+            "processed": int(processed),
+        }
+
+    @router.post(
+        "/lifecycle/fulfillment-resume/run-cycle",
+        summary="Run one fulfillment-resume sweep now (admin)",
+    )
+    async def run_fulfillment_resume_cycle(self) -> dict:
+        from market_storefront.services.fulfillment_resume_runtime import (
+            resume_incomplete_fulfillments_once,
+        )
+
+        await resume_incomplete_fulfillments_once(sqlite_client=self._db)
+        return {"loop": ADVANCE_LOOP_NAMES["fulfillment-resume"]}
+
+    @router.post(
+        "/lifecycle/site-projections/run-cycle",
+        summary="Pull site-authority projections now (admin)",
+    )
+    async def run_site_projection_cycle(self) -> dict:
+        """The projection poller's own cycle, named as a loop advance.
+
+        Same work as `/capacity/projections/refresh`, which predates the
+        lifecycle controls and is kept because callers use it. This one is
+        reachable by loop name like every other advance.
+        """
+        from market_storefront.services.site_projection_cache import (
+            load_site_projections,
+            projection_status_summary,
+        )
+
+        await load_site_projections(self._db)
+        return {
+            "loop": ADVANCE_LOOP_NAMES["site-projections"],
+            "sites": projection_status_summary(),
+        }
+
+    @router.post(
+        "/lifecycle/capacity-events/dry-run",
+        summary="Report what one capacity-event cycle would do (admin)",
+    )
+    async def dry_run_capacity_events_cycle(self) -> dict:
+        """Read each site's feed and report the cycle without running it.
+
+        The read half of stepping this loop. Capacity deltas are what close
+        and reopen derived listings, so an advance changes what buyers can
+        discover; a caller that can see the pending events first can assert
+        on the cause before committing to the effect, which is what the
+        evaluate routes do for a negotiation and a settlement.
+
+        Emits nothing, reconciles nothing, and leaves every cursor where it
+        was -- two consecutive dry runs report the same thing.
+        """
+        runtime = self._runtime()
+        sites = [
+            (await runtime.preview_events_once(site_id)).to_dict()
+            for site_id in runtime.site_ids
+        ]
+        return {
+            "loop": ADVANCE_LOOP_NAMES["capacity-events"],
+            "dry_run": True,
+            "sites": sites,
+            "pending_count": sum(int(site["pending_count"]) for site in sites),
+        }
+
+    @router.post(
+        "/lifecycle/capacity-events/run-cycle",
+        summary="Drain one capacity-event cycle per site now (admin)",
+    )
+    async def run_capacity_events_cycle(self) -> dict:
+        """Run exactly one cycle of each site's capacity-event feed.
+
+        One cycle per site per call, not a drain to the head: a truncated page
+        reports `truncated` so a caller advancing deliberately can step again
+        and see each page separately, rather than having the route decide how
+        far to go.
+
+        Addresses the same per-site cursor the running poller holds. Intended
+        to be called while the loop is held -- a cycle either runs completely
+        or never starts, so an advance under the pause has the feed to itself.
+        """
+        runtime = self._runtime()
+        sites = [
+            (await runtime.drain_events_once(site_id)).to_dict()
+            for site_id in runtime.site_ids
+        ]
+        logger.info("[ADMIN] Capacity-event cycle advanced: %s", sites)
+        return {
+            "loop": ADVANCE_LOOP_NAMES["capacity-events"],
+            "sites": sites,
+            "applied_count": sum(int(site["applied_count"]) for site in sites),
+        }
+
+    @router.post(
+        "/capacity/projections/refresh",
+        summary="Pull site-authority projections now (admin)",
+    )
+    async def refresh_site_projections(self) -> dict[str, Any]:
+        """Reload every site projection and report what each site now holds.
+
+        Projections are pull-synchronized on a poller interval. A caller that
+        has just declared capacity at the site authority would otherwise wait
+        that interval out, and a caller holding the lifecycle loops paused
+        would wait forever: the poller that would pull it is one of the loops
+        being held. Neither is a wait a test may take.
+
+        Returns the per-site load state so a caller asserts the pull happened
+        rather than assuming it. A site reporting `not_loaded`, `unavailable`,
+        or `invalid` has not confirmed its projection and must not be read as
+        an authoritative empty -- an unconfirmed projection and an empty one
+        are indistinguishable downstream, which is how an inventory failure
+        becomes a negotiation failure several stages away.
+        """
+        from market_storefront.services.site_projection_cache import (
+            load_site_projections,
+            projection_status_summary,
+        )
+
+        await load_site_projections(self._db)
+        summary = projection_status_summary()
+        logger.info(
+            "[ADMIN] Site projections refreshed on demand: %s",
+            {
+                site: {family: view.get("state") for family, view in families.items()}
+                for site, families in summary.items()
+            },
+        )
+        return {"sites": summary}
 
     @router.post(
         "/portfolio/resources/import",
@@ -603,8 +856,8 @@ class AdminController:
         listing: dict[str, Any],
         thread: dict[str, Any] | None,
     ) -> bool:
-        offer = self._json_object(listing.get("offer_resource"))
-        if offer.get("interruptible") is True:
+        listing_resource = self._json_object(listing.get("listing_resource"))
+        if listing_resource.get("interruptible") is True:
             return True
 
         proposal = (thread or {}).get("buyer_escrow_proposal")
@@ -1038,7 +1291,7 @@ class AdminController:
         except RuntimeError as exc:
             raise HTTPException(status_code=500, detail=str(exc)) from exc
         claim = dict(body.required_attributes or {})
-        claim["executor_kind"] = binding.offering_mode
+        claim["offering_mode"] = binding.offering_mode
         try:
             reserved = await self._runtime().reserve(
                 binding,
@@ -1088,16 +1341,23 @@ class AdminController:
             escrow_uid=body.escrow_uid,
             closed_listing_ids=closed_listing_ids,
         )
-        # Pools are the aggregator's concept, not the ledger's — surface
-        # the membership from the resource attributes the sync mirrored.
-        pool_id = reserved.get("pool_id") or (reserved.get("attributes") or {}).get(
-            "pool_id"
+        # Pools are the aggregator's concept, not the ledger's. The
+        # reservation payload carries neither a `pool_id` nor pool-bearing
+        # resource attributes -- the capacity boundary reports the hold and
+        # withholds the topology the storefront published from -- so read the
+        # membership from the durable listing binding, which is where this
+        # storefront recorded it at publication time.
+        durable = await self._db.load_listing_binding(listing_id=body.listing_id)
+        pool_id = (
+            reserved.get("pool_id")
+            or (reserved.get("attributes") or {}).get("pool_id")
+            or (durable.pool_id if durable is not None else None)
         )
+        require_reservation_fields(reserved, site_id=binding.site_id)
         return ReserveCapacityResponse(
             capacity_reservation_id=str(reserved["capacity_reservation_id"]),
             pool_id=str(pool_id) if pool_id else None,
             member_id=str(reserved["member_id"]) if reserved.get("member_id") else None,
-            resource_id=str(reserved["resource_id"]),
             gpu_count=int(reserved.get("allocated_gpu_count") or 1),
             resource_state=reserved.get("state") or "available",
             closed_listing_ids=closed_listing_ids,

@@ -133,6 +133,41 @@ the callback, and `await asyncio.wait_for(event.wait(), timeout=...)`
 before proceeding. If no such seam exists yet where a test needs one,
 adding it is the correct fix, not a sleep.
 
+**Pause the loop, then advance it explicitly:** the same discipline
+applies to a service's own background lifecycle loops, where the seam is
+an HTTP control rather than a callback. Each loop should offer a pause,
+and an explicit single-step that works *while* paused, so a scenario
+drives transitions instead of waiting for a timer:
+
+| Loop | Pause | Explicit step |
+|---|---|---|
+| Lease watchdog | `POST /api/v1/system/lease-watchdog/pause` | `POST /api/v1/system/check-leases` |
+| Fulfillment convergence | `POST /api/v1/system/fulfillment-convergence/pause` | `POST /api/v1/system/fulfillment-convergence/advance-cycle` |
+
+Two traps this has already sprung, both worth checking for a new loop:
+
+- **A loop with no pause is not paused.** Convergence ran a 30s timer
+  with no gate while the scenario around it believed everything was
+  stopped, so it claimed the same rows the test was explicitly
+  advancing. "Everything is mocked, so nothing can take wall time" is
+  true of the work and false of the coordination.
+- **A "run one cycle" endpoint is not necessarily a step.** Convergence
+  claims a row before polling its provider and, on a pending answer,
+  deliberately keeps that claim so the lease spaces the next poll. A
+  further cycle inside that lease reaches nothing, so any number of them
+  is still zero advances. `advance-cycle` releases the caller's own
+  claims first; `run-cycle` is the production cycle and does not. If a
+  test needs several steps to make one transition, suspect the step
+  rather than adding a sleep.
+- **Scope the pause to the module that owns the advances.** A pause in
+  a shared `conftest.py` reaches every scenario in that directory, and a
+  scenario that legitimately relies on the timer — one that arms an
+  ungated provider rule and waits for the lease, say — is stalled rather
+  than made deterministic by it. Make the fixture opt-in and take it with
+  `pytest.mark.usefixtures` from the modules that drive the loop
+  themselves, and resume in a finaliser so a failing stage does not leave
+  the loop stopped for the next module.
+
 ### 3. Smoke Tests (Deployment Validation)
 
 **What they cover:** Stateless, idempotent verification that a deployed
@@ -304,7 +339,7 @@ scenarios at every level:
   bindings, lifecycle carriers, publication fan-out, and schema-opaque result
   dispatch;
 - VM storefront tests cover installed contribution wiring, exact public
-  `virtualization_type`, configured source selection, negotiation/settlement
+  `offering_mode`, configured source selection, negotiation/settlement
   adapters, selected-site capacity calls, restart recovery, and transactional
   legacy migration;
 - bare-metal domain/storefront tests own only bare-metal codecs, publication

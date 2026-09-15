@@ -33,6 +33,7 @@ import urllib.request
 import uuid
 from collections.abc import Mapping
 from dataclasses import dataclass
+from decimal import Decimal, InvalidOperation
 from typing import Any, Callable, Optional
 
 from market_policy.negotiation_middleware import (
@@ -44,7 +45,11 @@ from market_policy.negotiation_middleware import (
     normalize_policies_by_escrow_kind_config,
     run_negotiation_chain,
 )
-from market_policy.scalar_policies import make_escrow_kind_dispatch_middleware
+from market_policy.scalar_policies import (
+    format_wire_amount,
+    make_escrow_kind_dispatch_middleware,
+    parse_wire_amount,
+)
 from market_core.schemas import (
     SettlementOption,
     SettlementPlan,
@@ -162,6 +167,56 @@ def load_buyer_chain(
 
 
 DEFAULT_TIMEOUT_SECONDS = 30.0
+
+
+def display_to_base_units(price: Any, decimals: Any, *, field: str) -> int:
+    """Convert a human display price into exact base units.
+
+    `price * 10**decimals` through a float is lossy for any 18-decimal
+    asset -- and the product is what gets signed, persisted, and escrowed, so
+    a dropped digit is a different deal. Decimal shifts the exponent exactly.
+    A price finer than the asset's smallest unit is refused rather than
+    rounded: nobody can pay a fraction of a base unit, and rounding it would
+    move money the caller did not name.
+    """
+    try:
+        scaled = Decimal(str(price)).scaleb(int(decimals))
+    except (InvalidOperation, ValueError, TypeError) as exc:
+        raise ValueError(f"{field} is not a numeric price: {price!r}") from exc
+    integral = scaled.to_integral_value()
+    if scaled != integral:
+        raise ValueError(
+            f"{field} is finer than the asset's smallest unit: {price!r} at "
+            f"{int(decimals)} decimals is {scaled}"
+        )
+    if integral < 0:
+        raise ValueError(f"{field} must be non-negative")
+    return int(integral)
+
+
+def scaled_base_units(per_unit: Any, unit_count: Any, *, field: str) -> int:
+    """Per-unit rate times unit count, as an exact integer of base units.
+
+    Amounts live in the uint256 domain, so this multiplication cannot go
+    through a float: `7000 * 10**18` is already past the point where a double
+    keeps every digit, and the product is what both parties sign. Decimal
+    multiplies the two exactly and a non-integral product is refused rather
+    than rounded -- a price with more precision than the asset's base unit is
+    a caller error, not something to silently resolve.
+    """
+    try:
+        product = Decimal(str(per_unit)) * Decimal(str(unit_count))
+    except (InvalidOperation, ValueError) as exc:
+        raise RuntimeError(f"{field} is not a numeric amount: {per_unit!r}") from exc
+    integral = product.to_integral_value()
+    if product != integral:
+        raise RuntimeError(
+            f"{field} x unit count is not a whole number of base units "
+            f"({product}); the asset has no smaller unit to pay in"
+        )
+    if integral < 0:
+        raise RuntimeError(f"{field} must be non-negative")
+    return int(integral)
 
 
 def _dump_payload(value: Any, *, mode: str | None = None) -> dict[str, Any]:
@@ -819,10 +874,48 @@ def negotiate_with_seller(
     pinned_proposal: dict[str, Any] | None = None
 
     def _amount(p: dict | None) -> int | None:
+        # Through the shared uint256 reader: the seller sends the accepted
+        # amount as a decimal-digit string, and a float or a negative here is
+        # a contract disagreement rather than a number to coerce.
         if not isinstance(p, dict):
             return None
-        v = (p.get("fields") or {}).get("amount")
-        return int(v) if v is not None else None
+        return parse_wire_amount((p.get("fields") or {}).get("amount"))
+
+    def _wire_proposal(p: dict[str, Any]) -> dict[str, Any]:
+        """Spell a proposal's scalar amount in its canonical wire form.
+
+        The write-side counterpart of `_amount`, applied where a proposal
+        becomes a signed request body. `parse_wire_amount` already accepts
+        either an `int` or a decimal-digit string, so this boundary read both
+        forms while the boundary write emitted whichever one the configured
+        policy happened to produce -- and only two of the shipped decision
+        producers call `format_wire_amount` themselves. A policy that returns
+        a plain `int` is fine for a small amount and fails at *signing* time
+        for a realistic 18-decimal one, because canonical JSON has no number
+        form above 2^53-1. That puts the error in the canonicalizer, several
+        frames from the policy that caused it.
+
+        One normalization here instead of the same obligation restated in
+        every policy: the chain is a configurable surface, so requiring each
+        policy author to know the wire spelling of an integer is a contract
+        that leaks. This narrows the leak to encoding only -- whether an
+        amount is present at all, and what it is, stay entirely the policy's.
+
+        Lossless, and loud rather than lenient: valid input is re-spelled and
+        `format_wire_amount`/`parse_wire_amount` refuse a float, a boolean or
+        a negative, so a policy defect surfaces here by name instead of being
+        coerced into a plausible-looking number.
+        """
+        fields = p.get("fields")
+        if not isinstance(fields, dict) or fields.get("amount") is None:
+            return p
+        amount = parse_wire_amount(fields.get("amount"))
+        if amount is None:
+            return p
+        return {
+            **p,
+            "fields": {**fields, "amount": format_wire_amount(amount)},
+        }
 
     neg_id: str | None
     if resume is not None:
@@ -844,7 +937,11 @@ def negotiate_with_seller(
         # Recover the buyer's first-pinned proposal from the transcript.
         for entry in transcript:
             if entry.sender == "us" and entry.proposal is not None:
-                pinned_proposal = entry.proposal
+                # Normalized on the way out of the run-log for the same reason
+                # as the fresh pin: a prior run may have recorded an integer
+                # amount, and the guard compares this against a seller echo
+                # that arrives as a decimal-digit string.
+                pinned_proposal = _wire_proposal(entry.proposal)
                 break
         round_idx = max(1, resume.rounds_completed)
     else:
@@ -868,9 +965,10 @@ def negotiate_with_seller(
                 "unit_count must be > 0 to translate per-unit bounds "
                 "into absolute amounts."
             )
-        scale = float(unit_count)
-        initial_amount = int(round(float(initial_price) * scale))
-        ceiling_amount = float(max_price) * scale
+        initial_amount = scaled_base_units(
+            initial_price, unit_count, field="initial_price"
+        )
+        ceiling_amount = scaled_base_units(max_price, unit_count, field="max_price")
 
         # Pin the buyer's first proposal: the policy chain owns the
         # round-0 opening (ARCHITECTURE.md, "Buyer negotiation policy surface") — run it
@@ -890,17 +988,16 @@ def negotiate_with_seller(
                     "escrow proposal encoder"
                 )
             base_proposal = encode_escrow_proposal(escrow_proposal)
-        if expected_selection is None and advertised_option is not None:
-            raw_expiration = base_proposal.get("expiration_unix")
-            if isinstance(raw_expiration, bool) or not isinstance(raw_expiration, int):
-                raise RuntimeError(
-                    "selected advertised settlement option has no pinned expiry"
-                )
-            expected_selection = SettlementSelection(
-                mechanism=advertised_option.mechanism,
-                option_id=advertised_option.option_id,
-                expiration_unix=raw_expiration,
-            )
+        # No synthesized selection for peer settlement. The selection
+        # contract is what the buyer *sent*, not what the listing advertised:
+        # when the buyer sends an escrow proposal instead of a selection, the
+        # seller's acceptance echoes the accepted escrow proposal and builds
+        # neither a selection nor a settlement plan -- one or the other by
+        # construction, not an omission. Deriving an expectation from the
+        # advertised option here ran the acceptance validator, which requires
+        # both of those, against a reply not shaped to carry them, so
+        # `market negotiate` refused a deal `market buy` completes against
+        # the same seller in the same round.
         opening = run_negotiation_chain(
             chain,
             [],
@@ -930,7 +1027,11 @@ def negotiate_with_seller(
                 f"opening — only counter (with a proposal), exit, or "
                 f"reject make sense before the seller has said anything."
             )
-        pinned_proposal = opening.proposal
+        # Pinned in wire form, not merely sent in it. This value is also the
+        # buyer's commitment for `buyer_escrow_shape_guard` and the chain
+        # context below, and a commitment spelled differently from the request
+        # that carried it would read as the seller having mutated a field.
+        pinned_proposal = _wire_proposal(opening.proposal)
 
         new_body = {
             "listing_id": listing_id,
@@ -1059,18 +1160,18 @@ def negotiate_with_seller(
                     proposal=seller_counter_proposal,
                 )
             )
-        ceiling_amount = (
-            float(max_price) * float(unit_count)
-            if unit_count is not None
-            else float(max_price)
+        ceiling_amount = scaled_base_units(
+            max_price,
+            unit_count if unit_count is not None else 1,
+            field="max_price",
         )
         ctx = NegotiationContext(
             direction="minimize",
             our_reference_amount=ceiling_amount,
-            our_opening_amount=(
-                float(initial_price) * float(unit_count)
-                if unit_count is not None
-                else float(initial_price)
+            our_opening_amount=scaled_base_units(
+                initial_price,
+                unit_count if unit_count is not None else 1,
+                field="initial_price",
             ),
             listing={},
             our_escrow_proposal=pinned_proposal,
@@ -1115,7 +1216,7 @@ def negotiate_with_seller(
                 raise RuntimeError(
                     f"chain returned {next_move.action!r} without a proposal"
                 )
-            body["proposal"] = next_move.proposal
+            body["proposal"] = _wire_proposal(next_move.proposal)
         elif next_move.action in ("exit", "reject"):
             body["reason"] = next_move.reason or "buyer_exit"
 

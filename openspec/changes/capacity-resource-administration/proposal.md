@@ -60,7 +60,7 @@ consolidation exists to remove, so capacity moves in full.
 - Forbid moving a capacity resource between Resource Pools while it has live capacity
   obligations. A reservation's pool is resolved through the resource's *current*
   `pool_id`, so reassignment rewrites the authority under an existing reservation.
-- **BREAKING (deployment/data):** make `Host` executor identity only — addressing,
+- **BREAKING (deployment/data):** make `Host` connection identity only — addressing,
   SSH credentials, Ansible alias, pool membership, enabled state. Retire
   `gpu_count`/`gpu_model` as capacity sources and retire `_project_host`'s
   host-derived capacity fallback. A migration derives a capacity resource from every
@@ -105,7 +105,7 @@ None.
   declaration of multi-dimensional sellable capacity rather than a compatibility
   registration path; projected physical inventory must be internally consistent
   between `capacity` and `attributes`.
-- `physical-provisioning`: host inventory is executor identity and MUST NOT be the
+- `physical-provisioning`: host inventory is connection identity and MUST NOT be the
   authoritative source of sellable capacity dimensions; the compute provisioner
   imports capacity definitions at startup on the same digest-gated contract as pool
   definitions.
@@ -156,7 +156,7 @@ None.
 
 - [x] `docs/development/ARCHITECTURE.md` — the authority-boundaries table's physical
       resource row and the shared-vocabulary entry for Physical Resource, which
-      currently do not distinguish executor identity from capacity declaration.
+      currently do not distinguish connection identity from capacity declaration.
 - [x] Existing subsystem specification — `openspec/specs/site-capacity/spec.md` and
       `openspec/specs/physical-provisioning/spec.md`.
 - [ ] New subsystem specification — none.
@@ -165,12 +165,12 @@ None.
 ### Knowledge to promote
 
 - Capacity resources are the single authoritative declaration of sellable capacity;
-  host rows are executor identity — `openspec/specs/physical-provisioning/spec.md`
+  host rows are connection identity — `openspec/specs/physical-provisioning/spec.md`
   and the `ARCHITECTURE.md` authority-boundaries table.
 - Projected inventory `attributes` must not contradict projected `capacity` —
   `openspec/specs/site-capacity/spec.md`, alongside the existing physical-inventory
   projection requirement.
-- Why capacity declaration is a separate concern from executor inventory, and why
+- Why capacity declaration is a separate concern from host inventory, and why
   splitting dimensions across both was rejected — `openspec/specs/site-capacity/architecture.md`.
 
 ## Dependencies and Related Changes

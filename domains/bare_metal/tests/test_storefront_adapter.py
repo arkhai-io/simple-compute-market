@@ -54,7 +54,7 @@ def test_adapter_returns_exact_projection_candidate():
     assert len(candidates) == 1
     assert candidates[0]["site_id"] == "site-a"
     assert candidates[0]["physical_resource_id"] == "resource-1"
-    assert source.offer_resource(candidates[0]) == candidates[0]["offer_resource"]
+    assert source.listing_resource(candidates[0]) == candidates[0]["listing_resource"]
     assert bare_metal_candidate_skip_keys(candidates[0]) == {
         bare_metal_listing_key(site_id="site-a", physical_resource_id="resource-1"),
     }

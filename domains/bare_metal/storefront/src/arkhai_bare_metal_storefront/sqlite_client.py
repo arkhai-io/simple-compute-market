@@ -389,14 +389,14 @@ class SQLiteClient(CoreSQLiteClient):
             source_envelope=source_envelope,
             last_reconciled_at=updated_at,
         )
-        offer_resource = normalized.model_dump(mode="json", exclude_none=True)
-        offer_resource["virtualization_type"] = domain_binding.offering_mode
+        listing_resource = normalized.model_dump(mode="json", exclude_none=True)
+        listing_resource["offering_mode"] = domain_binding.offering_mode
         await self.upsert_listing_with_binding(
             binding=binding,
             status=status,
             created_at=created_at,
             updated_at=updated_at,
-            offer_resource=offer_resource,
+            listing_resource=listing_resource,
             fulfillment_resource=None,
             max_duration_seconds=normalized.max_duration_seconds,
             storefront_url=storefront_url,
@@ -417,7 +417,7 @@ class SQLiteClient(CoreSQLiteClient):
         row = await self.load_listing(listing_id=listing_id)
         if row is None:
             return None
-        raw = row.get("offer_resource")
+        raw = row.get("listing_resource")
         value = json.loads(raw) if isinstance(raw, str) else raw
         return self._market_domain.codecs.listing(value)
 

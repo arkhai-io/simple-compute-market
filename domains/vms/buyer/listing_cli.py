@@ -68,7 +68,7 @@ def _registry_context(
 ):
     """Resolve one signer-authenticated, authority-pinned registry set."""
     from .common import (
-        VMS_SCHEMA_ID,
+        COMPUTE_SCHEMA_ID,
         resolve_discovery_timeout,
         resolve_fresh_buyer_identity,
         resolve_indexer_urls,
@@ -83,7 +83,7 @@ def _registry_context(
     authorities = resolve_registry_authorities(configured_urls)
     deadline = resolve_discovery_timeout(override=discovery_timeout)
     urls = resolve_indexer_urls_for_schema(
-        VMS_SCHEMA_ID,
+        COMPUTE_SCHEMA_ID,
         signer=signer,
         registry_authorities=authorities,
         override=registry_urls,
@@ -224,7 +224,7 @@ def listing_list(
     table.add_column("Created", justify="right")
 
     for row in items:
-        offer_display = format_resource(row.get("offer_resource", {}))
+        listing_display = format_resource(row.get("listing_resource", {}))
         accepted_display = format_accepted_escrows(row.get("accepted_escrows", []))
         demands_display = format_demands(row.get("demands", []))
         selected = row["_selected_settlement"].option
@@ -232,7 +232,7 @@ def listing_list(
             str(row.get("listing_id", "-")),
             str(row.get("publisher_id", "-")),
             shorten(str(row.get("storefront_url", "-")), 40),
-            offer_display if "\n" in offer_display else shorten(offer_display, 120),
+            listing_display if "\n" in listing_display else shorten(listing_display, 120),
             accepted_display
             if "\n" in accepted_display
             else shorten(accepted_display, 120),
@@ -316,7 +316,7 @@ def listing_show(
     )
     table.add_row("Created", short_ts(found.get("created_at")))
     table.add_row("Updated", short_ts(found.get("updated_at")))
-    table.add_row("Offer", format_resource(found.get("offer_resource", {})))
+    table.add_row("Offer", format_resource(found.get("listing_resource", {})))
     table.add_row(
         "Accepted escrows", format_accepted_escrows(found.get("accepted_escrows", []))
     )

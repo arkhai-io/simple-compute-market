@@ -3,12 +3,12 @@
 ## 1. Publish declared dimensions
 
 - [ ] 1.1 Re-verify `design.md`'s Context findings before editing: the five fields
-      `vm_offer_resource_for_listing` currently builds, `ComputeResource`'s optional
+      `vm_listing_resource_for_listing` currently builds, `ComputeResource`'s optional
       dimension fields, and the reconciler discarding all of `resource["capacity"]`
       except `gpu_count`.
 - [ ] 1.2 Carry the projection's declared capacity map through `_publishable_slices`
       and the slice dictionaries instead of reducing it to `gpu_count`.
-- [ ] 1.3 Extend `vm_offer_resource_for_listing` to emit each declared dimension the
+- [ ] 1.3 Extend `vm_listing_resource_for_listing` to emit each declared dimension the
       domain vocabulary recognizes, omitting undeclared ones. Derive the set from
       `arkhai_vms.DIMENSION_KEYS`, not a literal tuple.
 - [ ] 1.4 Confirm no provisioning default (`default_vm_ram`, `default_vm_vcpus`,
@@ -39,7 +39,7 @@
 Per `openspec/README.md#plan-closeout-requirements`.
 
 - [ ] 4.1 **Comment hygiene.** Run `make check-comment-hygiene`. Read
-      `vm_offer_resource_for_listing`'s and `_publishable_slices`' docstrings
+      `vm_listing_resource_for_listing`'s and `_publishable_slices`' docstrings
       directly; both describe a GPU-only shape.
 - [ ] 4.2 **Import placement.** Review imports this change adds or touches.
 - [ ] 4.3 **Documentation compliance.** Confirm the publish-what-is-declared rule
@@ -59,6 +59,22 @@ Per `openspec/README.md#plan-closeout-requirements`.
       completion, or record the disposition here if its status and campaign placement are
       both unchanged.
 
+- [ ] 4.8 **Documentation citations.** Run
+      `make check-doc-citations CHANGE=publish-multidimensional-listing-shape` and resolve every match.
+      An unresolvable citation is a blocking defect under `AGENTS.md`'s
+      cross-reference rule, and the target also rejects a citation whose
+      target is a *tombstone*: a tombstoned file still exists on disk while
+      its content is gone, so a plain existence test cannot fail on a
+      rename-to-tombstone.
+- [ ] 4.9 **End-to-end pipeline.** Confirm the end-to-end pipeline passes and
+      record the evidence: the run, its result, and the scenarios that
+      exercise this change's behaviour. Green unit and integration suites do
+      not substitute -- this is the tier that catches a wire contract whose
+      two sides disagree, a service that starts cleanly and cannot settle,
+      and a configuration gap no in-process test can see. If the pipeline
+      cannot run for a reason unrelated to this change, record that as an
+      explicit blocker naming the cause and the change that owns it, and
+      treat the validations it gates as unrun rather than passed.
 ## Design promotion record
 
 | Accepted decision | Permanent location |

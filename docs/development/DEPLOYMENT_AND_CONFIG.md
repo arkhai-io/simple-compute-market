@@ -147,7 +147,7 @@ public identity pins and keep signer credentials in role-owned file mounts.
 The umbrella chart enables the compute registry by default and keeps the
 `api-credits-registry` alias disabled. Enabling the alias instantiates the same
 schema-opaque registry chart a second time. The compute instance selects
-`/app/filter-spec.yaml` (`vms.compute`); the API-credits instance selects
+`/app/filter-spec.yaml` (`compute.market`); the API-credits instance selects
 `/app/filter-spec-apicredits.yaml` (`api_credits`). Both specifications are
 packaged in the registry image, but each process loads exactly one. Identity,
 credential Secret, descriptor, API-key Secret references, Service, and PVC

@@ -41,7 +41,7 @@ class FulfillmentServiceTeardownPort:
         return self._service_provider().get_fulfillment_status(fulfillment_id)
 
 
-VM_EXECUTOR_KIND = "vm"
+VM_OFFERING_MODE = "vm"
 
 
 class VmReleaseExecutor:

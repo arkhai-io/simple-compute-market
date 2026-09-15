@@ -23,7 +23,7 @@ from registry_client.client import SyncRegistryClient
     ],
 )
 def test_both_schemes_emit_the_same_v2_header_contract(signer) -> None:
-    body = {"listing_id": "listing", "offer_resource": {"region": "us"}}
+    body = {"listing_id": "listing", "listing_resource": {"region": "us"}}
     authenticated = authenticate_request(
         signer=signer,
         role="seller",

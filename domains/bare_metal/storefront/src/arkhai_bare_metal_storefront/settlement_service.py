@@ -101,13 +101,13 @@ class BareMetalSettlementService:
             raise SettlementRequestError(
                 "negotiated listing not found", status_code=404
             )
-        offer = await self.db.load_bare_metal_listing_payload(
+        listing_resource = await self.db.load_bare_metal_listing_payload(
             listing_id=thread["our_listing_id"],
         )
-        assert offer is not None
+        assert listing_resource is not None
         if (
-            offer.machine_id != terms.machine_id
-            or offer.physical_host_id != terms.physical_host_id
+            listing_resource.machine_id != terms.machine_id
+            or listing_resource.physical_host_id != terms.physical_host_id
             or terms.listing_ref != thread["our_listing_id"]
         ):
             raise SettlementRequestError(

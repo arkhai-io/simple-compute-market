@@ -19,8 +19,58 @@ log_level = "info"
 # Defaults to SQLite so a fresh checkout works without any setup.
 database_url = "sqlite:///apicredits.db"
 
-# Shared secret gating every non-health request (X-Admin-Key). Production
-# deployments select storefront_admin_key_file; an inline value remains an
-# explicit local-process option and cannot be combined with the file.
+# Shared secret gating the routes that have not yet moved to marketplace
+# signatures. Production deployments select storefront_admin_key_file; an
+# inline value remains an explicit local-process option and cannot be
+# combined with the file.
+#
+# No longer the gate for issuance, keys, consume/verify or capacity: those
+# authenticate marketplace signatures per caller role. Retained only so a
+# deployment that has not yet provisioned identities can still start.
 storefront_admin_key = ""
 storefront_admin_key_file = ""
+
+# ---------------------------------------------------------------------------
+# Marketplace identity
+#
+# This service is a site authority: it verifies its callers' signed requests
+# and signs its own responses, refusals included. Empty disables signed
+# authentication entirely and falls back to the admin-key gate, which is a
+# deployment that has not been given an identity yet rather than a supported
+# production posture.
+# ---------------------------------------------------------------------------
+site_signing_key_file = ""
+
+# The principal this credential must own. Pinning it here makes a wrong
+# credential a startup failure rather than a service that signs every response
+# as someone no counterparty pinned -- which reads to them as an impostor, and
+# which the service itself cannot notice.
+site_principal = ""
+
+# Seconds a request timestamp may differ from this service's clock.
+max_timestamp_skew = 300
+
+# Who may call, by role. Each entry is a scheme/identifier pair, matching the
+# `expected_authorities` shape the storefront already uses for this service.
+#
+# A role with no entries is not "trust anybody" -- a request in that role is
+# refused, naming the missing configuration. Roles are deliberately narrow:
+# `seller` is the storefront that sells these credits, `service` is the gated
+# application that spends them, and `admin` is for manual operation,
+# debugging and intervention and is held by an operator, not by either
+# service component.
+[trusted_principals]
+# Empty here on purpose, and not merely because this file documents defaults.
+# Dynaconf merges rather than replaces, so a principal listed here is *added*
+# to whatever a deployment configures and cannot be removed by overriding it --
+# a committed trust entry would be un-narrowable in every environment. Real
+# principals are supplied per deployment; see domains/apicredits/compose.yml.
+#
+# Each entry is a scheme/identifier pair. The scheme matters: the credits
+# storefront signs eip191 while the gated application signs ed25519, so a bare
+# identifier would pin a principal that cannot exist. At most two principals
+# per role, which is what `TrustedIdentitySet` admits -- enough for a rotation
+# and no more.
+seller = []
+service = []
+admin = []

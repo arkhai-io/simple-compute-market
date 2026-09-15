@@ -138,7 +138,7 @@ async def test_missing_identifiers_replay_exact_persisted_request(tmp_path):
     )
 
     capacity.reserve.assert_awaited_once_with(
-        claim={"gpu_count": 1, "executor_kind": "vm"},
+        claim={"gpu_count": 1, "offering_mode": "vm"},
         deal_ref={"listing_id": "listing-1", "escrow_uid": "escrow-1"},
         lease_start_utc=None,
         lease_duration_seconds=7200,

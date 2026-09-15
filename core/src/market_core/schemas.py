@@ -30,11 +30,13 @@ import hashlib
 import json
 import re
 
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 
 from pydantic import (
     BaseModel,
+    BeforeValidator,
     Field,
+    PlainSerializer,
     SerializeAsAny,
     field_serializer,
     field_validator,
@@ -101,6 +103,70 @@ def _serialize_uint256_str(v: int | None) -> str | None:
     return None if v is None else str(v)
 
 
+def _uint256_before(v: Any) -> Any:
+    return _parse_uint256_str(v, "uint256 amount")
+
+
+#: A uint256-domain amount: Python ``int`` in memory, decimal-digit string on
+#: the wire. Use this for any field carrying base units rather than a bare
+#: ``int`` -- a response body is canonicalized for the responder's signature,
+#: and a JSON number above 2^53-1 has no canonical form, so an ordinary
+#: 18-decimal amount in a bare ``int`` field makes the response unsignable.
+Uint256Amount = Annotated[
+    int,
+    BeforeValidator(_uint256_before),
+    PlainSerializer(lambda v: str(v), return_type=str),
+]
+
+#: The same, where absent is a distinct answer from zero.
+OptionalUint256Amount = Annotated[
+    int | None,
+    BeforeValidator(_uint256_before),
+    PlainSerializer(_serialize_uint256_str, return_type=str | None),
+]
+
+
+#: JSON numbers are IEEE-754 doubles to most parsers, and canonical JSON has
+#: no number form for an integer outside this range at all.
+JSON_SAFE_INT_MAX = 2**53 - 1
+
+
+def json_safe_wire_value(value: Any) -> Any:
+    """Rewrite out-of-range integers in an untyped payload as decimal strings.
+
+    For payloads that reach the wire without passing through a typed field:
+    persisted rows embedded in a response, diagnostic event bodies. A
+    response is canonicalized for the responder's signature, so an amount
+    read back out of storage as a Python int makes the whole response
+    unsignable -- and the failure lands on whichever route embeds it rather
+    than on the negotiation that recorded the value.
+
+    Deliberately magnitude-dependent: round numbers, counts and identifiers
+    are genuinely numbers and consumers read them as such. Only a value with
+    no canonical number form changes shape, and it changes to the same
+    decimal-digit string typed uint256 fields serialize to.
+    """
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, int):
+        if -JSON_SAFE_INT_MAX <= value <= JSON_SAFE_INT_MAX:
+            return value
+        return str(value)
+    if isinstance(value, dict):
+        return {key: json_safe_wire_value(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [json_safe_wire_value(item) for item in value]
+    return value
+
+
+#: Untyped rows embedded in a signed response: normalized on the way in so
+#: the response can be canonicalized whatever storage handed back.
+EmbeddedWireRows = Annotated[
+    list[dict[str, Any]],
+    BeforeValidator(json_safe_wire_value),
+]
+
+
 class Resource(BaseModel):
     """Domain-agnostic base resource model."""
 
@@ -127,7 +193,7 @@ class TokenResource(Resource):
       * positive integer — the public price (the seller advertises this
         floor and uses it as the negotiation anchor).
       * ``0`` — free / public-test offering (the seller advertises zero
-        cost; strategy accepts any non-negative offer).
+        cost; strategy accepts any non-negative listing_resource).
       * ``None`` — hidden reserve (the seller publishes the listing without
         advertising a price; the negotiation strategy falls back to
         ``[seller.pricing].default_min_price`` for the floor; buyer must

@@ -26,7 +26,7 @@ from market_core.schemas import (
 BUYER = CanonicalPrincipal(scheme="ed25519", identifier="buyer")
 SELLER = CanonicalPrincipal(scheme="ed25519", identifier="seller")
 KEY = "ssh-ed25519 " + base64.b64encode(b"x" * 48).decode()
-OFFER_EXPIRY = datetime(2099, 1, 1, 2, tzinfo=timezone.utc)
+OPTION_EXPIRY = datetime(2099, 1, 1, 2, tzinfo=timezone.utc)
 FUNDING_DEADLINE = datetime(2099, 1, 1, 1, tzinfo=timezone.utc)
 FULFILLMENT_DEADLINE = datetime(2099, 1, 1, 3, tzinfo=timezone.utc)
 
@@ -65,12 +65,12 @@ def _facts() -> BareMetalHostedOptionFacts:
         derivation_key="site-a:resource-a",
         projection_digest="sha256:" + "2" * 64,
         site_id="site-a",
-        executor_kind="bare_metal",
+        offering_mode="bare_metal",
         resource_selection="specific",
         physical_resource_id="resource-a",
         physical_host_id="host-a",
         access_method="ssh",
-        offer_expires_at=OFFER_EXPIRY,
+        option_expires_at=OPTION_EXPIRY,
         funding_deadline=FUNDING_DEADLINE,
         fulfillment_deadline=FULFILLMENT_DEADLINE,
     )

@@ -158,7 +158,7 @@ class BareMetalFulfillmentService:
                 claim={
                     "resource_id": str(context["physical_resource_id"]),
                     "dimensions": {"units": 1},
-                    "executor_kind": "bare_metal",
+                    "offering_mode": "bare_metal",
                 },
                 deal_ref={
                     "negotiation_id": negotiation_id,

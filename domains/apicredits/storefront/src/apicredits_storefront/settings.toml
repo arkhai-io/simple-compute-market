@@ -16,34 +16,33 @@
 
 # Public marketplace identity. The matching credential is supplied only through
 # ARKHAI_IDENTITY_CREDENTIAL and is never loaded into Dynaconf.
-[identity]
-scheme     = ""
-identifier = ""
-
-[identity.admin_principals]
-identities = []
-
+# Root-level defaults. These must appear before the first table header: a
+# bare key after one belongs to that table, and these previously sat below
+# [identity.admin_principals], which put every one of them out of reach of
+# the `settings.<key>` lookups that read them.
 # Display/process identity
 agent_id   = ""        # must be a Python identifier; empty → "root_agent"
 agent_name = ""        # display name; falls back to agent_id
 # HTTP server
 port     = 8002
 base_url = "http://localhost:8002"  # advertised in registry publications
-
 # Storage / logging
 db_path       = "./src/apicredits_storefront/data/storefront/agent.db"
 log_level     = "INFO"
-
-
 # Registry discovery (seller-side)
 enable_registry_discovery = true
-
 # Negotiation watchdog
 negotiation_timeout_seconds   = 1800
 negotiation_watchdog_interval = 60
 # Shared settlement-servicing worker cadence (seconds).
 claims_sweep_interval = 30
 
+[identity]
+scheme     = ""
+identifier = ""
+
+[identity.admin_principals]
+identities = []
 [Settlement]
 schema_version = 1
 priority = []

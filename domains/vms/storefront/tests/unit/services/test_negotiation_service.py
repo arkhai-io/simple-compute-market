@@ -78,7 +78,7 @@ def _order(order_id: str = "ord-1", duration_hours: int = 2) -> dict:
         "status": "open",
         "max_duration_seconds": duration_hours * 3600,
         "seller_principal": SELLER.model_dump(mode="json"),
-        "offer_resource": {},
+        "listing_resource": {},
         "demand_resource": {},
     }
 

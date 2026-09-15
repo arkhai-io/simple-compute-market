@@ -20,7 +20,7 @@ class ValidatePublishRequest(BaseModel):
         default="",
         description="Publisher's storefront URL. Required by listing_shape v4+.",
     )
-    offer_resource: dict[str, Any] = Field(
+    listing_resource: dict[str, Any] = Field(
         default_factory=dict, description="Offered resource dict"
     )
     accepted_escrows: list[dict[str, Any]] = Field(
@@ -51,7 +51,6 @@ class ValidatePublishResponse(BaseModel):
 
     valid: bool
     listing_id: str
-    offer_resource_type: str | None = None   # "compute" | "token" | "unknown"
     accepted_escrows_count: int = 0
     settlement_options_count: int = 0
     errors: list[str] = Field(default_factory=list)

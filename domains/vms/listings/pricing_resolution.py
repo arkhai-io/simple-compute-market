@@ -117,9 +117,10 @@ def _hint_fields_for_model(
 ) -> Mapping[str, Any] | None:
     if not gpu_model:
         return None
-    # Local import -- see resolve_vm_listing_mode's own comment in
-    # domains.vms.listings.listing_mode for the reason (kept out of any
-    # consumer that imports this module's signatures without calling it).
+    # Local import -- see resolve_vm_listing_cardinality_mode's own comment
+    # in domains.vms.listings.listing_cardinality_mode for the reason (kept
+    # out of any consumer that imports this module's signatures without
+    # calling it).
     from market_resource_pools.hints import raw_pricing
 
     pricing = raw_pricing(policy_tags)

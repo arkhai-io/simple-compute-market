@@ -37,11 +37,28 @@ class HealthResponse(BaseModel):
     chain_id: int | None = None
     resource_count: int | None = None
     site_projections: dict[str, dict[str, ProjectionFamilyStatus]] | None = None
-    # Per-site, per-pool operator-visible reason a projected `listing_mode`
-    # fell back to a domain's structural default (unrecognized raw value).
-    # A pool's absence means no fallback is owed, not that data is missing.
-    listing_mode_explanations: dict[str, dict[str, str]] | None = None
+    # Per-site, per-pool operator-visible notice about a projected
+    # `listing_cardinality_mode`: either its supplied value was unrecognized
+    # and a domain's structural default was substituted, or its value was
+    # honored but arrived under the deprecated ingestion key. A pool's
+    # absence means nothing is owed, not that data is missing.
+    listing_cardinality_mode_explanations: dict[str, dict[str, str]] | None = None
     storefront_domains: tuple[dict[str, str], ...] | None = None
+    #: The storefront-to-provisioning contract major this storefront speaks,
+    #: read from its own installed `compute_provisioning` wheel. A cutover
+    #: requires every participant to report its pin before mutations resume,
+    #: and two deployments can disagree only if their wheels differ.
+    #:
+    #: Declared here because this model is what the route returns: the status
+    #: handler builds `HealthResponse(**body)`, so a key the service puts in
+    #: its status dict and this model does not name never reaches a caller.
+    #: Any field added to that dict has to be added here too.
+    #:
+    #: Distinct from `storefront_domains[].contract_version`, which is a
+    #: domain contribution's own version and a different axis. Optional so
+    #: `GET /health`, which shares this model and reports neither, stays
+    #: valid.
+    provisioning_contract_version: str | None = None
 
 
 class AdminPauseResponse(BaseModel):
@@ -49,9 +66,30 @@ class AdminPauseResponse(BaseModel):
     message: str = ""
 
 
+#: Largest page `GET /api/v1/system/events` will return, and the bound its
+#: `limit` query parameter is validated against.
+#:
+#: One constant for the route's validation and the store's clamp because the
+#: two disagreeing is unobservable: a caller asking for exactly the cap gets a
+#: full page either way, and cannot tell it apart from a page with more behind
+#: it. `StageEventResponse.truncated` is what makes the difference reportable,
+#: and it is only meaningful if the cap has a single definition.
+STAGE_EVENT_PAGE_CAP = 500
+
+
 class StageEventResponse(BaseModel):
     events: list[dict[str, Any]]
     count: int
+    #: Whether more rows matched the query than this page carries.
+    #:
+    #: The server's to report, not the client's to infer. `count == limit` is
+    #: ambiguous -- it is equally a log that ended exactly at the page boundary
+    #: and a log that continues past it -- and the requested limit may have been
+    #: lowered by `STAGE_EVENT_PAGE_CAP` before the page was cut, so the caller
+    #: does not necessarily know which boundary it hit. A reader that filters
+    #: this page is only entitled to conclusions about the whole log when this
+    #: is false.
+    truncated: bool = False
 
 
 

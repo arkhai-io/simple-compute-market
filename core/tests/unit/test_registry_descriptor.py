@@ -18,7 +18,7 @@ def _descriptor(**overrides: object) -> dict[str, object]:
         "baseUrl": "https://registry.example/",
         "displayName": " Example Compute Registry ",
         "operatorIdentity": " Example Operator ",
-        "schema": {"id": "vms.compute", "version": "1"},
+        "schema": {"id": "compute.market", "version": "1"},
     }
     value.update(overrides)
     return value
@@ -36,7 +36,7 @@ def test_descriptor_emits_exact_portable_wire_shape() -> None:
         "baseUrl": "https://registry.example",
         "displayName": "Example Compute Registry",
         "operatorIdentity": "Example Operator",
-        "schema": {"id": "vms.compute", "version": "1"},
+        "schema": {"id": "compute.market", "version": "1"},
     }
 
 

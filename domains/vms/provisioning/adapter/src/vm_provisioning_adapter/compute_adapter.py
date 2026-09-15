@@ -18,11 +18,11 @@ from compute_provisioning_service.services.compute_contract_service import (
 )
 from vm_provisioning_adapter.services.vm_operations_service import VmOperationsService
 
-VM_EXECUTOR_KIND = "vm"
+VM_OFFERING_MODE = "vm"
 
 
 class VmComputeAdapter:
-    executor_kind = VM_EXECUTOR_KIND
+    offering_mode = VM_OFFERING_MODE
 
     def __init__(
         self,
@@ -65,7 +65,7 @@ class VmComputeAdapter:
         self, action_kind: str, result: Mapping[str, Any]
     ) -> ResultEnvelope:
         return ResultEnvelope(
-            executor_kind=self.executor_kind,
+            offering_mode=self.offering_mode,
             result_kind=f"vm_{action_kind}",
             value=dict(result),
         )
@@ -77,7 +77,7 @@ class VmComputeAdapter:
     ) -> list[CredentialEnvelope]:
         return [
             CredentialEnvelope(
-                executor_kind=self.executor_kind,
+                offering_mode=self.offering_mode,
                 credential_kind=str(item.get("role") or "access"),
                 value={
                     key: value

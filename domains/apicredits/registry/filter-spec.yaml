@@ -5,14 +5,14 @@
 # api-credits-registry service). The schema.id here is `api_credits`,
 # which is what `arkhai-apicredits-buyer` declares — so with both
 # registries configured, the buyer plugin's discovery only queries this
-# one and the VM plugin only queries the vms.compute registry. This is
+# one and the VM plugin only queries the compute.market registry. This is
 # what makes schema identity load-bearing (design item 1, proven by
 # item 6's topology).
 #
 # Bump `version` on backwards-incompatible changes; add filters freely
 # (etag changes, clients re-fetch).
 
-version: 2
+version: 3
 
 schema:
   id: api_credits
@@ -22,11 +22,11 @@ listing_shape:
   $schema: "https://json-schema.org/draft/2020-12/schema"
   type: object
   additionalProperties: true
-  required: [listing_id, offer_resource, accepted_escrows, storefront_url]
+  required: [listing_id, listing_resource, accepted_escrows, storefront_url]
   properties:
     listing_id: {type: string, minLength: 1}
     storefront_url: {type: string, minLength: 1}
-    offer_resource:
+    listing_resource:
       type: object
       # An api_credits.v1 offering. service_name is the only required
       # axis; the OpenAPI/base URLs and the seller-internal quota
@@ -91,10 +91,10 @@ filters:
   # service_name equality. The registry has no substring op, so v1 is
   # exact match (`op: in` covers eq via `in: [x]`); `?service_name=foo`
   # parses to in:[foo]. Substring/contains is a later registry upgrade.
-  - {name: service_name, path: $.offer_resource.service_name, op: in, value_type: string, on_missing: fail}
+  - {name: service_name, path: $.listing_resource.service_name, op: in, value_type: string, on_missing: fail}
 
   # Payment-token projection over accepted_escrows[*].literal_fields.token,
-  # same as the vms.compute spec. `on_missing: pass` keeps a seller that
+  # same as the compute.market spec. `on_missing: pass` keeps a seller that
   # advertises no token from vanishing on a token-scoped query.
   - {name: token,         path: "$.accepted_escrows[*].literal_fields.token", op: in,     value_type: string, on_missing: pass}
   - {name: token_exclude, path: "$.accepted_escrows[*].literal_fields.token", op: not_in, value_type: string, on_missing: pass}

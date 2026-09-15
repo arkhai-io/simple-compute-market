@@ -33,7 +33,7 @@ class BareMetalLeaseReadyResult(BaseModel):
         BARE_METAL_LEASE_READY_RESULT_KIND
     )
     site_id: str = Field(min_length=1, max_length=256)
-    executor_kind: Literal["bare_metal"] = "bare_metal"
+    offering_mode: Literal["bare_metal"] = "bare_metal"
     resource_selection: ResourceSelection
     physical_resource_id: str | None = Field(default=None, max_length=256)
     capacity_reservation_ref: str = Field(min_length=1, max_length=256)
@@ -150,7 +150,7 @@ def derive_bare_metal_fulfillment_identity(
             "buyer_principal": binding.buyer_principal.model_dump(mode="json"),
             "claimant_principal": binding.claimant_principal.model_dump(mode="json"),
             "site_id": facts.site_id,
-            "executor_kind": facts.executor_kind,
+            "offering_mode": facts.offering_mode,
             "resource_selection": facts.resource_selection,
             "physical_resource_id": facts.physical_resource_id,
             "pool_id": facts.pool_id,
@@ -167,7 +167,7 @@ def build_bare_metal_lease_ready_evidence(
     """Bind an authoritative public result to the exact accepted obligation."""
 
     facts = binding.option.facts
-    if result.site_id != facts.site_id or result.executor_kind != facts.executor_kind:
+    if result.site_id != facts.site_id or result.offering_mode != facts.offering_mode:
         raise ValueError("lease-ready result conflicts with accepted site/executor")
     if result.resource_selection != facts.resource_selection:
         raise ValueError("lease-ready result changes accepted resource selection")

@@ -19,6 +19,18 @@ db_path             = "./src/market_storefront/data/storefront/agent.db"
 log_file_path       = "./logs/alice.log"
 resources_csv_path  = "/app/resources.csv"
 
+# Timer-loop intervals, shortened for this stack only. A scenario pauses the
+# storefront and then advances each loop deliberately, and a pause is observed
+# when a loop next reaches its gate -- which it can only do at the end of an
+# interval. The shipped defaults (60s watchdog, 30s sweeps) exceed the pause's
+# own bounded wait, so every loop reports `pausing` and a scenario can never
+# assert that the storefront is idle. Shortening them changes nothing about
+# what a loop does, only how soon it notices it has been asked to stop.
+# Production keeps the shipped values.
+negotiation_watchdog_interval     = 2
+claims_sweep_interval             = 2
+fulfillment_resume_sweep_interval = 2
+
 [[storefront_domains]]
 contribution = "vms"
 offering_mode = "vm"
@@ -31,20 +43,28 @@ scheme = "eip191"
 identifier = "0x15d34aaf54267db7d7c367839aaf71a00a2c6a65"
 
 [Identity.administrators.operator]
-principal = { scheme = "eip191", identifier = "0x15d34aaf54267db7d7c367839aaf71a00a2c6a65" }
+# Anvil account 7. The operator is deliberately a different principal
+# from Identity.principal above: the seller publishes and the administrator
+# operates, and the two are separately authorized rather than conflated.
+# The loader requires a list: a stable administrator may hold more than one
+# principal, and `principal = {...}` is the pre-list spelling.
+principals = [
+  { scheme = "eip191", identifier = "0x14dc79964da2c08b23698b3d3cc7ca32193d9955" },
+]
 
 [Identity.service_peers.provisioning_default]
 role = "service"
 site_id = "default"
-principal = { scheme = "eip191", identifier = "0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266" }
-
+principals = [
+  { scheme = "eip191", identifier = "0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266" },
+]
 [Settlement]
 schema_version = 1
 priority = ["alkahest.v1"]
 
 [Settlement.alkahest]
 enabled = true
-address_config_path = "/app/src/market_storefront/data/alkahest_anvil_addresses.json"
+address_config_path = "/app/alkahest_anvil_addresses.json"
 oracle_gated = false
 trusted_oracle_addresses = []
 interruptible = false
@@ -56,6 +76,9 @@ ssh_public_key = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIDemoPublicKeyForComputeAc
 
 [Chains.anvil]
 rpc_url = "ws://anvil:8545"
+# Read per chain when the Alkahest clients are built; the settlement-level
+# `address_config_path` above is read separately by the readiness preflight.
+alkahest_address_config_path = "/app/alkahest_anvil_addresses.json"
 chain_id = 31337
 
 [registry]
@@ -72,6 +95,15 @@ authority = "registry"
 principals = [
   { scheme = "eip191", identifier = "0x90f79bf6eb2c4f870365e785982e1f101e93b906" },
 ]
+
+# Site name -> authority URL. Required: the shipped settings.toml documents
+# this table but does not default it, and `_capacity_settings()` raises when it
+# is empty. The name matches `Identity.service_peers.provisioning_default`'s
+# `site_id`, and the URL is the same provisioning service `[provisioning]`
+# names below -- the comment above this block describes an authority_url
+# default from `provisioning.service_url` that the code no longer applies.
+[capacity.sites]
+default = "http://provisioning:8081"
 
 [provisioning]
 # Shares Bob's provisioning service for now. The multi-registry test

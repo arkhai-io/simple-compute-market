@@ -45,6 +45,13 @@ descriptor, authentication, Service, persistence, and workload coordinates.
 Disabling an optional instance MUST emit no resource for that instance and MUST
 preserve the existing compute-registry render.
 
+The compute-family instance MUST select its filter specification by the schema
+identity naming the family rather than one domain within it, since that
+specification carries bare-metal, virtual-machine, and container listings alike. A
+deployment MUST NOT select the retired single-domain identity, and because buyer
+commands declare the schema identity they understand, a registry and the buyers
+querying it MUST move together.
+
 #### Scenario: Compute and API-credit registries are enabled
 
 - **WHEN** an operator enables compute and API-credit registry instances with
@@ -56,7 +63,7 @@ preserve the existing compute-registry render.
 
 - **WHEN** an operator renders the default umbrella values
 - **THEN** only the existing compute registry resources are emitted and they
-  select the `vms.compute` filter specification
+  select the `compute.market` filter specification
 
 #### Scenario: Registry identities differ
 

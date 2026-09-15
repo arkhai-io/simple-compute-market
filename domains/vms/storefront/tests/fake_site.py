@@ -305,10 +305,10 @@ class FakeSite:
 
     def _match(self, claim: dict) -> dict | None:
         claim = claim or {}
-        executor_kind = claim.get("executor_kind")
+        offering_mode = claim.get("offering_mode")
         if (
-            not isinstance(executor_kind, str)
-            or executor_kind not in self.deliverable_modes
+            not isinstance(offering_mode, str)
+            or offering_mode not in self.deliverable_modes
         ):
             return None
         # compute_capacity_claim_from_order now always routes gpu_count.
@@ -343,7 +343,7 @@ class FakeSite:
                     "gpu_count",
                     "dimensions",
                     "resource_type",
-                    "executor_kind",
+                    "offering_mode",
                 )
             )
             if mismatched:

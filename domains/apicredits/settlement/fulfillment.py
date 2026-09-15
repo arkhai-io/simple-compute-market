@@ -67,7 +67,7 @@ def prepare_credit_issuance_request(
 
 def encode_credit_fulfillment(
     *,
-    offer_resource: dict[str, Any],
+    listing_resource: dict[str, Any],
     key_id: str,
     quantity: int,
 ) -> str:
@@ -75,8 +75,8 @@ def encode_credit_fulfillment(
     return json.dumps(
         {
             "kind": "api_credits.v1",
-            "service_name": offer_resource.get("service_name"),
-            "base_url": offer_resource.get("base_url"),
+            "service_name": listing_resource.get("service_name"),
+            "base_url": listing_resource.get("base_url"),
             "key_id": key_id,
             "quantity": int(quantity),
         }
@@ -116,7 +116,7 @@ async def fulfill_api_credits_obligation(
     *,
     client: Any | None,
     escrow_uid: str,
-    offer_resource: dict[str, Any],
+    listing_resource: dict[str, Any],
     quantity: int,
     key_mode: str = "new",
     key_id: str | None = None,
@@ -143,7 +143,7 @@ async def fulfill_api_credits_obligation(
         if held_reservation and held_reservation.get("capacity_reservation_id")
         else None
     )
-    resource_id = offer_resource.get("resource_id")
+    resource_id = listing_resource.get("resource_id")
     if credits_client is None:
         if service_url is None or admin_key is None:
             raise ValueError("credits_client or service_url/admin_key is required")
@@ -182,7 +182,7 @@ async def fulfill_api_credits_obligation(
             "escrow_uid": escrow_uid,
         }
 
-    service_name = str(offer_resource.get("service_name") or "")
+    service_name = str(listing_resource.get("service_name") or "")
     if not service_name or not resource_id:
         return await _fail(
             "issuance_input_invalid",
@@ -224,7 +224,7 @@ async def fulfill_api_credits_obligation(
     )
 
     payload = encode_credit_fulfillment(
-        offer_resource=offer_resource,
+        listing_resource=listing_resource,
         key_id=issued_key_id,
         quantity=quantity,
     )
@@ -270,7 +270,7 @@ async def fulfill_api_credits_obligation(
     )
     credentials: dict[str, Any] = {
         "key_id": issued_key_id,
-        "base_url": offer_resource.get("base_url"),
+        "base_url": listing_resource.get("base_url"),
         "balance": issuance.balance,
     }
     if issuance.secret:

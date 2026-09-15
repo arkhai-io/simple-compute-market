@@ -336,17 +336,17 @@ def _accepted_vm_service_terms(
     if not isinstance(listing_id, str) or not listing_id:
         raise OfferUnfulfillableError("hosted_listing_identity_unavailable")
     order = dict(listing)
-    offer_resource = order.get("offer_resource")
-    if isinstance(offer_resource, str):
+    listing_resource = order.get("listing_resource")
+    if isinstance(listing_resource, str):
         try:
-            offer_resource = json.loads(offer_resource)
+            listing_resource = json.loads(listing_resource)
         except json.JSONDecodeError as exc:
             raise OfferUnfulfillableError(
-                "hosted_offer_resource_unavailable"
+                "hosted_listing_resource_unavailable"
             ) from exc
-        order["offer_resource"] = offer_resource
-    if not isinstance(offer_resource, dict):
-        raise OfferUnfulfillableError("hosted_offer_resource_unavailable")
+        order["listing_resource"] = listing_resource
+    if not isinstance(listing_resource, dict):
+        raise OfferUnfulfillableError("hosted_listing_resource_unavailable")
     return {
         "vm.v1": {
             "listing_id": listing_id,

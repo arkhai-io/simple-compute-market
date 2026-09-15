@@ -15,8 +15,16 @@ from typing import Any, Protocol
 
 from core_storefront.aggregation import AggregateCapacityClient, PlacementPolicy
 from core_storefront.capacity import CapacityDelta
-from core_storefront.capacity_remote import site_events_poller
 from market_site_client import SiteCapacityClient
+
+from .capacity_remote import (
+    SiteEventCycle,
+    SiteEventPreview,
+    drain_site_events_once,
+    preview_site_events,
+    site_event_cursor,
+    site_events_poller,
+)
 
 
 class CapacityConfigurationError(ValueError):
@@ -327,8 +335,50 @@ class CapacityRuntime:
             )
         )
 
-    async def poll_events(self, *, interval_seconds: float) -> None:
-        """Tail every configured authority and reconcile at feed boundaries."""
+    async def preview_events_once(self, site_id: str) -> SiteEventPreview:
+        """Report what one site's next event cycle would do, changing nothing.
+
+        The read half of stepping a held loop: a caller can see the pending
+        events and the feed head before deciding to apply them, the same way
+        the evaluate routes dry-run a negotiation or a settlement.
+        """
+        return await preview_site_events(
+            self.site_client(site_id),
+            site_event_cursor(site_id),
+        )
+
+    async def drain_events_once(self, site_id: str) -> SiteEventCycle:
+        """Run exactly one event cycle for one site and report what it did.
+
+        Addresses the same cursor the running poller holds, because a second
+        position would replay or skip. Intended to be called while the loop is
+        held: the pause guarantees a cycle either runs completely or never
+        starts, so an advance has the feed to itself.
+        """
+        # `site_client` already fails closed on an unconfigured site, so
+        # there is no second guard here saying the same thing differently.
+        return await drain_site_events_once(
+            self.client(),
+            self.site_client(site_id),
+            site_event_cursor(site_id),
+            full_reconcile=self.reconcile_now,
+        )
+
+    async def poll_events(
+        self,
+        *,
+        interval_seconds: float,
+        paused: Callable[[str], Callable[[], bool]] | None = None,
+    ) -> None:
+        """Tail every configured authority and reconcile at feed boundaries.
+
+        ``paused`` is a factory, not a predicate: it receives a site id and
+        returns that site's gate. The pollers run concurrently and each holds
+        its own feed position, so one site being held must not hold the others
+        -- a single shared predicate could only stop all of them together.
+        Supplying the gate per site keeps the naming with the caller, which is
+        the only party that knows what each loop is registered as.
+        """
         if interval_seconds <= 0:
             raise CapacityConfigurationError("poll interval must be positive")
         aggregate = self.client()
@@ -340,6 +390,7 @@ class CapacityRuntime:
                     self.site_client(site_id),
                     interval_seconds,
                     full_reconcile=self.reconcile_now,
+                    paused=paused(site_id) if paused is not None else None,
                 )
                 for site_id in self.site_ids
             )
