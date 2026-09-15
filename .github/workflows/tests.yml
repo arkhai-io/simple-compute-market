@@ -154,6 +154,41 @@ jobs:
           PYTEST_ARGS: ${{ matrix.pytest_args }}
         run: uv run --find-links "$GITHUB_WORKSPACE/.dist" --with pytest --with pytest-asyncio pytest -q $PYTEST_ARGS
 
+  iac-systemd-compatibility:
+    name: iac · lease units on the target systemd
+    runs-on: ubuntu-latest
+    # The managed bare-metal profile targets systemd 249. An unknown directive
+    # is ignored rather than rejected, so this check only means something on
+    # that version: it runs in a container that provides it rather than on
+    # whatever the hosted runner happens to ship.
+    container:
+      image: ubuntu:22.04
+    steps:
+      - name: Install the target toolchain
+        # A container job's default shell is sh, which on Ubuntu is dash and
+        # rejects `set -o pipefail`. This step runs before checkout because
+        # actions/checkout needs git, which the base image does not carry.
+        # ca-certificates and xz-utils are for uv rather than for apt: this
+        # image ships Python 3.10 and this project requires 3.12, so uv
+        # fetches and unpacks an interpreter instead of using the image's.
+        shell: bash
+        run: |
+          set -euo pipefail
+          apt-get update
+          apt-get install -y --no-install-recommends \
+            systemd ca-certificates curl git xz-utils
+          systemd-analyze --version
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v3
+        with:
+          version: "0.11.17"
+      - name: Verify rendered lease units
+        working-directory: domains/vms/provisioning/iac
+        env:
+          ARKHAI_SYSTEMD_COMPAT_LANE: '1'
+        # No unit is started: systemd-analyze only parses the files.
+        run: uv run --with pytest pytest -q tests/test_bare_metal_lease_unit_directives.py
+
   release-deployment:
     name: release · deployment contracts
     runs-on: ubuntu-latest

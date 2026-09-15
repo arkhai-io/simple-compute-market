@@ -86,6 +86,11 @@ class AnsibleJobParams:
     ssh_public_key: Optional[str] = None
     access_ref: Optional[dict[str, Any]] = None
     bare_metal_reclaim_policy: Optional[str] = None
+    # Identifies which lease generation's prepared environment a bare-metal
+    # access action belongs to. The host's runtime units, volume and view are
+    # named from it, so a grant can only reach the environment prepared for
+    # its own lease.
+    lease_generation: Optional[str] = None
 
     # Retry policy (per-job override)
     max_retries: Optional[int] = None

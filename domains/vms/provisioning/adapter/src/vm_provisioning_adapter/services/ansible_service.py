@@ -709,6 +709,11 @@ class AnsibleService:
             lines.append(
                 f'bare_metal_reclaim_policy: "{params.bare_metal_reclaim_policy}"'
             )
+        if params.lease_generation:
+            # Names the lease's runtime units, volume and view. Built in rather
+            # than pool-supplied: a pool that could choose the generation could
+            # aim one lease's grant at another lease's prepared environment.
+            lines.append(f'bare_metal_lease_generation: "{params.lease_generation}"')
         if params.image_setup_type == "golden":
             self._inject_golden_image_credentials(lines)
         else:

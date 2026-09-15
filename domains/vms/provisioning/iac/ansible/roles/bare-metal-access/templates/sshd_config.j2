@@ -1,0 +1,63 @@
+{#
+  The lease daemon's configuration, read by ``sshd -i`` inside the lease view.
+
+  This is not the host's management daemon and never edits it. It authenticates
+  one tenant, by key only, into one environment.
+#}
+# Arkhai bare-metal lease {{ bare_metal_lease_generation }}.
+# Rendered per lease generation; not the host management daemon.
+
+{# Namespace-visible path. The generated view is mounted at /etc inside the
+   instance, so the host-side source path is not reachable from there. #}
+HostKey /etc/ssh/lease_host_key
+
+# No PAM, so no login session, no user service manager and no host account
+# state is consulted for this connection.
+UsePAM no
+PermitRootLogin no
+AllowUsers {{ bare_metal_ssh_user }}
+
+# Key authentication only.
+PubkeyAuthentication yes
+PasswordAuthentication no
+KbdInteractiveAuthentication no
+GSSAPIAuthentication no
+HostbasedAuthentication no
+PermitEmptyPasswords no
+
+{# Keys the tenant adds live inside the lease volume, so an added key is inside
+   the boundary and is revoked with it rather than surviving on the host. #}
+AuthorizedKeysFile {{ bare_metal_lease_volume_path }}/.ssh/authorized_keys
+AuthorizedKeysCommand none
+PermitUserEnvironment no
+
+{# SFTP is served by this same daemon inside this same view. An external
+   subsystem binary would execute outside the boundary. #}
+Subsystem sftp internal-sftp
+
+# Forwarding stays within the lease namespace; nothing is published outward.
+AllowTcpForwarding local
+AllowAgentForwarding no
+AllowStreamLocalForwarding no
+GatewayPorts no
+PermitTunnel no
+X11Forwarding no
+PermitOpen none
+
+# No host name service lookups and no host login records from a tenant session.
+UseDNS no
+PrintLastLog no
+PrintMotd no
+
+{# Where these diagnostics land is decided by the service unit, which appends
+   the daemon's stderr to a provider-only file inside the lease volume. A
+   configuration keyword cannot express that: sshd -i writes to stderr, and an
+   environment variable would name a path nothing reads. The level is set here;
+   the destination is the unit's StandardError. #}
+LogLevel VERBOSE
+
+LoginGraceTime 30
+MaxAuthTries 4
+MaxSessions {{ bare_metal_lease_max_sessions | default(8) }}
+ClientAliveInterval 300
+ClientAliveCountMax 2

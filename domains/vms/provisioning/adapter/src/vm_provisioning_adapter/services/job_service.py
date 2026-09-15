@@ -762,6 +762,7 @@ class AnsibleJobService:
             ssh_public_key=params.get("ssh_public_key"),
             access_ref=params.get("access_ref"),
             bare_metal_reclaim_policy=params.get("bare_metal_reclaim_policy"),
+            lease_generation=params.get("lease_generation"),
             max_retries=params.get("max_retries"),
             playbook_path=params.get("playbook_path"),
             provider_extra_vars=params.get("provider_extra_vars") or {},

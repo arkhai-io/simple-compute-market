@@ -1,0 +1,22 @@
+{#
+  Per-lease listening socket on the buyer port.
+
+  The socket lives in the host network namespace so the buyer can reach it,
+  while each accepted connection is handed to a service instance that joins the
+  lease's own namespaces. Only the connection crosses that boundary.
+
+  Runtime unit for one lease generation: it is not enabled and does not survive
+  a reboot. Recovery re-creates it under the lease's recorded generation.
+#}
+[Unit]
+Description=Arkhai bare-metal lease {{ bare_metal_lease_generation }} buyer socket
+Documentation=https://github.com/arkhai-io/simple-compute-market
+
+[Socket]
+ListenStream={{ bare_metal_lease_buyer_port }}
+Accept=yes
+MaxConnections={{ bare_metal_lease_max_connections | default(16) }}
+MaxConnectionsPerSource={{ bare_metal_lease_max_connections_per_source | default(8) }}
+KeepAlive=yes
+NoDelay=yes
+Slice=arkhai-lease-{{ bare_metal_lease_generation }}.slice

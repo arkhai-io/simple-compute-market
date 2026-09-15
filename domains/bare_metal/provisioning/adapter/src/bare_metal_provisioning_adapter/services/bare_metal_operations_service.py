@@ -147,6 +147,10 @@ class BareMetalOperationsService:
                     access_ref, "ssh_public_key", "ssh_pubkey", "public_key",
                 ),
                 access_ref=access_ref or None,
+                # The lease's own durable identity names its prepared
+                # environment on the host, so a grant cannot reach one prepared
+                # for a different lease.
+                lease_generation=body.capacity_reservation_id or body.escrow_uid,
             ),
             self._job_queue_provider(),
             contract=contract,

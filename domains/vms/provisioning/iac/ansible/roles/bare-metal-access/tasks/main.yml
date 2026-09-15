@@ -28,56 +28,148 @@
     - node_action == "node_reclaim_access"
     - (bare_metal_reclaim_policy | default('remove_lease_key')) not in ["remove_lease_key", "lock_user", "delete_user"]
 
-- name: Ensure bare-metal tenant group exists
-  group:
-    name: "{{ bare_metal_ssh_user }}"
-    state: present
+- name: Validate bare-metal lease generation
+  fail:
+    msg: "node_grant_access requires bare_metal_lease_generation"
+  when:
+    - node_action == "node_grant_access"
+    - bare_metal_lease_generation | default('') | trim == ''
+
+# The lease account exists only inside the generated runtime view, so the host
+# database is read here for one reason: to refuse a name that is already taken.
+# An account under the lease name was not created by this lease, and adopting
+# it would hand a tenant whatever that account already owns. The check reads
+# the host's own database before anything is changed, so a refusal leaves the
+# host exactly as it was found.
+- name: Read the host account database before granting
+  slurp:
+    src: /etc/passwd
   become: yes
   delegate_to: "{{ target_host }}"
+  register: bare_metal_grant_passwd_file
   when: node_action == "node_grant_access"
 
-- name: Ensure bare-metal tenant user exists
-  user:
-    name: "{{ bare_metal_ssh_user }}"
-    group: "{{ bare_metal_ssh_user }}"
-    shell: /bin/bash
-    create_home: yes
-    state: present
-  become: yes
-  delegate_to: "{{ target_host }}"
+- name: Refuse a lease account name the host already uses
+  assert:
+    that:
+      - bare_metal_grant_passwd_file.content | bare_metal_account_absent_from_passwd(bare_metal_ssh_user)
+    fail_msg: >-
+      bare-metal tenant account {{ bare_metal_ssh_user }} already exists on the
+      host; this lease did not create it and will not adopt or alter it
+    quiet: yes
   when: node_action == "node_grant_access"
 
-- name: Install bare-metal tenant SSH public key
-  ansible.posix.authorized_key:
-    user: "{{ bare_metal_ssh_user }}"
-    key: "{{ bare_metal_ssh_public_key }}"
-    state: present
-    manage_dir: yes
-    comment: "arkhai bare-metal lease {{ escrow_uid | default('unknown') }}"
+# Readiness is read from the host, never asserted by the caller. Each fact
+# below is a resource a later task in this milestone creates and owns: the
+# encrypted lease volume, the lease network namespace and the generated runtime
+# view. Until those exist on this host for this generation, there is nowhere
+# confined to put a tenant, so the grant refuses rather than falling back to a
+# host account.
+- name: Observe the lease volume
+  stat:
+    path: "{{ bare_metal_lease_volume_path }}"
   become: yes
   delegate_to: "{{ target_host }}"
+  register: bare_metal_lease_volume_state
   when: node_action == "node_grant_access"
 
-- name: Ensure bare-metal tenant SSH directory permissions
-  file:
-    path: "/home/{{ bare_metal_ssh_user }}/.ssh"
-    owner: "{{ bare_metal_ssh_user }}"
-    group: "{{ bare_metal_ssh_user }}"
-    mode: "0700"
-    state: directory
+- name: Observe the lease network namespace
+  stat:
+    path: "/run/netns/{{ bare_metal_lease_netns }}"
   become: yes
   delegate_to: "{{ target_host }}"
+  register: bare_metal_lease_netns_state
   when: node_action == "node_grant_access"
 
-- name: Ensure bare-metal tenant authorized_keys permissions
-  file:
-    path: "/home/{{ bare_metal_ssh_user }}/.ssh/authorized_keys"
-    owner: "{{ bare_metal_ssh_user }}"
-    group: "{{ bare_metal_ssh_user }}"
-    mode: "0600"
-    state: file
+- name: Observe the lease runtime view
+  stat:
+    path: "{{ bare_metal_lease_view_path }}"
   become: yes
   delegate_to: "{{ target_host }}"
+  register: bare_metal_lease_view_state
+  when: node_action == "node_grant_access"
+
+- name: Require a prepared lease environment before exposing access
+  vars:
+    missing: >-
+      {{
+        ([] if bare_metal_lease_volume_state.stat.exists | default(false) else ['encrypted lease volume'])
+        + ([] if bare_metal_lease_netns_state.stat.exists | default(false) else ['lease network namespace'])
+        + ([] if bare_metal_lease_view_state.stat.exists | default(false) else ['generated runtime view'])
+      }}
+  assert:
+    that:
+      - missing | length == 0
+    fail_msg: >-
+      lease environment is not ready for generation
+      {{ bare_metal_lease_generation }}: {{ missing | join(', ') }} absent on
+      {{ target_host }}. Managed preparation owns these; access is not exposed
+      without them.
+    quiet: yes
+  when: node_action == "node_grant_access"
+
+# The observations above tell us whether the paths are there. They cannot tell
+# us whether the volume is the encrypted one this generation owns, whether the
+# namespace carries the egress rules, or whether the persistent-path controls
+# hold: an ordinary or stale directory satisfies every one of them. The
+# verifiers that could answer those questions are the subject of the remaining
+# tasks in this milestone and do not exist yet, so the managed path stops here
+# unconditionally rather than treating a successful render as access.
+#
+# This is deliberately not conditional on the observations, and deliberately
+# not overridable by a variable: a switch here would be an opt-in route back to
+# exposing a tenant on an unverified host. It is removed by implementing the
+# verifiers, not by setting something.
+- name: Refuse to expose access while managed preparation is unfinished
+  fail:
+    msg: >-
+      bare-metal managed preparation is unfinished for generation
+      {{ bare_metal_lease_generation }}: lease storage, key custody,
+      persistent-path controls and the egress namespace have no verifier yet,
+      so the presence of a volume, namespace or view path does not establish a
+      confined environment. Access is not exposed and nothing is written on
+      {{ target_host }}.
+  when: node_action == "node_grant_access"
+
+# Rendering happens only after a verifier admits the environment. Until then
+# the task below is unreachable on the production path; the artifacts it writes
+# are exercised directly by the role's template tests, which render them with
+# controlled inputs rather than through this path.
+- name: Render the lease runtime view and units
+  template:
+    src: "{{ item.src }}"
+    dest: "{{ item.dest }}"
+    owner: root
+    group: root
+    mode: "{{ item.mode }}"
+  become: yes
+  delegate_to: "{{ target_host }}"
+  loop:
+    - src: view-passwd.j2
+      dest: "{{ bare_metal_lease_view_path }}/etc/passwd"
+      mode: "0644"
+    - src: view-group.j2
+      dest: "{{ bare_metal_lease_view_path }}/etc/group"
+      mode: "0644"
+    - src: view-shadow.j2
+      dest: "{{ bare_metal_lease_view_path }}/etc/shadow"
+      mode: "0640"
+    - src: view-nsswitch.conf.j2
+      dest: "{{ bare_metal_lease_view_path }}/etc/nsswitch.conf"
+      mode: "0644"
+    - src: sshd_config.j2
+      dest: "{{ bare_metal_lease_view_path }}/etc/ssh/sshd_config"
+      mode: "0600"
+    - src: lease.slice.j2
+      dest: "/run/systemd/system/arkhai-lease-{{ bare_metal_lease_generation }}.slice"
+      mode: "0644"
+    - src: lease-sshd@.service.j2
+      dest: "/run/systemd/system/arkhai-lease-{{ bare_metal_lease_generation }}@.service"
+      mode: "0644"
+    - src: lease.socket.j2
+      dest: "/run/systemd/system/arkhai-lease-{{ bare_metal_lease_generation }}.socket"
+      mode: "0644"
+  register: bare_metal_lease_render_result
   when: node_action == "node_grant_access"
 
 - name: Revoke bare-metal tenant SSH public key when provided
@@ -233,10 +325,17 @@
       # falls back to the provisioner's values.
       host: "{{ hostvars[target_host].public_host | default(hostvars[target_host].ansible_host | default(target_host)) }}"
       port: "{{ hostvars[target_host].public_port | default(hostvars[target_host].ansible_port | default(22)) }}"
+      lease_generation: "{{ bare_metal_lease_generation }}"
       status: "success"
   when:
     - node_action == "node_grant_access"
     - node_access_timestamp is defined
+    # Reached only when the managed path rendered the lease environment. A
+    # refused grant leaves this undefined, so no receipt claims access that
+    # was never exposed.
+    - bare_metal_lease_render_result is defined
+    - bare_metal_lease_render_result is not skipped
+    - bare_metal_lease_render_result is not failed
 
 - name: Create JSON formatted output for node_grant_access
   set_fact:

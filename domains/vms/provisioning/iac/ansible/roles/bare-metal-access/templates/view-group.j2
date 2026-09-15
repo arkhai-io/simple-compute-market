@@ -1,0 +1,7 @@
+{#
+  The lease's group database. The tenant belongs to its own group and to no
+  other: no supplementary group carries host privilege into the lease.
+#}
+root:x:0:
+{{ bare_metal_lease_privsep_user }}:x:{{ bare_metal_lease_privsep_gid | default(65534) }}:
+{{ bare_metal_ssh_user }}:x:{{ bare_metal_lease_tenant_gid }}:

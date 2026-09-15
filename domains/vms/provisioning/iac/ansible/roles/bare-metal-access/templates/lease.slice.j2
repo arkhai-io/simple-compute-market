@@ -1,0 +1,24 @@
+{#
+  Every process the lease runs lives here.
+
+  The slice is what makes "stop the tenant" a single, complete operation at
+  release: a connection instance can exit without taking its children with it,
+  but nothing escapes the slice. Limits that must hold for every instance are
+  set here rather than per-instance, so a future unit cannot widen them.
+#}
+[Unit]
+Description=Arkhai bare-metal lease {{ bare_metal_lease_generation }} processes
+Documentation=https://github.com/arkhai-io/simple-compute-market
+
+[Slice]
+{# Tenant plaintext, and any provider material handled beside it, never reaches
+   swap. Set at the slice so it covers every connection instance. #}
+MemorySwapMax=0
+MemoryAccounting=yes
+TasksAccounting=yes
+TasksMax={{ bare_metal_lease_slice_tasks_max | default(2048) }}
+{# Closed by default: an instance may only use the nodes it is granted. #}
+DevicePolicy=closed
+{% for node in bare_metal_lease_gpu_nodes %}
+DeviceAllow={{ node }} rw
+{% endfor %}

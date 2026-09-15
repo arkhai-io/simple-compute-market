@@ -1,0 +1,18 @@
+{#
+  The lease's shadow database.
+
+  No principal here has a usable password: the lease authenticates by key
+  alone, so there is no hash to crack, reuse or leave behind.
+
+  The tenant's field is ``*``, not ``!``. Both are unusable as passwords, but
+  they are not equivalent to the daemon: with ``UsePAM no`` the daemon performs
+  its own account admission, and on this platform a leading ``!`` marks a
+  *locked account*, which is rejected before key authentication is attempted.
+  ``*`` is simply an invalid hash -- no password can produce it -- without
+  asserting that the account is locked. Accounts that must never authenticate
+  at all keep ``!``, which is the stronger statement and the correct one for
+  them.
+#}
+root:!:20000:0:99999:7:::
+{{ bare_metal_lease_privsep_user }}:!:20000:0:99999:7:::
+{{ bare_metal_ssh_user }}:*:20000:0:99999:7:::

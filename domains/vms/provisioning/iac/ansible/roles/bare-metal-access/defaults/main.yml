@@ -1,0 +1,47 @@
+---
+# Where a lease generation's prepared resources live on the host.
+#
+# These are locations, not assertions that anything exists: the grant path
+# reads the host to find out. Managed preparation owns creating them, and until
+# it does the readiness check finds them absent and the grant refuses.
+#
+# Each is derived from the lease generation so two leases never name the same
+# volume, namespace or view.
+
+bare_metal_lease_root: /var/lib/arkhai
+bare_metal_lease_runtime_root: /run/arkhai
+
+bare_metal_lease_volume_path: >-
+  {{ bare_metal_lease_root }}/lease-{{ bare_metal_lease_generation | default('unset') }}/volume
+bare_metal_lease_view_path: >-
+  {{ bare_metal_lease_runtime_root }}/lease-{{ bare_metal_lease_generation | default('unset') }}/view
+bare_metal_lease_netns: >-
+  arkhai-lease-{{ bare_metal_lease_generation | default('unset') }}
+
+# The buyer-facing port the lease socket listens on. The host registry is the
+# authority for it; this default only applies when the inventory states none.
+bare_metal_lease_buyer_port: "{{ hostvars[target_host].public_port | default(2222) }}"
+
+# Only qualified GPU device nodes are exposed. An empty list is a lease with no
+# GPU access, not a lease with unrestricted devices.
+bare_metal_lease_gpu_nodes: []
+
+# Writable locations, all inside the lease volume. The tenant's scratch
+# directories are bound over /tmp and /var/tmp so nothing writable is backed by
+# host storage, and the daemon's own runtime and log directories are
+# provider-only: the tenant's view does not map them.
+bare_metal_lease_scratch_tmp: "{{ bare_metal_lease_volume_path }}/scratch/tmp"
+bare_metal_lease_scratch_var_tmp: "{{ bare_metal_lease_volume_path }}/scratch/var-tmp"
+bare_metal_lease_runtime_dir: "{{ bare_metal_lease_volume_path }}/run-sshd"
+bare_metal_lease_log_path: "{{ bare_metal_lease_volume_path }}/provider-logs/sshd.log"
+
+bare_metal_lease_sshd_binary: /usr/sbin/sshd
+bare_metal_lease_privsep_user: sshd
+bare_metal_lease_privsep_uid: 101
+bare_metal_lease_privsep_gid: 65534
+
+# The tenant's identity inside the generated view only. It is never created in
+# the host's account database.
+bare_metal_lease_tenant_uid: 61001
+bare_metal_lease_tenant_gid: 61001
+bare_metal_lease_tenant_shell: /bin/bash

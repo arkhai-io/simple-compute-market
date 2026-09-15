@@ -1,0 +1,104 @@
+{#
+  One accepted connection, one daemon instance.
+
+  ``sshd -i`` serves the connection it is handed on standard input and exits,
+  so no listening daemon runs inside the lease and no login session, user
+  service manager or PAM stack exists. Every access method a client can ask
+  for -- an interactive shell, a remote command, SFTP -- is served by this
+  instance inside this view, so they share one boundary by construction rather
+  than by a wrapper that has to be kept in step.
+
+  The namespace and volume this unit joins are prepared before it is rendered.
+  Nothing here creates them, and the role refuses to expose access until the
+  host shows they exist.
+#}
+[Unit]
+Description=Arkhai bare-metal lease {{ bare_metal_lease_generation }} connection %i
+Documentation=https://github.com/arkhai-io/simple-compute-market
+
+[Service]
+Type=simple
+StandardInput=socket
+StandardOutput=socket
+{# Two different destinations, and they are not interchangeable.
+
+   -E is the one that matters: without it the daemon logs through syslog, and
+   a lease namespace has no /dev/log, so its connection records would simply be
+   lost rather than falling back to stderr. The path is resolved by the daemon
+   *inside* the namespace, where the lease volume is mounted, so it is both
+   visible and writable there, and it is destroyed with the volume.
+
+   StandardError catches what the daemon writes before -E takes effect, such as
+   a fatal configuration error. systemd opens this file on the host side,
+   before the unit's mounts are applied, so it names the volume's host mount
+   point rather than a namespace path. It is a file for the same reason -E is:
+   the journal would publish one tenant's connection records to the host, which
+   is what this boundary exists to prevent. #}
+StandardError=append:{{ bare_metal_lease_volume_path }}/provider-logs/sshd-startup.log
+ExecStart={{ bare_metal_lease_sshd_binary }} -i -f /etc/ssh/sshd_config -E {{ bare_metal_lease_volume_path }}/provider-logs/sshd.log
+Slice=arkhai-lease-{{ bare_metal_lease_generation }}.slice
+
+{# Root is a read-only tmpfs; only what the daemon and user-space tools need is
+   mapped back in, and /usr/local is masked so host-installed tooling is not.
+   Paths below are the ones the daemon resolves *inside* this namespace, so the
+   configuration it is told to read is the one mounted at /etc. #}
+TemporaryFileSystem=/:ro
+BindReadOnlyPaths=/usr
+BindReadOnlyPaths={{ bare_metal_lease_view_path }}/etc:/etc
+InaccessiblePaths=/usr/local
+{# Minimum runtime layout the daemon and the tenant's login shell need to
+   execute at all: the shell itself, the ELF loader's search paths, and the
+   privilege-separation directory sshd requires. On a merged-/usr Ubuntu 22.04
+   the /bin and /lib entries are symlinks into /usr, which is already mapped
+   read-only above; they are bound explicitly so the paths resolve rather than
+   depending on the tmpfs root carrying them. #}
+BindReadOnlyPaths=/bin
+BindReadOnlyPaths=/lib
+{% if bare_metal_lease_bind_lib64 | default(true) %}
+BindReadOnlyPaths=/lib64
+{% endif %}
+{# The tenant's only writable locations, all inside the lease volume so they
+   are revoked with the volume's key rather than swept afterwards. Scratch is
+   bound from the volume instead of PrivateTmp: systemd's private directories
+   are backed by the host's /tmp and /var/tmp, which is writable state outside
+   the boundary, and unlinking them on stop is not cryptographic destruction. #}
+BindPaths={{ bare_metal_lease_volume_path }}
+BindPaths={{ bare_metal_lease_volume_path }}/scratch/tmp:/tmp
+BindPaths={{ bare_metal_lease_volume_path }}/scratch/var-tmp:/var/tmp
+BindPaths={{ bare_metal_lease_volume_path }}/run-sshd:/run/sshd
+
+PrivateIPC=yes
+ProtectProc=invisible
+ProcSubset=pid
+NetworkNamespacePath=/run/netns/{{ bare_metal_lease_netns }}
+
+{# Qualified GPU nodes only. PrivateDevices gives the instance its own /dev
+   containing the usual pseudo-devices and nothing else, so each qualified node
+   is both bound into that view and allowed by the device policy: allowing a
+   node that is not present grants nothing, and binding one that is not allowed
+   is refused. A TPM, a raw disk or a container runtime socket is neither bound
+   nor allowed, so it is absent by construction. #}
+PrivateDevices=yes
+DevicePolicy=closed
+{% for node in bare_metal_lease_gpu_nodes %}
+BindPaths={{ node }}
+DeviceAllow={{ node }} rw
+{% endfor %}
+
+NoNewPrivileges=yes
+RestrictNamespaces=yes
+RestrictSUIDSGID=yes
+RestrictRealtime=yes
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+LockPersonality=yes
+MemoryDenyWriteExecute=no
+SystemCallArchitectures=native
+SystemCallFilter=~@keyring @module @mount @reboot @swap @obsolete
+CapabilityBoundingSet=CAP_SETUID CAP_SETGID CAP_SYS_CHROOT
+AmbientCapabilities=
+
+{# Tenant plaintext must never reach swap or a core file. #}
+MemorySwapMax=0
+LimitCORE=0
+LimitNOFILE={{ bare_metal_lease_limit_nofile | default(4096) }}
+TasksMax={{ bare_metal_lease_tasks_max | default(512) }}

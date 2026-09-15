@@ -1,0 +1,16 @@
+{#
+  Name resolution inside the lease reads the generated files and nothing else.
+
+  Any other source would reach a host database -- which is exactly what the
+  generated view exists to avoid -- and could resolve the tenant name to a host
+  account the lease does not own.
+#}
+passwd:         files
+group:          files
+shadow:         files
+gshadow:        files
+
+hosts:          files dns
+networks:       files
+protocols:      files
+services:       files

@@ -1,0 +1,18 @@
+{#
+  The lease's account database, and the only place the tenant account exists.
+
+  It is generated into the lease view, never added to the host. The host's
+  management daemon therefore sees an unknown user for every authentication
+  method the tenant could try, and release destroys the account by destroying
+  the view rather than by deleting a host account.
+
+  Three principals only: root because the file format expects it, the
+  privilege-separation user the daemon needs, and the tenant.
+#}
+{# Root exists because the file format expects it, not because it is usable:
+   the shell is nologin, the password is locked, and its home names nothing the
+   lease maps. Naming the host's /root here would describe a path the view
+   deliberately does not carry. #}
+root:x:0:0:root:/nonexistent:/usr/sbin/nologin
+{{ bare_metal_lease_privsep_user }}:x:{{ bare_metal_lease_privsep_uid | default(101) }}:{{ bare_metal_lease_privsep_gid | default(65534) }}::/run/sshd:/usr/sbin/nologin
+{{ bare_metal_ssh_user }}:x:{{ bare_metal_lease_tenant_uid }}:{{ bare_metal_lease_tenant_gid }}::{{ bare_metal_lease_volume_path }}:{{ bare_metal_lease_tenant_shell | default('/bin/bash') }}
