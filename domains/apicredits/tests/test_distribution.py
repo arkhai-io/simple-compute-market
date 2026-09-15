@@ -26,11 +26,12 @@ __all__ = ["wheels"]
 
 
 def test_no_apicredits_project_declares_an_internal_editable_source() -> None:
-    """Scoped to the API-credit domain only. The repository-wide version
-    of this check -- covering every consumable project, not just this
-    domain -- belongs to `remove-relative-uv-sources`, an existing,
-    separate change already scoped to exactly that; this test does not
-    duplicate it.
+    """Scoped to the API-credit domain only.
+
+    Deliberately narrow: the repository-wide equivalent -- covering every
+    consumable project rather than this domain -- is owned elsewhere, and
+    duplicating it here would give two places an opinion about the same
+    rule.
     """
     apicredits_pyprojects = sorted(APICREDITS.glob("**/pyproject.toml"))
     assert apicredits_pyprojects, "expected to find at least one pyproject.toml"

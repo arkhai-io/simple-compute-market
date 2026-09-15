@@ -573,9 +573,9 @@ async def test_an_exact_retry_of_a_non_replay_safe_route_is_refused(app):
     once the same middleware began protecting credit mutations.
 
     Refusing is the safe half of the exact-retry requirement -- no conflicting
-    mutation runs. Returning the recorded outcome is the other half and needs
-    a store that retains outcomes; `retain-authenticated-request-outcomes`
-    owns that.
+    mutation runs. Returning the recorded outcome is the other half, and needs
+    a replay store that retains outcomes rather than only reserving request
+    identity.
     """
     calls: list[int] = []
 

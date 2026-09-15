@@ -78,7 +78,10 @@ response, including refusals. It accepts signed requests **or** the legacy
 
 So all three still reproduce this fixture exactly, and are still
 behaviourally identical in everything it asserts. They are not
-interchangeable deployments. Closing that gap needs a validation path for
-the TS and Rust clients first — there is no e2e scenario exercising either
-— and is tracked as `3ax.10` in
-`openspec/changes/repair-storefront-alkahest-configuration/tasks.md`.
+interchangeable deployments.
+
+Closing that gap needs a validation path for the TypeScript and Rust
+clients before signing support, because neither has an end-to-end scenario:
+signing code for them could pass its own language's unit tests, satisfy
+this fixture, and still be refused by a real service — which is precisely
+the failure this fixture cannot see.

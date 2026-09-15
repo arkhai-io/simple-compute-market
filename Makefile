@@ -799,6 +799,30 @@ check-comment-hygiene: ## Fail if change-ID/task-number references leak outside 
 		exit 1; \
 	fi
 	@echo "OK: no change-ID/task-number references found outside openspec/."
+	@echo "Scanning for OpenSpec change directory names in code..."
+	@ids=$$(ls -d openspec/changes/*/ 2>/dev/null | grep -v archive | xargs -n1 basename; \
+		ls -d openspec/changes/archive/*/ 2>/dev/null | xargs -n1 basename \
+			| sed -E 's/^[0-9]{4}-[0-9]{2}-[0-9]{2}-//'); \
+	if [ -n "$$ids" ]; then \
+		matches=$$(echo "$$ids" | sort -u | grep -v '^$$' \
+			| grep -Ff /dev/stdin -rn \
+				--include="*.py" --include="*.toml" --include="*.yml" --include="*.yaml" \
+				--exclude-dir="openspec" --exclude-dir="docs" --exclude-dir=".git" \
+				--exclude-dir="__pycache__" --exclude-dir=".venv" --exclude-dir=".dist" \
+				--exclude-dir="node_modules" --exclude-dir="build" --exclude-dir=".claude" \
+				. 2>/dev/null || true); \
+		if [ -n "$$matches" ]; then \
+			echo "$$matches"; \
+			echo ""; \
+			echo "FAIL: code names an OpenSpec change. A comment must describe the"; \
+			echo "current system, not the change that produced it or the change that"; \
+			echo "will alter it next -- a reader of the code cannot see either, and"; \
+			echo "the name goes stale the moment the change is archived."; \
+			echo "docs/ is exempt: the roadmap's job is to name the change owning a gap."; \
+			exit 1; \
+		fi; \
+	fi
+	@echo "OK: no OpenSpec change names found in code."
 
 # ---------------------------------------------------------------------------
 # check-doc-citations — AGENTS.md's cross-reference rule: every openspec/,

@@ -454,12 +454,12 @@ def _list_listings_multi(
 #:
 #: One provisioning service serving several storefronts is what makes a
 #: storefront substitutable, which `docs/development/ROADMAP.md` Goal 1 names
-#: as the value of consolidating physical authority. Repair is owned by
-#: `openspec/changes/repair-multi-storefront-scenario/`.
+#: as the value of consolidating physical authority. That goal's table names
+#: the change which owns the repair.
 _MULTI_STOREFRONT_SKIP = (
     "provisioning serves one storefront: its storefront principal is a single "
     "identity, so Alice is not a trusted caller and never loads capacity. "
-    "See ROADMAP Goal 1 and openspec/changes/repair-multi-storefront-scenario/."
+    "See docs/development/ROADMAP.md Goal 1."
 )
 
 

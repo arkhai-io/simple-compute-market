@@ -189,6 +189,7 @@ dependencies = [
 dev = [
     { name = "arkhai-apicredits-domain" },
     { name = "arkhai-apicredits-middleware", extra = ["signed"] },
+    { name = "arkhai-kit-site-client" },
     { name = "httpx" },
     { name = "pytest" },
     { name = "pytest-asyncio" },
@@ -210,6 +211,7 @@ requires-dist = [
 dev = [
     { name = "arkhai-apicredits-domain" },
     { name = "arkhai-apicredits-middleware", extras = ["signed"] },
+    { name = "arkhai-kit-site-client" },
     { name = "httpx", specifier = ">=0.28.1" },
     { name = "pytest", specifier = ">=8.3.4,<9.0.0" },
     { name = "pytest-asyncio", specifier = ">=0.23.8,<1.0.0" },
@@ -314,6 +316,20 @@ dependencies = [
 wheels = [
     { path = "arkhai_kit_site-0.3.0-py3-none-any.whl" },
     { path = "arkhai_kit_site-0.3.0-py3-none-any.whl" },
+]
+
+[[package]]
+name = "arkhai-kit-site-client"
+version = "0.2.0"
+source = { registry = "../../../.dist" }
+dependencies = [
+    { name = "arkhai-kit-identity" },
+    { name = "httpx" },
+    { name = "pydantic" },
+]
+wheels = [
+    { path = "arkhai_kit_site_client-0.2.0-py3-none-any.whl" },
+    { path = "arkhai_kit_site_client-0.2.0-py3-none-any.whl" },
 ]
 
 [[package]]

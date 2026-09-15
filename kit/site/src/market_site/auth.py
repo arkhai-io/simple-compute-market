@@ -108,8 +108,9 @@ class SiteRouteContract:
     #: here turns an assumption the middleware used to make about every route
     #: into a property each route states, so a new non-idempotent mutation
     #: behind this middleware is refused rather than silently double-applied.
-    #: Returning the recorded outcome instead of refusing needs a store that
-    #: retains outcomes; see `retain-authenticated-request-outcomes`.
+    #: Refusing is the safe half of the exact-retry contract: no conflicting
+    #: mutation runs. Returning the recorded outcome instead would need a
+    #: replay store that retains outcomes, which this one does not.
     exact_retry_safe: bool = True
 
     def match(self, method: str, path: str, body: Any) -> str | None:

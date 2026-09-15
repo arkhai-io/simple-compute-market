@@ -53,10 +53,9 @@ def reject_retired_listing_shape(body: Any) -> None:
     """Refuse a listing whose shape uses a retired spelling.
 
     The same `listing_shape` schema the dry-run route validates against and
-    `GET /filter-spec` serves, applied at the mutation boundary. Before this,
-    only the dry run checked anything: `POST /listings` stored whatever it was
-    given, so a publisher could be told `valid=false` by the dry run and still
-    publish successfully.
+    `GET /filter-spec` serves, applied at the mutation boundary so that a
+    publisher cannot be told `valid=false` by the dry run and still publish
+    successfully. A shape opinion that only the dry run holds is advisory.
 
     Scoped to the retired spellings rather than enforcing the whole schema
     here. Full enforcement at publish would reject listings this registry has

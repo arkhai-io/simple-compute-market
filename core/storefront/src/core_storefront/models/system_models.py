@@ -51,9 +51,8 @@ class HealthResponse(BaseModel):
     #:
     #: Declared here because this model is what the route returns: the status
     #: handler builds `HealthResponse(**body)`, so a key the service puts in
-    #: its dict and this model does not name never reaches a caller. That is
-    #: how the pin first shipped invisible on this service and, separately,
-    #: on the provisioning service.
+    #: its status dict and this model does not name never reaches a caller.
+    #: Any field added to that dict has to be added here too.
     #:
     #: Distinct from `storefront_domains[].contract_version`, which is a
     #: domain contribution's own version and a different axis. Optional so

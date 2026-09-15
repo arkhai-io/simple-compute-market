@@ -589,9 +589,8 @@ class HealthResponse(BaseModel):
     #:
     #: Declared here because this model governs what the route emits: a field
     #: the service puts in its status dict but this model does not name is
-    #: dropped before any caller sees it, which is how the pin first shipped
-    #: invisible. Optional so `GET /health`, which shares the model and
-    #: reports neither, stays valid.
+    #: dropped before any caller sees it. Optional so `GET /health`, which
+    #: shares the model and reports neither, stays valid.
     provisioning_contract_version: str | None = Field(
         default=None,
         description="Contract major.minor this service speaks (status only)",
