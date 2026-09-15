@@ -716,14 +716,23 @@ effects; an assertion that changes for any other reason is the defect.
 - [x] 10.7 **Promotion.** Complete the design-promotion record below.
 
       - **Status:** Done. The record below names a permanent destination per accepted decision, plus a second table classifying what was deliberately not promoted.
-- [ ] 10.8 **Documentation citations.** Run
+- [x] 10.8 **Documentation citations.** Run
       `make check-doc-citations CHANGE=settle-listing-vocabulary` and resolve every match.
       An unresolvable citation is a blocking defect under `AGENTS.md`'s
       cross-reference rule, and the target also rejects a citation whose
       target is a *tombstone*: a tombstoned file still exists on disk while
       its content is gone, so a plain existence test cannot fail on a
       rename-to-tombstone.
-- [ ] 10.9 **End-to-end pipeline.** Confirm the end-to-end pipeline passes and
+      **Done (2026-09-15).** `make check-doc-citations CHANGE=settle-listing-vocabulary` reports every cited path resolving and
+      none a tombstone, across this change's twelve documents.
+
+      The check found two defects while being adopted, both in this change's
+      own records and both introduced by the session that added the target:
+      a path elided with an ellipsis in 9.12's note, and then the note
+      recording that fix quoting the elided form as an example of itself.
+      Neither would have been caught by the file-existence test this
+      replaced.
+- [x] 10.9 **End-to-end pipeline.** Confirm the end-to-end pipeline passes and
       record the evidence: the run, its result, and the scenarios that
       exercise this change's behaviour. Green unit and integration suites do
       not substitute -- this is the tier that catches a wire contract whose
@@ -732,6 +741,35 @@ effects; an assertion that changes for any other reason is the defect.
       cannot run for a reason unrelated to this change, record that as an
       explicit blocker naming the cause and the change that owns it, and
       treat the validations it gates as unrun rather than passed.
+      **Done (2026-09-15).** `make -C e2e-tests test-e2e`: 113 passed, 3
+      skipped, 263 deselected. The three skips are the Alice-dependent
+      multi-storefront stages, statically skipped because the provisioning
+      topology trusts one storefront principal;
+      `repair-multi-storefront-scenario` owns that and this run does not
+      claim them.
+
+      The scenarios that exercise this change specifically:
+
+      - `test_compute_dynamic_listings.py` stage `00a` declares a pool's
+        cardinality under the deprecated `listing_mode` key and asserts both
+        that the value is honored and that the storefront reports an
+        operator notice naming the retired spelling. That is the retained
+        one-way ingestion alias proven against deployed services, and it is
+        9.12's evidence.
+      - `test_full_deal.py` stage `00c2` asserts both ends of the
+        storefront-to-provisioning wire report an agreeing contract major
+        before any mutating stage runs, which is 9.13's evidence and the
+        reason the stages after it cannot be explained away as version skew.
+      - The VM deal paths and the API-credits buy, use and top-up flow
+        exercise `offering_mode` and `listing_resource` across every renamed
+        boundary under real settlement.
+
+      This run also follows the `filter-spec` bump to v6, which added the
+      retired-spelling prohibition and changed the served schema identity.
+      No `412`, no `retired_listing_shape` refusal, and no schema-identity
+      mismatch appears in the run, so the bump propagated to buyers and
+      publishers without incident. Sequenced deliberately: the preceding
+      green run predated the bump and would not have proven it.
 ## 11. Code-review remediation
 
 Ordered boundaries-before-consumers, because the defects found were all cases
