@@ -78,11 +78,12 @@ A host that has not passed those gates may complete release but remains unavaila
 Promoted, and therefore describing current behavior rather than a proposed delta:
 
 - Derived lease accounts, the tenant endpoint distinct from the management endpoint, selected-host pinned SSH trust with refusal on an absent or changed pin, and account operations reporting only read-back-verified outcomes are in `physical-provisioning/spec.md`, with the rationale for enforcing trust at the effective connection boundary, the endpoint distinction, and the account-database read-back limit in `physical-provisioning/architecture.md`.
+- The implemented, disabled-by-default lease-storage preparation seam is in `physical-provisioning/spec.md`, with its same-process TPM ownership and durable-recovery rationale in `physical-provisioning/architecture.md`. This promotion does not activate host preparation or access grant.
 - Registry write-credential sanitization and truthful publication failure reporting are in `storefront-publication/spec.md`.
 
 Still held by this change, because the behavior is not implemented:
 
-- Managed tenant boundary, persistent-path containment, recoverable storage and counter revocation, release sequence, and egress containment go to `physical-provisioning/spec.md`, with their rationale, trade-offs and qualification limits in `physical-provisioning/architecture.md`.
+- Managed tenant activation, persistent-path containment, active-lease reboot recovery, release-time counter revocation, the release sequence, and egress containment go to `physical-provisioning/spec.md`, with their rationale, trade-offs and qualification limits in `physical-provisioning/architecture.md`.
 - Quarantine eligibility and administrator recovery go to `site-capacity/spec.md`.
 - Confirmed relisting and acknowledged-work cursor semantics go to `storefront-publication/spec.md` and its architecture companion.
 - The release flow and recovery-worker ownership are summarized in `docs/development/ARCHITECTURE.md`.

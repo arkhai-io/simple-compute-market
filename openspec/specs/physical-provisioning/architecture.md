@@ -213,6 +213,34 @@ indistinguishable from one that legitimately ends there, so it establishes that
 the account is absent now, not that the host's other accounts were preserved;
 preservation rests on the action mutating only the named account.
 
+## Lease-storage custody has one live owner
+
+The storage-preparation seam treats a TPM resource handle as authority only
+inside the ESAPI connection that returned it. Creation, policy evaluation,
+load, public verification, unseal and checked cleanup therefore stay in one
+process lifetime. This avoids composing several command processes around a
+saved or observed number whose resource may already have disappeared or whose
+number may have been reassigned to another TPM owner. Cleanup names only
+resources returned to the live executor; there is no inventory-wide flush or
+resource-difference inference.
+
+The durable recovery boundary is the verified parent identity, counter policy,
+sealed public/private blobs and fsynced manifest, not a runtime context or
+numeric handle. The manifest records ownership before each creation or load and
+records close-pending before cleanup. If the process ends before confirmed
+closure is durable, a later process cannot distinguish a remaining orphan from
+a handle that has been reused. It quarantines without attempting stale cleanup
+or repeating the counter mutation. This deliberately prefers an unavailable
+host to deleting a resource another TPM user may now own.
+
+The implementation is currently an isolated preparation and qualification
+seam. The ordinary helper entrypoint and host role refuse before state or key
+creation because the provider unit's swap, core-dump and supervision boundary
+is not present, and access grant remains refused. Disposable software-TPM and
+regular-file LUKS-header evidence does not establish mapping or mount behavior,
+active-lease reboot recovery, release, preservation on a provider device, or
+physical-host qualification.
+
 ## Related contracts
 
 - [Fulfillment](../fulfillment/spec.md)

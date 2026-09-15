@@ -18,6 +18,17 @@ bare_metal_lease_view_path: >-
 bare_metal_lease_netns: >-
   arkhai-lease-{{ bare_metal_lease_generation | default('unset') }}
 
+# Storage custody is a host-profile input, not a caller readiness assertion.
+# The reserved NV counter and persistent parent are provisioned separately and
+# recorded in inventory only after their public identity has been reviewed.
+bare_metal_lease_storage_state_root: /var/lib/arkhai/lease-storage
+bare_metal_lease_backing_size_bytes: 0
+bare_metal_lease_free_space_floor_bytes: 0
+bare_metal_lease_counter_index: ""
+bare_metal_lease_counter_headroom: 0
+bare_metal_lease_parent_handle: ""
+bare_metal_lease_parent_name: ""
+
 # The buyer-facing port the lease socket listens on. The host registry is the
 # authority for it; this default only applies when the inventory states none.
 bare_metal_lease_buyer_port: "{{ hostvars[target_host].public_port | default(2222) }}"

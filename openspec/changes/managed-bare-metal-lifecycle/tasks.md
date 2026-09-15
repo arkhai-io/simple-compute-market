@@ -30,6 +30,9 @@
   - **Boundary coherence.** The rendered artifacts are self-consistent rather than merely plausible: the daemon is told to read `/etc/ssh/sshd_config` and its host key at `/etc/ssh/lease_host_key`, which are the paths its own mount view supplies, and the tests resolve those paths through the unit's mounts rather than asserting that a flag appears in the file. Daemon diagnostics reach a provider-only file inside the lease volume because the daemon is given that file explicitly: a daemon told nothing logs through syslog, and the lease namespace carries no `/dev/log`, so a unit-level stderr setting on its own would lose the records rather than redirect them. The unit sets both, and they are not interchangeable — systemd opens the stderr file on the host side before the unit's mounts are applied, so it catches what the daemon writes before its own log file takes effect, such as a fatal configuration error, while the daemon's log file is resolved inside the namespace. The tests assert both routes and check that the daemon's path is reachable and writable through the unit's own mounts. Neither destination is the journal, which would publish one tenant's connection records to the host. Scratch comes from the volume over `/tmp` and `/var/tmp` instead of systemd's private directories, which are host-backed and whose removal on stop is not cryptographic destruction. Qualified GPU nodes are both bound into the private `/dev` and permitted by device policy, since allowing a node that is not present grants nothing. The generated tenant's password field is an invalid hash rather than the locked-account marker: under `UsePAM no` the daemon performs its own account admission, and a reviewing operator compared the two forms against a pinned OpenSSH 8.9, with the same generated key and the same configuration, over standard input with no listening socket and no external network — the locked marker was refused before key authentication, and the invalid hash was accepted. Principals that must never authenticate keep the locked marker.
   - **Evidence and its limits.** Directive support is checked by rendering the units and reading `systemd-analyze verify` output for unknown keys — its exit status is unusable, because systemd ignores an unrecognised directive and still exits zero, so the check reads the output and considers only the lines naming the rendered files. It is gated to a lane that must supply systemd 249: outside the lane it skips with that reason, and inside it a missing tool or a different version fails rather than passing quietly. It has been run on systemd 249 / Ubuntu 22.04, the version the profile targets, which is directive acceptance on a matching version, not evidence of behaviour on the qualification host; the CI job that supplies that version in a container has not yet executed. The lease daemon configuration is asserted structurally; no `sshd` is present where these tests were written, so it is not machine-parsed there. Nothing was activated, no connection was made and no privileged operation ran: the role tests execute the real playbook with recording module stand-ins. A reviewing operator ran the suite and observed 41 passed. The M2 gate — the checked GPU computation over renter SSH and hostile persistence probes on qualified hardware — is not met and is not claimed.
 - [ ] 2.2 Implement LUKS2 lease storage with the sealed keyslot secret: counter checks, sealed-object attributes, parent Name verification, prepare journal and exclusive-writer rule, as specified in `design.md` D4.
+  - **Implemented seam:** The root-private helper serializes authoritative state under one host/index lock, fences an unreleased generation, journals an attributable full-width counter increment, creates and revalidates a fixed-size single-keyslot LUKS2 file, and seals its 32-byte standard-input-only key through one same-process ESAPI custody lifetime. It verifies the recorded persistent parent Name and the sealed policy and attributes. Durable sealed public/private blobs are recovery material; TPM object and session handles are valid only in the executor lifetime that created them. Pending, live, close-pending and confirmed-closed transitions are fsynced, cleanup is checked and limited to handles returned by that executor, and an incomplete prior lifetime or any other ambiguity is quarantined without a stale flush, counter re-advance or destructive retry.
+  - **Evidence:** The deterministic custody set reports `76 passed, 2 skipped`, and final bounded review accepts the simulator custody seam. A reviewing operator's disposable-software-TPM run completed preparation and prepared-state revalidation, preserved foreign transient, session, persistent and NV sentinels, recovered from durable blobs after an emulator restart without another counter advance, and observed revoked blobs refuse recovery. Five abrupt `os._exit(97)` checkpoints restarted with neither stale cleanup nor a repeated counter advance; `after-flush-session` covers the first trial-policy flush, not a separate post-unseal flush.
+  - **Limits:** Deterministic fault tests establish the modeled failure propagation, not comprehensive real response-loss or physical-TPM fault injection. The revocation run establishes refusal and owned-resource closure, not an independently read counter value or an assertion of one exact TPM error code. The ordinary helper entrypoint and the `node_prepare_lease_storage` role action refuse before creating state or a secret, and access grant remains unconditionally refused until supervised execution and persistent-path controls are integrated. No mapping, mount, qualified-host device, physical TPM, provider-preservation, reboot, Windows, GPU, egress, complete recovery or release path is established. Tasks 2.3–2.6 and sections 3–6 remain open, so overall 2.2 stays unchecked.
 - [ ] 2.3 Implement recovery after restart or reboot under the per-host lock (D5), with the lease window never written.
 - [ ] 2.4 Implement persistent-path preflight and controls (D3) as prepare preconditions that fail closed.
 - [ ] 2.5 Implement the lease egress namespace and dual-stack firewall table (D8), with prepare refusing on a mismatch.
@@ -124,16 +127,30 @@ Local environment: uv 0.8.14 (CI pins 0.11.17) and a uv-selected CPython 3.13. `
 
 Per `openspec/README.md#plan-closeout-requirements`.
 
-Section 1 is accepted and its closeout is recorded below. The remaining sections are
-not started, so their closeout is owed when they are.
+Section 1 is accepted and its closeout is recorded below. M2.2 documentation is
+prepared for its pending acceptance review; the rest of sections 2–6 remains open.
 
 - [x] **Comment hygiene.** `make check-comment-hygiene` passes, and the comments and docstrings section 1 adds or touches were read directly for provenance narration the target cannot catch.
 - [x] **Import placement.** Section 1's imports are at module level. The one deliberate exception is the gated harness's endpoint import, which is local so routine collection never depends on a loopback SSH fixture; the reason is stated where it occurs.
-- [x] **Documentation compliance.** Section 1's accepted rules are in the owning `openspec/specs/physical-provisioning/spec.md` and `openspec/specs/storefront-publication/spec.md`, with the rationale that does not fit a normative scenario in `openspec/specs/physical-provisioning/architecture.md`. Only behavior this change's tests prove is promoted; the managed tenant boundary, storage custody, release sequence, quarantine and relisting rules stay here until they are implemented, and `docs/development/ARCHITECTURE.md` is unchanged because no repository-wide flow changed.
+- [x] **Documentation compliance.** Section 1's accepted rules are in the owning `openspec/specs/physical-provisioning/spec.md` and `openspec/specs/storefront-publication/spec.md`, with the rationale that does not fit a normative scenario in `openspec/specs/physical-provisioning/architecture.md`. The implemented M2.2 preparation seam and its current refusal boundary are now promoted to the physical-provisioning spec and architecture; managed activation, recovery, release, quarantine and relisting remain only in this change. `docs/development/ARCHITECTURE.md` is unchanged because no repository-wide flow changed.
 - [x] **Narrative compression.** Section 1 notes state final behavior, the validation that backs it, and what remains.
 - [x] **Roadmap currency.** No goal or gap row in `docs/development/ROADMAP.md` names this change; nothing is owed and that disposition is recorded here and in the design-promotion record.
 - [x] **Campaign index currency.** This change's row in `openspec/changes/README.md` states section 1 accepted with its rules promoted and sections 2-6 not started; its campaign placement is unchanged.
 - [x] **Promotion.** The design-promotion record in `design.md` names each promoted rule and its exact permanent location, and no production source references this change directory.
+
+### M2.2 documentation closeout preparation
+
+The task narrative now records only the current same-process custody mechanism,
+the accepted simulator-seam evidence, and its limits. The implemented interface
+is promoted to the physical-provisioning specification and architecture; no
+activation, recovery, release or physical-qualification behavior is promoted.
+The roadmap needs no change. The campaign index records section 1 and the 2.1
+rendering checkpoint as accepted, the 2.2 simulator seam as verified with
+overall integration pending, and every later stage as open. Exact-version
+strict validation, citation checks, comment hygiene and whitespace validation
+pass for these documentation edits. Overall 2.2 remains unchecked until its
+supervision, persistent-path, production activation and recovery integration
+gates are completed.
 
 ## Section 1 acceptance
 
@@ -148,9 +165,10 @@ observed 26 passed. The chart contract render tests were observed passing throug
 Make target. Those are that operator's observations, recorded here as such.
 
 Outstanding, and not covered by this acceptance: physical qualification on a real host;
-sanitation, reboot and verification before capacity returns; the managed tenant boundary,
-lease storage custody, egress containment, quarantine and confirmed relisting of sections
-2-6; and the grant path's handling of a pre-existing host account, recorded under task 1.2.
+sanitation, reboot and verification before capacity returns; managed-tenant activation,
+lease-storage recovery and revocation integration, egress containment, quarantine and
+confirmed relisting of sections 2-6; and the grant path's handling of a pre-existing host
+account, recorded under task 1.2.
 Two repository baseline failures are unchanged and unrelated to this work: a
 `provisioning/compute` relay route-contract case and a `provisioning/compute/service`
 dotenv discovery case, both diagnosed in the baseline ledger above.

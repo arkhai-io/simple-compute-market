@@ -32,6 +32,8 @@ While a managed bare-metal lease is active, every location the tenant can write 
 
 A managed bare-metal lease volume MUST survive an unexpected host reboot during its active lease and MUST become unrecoverable to later tenants once the lease is released. The volume's unlock secret MUST be sealed to the host TPM under a policy requiring a monotonic, non-orderly TPM counter to equal the value recorded for that lease generation. The sealed object MUST have a non-empty policy with no alternative branch, `USERWITHAUTH` clear, and `FIXEDTPM` and `FIXEDPARENT` set, under a non-exportable parent whose Name is verified before each unseal. Revocation MUST advance the counter; it MUST NOT rely on deleting data from storage.
 
+Preparation MUST hold the host/index lock while reading or creating the authoritative generation fence and manifest. Another unreleased generation MUST refuse before a counter increment. Object creation, policy evaluation, load, public verification, unseal and cleanup MUST share one ESAPI lifetime, and cleanup MUST be checked and limited to handles returned in that lifetime. Durable sealed public/private blobs, not runtime object or session handles, are the recovery material. An incomplete record from an earlier process lifetime MUST quarantine ordinary retry without flushing a stale handle or advancing the counter again. A prepared retry MUST revalidate the LUKS2 header, its single keyslot and the sealed secret's ability to unlock it before reporting success.
+
 #### Scenario: Host reboots during an active lease
 
 - **WHEN** the host restarts before the lease's original end, and no release intent exists
@@ -46,6 +48,16 @@ A managed bare-metal lease volume MUST survive an unexpected host reboot during 
 
 - **WHEN** the counter after a prepare increment cannot be attributed to that attempt through durable exclusive-writer evidence
 - **THEN** prepare quarantines the host without sealing a secret
+
+#### Scenario: Preparation restarts with an incomplete TPM lifetime
+
+- **WHEN** durable ownership state shows a session or object that was not confirmed closed before its executor lifetime ended
+- **THEN** preparation quarantines without flushing its recorded numeric handle or advancing the lease counter again
+
+#### Scenario: Prepared storage was replaced
+
+- **WHEN** a retry finds that the recorded backing file is no longer a matching single-keyslot LUKS2 volume unlockable by the sealed secret
+- **THEN** preparation quarantines without formatting or overwriting the existing file
 
 ### Requirement: Bare-metal release revokes, resets and verifies before capacity returns
 

@@ -116,6 +116,22 @@ Socket activation allocates the listening socket in the host network namespace. 
 
 **TPM safety.** Operations never clear the TPM, flush broadly, or touch an index or object the lease does not own. Other owners may depend on the same TPM.
 
+**Custody lifetime.** Creation, policy evaluation, load, public verification,
+unseal and cleanup run through one ESAPI connection. The production adapter
+selects only an explicit provider-qualified TPM device TCTI; an injected
+software-TPM transport exists only in the isolated qualification harness. The
+executor checks cleanup of only the object and session handles returned within
+that live connection and withholds a successful result, including an unsealed
+secret, until cleanup and its durable confirmation succeed.
+
+The sealed public and private blobs are durable recovery material. Numeric
+object and session handles are not: they describe one process lifetime and may
+be reused after it ends. Before a TPM resource is created or loaded, the helper
+fsyncs a pending ownership record; it then fsyncs live, close-pending and
+confirmed-closed transitions. Any record from a prior lifetime that is not
+confirmed closed is an ownership ambiguity. Restart quarantines it without
+flushing the stale number, advancing the counter again or claiming recovery.
+
 **Prepare journal.** Before incrementing, prepare fsyncs the pre-increment value `V`.
 
 - Counter still `V`: the increment did not happen.
@@ -146,7 +162,7 @@ Only the provisioning recovery action may reopen a lease volume. All of these mu
 - the counter equals `C_G`;
 - the parent Name matches the recorded Name.
 
-The lock is held from the start of the policy session through unseal and volume open. Recovery uses only non-continued sessions, never saves a session context, and runs as a transient unit with swap and core dumps disabled. It never writes the lease window.
+The lock is held from the start of the policy session through unseal and volume open. Recovery may continue a policy session only within the same live ESAPI ownership boundary while its dependent policy operations run. It never saves a session context or deliberately carries a session across a completed executor lifetime, and it requires an explicit checked flush plus durable confirmed-closed evidence before that lifetime succeeds. Recovery runs as a transient unit with swap and core dumps disabled and never writes the lease window.
 
 **Session-creation evidence.** Before any helper creates a policy session or loads the sealed object, it durably records a pending session intent in the host manifest (generation, attempt and helper unit) and fsyncs it. Only then does it create the session, and it records the returned handle before using it. Pending intents, partial records, and each helper's unit and exit evidence are retained, including for interrupted helpers, and cleanup never removes them.
 
@@ -312,9 +328,11 @@ None. Each unresolved physical fact above is an explicit qualification gate, not
 | Campaign index currency | `openspec/changes/README.md` — this change's row states section 1 accepted with later sections outstanding (recorded) |
 | Managed tenant boundary and runtime view | `openspec/specs/physical-provisioning/spec.md` (pending) |
 | Persistent-path containment | `openspec/specs/physical-provisioning/spec.md` (pending) |
-| Recoverable storage and counter revocation | `openspec/specs/physical-provisioning/spec.md` and `architecture.md` (pending) |
+| Serialized lease-storage preparation and same-process checked TPM custody | `openspec/specs/physical-provisioning/spec.md` — "Encrypted lease-storage preparation is isolated and fail-closed", rationale in `architecture.md` — "Lease-storage custody has one live owner" (promoted; activation remains pending) |
+| Active-lease storage recovery and release-time counter revocation | `openspec/specs/physical-provisioning/spec.md` and `architecture.md` (pending) |
 | Release sequence, completion and fencing | `openspec/specs/physical-provisioning/spec.md` and `docs/development/ARCHITECTURE.md#release` (pending) |
 | Egress containment | `openspec/specs/physical-provisioning/spec.md` (pending) |
 | Quarantine eligibility and administrator recovery | `openspec/specs/site-capacity/spec.md` (pending) |
 | Confirmed relisting and cursor acknowledgement | `openspec/specs/storefront-publication/spec.md` and `architecture.md` (pending) |
-| Custody alternatives, qualification limits and GPU residue boundary | `openspec/specs/physical-provisioning/architecture.md` (pending) |
+| Custody ownership rationale | `openspec/specs/physical-provisioning/architecture.md` — "Lease-storage custody has one live owner" (promoted) |
+| Remaining qualification limits and GPU residue boundary | `openspec/specs/physical-provisioning/architecture.md` (pending) |

@@ -35,6 +35,13 @@
     - node_action == "node_grant_access"
     - bare_metal_lease_generation | default('') | trim == ''
 
+- name: Refuse unprotected encrypted lease storage preparation
+  fail:
+    msg: >-
+      node_prepare_lease_storage is disabled until its swap, core-dump, and
+      supervised-helper protections are enforced
+  when: node_action == 'node_prepare_lease_storage'
+
 # The lease account exists only inside the generated runtime view, so the host
 # database is read here for one reason: to refuse a name that is already taken.
 # An account under the lease name was not created by this lease, and adopting

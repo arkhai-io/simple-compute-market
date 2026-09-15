@@ -625,6 +625,68 @@ A bare-metal reclaim MUST NOT report an account operation as successful unless t
 - **WHEN** the read-back shows the tenant account still present
 - **THEN** the reclaim fails and capacity is not reported reclaimed
 
+### Requirement: Encrypted lease-storage preparation is isolated and fail-closed
+
+The executable lease-storage preparation seam MUST hold one host/index lock
+while reading or creating its authoritative generation fence, ownership state
+and manifest. One unreleased generation MUST retain that fence; a different
+generation MUST refuse before advancing the host's TPM counter. Before an
+attributable counter increment, preparation MUST durably record the full
+eight-byte pre-increment value and exclusive-writer intent. Unattributable
+counter state MUST quarantine while the original lock is still held.
+
+The seam MUST create only a fixed-size, preallocated, root-private regular-file
+LUKS2 volume with one keyslot, subject to safe path, ownership and free-space
+checks. Its 32-byte key MUST cross command boundaries only through standard
+input and MUST NOT be written to arguments, logs, configuration, the manifest
+or any other durable file. A prepared retry MUST revalidate the actual LUKS2
+header, its single keyslot and the sealed key's ability to unlock it before
+reporting success; changed or unusable storage MUST quarantine without being
+formatted or overwritten.
+
+TPM object creation, policy evaluation, load, public verification, unseal and
+cleanup MUST use one same-process ESAPI ownership lifetime selected through an
+explicit TPM transport. The production adapter MUST accept only an explicit,
+provider-qualified direct-device TCTI; transport injection MUST remain confined
+to the isolated qualification harness. The recorded persistent parent Name,
+the non-empty counter policy and the sealed object's required attributes MUST
+be verified. Cleanup MUST be checked and limited to the object and session
+handles returned in that lifetime, and a successful result or unsealed secret
+MUST be withheld until required cleanup is durably confirmed. Sealed public and
+private blobs are durable recovery material; runtime TPM handles are not.
+Pending, live, close-pending and confirmed-closed ownership transitions MUST be
+fsynced. Any incomplete record from an earlier process lifetime MUST quarantine
+ordinary retry without flushing its recorded handle, advancing the counter
+again or clearing the uncertainty automatically. If quarantine cannot be made
+durable, the seam MUST report unresolved ownership rather than quarantine or
+success.
+
+The ordinary helper entrypoint and the `node_prepare_lease_storage` role action
+MUST refuse before creating lease state or key material until supervised
+execution and the required swap, core-dump and persistent-path controls are
+integrated. Access grant MUST remain refused while those controls and recovery
+readiness are absent.
+
+#### Scenario: Another generation owns the host counter
+
+- **WHEN** preparation finds an unreleased generation holding the host/index fence
+- **THEN** it refuses before incrementing the counter or changing that generation's storage
+
+#### Scenario: A prior executor lifetime is incomplete
+
+- **WHEN** durable ownership state contains a pending, live or close-pending TPM resource from an earlier process lifetime
+- **THEN** preparation quarantines without flushing the recorded numeric handle or advancing the counter again
+
+#### Scenario: Prepared storage no longer matches
+
+- **WHEN** retry finds that the backing file is not the recorded single-keyslot LUKS2 volume unlockable by the sealed key
+- **THEN** preparation quarantines without reformatting or overwriting the file
+
+#### Scenario: Ordinary host preparation is requested
+
+- **WHEN** the production role requests encrypted lease-storage preparation before its supervision and persistent-path prerequisites exist
+- **THEN** it refuses before invoking the helper, creating state or generating a key
+
 ### Requirement: Relays are administered resources
 
 A relay is a durable resource, not pool configuration. The provisioning service MUST record each relay's rendezvous address, rendezvous port, VM port allocation window, and admission token as one row, and resource pools MUST reference a relay rather than restating its address, window, or token.
