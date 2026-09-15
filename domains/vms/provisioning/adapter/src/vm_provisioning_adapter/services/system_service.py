@@ -236,21 +236,7 @@ class SystemService:
             checks["job_processor"] = "degraded"
 
         all_ok = all(v == "ok" for v in checks.values())
-        # The contract major this service speaks, so a fleet can be checked
-        # for skew before mutations resume. Without it there is no way to ask
-        # a running service which version of the storefront-to-provisioning
-        # wire it accepts: the constant existed only in the contract module,
-        # which makes a documented cutover step unexecutable against a live
-        # deployment. Reported rather than negotiated -- the service still
-        # rejects an unsupported major on the route itself.
-        return {
-            "status": "ok" if all_ok else "degraded",
-            "checks": checks,
-            "provisioning_contract_version": COMPUTE_PROVISIONING_CONTRACT_VERSION,
-            "provisioning_contract_supported_majors": sorted(
-                SUPPORTED_COMPUTE_PROVISIONING_MAJOR_VERSIONS
-            ),
-        }, all_ok
+        return {"status": "ok" if all_ok else "degraded", "checks": checks}, all_ok
 
     def ansible_readiness(self) -> AnsibleReadinessResponse:
         """Collect full Ansible readiness information synchronously.
@@ -427,7 +413,21 @@ class SystemService:
             return value == "ok"
 
         all_ok = all(_is_healthy(k, v) for k, v in checks.items())
-        return {"status": "ok" if all_ok else "degraded", "checks": checks}
+        # The contract major this service speaks, so a fleet can be checked
+        # for skew before mutations resume. Without it there is no way to ask
+        # a running service which version of the storefront-to-provisioning
+        # wire it accepts: the constant existed only in the contract module,
+        # which makes a documented cutover step unexecutable against a live
+        # deployment. Reported rather than negotiated -- the service still
+        # rejects an unsupported major on the route itself.
+        return {
+            "status": "ok" if all_ok else "degraded",
+            "checks": checks,
+            "provisioning_contract_version": COMPUTE_PROVISIONING_CONTRACT_VERSION,
+            "provisioning_contract_supported_majors": sorted(
+                SUPPORTED_COMPUTE_PROVISIONING_MAJOR_VERSIONS
+            ),
+        }
 
     async def force_fulfillment_convergence(self) -> dict:
         """Run one production fulfillment convergence cycle."""

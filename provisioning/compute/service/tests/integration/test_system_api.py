@@ -17,6 +17,10 @@ What is NOT covered here (unit test jurisdiction):
 
 from __future__ import annotations
 
+from compute_provisioning import (
+    COMPUTE_PROVISIONING_CONTRACT_VERSION,
+    SUPPORTED_COMPUTE_PROVISIONING_MAJOR_VERSIONS,
+)
 import pytest
 
 class TestHealthEndpoint:
@@ -101,6 +105,33 @@ class TestSystemStatus:
         assert isinstance(resp, dict), f"Expected dict, got {type(resp)}"
         assert "status" in resp, f"Missing 'status' in status response: {resp}"
         assert "checks" in resp, f"Missing 'checks' in status response: {resp}"
+
+    async def test_reports_the_contract_pin_and_supported_majors(
+        self, client_and_queue
+    ):
+        """The pin has to survive the route, not just the service method.
+
+        A cutover requires every participant to report the contract major it
+        speaks before mutations resume, and there is no other way to ask a
+        running service for it. Asserted through the real route because the
+        handler declares a `response_model`, so a field present on the
+        service's dict can still be absent from what a caller receives --
+        which is exactly how this first shipped.
+        """
+        client, _ = client_and_queue
+        resp = await client.get_system_status()
+        pin = resp.get("provisioning_contract_version")
+        majors = resp.get("provisioning_contract_supported_majors")
+        assert pin == COMPUTE_PROVISIONING_CONTRACT_VERSION, (
+            "GET /api/v1/system/status must report the contract pin; got "
+            f"{pin!r} in {resp!r}"
+        )
+        assert majors and sorted(majors) == sorted(
+            SUPPORTED_COMPUTE_PROVISIONING_MAJOR_VERSIONS
+        ), f"supported majors missing or wrong: {majors!r}"
+        assert int(str(pin).split(".")[0]) in majors, (
+            "the service must admit its own declared major"
+        )
 
     async def test_storefront_check_is_present(self, client_and_queue):
         """checks.storefront is present in the diagnostic status."""
