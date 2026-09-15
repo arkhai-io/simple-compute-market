@@ -89,7 +89,7 @@ dispositions.
       storefront claim builders including `_VM_EXECUTOR_KIND` and the API-credit
       producers. Keep the field required.
       - **Status:** Done. 115 files. All identifier forms: the field, `VM_EXECUTOR_KIND`, `BARE_METAL_EXECUTOR_KIND`, `OFFERING_MODE_CLAIM_KEY`, `_LEGACY_EXECUTOR_KIND`, `_requested_offering_mode`, locals, test names, and error/log prose. Field kept required.
-- [ ] 2.1b Rename the field on the compute provisioning service's own versioned
+- [x] 2.1b Rename the field on the compute provisioning service's own versioned
       contract in `provisioning/compute/src/compute_provisioning/contracts.py` — all
       seven models: `ExecutorActionEnvelope`, `JobAccepted`, `CredentialEnvelope`,
       `ResultEnvelope`, `ProvisioningJob`, `LeaseRegistration`, and `LifecycleEvent` —
@@ -99,6 +99,26 @@ dispositions.
       `executor_target` on `LeaseRegistration` stays, per task 6.4.
       - **Status:** Done. All seven versioned models in `contracts.py`. `executor_target` on `LeaseRegistration` retained per 6.4.
       - **Correction:** **REOPENED by code review.** The seven models were renamed; the contract version was not. `COMPUTE_PROVISIONING_CONTRACT_VERSION` is still `"1.0"` with supported majors `{1}`, so the completion note above was false and production contradicts the specification this change promoted. See task 11.1.
+      - **Resolution (2026-09-14).** The review was right and 11.1 carried out
+        the remedy, so this was stale-open rather than unresolved. Verified
+        against the source rather than 11.1's note:
+        `COMPUTE_PROVISIONING_CONTRACT_VERSION = "2.0"` and
+        `SUPPORTED_COMPUTE_PROVISIONING_MAJOR_VERSIONS = frozenset({2})` --
+        `{2}`, not `{1, 2}`, so a 1.x caller carrying the retired spelling is
+        refused rather than accepted alongside.
+
+        All seven models carry `offering_mode`:
+        `ExecutorActionEnvelope`, `JobAccepted`, `CredentialEnvelope`,
+        `ResultEnvelope`, `ProvisioningJob`, `LeaseRegistration` and
+        `LifecycleEvent`. `LeaseRegistration.executor_target` is retained per
+        6.4. No `executor_kind` or `ExecutorKind` remains anywhere in the
+        contract package.
+
+        The test remediation 11.1 asked for is in place too: nothing pins
+        `supported majors: 1` any more, and the two rejection boundaries are
+        `test_retired_contract_major_is_refused` and
+        `test_unsupported_future_contract_major_is_refused`. That suite
+        reports 15 passed.
 - [x] 2.2 Rename `virtualization_type` to `offering_mode` in the published listing
       shape, the `VirtualizationType` enum — whose type name becomes `OfferingMode` —
       the bare-metal schema literal, the registry filter, and the buyer CLI flags in
@@ -410,7 +430,7 @@ dispositions.
       registry's `vms.compute` filter specification, and
       `docs/development/TESTING.md`'s `virtualization_type` example.
       - **Status:** Done for `DEPLOYMENT_AND_CONFIG.md`'s filter-specification reference. `TESTING.md`'s example moved with the 2.2 sweep.
-- [ ] 8.9 Run the cross-reference check `AGENTS.md` requires before promoting
+- [x] 8.9 Run the cross-reference check `AGENTS.md` requires before promoting
       documentation: every `openspec/`, `docs/`, `tools/`, `scripts/`, and
       `e2e-tests/` path cited by a document this change edits must exist on this
       branch. This change adds a specification delta directory and renames a module,
@@ -419,6 +439,29 @@ dispositions.
 
       - **Status:** Done. Every `openspec/`, `docs/`, `tools/`, `scripts/`, and `e2e-tests/` path cited by a document this change edits resolves on this branch. One apparent miss was a regex artifact clipping `helm/scripts/test-render.sh`.
       - **Correction:** **REOPENED by code review.** `openspec/specs/storefront-publication/spec.md` cites its retired test module path, which this change renamed. The check used a file-existence test, and a tombstoned file still exists on disk -- so it could never detect a rename-to-tombstone, the most likely broken citation in a renaming change. See task 11.8.
+      - **Resolution (2026-09-14).** 11.8 repaired the citation and replaced
+        the check; this is the re-run the task asks for, using the
+        replacement's rule rather than the existence test that could not
+        fail on a tombstone. `scripts/tombstones.py`'s own `is_tombstone`
+        predicate supplies the second half, so the check and the convention
+        cannot drift apart.
+
+        46 permanent and change-local documents scanned for
+        `openspec/`, `docs/`, `tools/`, `scripts/` and `e2e-tests/`
+        citations. **Zero tombstoned targets** -- `storefront-publication`
+        now cites `test_listing_cardinality_mode.py`, which exists and is a
+        real file -- and, after one fix, zero absent.
+
+        The one absent citation the re-run found was introduced by this
+        session's own 9.12 note, which had elided the dynamic-listings
+        scenario's path with an ellipsis in place of its directories rather
+        than writing it out. Now written out in full.
+
+        Deliberately described rather than quoted: writing the elided form
+        here would re-introduce the citation as an example of itself, which
+        is exactly what the first draft of this note did and what the
+        re-run then caught. Worth recording that the check earned its keep
+        twice on the document that records it.
 ## 9. Validation
 
 Levels are named deliberately. Per `docs/development/TESTING.md`, integration means
@@ -501,7 +544,7 @@ effects; an assertion that changes for any other reason is the defect.
 - [x] 9.12 **System.** Old-producer cardinality skew across deployable services. This
       is system-level evidence for the alias, not a substitute for 9.8.
       - **Status (2026-09-14).** Asserted in
-        `e2e-tests/.../vms/test_compute_dynamic_listings.py`'s
+        `e2e-tests/tests/e2e/roles/scenarios/vms/test_compute_dynamic_listings.py`'s
         `test_00a_registers_executor_host_and_syncs_projection`. That
         scenario's pool already declared its cardinality under
         `listing_mode`, the deprecated ingestion spelling, so the skew was
@@ -637,6 +680,22 @@ effects; an assertion that changes for any other reason is the defect.
 - [x] 10.7 **Promotion.** Complete the design-promotion record below.
 
       - **Status:** Done. The record below names a permanent destination per accepted decision, plus a second table classifying what was deliberately not promoted.
+- [ ] 10.8 **Documentation citations.** Run
+      `make check-doc-citations CHANGE=settle-listing-vocabulary` and resolve every match.
+      An unresolvable citation is a blocking defect under `AGENTS.md`'s
+      cross-reference rule, and the target also rejects a citation whose
+      target is a *tombstone*: a tombstoned file still exists on disk while
+      its content is gone, so a plain existence test cannot fail on a
+      rename-to-tombstone.
+- [ ] 10.9 **End-to-end pipeline.** Confirm the end-to-end pipeline passes and
+      record the evidence: the run, its result, and the scenarios that
+      exercise this change's behaviour. Green unit and integration suites do
+      not substitute -- this is the tier that catches a wire contract whose
+      two sides disagree, a service that starts cleanly and cannot settle,
+      and a configuration gap no in-process test can see. If the pipeline
+      cannot run for a reason unrelated to this change, record that as an
+      explicit blocker naming the cause and the change that owns it, and
+      treat the validations it gates as unrun rather than passed.
 ## 11. Code-review remediation
 
 Ordered boundaries-before-consumers, because the defects found were all cases
@@ -810,7 +869,7 @@ as a validation failure of this change.
       therefore no longer blocked -- they remain open because each is a
       specific system-level assertion that still needs deliberate
       verification, which a green suite does not supply on its own.
-- [ ] 11.14 Confirm the two `[tool.uv] find-links` entries added to
+- [x] 11.14 Confirm the two `[tool.uv] find-links` entries added to
       `domains/vms/domain` and `domains/bare_metal` never enter a Docker build
       context. The e2e build log warns
       `path could not be normalized: /app/../../../.dist` for
@@ -822,6 +881,22 @@ as a validation failure of this change.
       package later gains an image, and prefer the VM storefront's
       pass-`--find-links`-at-invocation pattern over a relative entry in that
       case.
+      - **Re-verified (2026-09-14).** Both entries are still present, so the
+        concern is live: `domains/vms/domain/pyproject.toml` declares
+        `find-links = ["../../../.dist"]` and `domains/bare_metal` declares
+        `["../../.dist"]`. No `Dockerfile` in the repository copies either
+        pyproject, so neither is read inside a container and neither relative
+        path is ever resolved against an image root.
+
+        The hazard this task points at is real and lives elsewhere:
+        `domains/apicredits/service/Dockerfile` does copy its own pyproject,
+        and that file carries `find-links = ["../../../.dist"]`, which is
+        what emits `path could not be normalized: /app/../../../.dist`. It is
+        noise rather than a failure -- the copied lock plus
+        `--find-links /.dist` supply the wheels either way -- but it is the
+        same construct in the one place the warning says it does not
+        normalize, so a genuine path problem there would look identical to
+        the noise already present.
 
 ### Reinit coverage and rename-sweep damage
 

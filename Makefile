@@ -770,7 +770,7 @@ clobber-wheels: _require-ar-project
 # Reviw and agent targets
 
 # ---------------------------------------------------------------------------
-# check-comment-hygiene — mechanical sweep for AGENTS.md's "Python comments
+# check-comment-hygiene check-doc-citations — mechanical sweep for AGENTS.md's "Python comments
 # and docstrings" rule: change IDs, section/task numbers, and change-document
 # filenames must never appear in comments or docstrings outside openspec/.
 # This catches the reliably-mechanical subset of that rule (not the fuzzier
@@ -799,6 +799,30 @@ check-comment-hygiene: ## Fail if change-ID/task-number references leak outside 
 		exit 1; \
 	fi
 	@echo "OK: no change-ID/task-number references found outside openspec/."
+
+# ---------------------------------------------------------------------------
+# check-doc-citations — AGENTS.md's cross-reference rule: every openspec/,
+# docs/, tools/, scripts/, and e2e-tests/ path cited by a document must
+# resolve on this branch, and an unresolvable one is a blocking defect rather
+# than a stale link.
+#
+# Rejects a tombstoned target as well as an absent one. The existence test
+# this replaces could not fail on a rename-to-tombstone -- the likeliest
+# broken citation in a renaming change -- because a tombstoned file still
+# exists on disk while its content is gone. The predicate is imported from
+# scripts/tombstones.py rather than reimplemented, so this check and the
+# prune utility cannot disagree about what a tombstone is.
+#
+# Archived changes are excluded: they record what was true when archived. A
+# change runs this during its own closeout, while its citations are still
+# expected to hold.
+# ---------------------------------------------------------------------------
+# Pass CHANGE=<name> to scope to one unarchived change's own documents, which
+# is what a closeout gates on: a change owes the citations it wrote, and
+# gating it on the whole repository's documentation debt would let one stale
+# runbook block everyone else's archival.
+check-doc-citations: ## Fail if a document cites a path that is absent or tombstoned (CHANGE=<name> to scope)
+	@python3 scripts/check_doc_citations.py "$(CHANGE)"
 
 code-snapshot: ## Zip all git-tracked files for sharing (excludes gitignored artifacts).
 	@mkdir -p .snapshot
