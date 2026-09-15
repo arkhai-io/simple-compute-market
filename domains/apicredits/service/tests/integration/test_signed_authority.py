@@ -451,8 +451,8 @@ async def _seed_quota(signed_app, resource_id: str = "weather-quota", units: int
     Issuance refuses when no quota resource can cover the request, which is
     the service behaving correctly -- credits are backed by declared capacity
     rather than minted on demand. The seller declares that capacity through
-    `SiteCapacityClient`, so seeding it here brings the third canonical client
-    onto the same real application and makes the flow the deployed one.
+    `SiteCapacityAdminClient`, so seeding it here brings the third canonical
+    client onto the same real application and makes the flow the deployed one.
     """
     from market_site_client import SiteCapacityAdminClient
 

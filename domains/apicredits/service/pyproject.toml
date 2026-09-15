@@ -38,6 +38,11 @@ dev = [
     # defect survived. Neither package is a runtime dependency.
     "arkhai-apicredits-middleware[signed]",
     "arkhai-apicredits-domain",
+    # The capacity half of this service's own boundary. Credits are backed by
+    # declared capacity, so the canonical-client test has to register a quota
+    # resource before an issuance can succeed -- and registering it through
+    # the client a seller actually uses is the point of that test.
+    "arkhai-kit-site-client",
 ]
 
 [tool.pytest.ini_options]
